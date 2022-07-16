@@ -159,6 +159,7 @@ class Invoice(AbstractBaseModel):
         blank=True,
         verbose_name="Line Items",
         help_text="Line Items of the invoice.",
+        related_name="line_items",
     )
     total_amount = models.DecimalField(
         max_digits=12,

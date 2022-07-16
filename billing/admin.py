@@ -63,6 +63,11 @@ class LineItemAdmin(admin.ModelAdmin):
     )
 
 
+class LineInline(admin.TabularInline):
+    model = Invoice.line_items.through
+    extra = 1
+
+
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = ("customer", "business", "created_at", "updated_at")
@@ -74,7 +79,6 @@ class InvoiceAdmin(admin.ModelAdmin):
     date_hierarchy = "created_at"
     raw_id_fields = ("customer", "business")
     autocomplete_fields = ("customer", "business")
-    filter_horizontal = ()
     fieldsets = (
         ("Invoice", {"fields": ("customer", "business")}),
         ("Line Items", {"fields": ("line_items",)}),
@@ -83,3 +87,4 @@ class InvoiceAdmin(admin.ModelAdmin):
             {"classes": ("collapse",), "fields": ("created_at", "updated_at")},
         ),
     )
+    inlines = [LineInline]
