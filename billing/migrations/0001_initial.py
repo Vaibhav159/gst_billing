@@ -8,72 +8,127 @@ class Migration(migrations.Migration):
 
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Business',
+            name="Business",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('name', models.CharField(max_length=255)),
-                ('address', models.CharField(max_length=255)),
-                ('gst_number', models.CharField(max_length=255)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("name", models.CharField(max_length=255)),
+                ("address", models.CharField(max_length=255)),
+                ("gst_number", models.CharField(max_length=255)),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='Customer',
+            name="Customer",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('name', models.CharField(max_length=255)),
-                ('address', models.CharField(max_length=255)),
-                ('gst_number', models.CharField(max_length=255)),
-                ('business', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='billing.business')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("name", models.CharField(max_length=255)),
+                ("address", models.CharField(max_length=255)),
+                ("gst_number", models.CharField(max_length=255)),
+                (
+                    "business",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="billing.business",
+                    ),
+                ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='LineItem',
+            name="LineItem",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('product_name', models.CharField(max_length=255)),
-                ('hsn_code', models.CharField(max_length=255)),
-                ('quantity', models.DecimalField(decimal_places=3, max_digits=10)),
-                ('rate', models.DecimalField(decimal_places=3, max_digits=12)),
-                ('cgst', models.DecimalField(decimal_places=3, max_digits=10)),
-                ('sgst', models.DecimalField(decimal_places=3, max_digits=10)),
-                ('amount', models.DecimalField(decimal_places=3, max_digits=12)),
-                ('customer', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='billing.customer')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("product_name", models.CharField(max_length=255)),
+                ("hsn_code", models.CharField(max_length=255)),
+                ("quantity", models.DecimalField(decimal_places=3, max_digits=10)),
+                ("rate", models.DecimalField(decimal_places=3, max_digits=12)),
+                ("cgst", models.DecimalField(decimal_places=3, max_digits=10)),
+                ("sgst", models.DecimalField(decimal_places=3, max_digits=10)),
+                ("amount", models.DecimalField(decimal_places=3, max_digits=12)),
+                (
+                    "customer",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="billing.customer",
+                    ),
+                ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='Invoice',
+            name="Invoice",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('invoice_number', models.CharField(max_length=255)),
-                ('total_amount', models.DecimalField(decimal_places=3, max_digits=12)),
-                ('business', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='billing.business')),
-                ('customer', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='billing.customer')),
-                ('line_items', models.ManyToManyField(to='billing.lineitem')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("invoice_number", models.CharField(max_length=255)),
+                ("total_amount", models.DecimalField(decimal_places=3, max_digits=12)),
+                (
+                    "business",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="billing.business",
+                    ),
+                ),
+                (
+                    "customer",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="billing.customer",
+                    ),
+                ),
+                ("line_items", models.ManyToManyField(to="billing.lineitem")),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
     ]
