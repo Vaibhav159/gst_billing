@@ -70,14 +70,14 @@ class Customer(AbstractBaseModel):
         help_text="Business of the customer.",
     )
     pan_number = models.CharField(
-        max_length=255,
+        max_length=10,
         verbose_name="PAN Number",
         help_text="PAN Number of the customer.",
         blank=True,
         null=True,
     )
     mobile_number = models.CharField(
-        max_length=255,
+        max_length=12,
         verbose_name="Mobile Number",
         help_text="Mobile Number of the customer.",
         blank=True,

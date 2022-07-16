@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h1 class="font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
+
+<table class="table table-hover">
+  <tbody>
+    <thead class="border-b bg-gray-800">
+        <tr>
+            <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
+            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Customer Name</th>
+            <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST Number</th>
+            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Pan Number</th>
+        </tr>
+    </thead>
+      {% for object in object_list %}
+          <tr>
+              <th scope="row">{{ object.id }}</th>
+              <td><a href="{% url 'customer_detail' object.id %}">{{ object.name }}</a></td>
+              <td>{{ object.gst_number }}</td>
+              <td>{{ object.pan_number }}</td>
+        </tr>
+      {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
