@@ -2,7 +2,7 @@
 
 {% block content %}
 
-    <div>
+    <div id="customer-detail">
         <h3 class="font-medium leading-tight text-3xl mt-0 mb-2 text-blue-600">{{ object.name }}</h3>
         <p>{{ object.address }}</p>
 
@@ -23,7 +23,11 @@
 
         <button
                 type="button"
-                class=" inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
+                hx-get="{% url 'customer_edit' object.id%}"
+                hx-trigger="click"
+                hx-target="#customer-detail"
+                class=" inline-block px-6 py-2.5
+                bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
             EDIT</button>
       </div>
 </div>
