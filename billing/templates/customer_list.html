@@ -28,7 +28,12 @@
           {% for object in object_list %}
               <tr>
                   <th scope="row">{{ object.id }}</th>
-                  <td><a href="{% url 'customer_detail' object.id %}">{{ object.name }}</a></td>
+                  <td>
+                      <a href="{% url 'customer_detail' object.id %}"
+                         class="text-blue-400 hover:underline hover:text-dark-blue-400">
+                      {{ object.name }}
+                    </a>
+                  </td>
                   <td>{{ object.gst_number }}</td>
                   <td>{{ object.pan_number }}</td>
             </tr>
