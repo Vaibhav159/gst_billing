@@ -2,6 +2,9 @@ asgiref==3.5.2
 cfgv==3.3.1
 distlib==0.3.5
 Django==4.0.6
+django-crispy-forms==1.14.0
+django-htmx==1.12.0
+django-phonenumber-field==6.3.0
 filelock==3.7.1
 identify==2.5.1
 nodeenv==1.7.0
