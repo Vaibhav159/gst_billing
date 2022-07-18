@@ -2,43 +2,31 @@
 
 {% block content %}
     <div id="customer-list">
-    <div class="flow-root">
-        <h1 class="float-left font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
-        <button type="button"
-                hx-get="{% url 'customer_form' %}"
-                hx-trigger="click"
-                hx-target="#customer-list"
-                hx-push-url="{% url 'customer_form' %}"
-                class="float-right text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">
-            Add Customer
-            <svg aria-hidden="true" class="ml-2 -mr-1 w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
-        </button>
-    </div>
+        <div class="flow-root">
+            <h1 class="float-left font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
+            <button type="button"
+                    hx-get="{% url 'customer_form' %}"
+                    hx-trigger="click"
+                    hx-target="#content-body"
+                    hx-push-url="{% url 'customer_form' %}"
+                    class="float-right text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">
+                Add Customer
+                <svg aria-hidden="true" class="ml-2 -mr-1 w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+            </button>
+        </div>
 
-    <table class="table table-hover">
-      <tbody>
-        <thead class="border-b bg-gray-800">
-            <tr>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Customer Name</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST Number</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Pan Number</th>
-            </tr>
-        </thead>
-          {% for object in object_list %}
-              <tr>
-                  <th scope="row">{{ object.id }}</th>
-                  <td>
-                      <a href="{% url 'customer_detail' object.id %}"
-                         class="text-blue-400 hover:underline hover:text-dark-blue-400">
-                      {{ object.name }}
-                    </a>
-                  </td>
-                  <td>{{ object.gst_number }}</td>
-                  <td>{{ object.pan_number }}</td>
-            </tr>
-          {% endfor %}
-      </tbody>
-    </table>
+        <table class="table table-hover">
+          <tbody>
+            <thead class="border-b bg-gray-800">
+                <tr>
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Customer Name</th>
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST Number</th>
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Pan Number</th>
+                </tr>
+            </thead>
+            {% include 'partials/customer_data_list.html' %}
+          </tbody>
+        </table>
     </div>
 {% endblock %}

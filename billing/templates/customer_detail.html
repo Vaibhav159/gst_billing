@@ -12,27 +12,24 @@
         <p>{{ object.mobile_number|default_if_none:"Mobile number not avaiable" }}</p>
         <br>
 
+        <div class="flex items-center justify-left">
+          <div class="inline-flex shadow-md hover:shadow-lg focus:shadow-lg" role="group">
+            <a
+                    href="{% url 'customer_list' %}"
+                    class="rounded-l inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
+                        &laquo;  Customer List
+            </a>
 
-    <div class="flex items-center justify-left">
-      <div class="inline-flex shadow-md hover:shadow-lg focus:shadow-lg" role="group">
-        <a
-                href="{% url 'customer_list' %}"
-                class="rounded-l inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
-                    &laquo;  Customer List
-        </a>
-
-        <button
-                type="button"
-                hx-get="{% url 'customer_edit' object.id%}"
-                hx-trigger="click"
-                hx-target="#customer-detail"
-                class=" inline-block px-6 py-2.5
-                bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
-            EDIT</button>
-      </div>
-</div>
-
-
+            <button
+                    type="button"
+                    hx-get="{% url 'customer_edit' object.id%}"
+                    hx-trigger="click"
+                    hx-target="#content-body"
+                    class=" inline-block px-6 py-2.5
+                    bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
+                EDIT</button>
+          </div>
+        </div>
     </div>
 
 {% endblock %}
