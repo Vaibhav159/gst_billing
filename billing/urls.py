@@ -6,6 +6,11 @@ from billing.views import (
     CustomerDetailView,
     CustomerEditView,
     CustomerDeleteView,
+    BusinessView,
+    BusinessEditView,
+    BusinessListView,
+    BusinessDetailView,
+    BusinessDeleteView,
 )
 
 urlpatterns = [
@@ -25,5 +30,23 @@ urlpatterns = [
         "customer/delete/<int:pk>",
         CustomerDeleteView.as_view(),
         name="customer_delete",
+    ),
+    # Business Urls
+    path("business/", BusinessView.as_view(), name="business_form"),
+    path(
+        "business/edit/<int:business_id>",
+        BusinessEditView.as_view(),
+        name="business_edit",
+    ),
+    path("business/list/", BusinessListView.as_view(), name="business_list"),
+    path(
+        "business/<int:business_id>/",
+        BusinessDetailView.as_view(),
+        name="business_detail",
+    ),
+    path(
+        "business/delete/<int:pk>",
+        BusinessDeleteView.as_view(),
+        name="business_delete",
     ),
 ]
