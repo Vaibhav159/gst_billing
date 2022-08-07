@@ -9,6 +9,11 @@ from billing.forms import CustomerForm, BusinessForm
 from billing.models import Business, Customer
 
 
+class InitialView(View):
+    def get(self, request):
+        return render(request, "base.html")
+
+
 class CustomerView(View):
     def get(self, request):
         customer = (

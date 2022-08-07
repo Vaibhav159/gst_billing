@@ -16,7 +16,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+from billing.views import InitialView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("", InitialView.as_view(), name="initial"),
     path("billing/", include("billing.urls")),
 ]
