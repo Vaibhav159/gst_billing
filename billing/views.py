@@ -57,9 +57,7 @@ class CustomerListView(ListView):
         return context
 
     def get(self, request, *args, **kwargs):
-        print("weew")
         if request.htmx and request.GET.get("page"):
-            print("here?")
             return render(
                 request,
                 "partials/customer_data_list.html",
@@ -85,5 +83,4 @@ class CustomerDeleteView(DeleteView):
     template_name = "customer_list.html"
 
     def get_success_url(self):
-        print(super().get_success_url())
         return super().get_success_url()
