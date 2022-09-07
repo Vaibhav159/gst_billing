@@ -16,7 +16,7 @@
         </div>
 
         <table class="table table-hover">
-          <tbody>
+
             <thead class="border-b bg-gray-800">
                 <tr>
                     <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
@@ -24,8 +24,10 @@
                     <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST Number</th>
                 </tr>
             </thead>
-            {% include 'partials/business_data_list.html' %}
-          </tbody>
+
+            <tbody>
+                {% include 'partials/business_data_list.html' %}
+            </tbody>
         </table>
     </div>
 {% endblock %}
