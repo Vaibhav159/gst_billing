@@ -88,6 +88,42 @@ class Customer(AbstractBaseModel):
         return self.name
 
 
+class Invoice(AbstractBaseModel):
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        verbose_name="Customer",
+        help_text="Customer of the invoice.",
+    )
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        verbose_name="Business",
+        help_text="Business of the invoice.",
+    )
+    invoice_number = models.CharField(
+        max_length=255,
+        verbose_name="Invoice Number",
+        help_text="Invoice Number of the invoice.",
+    )
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
+        default=0,
+        verbose_name="Total Amount",
+        help_text="Total Amount of the invoice.",
+    )
+
+    def __str__(self):
+        return f"{self.invoice_number}_{self.customer.name}"
+
+    def save(self, *args, **kwargs):
+        self.total_amount = sum(
+            LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
+        )
+        super().save(*args, **kwargs)
+
+
 class LineItem(AbstractBaseModel):
     customer = models.ForeignKey(
         Customer,
@@ -95,6 +131,14 @@ class LineItem(AbstractBaseModel):
         verbose_name="Customer",
         help_text="Customer of the line item.",
     )
+
+    invoice = models.ForeignKey(
+        Invoice,
+        on_delete=models.CASCADE,
+        verbose_name="Invoice",
+        help_text="Invoice of the line item.",
+    )
+
     product_name = models.CharField(
         max_length=255, verbose_name="Product Name", help_text="Name of the product."
     )
@@ -134,45 +178,3 @@ class LineItem(AbstractBaseModel):
 
     def __str__(self):
         return self.product_name
-
-
-class Invoice(AbstractBaseModel):
-    customer = models.ForeignKey(
-        Customer,
-        on_delete=models.CASCADE,
-        verbose_name="Customer",
-        help_text="Customer of the invoice.",
-    )
-    business = models.ForeignKey(
-        Business,
-        on_delete=models.CASCADE,
-        verbose_name="Business",
-        help_text="Business of the invoice.",
-    )
-    invoice_number = models.CharField(
-        max_length=255,
-        verbose_name="Invoice Number",
-        help_text="Invoice Number of the invoice.",
-    )
-    line_items = models.ManyToManyField(
-        LineItem,
-        blank=True,
-        verbose_name="Line Items",
-        help_text="Line Items of the invoice.",
-        related_name="line_items",
-    )
-    total_amount = models.DecimalField(
-        max_digits=12,
-        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
-        default=0,
-        verbose_name="Total Amount",
-        help_text="Total Amount of the invoice.",
-    )
-
-    def __str__(self):
-        return f"{self.invoice_number}_{self.customer.name}"
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        self.total_amount = sum([item.amount for item in self.line_items.all()])
-        super().save(*args, **kwargs)
