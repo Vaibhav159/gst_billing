@@ -161,3 +161,8 @@ class BusinessDeleteView(DeleteView):
     model = Business
     success_url = reverse_lazy("business_list")
     template_name = "business_list.html"
+
+
+class InvoiceView(View):
+    def get(self, request, *args, **kwargs):
+        return render(request, "invoicing/invoice.html")

@@ -81,7 +81,6 @@ class InvoiceAdmin(admin.ModelAdmin):
     autocomplete_fields = ("customer", "business")
     fieldsets = (
         ("Invoice", {"fields": ("customer", "business")}),
-        # ("Line Items", {"fields": ("line_items",)}),
         (
             "Meta Data",
             {"classes": ("collapse",), "fields": ("created_at", "updated_at")},
