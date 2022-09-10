@@ -1,0 +1,37 @@
+{% for object in object_list %}
+  <tr>
+      <th scope="row">{{ object.id }}</th>
+      <td>
+          <div class="d-flex justify-content-between align-items-center">
+
+          <a href="{% url 'business_detail' object.business.id %}"
+                 class="text-blue-400 hover:underline hover:text-dark-blue-400">
+              {{ object.business.name }}
+              </a>
+
+          </div>
+      </td>
+      <td>
+          <a href="{% url 'customer_detail' object.customer.id %}"
+                 class="text-blue-400 hover:underline hover:text-dark-blue-400">
+              {{ object.customer.name }}
+              </a>
+      </td>
+      <td>{{ object.total_amount }}</td>
+</tr>
+{% endfor %}
+
+{% if page_obj.has_next %}
+    <tr id="load-more">
+        <td colspan="4" class="text-center">
+            <button
+                    type="button"
+                    hx-get="{% url 'invoice_list' %}?page={{ page_obj.next_page_number }}"
+                    hx-target="#load-more"
+                    hx-swap="outerHTML"
+                    class="text-white bg-[#050708] hover:bg-[#050708]/90 focus:ring-4 focus:outline-none focus:ring-[#050708]/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:focus:ring-[#050708]/50 dark:hover:bg-[#050708]/30 mr-2 mb-2">
+              Load More Invoices
+            </button>
+        </td>
+    </tr>
+{% endif %}

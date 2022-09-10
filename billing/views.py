@@ -6,7 +6,7 @@ from django.views import View
 from django.views.generic import ListView, DeleteView
 
 from billing.forms import CustomerForm, BusinessForm
-from billing.models import Business, Customer
+from billing.models import Business, Customer, Invoice
 
 
 class InitialView(View):
@@ -163,6 +163,47 @@ class BusinessDeleteView(DeleteView):
     template_name = "business_list.html"
 
 
+# invoicing print page
 class InvoiceView(View):
     def get(self, request, *args, **kwargs):
         return render(request, "invoicing/invoice.html")
+
+
+# invoice views
+class InvoiceListView(ListView):
+    model = Invoice
+    template_name = "invoice_list.html"
+    context_object_name = "invoices"
+    paginate_by = 2
+
+    def get_queryset(self):
+        return Invoice.objects.all().order_by("id")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["title"] = "Invoices"
+        return context
+
+    def get(self, request, *args, **kwargs):
+        if request.htmx and request.GET.get("page"):
+            return render(
+                request,
+                "partials/customer_data_list.html",
+                context=self.get_context_data(object_list=self.get_queryset()),
+            )
+        return super().get(request, *args, *kwargs)
+
+
+class InvoiceAddView(View):
+    def get(self, request, *args, **kwargs):
+        context = {
+            "businesses": Business.objects.all(),
+        }
+        if not request.htmx:
+            return render(request, "partials/add_invoice_form.html", context=context)
+
+        business_id = request.GET.get("businesses")
+        print(business_id)
+        context["customers"] = Customer.objects.filter(business_id=business_id)
+
+        return render(request, "partials/add_invoice_form.html", context=context)

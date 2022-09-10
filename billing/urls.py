@@ -12,6 +12,8 @@ from billing.views import (
     BusinessDetailView,
     BusinessDeleteView,
     InvoiceView,
+    InvoiceListView,
+    InvoiceAddView,
 )
 
 urlpatterns = [
@@ -55,4 +57,6 @@ urlpatterns = [
         InvoiceView.as_view(),
         name="invoice_form",
     ),
+    path("invoice/list/", InvoiceListView.as_view(), name="invoice_list"),
+    path("invoice/add/", InvoiceAddView.as_view(), name="invoice_add"),
 ]

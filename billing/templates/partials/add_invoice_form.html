@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<label for="businesses" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">Select an option</label>
+<select id="businesses"
+        name="businesses"
+        hx-get="{% url 'invoice_add' %}"
+        hx-trigger="change"
+        hx-target="#content-body"
+        hx-indicator="#loadingIndicator"
+        hx-swap="outerHTML"
+        class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+
+    {% if not request.GET.businesses %}
+        <option selected disabled>Choose a business</option>
+    {% endif %}
+
+    {% for business in businesses %}
+        {% if business.id|add:0 == request.GET.businesses|add:0 %}
+        <option value="{{ business.id }}" selected>{{ business.name }}</option>
+        {% else %}
+        <option value="{{ business.id }}">{{ business.name }}</option>
+        {% endif %}
+    {% endfor %}
+</select>
+
+    {% if customers %}
+<select id="customers"
+        name="customers"
+        class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+  <option selected disabled>Choose a Customer</option>
+    {% for customer in customers %}
+    <option value="{{ customer.id }}">{{ customer.name }}</option>
+    {% endfor %}
+</select>
+        {% elif request.GET.businesses and not customers %}
+        No Customers for this business
+    {% endif %}
+
+
+{% endblock %}
