@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 
 from billing.constants import BILLING_DECIMAL_PLACE_PRECISION
@@ -178,3 +180,26 @@ class LineItem(AbstractBaseModel):
 
     def __str__(self):
         return self.product_name
+
+    @classmethod
+    def create_line_item_for_invoice(cls, product_name, quantity, rate, invoice_id):
+        quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
+        line_item = LineItem(
+            product_name=product_name,
+            quantity=quantity,
+            rate=rate,
+            invoice_id=invoice_id,
+            hsn_code="nice",
+            customer_id=1,
+        )
+
+        net_amount = quantity * rate
+
+        tax = Decimal("0.03")
+        tax_amount = net_amount * tax
+        line_item.sgst = tax_amount / 2
+        line_item.cgst = tax_amount / 2
+        line_item.amount = line_item.sgst + line_item.cgst + net_amount
+        line_item.save()
+
+        return line_item

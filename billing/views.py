@@ -6,7 +6,7 @@ from django.views import View
 from django.views.generic import ListView, DeleteView
 
 from billing.forms import CustomerForm, BusinessForm
-from billing.models import Business, Customer, Invoice
+from billing.models import Business, Customer, Invoice, LineItem
 
 
 class InitialView(View):
@@ -255,3 +255,32 @@ class InvoiceDetailView(View):
 
     def post(self, request):
         return render(request, "invoice_detail.html")
+
+
+# LineItemsView
+class LineItemView(View):
+    def get(self, request):
+        invoice_id = request.GET.get("invoice_id")
+        total_line_items = LineItem.objects.filter(invoice_id=invoice_id).count()
+        return render(
+            request,
+            "partials/line_item_add.html",
+            {"total_line_items": total_line_items, "invoice_id": invoice_id},
+        )
+
+    def post(self, request):
+        data = request.POST
+        invoice_id, product_name, qty, rate = (
+            data["invoice_id"],
+            data["item_name"],
+            data["qty"],
+            data["rate"],
+        )
+        line_item = LineItem.create_line_item_for_invoice(
+            invoice_id=invoice_id,
+            product_name=product_name,
+            rate=rate,
+            quantity=qty,
+        )
+        print(line_item)
+        return render(request, "line_item_detail.html", {"line_item": line_item})

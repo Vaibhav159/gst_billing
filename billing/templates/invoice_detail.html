@@ -3,4 +3,18 @@
 {% block content %}
     {% include "invoicing/business_selection.html" with business=invoice.business %}
     {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number%}
+    <h2 class="mb-4 text-3xl font-extrabold tracking-tight leading-none text-gray-900 md:text-4xl ">Line Items</h2>
+
+    <div id="add_line_items">
+
+    </div>
+
+    <button
+        hx-get="{% url 'line_item_inline_form' %}?invoice_id={{ invoice.id }}"
+        hx-target="#add_line_items"
+        hx-trigger="click"
+        hx-swap="beforeend"
+            class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full">
+      Button
+    </button>
 {% endblock %}
