@@ -202,8 +202,56 @@ class InvoiceAddView(View):
         if not request.htmx:
             return render(request, "partials/add_invoice_form.html", context=context)
 
-        business_id = request.GET.get("businesses")
-        print(business_id)
+        business_id = request.GET.get("business")
         context["customers"] = Customer.objects.filter(business_id=business_id)
 
         return render(request, "partials/add_invoice_form.html", context=context)
+
+    def post(self, request, *args, **kwargs):
+        data = request.POST
+        error_list = []
+        business_id, customer_id, invoice_number = (
+            data["business"],
+            data["customer"],
+            data["invoice_number"],
+        )
+        if not business_id:
+            error_list.append("business")
+
+        if not customer_id:
+            error_list.append("customer")
+
+        if not invoice_number:
+            error_list.append("invoice_number")
+
+        if error_list:
+            return render(
+                request,
+                "partials/add_invoice_form.html",
+                context={
+                    "error_message": f"{', '.join(error_list)} can't be empty",
+                },
+            )
+
+        invoice = Invoice.objects.create(
+            business_id=business_id,
+            customer_id=customer_id,
+            invoice_number=invoice_number,
+        )
+
+        response = render(request, "invoice_detail.html", context={invoice: invoice})
+
+        response["HX-Push"] = f"billing/invoice/{invoice.id}"
+
+        return response
+
+
+class InvoiceDetailView(View):
+    def get(self, request, invoice_id):
+        context = {
+            "invoice": Invoice.objects.get(id=invoice_id),
+        }
+        return render(request, "invoice_detail.html", context)
+
+    def post(self, request):
+        return render(request, "invoice_detail.html")

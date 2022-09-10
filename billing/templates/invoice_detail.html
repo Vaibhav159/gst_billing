@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    {% include "invoicing/business_selection.html" with business=invoice.business %}
+    {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number%}
+{% endblock %}

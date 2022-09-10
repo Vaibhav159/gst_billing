@@ -14,6 +14,7 @@ from billing.views import (
     InvoiceView,
     InvoiceListView,
     InvoiceAddView,
+    InvoiceDetailView,
 )
 
 urlpatterns = [
@@ -59,4 +60,9 @@ urlpatterns = [
     ),
     path("invoice/list/", InvoiceListView.as_view(), name="invoice_list"),
     path("invoice/add/", InvoiceAddView.as_view(), name="invoice_add"),
+    path(
+        "invoice/<int:invoice_id>/",
+        InvoiceDetailView.as_view(),
+        name="invoice_detail",
+    ),
 ]
