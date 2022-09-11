@@ -239,9 +239,9 @@ class InvoiceAddView(View):
             invoice_number=invoice_number,
         )
 
-        response = render(request, "invoice_detail.html", context={invoice: invoice})
+        response = render(request, "invoice_detail.html", context={"invoice": invoice})
 
-        response["HX-Push"] = f"billing/invoice/{invoice.id}"
+        response["HX-Push"] = f"/billing/invoice/{invoice.id}"
 
         return response
 
