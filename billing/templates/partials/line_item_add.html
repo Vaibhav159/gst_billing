@@ -1,8 +1,13 @@
-<form class="form-inline" hx-post="{% url "line_item_inline_form" %}" hx-swap="outerHTML">
+<form class="form-inline"
+      hx-post="{% url "line_item_inline_form" %}"
+      hx-target="#line-item-table"
+      hx-swap="beforeend"
+      _="on submit reset() on me"
+>
     <input type="hidden" name="invoice_id" value="{{ invoice_id }}">
 
     <label>{{ total_line_items|add:1 }}</label>
-    <input type="text" class="form-control mb-2 mr-sm-2" id="item_name" name="item_name" placeholder="Item name">
+    <input type="text" class="form-control mb-2 mr-sm-2" id="item_name" name="item_name" placeholder="Item name"/>
 
     <div class="input-group mb-2 mr-sm-2">
     <input type="number" class="form-control" min="0" id="qty" name="qty" placeholder="Qty"/>

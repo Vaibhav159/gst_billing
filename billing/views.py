@@ -250,6 +250,7 @@ class InvoiceDetailView(View):
     def get(self, request, invoice_id):
         context = {
             "invoice": Invoice.objects.get(id=invoice_id),
+            "line_items": LineItem.objects.filter(invoice_id=invoice_id),
         }
         return render(request, "invoice_detail.html", context)
 
@@ -283,4 +284,11 @@ class LineItemView(View):
             quantity=qty,
         )
         print(line_item)
-        return render(request, "line_item_detail.html", {"line_item": line_item})
+        return render(
+            request,
+            "line_item_detail.html",
+            {
+                "object": line_item,
+                "index": LineItem.objects.filter(invoice_id=invoice_id).count(),
+            },
+        )
