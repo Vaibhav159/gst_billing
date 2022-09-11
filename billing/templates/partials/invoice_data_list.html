@@ -1,6 +1,11 @@
 {% for object in object_list %}
   <tr>
-      <th scope="row">{{ object.id }}</th>
+      <th scope="row">
+          <a href="{% url 'invoice_detail' object.id %}"
+                 class="text-blue-400 hover:underline hover:text-dark-blue-400">
+          {{ object.id }}
+          </a>
+      </th>
       <td>
           <div class="d-flex justify-content-between align-items-center">
 

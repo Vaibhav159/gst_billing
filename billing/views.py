@@ -188,7 +188,7 @@ class InvoiceListView(ListView):
         if request.htmx and request.GET.get("page"):
             return render(
                 request,
-                "partials/customer_data_list.html",
+                "partials/invoice_data_list.html",
                 context=self.get_context_data(object_list=self.get_queryset()),
             )
         return super().get(request, *args, *kwargs)
@@ -285,8 +285,10 @@ class LineItemView(View):
             rate=rate,
             quantity=qty,
         )
-        print(line_item)
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
+        Invoice.objects.filter(id=invoice_id).update(
+            total_amount=sum(line_items.values_list("amount", flat=True))
+        )
 
         response = render(
             request,
@@ -294,7 +296,6 @@ class LineItemView(View):
             {
                 "object": line_item,
                 "index": line_items.count(),
-                "changed_amount": sum(line_items.values_list("amount", flat=True)),
             },
         )
 
