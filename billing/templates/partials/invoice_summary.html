@@ -1,0 +1,17 @@
+<div id="total" hx-get="{% url 'invoice_summary'%}?invoice_id={{ invoice.id }}" hx-trigger="newLineItem from:body">
+    {% if total_items %}
+        Total Items: {{ total_items }}<br>
+        Amount Without Tax : {{ amount_without_tax }} <br>
+        CGST: {{ total_cgst_tax|floatformat }}<br>
+        SGST: {{ total_sgst_tax|floatformat }}<br>
+        Total Tax: {{ total_sgst_tax|add:total_cgst_tax }}<br>
+        Total Amount: {{ total_amount|floatformat }}<br>
+        <br>
+    {% endif %}
+
+    {% if magic %}
+        <div id="magic" hx-swap-oob="true">
+            trail of magic
+        </div>
+    {% endif %}
+</div>

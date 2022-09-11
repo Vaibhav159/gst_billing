@@ -248,9 +248,11 @@ class InvoiceAddView(View):
 
 class InvoiceDetailView(View):
     def get(self, request, invoice_id):
+        line_items = LineItem.objects.filter(invoice_id=invoice_id)
         context = {
             "invoice": Invoice.objects.get(id=invoice_id),
-            "line_items": LineItem.objects.filter(invoice_id=invoice_id),
+            "line_items": line_items,
+            **LineItem.get_invoice_summary(invoice_id=invoice_id),
         }
         return render(request, "invoice_detail.html", context)
 
@@ -284,11 +286,36 @@ class LineItemView(View):
             quantity=qty,
         )
         print(line_item)
-        return render(
+        line_items = LineItem.objects.filter(invoice_id=invoice_id)
+
+        response = render(
             request,
             "line_item_detail.html",
             {
                 "object": line_item,
-                "index": LineItem.objects.filter(invoice_id=invoice_id).count(),
+                "index": line_items.count(),
+                "changed_amount": sum(line_items.values_list("amount", flat=True)),
+            },
+        )
+
+        response["HX-Trigger"] = "newLineItem"
+
+        return response
+
+
+class InvoiceSummaryView(View):
+    """
+    Displays the summary of the invoice.
+    """
+
+    def get(self, request):
+        invoice_id = request.GET["invoice_id"]
+
+        return render(
+            request,
+            "partials/invoice_summary.html",
+            context={
+                "magic": True,
+                **LineItem.get_invoice_summary(invoice_id=invoice_id),
             },
         )

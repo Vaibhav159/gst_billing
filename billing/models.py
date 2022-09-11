@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
+from django.db.models import Sum, Count, F
 
 from billing.constants import BILLING_DECIMAL_PLACE_PRECISION
 
@@ -203,3 +204,13 @@ class LineItem(AbstractBaseModel):
         line_item.save()
 
         return line_item
+
+    @classmethod
+    def get_invoice_summary(cls, invoice_id):
+        return cls.objects.filter(invoice_id=invoice_id).aggregate(
+            total_amount=Sum("amount"),
+            total_cgst_tax=Sum("cgst"),
+            total_sgst_tax=Sum("sgst"),
+            total_items=Count("id"),
+            amount_without_tax=Sum(F("quantity") * F("rate")),
+        )
