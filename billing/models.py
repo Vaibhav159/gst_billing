@@ -212,5 +212,6 @@ class LineItem(AbstractBaseModel):
             total_cgst_tax=Sum("cgst"),
             total_sgst_tax=Sum("sgst"),
             total_items=Count("id"),
+            total_tax=Sum(F("cgst") + F("sgst")),
             amount_without_tax=Sum(F("quantity") * F("rate")),
         )

@@ -1,11 +1,11 @@
 <div id="total" hx-get="{% url 'invoice_summary'%}?invoice_id={{ invoice.id }}" hx-trigger="newLineItem from:body">
     {% if total_items %}
         Total Items: {{ total_items }}<br>
-        Amount Without Tax : {{ amount_without_tax }} <br>
-        CGST: {{ total_cgst_tax|floatformat }}<br>
-        SGST: {{ total_sgst_tax|floatformat }}<br>
-        Total Tax: {{ total_sgst_tax|add:total_cgst_tax }}<br>
-        Total Amount: {{ total_amount|floatformat }}<br>
+        Amount Without Tax : {{ amount_without_tax|floatformat:3 }} <br>
+        CGST: {{ total_cgst_tax|floatformat:3 }}<br>
+        SGST: {{ total_sgst_tax|floatformat:3 }}<br>
+        Total Tax: {{ total_tax|floatformat:3 }}<br>
+        Total Amount: {{ total_amount|floatformat:3 }}<br>
         <br>
     {% endif %}
 
