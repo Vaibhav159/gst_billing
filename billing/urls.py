@@ -17,6 +17,7 @@ from billing.views import (
     InvoiceDetailView,
     LineItemView,
     InvoiceSummaryView,
+    PrintInvoiceView,
 )
 
 urlpatterns = [
@@ -68,6 +69,11 @@ urlpatterns = [
         name="invoice_detail",
     ),
     path("invoice_summary/", InvoiceSummaryView.as_view(), name="invoice_summary"),
+    path(
+        "invoice/<int:invoice_id>/print",
+        PrintInvoiceView.as_view(),
+        name="invoice_print",
+    ),
     # line items
     path("line_item/", LineItemView.as_view(), name="line_item_inline_form"),
 ]

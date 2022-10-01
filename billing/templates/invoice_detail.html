@@ -25,4 +25,21 @@
             class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full">
       Add
     </button>
+
+        <input type="button" value="View Bill"
+               hx-get="{% url 'invoice_print' invoice.id %}"
+               hx-target="#content-body"
+               hx-trigger="click"
+               hx-push-url="{% url 'invoice_print' invoice.id %}"
+               style="float: right; width:140px;
+	   height:35px;
+	   line-height:32px;
+	   text-align:center;
+	   border:none;
+	   border-radius:20px;
+	   background:#f60;
+	   margin-bottom:20px;
+	   cursor:pointer;
+	   color:#fff;
+	   font-family: 'Muli', sans-serif;">
 {% endblock %}

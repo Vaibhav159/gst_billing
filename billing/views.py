@@ -5,6 +5,7 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView, DeleteView
 
+from billing.constants import GST_TAX_RATE
 from billing.forms import CustomerForm, BusinessForm
 from billing.models import Business, Customer, Invoice, LineItem
 
@@ -317,6 +318,27 @@ class InvoiceSummaryView(View):
             "partials/invoice_summary.html",
             context={
                 "magic": True,
+                **LineItem.get_invoice_summary(invoice_id=invoice_id),
+            },
+        )
+
+
+class PrintInvoiceView(View):
+    """
+    Displays the printable invoice.
+    """
+
+    def get(self, request, invoice_id=None):
+        invoice = Invoice.objects.get(id=invoice_id)
+        line_items = LineItem.objects.filter(invoice_id=invoice_id)
+        tax_rate = f"{GST_TAX_RATE * 100} %"
+        return render(
+            request,
+            "invoicing/invoice.html",
+            context={
+                "invoice": invoice,
+                "line_items": line_items,
+                "tax_rate": tax_rate,
                 **LineItem.get_invoice_summary(invoice_id=invoice_id),
             },
         )
