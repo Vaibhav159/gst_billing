@@ -64,7 +64,7 @@ class LineItemAdmin(admin.ModelAdmin):
 
 
 class LineInline(admin.TabularInline):
-    model = Invoice.line_items.through
+    model = LineItem
     extra = 1
 
 
@@ -81,10 +81,18 @@ class InvoiceAdmin(admin.ModelAdmin):
     autocomplete_fields = ("customer", "business")
     fieldsets = (
         ("Invoice", {"fields": ("customer", "business")}),
-        ("Line Items", {"fields": ("line_items",)}),
         (
             "Meta Data",
             {"classes": ("collapse",), "fields": ("created_at", "updated_at")},
+        ),
+        (
+            "Bill Info",
+            {
+                "fields": (
+                    "invoice_number",
+                    "total_amount",
+                )
+            },
         ),
     )
     inlines = [LineInline]

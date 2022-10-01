@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from django.db import models
+from django.db.models import Sum, Count, F
 
 from billing.constants import BILLING_DECIMAL_PLACE_PRECISION
 
@@ -88,6 +91,42 @@ class Customer(AbstractBaseModel):
         return self.name
 
 
+class Invoice(AbstractBaseModel):
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        verbose_name="Customer",
+        help_text="Customer of the invoice.",
+    )
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        verbose_name="Business",
+        help_text="Business of the invoice.",
+    )
+    invoice_number = models.CharField(
+        max_length=255,
+        verbose_name="Invoice Number",
+        help_text="Invoice Number of the invoice.",
+    )
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
+        default=0,
+        verbose_name="Total Amount",
+        help_text="Total Amount of the invoice.",
+    )
+
+    def __str__(self):
+        return f"{self.invoice_number}_{self.customer.name}"
+
+    def save(self, *args, **kwargs):
+        self.total_amount = sum(
+            LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
+        )
+        super().save(*args, **kwargs)
+
+
 class LineItem(AbstractBaseModel):
     customer = models.ForeignKey(
         Customer,
@@ -95,6 +134,14 @@ class LineItem(AbstractBaseModel):
         verbose_name="Customer",
         help_text="Customer of the line item.",
     )
+
+    invoice = models.ForeignKey(
+        Invoice,
+        on_delete=models.CASCADE,
+        verbose_name="Invoice",
+        help_text="Invoice of the line item.",
+    )
+
     product_name = models.CharField(
         max_length=255, verbose_name="Product Name", help_text="Name of the product."
     )
@@ -135,44 +182,36 @@ class LineItem(AbstractBaseModel):
     def __str__(self):
         return self.product_name
 
+    @classmethod
+    def create_line_item_for_invoice(cls, product_name, quantity, rate, invoice_id):
+        quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
+        line_item = LineItem(
+            product_name=product_name,
+            quantity=quantity,
+            rate=rate,
+            invoice_id=invoice_id,
+            hsn_code="nice",
+            customer_id=1,
+        )
 
-class Invoice(AbstractBaseModel):
-    customer = models.ForeignKey(
-        Customer,
-        on_delete=models.CASCADE,
-        verbose_name="Customer",
-        help_text="Customer of the invoice.",
-    )
-    business = models.ForeignKey(
-        Business,
-        on_delete=models.CASCADE,
-        verbose_name="Business",
-        help_text="Business of the invoice.",
-    )
-    invoice_number = models.CharField(
-        max_length=255,
-        verbose_name="Invoice Number",
-        help_text="Invoice Number of the invoice.",
-    )
-    line_items = models.ManyToManyField(
-        LineItem,
-        blank=True,
-        verbose_name="Line Items",
-        help_text="Line Items of the invoice.",
-        related_name="line_items",
-    )
-    total_amount = models.DecimalField(
-        max_digits=12,
-        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
-        default=0,
-        verbose_name="Total Amount",
-        help_text="Total Amount of the invoice.",
-    )
+        net_amount = quantity * rate
 
-    def __str__(self):
-        return f"{self.invoice_number}_{self.customer.name}"
+        tax = Decimal("0.03")
+        tax_amount = net_amount * tax
+        line_item.sgst = tax_amount / 2
+        line_item.cgst = tax_amount / 2
+        line_item.amount = line_item.sgst + line_item.cgst + net_amount
+        line_item.save()
 
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        self.total_amount = sum([item.amount for item in self.line_items.all()])
-        super().save(*args, **kwargs)
+        return line_item
+
+    @classmethod
+    def get_invoice_summary(cls, invoice_id):
+        return cls.objects.filter(invoice_id=invoice_id).aggregate(
+            total_amount=Sum("amount"),
+            total_cgst_tax=Sum("cgst"),
+            total_sgst_tax=Sum("sgst"),
+            total_items=Count("id"),
+            total_tax=Sum(F("cgst") + F("sgst")),
+            amount_without_tax=Sum(F("quantity") * F("rate")),
+        )

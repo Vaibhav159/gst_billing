@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    {% if error_message %}
+    <div class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg dark:bg-red-200 dark:text-red-800" role="alert">
+  <span class="font-medium">Danger alert!</span>{{ error_message }}
+</div>
+    {% endif %}
+<form hx-post="." hx-target="#content-body" hx-swap="outerHTML">
+    <label for="business" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">Select a Business</label>
+    <select id="business"
+            name="business"
+            hx-get="{% url 'invoice_add' %}"
+            hx-trigger="change"
+            hx-target="#content-body"
+            hx-indicator="#loadingIndicator"
+            hx-swap="outerHTML"
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+
+        {% if not request.GET.business %}
+            <option selected disabled>Choose a business</option>
+        {% endif %}
+
+        {% for business in businesses %}
+            {% if business.id|add:0 == request.GET.business|add:0 %}
+            <option value="{{ business.id }}" selected>{{ business.name }}</option>
+            {% else %}
+            <option value="{{ business.id }}">{{ business.name }}</option>
+            {% endif %}
+        {% endfor %}
+    </select>
+
+    {% if customers %}
+        <br>
+        <label for="customer" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">Select a Customer</label>
+
+        <select id="customer"
+            name="customer"
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+            <option selected disabled>Choose a Customer</option>
+            {% for customer in customers %}
+                <option value="{{ customer.id }}">{{ customer.name }}</option>
+            {% endfor %}
+
+        </select>
+
+        <div>
+        <br>
+            <label for="invoice_number" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">Enter the invoice Number</label>
+            <input type="text" id="invoice_number" name="invoice_number" class="block p-2 w-full text-gray-900 bg-gray-50 rounded-lg border border-gray-300 sm:text-xs focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+        </div>
+        <input type="submit" class="text-white bg-gray-800 hover:bg-gray-900 focus:outline-none focus:ring-4 focus:ring-gray-300 font-medium rounded-lg text-sm px-5 py-2.5 mr-2 mb-2 dark:bg-gray-800 dark:hover:bg-gray-700 dark:focus:ring-gray-700 dark:border-gray-700"/>
+    {% elif request.GET.business and not customers %}
+        <br>
+        <label for="customer" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">
+            No Customers for this Business</label>
+    {% endif %}
+
+</form>
+
+
+{% endblock %}

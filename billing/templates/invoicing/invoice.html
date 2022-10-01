@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+
+
+{% block content %}
+<style>
+   .print
+   {
+	   width:140px;
+	   height:35px;
+	   line-height:32px;
+	   text-align:center;
+	   border:none;
+	   border-radius:20px;
+	   background:#f60;
+	   margin-bottom:20px;
+	   cursor:pointer;
+	   color:#fff;
+	   font-family: 'Muli', sans-serif;
+   }
+   table.tb2 tr:first-of-type{
+      border-bottom: 2px solid black
+    }
+
+   table.tb2 tr:last-of-type{
+       border-top:2px solid black;
+   }
+</style>
+
+
+<div onclick="printDiv()" class="print">Print Invoice</div>
+
+
+<div id="panel">
+<table style="border:1px solid #999999;" width="100%" border="0" cellpadding="0" cellspacing="0" class="tb">
+  <tbody>
+    <tr>
+      <td height="35" colspan="4" align="center" class="txt" style="border-bottom:1px solid #ddd; color:#d04e00; font-weight:800; font-family: 'Muli', sans-serif;">TAX INVOICE</td>
+    </tr>
+    <tr>
+      <td>&nbsp;</td>
+        {% include 'invoicing/business_selection.html' %}
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td height="36" colspan="4">&nbsp;</td>
+    </tr>
+    <tr>
+      <td width="3%">&nbsp;</td>
+      <td colspan="2"><table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
+        <tbody>
+        {% include 'invoicing/customer_selection.html' %}
+        {% include 'invoicing/line_item_selection.html' %}
+          <tr>
+            <td>&nbsp;</td>
+          </tr>
+          <tr>
+            <td><table width="100%" border="1" cellpadding="0" cellspacing="0" class="tb2">
+              <tbody>
+                <tr style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
+                  <td width="7%" height="48" align="center">&nbsp;</td>
+                  <td width="60%" align="center">&nbsp;</td>
+                  <td align="center">Add CGST : <br>Add SGST :</td>
+                  <td width="13%" align="center">&nbsp;</td>
+                </tr>
+                <tr style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
+                  <td height="31" align="center">&nbsp;</td>
+                  <td align="center">&nbsp;</td>
+                  <td align="center"><strong>Grand Total</strong></td>
+                  <td align="center">&nbsp;</td>
+                </tr>
+              </tbody>
+            </table></td>
+          </tr>
+          <tr>
+            <td>&nbsp;</td>
+          </tr>
+        </tbody>
+      </table></td>
+      <td width="3%">&nbsp;</td>
+    </tr>
+    <tr>
+      <td colspan="4">&nbsp;</td>
+    </tr>
+    <tr>
+      <td height="32">&nbsp;</td>
+      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" width="47%" height="32">
+          <strong>Date : <input type="date"/></strong>
+      </td>
+      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" width="47%" align="right"><strong>For : Online Receipt</strong></td>
+      <td height="32">&nbsp;</td>
+    </tr>
+    <tr>
+      <td colspan="4">&nbsp;</td>
+    </tr>
+    <tr>
+      <td height="72">&nbsp;</td>
+      <td>&nbsp;</td>
+      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" align="right" valign="bottom"><strong>Authorised Signature</strong></td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td colspan="4">&nbsp;</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+{% endblock %}
+
+{% block javascripts %}
+  <script>
+        function printDiv() {
+            var divContents = document.getElementById("panel").innerHTML;
+            var a = window.open('', '', 'height=800, width=800');
+            a.document.write('<html>');
+            a.document.write(divContents);
+            a.document.write('</body></html>');
+            a.document.close();
+            a.print();
+        }
+    </script>
+{% endblock %}

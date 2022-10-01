@@ -1,0 +1,20 @@
+<div id="line_items_list">
+    <table class="table table-hover" id="line-item-table">
+
+        <thead class="border-b bg-gray-800">
+            <tr>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Product Name</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Quantity</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Rate</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">CGST</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">SGST</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Total Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% include 'partials/line_item_data_list.html' with line_items=line_items %}
+        </tbody>
+
+    </table>
+</div>

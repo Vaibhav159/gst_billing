@@ -6,7 +6,7 @@ from django.views import View
 from django.views.generic import ListView, DeleteView
 
 from billing.forms import CustomerForm, BusinessForm
-from billing.models import Business, Customer
+from billing.models import Business, Customer, Invoice, LineItem
 
 
 class InitialView(View):
@@ -161,3 +161,162 @@ class BusinessDeleteView(DeleteView):
     model = Business
     success_url = reverse_lazy("business_list")
     template_name = "business_list.html"
+
+
+# invoicing print page
+class InvoiceView(View):
+    def get(self, request, *args, **kwargs):
+        return render(request, "invoicing/invoice.html")
+
+
+# invoice views
+class InvoiceListView(ListView):
+    model = Invoice
+    template_name = "invoice_list.html"
+    context_object_name = "invoices"
+    paginate_by = 2
+
+    def get_queryset(self):
+        return Invoice.objects.all().order_by("id")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["title"] = "Invoices"
+        return context
+
+    def get(self, request, *args, **kwargs):
+        if request.htmx and request.GET.get("page"):
+            return render(
+                request,
+                "partials/invoice_data_list.html",
+                context=self.get_context_data(object_list=self.get_queryset()),
+            )
+        return super().get(request, *args, *kwargs)
+
+
+class InvoiceAddView(View):
+    def get(self, request, *args, **kwargs):
+        context = {
+            "businesses": Business.objects.all(),
+        }
+        if not request.htmx:
+            return render(request, "partials/add_invoice_form.html", context=context)
+
+        business_id = request.GET.get("business")
+        context["customers"] = Customer.objects.filter(business_id=business_id)
+
+        return render(request, "partials/add_invoice_form.html", context=context)
+
+    def post(self, request, *args, **kwargs):
+        data = request.POST
+        error_list = []
+        business_id, customer_id, invoice_number = (
+            data["business"],
+            data["customer"],
+            data["invoice_number"],
+        )
+        if not business_id:
+            error_list.append("business")
+
+        if not customer_id:
+            error_list.append("customer")
+
+        if not invoice_number:
+            error_list.append("invoice_number")
+
+        if error_list:
+            return render(
+                request,
+                "partials/add_invoice_form.html",
+                context={
+                    "error_message": f"{', '.join(error_list)} can't be empty",
+                },
+            )
+
+        invoice = Invoice.objects.create(
+            business_id=business_id,
+            customer_id=customer_id,
+            invoice_number=invoice_number,
+        )
+
+        response = render(request, "invoice_detail.html", context={"invoice": invoice})
+
+        response["HX-Push"] = f"/billing/invoice/{invoice.id}"
+
+        return response
+
+
+class InvoiceDetailView(View):
+    def get(self, request, invoice_id):
+        line_items = LineItem.objects.filter(invoice_id=invoice_id)
+        context = {
+            "invoice": Invoice.objects.get(id=invoice_id),
+            "line_items": line_items,
+            **LineItem.get_invoice_summary(invoice_id=invoice_id),
+        }
+        return render(request, "invoice_detail.html", context)
+
+    def post(self, request):
+        return render(request, "invoice_detail.html")
+
+
+# LineItemsView
+class LineItemView(View):
+    def get(self, request):
+        invoice_id = request.GET.get("invoice_id")
+        total_line_items = LineItem.objects.filter(invoice_id=invoice_id).count()
+        return render(
+            request,
+            "partials/line_item_add.html",
+            {"total_line_items": total_line_items, "invoice_id": invoice_id},
+        )
+
+    def post(self, request):
+        data = request.POST
+        invoice_id, product_name, qty, rate = (
+            data["invoice_id"],
+            data["item_name"],
+            data["qty"],
+            data["rate"],
+        )
+        line_item = LineItem.create_line_item_for_invoice(
+            invoice_id=invoice_id,
+            product_name=product_name,
+            rate=rate,
+            quantity=qty,
+        )
+        line_items = LineItem.objects.filter(invoice_id=invoice_id)
+        Invoice.objects.filter(id=invoice_id).update(
+            total_amount=sum(line_items.values_list("amount", flat=True))
+        )
+
+        response = render(
+            request,
+            "line_item_detail.html",
+            {
+                "object": line_item,
+                "index": line_items.count(),
+            },
+        )
+
+        response["HX-Trigger"] = "newLineItem"
+
+        return response
+
+
+class InvoiceSummaryView(View):
+    """
+    Displays the summary of the invoice.
+    """
+
+    def get(self, request):
+        invoice_id = request.GET["invoice_id"]
+
+        return render(
+            request,
+            "partials/invoice_summary.html",
+            context={
+                "magic": True,
+                **LineItem.get_invoice_summary(invoice_id=invoice_id),
+            },
+        )
