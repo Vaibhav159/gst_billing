@@ -66,11 +66,10 @@ class Customer(AbstractBaseModel):
         verbose_name="GST Number",
         help_text="GST Number of the customer.",
     )
-    business = models.ForeignKey(
+    businesses = models.ManyToManyField(
         Business,
-        on_delete=models.CASCADE,
-        verbose_name="Business",
-        help_text="Business of the customer.",
+        verbose_name="Businesses",
+        help_text="Businesses associated of the customer.",
     )
     pan_number = models.CharField(
         max_length=10,

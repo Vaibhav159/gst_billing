@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils.safestring import mark_safe
 
 from billing.models import Business, Customer, LineItem, Invoice
 
@@ -13,10 +14,28 @@ class BusinessAdmin(admin.ModelAdmin):
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
-    list_display = ("name", "address", "gst_number", "business")
-    list_filter = ("name", "address", "gst_number", "business")
-    search_fields = ("name", "address", "gst_number", "business")
-    ordering = ("name", "address", "gst_number", "business")
+    list_display = ("name", "address", "gst_number", "businesses_linked")
+    list_filter = ("name", "address", "gst_number", "businesses")
+    search_fields = ("name", "address", "gst_number", "businesses__name")
+    ordering = (
+        "name",
+        "address",
+        "gst_number",
+    )
+
+    def businesses_linked(self, obj):
+        businesses_linked_to_customer = obj.businesses.values_list("name", flat=True)
+
+        html_text = ""
+        for business_name in businesses_linked_to_customer:
+            html_text += f"<li>{business_name}</li>"
+
+        if html_text:
+            html_text = f"<ol>{html_text}</ol>"
+        else:
+            html_text = "No Businesses linked"
+
+        return mark_safe(html_text)
 
 
 @admin.register(LineItem)
