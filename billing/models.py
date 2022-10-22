@@ -60,11 +60,15 @@ class Customer(AbstractBaseModel):
         max_length=255,
         verbose_name="Customer Address",
         help_text="Address of the customer.",
+        null=True,
+        blank=True,
     )
     gst_number = models.CharField(
         max_length=255,
         verbose_name="GST Number",
         help_text="GST Number of the customer.",
+        null=True,
+        blank=True,
     )
     businesses = models.ManyToManyField(
         Business,
