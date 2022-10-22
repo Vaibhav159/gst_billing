@@ -3,20 +3,6 @@
 
 {% block content %}
 <style>
-   .print
-   {
-	   width:140px;
-	   height:35px;
-	   line-height:32px;
-	   text-align:center;
-	   border:none;
-	   border-radius:20px;
-	   background:#f60;
-	   margin-bottom:20px;
-	   cursor:pointer;
-	   color:#fff;
-	   font-family: 'Muli', sans-serif;
-   }
    table.tb2 tr:first-of-type{
       border-bottom: 2px solid black
     }
@@ -24,10 +10,34 @@
    table.tb2 tr:last-of-type{
        border-top:2px solid black;
    }
+
+   @media print {
+       @page { margin: 0; }
+      body * {
+        visibility: hidden;
+      }
+      #panel *{
+        visibility: visible;
+      }
+    }
 </style>
 
+    <div class="inline-flex rounded-md shadow-sm" role="group">
 
-<div onclick="printDiv()" class="print">Print Invoice</div>
+    <button
+        hx-get="{% url 'invoice_detail' invoice.id %}"
+        hx-target="#content-body"
+        hx-trigger="click"
+        hx-push-url="{% url 'invoice_detail' invoice.id %}"
+        hx-swap="outerHTML"
+        type="button"
+        class="h-8 px-4 m-2 text-sm text-indigo-100 transition-colors duration-150 bg-indigo-700 rounded-lg focus:shadow-outline hover:bg-indigo-800">
+      &laquo; Back to Invoice {{ invoice.id }}
+    </button>
+        <button type="button" onclick="window.print();"
+                class="h-8 px-4 m-2 text-sm text-orange-100 transition-colors duration-150 bg-orange-600 rounded-lg focus:shadow-outline hover:bg-orange-800"
+        >Print Invoice</button>
+    </div>
 
 
 <div id="panel">
@@ -38,7 +48,7 @@
     </tr>
     <tr>
       <td>&nbsp;</td>
-        {% include 'invoicing/business_selection.html' %}
+        {% include "invoicing/business_selection.html" with business=invoice.business %}
       <td>&nbsp;</td>
     </tr>
     <tr>
@@ -48,7 +58,7 @@
       <td width="3%">&nbsp;</td>
       <td colspan="2"><table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
         <tbody>
-        {% include 'invoicing/customer_selection.html' %}
+        {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number%}
         {% include 'invoicing/line_item_selection.html' %}
           <tr>
             <td>&nbsp;</td>
@@ -57,16 +67,24 @@
             <td><table width="100%" border="1" cellpadding="0" cellspacing="0" class="tb2">
               <tbody>
                 <tr style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
-                  <td width="7%" height="48" align="center">&nbsp;</td>
+                  <td height="31" align="center">&nbsp;</td>
                   <td width="60%" align="center">&nbsp;</td>
-                  <td align="center">Add CGST : <br>Add SGST :</td>
-                  <td width="13%" align="center">&nbsp;</td>
+                  <td align="center">
+                      <strong>CGST</strong> :<br>
+                      <strong>SGST</strong> :
+                  </td>
+                  <td width="13%" align="center">{{ total_cgst_tax|floatformat:3 }}<br>
+                      {{ total_sgst_tax|floatformat:3 }}
+                      </td>
                 </tr>
                 <tr style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
                   <td height="31" align="center">&nbsp;</td>
                   <td align="center">&nbsp;</td>
                   <td align="center"><strong>Grand Total</strong></td>
-                  <td align="center">&nbsp;</td>
+                  <td align="center">&nbsp;{{ total_amount|floatformat:3 }}</td>
+                </tr>
+                <tr style="border-bottom:1px solid black">
+                     <td colspan="100%"></td>
                 </tr>
               </tbody>
             </table></td>
@@ -81,14 +99,14 @@
     <tr>
       <td colspan="4">&nbsp;</td>
     </tr>
-    <tr>
-      <td height="32">&nbsp;</td>
-      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" width="47%" height="32">
-          <strong>Date : <input type="date"/></strong>
-      </td>
-      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" width="47%" align="right"><strong>For : Online Receipt</strong></td>
-      <td height="32">&nbsp;</td>
-    </tr>
+{#    <tr>#}
+{#      <td height="32">&nbsp;</td>#}
+{#      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" width="47%" height="32">#}
+{#          <strong>Date : {% now "jS F Y" %}</strong>#}
+{#      </td>#}
+{#      <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" width="47%" align="right"><strong>For : Online Receipt</strong></td>#}
+{#      <td height="32">&nbsp;</td>#}
+{#    </tr>#}
     <tr>
       <td colspan="4">&nbsp;</td>
     </tr>
@@ -105,18 +123,4 @@
 </table>
 </div>
 
-{% endblock %}
-
-{% block javascripts %}
-  <script>
-        function printDiv() {
-            var divContents = document.getElementById("panel").innerHTML;
-            var a = window.open('', '', 'height=800, width=800');
-            a.document.write('<html>');
-            a.document.write(divContents);
-            a.document.write('</body></html>');
-            a.document.close();
-            a.print();
-        }
-    </script>
 {% endblock %}

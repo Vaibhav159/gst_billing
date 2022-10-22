@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import models
 from django.db.models import Sum, Count, F
 
-from billing.constants import BILLING_DECIMAL_PLACE_PRECISION
+from billing.constants import BILLING_DECIMAL_PLACE_PRECISION, GST_TAX_RATE, HSN_CODE
 
 
 class AbstractBaseModel(models.Model):
@@ -66,11 +66,10 @@ class Customer(AbstractBaseModel):
         verbose_name="GST Number",
         help_text="GST Number of the customer.",
     )
-    business = models.ForeignKey(
+    businesses = models.ManyToManyField(
         Business,
-        on_delete=models.CASCADE,
-        verbose_name="Business",
-        help_text="Business of the customer.",
+        verbose_name="Businesses",
+        help_text="Businesses associated of the customer.",
     )
     pan_number = models.CharField(
         max_length=10,
@@ -182,6 +181,10 @@ class LineItem(AbstractBaseModel):
     def __str__(self):
         return self.product_name
 
+    @property
+    def amount_without_tax(self):
+        return self.rate * self.quantity
+
     @classmethod
     def create_line_item_for_invoice(cls, product_name, quantity, rate, invoice_id):
         quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
@@ -190,14 +193,13 @@ class LineItem(AbstractBaseModel):
             quantity=quantity,
             rate=rate,
             invoice_id=invoice_id,
-            hsn_code="nice",
+            hsn_code=HSN_CODE,
             customer_id=1,
         )
 
         net_amount = quantity * rate
 
-        tax = Decimal("0.03")
-        tax_amount = net_amount * tax
+        tax_amount = net_amount * GST_TAX_RATE
         line_item.sgst = tax_amount / 2
         line_item.cgst = tax_amount / 2
         line_item.amount = line_item.sgst + line_item.cgst + net_amount
