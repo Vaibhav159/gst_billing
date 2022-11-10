@@ -213,10 +213,11 @@ class InvoiceAddView(View):
     def post(self, request, *args, **kwargs):
         data = request.POST
         error_list = []
-        business_id, customer_id, invoice_number = (
+        business_id, customer_id, invoice_number, invoice_date = (
             data["business"],
             data["customer"],
             data["invoice_number"],
+            data["invoice_date"],
         )
         if not business_id:
             error_list.append("business")
@@ -240,7 +241,10 @@ class InvoiceAddView(View):
             business_id=business_id,
             customer_id=customer_id,
             invoice_number=invoice_number,
+            invoice_date=invoice_date,
         )
+
+        invoice.refresh_from_db()
 
         response = render(request, "invoice_detail.html", context={"invoice": invoice})
 

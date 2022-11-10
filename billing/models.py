@@ -119,6 +119,7 @@ class Invoice(AbstractBaseModel):
         verbose_name="Total Amount",
         help_text="Total Amount of the invoice.",
     )
+    invoice_date = models.DateField(help_text="Date at which invoice was raised.")
 
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
