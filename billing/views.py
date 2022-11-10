@@ -267,6 +267,12 @@ class InvoiceDetailView(View):
         return render(request, "invoice_detail.html")
 
 
+class InvoiceDeleteView(DeleteView):
+    model = Invoice
+    success_url = reverse_lazy("invoice_list")
+    template_name = "invoice_list.html"
+
+
 # LineItemsView
 class LineItemView(View):
     def get(self, request):
