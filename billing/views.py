@@ -5,7 +5,7 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView, DeleteView
 
-from billing.constants import GST_TAX_RATE
+from billing.constants import GST_TAX_RATE, PAGINATION_PAGE_SIZE
 from billing.forms import CustomerForm, BusinessForm
 from billing.models import Business, Customer, Invoice, LineItem
 
@@ -52,7 +52,7 @@ class CustomerListView(ListView):
     model = Customer
     template_name = "customer_list.html"
     context_object_name = "customers"
-    paginate_by = 2
+    paginate_by = PAGINATION_PAGE_SIZE
 
     def get_queryset(self):
         return Customer.objects.all().order_by("id")
@@ -127,7 +127,7 @@ class BusinessListView(ListView):
     model = BusinessForm
     template_name = "business_list.html"
     context_object_name = "businesses"
-    paginate_by = 2
+    paginate_by = PAGINATION_PAGE_SIZE
 
     def get_queryset(self):
         return Business.objects.all().order_by("id")
@@ -175,7 +175,7 @@ class InvoiceListView(ListView):
     model = Invoice
     template_name = "invoice_list.html"
     context_object_name = "invoices"
-    paginate_by = 2
+    paginate_by = PAGINATION_PAGE_SIZE
 
     def get_queryset(self):
         return Invoice.objects.all().order_by("id")

@@ -54,7 +54,10 @@ class Business(AbstractBaseModel):
 
 class Customer(AbstractBaseModel):
     name = models.CharField(
-        max_length=255, verbose_name="Customer Name", help_text="Name of the customer"
+        max_length=255,
+        verbose_name="Customer Name",
+        help_text="Name of the customer",
+        unique=True,
     )
     address = models.CharField(
         max_length=255,
