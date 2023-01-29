@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from django.shortcuts import render, redirect
 
 # Create your views here.
@@ -297,7 +295,7 @@ class LineItemView(View):
             data["item_name"],
             data["qty"],
             data["rate"],
-            Decimal(data["gst_tax_rate"]),
+            data["gst_tax_rate"],
         )
         line_item = LineItem.create_line_item_for_invoice(
             invoice_id=invoice_id,

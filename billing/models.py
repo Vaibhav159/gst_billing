@@ -226,6 +226,8 @@ class LineItem(AbstractBaseModel):
         cls, product_name, quantity, rate, invoice_id, gst_tax_rate
     ):
         quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
+        gst_tax_rate_in_decimal = Decimal(str(gst_tax_rate)) / 100
+
         line_item = LineItem(
             product_name=product_name,
             quantity=quantity,
@@ -233,9 +235,8 @@ class LineItem(AbstractBaseModel):
             invoice_id=invoice_id,
             hsn_code=HSN_CODE,
             customer_id=1,
+            gst_tax_rate=gst_tax_rate_in_decimal,
         )
-
-        gst_tax_rate_in_decimal = gst_tax_rate / 100
 
         net_amount = quantity * rate
 
