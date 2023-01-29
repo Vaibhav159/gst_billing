@@ -7,8 +7,15 @@
                 <th scope="col" class="text-sm font-medium text-white px-6 py-4">Product Name</th>
                 <th scope="col" class="text-sm font-medium text-white px-6 py-4">Quantity</th>
                 <th scope="col" class="text-sm font-medium text-white px-6 py-4">Rate</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">CGST</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">SGST</th>
+                <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST%</th>
+
+                {% if invoice.is_igst_applicable %}
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">IGST</th>
+                {% else %}
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">CGST</th>
+                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">SGST</th>
+                {% endif %}
+
                 <th scope="col" class="text-sm font-medium text-white px-6 py-4">Total Amount</th>
             </tr>
         </thead>

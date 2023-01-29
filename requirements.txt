@@ -17,3 +17,4 @@ toml==0.10.2
 virtualenv==20.15.1
 
 django-simple-history~=3.2.0
+openpyxl==3.0.10

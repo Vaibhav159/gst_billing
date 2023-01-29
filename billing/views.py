@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.shortcuts import render, redirect
 
 # Create your views here.
@@ -281,22 +283,28 @@ class LineItemView(View):
         return render(
             request,
             "partials/line_item_add.html",
-            {"total_line_items": total_line_items, "invoice_id": invoice_id},
+            {
+                "total_line_items": total_line_items,
+                "invoice_id": invoice_id,
+                "gst_tax_rate": GST_TAX_RATE * 100,
+            },
         )
 
     def post(self, request):
         data = request.POST
-        invoice_id, product_name, qty, rate = (
+        invoice_id, product_name, qty, rate, gst_tax_rate = (
             data["invoice_id"],
             data["item_name"],
             data["qty"],
             data["rate"],
+            Decimal(data["gst_tax_rate"]),
         )
         line_item = LineItem.create_line_item_for_invoice(
             invoice_id=invoice_id,
             product_name=product_name,
             rate=rate,
             quantity=qty,
+            gst_tax_rate=gst_tax_rate,
         )
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
         Invoice.objects.filter(id=invoice_id).update(
@@ -309,6 +317,7 @@ class LineItemView(View):
             {
                 "object": line_item,
                 "index": line_items.count(),
+                "invoice": Invoice.objects.get(id=invoice_id),
             },
         )
 

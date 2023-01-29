@@ -2,8 +2,14 @@
     {% if total_items %}
         Total Items: {{ total_items }}<br>
         Amount Without Tax : {{ amount_without_tax|floatformat:3 }} <br>
-        CGST: {{ total_cgst_tax|floatformat:3 }}<br>
-        SGST: {{ total_sgst_tax|floatformat:3 }}<br>
+        asdf{{ invoice }}<br>
+        adfasfd{{ invoice.is_igst_applicable }}<br>
+        {% if invoice.is_igst_applicable %}
+            IGST : {{ total_igst_tax|floatformat:3 }} <br>
+        {% else %}
+            CGST : {{ total_cgst_tax|floatformat:3 }} <br>
+            SGST : {{ total_sgst_tax|floatformat:3 }} <br>
+        {% endif %}
         Total Tax: {{ total_tax|floatformat:3 }}<br>
         Total Amount: {{ total_amount|floatformat:3 }}<br>
         <br>
