@@ -22,4 +22,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", InitialView.as_view(), name="initial"),
     path("billing/", include("billing.urls")),
+    path("explorer/", include("explorer.urls")),
 ]

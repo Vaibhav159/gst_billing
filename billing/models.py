@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import models
 from django.db.models import Sum, Count, F
+from simple_history.models import HistoricalRecords
 
 from billing.constants import BILLING_DECIMAL_PLACE_PRECISION, GST_TAX_RATE, HSN_CODE
 
@@ -123,6 +124,8 @@ class Invoice(AbstractBaseModel):
         help_text="Total Amount of the invoice.",
     )
     invoice_date = models.DateField(help_text="Date at which invoice was raised.")
+
+    history = HistoricalRecords()
 
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"

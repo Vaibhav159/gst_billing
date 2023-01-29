@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.safestring import mark_safe
+from simple_history.admin import SimpleHistoryAdmin
 
 from billing.models import Business, Customer, LineItem, Invoice
 
@@ -88,7 +89,7 @@ class LineInline(admin.TabularInline):
 
 
 @admin.register(Invoice)
-class InvoiceAdmin(admin.ModelAdmin):
+class InvoiceAdmin(SimpleHistoryAdmin):
     list_display = ("customer", "business", "created_at", "updated_at")
     list_filter = ("customer", "business", "created_at", "updated_at")
     search_fields = ("customer", "business", "created_at", "updated_at")
