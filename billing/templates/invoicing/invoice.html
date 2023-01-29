@@ -70,11 +70,20 @@
                   <td height="31" align="center">&nbsp;</td>
                   <td width="60%" align="center">&nbsp;</td>
                   <td align="center">
-                      <strong>CGST</strong> :<br>
-                      <strong>SGST</strong> :
+                      {% if invoice.is_igst_applicable %}
+                          <strong>IGST</strong> :<br>
+                      {% else %}
+                          <strong>CGST</strong> :<br>
+                          <strong>SGST</strong> :
+                      {% endif %}
                   </td>
-                  <td width="13%" align="center">{{ total_cgst_tax|floatformat:3 }}<br>
-                      {{ total_sgst_tax|floatformat:3 }}
+                  <td width="13%" align="center">
+                      {% if invoice.is_igst_applicable %}
+                          {{ total_igst_tax|floatformat:3 }} <br>
+                      {% else %}
+                          {{ total_cgst_tax|floatformat:3 }}<br>
+                          {{ total_sgst_tax|floatformat:3 }}
+                      {% endif %}
                       </td>
                 </tr>
                 <tr style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
