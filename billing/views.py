@@ -330,6 +330,7 @@ class InvoiceSummaryView(View):
             "partials/invoice_summary.html",
             context={
                 "magic": True,
+                "invoice": Invoice.objects.get(id=invoice_id),
                 **LineItem.get_invoice_summary(invoice_id=invoice_id),
             },
         )

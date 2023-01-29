@@ -1,4 +1,6 @@
-<div id="total" hx-get="{% url 'invoice_summary'%}?invoice_id={{ invoice.id }}" hx-trigger="newLineItem from:body">
+<div id="total" hx-get="{% url 'invoice_summary'%}?invoice_id={{ invoice.id }}"
+     hx-trigger="newLineItem from:body" hx-swap="outerHTML"
+>
     {% if total_items %}
         Total Items: {{ total_items }}<br>
         Amount Without Tax : {{ amount_without_tax|floatformat:3 }} <br>
