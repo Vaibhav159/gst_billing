@@ -5,7 +5,7 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView, DeleteView
 
-from billing.constants import GST_TAX_RATE, PAGINATION_PAGE_SIZE
+from billing.constants import GST_TAX_RATE, PAGINATION_PAGE_SIZE, INVOICE_TYPE_CHOICES
 from billing.forms import CustomerForm, BusinessForm
 from billing.models import Business, Customer, Invoice, LineItem
 
@@ -199,6 +199,7 @@ class InvoiceAddView(View):
     def get(self, request, *args, **kwargs):
         context = {
             "businesses": Business.objects.all(),
+            "type_of_invoices": INVOICE_TYPE_CHOICES,
         }
         if not request.htmx:
             return render(request, "partials/add_invoice_form.html", context=context)
@@ -213,11 +214,12 @@ class InvoiceAddView(View):
     def post(self, request, *args, **kwargs):
         data = request.POST
         error_list = []
-        business_id, customer_id, invoice_number, invoice_date = (
+        business_id, customer_id, invoice_number, invoice_date, type_of_invoice = (
             data["business"],
             data["customer"],
             data["invoice_number"],
             data["invoice_date"],
+            data["type_of_invoice"],
         )
         if not business_id:
             error_list.append("business")
@@ -242,6 +244,7 @@ class InvoiceAddView(View):
             customer_id=customer_id,
             invoice_number=invoice_number,
             invoice_date=invoice_date,
+            type_of_invoice=type_of_invoice,
         )
 
         invoice.refresh_from_db()

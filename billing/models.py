@@ -1,11 +1,16 @@
 from decimal import Decimal
 
-import openpyxl
 from django.db import models
-from django.db.models import Sum, Count, F, Q
+from django.db.models import Sum, Count, F
 from simple_history.models import HistoricalRecords
 
-from billing.constants import BILLING_DECIMAL_PLACE_PRECISION, GST_TAX_RATE, HSN_CODE
+from billing.constants import (
+    BILLING_DECIMAL_PLACE_PRECISION,
+    GST_TAX_RATE,
+    HSN_CODE,
+    INVOICE_TYPE_CHOICES,
+    INVOICE_TYPE_SELL,
+)
 
 
 class AbstractBaseModel(models.Model):
@@ -125,6 +130,13 @@ class Invoice(AbstractBaseModel):
         help_text="Total Amount of the invoice.",
     )
     invoice_date = models.DateField(help_text="Date at which invoice was raised.")
+    type_of_invoice = models.CharField(
+        max_length=255,
+        verbose_name="Type of Invoice",
+        help_text="Type of Invoice.",
+        choices=INVOICE_TYPE_CHOICES,
+        default=INVOICE_TYPE_SELL,
+    )
 
     history = HistoricalRecords()
 

@@ -35,14 +35,34 @@
         <label for="customer" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">Select a Customer</label>
 
         <select id="customer"
-            name="customer"
+            name="customer" required
             class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
-            <option selected disabled>Choose a Customer</option>
+            <option selected disabled value="">Choose a Customer</option>
             {% for customer in customers %}
                 <option value="{{ customer.id }}">{{ customer.name }}</option>
             {% endfor %}
 
         </select>
+
+
+        <div>
+        <br>
+            <label for="type_of_invoice" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">Type of invoice</label>
+
+            <select id="type_of_invoice"
+            name="type_of_invoice" required
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+
+                {% for internal_value, visible_value in type_of_invoices %}
+                {% if visible_value == "Sell" %}
+                    <option value="{{ internal_value }}" selected>{{ visible_value }}</option>
+                {% else %}
+                    <option value="{{ internal_value }}">{{ visible_value }}</option>
+                {% endif %}
+            {% endfor %}
+
+        </select>
+        </div>
 
         <div>
         <br>
