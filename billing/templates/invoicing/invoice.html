@@ -58,6 +58,9 @@
             <tr>
                 <td>&nbsp;</td>
                 {% include "invoicing/business_selection.html" with business=invoice.business %}
+                <td>
+                    {% include "invoicing/business_bank_details.html" %}
+                </td>
                 <td>&nbsp;</td>
             </tr>
             <tr>
@@ -76,55 +79,7 @@
                             </tr>
                             <tr>
                                 <td>
-                                    <table width="100%" border="1" cellpadding="0" cellspacing="0" class="tb2">
-                                        <tbody>
-                                            <tr style="font-size: 13px; color: #000; padding: 5px; font-family: 'Muli', sans-serif;">
-                                                <td height="31" align="center">
-                                                    &nbsp;
-                                                </td>
-                                                <td width="60%" align="center">
-                                                    &nbsp;
-                                                </td>
-                                                <td align="center">
-
-                                                    {% if invoice.is_igst_applicable %}
-                                                        <strong>IGST</strong> :<br/>
-                                                    {% else %}
-                                                        <strong>CGST</strong> :<br/>
-                                                        <strong>SGST</strong> :
-                                                    {% endif %}
-                                                </td>
-                                                <td width="13%" align="center">
-                                                    {% if invoice.is_igst_applicable %}
-                                                        {{ total_igst_tax|floatformat:3 }} <br/>
-                                                    {% else %}
-                                                        {{ total_cgst_tax|floatformat:3 }}  <br/>
-                                                        {{ total_sgst_tax|floatformat:3 }}
-                                                    {% endif %}
-                                                </td>
-                                            </tr>
-                                            <tr style="font-size: 13px; color: #000; padding: 5px; font-family: 'Muli', sans-serif;">
-                                                <td height="31" align="center">&nbsp;</td>
-                                                <td align="center">&nbsp;</td>
-                                                <td align="center"><strong>Grand Total</strong></td>
-                                                <td align="center">&nbsp;{{ total_amount|floatformat:3 }}</td>
-                                            </tr>
-                                            <tr style="border-bottom: 1px solid black;">
-                                                <td colspan="100%"></td>
-                                            </tr>
-
-
-                                            <tr style="font-size: 13px; color: #000; padding: 20px; font-family: 'Muli', sans-serif;">
-                                                <td align="center" colspan="4"
-                                                    style="font-size: 25px; color: #000; padding: 20px; font-family: 'Muli', sans-serif;">
-                                                    Total Invoice Amount in words :
-                                                    <strong> INR {{ amount_in_words }} Only</strong>
-                                                </td>
-                                            </tr>
-                                            <tr style="border-bottom: 1px solid black;">
-                                                <td colspan="100%"></td>
-                                        </tbody>
-                                    </table>
+                                    {% include "invoicing/invoice_final_summary.html" %}
                                 </td>
                             </tr>
                             <tr>
