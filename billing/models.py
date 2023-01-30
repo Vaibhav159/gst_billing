@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.db import models
 from django.db.models import Sum, Count, F
+from django.db.models.functions import Coalesce
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
@@ -44,10 +45,31 @@ class Business(AbstractBaseModel):
         verbose_name="Mobile Number",
         help_text="Mobile Number of the business.",
     )
-    landline_number = models.CharField(
+    bank_name = models.CharField(
         max_length=255,
-        verbose_name="Landline Number",
-        help_text="Landline Number of the business.",
+        verbose_name="Bank Name",
+        help_text="Bank Name of the business.",
+        blank=True,
+        null=True,
+    )
+    bank_account_number = models.CharField(
+        max_length=255,
+        verbose_name="A/c. No.",
+        help_text="Bank Account Number of the business.",
+        blank=True,
+        null=True,
+    )
+    bank_ifsc_code = models.CharField(
+        max_length=255,
+        verbose_name="IFSC Code",
+        help_text="IFSC Code of the Bank Account.",
+        blank=True,
+        null=True,
+    )
+    bank_branch_name = models.CharField(
+        max_length=255,
+        verbose_name="Branch Name",
+        help_text="Branch Name of the Bank Account.",
         blank=True,
         null=True,
     )
@@ -58,6 +80,14 @@ class Business(AbstractBaseModel):
 
     def __str__(self):
         return self.name
+
+    def get_bank_details(self):
+        return {
+            "bank_name": self.bank_name,
+            "bank_account_number": self.bank_account_number,
+            "bank_ifsc_code": self.bank_ifsc_code,
+            "bank_branch_name": self.bank_branch_name,
+        }
 
 
 class Customer(AbstractBaseModel):
@@ -278,7 +308,7 @@ class LineItem(AbstractBaseModel):
     @classmethod
     def get_invoice_summary(cls, invoice_id):
         invoice_summary_data = cls.objects.filter(invoice_id=invoice_id).aggregate(
-            total_amount=Sum("amount"),
+            total_amount=Coalesce(Sum("amount"), Decimal(0)),
             total_cgst_tax=Sum("cgst"),
             total_sgst_tax=Sum("sgst"),
             total_igst_tax=Sum("igst"),

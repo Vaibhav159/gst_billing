@@ -370,5 +370,6 @@ class PrintInvoiceView(View):
                     invoice_summary["total_amount"], lang="en_IN"
                 ).title(),
                 **invoice_summary,
+                **invoice.business.get_bank_details(),
             },
         )
