@@ -9,7 +9,7 @@ from billing.constants import (
     GST_TAX_RATE,
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
-    INVOICE_TYPE_SELL,
+    INVOICE_TYPE_INWARD,
 )
 
 
@@ -135,7 +135,7 @@ class Invoice(AbstractBaseModel):
         verbose_name="Type of Invoice",
         help_text="Type of Invoice.",
         choices=INVOICE_TYPE_CHOICES,
-        default=INVOICE_TYPE_SELL,
+        default=INVOICE_TYPE_INWARD,
     )
 
     history = HistoricalRecords()
