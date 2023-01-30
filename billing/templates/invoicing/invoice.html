@@ -88,17 +88,17 @@
                                                 <td align="center">
 
                                                     {% if invoice.is_igst_applicable %}
-                                                        <strong>IGST</strong> :<br />
+                                                        <strong>IGST</strong> :<br/>
                                                     {% else %}
-                                                        <strong>CGST</strong> :<br />
+                                                        <strong>CGST</strong> :<br/>
                                                         <strong>SGST</strong> :
                                                     {% endif %}
                                                 </td>
                                                 <td width="13%" align="center">
                                                     {% if invoice.is_igst_applicable %}
-                                                        {{ total_igst_tax|floatformat:3 }} <br />
+                                                        {{ total_igst_tax|floatformat:3 }} <br/>
                                                     {% else %}
-                                                        {{ total_cgst_tax|floatformat:3 }}<br />
+                                                        {{ total_cgst_tax|floatformat:3 }}  <br/>
                                                         {{ total_sgst_tax|floatformat:3 }}
                                                     {% endif %}
                                                 </td>

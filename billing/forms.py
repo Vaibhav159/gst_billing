@@ -52,11 +52,6 @@ class BusinessForm(forms.ModelForm):
                     "minlength": "10",
                 }
             ),
-            "landline_number": forms.TextInput(
-                attrs={
-                    "minlength": "10",
-                }
-            ),
         }
 
     def __init__(self, *args, **kwargs):
