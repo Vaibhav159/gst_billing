@@ -4,6 +4,7 @@ from django.shortcuts import render, redirect
 from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView, DeleteView
+from num2words import num2words
 
 from billing.constants import GST_TAX_RATE, PAGINATION_PAGE_SIZE, INVOICE_TYPE_CHOICES
 from billing.forms import CustomerForm, BusinessForm
@@ -355,6 +356,9 @@ class PrintInvoiceView(View):
         invoice = Invoice.objects.get(id=invoice_id)
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
         tax_rate = f"{GST_TAX_RATE * 100} %"
+
+        invoice_summary = LineItem.get_invoice_summary(invoice_id=invoice_id)
+
         return render(
             request,
             "invoicing/invoice.html",
@@ -362,6 +366,9 @@ class PrintInvoiceView(View):
                 "invoice": invoice,
                 "line_items": line_items,
                 "tax_rate": tax_rate,
-                **LineItem.get_invoice_summary(invoice_id=invoice_id),
+                "amount_in_words": num2words(
+                    invoice_summary["total_amount"], lang="en_IN"
+                ).title(),
+                **invoice_summary,
             },
         )

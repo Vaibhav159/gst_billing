@@ -1,3 +1,4 @@
+import math
 from decimal import Decimal
 
 from django.db import models
@@ -267,9 +268,16 @@ class LineItem(AbstractBaseModel):
 
         return line_item
 
+    @staticmethod
+    def custom_round(num: Decimal):
+        if num - int(num) < 0.5:
+            return math.floor(num)
+        else:
+            return math.ceil(num)
+
     @classmethod
     def get_invoice_summary(cls, invoice_id):
-        return cls.objects.filter(invoice_id=invoice_id).aggregate(
+        invoice_summary_data = cls.objects.filter(invoice_id=invoice_id).aggregate(
             total_amount=Sum("amount"),
             total_cgst_tax=Sum("cgst"),
             total_sgst_tax=Sum("sgst"),
@@ -278,6 +286,12 @@ class LineItem(AbstractBaseModel):
             total_tax=Sum(F("cgst") + F("sgst") + F("igst")),
             amount_without_tax=Sum(F("quantity") * F("rate")),
         )
+
+        invoice_summary_data["total_amount"] = cls.custom_round(
+            invoice_summary_data["total_amount"]
+        )
+
+        return invoice_summary_data
 
 
 #
