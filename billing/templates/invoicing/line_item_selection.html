@@ -11,7 +11,7 @@
       <th width="13%" align="center"><strong>Amount</strong></th>
     </tr>
 
-    <tr>
+    <tr style="height: 50px">
         <td>&nbsp;</td>
     </tr>
 
@@ -19,7 +19,7 @@
         {% include "invoicing/line_item.html" with item=item index=forloop.counter %}
     {% endfor %}
 
-    <tr>
+    <tr style="height: 300px">
         <td>&nbsp;</td>
     </tr>
 
