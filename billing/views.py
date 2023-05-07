@@ -1,4 +1,3 @@
-import csv
 from datetime import datetime
 
 from django.http import HttpResponse
@@ -9,6 +8,7 @@ from django.urls import reverse_lazy
 from django.views import View
 from django.views.generic import ListView, DeleteView
 from num2words import num2words
+from openpyxl.workbook import Workbook
 
 from billing.constants import (
     GST_TAX_RATE,
@@ -16,6 +16,7 @@ from billing.constants import (
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
+    DOWNLOAD_SHEET_FIELD_NAMES,
 )
 from billing.forms import CustomerForm, BusinessForm
 from billing.models import Business, Customer, Invoice, LineItem
@@ -391,91 +392,86 @@ class DownloadInvoicesView(View):
     """
 
     @staticmethod
-    def generate_csv_response(start_date, end_date):
-        # Generate CSV file and return HTTP response
-        field_names = [
-            "S.No.",
-            "Bill No.",
-            "Invoice Date",
-            "Party Name",
-            "GST Number",
-            "Commodity",
-            "HSN Code",
-            "GST Rate",
-            "Quantity",
-            "Rate",
-            "Taxable Value",
-            "CGST",
-            "SGST",
-            "IGST",
-            "Total Invoice Value",
-            "Business",
-        ]
-
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="invoices.csv"'
-
-        writer = csv.writer(response)
-
-        line_item_data = LineItem.get_line_item_data_for_download(
-            start_date=start_date, end_date=end_date
-        )
-
-        for business in Business.objects.all():
-            writer.writerow([business.name])
-            DownloadInvoicesView.generate_report_for_business(
-                field_names, line_item_data, writer, start_date, end_date
-            )
-
-        return response
-
-    @staticmethod
     def get_date_range_string(start_date, end_date):
         start_date = datetime.strptime(start_date, "%Y-%m-%d")
         end_date = datetime.strptime(end_date, "%Y-%m-%d")
+
         start_date_str = datetime.strftime(start_date, "%B %Y")
-        if start_date == end_date:
+        end_date_str = datetime.strftime(end_date, "%B %Y")
+
+        if start_date_str == end_date_str:
             return start_date_str
         else:
-            end_date_str = datetime.strftime(end_date, "%B %Y")
             if start_date.year == end_date.year:
                 return f"{start_date_str} to {datetime.strftime(end_date, '%B')}-{end_date.year}"
             else:
                 return f"{start_date_str} to {end_date_str}"
 
     @staticmethod
-    def generate_report_for_business(
-        field_names, line_item_data, writer, start_date, end_date
-    ):
+    def generate_report_for_business(workbook, business, start_date, end_date):
 
         date_range_string = DownloadInvoicesView.get_date_range_string(
             start_date, end_date
         )
+        business_name = business.name
+
+        line_item_data = LineItem.get_line_item_data_for_download(
+            start_date=start_date, end_date=end_date, business=business
+        )
+
+        sheet = workbook.create_sheet(title=business_name)
 
         inward_invoices = line_item_data.filter(
             invoice__type_of_invoice=INVOICE_TYPE_INWARD
         )
 
-        writer.writerow(["Inward Supply"])
-        writer.writerow([date_range_string])
-        writer.writerow(field_names)
-        for idx, inward in enumerate(inward_invoices, start=1):
-            writer.writerow([idx] + list(inward))
+        sheet.append([business_name])
+        sheet.append(["Inward Supply"])
+        sheet.append([date_range_string])
+        sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
 
-        writer.writerow([])
+        for idx, inward in enumerate(inward_invoices, start=1):
+            sheet.append([idx] + list(inward))
+
+        sheet.append([])
 
         outwards_invoices = line_item_data.filter(
             invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
         )
 
-        writer.writerow(["Outward Supply"])
-        writer.writerow([date_range_string])
-        writer.writerow(field_names)
+        sheet.append([business_name])
+        sheet.append(["Outward Supply"])
+        sheet.append([date_range_string])
+        sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
 
         for idx, outward in enumerate(outwards_invoices, start=1):
-            writer.writerow([idx] + list(outward))
+            sheet.append([idx] + list(outward))
 
-        writer.writerow([])
+        sheet.append([])
+
+    @classmethod
+    def generate_csv_response(cls, start_date, end_date):
+        # Generate Excel file and return HTTP response
+
+        workbook = Workbook()
+        # remove default sheet
+        workbook.remove(workbook.active)
+
+        for business in Business.objects.all():
+            DownloadInvoicesView.generate_report_for_business(
+                workbook, business, start_date, end_date
+            )
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response[
+            "Content-Disposition"
+        ] = f'attachment; filename="invoices_{cls.get_date_range_string(start_date, end_date)}.xlsx"'
+
+        workbook.save(response)
+
+        return response
 
     def post(self, request, *args, **kwargs):
         # Retrieve invoices queryset, generate CSV, and return HTTP response

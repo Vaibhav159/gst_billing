@@ -13,3 +13,21 @@ INVOICE_TYPE_CHOICES = (
     (INVOICE_TYPE_INWARD, "Inward"),
     (INVOICE_TYPE_OUTWARD, "Outward"),
 )
+
+DOWNLOAD_SHEET_FIELD_NAMES = [
+    "S.No.",
+    "Bill No.",
+    "Invoice Date",
+    "Party Name",
+    "GST Number",
+    "Commodity",
+    "HSN Code",
+    "GST Rate",
+    "Quantity",
+    "Rate",
+    "Taxable Value",
+    "CGST",
+    "SGST",
+    "IGST",
+    "Total Invoice Value",
+]

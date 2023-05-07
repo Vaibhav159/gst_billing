@@ -324,9 +324,10 @@ class LineItem(AbstractBaseModel):
         return invoice_summary_data
 
     @classmethod
-    def get_line_item_data_for_download(cls, start_date, end_date):
+    def get_line_item_data_for_download(cls, start_date, end_date, business):
         line_item_data = cls.objects.filter(
-            # invoice__invoice_date__range=[start_date, end_date]
+            # invoice__invoice_date__range=[start_date, end_date],
+            invoice__business=business
         ).values_list(
             "invoice__invoice_number",
             "invoice__invoice_date",
@@ -342,7 +343,6 @@ class LineItem(AbstractBaseModel):
             "sgst",
             "igst",
             "amount",
-            "invoice__business__name",
         )
         return line_item_data
 
