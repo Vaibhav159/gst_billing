@@ -1,3 +1,7 @@
+import csv
+from datetime import datetime
+
+from django.http import HttpResponse
 from django.shortcuts import render, redirect
 
 # Create your views here.
@@ -6,7 +10,13 @@ from django.views import View
 from django.views.generic import ListView, DeleteView
 from num2words import num2words
 
-from billing.constants import GST_TAX_RATE, PAGINATION_PAGE_SIZE, INVOICE_TYPE_CHOICES
+from billing.constants import (
+    GST_TAX_RATE,
+    PAGINATION_PAGE_SIZE,
+    INVOICE_TYPE_CHOICES,
+    INVOICE_TYPE_INWARD,
+    INVOICE_TYPE_OUTWARD,
+)
 from billing.forms import CustomerForm, BusinessForm
 from billing.models import Business, Customer, Invoice, LineItem
 
@@ -373,3 +383,118 @@ class PrintInvoiceView(View):
                 **invoice.business.get_bank_details(),
             },
         )
+
+
+class DownloadInvoicesView(View):
+    """
+    Downloads the invoices in csv format in a given range.
+    """
+
+    @staticmethod
+    def generate_csv_response(start_date, end_date):
+        # Generate CSV file and return HTTP response
+        field_names = [
+            "S.No.",
+            "Bill No.",
+            "Invoice Date",
+            "Party Name",
+            "GST Number",
+            "Commodity",
+            "HSN Code",
+            "GST Rate",
+            "Quantity",
+            "Rate",
+            "Taxable Value",
+            "CGST",
+            "SGST",
+            "IGST",
+            "Total Invoice Value",
+            "Business",
+        ]
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="invoices.csv"'
+
+        writer = csv.writer(response)
+
+        line_item_data = LineItem.get_line_item_data_for_download(
+            start_date=start_date, end_date=end_date
+        )
+
+        for business in Business.objects.all():
+            writer.writerow([business.name])
+            DownloadInvoicesView.generate_report_for_business(
+                field_names, line_item_data, writer, start_date, end_date
+            )
+
+        return response
+
+    @staticmethod
+    def get_date_range_string(start_date, end_date):
+        start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+        start_date_str = datetime.strftime(start_date, "%B %Y")
+        if start_date == end_date:
+            return start_date_str
+        else:
+            end_date_str = datetime.strftime(end_date, "%B %Y")
+            if start_date.year == end_date.year:
+                return f"{start_date_str} to {datetime.strftime(end_date, '%B')}-{end_date.year}"
+            else:
+                return f"{start_date_str} to {end_date_str}"
+
+    @staticmethod
+    def generate_report_for_business(
+        field_names, line_item_data, writer, start_date, end_date
+    ):
+
+        date_range_string = DownloadInvoicesView.get_date_range_string(
+            start_date, end_date
+        )
+
+        inward_invoices = line_item_data.filter(
+            invoice__type_of_invoice=INVOICE_TYPE_INWARD
+        )
+
+        writer.writerow(["Inward Supply"])
+        writer.writerow([date_range_string])
+        writer.writerow(field_names)
+        for idx, inward in enumerate(inward_invoices, start=1):
+            writer.writerow([idx] + list(inward))
+
+        writer.writerow([])
+
+        outwards_invoices = line_item_data.filter(
+            invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
+        )
+
+        writer.writerow(["Outward Supply"])
+        writer.writerow([date_range_string])
+        writer.writerow(field_names)
+
+        for idx, outward in enumerate(outwards_invoices, start=1):
+            writer.writerow([idx] + list(outward))
+
+        writer.writerow([])
+
+    def post(self, request, *args, **kwargs):
+        # Retrieve invoices queryset, generate CSV, and return HTTP response
+        start_date = request.POST.get("start_invoice_date")
+        end_date = request.POST.get("end_invoice_date")
+
+        return self.generate_csv_response(start_date, end_date)
+
+    def get(self, request, *args, **kwargs):
+        context = {
+            "businesses": Business.objects.all(),
+            "type_of_invoices": INVOICE_TYPE_CHOICES,
+        }
+        if not request.htmx:
+            return render(request, "reports.html", context=context)
+
+        business_id = request.GET.get("business")
+
+        if business_id:
+            context["customers"] = Customer.objects.filter(businesses__in=business_id)
+
+        return render(request, "reports.html", context=context)

@@ -19,6 +19,7 @@ from billing.views import (
     InvoiceSummaryView,
     PrintInvoiceView,
     InvoiceDeleteView,
+    DownloadInvoicesView,
 )
 
 urlpatterns = [
@@ -82,4 +83,5 @@ urlpatterns = [
     ),
     # line items
     path("line_item/", LineItemView.as_view(), name="line_item_inline_form"),
+    path("download_invoice/", DownloadInvoicesView.as_view(), name="download_invoice"),
 ]
