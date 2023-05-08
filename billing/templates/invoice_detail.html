@@ -10,9 +10,6 @@
     {% include "invoicing/business_selection.html" with business=invoice.business %}
     {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number invoice_date=invoice.invoice_date%}
     <h2 class="mb-4 text-3xl font-extrabold tracking-tight leading-none text-gray-900 md:text-4xl">Line Items</h2>
-    <div id="magic">
-            mage
-    </div>
 
     {% include "partials/invoice_summary.html" %}
 
