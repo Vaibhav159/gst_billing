@@ -356,9 +356,9 @@ class LineItem(AbstractBaseModel):
             amount_without_tax=Sum(F("quantity") * F("rate")),
         )
 
-        invoice_summary_data["total_amount"] = cls.custom_round(
-            invoice_summary_data["total_amount"]
-        )
+        # invoice_summary_data["total_amount"] = cls.custom_round(
+        #     invoice_summary_data["total_amount"]
+        # )
 
         return invoice_summary_data
 
