@@ -450,6 +450,8 @@ class DownloadInvoicesView(View):
             sheet.append([f"GSTIN: {business.gst_number}"])
             sheet.append([])
 
+            sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
+
             for idx, inward in enumerate(inward_invoices, start=1):
                 sheet.append([idx] + list(inward))
 
