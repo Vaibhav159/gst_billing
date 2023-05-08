@@ -36,7 +36,7 @@ def get_state_code_from_gst_number(gst_number):
 
 
 def get_state_name_from_gst_number(gst_number):
-    return GST_CODE.get(gst_number[0:2])
+    return GST_CODE.get(gst_number[0:2], "") or ""
 
 
 class Business(AbstractBaseModel):
