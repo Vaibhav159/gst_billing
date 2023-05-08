@@ -8,27 +8,27 @@
             </tr>
           <tr>
             <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;" >
-                <strong>GSTIN :</strong> {{ business.gst_number }}, </td>
+                <strong>GSTIN :</strong> {{ business.gst_number|default_if_none:"" }}, </td>
             </tr>
           <tr>
             <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
-                <strong>Pan No :</strong> {{ business.pan_number }}</td>
+                <strong>Pan No :</strong> {{ business.pan_number|default_if_none:"" }}</td>
             </tr>
           <tr>
             <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
-                <strong>Address :</strong> {{ business.address }}</td>
+                <strong>Address :</strong> {{ business.address|default_if_none:"" }}</td>
             </tr>
 
           <tr>
             <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
-                <strong>Mobile Number :</strong> {{ business.mobile_number }}</td>
-            </tr>
-
-        <tr>
-            <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
-                <strong>State :</strong> {{ business.clean_state_name }}, <strong>Code :</strong> {{ business.state_code }}
+                <strong>State :</strong> {{ business.clean_state_name|default_if_none:"" }}, <strong>Code :</strong> {{ business.state_code|default_if_none:"" }}
             </td>
-            </tr>
+          </tr>
+
+          <tr>
+            <td style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
+                <strong>Mobile Number :</strong> {{ business.mobile_number|default_if_none:"" }}</td>
+          </tr>
 
         </tbody>
     </table>
