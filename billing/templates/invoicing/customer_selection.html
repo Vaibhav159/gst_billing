@@ -4,20 +4,27 @@
         <tr>
           <td width="16%" height="25"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Customer Name </span></strong></td>
           <td width="49%"><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.name }}</span></td>
-          <td width="20%"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Invoice Date</span></strong></td>
-          <td width="15%"><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ invoice_date }}</span></td>
-        </tr>
-        <tr>
-          <td height="25"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Address</span></strong></td>
-          <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.address }} </span></td>
           <td><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Invoice Number</span></strong></td>
           <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ invoice_number }}</span></td>
         </tr>
         <tr>
+          <td height="25"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Address</span></strong></td>
+          <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.address }} </span></td>
+            <td width="20%"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Invoice Date</span></strong></td>
+          <td width="15%"><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ invoice_date }}</span></td>
+        </tr>
+        <tr>
+          <td height="25"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">State</span></strong></td>
+          <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.clean_state_name }}, <strong>Code:</strong> {{ customer.state_code }}</span></td>
+          <td><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">Mobile Number</span></strong></td>
+          <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.mobile_number }}</span></td>
+        </tr>
+
+        <tr>
           <td height="25"><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">GSTIN</span></strong></td>
           <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.gst_number }}</span></td>
-          <td><strong><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">State</span></strong></td>
-          <td><span style=" font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">{{ customer.clean_state_name }}</span></td>
+          <td></td>
+          <td></td>
         </tr>
       </tbody>
     </table></td>
