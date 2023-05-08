@@ -277,7 +277,7 @@ class LineItem(AbstractBaseModel):
             rate=rate,
             invoice_id=invoice_id,
             hsn_code=HSN_CODE,
-            customer_id=1,
+            customer_id=Invoice.objects.get(id=invoice_id).customer_id,
             gst_tax_rate=gst_tax_rate_in_decimal,
         )
 
@@ -326,8 +326,8 @@ class LineItem(AbstractBaseModel):
     @classmethod
     def get_line_item_data_for_download(cls, start_date, end_date, business):
         line_item_data = cls.objects.filter(
-            # invoice__invoice_date__range=[start_date, end_date],
-            invoice__business=business
+            invoice__invoice_date__range=[start_date, end_date],
+            invoice__business=business,
         ).values_list(
             "invoice__invoice_number",
             "invoice__invoice_date",
