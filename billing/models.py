@@ -19,6 +19,7 @@ from billing.constants import (
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_INWARD,
     GST_CODE,
+    STATE_CHOICES,
 )
 
 
@@ -30,13 +31,14 @@ class AbstractBaseModel(models.Model):
         abstract = True
 
 
-def get_state_code_from_gst_number(gst_number):
-    state_code = gst_number[0:2]
-    return int(state_code)
+def get_state_code_from_state_name(state_name):
+    # invert the GST_CODE dict
+    if not state_name:
+        return ""
 
+    state_code = [k for k, v in GST_CODE.items() if v == state_name]
 
-def get_state_name_from_gst_number(gst_number):
-    return GST_CODE.get(gst_number[0:2], "") or ""
+    return int(state_code[0]) if state_code else ""
 
 
 class Business(AbstractBaseModel):
@@ -96,6 +98,14 @@ class Business(AbstractBaseModel):
         blank=True,
         null=True,
     )
+    state_name = models.CharField(
+        max_length=255,
+        verbose_name="State Name",
+        help_text="State Name of the business.",
+        blank=True,
+        null=True,
+        choices=STATE_CHOICES,
+    )
 
     class Meta:
         verbose_name = "Business"
@@ -113,12 +123,12 @@ class Business(AbstractBaseModel):
         }
 
     @property
-    def state_code(self):
-        return get_state_code_from_gst_number(self.gst_number)
+    def clean_state_name(self):
+        return self.state_name.upper() if self.state_name else ""
 
     @property
-    def state_name(self):
-        return get_state_name_from_gst_number(self.gst_number)
+    def state_code(self):
+        return get_state_code_from_state_name(self.state_name)
 
 
 class Customer(AbstractBaseModel):
@@ -162,16 +172,25 @@ class Customer(AbstractBaseModel):
         null=True,
     )
 
+    state_name = models.CharField(
+        max_length=255,
+        verbose_name="State Name",
+        help_text="State Name of the business.",
+        blank=True,
+        null=True,
+        choices=STATE_CHOICES,
+    )
+
     def __str__(self):
         return self.name
 
     @property
-    def state_code(self):
-        return get_state_code_from_gst_number(self.gst_number)
+    def clean_state_name(self):
+        return self.state_name.upper() if self.state_name else ""
 
     @property
-    def state_name(self):
-        return get_state_name_from_gst_number(self.gst_number)
+    def state_code(self):
+        return get_state_code_from_state_name(self.state_name)
 
 
 class Invoice(AbstractBaseModel):

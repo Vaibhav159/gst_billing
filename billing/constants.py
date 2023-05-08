@@ -74,3 +74,5 @@ GST_CODE = {
     "97": "OTHER TERRITORY",
     "99": "CENTRE JURISDICTION",
 }
+
+STATE_CHOICES = [(state, state) for state in GST_CODE.values()]
