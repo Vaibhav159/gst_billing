@@ -2,8 +2,14 @@ import math
 from decimal import Decimal
 
 from django.db import models
-from django.db.models import Sum, Count, F
-from django.db.models.functions import Coalesce
+from django.db.models import Sum, Count, F, CharField, Value
+from django.db.models.functions import (
+    Coalesce,
+    ExtractYear,
+    ExtractMonth,
+    Concat,
+    ExtractDay,
+)
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
@@ -332,25 +338,43 @@ class LineItem(AbstractBaseModel):
 
     @classmethod
     def get_line_item_data_for_download(cls, start_date, end_date, business):
-        line_item_data = cls.objects.filter(
-            invoice__invoice_date__range=[start_date, end_date],
-            invoice__business=business,
-        ).values_list(
-            "invoice__invoice_number",
-            "invoice__invoice_date",
-            "customer__name",
-            "customer__gst_number",
-            "product_name",
-            "hsn_code",
-            "gst_tax_rate",
-            "quantity",
-            "rate",
-            "amount",
-            "cgst",
-            "sgst",
-            "igst",
-            "amount",
+
+        # convert invoice date to 21/04/2021 format
+
+        line_item_data = (
+            cls.objects.filter(
+                invoice__invoice_date__range=[start_date, end_date],
+                invoice__business=business,
+            )
+            .annotate(
+                gst_tax=F("gst_tax_rate") * 100,
+                invoice_date=Concat(
+                    ExtractDay("invoice__invoice_date"),
+                    Value("/"),
+                    ExtractMonth("invoice__invoice_date"),
+                    Value("/"),
+                    ExtractYear("invoice__invoice_date"),
+                    output_field=CharField(),
+                ),
+            )
+            .values_list(
+                "invoice__invoice_number",
+                "invoice_date",
+                "customer__name",
+                "customer__gst_number",
+                "product_name",
+                "hsn_code",
+                "gst_tax",
+                "quantity",
+                "rate",
+                "amount",
+                "cgst",
+                "sgst",
+                "igst",
+                "amount",
+            )
         )
+
         return line_item_data
 
 

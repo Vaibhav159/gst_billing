@@ -420,33 +420,36 @@ class DownloadInvoicesView(View):
 
         sheet = workbook.create_sheet(title=business_name)
 
-        inward_invoices = line_item_data.filter(
-            invoice__type_of_invoice=INVOICE_TYPE_INWARD
-        )
-
-        sheet.append([business_name])
-        sheet.append(["Inward Supply"])
-        sheet.append([date_range_string])
-        sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
-
-        for idx, inward in enumerate(inward_invoices, start=1):
-            sheet.append([idx] + list(inward))
-
-        sheet.append([])
-
         outwards_invoices = line_item_data.filter(
             invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
         )
 
-        sheet.append([business_name])
-        sheet.append(["Outward Supply"])
-        sheet.append([date_range_string])
-        sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
+        if outwards_invoices:
 
-        for idx, outward in enumerate(outwards_invoices, start=1):
-            sheet.append([idx] + list(outward))
+            sheet.append([business_name])
+            sheet.append(["Outward Supply"])
+            sheet.append([date_range_string])
+            sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
 
-        sheet.append([])
+            for idx, outward in enumerate(outwards_invoices, start=1):
+                sheet.append([idx] + list(outward))
+
+            sheet.append([])
+
+        inward_invoices = line_item_data.filter(
+            invoice__type_of_invoice=INVOICE_TYPE_INWARD
+        )
+
+        if inward_invoices:
+            sheet.append([business_name])
+            sheet.append(["Inward Supply"])
+            sheet.append([date_range_string])
+            sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
+
+            for idx, inward in enumerate(inward_invoices, start=1):
+                sheet.append([idx] + list(inward))
+
+            sheet.append([])
 
     @classmethod
     def generate_csv_response(cls, start_date, end_date):
