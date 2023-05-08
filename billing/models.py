@@ -427,6 +427,7 @@ class LineItem(AbstractBaseModel):
                     Value(" / g"),
                     output_field=CharField(),
                 ),
+                amount_before_tax=F("quantity") * F("rate"),
             )
             .values_list(
                 "invoice__invoice_number",
@@ -438,7 +439,7 @@ class LineItem(AbstractBaseModel):
                 "gst_tax",
                 "quantity_with_unit",
                 "rate_with_unit",
-                "amount",
+                "amount_before_tax",
                 "cgst",
                 "sgst",
                 "igst",
