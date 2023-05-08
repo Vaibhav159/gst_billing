@@ -340,6 +340,7 @@ class LineItem(AbstractBaseModel):
     def get_line_item_data_for_download(cls, start_date, end_date, business):
 
         # convert invoice date to 21/04/2021 format
+        # quantity as 1.000 gm, rate as 1 / g
 
         line_item_data = (
             cls.objects.filter(
@@ -347,13 +348,25 @@ class LineItem(AbstractBaseModel):
                 invoice__business=business,
             )
             .annotate(
-                gst_tax=F("gst_tax_rate") * 100,
+                gst_tax=Concat(
+                    F("gst_tax_rate") * 100, Value("%"), output_field=CharField()
+                ),
                 invoice_date=Concat(
                     ExtractDay("invoice__invoice_date"),
                     Value("/"),
                     ExtractMonth("invoice__invoice_date"),
                     Value("/"),
                     ExtractYear("invoice__invoice_date"),
+                    output_field=CharField(),
+                ),
+                quantity_with_unit=Concat(
+                    F("quantity"),
+                    Value(" gm"),
+                    output_field=CharField(),
+                ),
+                rate_with_unit=Concat(
+                    F("rate"),
+                    Value(" / g"),
                     output_field=CharField(),
                 ),
             )

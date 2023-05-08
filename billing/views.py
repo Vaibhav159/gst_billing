@@ -428,7 +428,10 @@ class DownloadInvoicesView(View):
 
             sheet.append([business_name])
             sheet.append(["Outward Supply"])
-            sheet.append([date_range_string])
+            sheet.append([f"Month: {date_range_string}"])
+            sheet.append([f"GSTIN: {business.gst_number}"])
+            sheet.append([])
+
             sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
 
             for idx, outward in enumerate(outwards_invoices, start=1):
@@ -443,8 +446,9 @@ class DownloadInvoicesView(View):
         if inward_invoices:
             sheet.append([business_name])
             sheet.append(["Inward Supply"])
-            sheet.append([date_range_string])
-            sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
+            sheet.append([f"Month: {date_range_string}"])
+            sheet.append([f"GSTIN: {business.gst_number}"])
+            sheet.append([])
 
             for idx, inward in enumerate(inward_invoices, start=1):
                 sheet.append([idx] + list(inward))
