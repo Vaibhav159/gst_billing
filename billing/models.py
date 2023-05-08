@@ -18,6 +18,7 @@ from billing.constants import (
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_INWARD,
+    GST_CODE,
 )
 
 
@@ -27,6 +28,15 @@ class AbstractBaseModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+def get_state_code_from_gst_number(gst_number):
+    state_code = gst_number[0:2]
+    return int(state_code)
+
+
+def get_state_name_from_gst_number(gst_number):
+    return GST_CODE.get(gst_number[0:2])
 
 
 class Business(AbstractBaseModel):
@@ -102,6 +112,14 @@ class Business(AbstractBaseModel):
             "bank_branch_name": self.bank_branch_name,
         }
 
+    @property
+    def state_code(self):
+        return get_state_code_from_gst_number(self.gst_number)
+
+    @property
+    def state_name(self):
+        return get_state_name_from_gst_number(self.gst_number)
+
 
 class Customer(AbstractBaseModel):
     name = models.CharField(
@@ -146,6 +164,14 @@ class Customer(AbstractBaseModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def state_code(self):
+        return get_state_code_from_gst_number(self.gst_number)
+
+    @property
+    def state_name(self):
+        return get_state_name_from_gst_number(self.gst_number)
 
 
 class Invoice(AbstractBaseModel):
