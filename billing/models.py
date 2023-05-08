@@ -45,6 +45,13 @@ class Business(AbstractBaseModel):
         verbose_name="Mobile Number",
         help_text="Mobile Number of the business.",
     )
+    pan_number = models.CharField(
+        max_length=10,
+        verbose_name="PAN Number",
+        help_text="PAN Number of the business.",
+        blank=True,
+        null=True,
+    )
     bank_name = models.CharField(
         max_length=255,
         verbose_name="Bank Name",
