@@ -408,6 +408,8 @@ class DownloadInvoicesView(View):
 
     @staticmethod
     def generate_report_for_business(workbook, business, start_date, end_date):
+        def create_row_with_spacing(data):
+            return ([""] * 5) + [data]
 
         date_range_string = DownloadInvoicesView.get_date_range_string(
             start_date, end_date
@@ -426,10 +428,10 @@ class DownloadInvoicesView(View):
 
         if outwards_invoices:
 
-            sheet.append([business_name])
-            sheet.append(["Outward Supply"])
-            sheet.append([f"Month: {date_range_string}"])
-            sheet.append([f"GSTIN: {business.gst_number}"])
+            sheet.append(create_row_with_spacing(business_name))
+            sheet.append(create_row_with_spacing("Outward Supply"))
+            sheet.append(create_row_with_spacing(f"Month: {date_range_string}"))
+            sheet.append(create_row_with_spacing(f"GSTIN: {business.gst_number}"))
             sheet.append([])
 
             sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
@@ -444,10 +446,11 @@ class DownloadInvoicesView(View):
         )
 
         if inward_invoices:
-            sheet.append([business_name])
-            sheet.append(["Inward Supply"])
-            sheet.append([f"Month: {date_range_string}"])
-            sheet.append([f"GSTIN: {business.gst_number}"])
+            sheet.append(create_row_with_spacing(business_name))
+            sheet.append(create_row_with_spacing("Inward Supply"))
+            sheet.append(create_row_with_spacing(f"Month: {date_range_string}"))
+            sheet.append(create_row_with_spacing(f"GSTIN: {business.gst_number}"))
+
             sheet.append([])
 
             sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
