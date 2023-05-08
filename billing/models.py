@@ -363,6 +363,15 @@ class LineItem(AbstractBaseModel):
         else:
             return math.ceil(num)
 
+    @staticmethod
+    def custom_round_off(num: Decimal):
+        rounding = num - int(num)
+
+        if rounding < 0.5:
+            return f"-{rounding}"
+        else:
+            return f"+{1 - rounding}"
+
     @classmethod
     def get_invoice_summary(cls, invoice_id):
         invoice_summary_data = cls.objects.filter(invoice_id=invoice_id).aggregate(
@@ -375,9 +384,13 @@ class LineItem(AbstractBaseModel):
             amount_without_tax=Sum(F("quantity") * F("rate")),
         )
 
-        # invoice_summary_data["total_amount"] = cls.custom_round(
-        #     invoice_summary_data["total_amount"]
-        # )
+        invoice_summary_data["round_off"] = cls.custom_round_off(
+            invoice_summary_data["total_amount"]
+        )
+
+        invoice_summary_data["total_amount"] = cls.custom_round(
+            invoice_summary_data["total_amount"]
+        )
 
         return invoice_summary_data
 
