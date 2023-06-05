@@ -293,15 +293,32 @@ class LineItemView(View):
     def get(self, request):
         invoice_id = request.GET.get("invoice_id")
         total_line_items = LineItem.objects.filter(invoice_id=invoice_id).count()
-        return render(
-            request,
-            "partials/line_item_add.html",
-            {
-                "total_line_items": total_line_items,
-                "invoice_id": invoice_id,
-                "gst_tax_rate": GST_TAX_RATE * 100,
-            },
-        )
+        line_item = request.GET.get("line_id")
+
+        context = {
+            "total_line_items": total_line_items,
+            "invoice_id": invoice_id,
+            "gst_tax_rate": GST_TAX_RATE * 100,
+            "item_name": "",
+            "qty": "",
+            "rate": "",
+        }
+
+        if not line_item:
+            return render(request, "partials/line_item_add.html", context)
+
+        line_item = LineItem.objects.filter(id=line_item)
+
+        if line_item:
+            context.update(
+                {
+                    "item_name": line_item[0].product_name,
+                    "qty": line_item[0].quantity,
+                    "rate": line_item[0].rate,
+                }
+            )
+
+        return render(request, "partials/line_item_add.html", context)
 
     def post(self, request):
         data = request.POST

@@ -15,5 +15,13 @@
     {% endif %}
 
     <td>{{ object.amount }}</td>
+    <td>
+        <button class="btn btn-dark"
+                hx-get="{% url 'line_item_inline_form' %}?invoice_id={{ invoice.id }}&line_id={{ object.id }}"
+{#                hx-target="#line_item_{{ object.id }}"#}
+{#                hx-target="closest tr"#}
+        >
+            EDIT</button>
+    </td>
 
 </tr>
