@@ -14,13 +14,23 @@
           </div>
       </td>
       <td>
+          {{ object.invoice_date }}
+      </td>
+      <td>
           <a href="{% url 'customer_detail' object.customer.id %}"
                  class="text-blue-400 hover:underline hover:text-dark-blue-400">
               {{ object.customer.name }}
               </a>
       </td>
       <td>
+          {{ object.invoice_number }}
+      </td>
+      <td>
           {{ object.total_amount }}
+      </td>
+
+      <td>
+          {{ object.type_of_invoice }}
       </td>
   <td>
 
