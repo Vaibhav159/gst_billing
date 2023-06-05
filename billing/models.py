@@ -451,7 +451,7 @@ class LineItem(AbstractBaseModel):
                 "igst",
                 "amount",
             )
-            .order_by("invoice__invoice_number")
+            .order_by("invoice_date")
         )
 
         return line_item_data
