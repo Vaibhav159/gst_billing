@@ -52,6 +52,12 @@ class BusinessForm(forms.ModelForm):
                     "minlength": "10",
                 }
             ),
+            "primary_color_theme": forms.TextInput(
+                attrs={
+                    "type": "color",
+                    "style": "width: 25%; padding: 0;",
+                },
+            ),
         }
 
     def __init__(self, *args, **kwargs):

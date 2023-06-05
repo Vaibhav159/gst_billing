@@ -106,6 +106,12 @@ class Business(AbstractBaseModel):
         null=True,
         choices=STATE_CHOICES,
     )
+    primary_color_theme = models.CharField(
+        default="#d04e00",
+        verbose_name="Primary Color Theme",
+        help_text="Primary Color Theme of the business.",
+        max_length=15,
+    )
 
     class Meta:
         verbose_name = "Business"
