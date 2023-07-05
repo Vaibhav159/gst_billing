@@ -5,7 +5,7 @@
         <div class="flow-root">
             <h1 class="float-left font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
 
-            <form style="padding-inline-start: 15em;" class="flex items-center gap-4">
+            <form style="padding-inline-start: 5em;" class="flex items-center gap-4">
                 <label class="font-bold" for="businesses">Businesses:</label>
                 <select class="p-2 text-sm rounded-md border border-gray-300" name="business_id" id="businesses">
                     <option value="">All</option>
@@ -23,6 +23,20 @@
                 
                 <label class="font-bold" for="end">End date:</label>
                 <input class="p-2 text-sm rounded-md border border-gray-300" type="date" id="end" name="end_date" value="{{ end_date }}">
+
+                <label class="font-bold" for="type_of_invoice">Invoice Type:</label>
+                <select class="p-2 text-sm rounded-md border border-gray-300" name="type_of_invoice" id="type_of_invoice">
+                    <option value="">All</option>
+
+                    {% for internal_name, display_name in invoice_types_list %}
+                        {% if internal_name == type_of_invoice_selected %}
+                            <option value="{{ internal_name }}" selected>{{ display_name }}</option>
+                        {% else %}
+                            <option value="{{ internal_name }}">{{ display_name }}</option>
+                        {% endif %}
+                    {% endfor %}
+
+                </select>
                 
                 <input type="submit" value="Search" 
                 class="p-3 text-sm font-medium text-white bg-green-500 rounded-md hover:bg-green-600 cursor-pointer">

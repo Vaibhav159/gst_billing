@@ -193,6 +193,7 @@ class InvoiceListView(ListView):
         business_id = self.request.GET.get("business_id")
         start_date = self.request.GET.get("start_date")
         end_date = self.request.GET.get("end_date")
+        type_of_invoice = self.request.GET.get("type_of_invoice")
 
         filter_kwargs = {}
 
@@ -206,6 +207,9 @@ class InvoiceListView(ListView):
         if end_date:
             end_date = datetime.strptime(end_date, "%Y-%m-%d")
             filter_kwargs["invoice_date__lte"] = end_date
+
+        if type_of_invoice:
+            filter_kwargs["type_of_invoice"] = type_of_invoice
 
         return Invoice.objects.filter(**filter_kwargs).order_by("id")
 
@@ -221,6 +225,8 @@ class InvoiceListView(ListView):
         context["start_date"] = self.request.GET.get("start_date")
         context["end_date"] = self.request.GET.get("end_date")
         context["businesses"] = Business.objects.all()
+        context["invoice_types_list"] = INVOICE_TYPE_CHOICES
+        context["type_of_invoice_selected"] = self.request.GET.get("type_of_invoice")
         return context
 
     def get(self, request, *args, **kwargs):
