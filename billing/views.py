@@ -190,11 +190,32 @@ class InvoiceListView(ListView):
     paginate_by = PAGINATION_PAGE_SIZE
 
     def get_queryset(self):
-        return Invoice.objects.all().order_by("id")
+        business = self.request.GET.get("business")
+        start_date = self.request.GET.get("start_date")
+        end_date = self.request.GET.get("end_date")
+
+        filter_kwargs = {}
+
+        if business:
+            filter_kwargs["business_id"] = business
+
+        if start_date:
+            start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            filter_kwargs["invoice_date__gte"] = start_date
+
+        if end_date:
+            end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            filter_kwargs["invoice_date__lte"] = end_date
+
+        return Invoice.objects.filter(**filter_kwargs).order_by("id")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["title"] = "Invoices"
+        context["business"] = self.request.GET.get("business", "")
+        context["start_date"] = self.request.GET.get("start_date")
+        context["end_date"] = self.request.GET.get("end_date")
+        context["businesses"] = Business.objects.all()
         return context
 
     def get(self, request, *args, **kwargs):

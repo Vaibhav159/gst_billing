@@ -4,6 +4,21 @@
     <div id="invoice-list">
         <div class="flow-root">
             <h1 class="float-left font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
+            <form>
+                <label for="id">Businesses</label>
+                <select name="business" id="businesses">
+                    <option value="">All</option>
+                    {% for business in businesses %}
+                        <option value="{{ business.id }}">{{ business.name }}</option>
+                    {% endfor %}
+                </select>
+                <label for="start">Start date:</label>
+                <input type="date" id="start" name="start_date" value={{ start_date }}>
+                <label for="end">End date:</label>
+                <input type="date" id="end" name="end_date" value={{ end_date }}>
+                <input type="submit" value="Search"
+                class=" text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">
+            </form>
             <button type="button"
                     hx-get="{% url 'invoice_add' %}"
                     hx-trigger="click"
