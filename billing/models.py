@@ -2,23 +2,23 @@ import math
 from decimal import Decimal
 
 from django.db import models
-from django.db.models import Sum, Count, F, CharField, Value
+from django.db.models import CharField, Count, F, Sum, Value
 from django.db.models.functions import (
     Coalesce,
-    ExtractYear,
-    ExtractMonth,
     Concat,
     ExtractDay,
+    ExtractMonth,
+    ExtractYear,
 )
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
     BILLING_DECIMAL_PLACE_PRECISION,
+    GST_CODE,
     GST_TAX_RATE,
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_INWARD,
-    GST_CODE,
     STATE_CHOICES,
 )
 
@@ -455,112 +455,3 @@ class LineItem(AbstractBaseModel):
         )
 
         return line_item_data
-
-
-#
-#
-# # Create a InvoiceExcelImport model to import the Excel file to Invoice model and LineItem model.
-# class InvoiceExcelImport(AbstractBaseModel):
-#     IMPORT_STATUS_CHOICES = (
-#         ("PENDING", "Pending"),
-#         ("IN_PROGRESS", "In Progress"),
-#         ("COMPLETED", "Completed"),
-#     )
-#
-#     import_excel_file = models.FileField(
-#         upload_to="invoice_excel_imports",
-#         verbose_name="Import Excel File",
-#         help_text="Import Excel File.",
-#     )
-#     business = models.ForeignKey(
-#         Business,
-#         on_delete=models.CASCADE,
-#         verbose_name="Business",
-#         help_text="Business where import is happening.",
-#     )
-#
-#     failed_excel_file = models.FileField(
-#         upload_to="invoice_excel_imports",
-#         verbose_name="Failed Excel File",
-#         help_text="Failed Excel File.",
-#         blank=True,
-#         null=True,
-#     )
-#     status = models.CharField(
-#         max_length=255,
-#         verbose_name="Status",
-#         help_text="Status of the import.",
-#         choices=IMPORT_STATUS_CHOICES,
-#         default=IMPORT_STATUS_CHOICES[0][0],
-#     )
-#
-#     def __str__(self):
-#         return f"{self.import_excel_file.name}"
-#
-#     def save(self, *args, **kwargs):
-#         super().save(*args, **kwargs)
-#
-#         if self.status == "PENDING":
-#             self.status = "IN_PROGRESS"
-#             self.save()
-#             self.import_invoice_excel_file()
-#
-#     def import_invoice_excel_file(self):
-#         try:
-#             # Read the Excel file.
-#             wb = openpyxl.load_workbook(self.import_excel_file)
-#             ws = wb.active
-#
-#             # Iterate over the rows of the Excel file.
-#             for row in ws.iter_rows(min_row=2, values_only=True):
-#                 # search for the customer in the database using the customer name or GSTIN.
-#                 customer = Customer.objects.get(
-#                     Q(name=row[3]) | Q(gstin=row[4])
-#                 )
-#
-#                 # extract the values from the row
-#                 invoice_number = row[1]
-#                 invoice_date = row[2]
-#
-#                 # Create a Invoice object.
-#                 invoice = Invoice.objects.create(
-#                     invoice_number=invoice_number,
-#                     invoice_date=invoice_date,
-#                     customer_id=customer.id,
-#                     business_id=self.business_id,
-#                 )
-#
-#                 # single line item
-#                 product_name = row[5]
-#                 hsn_code = row[6]
-#                 gst_tax_rate = row[7]
-#                 quantity = row[8]  # in grams
-#                 rate = row[9]  # per gram
-#                 cgst = row[10]
-#                 sgst = row[11]
-#                 amount = row[12]
-#
-#                 # Create a LineItem object.
-#                 LineItem.create_line_item_for_invoice(
-#                     product_name=row[2],
-#                     quantity=row[3],
-#                     rate=row[4],
-#                     invoice_id=invoice.id,
-#                 )
-#
-#                 product_name, quantity, rate = row
-#                 LineItem.create_line_item_for_invoice(
-#                     product_name=product_name,
-#                     quantity=quantity,
-#                     rate=rate,
-#                     invoice_id=invoice.id,
-#                 )
-#
-#             # Update the status of the InvoiceExcelImport object.
-#             self.status = "COMPLETED"
-#             self.save()
-#         except Exception as e:
-#             # If any exception occurs, then update the status of the InvoiceExcelImport object.
-#             self.status = "COMPLETED"
-#             self.save()
-#             raise e

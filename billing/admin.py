@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.safestring import mark_safe
 from simple_history.admin import SimpleHistoryAdmin
 
-from billing.models import Business, Customer, LineItem, Invoice
+from billing.models import Business, Customer, Invoice, LineItem
 
 
 @admin.register(Business)
@@ -31,10 +31,7 @@ class CustomerAdmin(admin.ModelAdmin):
         for business_name in businesses_linked_to_customer:
             html_text += f"<li>{business_name}</li>"
 
-        if html_text:
-            html_text = f"<ol>{html_text}</ol>"
-        else:
-            html_text = "No Businesses linked"
+        html_text = f"<ol>{html_text}</ol>" if html_text else "No Businesses linked"
 
         return mark_safe(html_text)
 
