@@ -542,19 +542,19 @@ class DownloadInvoicesView(View):
 # Create views for Product
 class ProductView(View):
     def get(self, request):
-        business = (
+        product = (
             None
-            if not request.GET.get("business_id")
-            else Business.objects.get(id=int(request.GET.get("business_id")))
+            if not request.GET.get("product_id")
+            else Product.objects.get(id=int(request.GET.get("product_id")))
         )
-        form = ProductForm(instance=business)
+        form = ProductForm(instance=product)
         return render(request, "partials/business_form.html", {"form": form})
 
     def post(self, request):
         form = ProductForm(request.POST)
         if form.is_valid():
             form.save()
-            return redirect("business_detail", business_id=form.instance.id)
+            return redirect("product_list")
         return render(request, "partials/business_form.html", {"form": form})
 
 
