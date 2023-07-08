@@ -595,3 +595,9 @@ class ProductEditView(View):
             form.save()
             return redirect("product_list")
         return render(request, "partials/business_form.html", {"form": form})
+
+
+class ProductDeleteView(DeleteView):
+    model = Product
+    success_url = reverse_lazy("product_list")
+    template_name = "product_list.html"

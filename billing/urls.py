@@ -20,6 +20,7 @@ from billing.views import (
     InvoiceView,
     LineItemView,
     PrintInvoiceView,
+    ProductDeleteView,
     ProductEditView,
     ProductListView,
     ProductView,
@@ -94,5 +95,10 @@ urlpatterns = [
         "product/edit/<int:product_id>",
         ProductEditView.as_view(),
         name="product_edit",
+    ),
+    path(
+        "product/delete/<int:pk>",
+        ProductDeleteView.as_view(),
+        name="product_delete",
     ),
 ]
