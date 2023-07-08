@@ -19,7 +19,7 @@ from billing.constants import (
     PAGINATION_PAGE_SIZE,
 )
 from billing.forms import BusinessForm, CustomerForm, ProductForm
-from billing.models import Business, Customer, Invoice, LineItem
+from billing.models import Business, Customer, Invoice, LineItem, Product
 
 
 class InitialView(View):
@@ -556,3 +556,27 @@ class ProductView(View):
             form.save()
             return redirect("business_detail", business_id=form.instance.id)
         return render(request, "partials/business_form.html", {"form": form})
+
+
+class ProductListView(ListView):
+    model = ProductForm
+    template_name = "product_list.html"
+    context_object_name = "businesses"
+    paginate_by = PAGINATION_PAGE_SIZE
+
+    def get_queryset(self):
+        return Product.objects.all().order_by("id")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["title"] = "Products"
+        return context
+
+    def get(self, request, *args, **kwargs):
+        if request.htmx and request.GET.get("page"):
+            return render(
+                request,
+                "partials/business_data_list.html",
+                context=self.get_context_data(object_list=self.get_queryset()),
+            )
+        return super().get(request, *args, *kwargs)
