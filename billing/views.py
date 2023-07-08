@@ -18,7 +18,7 @@ from billing.constants import (
     INVOICE_TYPE_OUTWARD,
     PAGINATION_PAGE_SIZE,
 )
-from billing.forms import BusinessForm, CustomerForm
+from billing.forms import BusinessForm, CustomerForm, ProductForm
 from billing.models import Business, Customer, Invoice, LineItem
 
 
@@ -537,3 +537,22 @@ class DownloadInvoicesView(View):
             context["customers"] = Customer.objects.filter(businesses__in=business_id)
 
         return render(request, "reports.html", context=context)
+
+
+# Create views for Product
+class ProductView(View):
+    def get(self, request):
+        business = (
+            None
+            if not request.GET.get("business_id")
+            else Business.objects.get(id=int(request.GET.get("business_id")))
+        )
+        form = ProductForm(instance=business)
+        return render(request, "partials/business_form.html", {"form": form})
+
+    def post(self, request):
+        form = ProductForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect("business_detail", business_id=form.instance.id)
+        return render(request, "partials/business_form.html", {"form": form})
