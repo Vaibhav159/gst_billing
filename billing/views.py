@@ -332,6 +332,7 @@ class LineItemView(View):
                 "total_line_items": total_line_items,
                 "invoice_id": invoice_id,
                 "gst_tax_rate": GST_TAX_RATE * 100,
+                "product_list": Product.objects.all(),
             },
         )
 
