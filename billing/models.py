@@ -455,3 +455,12 @@ class LineItem(AbstractBaseModel):
         )
 
         return line_item_data
+
+
+class Product(AbstractBaseModel):
+    name = models.CharField(
+        max_length=255,
+        verbose_name="Product Name",
+        help_text="Name of the product",
+        unique=True,
+    )
