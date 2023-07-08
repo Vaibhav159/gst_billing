@@ -580,3 +580,18 @@ class ProductListView(ListView):
                 context=self.get_context_data(object_list=self.get_queryset()),
             )
         return super().get(request, *args, *kwargs)
+
+
+class ProductEditView(View):
+    def get(self, request, product_id=None):
+        product = None if not product_id else Product.objects.get(id=product_id)
+        form = ProductForm(instance=product)
+        return render(request, "partials/business_form.html", {"form": form})
+
+    def post(self, request, product_id):
+        product = None if not product_id else Product.objects.get(id=product_id)
+        form = ProductForm(request.POST, instance=product)
+        if form.is_valid():
+            form.save()
+            return redirect("product_list")
+        return render(request, "partials/business_form.html", {"form": form})

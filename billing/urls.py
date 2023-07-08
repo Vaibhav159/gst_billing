@@ -20,6 +20,7 @@ from billing.views import (
     InvoiceView,
     LineItemView,
     PrintInvoiceView,
+    ProductEditView,
     ProductListView,
     ProductView,
 )
@@ -89,4 +90,9 @@ urlpatterns = [
     # product urls
     path("product/", ProductView.as_view(), name="product_form"),
     path("product/list/", ProductListView.as_view(), name="product_list"),
+    path(
+        "product/edit/<int:product_id>",
+        ProductEditView.as_view(),
+        name="product_edit",
+    ),
 ]
