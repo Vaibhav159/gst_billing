@@ -54,7 +54,7 @@
             class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
 
                 {% for internal_value, visible_value in type_of_invoices %}
-                {% if visible_value == "inward" %}
+                {% if visible_value == "Outward" %}
                     <option value="{{ internal_value }}" selected>{{ visible_value }}</option>
                 {% else %}
                     <option value="{{ internal_value }}">{{ visible_value }}</option>
