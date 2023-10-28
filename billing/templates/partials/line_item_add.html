@@ -12,7 +12,7 @@
     id="item_name" name="item_name" placeholder="Item name" required="true">
         <datalist id="productListOptions">
             {% for product in product_list %}
-                <option value="{{ product.name }}">
+                <option value="{{ product.name }}"> {{ product.name }}: {{ product.hsn_code }} </option>
             {% endfor %}
         </datalist>
     </input>
