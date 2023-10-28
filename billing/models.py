@@ -335,12 +335,16 @@ class LineItem(AbstractBaseModel):
         quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
         gst_tax_rate_in_decimal = Decimal(str(gst_tax_rate)) / 100
 
+        product = Product.objects.filter(name=product_name).last()
+
+        hsn_code = product.hsn_code if product else HSN_CODE
+
         line_item = LineItem(
             product_name=product_name,
             quantity=quantity,
             rate=rate,
             invoice_id=invoice_id,
-            hsn_code=HSN_CODE,
+            hsn_code=hsn_code,
             customer_id=Invoice.objects.get(id=invoice_id).customer_id,
             gst_tax_rate=gst_tax_rate_in_decimal,
         )
@@ -463,4 +467,11 @@ class Product(AbstractBaseModel):
         verbose_name="Product Name",
         help_text="Name of the product",
         unique=True,
+    )
+
+    hsn_code = models.CharField(
+        max_length=255,
+        verbose_name="HSN Code",
+        help_text="HSN Code of the product.",
+        default=HSN_CODE,
     )

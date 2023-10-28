@@ -8,6 +8,12 @@
       </td>
 
       <td>
+          <div class="d-flex justify-content-between align-items-center">
+              {{ object.hsn_code }}
+          </div>
+      </td>
+
+      <td>
         <div class="flex justify-center rounded-lg text-lg" role="group">
 
             <a href="{% url 'product_edit' object.id %}"
