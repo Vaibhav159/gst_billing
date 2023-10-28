@@ -464,3 +464,10 @@ class Product(AbstractBaseModel):
         help_text="Name of the product",
         unique=True,
     )
+
+    hsn_code = models.CharField(
+        max_length=255,
+        verbose_name="HSN Code",
+        help_text="HSN Code of the product.",
+        default=HSN_CODE,
+    )
