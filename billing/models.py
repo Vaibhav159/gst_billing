@@ -1,6 +1,7 @@
 import math
 from decimal import Decimal
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import CharField, Count, F, Sum, Value
 from django.db.models.functions import (
@@ -325,19 +326,22 @@ class LineItem(AbstractBaseModel):
         return self.product_name
 
     @property
+    def gst_tax_in_percentage(self):
+        return f"{int(self.gst_tax_rate * 100)}%"
+
+    @property
     def amount_without_tax(self):
         return self.rate * self.quantity
 
     @classmethod
-    def create_line_item_for_invoice(
-        cls, product_name, quantity, rate, invoice_id, gst_tax_rate
-    ):
+    def create_line_item_for_invoice(cls, product_name, quantity, rate, invoice_id):
         quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
-        gst_tax_rate_in_decimal = Decimal(str(gst_tax_rate)) / 100
+        # gst_tax_rate_in_decimal = Decimal(str(gst_tax_rate)) / 100
 
         product = Product.objects.filter(name=product_name).last()
 
         hsn_code = product.hsn_code if product else HSN_CODE
+        gst_tax_rate_in_decimal = product.gst_tax_rate if product else GST_TAX_RATE
 
         line_item = LineItem(
             product_name=product_name,
@@ -474,4 +478,16 @@ class Product(AbstractBaseModel):
         verbose_name="HSN Code",
         help_text="HSN Code of the product.",
         default=HSN_CODE,
+    )
+
+    gst_tax_rate = models.DecimalField(
+        max_digits=12,
+        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
+        validators=[
+            MinValueValidator(Decimal("0.00")),
+            MaxValueValidator(Decimal("1.00")),
+        ],
+        default=GST_TAX_RATE,
+        verbose_name="GST Tax Rate",
+        help_text="GST Tax Rate of the product.",
     )
