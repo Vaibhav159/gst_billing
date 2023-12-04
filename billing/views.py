@@ -69,7 +69,14 @@ class CustomerListView(ListView):
     paginate_by = PAGINATION_PAGE_SIZE
 
     def get_queryset(self):
-        return Customer.objects.all().order_by("id")
+        filter_kwargs = {}
+
+        customer_name = self.request.GET.get("customer_name")
+
+        if customer_name:
+            filter_kwargs["name__icontains"] = customer_name
+
+        return Customer.objects.filter(**filter_kwargs).order_by("id")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
