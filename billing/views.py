@@ -21,6 +21,7 @@ from billing.constants import (
 )
 from billing.forms import BusinessForm, CustomerForm, ProductForm
 from billing.models import Business, Customer, Invoice, LineItem, Product
+from billing.utils import split_dates
 
 
 class InitialView(View):
@@ -68,7 +69,14 @@ class CustomerListView(ListView):
     paginate_by = PAGINATION_PAGE_SIZE
 
     def get_queryset(self):
-        return Customer.objects.all().order_by("id")
+        filter_kwargs = {}
+
+        customer_name = self.request.GET.get("customer_name")
+
+        if customer_name:
+            filter_kwargs["name__icontains"] = customer_name
+
+        return Customer.objects.filter(**filter_kwargs).order_by("id")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -448,37 +456,40 @@ class DownloadInvoicesView(View):
         )
         business_name = business.name
 
-        line_item_data = LineItem.get_line_item_data_for_download(
-            start_date=start_date, end_date=end_date, business=business
-        )
+        month_wise_split_date = split_dates(start_date, end_date)
 
         sheet = workbook.create_sheet(title=business_name)
 
-        outwards_invoices = line_item_data.filter(
-            invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
-        )
+        for month_start_date, month_end_date in month_wise_split_date:
+            line_item_data = LineItem.get_line_item_data_for_download(
+                start_date=month_start_date, end_date=month_end_date, business=business
+            )
 
-        DownloadInvoicesView.add_invoice_data_to_sheet(
-            business,
-            business_name,
-            date_range_string,
-            outwards_invoices,
-            sheet,
-            supply_type="Outward Supply",
-        )
+            outwards_invoices = line_item_data.filter(
+                invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
+            )
 
-        inward_invoices = line_item_data.filter(
-            invoice__type_of_invoice=INVOICE_TYPE_INWARD
-        )
+            DownloadInvoicesView.add_invoice_data_to_sheet(
+                business,
+                business_name,
+                date_range_string,
+                outwards_invoices,
+                sheet,
+                supply_type="Outward Supply",
+            )
 
-        DownloadInvoicesView.add_invoice_data_to_sheet(
-            business,
-            business_name,
-            date_range_string,
-            inward_invoices,
-            sheet,
-            supply_type="Inward Supply",
-        )
+            inward_invoices = line_item_data.filter(
+                invoice__type_of_invoice=INVOICE_TYPE_INWARD
+            )
+
+            DownloadInvoicesView.add_invoice_data_to_sheet(
+                business,
+                business_name,
+                date_range_string,
+                inward_invoices,
+                sheet,
+                supply_type="Inward Supply",
+            )
 
     @staticmethod
     def add_invoice_data_to_sheet(
