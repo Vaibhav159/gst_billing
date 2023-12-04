@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
@@ -441,8 +442,6 @@ class DownloadInvoicesView(View):
 
     @staticmethod
     def generate_report_for_business(workbook, business, start_date, end_date):
-        def create_row_with_spacing(data):
-            return ([""] * 5) + [data]
 
         date_range_string = DownloadInvoicesView.get_date_range_string(
             start_date, end_date
@@ -459,39 +458,83 @@ class DownloadInvoicesView(View):
             invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
         )
 
-        if outwards_invoices:
-
-            sheet.append(create_row_with_spacing(business_name))
-            sheet.append(create_row_with_spacing("Outward Supply"))
-            sheet.append(create_row_with_spacing(f"Month: {date_range_string}"))
-            sheet.append(create_row_with_spacing(f"GSTIN: {business.gst_number}"))
-            sheet.append([])
-
-            sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
-
-            for idx, outward in enumerate(outwards_invoices, start=1):
-                sheet.append([idx] + list(outward))
-
-            sheet.append([])
+        DownloadInvoicesView.add_invoice_data_to_sheet(
+            business,
+            business_name,
+            date_range_string,
+            outwards_invoices,
+            sheet,
+            supply_type="Outward Supply",
+        )
 
         inward_invoices = line_item_data.filter(
             invoice__type_of_invoice=INVOICE_TYPE_INWARD
         )
 
-        if inward_invoices:
-            sheet.append(create_row_with_spacing(business_name))
-            sheet.append(create_row_with_spacing("Inward Supply"))
-            sheet.append(create_row_with_spacing(f"Month: {date_range_string}"))
-            sheet.append(create_row_with_spacing(f"GSTIN: {business.gst_number}"))
+        DownloadInvoicesView.add_invoice_data_to_sheet(
+            business,
+            business_name,
+            date_range_string,
+            inward_invoices,
+            sheet,
+            supply_type="Inward Supply",
+        )
 
-            sheet.append([])
+    @staticmethod
+    def add_invoice_data_to_sheet(
+        business,
+        business_name,
+        date_range_string,
+        invoices,
+        sheet,
+        supply_type,
+    ):
+        def create_row_with_spacing(data):
+            return ([""] * 5) + [data]
 
-            sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
+        if not invoices:
+            return
 
-            for idx, inward in enumerate(inward_invoices, start=1):
-                sheet.append([idx] + list(inward))
+        total_taxable_value = (
+            total_cgst
+        ) = total_sgst = total_igst = total_invoice_value = Decimal("0")
 
-            sheet.append([])
+        sheet.append(create_row_with_spacing(business_name))
+        sheet.append(create_row_with_spacing(supply_type))
+        sheet.append(create_row_with_spacing(f"Month: {date_range_string}"))
+        sheet.append(create_row_with_spacing(f"GSTIN: {business.gst_number}"))
+        sheet.append([])
+
+        sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
+
+        for idx, outward in enumerate(invoices, start=1):
+            sheet.append([idx] + list(outward))
+
+            taxable_value, cgst, sgst, igst, invoice_value = outward[-5:]
+
+            total_taxable_value += taxable_value
+            total_cgst += cgst
+            total_sgst += sgst
+            total_igst += igst
+            total_invoice_value += invoice_value
+
+        sheet.append(
+            [""] * 5
+            + [
+                "Grand Total",
+                "",
+                "",
+                "",
+                "",
+                total_taxable_value,
+                total_cgst,
+                total_sgst,
+                total_igst,
+                total_invoice_value,
+            ]
+        )
+
+        sheet.append([])
 
     @classmethod
     def generate_csv_response(cls, start_date, end_date):
