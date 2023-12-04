@@ -131,4 +131,11 @@
     </div>
 
 </div>
+
+    {% block javascripts %}
+        Update title of the page
+        <script>
+            document.title = "{{ invoice.invoice_number }}-{{ invoice.business.name }}-{{ invoice.invoice_date.year }}";
+        </script>
+    {% endblock %}
 {% endblock %}
