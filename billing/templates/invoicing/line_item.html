@@ -2,7 +2,7 @@
     <td height="30" style="padding-left:10px">{{ index }}.</td>
     <td id="bordered-left-aligned-td">{{ item.product_name }}</td>
     <td class="bordered_td">{{ item.hsn_code }}</td>
-    <td class="bordered_td">{{ tax_rate }}</td>
+    <td class="bordered_td">{{ item.gst_tax_in_percentage }}</td>
     <td class="bordered_td">{{ item.quantity }} gm</td>
     <td class="bordered_td">{{ item.rate }}/g</td>
     <td class="bordered_td">{{ item.amount_without_tax|floatformat:3 }}</td>

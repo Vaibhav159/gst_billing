@@ -13,7 +13,6 @@ from openpyxl.workbook import Workbook
 
 from billing.constants import (
     DOWNLOAD_SHEET_FIELD_NAMES,
-    GST_TAX_RATE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
@@ -340,26 +339,23 @@ class LineItemView(View):
             {
                 "total_line_items": total_line_items,
                 "invoice_id": invoice_id,
-                "gst_tax_rate": GST_TAX_RATE * 100,
                 "product_list": Product.objects.all(),
             },
         )
 
     def post(self, request):
         data = request.POST
-        invoice_id, product_name, qty, rate, gst_tax_rate = (
+        invoice_id, product_name, qty, rate = (
             data["invoice_id"],
             data["item_name"],
             data["qty"],
             data["rate"],
-            data["gst_tax_rate"],
         )
         line_item = LineItem.create_line_item_for_invoice(
             invoice_id=invoice_id,
             product_name=product_name,
             rate=rate,
             quantity=qty,
-            gst_tax_rate=gst_tax_rate,
         )
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
         Invoice.objects.filter(id=invoice_id).update(
@@ -407,7 +403,6 @@ class PrintInvoiceView(View):
     def get(self, request, invoice_id=None):
         invoice = Invoice.objects.get(id=invoice_id)
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
-        tax_rate = f"{GST_TAX_RATE * 100} %"
 
         invoice_summary = LineItem.get_invoice_summary(invoice_id=invoice_id)
 
@@ -417,7 +412,6 @@ class PrintInvoiceView(View):
             context={
                 "invoice": invoice,
                 "line_items": line_items,
-                "tax_rate": tax_rate,
                 "amount_in_words": num2words(
                     invoice_summary["total_amount"], lang="en_IN"
                 ).title(),

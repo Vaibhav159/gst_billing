@@ -1,10 +1,26 @@
 [tool.ruff]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
-select = ['E', 'F', 'I', 'ICN', 'TID', 'UP', 'W', 'SIM']
-ignore = []
+select = [
+    'E', 'F', 'I', 'ICN', 'TID',
+    'UP', 'W', 'SIM', 'B', 'A', 'TRY',
+    'Q', 'COM', 'PERF','RUF', 'PGH',
+    'ISC'
+]
+
+ignore = [
+    "E501", "F403", "E402",
+    "E401", "UP026", "UP032",
+    "UP030", "SIM102",
+    "SIM222", "SIM114",
+    "SIM115", "B904", "COM812", "TRY002",
+    "TRY003", "TRY200",
+    "TRY401", "TRY201", "TRY301",
+    "TRY400", "A003", "RUF012",
+    "RUF005", "PERF401", "PERF203" , "RUF015"
+]
 
 # Allow autofix for all enabled rules (when `--fix`) is provided.
-fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
+fixable = ["ALL"]
 unfixable = []
 
 # Exclude a variety of commonly ignored directories.
