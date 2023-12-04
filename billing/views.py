@@ -451,16 +451,17 @@ class DownloadInvoicesView(View):
     @staticmethod
     def generate_report_for_business(workbook, business, start_date, end_date):
 
-        date_range_string = DownloadInvoicesView.get_date_range_string(
-            start_date, end_date
-        )
         business_name = business.name
+        sheet = workbook.create_sheet(title=business_name)
 
         month_wise_split_date = split_dates(start_date, end_date)
 
-        sheet = workbook.create_sheet(title=business_name)
-
         for month_start_date, month_end_date in month_wise_split_date:
+
+            date_range_string = DownloadInvoicesView.get_date_range_string(
+                month_start_date, month_end_date
+            )
+
             line_item_data = LineItem.get_line_item_data_for_download(
                 start_date=month_start_date, end_date=month_end_date, business=business
             )
