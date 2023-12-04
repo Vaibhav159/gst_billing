@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
@@ -441,8 +442,6 @@ class DownloadInvoicesView(View):
 
     @staticmethod
     def generate_report_for_business(workbook, business, start_date, end_date):
-        def create_row_with_spacing(data):
-            return ([""] * 5) + [data]
 
         date_range_string = DownloadInvoicesView.get_date_range_string(
             start_date, end_date
@@ -462,7 +461,6 @@ class DownloadInvoicesView(View):
         DownloadInvoicesView.add_invoice_data_to_sheet(
             business,
             business_name,
-            create_row_with_spacing,
             date_range_string,
             outwards_invoices,
             sheet,
@@ -476,7 +474,6 @@ class DownloadInvoicesView(View):
         DownloadInvoicesView.add_invoice_data_to_sheet(
             business,
             business_name,
-            create_row_with_spacing,
             date_range_string,
             inward_invoices,
             sheet,
@@ -487,14 +484,20 @@ class DownloadInvoicesView(View):
     def add_invoice_data_to_sheet(
         business,
         business_name,
-        create_row_with_spacing,
         date_range_string,
         invoices,
         sheet,
         supply_type,
     ):
+        def create_row_with_spacing(data):
+            return ([""] * 5) + [data]
+
         if not invoices:
             return
+
+        total_taxable_value = (
+            total_cgst
+        ) = total_sgst = total_igst = total_invoice_value = Decimal("0")
 
         sheet.append(create_row_with_spacing(business_name))
         sheet.append(create_row_with_spacing(supply_type))
@@ -506,6 +509,30 @@ class DownloadInvoicesView(View):
 
         for idx, outward in enumerate(invoices, start=1):
             sheet.append([idx] + list(outward))
+
+            taxable_value, cgst, sgst, igst, invoice_value = outward[-5:]
+
+            total_taxable_value += taxable_value
+            total_cgst += cgst
+            total_sgst += sgst
+            total_igst += igst
+            total_invoice_value += invoice_value
+
+        sheet.append(
+            [""] * 5
+            + [
+                "Grand Total",
+                "",
+                "",
+                "",
+                "",
+                total_taxable_value,
+                total_cgst,
+                total_sgst,
+                total_igst,
+                total_invoice_value,
+            ]
+        )
 
         sheet.append([])
 
