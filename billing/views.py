@@ -707,3 +707,15 @@ class CustomerSearchView(View):
         return render(
             request, "partials/customer_search_results.html", {"customers": customers}
         )
+
+
+class LineItemDeleteView(DeleteView):
+    model = LineItem
+
+    def delete(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        self.object.delete()
+        return HttpResponse(status=200)
+
+    def get(self, request, *args, **kwargs):
+        return self.delete(request, *args, **kwargs)

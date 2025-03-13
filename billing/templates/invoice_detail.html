@@ -1,50 +1,86 @@
 {% extends 'base.html' %}
 
+{% block title %}Invoice #{{ invoice.invoice_number }}{% endblock %}
+
 {% block content %}
-    <h2 class="p-1 rounded-md text-xl-center font-medium text-center text-white
-    {% if invoice.type_of_invoice == 'inward' %}bg-green-500{% else %}bg-red-500{% endif %}
-        md:text-5xl lg:text-5xl dark:text-red dark:text-green">
-        {{ invoice.type_of_invoice|title }}
-    </h2>
-
-    {% include "invoicing/business_selection.html" with business=invoice.business %}
-    {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number invoice_date=invoice.invoice_date%}
-    <h2 class="mb-4 text-3xl font-extrabold tracking-tight leading-none text-gray-900 md:text-4xl">Line Items</h2>
-
-    {% include "partials/invoice_summary.html" %}
-
-    <div id="existing-items">
-    {% include 'line_item_invoice_list.html' %}
+<div class="space-y-6">
+    <!-- Header Section -->
+    <div class="flex justify-between items-start">
+        <div class="space-y-4">
+            <h2 class="inline-flex items-center px-4 py-2 rounded-md text-xl font-medium text-white
+                       {% if invoice.type_of_invoice == 'inward' %}bg-green-600{% else %}bg-blue-600{% endif %}">
+                {{ invoice.type_of_invoice|title }} Invoice #{{ invoice.invoice_number }}
+            </h2>
+            <p class="text-gray-600">Created on {{ invoice.invoice_date|date:"d M Y" }}</p>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <button hx-get="{% url 'invoice_print' invoice.id %}"
+                    hx-target="#content-body"
+                    hx-trigger="click"
+                    hx-push-url="{% url 'invoice_print' invoice.id %}"
+                    class="inline-flex items-center px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+                </svg>
+                View Bill
+            </button>
+            
+            {% include "single_component/add_invoice_button.html" %}
+        </div>
     </div>
-    <div id="add_line_items">
 
+    <!-- Business and Customer Info -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-white rounded-lg shadow p-6">
+            {% include "invoicing/business_selection.html" with business=invoice.business %}
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number invoice_date=invoice.invoice_date %}
+        </div>
     </div>
 
-    <button
-        hx-get="{% url 'line_item_inline_form' %}?invoice_id={{ invoice.id }}"
-        hx-target="#existing-items"
-        hx-trigger="click"
-        hx-swap="beforeend"
-            class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full">
-      Add
-    </button>
+    <!-- Line Items Section -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="p-6 border-b border-gray-200">
+            <div class="flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-gray-900">Line Items</h2>
+                <button hx-get="{% url 'line_item_add' %}?invoice_id={{ invoice.id }}"
+                        hx-target="#existing-items"
+                        hx-trigger="click"
+                        hx-swap="beforeend"
+                        class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Add Item
+                </button>
+            </div>
+        </div>
 
-        <input type="button" value="View Bill"
-               hx-get="{% url 'invoice_print' invoice.id %}"
-               hx-target="#content-body"
-               hx-trigger="click"
-               hx-push-url="{% url 'invoice_print' invoice.id %}"
-               style="float: right; width:140px;
-	   height:35px;
-	   line-height:32px;
-	   text-align:center;
-	   border:none;
-	   border-radius:20px;
-	   background:#f60;
-	   margin-bottom:20px;
-	   cursor:pointer;
-	   color:#fff;
-	   font-family: 'Muli', sans-serif;">
+        <!-- Invoice Summary -->
+        <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+            {% include "partials/invoice_summary.html" %}
+        </div>
 
-       {% include "single_component/add_invoice_button.html" %}
+        <!-- Line Items List -->
+        <div id="existing-items" class="divide-y divide-gray-200">
+            {% include 'line_item_invoice_list.html' %}
+        </div>
+
+        <div id="add_line_items"></div>
+    </div>
+</div>
+
+<!-- Add any specific scripts needed for this page -->
+{% block extra_scripts %}
+<script>
+    // Refresh summary when new line item is added
+    document.body.addEventListener('htmx:afterOnLoad', function(evt) {
+        if (evt.detail.target.id === 'existing-items') {
+            htmx.trigger('#invoice-summary', 'refresh');
+        }
+    });
+</script>
+{% endblock %}
 {% endblock %}
