@@ -197,10 +197,18 @@ class InvoiceListView(ListView):
     context_object_name = "invoices"
     paginate_by = PAGINATION_PAGE_SIZE
 
+    def get_dates_from_fy(self, fy):
+        if not fy:
+            return None, None
+
+        start_year = int(fy.split("-")[0])
+        start_date = datetime(start_year, 4, 1)  # April 1st
+        end_date = datetime(start_year + 1, 3, 31)  # March 31st next year
+        return start_date, end_date
+
     def get_queryset(self):
         business_id = self.request.GET.get("business_id")
-        start_date = self.request.GET.get("start_date")
-        end_date = self.request.GET.get("end_date")
+        financial_year = self.request.GET.get("financial_year")
         type_of_invoice = self.request.GET.get("type_of_invoice")
 
         filter_kwargs = {}
@@ -208,13 +216,11 @@ class InvoiceListView(ListView):
         if business_id:
             filter_kwargs["business_id"] = business_id
 
-        if start_date:
-            start_date = datetime.strptime(start_date, "%Y-%m-%d")
-            filter_kwargs["invoice_date__gte"] = start_date
-
-        if end_date:
-            end_date = datetime.strptime(end_date, "%Y-%m-%d")
-            filter_kwargs["invoice_date__lte"] = end_date
+        if financial_year:
+            start_date, end_date = self.get_dates_from_fy(financial_year)
+            if start_date and end_date:
+                filter_kwargs["invoice_date__gte"] = start_date
+                filter_kwargs["invoice_date__lte"] = end_date
 
         if type_of_invoice:
             filter_kwargs["type_of_invoice"] = type_of_invoice
@@ -234,6 +240,8 @@ class InvoiceListView(ListView):
         context["business_id"] = business_id
         context["start_date"] = self.request.GET.get("start_date")
         context["end_date"] = self.request.GET.get("end_date")
+        context["financial_years"] = Invoice.get_financial_years()
+        context["selected_fy"] = self.request.GET.get("financial_year", "")
         context["businesses"] = Business.objects.all()
         context["invoice_types_list"] = INVOICE_TYPE_CHOICES
         context["type_of_invoice_selected"] = self.request.GET.get("type_of_invoice")
