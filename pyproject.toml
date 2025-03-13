@@ -10,6 +10,7 @@ dependencies = [
     "django-htmx==1.12.0",
     "django-simple-history==3.2.0",
     "django-sql-explorer==3.0.1",
+    "ipython>=9.0.2",
     "num2words>=0.5.14",
     "openpyxl==3.0.10",
     "pre-commit>=4.1.0",
