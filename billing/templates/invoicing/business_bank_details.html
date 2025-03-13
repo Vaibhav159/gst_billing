@@ -1,45 +1,38 @@
 {% load custom_filters %}
 
-<div class="space-y-3">
-    {% if bank_name %}
-    <div class="grid grid-cols-12 gap-2">
-        <span class="col-span-5 text-sm text-gray-500">Bank Name</span>
-        <span class="col-span-7 text-sm text-gray-800 pl-2">
-            : {{ bank_name|default_if_none:""|title|striptags|cut:" - "|cut:" ," }}
-        </span>
-    </div>
-    {% endif %}
-
-    {% if bank_account_number %}
-    <div class="grid grid-cols-12 gap-2">
-        <span class="col-span-5 text-sm text-gray-500">Account Number</span>
-        <span class="col-span-7 text-sm text-gray-800 pl-2">
-            : {{ bank_account_number|default_if_none:""|striptags }}
-        </span>
-    </div>
-    {% endif %}
-
-    {% if bank_ifsc_code %}
-    <div class="grid grid-cols-12 gap-2">
-        <span class="col-span-5 text-sm text-gray-500">IFSC Code</span>
-        <span class="col-span-7 text-sm text-gray-800 pl-2">
-            : {{ bank_ifsc_code|default_if_none:""|upper|striptags }}
-        </span>
-    </div>
-    {% endif %}
-
-    {% if bank_branch_name %}
-    <div class="grid grid-cols-12 gap-2">
-        <span class="col-span-5 text-sm text-gray-500">Branch</span>
-        <span class="col-span-7 text-sm text-gray-800 pl-2">
-            : {% with branch_name=bank_branch_name|default_if_none:""|striptags|title %}
-                {% if "," in branch_name %}
-                    {{ branch_name|split:","|join:", " }}
-                {% else %}
-                    {{ branch_name }}
-                {% endif %}
-              {% endwith %}
-        </span>
-    </div>
-    {% endif %}
+<div style="font-size: 10px; width: 100%; margin-top: 5px;">
+  <table style="width: 100%; table-layout: fixed; border-collapse: collapse;">
+      <tr>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>Bank Name:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {{ bank_name|default:"Not provided"|title }}
+              </span>
+          </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>A/c No:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {{ bank_account_number|default:"Not provided" }}
+              </span>
+          </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>IFSC Code:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {{ bank_ifsc_code|default:"Not provided"|upper }}
+              </span>
+          </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>Branch:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {% with branch_name=bank_branch_name|default:"Not provided"|title %}
+                      {% if "," in branch_name %}
+                          {{ branch_name|split:","|join:", " }}
+                      {% else %}
+                          {{ branch_name }}
+                      {% endif %}
+                  {% endwith %}
+              </span>
+          </td>
+      </tr>
+  </table>
 </div>
