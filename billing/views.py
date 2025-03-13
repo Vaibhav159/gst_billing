@@ -69,17 +69,26 @@ class CustomerListView(ListView):
 
     def get_queryset(self):
         filter_kwargs = {}
-
         customer_name = self.request.GET.get("customer_name")
+        business_id = self.request.GET.get("business_id")
 
         if customer_name:
             filter_kwargs["name__icontains"] = customer_name
+        if business_id:
+            filter_kwargs["businesses"] = business_id
 
         return Customer.objects.filter(**filter_kwargs).order_by("id")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["title"] = "Customers"
+        context["businesses"] = Business.objects.all()
+        context["business_id"] = (
+            int(self.request.GET.get("business_id"))
+            if self.request.GET.get("business_id")
+            else ""
+        )
+        context["customer_name"] = self.request.GET.get("customer_name", "")
         return context
 
     def get(self, request, *args, **kwargs):
