@@ -442,7 +442,6 @@ class PrintInvoiceView(View):
     def get(self, request, invoice_id=None):
         invoice = Invoice.objects.get(id=invoice_id)
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
-
         invoice_summary = LineItem.get_invoice_summary(invoice_id=invoice_id)
 
         return render(

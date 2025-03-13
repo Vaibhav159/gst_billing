@@ -29,18 +29,27 @@
 
     @media print {
         @page {
-            margin: 0;
+            margin: 15mm;
         }
-        body * {
+        body {
             visibility: hidden;
         }
-        #panel * {
+        #panel, #panel * {
             visibility: visible;
+        }
+        #panel {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+        }
+        .no-print {
+            display: none;
         }
     }
 </style>
 
-<div class="inline-flex rounded-md shadow-sm" role="group">
+<div class="inline-flex rounded-md shadow-sm no-print" role="group">
 
     <button
         hx-get="{% url 'invoice_detail' invoice.id %}"
@@ -62,69 +71,79 @@
 </div>
 
 <div id="panel">
-    <table style="border: 1px solid #999999;" width="100%" border="0" cellpadding="0" cellspacing="0" class="tb">
+    <table style="border: 1px solid #999999; width: 100%; max-width: 210mm; margin: 0 auto;" cellpadding="0" cellspacing="0" class="tb">
         <tbody>
             <tr>
                 <td height="35" colspan="4" align="center" class="txt"
                     style="border-bottom: 1px solid #ddd; color: {{ invoice.business.primary_color_theme }}; font-weight: 800;
-                    font-family: 'Muli', sans-serif;">
+                    font-family: 'Muli', sans-serif; font-size: 20px;">
                     TAX INVOICE
                 </td>
             </tr>
             <tr>
-                <td>&nbsp;</td>
-                {% include "invoicing/business_selection.html" with business=invoice.business %}
-                <td>
+                <td style="width: 3%;">&nbsp;</td>
+                <td style="width: 47%;">
+                    {% include "invoicing/business_selection.html" with business=invoice.business %}
+                </td>
+                <td style="width: 47%;">
                     {% include "invoicing/business_bank_details.html" %}
                 </td>
-                <td>&nbsp;</td>
+                <td style="width: 3%;">&nbsp;</td>
             </tr>
             <tr>
-                <td height="36" colspan="4">&nbsp;</td>
+                <td colspan="4" style="height: 20px;">&nbsp;</td>
             </tr>
             <tr>
-                <td width="3%">&nbsp;</td>
+                <td style="width: 3%;">&nbsp;</td>
                 <td colspan="2">
-                    <table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
+                    <table width="100%" border="0" cellpadding="0" cellspacing="0">
                         <tbody>
-                            {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number invoice_date=invoice.invoice_date%}
+                            {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number invoice_date=invoice.invoice_date %}
                             {% include 'invoicing/line_item_selection.html' %}
 
                             <tr>
-                                <td>&nbsp;</td>
+                                <td style="height: 20px;">&nbsp;</td>
                             </tr>
                             <tr>
                                 <td>
                                     {% include "invoicing/invoice_final_summary.html" %}
                                 </td>
                             </tr>
+
                             <tr>
-                                <td>&nbsp;</td>
+                                <td style="height: 20px;">&nbsp;</td>
                             </tr>
                         </tbody>
                     </table>
                 </td>
-                <td width="3%">&nbsp;</td>
+                <td style="width: 3%;">&nbsp;</td>
             </tr>
             <tr>
-                <td colspan="4">&nbsp;</td>
-            </tr>
-            <tr style="height: 20px">
-                <td colspan="4" >&nbsp;</td>
+                <td colspan="4" style="height: 40px;">&nbsp;</td>
             </tr>
             <tr>
-              <td style="font-size: 13px; color: #000; padding: 5px; font-family: 'Muli', sans-serif; text-align:center;" align="right" valign="bottom" colspan="4">
-                <strong style="display:inline-block;width:70%;text-align:right;">Customer Signature</strong>
-                <strong style="display:inline-block;width:20%;text-align:right;">Authorized Signature</strong>
-              </td>
+                <td colspan="4" style="font-size: 13px; color: #000; padding: 5px; font-family: 'Muli', sans-serif;">
+                    <div style="display: flex; justify-content: space-between; padding: 0 50px;">
+                        <div style="text-align: center;">
+                            <div style="border-top: 1px solid #000; padding-top: 5px;">
+                                <strong>Customer Signature</strong>
+                            </div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="border-top: 1px solid #000; padding-top: 5px;">
+                                <strong>Authorized Signature</strong>
+                            </div>
+                        </div>
+                    </div>
+                </td>
             </tr>
             <tr>
-                <td colspan="4">&nbsp;</td>
+                <td colspan="4" style="height: 20px;">&nbsp;</td>
             </tr>
         </tbody>
     </table>
 
-    <div style="text-align:center;">
+    <div style="text-align: center; margin-top: 20px;">
         <p style="font-size: 20px; color: #000; padding: 5px; font-family: 'Muli', sans-serif;">
             <strong>SUBJECT TO UDAIPUR JURISDICTION</strong>
         </p>
