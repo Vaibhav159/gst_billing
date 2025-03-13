@@ -35,15 +35,34 @@
                 </div>
 
                 <!-- Customer Name Search -->
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 relative">
                     <label class="font-bold" for="customer_name">Customer Name:</label>
-                    <input class="p-2 text-sm rounded-md border border-gray-300" 
-                           type="text" 
-                           id="customer_name" 
-                           name="customer_name" 
-                           value="{{ customer_name }}"
-                           placeholder="Search customers..."
-                           autocomplete="off">
+                    <div class="relative">
+                        <input class="p-2 text-sm rounded-md border border-gray-300 w-64" 
+                               type="text" 
+                               id="customer_name" 
+                               name="customer_name" 
+                               value="{{ customer_name }}"
+                               placeholder="Search customers..."
+                               autocomplete="off"
+                               hx-get="{% url 'customer_search' %}"
+                               hx-trigger="keyup changed delay:200ms"
+                               hx-target="#customer-search-results"
+                               hx-indicator="#search-indicator">
+                        
+                        <div id="search-indicator" 
+                             class="htmx-indicator absolute right-2 top-2">
+                            <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </div>
+
+                        <div id="customer-search-results" 
+                             class="absolute z-10 w-full mt-1 bg-white shadow-lg rounded-md border border-gray-300 max-h-60 overflow-y-auto"
+                             style="display: none;">
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Add Customer Button -->
@@ -80,4 +99,34 @@
             </tbody>
         </table>
     </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('customer_name');
+        const resultsDiv = document.getElementById('customer-search-results');
+        
+        // Show results when input is focused
+        searchInput.addEventListener('focus', function() {
+            if (resultsDiv.children.length > 0) {
+                resultsDiv.style.display = 'block';
+            }
+        });
+
+        // Hide results when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!searchInput.contains(e.target) && !resultsDiv.contains(e.target)) {
+                resultsDiv.style.display = 'none';
+            }
+        });
+
+        // Show results when HTMX loads them
+        document.body.addEventListener('htmx:afterOnLoad', function(evt) {
+            if (evt.detail.target.id === 'customer-search-results') {
+                if (evt.detail.target.children.length > 0) {
+                    evt.detail.target.style.display = 'block';
+                }
+            }
+        });
+    });
+    </script>
 {% endblock %}
