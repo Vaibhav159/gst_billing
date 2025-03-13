@@ -1,4 +1,5 @@
 import math
+from datetime import datetime
 from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -285,6 +286,23 @@ class Invoice(AbstractBaseModel):
                 next_number = 1
             return next_number
         return 1
+
+    @classmethod
+    def get_financial_years(cls):
+        # Get the earliest invoice date or default to current year
+        earliest_date = cls.objects.order_by("invoice_date").first()
+        start_year = (
+            earliest_date.invoice_date.year if earliest_date else datetime.now().year
+        )
+
+        current_year = datetime.now().year
+        financial_years = []
+
+        for year in range(start_year, current_year):  # +2 to include next year
+            fy = f"{year}-{str(year+1)[2:]}"  # Format: "2020-21"
+            financial_years.append((fy, fy))
+
+        return financial_years
 
 
 class LineItem(AbstractBaseModel):
