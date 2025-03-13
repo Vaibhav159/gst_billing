@@ -185,8 +185,18 @@ class BusinessListView(ListView):
 
 class BusinessDetailView(View):
     def get(self, request, business_id):
+        business = Business.objects.get(id=business_id)
+        customers = business.customer_set.all()
+        invoices = Invoice.objects.filter(business=business).order_by("-invoice_date")[
+            :5
+        ]  # Last 5 invoices
+
         context = {
-            "object": Business.objects.get(id=business_id),
+            "object": business,
+            "customers": customers,
+            "recent_invoices": invoices,
+            "customer_count": customers.count(),
+            "invoice_count": Invoice.objects.filter(business=business).count(),
         }
         return render(request, "business_detail.html", context)
 
