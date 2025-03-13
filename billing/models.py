@@ -298,7 +298,7 @@ class Invoice(AbstractBaseModel):
         current_year = datetime.now().year
         financial_years = []
 
-        for year in range(start_year, current_year):  # +2 to include next year
+        for year in range(start_year, current_year):
             fy = f"{year}-{str(year+1)[2:]}"  # Format: "2020-21"
             financial_years.append((fy, fy))
 
