@@ -1,34 +1,129 @@
 {% extends 'base.html' %}
 
 {% block content %}
-
-    <div id="business-detail">
-        <h3 class="font-medium leading-tight text-3xl mt-0 mb-2 text-blue-600">{{ object.name }}</h3>
-        <p>{{ object.address }}</p>
-
-        <p>{{ object.gst_number }}</p>
-        <p>{{ object.name }}</p>
-        <p>{{ object.mobile_number|default_if_none:"Mobile number not avaiable" }}</p>
-        <br>
-
-        <div class="flex items-center justify-left">
-          <div class="inline-flex shadow-md hover:shadow-lg focus:shadow-lg" role="group">
-            <a
-                    href="{% url 'business_list' %}"
-                    class="rounded-l inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
-                        &laquo;  Business List
+<div id="business-detail" class="space-y-6">
+    <!-- Header with Actions -->
+    <div class="flex justify-between items-start">
+        <h3 class="font-medium leading-tight text-3xl text-blue-600">{{ object.name }}</h3>
+        <div class="flex items-center space-x-3">
+            <a href="{% url 'business_list' %}"
+               class="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                </svg>
+                Back to List
             </a>
-
-            <button
-                    type="button"
-                    hx-get="{% url 'business_edit' object.id%}"
+            <button type="button"
+                    hx-get="{% url 'business_edit' object.id %}"
                     hx-trigger="click"
                     hx-target="#content-body"
-                    class=" inline-block px-6 py-2.5
-                    bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
-                EDIT</button>
-          </div>
+                    class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+                Edit Business
+            </button>
         </div>
     </div>
 
+    <!-- Business Information -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Basic Info Card -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h4 class="text-lg font-medium text-gray-900 mb-4">Business Information</h4>
+            <div class="space-y-3">
+                <div>
+                    <p class="text-sm text-gray-500">Address</p>
+                    <p class="text-gray-900">{{ object.address|default:"-" }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">GST Number</p>
+                    <p class="text-gray-900">{{ object.gst_number }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">State</p>
+                    <p class="text-gray-900">{{ object.state_name|default:"-" }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">PAN Number</p>
+                    <p class="text-gray-900">{{ object.pan_number|default:"-" }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contact & Bank Info Card -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h4 class="text-lg font-medium text-gray-900 mb-4">Contact & Bank Details</h4>
+            <div class="space-y-3">
+                <div>
+                    <p class="text-sm text-gray-500">Mobile Number</p>
+                    <p class="text-gray-900">{{ object.mobile_number|default:"-" }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Bank Name</p>
+                    <p class="text-gray-900">{{ object.bank_name|default:"-" }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Account Number</p>
+                    <p class="text-gray-900">{{ object.bank_account_number|default:"-" }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">IFSC Code</p>
+                    <p class="text-gray-900">{{ object.bank_ifsc_code|default:"-" }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <h4 class="text-lg font-medium text-gray-900">Customers ({{ customer_count }})</h4>
+                <a href="{% url 'customer_form' %}?business={{ object.id }}" 
+                   class="text-blue-600 hover:text-blue-800">Add Customer</a>
+            </div>
+            {% if customers %}
+            <div class="mt-4 divide-y">
+                {% for customer in customers %}
+                <div class="py-3">
+                    <a href="{% url 'customer_detail' customer.id %}" 
+                       class="text-blue-600 hover:text-blue-800 font-medium">{{ customer.name }}</a>
+                    <p class="text-sm text-gray-600">{{ customer.gst_number|default:"No GST" }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 mt-4">No customers linked yet</p>
+            {% endif %}
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <h4 class="text-lg font-medium text-gray-900">Recent Invoices ({{ invoice_count }} total)</h4>
+                <a href="{% url 'invoice_list' %}?business_id={{ object.id }}" 
+                   class="text-blue-600 hover:text-blue-800">View All</a>
+            </div>
+            {% if recent_invoices %}
+            <div class="mt-4 divide-y">
+                {% for invoice in recent_invoices %}
+                <div class="py-3 flex justify-between items-center">
+                    <div>
+                        <a href="{% url 'invoice_detail' invoice.id %}" 
+                           class="text-blue-600 hover:text-blue-800 font-medium">{{ invoice.invoice_number }}</a>
+                        <p class="text-sm text-gray-600">{{ invoice.invoice_date|date:"d M Y" }}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-medium">₹{{ invoice.total_amount }}</p>
+                        <p class="text-sm text-gray-600">{{ invoice.get_type_of_invoice_display }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 mt-4">No invoices created yet</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
 {% endblock %}

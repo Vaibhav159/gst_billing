@@ -185,8 +185,18 @@ class BusinessListView(ListView):
 
 class BusinessDetailView(View):
     def get(self, request, business_id):
+        business = Business.objects.get(id=business_id)
+        customers = business.customer_set.all()
+        invoices = Invoice.objects.filter(business=business).order_by("-invoice_date")[
+            :5
+        ]  # Last 5 invoices
+
         context = {
-            "object": Business.objects.get(id=business_id),
+            "object": business,
+            "customers": customers,
+            "recent_invoices": invoices,
+            "customer_count": customers.count(),
+            "invoice_count": Invoice.objects.filter(business=business).count(),
         }
         return render(request, "business_detail.html", context)
 
@@ -680,3 +690,20 @@ class ProductDeleteView(DeleteView):
     model = Product
     success_url = reverse_lazy("product_list")
     template_name = "product_list.html"
+
+
+class CustomerSearchView(View):
+    def get(self, request):
+        search_term = request.GET.get("customer_name", "").strip()
+        customers = []
+
+        if search_term and len(search_term) >= 2:
+            customers = Customer.objects.filter(
+                name__icontains=search_term
+            ).prefetch_related("businesses")[
+                :10
+            ]  # Limit to 10 results
+
+        return render(
+            request, "partials/customer_search_results.html", {"customers": customers}
+        )

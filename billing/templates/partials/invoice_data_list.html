@@ -1,96 +1,68 @@
-{% for object in object_list %}
-  <tr>
-      <th scope="row">
-          {{ object.id }}
-      </th>
-      <td>
-          <div class="d-flex justify-content-between align-items-center">
-
-          <a href="{% url 'business_detail' object.business.id %}"
-                 class="text-blue-400 hover:underline hover:text-dark-blue-400">
-              {{ object.business.name }}
-              </a>
-
-          </div>
-      </td>
-      <td>
-          {{ object.invoice_date }}
-      </td>
-      <td>
-          <a href="{% url 'customer_detail' object.customer.id %}"
-                 class="text-blue-400 hover:underline hover:text-dark-blue-400">
-              {{ object.customer.name }}
-              </a>
-      </td>
-      <td>
-          {{ object.invoice_number }}
-      </td>
-      <td>
-          {{ object.total_amount }}
-      </td>
-
-      <td>
-          {{ object.type_of_invoice }}
-      </td>
-  <td>
-
-      <div class="flex justify-center rounded-lg text-lg" role="group">
-        <a href="{% url 'invoice_detail' object.id %}"
-            class="text-base  rounded-l-none  hover:scale-110 focus:outline-none flex justify-center px-4 py-2 rounded font-bold cursor-pointer
-        hover:bg-cyan-700 hover:text-cyan-100
-        bg-cyan-100
-        text-cyan-700
-        border duration-200 ease-in-out
-        border-cyan-600 transition">
-                  <i class="material-icons">edit</i>
-
-        Edit</a>
-
-        <a href="{% url 'invoice_print' object.id %}"
-            class="text-base  rounded-l-none  hover:scale-110 focus:outline-none flex justify-center px-4 py-2 rounded font-bold cursor-pointer
-        hover:bg-teal-700 hover:text-teal-100
-        bg-teal-100
-        text-teal-700
-        border duration-200 ease-in-out
-        border-teal-600 transition">
-        <i class="material-icons">print</i>
-
-        Print</a>
-
-        <button
-             hx-post="{% url 'invoice_delete' object.id %}"
-              hx-target="#content-body"
-              hx-swap="outerHTML"
-              hx-confirm="Are you sure you want to delete this invoice?"
-        class="text-base  rounded-l-none  hover:scale-110 focus:outline-none flex justify-center px-4 py-2 rounded font-bold cursor-pointer
-        hover:bg-red-700 hover:text-red-100
-        bg-red-100
-        text-red-700
-        border duration-200 ease-in-out
-        border-red-600 transition">
-            <i class="material-icons">
-                delete
-            </i>
-            Delete
-        </button>
-
-  </div>
-  </td>
-
+{% for invoice in invoices %}
+<tr class="hover:bg-gray-50">
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {{ forloop.counter }}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {{ invoice.business.name }}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {{ invoice.invoice_date|date:"d M Y" }}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        <a href="{% url 'customer_detail' invoice.customer.id %}" class="text-blue-600 hover:text-blue-900">
+            {{ invoice.customer.name }}
+        </a>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+        {{ invoice.invoice_number }}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        ₹{{ invoice.total_amount }}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                     {% if invoice.type_of_invoice == 'outward' %}bg-green-100 text-green-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+            {{ invoice.get_type_of_invoice_display }}
+        </span>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+        <div class="flex items-center justify-center space-x-3">
+            <a href="{% url 'invoice_detail' invoice.id %}" 
+               class="text-blue-600 hover:text-blue-900">View</a>
+            <a href="{% url 'invoice_print' invoice.id %}" 
+               target="_blank"
+               class="text-green-600 hover:text-green-900">Print</a>
+        </div>
+    </td>
 </tr>
 {% endfor %}
 
-{% if page_obj.has_next %}
-    <tr id="load-more">
-        <td colspan="5" class="text-center">
-            <button
-                    type="button"
-                    hx-get="{% url 'invoice_list' %}?page={{ page_obj.next_page_number }}"
-                    hx-target="#load-more"
-                    hx-swap="outerHTML"
-                    class="text-white bg-[#050708] hover:bg-[#050708]/90 focus:ring-4 focus:outline-none focus:ring-[#050708]/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:focus:ring-[#050708]/50 dark:hover:bg-[#050708]/30 mr-2 mb-2">
-              Load More Invoices
-            </button>
-        </td>
-    </tr>
+{% if is_paginated %}
+<tr>
+    <td colspan="8" class="px-6 py-4">
+        <div class="flex justify-between items-center">
+            <div class="text-sm text-gray-700">
+                Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ page_obj.paginator.count }} results
+            </div>
+            <div class="flex space-x-2">
+                {% if page_obj.has_previous %}
+                    <a hx-get="?page={{ page_obj.previous_page_number }}&business_id={{ business_id }}&financial_year={{ selected_fy }}&type_of_invoice={{ type_of_invoice_selected }}"
+                       hx-target="tbody"
+                       class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200">
+                        Previous
+                    </a>
+                {% endif %}
+
+                {% if page_obj.has_next %}
+                    <a hx-get="?page={{ page_obj.next_page_number }}&business_id={{ business_id }}&financial_year={{ selected_fy }}&type_of_invoice={{ type_of_invoice_selected }}"
+                       hx-target="tbody"
+                       class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200">
+                        Next
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </td>
+</tr>
 {% endif %}

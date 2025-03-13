@@ -2,32 +2,68 @@
 
 {% block content %}
     <div id="business-list">
-        <div class="flow-root">
+        <div class="flow-root mb-6">
             <h1 class="float-left font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
-            <button type="button"
-                    hx-get="{% url 'business_form' %}"
-                    hx-trigger="click"
-                    hx-target="#content-body"
-                    hx-push-url="{% url 'business_form' %}"
-                    class="float-right text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">
-                Add Business
-                <svg aria-hidden="true" class="ml-2 -mr-1 w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
-            </button>
+
+            <form class="mt-4 flex flex-wrap items-center gap-4" 
+                  hx-get="{% url 'business_list' %}"
+                  hx-trigger="keyup[target.value.length >= 2] from:input[type='text']"
+                  hx-target="body"
+                  hx-indicator="#loading-indicator">
+                
+                <!-- Loading indicator -->
+                <div id="loading-indicator" class="htmx-indicator">
+                    <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+
+                <!-- Business Search -->
+                <div class="flex items-center gap-2">
+                    <label class="font-bold" for="business_name">Search:</label>
+                    <input class="p-2 text-sm rounded-md border border-gray-300 w-64" 
+                           type="text" 
+                           id="business_name" 
+                           name="business_name" 
+                           value="{{ business_name }}"
+                           placeholder="Search businesses..."
+                           autocomplete="off">
+                </div>
+
+                <!-- Add Business Button -->
+                <div class="ml-auto">
+                    <button type="button"
+                            hx-get="{% url 'business_form' %}"
+                            hx-trigger="click"
+                            hx-target="#content-body"
+                            hx-push-url="{% url 'business_form' %}"
+                            class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center">
+                        Add Business
+                        <svg aria-hidden="true" class="ml-2 -mr-1 w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                            <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
         </div>
 
-        <table class="table table-hover">
-
-            <thead class="border-b bg-gray-800">
-                <tr>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Business Name</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST Number</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                {% include 'partials/business_data_list.html' %}
-            </tbody>
-        </table>
+        <div class="overflow-x-auto bg-white rounded-lg shadow">
+            <table class="min-w-full table-auto">
+                <thead class="border-b bg-gray-800">
+                    <tr>
+                        <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
+                        <th scope="col" class="text-sm font-medium text-white px-6 py-4">Business Name</th>
+                        <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST Number</th>
+                        <th scope="col" class="text-sm font-medium text-white px-6 py-4">Contact</th>
+                        <th scope="col" class="text-sm font-medium text-white px-6 py-4">State</th>
+                        <th scope="col" class="text-sm font-medium text-white px-6 py-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% include 'partials/business_data_list.html' %}
+                </tbody>
+            </table>
+        </div>
     </div>
 {% endblock %}

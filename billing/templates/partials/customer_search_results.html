@@ -1,0 +1,17 @@
+{% if customers %}
+    {% for customer in customers %}
+    <div class="cursor-pointer hover:bg-gray-100 p-2 border-b last:border-b-0"
+         hx-get="{% url 'customer_list' %}?customer_name={{ customer.name }}"
+         hx-target="body"
+         onclick="document.getElementById('customer-name').value = '{{ customer.name }}'">
+        <div class="font-medium">{{ customer.name }}</div>
+        <div class="text-sm text-gray-600">
+            {% for business in customer.businesses.all %}
+                {{ business.name }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="p-2 text-gray-500">No customers found</div>
+{% endif %} 

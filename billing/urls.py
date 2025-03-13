@@ -10,6 +10,7 @@ from billing.views import (
     CustomerDetailView,
     CustomerEditView,
     CustomerListView,
+    CustomerSearchView,
     CustomerView,
     DownloadInvoicesView,
     InvoiceAddView,
@@ -101,4 +102,5 @@ urlpatterns = [
         ProductDeleteView.as_view(),
         name="product_delete",
     ),
+    path("customer/search/", CustomerSearchView.as_view(), name="customer_search"),
 ]
