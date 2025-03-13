@@ -1,83 +1,122 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div id="invoice-list">
-    <div class="flow-root">
-        <h1 class="float-left font-medium leading-tight text-5xl mt-0 mb-2 text-blue-600">{{ title }}</h1>
+<div id="invoice-list" class="space-y-6">
+    <!-- Header Section -->
+    <div class="flex justify-between items-start mb-6">
+        <h1 class="font-medium text-4xl text-blue-600">{{ title }}</h1>
+        {% include "single_component/add_invoice_button.html" %}
+    </div>
 
-        <form style="padding-inline-start: 5em;" 
-              class="flex items-center gap-4"
+    <!-- Filters Card -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <form class="space-y-4"
               hx-get="{% url 'invoice_list' %}"
-              hx-trigger="change from:select, change from:input[type='date']"
+              hx-trigger="change from:select"
               hx-target="body"
               hx-indicator="#loading-indicator">
             
             <!-- Loading indicator -->
-            <div id="loading-indicator" class="htmx-indicator">
-                <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+            <div id="loading-indicator" class="htmx-indicator fixed top-4 right-4">
+                <div class="bg-blue-600 text-white px-4 py-2 rounded-md shadow-lg flex items-center">
+                    <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Loading...
+                </div>
             </div>
 
-            <label class="font-bold" for="businesses">Businesses:</label>
-            <select class="p-2 text-sm rounded-md border border-gray-300" name="business_id" id="businesses">
-                <option value="">All</option>
-                {% for business in businesses %}
-                    {% if business.id == business_id %}
-                        <option value="{{ business.id }}" selected>{{ business.name }}</option>
-                    {% else %}
-                        <option value="{{ business.id }}">{{ business.name }}</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
-            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Business Filter -->
+                <div class="space-y-2">
+                    <label class="block font-medium text-gray-700" for="businesses">Business</label>
+                    <select class="w-full p-2 text-sm rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500" 
+                            name="business_id" 
+                            id="businesses">
+                        <option value="">All Businesses</option>
+                        {% for business in businesses %}
+                            <option value="{{ business.id }}" {% if business.id == business_id %}selected{% endif %}>
+                                {{ business.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-            <label class="font-bold" for="financial_year">Financial Year:</label>
-            <select class="p-2 text-sm rounded-md border border-gray-300" name="financial_year" id="financial_year">
-                <option value="">All</option>
-                {% for fy_value, fy_display in financial_years %}
-                    <option value="{{ fy_value }}" {% if fy_value == selected_fy %}selected{% endif %}>
-                        {{ fy_display }}
-                    </option>
-                {% endfor %}
-            </select>
+                <!-- Financial Year Filter -->
+                <div class="space-y-2">
+                    <label class="block font-medium text-gray-700" for="financial_year">Financial Year</label>
+                    <select class="w-full p-2 text-sm rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500" 
+                            name="financial_year" 
+                            id="financial_year">
+                        <option value="">All Years</option>
+                        {% for fy_value, fy_display in financial_years %}
+                            <option value="{{ fy_value }}" {% if fy_value == selected_fy %}selected{% endif %}>
+                                {{ fy_display }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-            <label class="font-bold" for="type_of_invoice">Invoice Type:</label>
-            <select class="p-2 text-sm rounded-md border border-gray-300" name="type_of_invoice" id="type_of_invoice">
-                <option value="">All</option>
-                {% for internal_name, display_name in invoice_types_list %}
-                    {% if internal_name == type_of_invoice_selected %}
-                        <option value="{{ internal_name }}" selected>{{ display_name }}</option>
-                    {% else %}
-                        <option value="{{ internal_name }}">{{ display_name }}</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
-
-            {% include "single_component/add_invoice_button.html" %}
+                <!-- Invoice Type Filter -->
+                <div class="space-y-2">
+                    <label class="block font-medium text-gray-700" for="type_of_invoice">Invoice Type</label>
+                    <select class="w-full p-2 text-sm rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500" 
+                            name="type_of_invoice" 
+                            id="type_of_invoice">
+                        <option value="">All Types</option>
+                        {% for internal_name, display_name in invoice_types_list %}
+                            <option value="{{ internal_name }}" {% if internal_name == type_of_invoice_selected %}selected{% endif %}>
+                                {{ display_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
         </form>
     </div>
 
-        <table class="table table-hover">
-
-            <thead class="border-b bg-gray-800">
-                <tr>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Business Name</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Invoice Date</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Customer Number</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Invoice No.</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Amount</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">Type</th>
-                    <th scope="col" class="text-sm font-medium text-white py-4 text-center">Actions</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                {% include 'partials/invoice_data_list.html' %}
-            </tbody>
-
-        </table>
+    <!-- Invoices Table Card -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-800">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">#</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Business Name</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Invoice Date</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Customer</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Invoice No.</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Amount</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Type</th>
+                        <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-white uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% include 'partials/invoice_data_list.html' %}
+                </tbody>
+            </table>
+        </div>
     </div>
+
+    <!-- Summary Card -->
+    {% if invoices %}
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Total Invoices</p>
+                <p class="text-2xl font-semibold text-gray-900">{{ page_obj.paginator.count }}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Total Amount (Selected Period)</p>
+                <p class="text-2xl font-semibold text-gray-900">₹{{ total_amount|default:"0" }}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-500">Average Invoice Value</p>
+                <p class="text-2xl font-semibold text-gray-900">₹{{ average_amount|default:"0" }}</p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
 {% endblock %}
