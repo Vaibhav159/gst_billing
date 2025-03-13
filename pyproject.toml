@@ -1,3 +1,23 @@
+[project]
+name = "gst-billing"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "django==4.2.2",
+    "django-crispy-forms==1.14.0",
+    "django-htmx==1.12.0",
+    "django-simple-history==3.2.0",
+    "django-sql-explorer==3.0.1",
+    "num2words>=0.5.14",
+    "openpyxl==3.0.10",
+    "pre-commit>=4.1.0",
+    "psycopg2-binary>=2.9.10",
+    "setuptools>=76.0.0",
+    "xlsxwriter==3.1.0",
+]
+
 [tool.ruff]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
 select = [
