@@ -451,6 +451,7 @@ class PrintInvoiceView(View):
             context={
                 "invoice": invoice,
                 "line_items": line_items,
+                "print_view": True,
                 "amount_in_words": num2words(
                     invoice_summary["total_amount"], lang="en_IN"
                 ).title(),

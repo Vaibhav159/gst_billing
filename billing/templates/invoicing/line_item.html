@@ -19,6 +19,7 @@
     <td class="px-4 py-3 text-sm text-gray-900 text-right">{{ item.quantity }} gm</td>
     <td class="px-4 py-3 text-sm text-gray-900 text-right">₹{{ item.rate }}/g</td>
     <td class="px-4 py-3 text-sm text-gray-900 text-right">₹{{ item.amount_without_tax|floatformat:3 }}</td>
+    {% if not print_view %}
     <td class="px-4 py-3 text-sm text-right">
         <button class="text-red-600 hover:text-red-900"
                 hx-delete="{% url 'line_item_delete' invoice_id=invoice.id pk=item.id %}"
@@ -30,5 +31,6 @@
             </svg>
         </button>
     </td>
+    {% endif %}
 </tr>
 {% endif %}
