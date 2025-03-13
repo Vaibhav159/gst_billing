@@ -219,7 +219,9 @@ class InvoiceListView(ListView):
         if type_of_invoice:
             filter_kwargs["type_of_invoice"] = type_of_invoice
 
-        return Invoice.objects.filter(**filter_kwargs).order_by("id")
+        return Invoice.objects.filter(**filter_kwargs).order_by(
+            "-type_of_invoice", "-invoice_date", "-invoice_number"
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
