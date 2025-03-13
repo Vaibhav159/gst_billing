@@ -1,25 +1,45 @@
-<table width="100%" border="1" cellspacing="0" cellpadding="0" style="border:1px solid #999999;">
-    <tbody>
-      <tr>
-            <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500; padding:5px; font-family: 'Muli', sans-serif;" align="center">
-                Bank Name : {{ bank_name }}
-            </td>
-        </tr>
-      <tr>
-            <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500;padding:5px; font-family: 'Muli', sans-serif;" align="center">
-                A/c. Number : {{ bank_account_number }}
-            </td>
-        </tr>
-      <tr>
-            <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500; padding:5px; font-family: 'Muli', sans-serif;" align="center">
-                Bank ISFC Code : {{ bank_ifsc_code }}
-            </td>
-        </tr>
+{% load custom_filters %}
 
-      <tr>
-        <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500; padding:5px; font-family: 'Muli', sans-serif;" align="center">
-            Bank Branch Name : {{ bank_branch_name }}
-        </td>
-      </tr>
-    </tbody>
-</table>
+<div class="space-y-3">
+    {% if bank_name %}
+    <div class="grid grid-cols-12 gap-2">
+        <span class="col-span-5 text-sm text-gray-500">Bank Name</span>
+        <span class="col-span-7 text-sm text-gray-800 pl-2">
+            : {{ bank_name|default_if_none:""|title|striptags|cut:" - "|cut:" ," }}
+        </span>
+    </div>
+    {% endif %}
+
+    {% if bank_account_number %}
+    <div class="grid grid-cols-12 gap-2">
+        <span class="col-span-5 text-sm text-gray-500">Account Number</span>
+        <span class="col-span-7 text-sm text-gray-800 pl-2">
+            : {{ bank_account_number|default_if_none:""|striptags }}
+        </span>
+    </div>
+    {% endif %}
+
+    {% if bank_ifsc_code %}
+    <div class="grid grid-cols-12 gap-2">
+        <span class="col-span-5 text-sm text-gray-500">IFSC Code</span>
+        <span class="col-span-7 text-sm text-gray-800 pl-2">
+            : {{ bank_ifsc_code|default_if_none:""|upper|striptags }}
+        </span>
+    </div>
+    {% endif %}
+
+    {% if bank_branch_name %}
+    <div class="grid grid-cols-12 gap-2">
+        <span class="col-span-5 text-sm text-gray-500">Branch</span>
+        <span class="col-span-7 text-sm text-gray-800 pl-2">
+            : {% with branch_name=bank_branch_name|default_if_none:""|striptags|title %}
+                {% if "," in branch_name %}
+                    {{ branch_name|split:","|join:", " }}
+                {% else %}
+                    {{ branch_name }}
+                {% endif %}
+              {% endwith %}
+        </span>
+    </div>
+    {% endif %}
+</div>

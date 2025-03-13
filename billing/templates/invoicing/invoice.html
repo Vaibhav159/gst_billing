@@ -3,33 +3,10 @@
 
 {% block content %}
 <style>
-    table.tb2 tr:first-of-type {
-        border-bottom: 2px solid black;
-    }
-
-    table.tb2 tr:last-of-type {
-        border-top: 2px solid black;
-    }
-    .bordered_td {
-        border-right: solid 1px #000;
-        border-left: solid 1px #000;
-        text-align: center;
-    }
-
-    #bordered-left-aligned-td {
-        text-align: left;
-        padding-left: 50px;
-        border-right: solid 1px #000;
-        border-left: solid 1px #000;
-    }
-
-    th {
-        text-align: center;
-    }
-
     @media print {
         @page {
             margin: 15mm;
+            size: A4;
         }
         body {
             visibility: hidden;
@@ -46,6 +23,23 @@
         .no-print {
             display: none;
         }
+    }
+
+    .invoice-table th {
+        padding: 12px;
+        background-color: #f8fafc;
+        border-bottom: 2px solid #e2e8f0;
+        font-weight: 600;
+        text-align: left;
+    }
+
+    .invoice-table td {
+        padding: 12px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .invoice-table tr:last-child td {
+        border-bottom: none;
     }
 </style>
 
@@ -68,90 +62,132 @@
     </button>
 </div>
 
-<div id="panel">
-    <table style="border: 1px solid #999999; width: 100%; max-width: 210mm; margin: 0 auto;" cellpadding="0" cellspacing="0" class="tb">
-        <tbody>
-            <tr>
-                <td height="35" colspan="4" align="center" class="txt"
-                    style="border-bottom: 1px solid #ddd; color: {{ invoice.business.primary_color_theme }}; font-weight: 800;
-                    font-family: 'Muli', sans-serif; font-size: 20px;">
-                    TAX INVOICE
-                </td>
-            </tr>
-            <tr>
-                <td style="width: 3%;">&nbsp;</td>
-                <td style="width: 47%;">
-                    {% include "invoicing/business_selection.html" with business=invoice.business %}
-                </td>
-                <td style="width: 47%;">
-                    {% include "invoicing/business_bank_details.html" %}
-                </td>
-                <td style="width: 3%;">&nbsp;</td>
-            </tr>
-            <tr>
-                <td colspan="4" style="height: 20px;">&nbsp;</td>
-            </tr>
-            <tr>
-                <td style="width: 3%;">&nbsp;</td>
-                <td colspan="2">
-                    <table width="100%" border="0" cellpadding="0" cellspacing="0">
-                        <tbody>
-                            {% include "invoicing/customer_selection.html" with customer=invoice.customer invoice_number=invoice.invoice_number invoice_date=invoice.invoice_date %}
-                            {% include 'invoicing/line_item_selection.html' %}
-
-                            <tr>
-                                <td style="height: 20px;">&nbsp;</td>
-                            </tr>
-                            <tr>
-                                <td>
-                                    {% include "invoicing/invoice_final_summary.html" %}
-                                </td>
-                            </tr>
-
-                            <tr>
-                                <td style="height: 20px;">&nbsp;</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </td>
-                <td style="width: 3%;">&nbsp;</td>
-            </tr>
-            <tr>
-                <td colspan="4" style="height: 40px;">&nbsp;</td>
-            </tr>
-            <tr>
-                <td colspan="4" style="font-size: 13px; color: #000; padding: 5px; font-family: 'Muli', sans-serif;">
-                    <div style="display: flex; justify-content: space-between; padding: 0 50px;">
-                        <div style="text-align: center;">
-                            <div style="border-top: 1px solid #000; padding-top: 5px;">
-                                <strong>Customer Signature</strong>
-                            </div>
-                        </div>
-                        <div style="text-align: center;">
-                            <div style="border-top: 1px solid #000; padding-top: 5px;">
-                                <strong>Authorized Signature</strong>
-                            </div>
-                        </div>
-                    </div>
-                </td>
-            </tr>
-            <tr>
-                <td colspan="4" style="height: 20px;">&nbsp;</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <div style="text-align: center; margin-top: 20px;">
-        <p style="font-size: 20px; color: #000; padding: 5px; font-family: 'Muli', sans-serif;">
-            <strong>SUBJECT TO UDAIPUR JURISDICTION</strong>
-        </p>
+<div id="panel" class="max-w-5xl mx-auto bg-white rounded-lg shadow-sm">
+    <div class="p-8 border-b border-gray-200">
+        <div class="flex justify-between items-start">
+            <div class="space-y-2">
+                <h1 class="text-2xl font-bold" style="color: {{ invoice.business.primary_color_theme }}">
+                    {{ invoice.business.name }}
+                </h1>
+                <div class="text-sm text-gray-600 space-y-1">
+                    <p>{{ invoice.business.address }}</p>
+                    <p>{{ invoice.business.clean_state_name }}, {{ invoice.business.state_code }}</p>
+                    <p>GSTIN: {{ invoice.business.gst_number }}</p>
+                    <p>PAN: {{ invoice.business.pan_number }}</p>
+                </div>
+            </div>
+            
+            <div class="text-right">
+                <h2 class="text-2xl font-bold text-gray-800">TAX INVOICE</h2>
+                <div class="mt-2 text-sm text-gray-600 space-y-1">
+                    <p>Invoice #: {{ invoice.invoice_number }}</p>
+                    <p>Date: {{ invoice.invoice_date|date:"d M Y" }}</p>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <div class="p-8 border-b border-gray-200 bg-gray-50">
+        <div class="grid grid-cols-2 gap-8">
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 mb-2">BILL TO</h3>
+                <div class="text-sm space-y-1">
+                    <p class="font-medium text-gray-800">{{ invoice.customer.name|default_if_none:"" }}</p>
+                    
+                    {% if invoice.customer.address %}
+                        <p class="text-gray-600">{{ invoice.customer.address }}</p>
+                    {% endif %}
+                    
+                    {% if invoice.customer.clean_state_name or invoice.customer.state_code %}
+                        <p class="text-gray-600">
+                            {% if invoice.customer.clean_state_name %}{{ invoice.customer.clean_state_name }}{% endif %}
+                            {% if invoice.customer.state_code %}
+                                {% if invoice.customer.clean_state_name %}, {% endif %}
+                                Code: {{ invoice.customer.state_code }}
+                            {% endif %}
+                        </p>
+                    {% endif %}
+                    
+                    {% if invoice.customer.gst_number %}
+                        <p class="text-gray-600">GSTIN: {{ invoice.customer.gst_number }}</p>
+                    {% endif %}
+                    
+                    {% if invoice.customer.pan_number %}
+                        <p class="text-gray-600">PAN: {{ invoice.customer.pan_number }}</p>
+                    {% endif %}
+                    
+                    {% if invoice.customer.mobile_number %}
+                        <p class="text-gray-600">Mobile: {{ invoice.customer.mobile_number }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div>
+                <h3 class="text-sm font-medium text-gray-500 mb-2">BANK DETAILS</h3>
+                <div class="bg-white rounded-lg p-4 border border-gray-200">
+                    {% include "invoicing/business_bank_details.html" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="p-8">
+        <table class="w-full invoice-table">
+            <thead>
+                <tr>
+                    <th class="text-left">#</th>
+                    <th class="text-left">Item</th>
+                    <th class="text-center">HSN</th>
+                    <th class="text-center">GST %</th>
+                    <th class="text-right">Qty</th>
+                    <th class="text-right">Rate</th>
+                    <th class="text-right">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in line_items %}
+                    {% include 'invoicing/line_item.html' with item=item index=forloop.counter print_view=True %}
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="mt-8 border-t border-gray-200 pt-8">
+            <div class="flex justify-between">
+                <div class="w-1/2">
+                    <p class="text-sm text-gray-600">Amount in Words:</p>
+                    <p class="text-sm font-medium text-gray-800">{{ amount_in_words }}</p>
+                </div>
+                
+                <div class="w-1/3">
+                    {% include "partials/invoice_summary_print.html" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="p-8 border-t border-gray-200">
+        <div class="flex justify-between">
+            <div class="w-1/3 text-center">
+                <div class="border-t-2 border-gray-300 pt-2">
+                    <p class="text-sm font-medium text-gray-600">Customer Signature</p>
+                </div>
+            </div>
+            <div class="w-1/3 text-center">
+                <div class="border-t-2 border-gray-300 pt-2">
+                    <p class="text-sm font-medium text-gray-600">Authorized Signature</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-8 text-center">
+            <p class="text-sm font-medium text-gray-600">SUBJECT TO UDAIPUR JURISDICTION</p>
+        </div>
+    </div>
 </div>
 
-    {% block javascripts %}
-        <script>
-            document.title = "{{ invoice.invoice_number }}-{{ invoice.business.name }}-{{ invoice.invoice_date.year }}";
-        </script>
-    {% endblock %}
+{% block javascripts %}
+<script>
+    document.title = "{{ invoice.invoice_number }}-{{ invoice.business.name }}-{{ invoice.invoice_date.year }}";
+</script>
+{% endblock %}
 {% endblock %}
