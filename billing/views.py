@@ -94,8 +94,15 @@ class CustomerListView(ListView):
 
 class CustomerDetailView(View):
     def get(self, request, customer_id):
+        customer = Customer.objects.get(id=customer_id)
+        invoices = Invoice.objects.filter(customer=customer).order_by(
+            "-type_of_invoice", "-invoice_date", "-invoice_number"
+        )
+
         context = {
-            "object": Customer.objects.get(id=customer_id),
+            "object": customer,
+            "invoices": invoices,
+            "invoice_count": invoices.count(),
         }
         return render(request, "customer_detail.html", context)
 
@@ -514,9 +521,9 @@ class DownloadInvoicesView(View):
         if not invoices:
             return
 
-        total_taxable_value = (
-            total_cgst
-        ) = total_sgst = total_igst = total_invoice_value = Decimal("0")
+        total_taxable_value = total_cgst = total_sgst = total_igst = (
+            total_invoice_value
+        ) = Decimal("0")
 
         sheet.append(create_row_with_spacing(business_name))
         sheet.append(create_row_with_spacing(supply_type))
@@ -571,9 +578,9 @@ class DownloadInvoicesView(View):
         response = HttpResponse(
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        response[
-            "Content-Disposition"
-        ] = f'attachment; filename="invoices_{cls.get_date_range_string(start_date, end_date)}.xlsx"'
+        response["Content-Disposition"] = (
+            f'attachment; filename="invoices_{cls.get_date_range_string(start_date, end_date)}.xlsx"'
+        )
 
         workbook.save(response)
 
