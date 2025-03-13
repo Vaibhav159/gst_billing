@@ -1,18 +1,55 @@
-<div id="total" hx-get="{% url 'invoice_summary'%}?invoice_id={{ invoice.id }}"
-     hx-trigger="newLineItem from:body" hx-swap="outerHTML"
->
+<div id="total" 
+     hx-get="{% url 'invoice_summary' %}?invoice_id={{ invoice.id }}"
+     hx-trigger="newLineItem from:body" 
+     hx-swap="outerHTML"
+     class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
     {% if total_items %}
-        Total Items: {{ total_items }}<br>
-        Amount Without Tax : {{ amount_without_tax|floatformat:3 }} <br>
-        {% if invoice.is_igst_applicable %}
-            IGST : {{ total_igst_tax|floatformat:3 }} <br>
-        {% else %}
-            CGST : {{ total_cgst_tax|floatformat:3 }} <br>
-            SGST : {{ total_sgst_tax|floatformat:3 }} <br>
-        {% endif %}
-        Total Tax: {{ total_tax|floatformat:3 }}<br>
-        Total Amount: {{ total_amount|floatformat:3 }}<br>
-        <br>
-    {% endif %}
+        <!-- Basic Info -->
+        <div class="bg-white rounded-lg p-4 shadow-sm">
+            <div class="text-sm text-gray-500">Total Items</div>
+            <div class="text-xl font-semibold text-gray-900">{{ total_items }}</div>
+        </div>
 
+        <!-- Amount Without Tax -->
+        <div class="bg-white rounded-lg p-4 shadow-sm">
+            <div class="text-sm text-gray-500">Amount (Before Tax)</div>
+            <div class="text-xl font-semibold text-gray-900">₹{{ amount_without_tax|floatformat:2 }}</div>
+        </div>
+
+        <!-- Tax Details -->
+        <div class="bg-white rounded-lg p-4 shadow-sm space-y-2">
+            <div class="text-sm text-gray-500">Tax Details</div>
+            {% if invoice.is_igst_applicable %}
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">IGST</span>
+                    <span class="text-sm font-medium text-gray-900">₹{{ total_igst_tax|floatformat:2 }}</span>
+                </div>
+            {% else %}
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">CGST</span>
+                    <span class="text-sm font-medium text-gray-900">₹{{ total_cgst_tax|floatformat:2 }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm text-gray-600">SGST</span>
+                    <span class="text-sm font-medium text-gray-900">₹{{ total_sgst_tax|floatformat:2 }}</span>
+                </div>
+            {% endif %}
+            <div class="flex justify-between items-center pt-2 border-t border-gray-200">
+                <span class="text-sm font-medium text-gray-600">Total Tax</span>
+                <span class="text-sm font-medium text-gray-900">₹{{ total_tax|floatformat:2 }}</span>
+            </div>
+        </div>
+
+        <!-- Total Amount -->
+        <div class="sm:col-span-2 lg:col-span-3 bg-blue-50 rounded-lg p-4 shadow-sm">
+            <div class="flex justify-between items-center">
+                <span class="text-lg font-medium text-blue-900">Total Amount</span>
+                <span class="text-2xl font-bold text-blue-900">₹{{ total_amount|floatformat:2 }}</span>
+            </div>
+        </div>
+    {% else %}
+        <div class="col-span-full text-center py-6 text-gray-500">
+            No items added yet
+        </div>
+    {% endif %}
 </div>
