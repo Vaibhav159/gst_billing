@@ -14,14 +14,16 @@
             <p class="text-gray-600">Created on {{ invoice.invoice_date|date:"d M Y" }}</p>
         </div>
         
-        <div class="flex items-center space-x-3">
-            <button onclick="window.location.href='{% url 'invoice_print' invoice.id %}'"
-                    class="inline-flex items-center px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600">
+        <!-- Invoice detail view buttons -->
+        <div class="flex items-center gap-3">
+            <a href="{% url 'invoice_print' invoice.id %}" 
+               target="_blank"
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
                 </svg>
                 View Bill
-            </button>
+            </a>
             
             {% include "single_component/add_invoice_button.html" %}
         </div>
