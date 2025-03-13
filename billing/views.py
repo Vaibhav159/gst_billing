@@ -260,6 +260,9 @@ class InvoiceAddView(View):
 
         if business_id:
             context["customers"] = Customer.objects.filter(businesses__in=business_id)
+            context["next_invoice_number"] = Invoice.get_next_invoice_number(
+                business_id
+            )
 
         return render(request, "partials/add_invoice_form.html", context=context)
 

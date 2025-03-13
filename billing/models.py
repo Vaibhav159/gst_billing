@@ -3,8 +3,9 @@ from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import CharField, Count, F, Sum, Value
+from django.db.models import CharField, Count, F, IntegerField, Sum, Value
 from django.db.models.functions import (
+    Cast,
     Coalesce,
     Concat,
     ExtractDay,
@@ -252,6 +253,38 @@ class Invoice(AbstractBaseModel):
             self.customer.gst_number
             and self.customer.gst_number[0:2] != self.business.gst_number[0:2]
         )
+
+    @classmethod
+    def get_next_invoice_number(cls, business_id):
+        from datetime import datetime
+
+        today = datetime.now().date()
+        # Get financial year start date (April 1st)
+        start_date = (
+            datetime(today.year - 1, 4, 1).date()
+            if today.month < 4
+            else datetime(today.year, 4, 1).date()
+        )
+
+        last_invoice = (
+            cls.objects.filter(
+                business_id=business_id,
+                invoice_date__gte=start_date,
+                type_of_invoice=INVOICE_TYPE_OUTWARD,
+            )
+            .annotate(invoice_number_int=Cast("invoice_number", IntegerField()))
+            .order_by("-invoice_number_int")
+            .first()
+        )
+
+        if last_invoice:
+            try:
+                next_number = int(last_invoice.invoice_number) + 1
+            except ValueError:
+                # If invoice_number is not an integer, return 1
+                next_number = 1
+            return next_number
+        return 1
 
 
 class LineItem(AbstractBaseModel):
