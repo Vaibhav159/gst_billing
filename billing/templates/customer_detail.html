@@ -1,35 +1,104 @@
 {% extends 'base.html' %}
 
 {% block content %}
+    <div id="customer-detail" class="space-y-6">
+        <!-- Customer Info Section -->
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h3 class="font-medium leading-tight text-3xl mt-0 mb-4 text-blue-600">{{ object.name }}</h3>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="font-semibold">Address:</p>
+                    <p>{{ object.address|default_if_none:"Address not available" }}</p>
+                </div>
+                <div>
+                    <p class="font-semibold">GST Number:</p>
+                    <p>{{ object.gst_number|default_if_none:"GST number not available" }}</p>
+                </div>
+                <div>
+                    <p class="font-semibold">PAN Number:</p>
+                    <p>{{ object.pan_number|default_if_none:"PAN number not available" }}</p>
+                </div>
+                <div>
+                    <p class="font-semibold">Mobile Number:</p>
+                    <p>{{ object.mobile_number|default_if_none:"Mobile number not available" }}</p>
+                </div>
+            </div>
+        </div>
 
-    <div id="customer-detail">
-        <h3 class="font-medium leading-tight text-3xl mt-0 mb-2 text-blue-600">{{ object.name }}</h3>
-        <p>{{ object.address }}</p>
+        <!-- Actions -->
+        <div class="flex items-center justify-left space-x-4">
+            <div class="inline-flex shadow-md hover:shadow-lg focus:shadow-lg" role="group">
+                <a href="{% url 'customer_list' %}"
+                   class="rounded-l inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
+                    &laquo; Customer List
+                </a>
+                <button type="button"
+                        hx-get="{% url 'customer_edit' object.id%}"
+                        hx-trigger="click"
+                        hx-target="#content-body"
+                        class="inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
+                    EDIT
+                </button>
+            </div>
+        </div>
 
-        <p>{{ object.gst_number }}</p>
-        <p>{{ object.business.name }}</p>
-        <p>{{ object.pan_number|default_if_none:"Pan number not avaiable" }}</p>
-        <p>{{ object.mobile_number|default_if_none:"Mobile number not avaiable" }}</p>
-        <br>
+        <!-- Invoices Section -->
+        <div class="bg-white p-6 rounded-lg shadow">
+            <div class="flex justify-between items-center mb-4">
+                <h4 class="font-medium text-2xl text-blue-600">Invoices ({{ invoice_count }})</h4>
+                <a href="{% url 'invoice_add' %}?customer={{ object.id }}" 
+                   class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                    Add Invoice
+                </a>
+            </div>
 
-        <div class="flex items-center justify-left">
-          <div class="inline-flex shadow-md hover:shadow-lg focus:shadow-lg" role="group">
-            <a
-                    href="{% url 'customer_list' %}"
-                    class="rounded-l inline-block px-6 py-2.5 bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
-                        &laquo;  Customer List
-            </a>
-
-            <button
-                    type="button"
-                    hx-get="{% url 'customer_edit' object.id%}"
-                    hx-trigger="click"
-                    hx-target="#content-body"
-                    class=" inline-block px-6 py-2.5
-                    bg-blue-600 text-white font-medium text-xs leading-tight uppercase hover:bg-blue-700 focus:bg-blue-700 focus:outline-none focus:ring-0 active:bg-blue-800 transition duration-150 ease-in-out">
-                EDIT</button>
-          </div>
+            {% if invoices %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="border-b bg-gray-800">
+                        <tr>
+                            <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
+                            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Business Name</th>
+                            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Invoice Date</th>
+                            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Invoice No.</th>
+                            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Amount</th>
+                            <th scope="col" class="text-sm font-medium text-white px-6 py-4">Type</th>
+                            <th scope="col" class="text-sm font-medium text-white py-4 text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for invoice in invoices %}
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                {{ forloop.counter }}
+                            </td>
+                            <td class="text-sm text-gray-900 font-light px-6 py-4 whitespace-nowrap">
+                                {{ invoice.business.name }}
+                            </td>
+                            <td class="text-sm text-gray-900 font-light px-6 py-4 whitespace-nowrap">
+                                {{ invoice.invoice_date }}
+                            </td>
+                            <td class="text-sm text-gray-900 font-light px-6 py-4 whitespace-nowrap">
+                                {{ invoice.invoice_number }}
+                            </td>
+                            <td class="text-sm text-gray-900 font-light px-6 py-4 whitespace-nowrap">
+                                {{ invoice.total_amount }}
+                            </td>
+                            <td class="text-sm text-gray-900 font-light px-6 py-4 whitespace-nowrap">
+                                {{ invoice.get_type_of_invoice_display }}
+                            </td>
+                            <td class="text-sm text-gray-900 font-light px-6 py-4 whitespace-nowrap text-center">
+                                <a href="{% url 'invoice_detail' invoice.id %}" 
+                                   class="text-blue-600 hover:text-blue-900">View</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-4">No invoices found for this customer.</p>
+            {% endif %}
         </div>
     </div>
-
 {% endblock %}
