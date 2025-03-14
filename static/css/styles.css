@@ -315,3 +315,78 @@ select:focus {
         color: #fecaca;
     }
 }
+
+/* styles.css */
+
+/* General navigation bar styles */
+.nav-bar {
+    background-color: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.nav-container {
+    max-width: 7xl;
+    margin: 0 auto;
+    padding: 0 2rem; /* Increased horizontal padding */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 5rem; /* Increased height */
+}
+
+.nav-content {
+    display: flex;
+    align-items: center;
+}
+
+.nav-brand {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.logo-icon {
+    height: 2.5rem; /* Increased logo size */
+    width: auto;
+    color: #4f46e5;
+}
+
+.nav-links {
+    display: flex;
+    margin-left: 3rem; /* Increased left margin */
+}
+
+.nav-links a {
+    margin-left: 1.5rem; /* Increased left margin between links */
+}
+
+.nav-link {
+    display: inline-flex;
+    align-items: center;
+    padding-top: 0.25rem;
+    font-size: 1rem; /* Increased font size */
+    font-weight: 500;
+    color: #4b5563;
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    transition: border-color 0.2s ease;
+}
+
+.nav-link:hover {
+    border-bottom-color: #4f46e5;
+}
+
+/* Dark Mode Styles */
+@media (prefers-color-scheme: dark) {
+    .nav-bar {
+        background-color: #1f2937;
+        box-shadow: 0 1px 3px rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-link {
+        color: #d1d5db;
+    }
+}
