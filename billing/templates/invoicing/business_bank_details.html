@@ -1,25 +1,38 @@
-<table width="100%" border="1" cellspacing="0" cellpadding="0" style="border:1px solid #999999;">
-    <tbody>
-      <tr>
-            <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500; padding:5px; font-family: 'Muli', sans-serif;" align="center">
-                Bank Name : {{ bank_name }}
-            </td>
-        </tr>
-      <tr>
-            <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500;padding:5px; font-family: 'Muli', sans-serif;" align="center">
-                A/c. Number : {{ bank_account_number }}
-            </td>
-        </tr>
-      <tr>
-            <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500; padding:5px; font-family: 'Muli', sans-serif;" align="center">
-                Bank ISFC Code : {{ bank_ifsc_code }}
-            </td>
-        </tr>
+{% load custom_filters %}
 
+<div style="font-size: 10px; width: 100%; margin-top: 5px;">
+  <table style="width: 100%; table-layout: fixed; border-collapse: collapse;">
       <tr>
-        <td style=" font-size:13px; color:{{ invoice.business.primary_color_theme }}; font-weight:500; padding:5px; font-family: 'Muli', sans-serif;" align="center">
-            Bank Branch Name : {{ bank_branch_name }}
-        </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>Bank Name:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {{ bank_name|default:"Not provided"|title }}
+              </span>
+          </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>A/c No:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {{ bank_account_number|default:"Not provided" }}
+              </span>
+          </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>IFSC Code:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {{ bank_ifsc_code|default:"Not provided"|upper }}
+              </span>
+          </td>
+          <td style="width: 25%; padding: 2px 5px;">
+              <strong>Branch:</strong><br>
+              <span style="word-wrap: break-word;">
+                  {% with branch_name=bank_branch_name|default:"Not provided"|title %}
+                      {% if "," in branch_name %}
+                          {{ branch_name|split:","|join:", " }}
+                      {% else %}
+                          {{ branch_name }}
+                      {% endif %}
+                  {% endwith %}
+              </span>
+          </td>
       </tr>
-    </tbody>
-</table>
+  </table>
+</div>

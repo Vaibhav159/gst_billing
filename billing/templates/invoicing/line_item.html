@@ -1,13 +1,13 @@
 {% if print_view %}
 <!-- Print View -->
-<tr style="font-size:13px; color:#000; padding:5px; font-family: 'Muli', sans-serif;">
-    <td height="30" style="padding-left:10px">{{ index }}.</td>
-    <td id="bordered-left-aligned-td">{{ item.product_name }}</td>
-    <td class="bordered_td">{{ item.hsn_code }}</td>
-    <td class="bordered_td">{{ item.gst_tax_in_percentage }}</td>
-    <td class="bordered_td">{{ item.quantity }} gm</td>
-    <td class="bordered_td">{{ item.rate }}/g</td>
-    <td class="bordered_td">{{ item.amount_without_tax|floatformat:3 }}</td>
+<tr class="text-sm">
+    <td class="text-gray-800">{{ index }}</td>
+    <td class="text-gray-800">{{ item.product_name }}</td>
+    <td class="text-center text-gray-600">{{ item.hsn_code }}</td>
+    <td class="text-center text-gray-600">{{ item.gst_tax_in_percentage }}</td>
+    <td class="text-right text-gray-600">{{ item.quantity }} gm</td>
+    <td class="text-right text-gray-600">₹{{ item.rate }}/g</td>
+    <td class="text-right text-gray-800">₹{{ item.amount_without_tax|floatformat:2 }}</td>
 </tr>
 {% else %}
 <!-- Regular View -->
