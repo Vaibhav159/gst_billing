@@ -176,3 +176,142 @@
         background-color: #374151; /* dark:hover:bg-gray-700 */
     }
 }
+
+/* styles.css */
+
+/* Form submit button */
+.form-submit-button {
+    background-color: #3b82f6; /* bg-blue-500 */
+    color: white; /* text-white */
+    font-weight: 700; /* font-bold */
+    padding: 0.5rem 1rem; /* py-2 px-4 */
+    border-radius: 0.25rem; /* rounded */
+    transition: background-color 0.2s ease; /* transition-colors duration-150 - More concise */
+    cursor: pointer; /* Add a pointer cursor for better UX */
+    border: none; /* Remove default button border */
+}
+
+.form-submit-button:hover {
+    background-color: #2563eb; /* hover:bg-blue-700 */
+}
+
+/* Dark Mode Styles (adjust as needed) */
+@media (prefers-color-scheme: dark) {
+    .form-submit-button {
+        background-color: #60a5fa; /* Slightly lighter blue in dark mode */
+    }
+
+    .form-submit-button:hover {
+        background-color: #3b82f6;
+    }
+}
+
+/* styles.css */
+
+/* Form container */
+.form-container {
+    max-width: 600px; /* Adjust as needed */
+    margin: 0 auto;
+    padding: 2rem;
+    background-color: #fff;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Custom form */
+.custom-form {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Form group */
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+/* Form label */
+.form-label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: #374151;
+}
+
+/* Form input and textarea */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+textarea,
+select {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    transition: border-color 0.2s ease;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+textarea:focus,
+select:focus {
+    border-color: #2563eb;
+    outline: none;
+    box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.25);
+}
+
+/* Form text (help text) */
+.form-text {
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+/* Form error */
+.form-error {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background-color: #fef2f2;
+    color: #b91c1c;
+    border-radius: 0.375rem;
+    border: 1px solid #fecaca;
+}
+
+/* Dark Mode Styles */
+@media (prefers-color-scheme: dark) {
+    .form-container {
+        background-color: #1f2937;
+        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.5);
+    }
+
+    .form-label {
+        color: #d1d5db;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    textarea,
+    select {
+        background-color: #374151;
+        border-color: #4b5563;
+        color: #d1d5db;
+    }
+
+    .form-text {
+        color: #9ca3af;
+    }
+
+    .form-error {
+        background-color: #450a0a;
+        border-color: #881307;
+        color: #fecaca;
+    }
+}
