@@ -74,3 +74,105 @@
         border-top-color: #4B5563; /* dark:divide-gray-600 */
     }
 }
+
+/* styles.css */
+
+/* General styles for product data cells */
+.product-data-cell {
+    padding: 0.75rem 1.5rem; /* px-6 py-4 */
+    white-space: nowrap; /* whitespace-nowrap */
+    font-size: 0.875rem; /* text-sm */
+    color: #374151; /* text-gray-700 */
+}
+
+/* Style for the Product ID cell (inherits from product-data-cell) */
+.product-id {
+    font-weight: 500; /* font-medium */
+    color: #111827; /* text-gray-900 */
+}
+
+/* Container for product action buttons */
+.product-actions {
+    display: flex;
+    gap: 0.5rem; /* space-x-2 converted to gap */
+}
+
+/* General styles for all product action buttons */
+.product-action-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem; /* px-3 py-2 */
+    border: 1px solid transparent; /* border border-transparent */
+    font-size: 0.875rem; /* text-sm */
+    font-weight: 500; /* font-medium */
+    border-radius: 0.375rem; /* rounded-md */
+    transition: all 150ms ease; /* transition-colors duration-150 - More concise */
+}
+
+/* Specific styles for the Edit button */
+.product-edit {
+    color: #2563eb; /* text-blue-600 */
+    background-color: #eff2ff; /* bg-blue-100 */
+}
+
+.product-edit:hover {
+    background-color: #dbeafe; /* hover:bg-blue-200 */
+}
+
+/* Specific styles for the Delete button */
+.product-delete {
+    color: #b91c1c; /* text-red-600 */
+    background-color: #fef2f2; /* bg-red-100 */
+}
+
+.product-delete:hover {
+    background-color: #fee2e2; /* hover:bg-red-200 */
+}
+
+/* Style the icon within the buttons */
+.icon {
+    width: 1.25rem; /* h-5 */
+    height: 1.25rem; /* w-5 */
+    margin-right: 0.25rem; /* mr-1 */
+}
+
+/* Style for the cell containing the action buttons */
+.product-actions-cell {
+    text-align: center; /* Center the content horizontally */
+}
+
+/* Style for the "Load More" cell */
+.load-more-cell {
+    padding: 1rem 1.5rem; /* px-6 py-4 */
+    text-align: center; /* text-center */
+}
+
+/* Style for the "Load More" button */
+.load-more-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 1.25rem; /* px-5 py-2 */
+    border-radius: 0.375rem; /* rounded-md */
+    background-color: #1f2937; /* bg-gray-800 */
+    color: white; /* text-white */
+    font-weight: 500;
+}
+
+.load-more-button:hover {
+    background-color: #374151; /* hover:bg-gray-700 */
+}
+
+/* Dark Mode Styles */
+@media (prefers-color-scheme: dark) {
+    .product-data-cell {
+        color: #D1D5DB; /* dark:text-gray-300 */
+    }
+
+    .load-more-button {
+        background-color: #4B5563; /* dark:bg-gray-600 */
+    }
+
+    .load-more-button:hover {
+        background-color: #374151; /* dark:hover:bg-gray-700 */
+    }
+}
