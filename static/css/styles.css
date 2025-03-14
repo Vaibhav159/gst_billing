@@ -25,3 +25,293 @@
 .htmx-request.htmx-indicator {
     opacity: 1;
 }
+
+.product-table-container {
+    background-color: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    overflow-x: auto;
+}
+
+.product-table {
+    min-width: 100%;
+    border-collapse: collapse; /* Optional, for table styling */
+}
+
+.product-table-header {
+    background-color: #374151; /* bg-gray-800 */
+}
+
+.product-table-header-cell {
+    padding: 0.75rem 1.5rem; /* px-6 py-3 */
+    text-align: left;
+    font-size: 0.75rem; /* text-xs */
+    font-weight: 500; /* font-medium */
+    color: white; /* text-white */
+    text-transform: uppercase; /* uppercase */
+    letter-spacing: 0.05em; /* tracking-wider */
+}
+
+.product-table-body {
+    background-color: white;
+    border-top: 1px solid #D1D5DB; /* divide-gray-200 */
+}
+
+/* Dark mode styles (using prefers-color-scheme) */
+@media (prefers-color-scheme: dark) {
+    .product-table-container {
+        background-color: #111827; /* dark:bg-gray-900 */
+        box-shadow: none; /* dark:shadow-none */
+    }
+
+    .product-table-header {
+        background-color: #4B5563; /* dark:bg-gray-700 */
+    }
+
+    .product-table-body {
+        background-color: #1F2937; /* dark:bg-gray-800 */
+        color: #D1D5DB; /* dark:text-gray-300 */
+        border-top-color: #4B5563; /* dark:divide-gray-600 */
+    }
+}
+
+/* styles.css */
+
+/* General styles for product data cells */
+.product-data-cell {
+    padding: 0.75rem 1.5rem; /* px-6 py-4 */
+    white-space: nowrap; /* whitespace-nowrap */
+    font-size: 0.875rem; /* text-sm */
+    color: #374151; /* text-gray-700 */
+}
+
+/* Style for the Product ID cell (inherits from product-data-cell) */
+.product-id {
+    font-weight: 500; /* font-medium */
+    color: #111827; /* text-gray-900 */
+}
+
+/* Container for product action buttons */
+.product-actions {
+    display: flex;
+    gap: 0.5rem; /* space-x-2 converted to gap */
+}
+
+/* General styles for all product action buttons */
+.product-action-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem; /* px-3 py-2 */
+    border: 1px solid transparent; /* border border-transparent */
+    font-size: 0.875rem; /* text-sm */
+    font-weight: 500; /* font-medium */
+    border-radius: 0.375rem; /* rounded-md */
+    transition: all 150ms ease; /* transition-colors duration-150 - More concise */
+}
+
+/* Specific styles for the Edit button */
+.product-edit {
+    color: #2563eb; /* text-blue-600 */
+    background-color: #eff2ff; /* bg-blue-100 */
+}
+
+.product-edit:hover {
+    background-color: #dbeafe; /* hover:bg-blue-200 */
+}
+
+/* Specific styles for the Delete button */
+.product-delete {
+    color: #b91c1c; /* text-red-600 */
+    background-color: #fef2f2; /* bg-red-100 */
+}
+
+.product-delete:hover {
+    background-color: #fee2e2; /* hover:bg-red-200 */
+}
+
+/* Style the icon within the buttons */
+.icon {
+    width: 1.25rem; /* h-5 */
+    height: 1.25rem; /* w-5 */
+    margin-right: 0.25rem; /* mr-1 */
+}
+
+/* Style for the cell containing the action buttons */
+.product-actions-cell {
+    text-align: center; /* Center the content horizontally */
+}
+
+/* Style for the "Load More" cell */
+.load-more-cell {
+    padding: 1rem 1.5rem; /* px-6 py-4 */
+    text-align: center; /* text-center */
+}
+
+/* Style for the "Load More" button */
+.load-more-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 1.25rem; /* px-5 py-2 */
+    border-radius: 0.375rem; /* rounded-md */
+    background-color: #1f2937; /* bg-gray-800 */
+    color: white; /* text-white */
+    font-weight: 500;
+}
+
+.load-more-button:hover {
+    background-color: #374151; /* hover:bg-gray-700 */
+}
+
+/* Dark Mode Styles */
+@media (prefers-color-scheme: dark) {
+    .product-data-cell {
+        color: #D1D5DB; /* dark:text-gray-300 */
+    }
+
+    .load-more-button {
+        background-color: #4B5563; /* dark:bg-gray-600 */
+    }
+
+    .load-more-button:hover {
+        background-color: #374151; /* dark:hover:bg-gray-700 */
+    }
+}
+
+/* styles.css */
+
+/* Form submit button */
+.form-submit-button {
+    background-color: #3b82f6; /* bg-blue-500 */
+    color: white; /* text-white */
+    font-weight: 700; /* font-bold */
+    padding: 0.5rem 1rem; /* py-2 px-4 */
+    border-radius: 0.25rem; /* rounded */
+    transition: background-color 0.2s ease; /* transition-colors duration-150 - More concise */
+    cursor: pointer; /* Add a pointer cursor for better UX */
+    border: none; /* Remove default button border */
+}
+
+.form-submit-button:hover {
+    background-color: #2563eb; /* hover:bg-blue-700 */
+}
+
+/* Dark Mode Styles (adjust as needed) */
+@media (prefers-color-scheme: dark) {
+    .form-submit-button {
+        background-color: #60a5fa; /* Slightly lighter blue in dark mode */
+    }
+
+    .form-submit-button:hover {
+        background-color: #3b82f6;
+    }
+}
+
+/* styles.css */
+
+/* Form container */
+.form-container {
+    max-width: 600px; /* Adjust as needed */
+    margin: 0 auto;
+    padding: 2rem;
+    background-color: #fff;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Custom form */
+.custom-form {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Form group */
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+/* Form label */
+.form-label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: #374151;
+}
+
+/* Form input and textarea */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+textarea,
+select {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    transition: border-color 0.2s ease;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+textarea:focus,
+select:focus {
+    border-color: #2563eb;
+    outline: none;
+    box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.25);
+}
+
+/* Form text (help text) */
+.form-text {
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+/* Form error */
+.form-error {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background-color: #fef2f2;
+    color: #b91c1c;
+    border-radius: 0.375rem;
+    border: 1px solid #fecaca;
+}
+
+/* Dark Mode Styles */
+@media (prefers-color-scheme: dark) {
+    .form-container {
+        background-color: #1f2937;
+        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.5);
+    }
+
+    .form-label {
+        color: #d1d5db;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    textarea,
+    select {
+        background-color: #374151;
+        border-color: #4b5563;
+        color: #d1d5db;
+    }
+
+    .form-text {
+        color: #9ca3af;
+    }
+
+    .form-error {
+        background-color: #450a0a;
+        border-color: #881307;
+        color: #fecaca;
+    }
+}

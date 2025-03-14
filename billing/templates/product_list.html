@@ -19,17 +19,17 @@
   </div>
 
   <!-- Products Table -->
-  <div class="bg-white rounded-lg shadow overflow-x-auto dark:bg-gray-900 dark:shadow-none">
-    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-      <thead class="bg-gray-800 dark:bg-gray-700">
+  <div class="product-table-container">
+    <table class="product-table">
+      <thead class="product-table-header">
         <tr>
-          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">#</th>
-          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Product Name</th>
-          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">HSN Code</th>
-          <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-white uppercase tracking-wider">Action</th>
+          <th scope="col" class="product-table-header-cell">#</th>
+          <th scope="col" class="product-table-header-cell">Product Name</th>
+          <th scope="col" class="product-table-header-cell">HSN Code</th>
+          <th scope="col" class="product-table-header-cell">Action</th>
         </tr>
       </thead>
-      <tbody class="bg-white divide-y divide-gray-200 dark:bg-gray-800 dark:divide-gray-600 dark:text-gray-300">
+      <tbody class="product-table-body">
         {% include 'partials/product_data_list.html' %}
       </tbody>
     </table>
