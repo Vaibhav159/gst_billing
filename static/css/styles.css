@@ -25,3 +25,52 @@
 .htmx-request.htmx-indicator {
     opacity: 1;
 }
+
+.product-table-container {
+    background-color: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    overflow-x: auto;
+}
+
+.product-table {
+    min-width: 100%;
+    border-collapse: collapse; /* Optional, for table styling */
+}
+
+.product-table-header {
+    background-color: #374151; /* bg-gray-800 */
+}
+
+.product-table-header-cell {
+    padding: 0.75rem 1.5rem; /* px-6 py-3 */
+    text-align: left;
+    font-size: 0.75rem; /* text-xs */
+    font-weight: 500; /* font-medium */
+    color: white; /* text-white */
+    text-transform: uppercase; /* uppercase */
+    letter-spacing: 0.05em; /* tracking-wider */
+}
+
+.product-table-body {
+    background-color: white;
+    border-top: 1px solid #D1D5DB; /* divide-gray-200 */
+}
+
+/* Dark mode styles (using prefers-color-scheme) */
+@media (prefers-color-scheme: dark) {
+    .product-table-container {
+        background-color: #111827; /* dark:bg-gray-900 */
+        box-shadow: none; /* dark:shadow-none */
+    }
+
+    .product-table-header {
+        background-color: #4B5563; /* dark:bg-gray-700 */
+    }
+
+    .product-table-body {
+        background-color: #1F2937; /* dark:bg-gray-800 */
+        color: #D1D5DB; /* dark:text-gray-300 */
+        border-top-color: #4B5563; /* dark:divide-gray-600 */
+    }
+}
