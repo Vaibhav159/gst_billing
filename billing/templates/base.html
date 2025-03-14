@@ -1,51 +1,150 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full bg-gray-50">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Billing</title>
+    <title>{% block title %}GST Billing{% endblock %}</title>
 
-    <!-- Bootstrap CSS -->
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 
-    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <script src="https://unpkg.com/htmx.org@1.6.1"></script>
-    <script src="https://unpkg.com/hyperscript.org@0.9.7"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tw-elements/dist/css/index.min.css" />
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HTMX and Hyperscript -->
+    <script src="https://unpkg.com/htmx.org@1.9.6" integrity="sha384-FhXw7b6AlE/jyjlZH5iHa/tTe9EpJ1Y55RjcgPbjeWMskSxZt1v9qkxLJWNJaGni" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/hyperscript.org@0.9.11"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
-          }
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        },
+                    }
+                }
+            }
         }
-      }
     </script>
+
+    <!-- Custom Styles -->
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* HTMX indicator animation */
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+        .htmx-request .htmx-indicator {
+            opacity: 1
+        }
+        .htmx-request.htmx-indicator {
+            opacity: 1
+        }
+    </style>
+
+    {% block extra_head %}{% endblock %}
 </head>
 
-<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-    <div id="content-body">
+<body class="h-full" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    <!-- Global Loading Indicator -->
+    <div id="global-loading" 
+         class="htmx-indicator fixed top-4 right-4 z-50 bg-blue-600 text-white px-4 py-2 rounded-md shadow-lg flex items-center">
+        <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Loading...
+    </div>
+
+    <!-- Main Layout -->
+    <div class="min-h-full">
         {% include 'nav_bar.html' %}
-        <div class="container mt-4">
-            {% block content %}
-                {% include 'category_cards.html' %}
-            {% endblock %}
+
+        <!-- Main Content -->
+        <div id="content-body" class="py-6">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {% block content %}
+                    {% include 'category_cards.html' %}
+                {% endblock %}
+            </div>
+        </div>
+
+        <!-- Toast Messages -->
+        <div id="toast-container" 
+             class="fixed bottom-4 right-4 z-50 space-y-2"
+             _="on showToast(message, type: 'success')
+                prepend the message as a div with the classes
+                'px-4 py-2 rounded-md shadow-lg text-white transition-all duration-300 transform translate-x-full'
+                and the background class {
+                    'success': 'bg-green-500',
+                    'error': 'bg-red-500',
+                    'info': 'bg-blue-500'
+                }[type]
+                then wait 10ms
+                then remove .translate-x-full from it
+                wait 5s
+                add .translate-x-full to it
+                wait 300ms
+                remove it">
         </div>
     </div>
-</body>
 
-{% block javascripts %}
-{% endblock %}
+    <!-- Base JavaScript -->
+    <script>
+        // Handle form validation errors
+        document.body.addEventListener('htmx:responseError', function(evt) {
+            const toast = document.getElementById('toast-container');
+            toast.dispatchEvent(new CustomEvent('showToast', {
+                detail: { message: 'An error occurred. Please try again.', type: 'error' }
+            }));
+        });
+
+        // Handle successful actions
+        document.body.addEventListener('htmx:afterOnLoad', function(evt) {
+            if (evt.detail.pathInfo.requestPath.includes('success')) {
+                const toast = document.getElementById('toast-container');
+                toast.dispatchEvent(new CustomEvent('showToast', {
+                    detail: { message: 'Action completed successfully!', type: 'success' }
+                }));
+            }
+        });
+    </script>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
 </html>

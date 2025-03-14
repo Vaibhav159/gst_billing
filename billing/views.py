@@ -442,7 +442,6 @@ class PrintInvoiceView(View):
     def get(self, request, invoice_id=None):
         invoice = Invoice.objects.get(id=invoice_id)
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
-
         invoice_summary = LineItem.get_invoice_summary(invoice_id=invoice_id)
 
         return render(
@@ -451,6 +450,7 @@ class PrintInvoiceView(View):
             context={
                 "invoice": invoice,
                 "line_items": line_items,
+                "print_view": True,
                 "amount_in_words": num2words(
                     invoice_summary["total_amount"], lang="en_IN"
                 ).title(),
@@ -707,3 +707,15 @@ class CustomerSearchView(View):
         return render(
             request, "partials/customer_search_results.html", {"customers": customers}
         )
+
+
+class LineItemDeleteView(DeleteView):
+    model = LineItem
+
+    def delete(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        self.object.delete()
+        return HttpResponse(status=200)
+
+    def get(self, request, *args, **kwargs):
+        return self.delete(request, *args, **kwargs)

@@ -1,27 +1,21 @@
 <div id="line_items_list">
-    <table class="table table-hover" id="line-item-table">
-
-        <thead class="border-b bg-gray-800">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
             <tr>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">#</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Product Name</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Quantity</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Rate</th>
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">GST%</th>
-
-                {% if invoice.is_igst_applicable %}
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">IGST</th>
-                {% else %}
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">CGST</th>
-                    <th scope="col" class="text-sm font-medium text-white px-6 py-4">SGST</th>
-                {% endif %}
-
-                <th scope="col" class="text-sm font-medium text-white px-6 py-4">Total Amount</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">HSN</th>
+                <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">GST %</th>
+                <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
+                <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
         </thead>
-        <tbody>
-            {% include 'partials/line_item_data_list.html' with line_items=line_items %}
+        <tbody class="bg-white divide-y divide-gray-200">
+            {% for item in line_items %}
+                {% include 'invoicing/line_item.html' with item=item index=forloop.counter %}
+            {% endfor %}
         </tbody>
-
     </table>
 </div>

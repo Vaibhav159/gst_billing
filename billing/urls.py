@@ -19,6 +19,7 @@ from billing.views import (
     InvoiceListView,
     InvoiceSummaryView,
     InvoiceView,
+    LineItemDeleteView,
     LineItemView,
     PrintInvoiceView,
     ProductDeleteView,
@@ -87,8 +88,13 @@ urlpatterns = [
         name="invoice_delete",
     ),
     # line items
-    path("line_item/", LineItemView.as_view(), name="line_item_inline_form"),
+    path("line_item/", LineItemView.as_view(), name="line_item_add"),
     path("download_invoice/", DownloadInvoicesView.as_view(), name="download_invoice"),
+    path(
+        "invoice/<int:invoice_id>/line-item/delete/<int:pk>/",
+        LineItemDeleteView.as_view(),
+        name="line_item_delete",
+    ),
     # product urls
     path("product/", ProductView.as_view(), name="product_form"),
     path("product/list/", ProductListView.as_view(), name="product_list"),
