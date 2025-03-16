@@ -1,7 +1,9 @@
+/* Custom styles for product list */
 .product-list-header {
     font-size: 2.25rem; /* equivalent to text-4xl */
     font-weight: 500;   /* equivalent to font-medium */
     color: #2563eb;     /* equivalent to text-blue-600 */
+    margin-bottom: 1.5rem; /* equivalent to mb-6 */
 }
 
 .add-product-button {
@@ -14,6 +16,7 @@
     border-radius: 0.375rem; /* equivalent to rounded-md */
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* equivalent to shadow */
     transition: background-color 0.2s;
+    cursor: pointer;
 }
 
 .add-product-button:hover {
@@ -23,4 +26,30 @@
 .add-product-button:focus {
     outline: none;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* equivalent to focus:ring-2 focus:ring-blue-500 */
+}
+
+.product-list-container {
+    background-color: #ffffff; /* equivalent to bg-white */
+    border-radius: 0.5rem; /* equivalent to rounded-lg */
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); /* equivalent to shadow */
+    overflow-x: auto;
+}
+
+.table-header {
+    background-color: #1f2937; /* equivalent to bg-gray-800 */
+}
+
+.table-header th {
+    padding: 0.75rem 1.5rem; /* equivalent to px-6 py-3 */
+    text-align: left;
+    font-size: 0.75rem; /* equivalent to text-xs */
+    font-weight: 500; /* equivalent to font-medium */
+    color: #ffffff; /* equivalent to text-white */
+    text-transform: uppercase;
+    letter-spacing: 0.05em; /* equivalent to tracking-wider */
+}
+
+.table-body {
+    background-color: #ffffff; /* equivalent to bg-white */
+    border-top: 1px solid #e5e7eb; /* equivalent to divide-y divide-gray-200 */
 }
