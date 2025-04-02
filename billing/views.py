@@ -481,11 +481,24 @@ class DownloadInvoicesView(View):
             else:
                 return f"{start_date_str} to {end_date_str}"
 
-    @staticmethod
-    def generate_report_for_business(workbook, business, start_date, end_date):
+    @classmethod
+    def generate_report_for_business(cls, workbook, business, start_date, end_date):
 
         business_name = business.name
         sheet = workbook.create_sheet(title=business_name)
+
+        # Initialize overall totals for the business
+        overall_outward_taxable = Decimal("0")
+        overall_outward_cgst = Decimal("0")
+        overall_outward_sgst = Decimal("0")
+        overall_outward_igst = Decimal("0")
+        overall_outward_total = Decimal("0")
+
+        overall_inward_taxable = Decimal("0")
+        overall_inward_cgst = Decimal("0")
+        overall_inward_sgst = Decimal("0")
+        overall_inward_igst = Decimal("0")
+        overall_inward_total = Decimal("0")
 
         month_wise_split_date = split_dates(start_date, end_date)
 
@@ -503,7 +516,13 @@ class DownloadInvoicesView(View):
                 invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
             )
 
-            DownloadInvoicesView.add_invoice_data_to_sheet(
+            (
+                out_taxable,
+                out_cgst,
+                out_sgst,
+                out_igst,
+                out_total,
+            ) = DownloadInvoicesView.add_invoice_data_to_sheet(
                 business,
                 business_name,
                 date_range_string,
@@ -511,12 +530,24 @@ class DownloadInvoicesView(View):
                 sheet,
                 supply_type="Outward Supply",
             )
+            if out_taxable:  # Check if data was added
+                overall_outward_taxable += out_taxable
+                overall_outward_cgst += out_cgst
+                overall_outward_sgst += out_sgst
+                overall_outward_igst += out_igst
+                overall_outward_total += out_total
 
             inward_invoices = line_item_data.filter(
                 invoice__type_of_invoice=INVOICE_TYPE_INWARD
             )
 
-            DownloadInvoicesView.add_invoice_data_to_sheet(
+            (
+                in_taxable,
+                in_cgst,
+                in_sgst,
+                in_igst,
+                in_total,
+            ) = DownloadInvoicesView.add_invoice_data_to_sheet(
                 business,
                 business_name,
                 date_range_string,
@@ -524,6 +555,51 @@ class DownloadInvoicesView(View):
                 sheet,
                 supply_type="Inward Supply",
             )
+            if in_taxable:  # Check if data was added
+                overall_inward_taxable += in_taxable
+                overall_inward_cgst += in_cgst
+                overall_inward_sgst += in_sgst
+                overall_inward_igst += in_igst
+                overall_inward_total += in_total
+
+        # Add aggregated sections at the end
+        date_range_str = cls.get_date_range_string(start_date, end_date)
+
+        if overall_outward_taxable:
+            sheet.append([])  # Add a blank row for spacing
+            sheet.append(
+                [""] * 5
+                + [
+                    f"Aggregated Outward Supply ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    overall_outward_taxable,
+                    overall_outward_cgst,
+                    overall_outward_sgst,
+                    overall_outward_igst,
+                    overall_outward_total,
+                ]
+            )
+
+        if overall_inward_taxable:
+            sheet.append(
+                [""] * 5
+                + [
+                    f"Aggregated Inward Supply ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    overall_inward_taxable,
+                    overall_inward_cgst,
+                    overall_inward_sgst,
+                    overall_inward_igst,
+                    overall_inward_total,
+                ]
+            )
+            sheet.append([])  # Add a blank row for spacing
 
     @staticmethod
     def add_invoice_data_to_sheet(
@@ -538,7 +614,14 @@ class DownloadInvoicesView(View):
             return ([""] * 5) + [data]
 
         if not invoices:
-            return
+            # Return zero values if there are no invoices for this section
+            return (
+                Decimal("0"),
+                Decimal("0"),
+                Decimal("0"),
+                Decimal("0"),
+                Decimal("0"),
+            )
 
         total_taxable_value = total_cgst = total_sgst = total_igst = (
             total_invoice_value
@@ -580,6 +663,15 @@ class DownloadInvoicesView(View):
         )
 
         sheet.append([])
+
+        # Return the calculated totals for this section
+        return (
+            total_taxable_value,
+            total_cgst,
+            total_sgst,
+            total_igst,
+            total_invoice_value,
+        )
 
     @classmethod
     def generate_csv_response(cls, start_date, end_date):
