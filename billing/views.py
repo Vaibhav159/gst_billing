@@ -482,7 +482,9 @@ class DownloadInvoicesView(View):
                 return f"{start_date_str} to {end_date_str}"
 
     @classmethod
-    def generate_report_for_business(cls, workbook, business, start_date, end_date):
+    def generate_report_for_business(
+        cls, workbook, business, start_date, end_date, invoice_type
+    ):
 
         business_name = business.name
         sheet = workbook.create_sheet(title=business_name)
@@ -503,69 +505,64 @@ class DownloadInvoicesView(View):
         month_wise_split_date = split_dates(start_date, end_date)
 
         for month_start_date, month_end_date in month_wise_split_date:
-
             date_range_string = DownloadInvoicesView.get_date_range_string(
                 month_start_date, month_end_date
             )
 
-            line_item_data = LineItem.get_line_item_data_for_download(
+            # Get base data for the month
+            base_line_item_data = LineItem.get_line_item_data_for_download(
                 start_date=month_start_date, end_date=month_end_date, business=business
             )
 
-            outwards_invoices = line_item_data.filter(
-                invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
-            )
+            # Process Outward if requested ('outward' or 'both')
+            if invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
+                outwards_invoices = base_line_item_data.filter(
+                    invoice__type_of_invoice=INVOICE_TYPE_OUTWARD
+                )
+                if outwards_invoices.exists():  # Only add section if there's data
+                    (out_taxable, out_cgst, out_sgst, out_igst, out_total) = (
+                        DownloadInvoicesView.add_invoice_data_to_sheet(
+                            business,
+                            business_name,
+                            date_range_string,
+                            outwards_invoices,
+                            sheet,
+                            supply_type="Outward Supply",
+                        )
+                    )
+                    overall_outward_taxable += out_taxable
+                    overall_outward_cgst += out_cgst
+                    overall_outward_sgst += out_sgst
+                    overall_outward_igst += out_igst
+                    overall_outward_total += out_total
 
-            (
-                out_taxable,
-                out_cgst,
-                out_sgst,
-                out_igst,
-                out_total,
-            ) = DownloadInvoicesView.add_invoice_data_to_sheet(
-                business,
-                business_name,
-                date_range_string,
-                outwards_invoices,
-                sheet,
-                supply_type="Outward Supply",
-            )
-            if out_taxable:  # Check if data was added
-                overall_outward_taxable += out_taxable
-                overall_outward_cgst += out_cgst
-                overall_outward_sgst += out_sgst
-                overall_outward_igst += out_igst
-                overall_outward_total += out_total
-
-            inward_invoices = line_item_data.filter(
-                invoice__type_of_invoice=INVOICE_TYPE_INWARD
-            )
-
-            (
-                in_taxable,
-                in_cgst,
-                in_sgst,
-                in_igst,
-                in_total,
-            ) = DownloadInvoicesView.add_invoice_data_to_sheet(
-                business,
-                business_name,
-                date_range_string,
-                inward_invoices,
-                sheet,
-                supply_type="Inward Supply",
-            )
-            if in_taxable:  # Check if data was added
-                overall_inward_taxable += in_taxable
-                overall_inward_cgst += in_cgst
-                overall_inward_sgst += in_sgst
-                overall_inward_igst += in_igst
-                overall_inward_total += in_total
+            # Process Inward if requested ('inward' or 'both')
+            if invoice_type in [INVOICE_TYPE_INWARD, "both"]:
+                inward_invoices = base_line_item_data.filter(
+                    invoice__type_of_invoice=INVOICE_TYPE_INWARD
+                )
+                if inward_invoices.exists():  # Only add section if there's data
+                    (in_taxable, in_cgst, in_sgst, in_igst, in_total) = (
+                        DownloadInvoicesView.add_invoice_data_to_sheet(
+                            business,
+                            business_name,
+                            date_range_string,
+                            inward_invoices,
+                            sheet,
+                            supply_type="Inward Supply",
+                        )
+                    )
+                    overall_inward_taxable += in_taxable
+                    overall_inward_cgst += in_cgst
+                    overall_inward_sgst += in_sgst
+                    overall_inward_igst += in_igst
+                    overall_inward_total += in_total
 
         # Add aggregated sections at the end
         date_range_str = cls.get_date_range_string(start_date, end_date)
 
-        if overall_outward_taxable:
+        # Only add aggregated outward if it has data and was requested
+        if overall_outward_taxable and invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
             sheet.append([])  # Add a blank row for spacing
             sheet.append(
                 [""] * 5
@@ -583,7 +580,8 @@ class DownloadInvoicesView(View):
                 ]
             )
 
-        if overall_inward_taxable:
+        # Only add aggregated inward if it has data and was requested
+        if overall_inward_taxable and invoice_type in [INVOICE_TYPE_INWARD, "both"]:
             sheet.append(
                 [""] * 5
                 + [
@@ -674,7 +672,7 @@ class DownloadInvoicesView(View):
         )
 
     @classmethod
-    def generate_csv_response(cls, start_date, end_date):
+    def generate_csv_response(cls, start_date, end_date, invoice_type):
         # Generate Excel file and return HTTP response
 
         workbook = Workbook()
@@ -683,7 +681,7 @@ class DownloadInvoicesView(View):
 
         for business in Business.objects.all():
             DownloadInvoicesView.generate_report_for_business(
-                workbook, business, start_date, end_date
+                workbook, business, start_date, end_date, invoice_type
             )
 
         response = HttpResponse(
@@ -701,8 +699,9 @@ class DownloadInvoicesView(View):
         # Retrieve invoices queryset, generate CSV, and return HTTP response
         start_date = request.POST.get("start_invoice_date")
         end_date = request.POST.get("end_invoice_date")
+        invoice_type = request.POST.get("invoice_type")
 
-        return self.generate_csv_response(start_date, end_date)
+        return self.generate_csv_response(start_date, end_date, invoice_type)
 
     def get(self, request, *args, **kwargs):
         context = {
