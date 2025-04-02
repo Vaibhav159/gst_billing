@@ -530,7 +530,7 @@ class DownloadInvoicesView(View):
                 sheet,
                 supply_type="Outward Supply",
             )
-            if out_taxable is not None:  # Check if data was added
+            if out_taxable:  # Check if data was added
                 overall_outward_taxable += out_taxable
                 overall_outward_cgst += out_cgst
                 overall_outward_sgst += out_sgst
@@ -555,7 +555,7 @@ class DownloadInvoicesView(View):
                 sheet,
                 supply_type="Inward Supply",
             )
-            if in_taxable is not None:  # Check if data was added
+            if in_taxable:  # Check if data was added
                 overall_inward_taxable += in_taxable
                 overall_inward_cgst += in_cgst
                 overall_inward_sgst += in_sgst
