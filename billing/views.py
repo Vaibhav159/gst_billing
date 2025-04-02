@@ -564,38 +564,42 @@ class DownloadInvoicesView(View):
 
         # Add aggregated sections at the end
         date_range_str = cls.get_date_range_string(start_date, end_date)
-        sheet.append([])  # Add a blank row for spacing
-        sheet.append(
-            [""] * 5
-            + [
-                f"Aggregated Outward Supply ({date_range_str})",
-                "",
-                "",
-                "",
-                "",
-                overall_outward_taxable,
-                overall_outward_cgst,
-                overall_outward_sgst,
-                overall_outward_igst,
-                overall_outward_total,
-            ]
-        )
-        sheet.append(
-            [""] * 5
-            + [
-                f"Aggregated Inward Supply ({date_range_str})",
-                "",
-                "",
-                "",
-                "",
-                overall_inward_taxable,
-                overall_inward_cgst,
-                overall_inward_sgst,
-                overall_inward_igst,
-                overall_inward_total,
-            ]
-        )
-        sheet.append([])  # Add a blank row for spacing
+
+        if overall_outward_taxable:
+            sheet.append([])  # Add a blank row for spacing
+            sheet.append(
+                [""] * 5
+                + [
+                    f"Aggregated Outward Supply ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    overall_outward_taxable,
+                    overall_outward_cgst,
+                    overall_outward_sgst,
+                    overall_outward_igst,
+                    overall_outward_total,
+                ]
+            )
+
+        if overall_inward_taxable:
+            sheet.append(
+                [""] * 5
+                + [
+                    f"Aggregated Inward Supply ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    overall_inward_taxable,
+                    overall_inward_cgst,
+                    overall_inward_sgst,
+                    overall_inward_igst,
+                    overall_inward_total,
+                ]
+            )
+            sheet.append([])  # Add a blank row for spacing
 
     @staticmethod
     def add_invoice_data_to_sheet(
