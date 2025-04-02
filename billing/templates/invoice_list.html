@@ -108,12 +108,12 @@
                 <p class="text-2xl font-semibold text-gray-900">{{ page_obj.paginator.count }}</p>
             </div>
             <div class="text-center">
-                <p class="text-sm text-gray-500">Total Amount (Selected Period)</p>
-                <p class="text-2xl font-semibold text-gray-900">₹{{ total_amount|default:"0" }}</p>
+                <p class="text-sm text-gray-500">Total Outward Amount (Selected Period)</p>
+                <p class="text-2xl font-semibold text-gray-900">₹{{ total_amount_outward|default:"0" }}</p>
             </div>
             <div class="text-center">
-                <p class="text-sm text-gray-500">Average Invoice Value</p>
-                <p class="text-2xl font-semibold text-gray-900">₹{{ average_amount|default:"0" }}</p>
+                <p class="text-sm text-gray-500">Total Inward Amount (Selected Period)</p>
+                <p class="text-2xl font-semibold text-gray-900">₹{{ total_amount_inward|default:"0" }}</p>
             </div>
         </div>
     </div>

@@ -271,14 +271,32 @@ class InvoiceListView(ListView):
         context["businesses"] = Business.objects.all()
         context["invoice_types_list"] = INVOICE_TYPE_CHOICES
         context["type_of_invoice_selected"] = self.request.GET.get("type_of_invoice")
+
+        # Calculate total amount and average amount
+        invoices = self.get_queryset()
+        total_amount_inward = sum(
+            invoices.filter(type_of_invoice=INVOICE_TYPE_INWARD).values_list(
+                "total_amount", flat=True
+            )
+        )
+        total_amount_outward = sum(
+            invoices.filter(type_of_invoice=INVOICE_TYPE_OUTWARD).values_list(
+                "total_amount", flat=True
+            )
+        )
+
+        context["total_amount_inward"] = total_amount_inward
+        context["total_amount_outward"] = total_amount_outward
+
         return context
 
     def get(self, request, *args, **kwargs):
         if request.htmx and request.GET.get("page"):
+            context = self.get_context_data(object_list=self.get_queryset())
             return render(
                 request,
                 "partials/invoice_data_list.html",
-                context=self.get_context_data(object_list=self.get_queryset()),
+                context=context,
             )
         return super().get(request, *args, *kwargs)
 
