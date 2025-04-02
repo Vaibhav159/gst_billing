@@ -31,6 +31,18 @@
         />
     </div>
 
+    <div>
+        <br>
+        <label for="invoice_type" class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-400">
+            Select Invoice Type
+        </label>
+        <select id="invoice_type" name="invoice_type" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-fit p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+            <option value="both" selected>Both</option>
+            <option value="inward">Inward</option>
+            <option value="outward">Outward</option>
+        </select>
+    </div>
+
     <input type="submit"
            class="text-white bg-gray-800 hover:bg-gray-900
            focus:outline-none focus:ring-4 focus:ring-gray-300
