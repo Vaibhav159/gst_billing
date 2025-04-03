@@ -828,7 +828,14 @@ class LineItemDeleteView(DeleteView):
 
     def delete(self, request, *args, **kwargs):
         self.object = self.get_object()
+        invoice = self.object.invoice  # Get the associated invoice
         self.object.delete()
+
+        # Recalculate the total amount
+        line_items = LineItem.objects.filter(invoice_id=invoice.id)
+        invoice.total_amount = sum(line_items.values_list("amount", flat=True))
+        invoice.save()  # Save the updated invoice
+
         return HttpResponse(status=200)
 
     def get(self, request, *args, **kwargs):
