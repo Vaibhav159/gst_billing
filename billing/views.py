@@ -236,6 +236,7 @@ class InvoiceListView(ListView):
         business_id = self.request.GET.get("business_id")
         financial_year = self.request.GET.get("financial_year")
         type_of_invoice = self.request.GET.get("type_of_invoice")
+        invoice_number = self.request.GET.get("invoice_number")
 
         filter_kwargs = {}
 
@@ -250,6 +251,9 @@ class InvoiceListView(ListView):
 
         if type_of_invoice:
             filter_kwargs["type_of_invoice"] = type_of_invoice
+
+        if invoice_number:
+            filter_kwargs["invoice_number__icontains"] = invoice_number
 
         return Invoice.objects.filter(**filter_kwargs).order_by(
             "-type_of_invoice", "-invoice_date", "-invoice_number"
@@ -271,6 +275,7 @@ class InvoiceListView(ListView):
         context["businesses"] = Business.objects.all()
         context["invoice_types_list"] = INVOICE_TYPE_CHOICES
         context["type_of_invoice_selected"] = self.request.GET.get("type_of_invoice")
+        context["invoice_number"] = self.request.GET.get("invoice_number", "")
 
         # Calculate total amount and average amount
         invoices = self.get_queryset()
