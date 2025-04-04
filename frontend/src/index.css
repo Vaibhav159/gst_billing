@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Global loading indicator */
+.loading-indicator {
+  opacity: 0;
+  transition: opacity 200ms ease-in;
+}
+.loading-indicator.active {
+  opacity: 1;
+}
+
+/* Print styles */
+@media print {
+  body {
+    background-color: white;
+    font-size: 12pt;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  @page {
+    margin: 0.5cm;
+    size: A4;
+  }
+
+  /* Ensure tables don't break across pages */
+  table { page-break-inside: avoid; }
+  tr { page-break-inside: avoid; }
+
+  /* Add more space between sections */
+  .mb-6 { margin-bottom: 1.5rem; }
+  .mb-8 { margin-bottom: 2rem; }
+}

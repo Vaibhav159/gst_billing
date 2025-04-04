@@ -71,6 +71,19 @@ wheels = [
 ]
 
 [[package]]
+name = "django-cors-headers"
+version = "4.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "asgiref" },
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8a/04/a280a98256602d3f4fffae37a9410711fb80f9d6cf199679f6e93bbdb8b3/django-cors-headers-4.3.1.tar.gz", hash = "sha256:0bf65ef45e606aff1994d35503e6b677c0b26cafff6506f8fd7187f3be840207", size = 21146 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/6a/3428ab5d1ec270e845f4ef064a7cefbf1339b4454788d77c00d36caa828c/django_cors_headers-4.3.1-py3-none-any.whl", hash = "sha256:0b1fd19297e37417fc9f835d39e45c8c642938ddba1acce0c1753d3edef04f36", size = 12785 },
+]
+
+[[package]]
 name = "django-crispy-forms"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -114,6 +127,18 @@ wheels = [
 ]
 
 [[package]]
+name = "djangorestframework"
+version = "3.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/97/112c5a72e6917949b6d8a18ad6c6e72c46da4290c8f36ee5f1c1dcbc9901/djangorestframework-3.16.0.tar.gz", hash = "sha256:f022ff46613584de994c0c6a4aebbace5fd700555fbe9d33b865ebf173eba6c9", size = 1068408 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/3e/2448e93f4f87fc9a9f35e73e3c05669e0edd0c2526834686e949bb1fd303/djangorestframework-3.16.0-py3-none-any.whl", hash = "sha256:bea7e9f6b96a8584c5224bfb2e4348dfb3f8b5e34edbecb98da258e892089361", size = 1067305 },
+]
+
+[[package]]
 name = "docopt"
 version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
@@ -152,10 +177,12 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "django" },
+    { name = "django-cors-headers" },
     { name = "django-crispy-forms" },
     { name = "django-htmx" },
     { name = "django-simple-history" },
     { name = "django-sql-explorer" },
+    { name = "djangorestframework" },
     { name = "ipython" },
     { name = "num2words" },
     { name = "openpyxl" },
@@ -169,10 +196,12 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "django", specifier = "==4.2.2" },
+    { name = "django-cors-headers", specifier = "==4.3.1" },
     { name = "django-crispy-forms", specifier = "==1.14.0" },
     { name = "django-htmx", specifier = "==1.12.0" },
     { name = "django-simple-history", specifier = "==3.2.0" },
     { name = "django-sql-explorer", specifier = "==3.0.1" },
+    { name = "djangorestframework", specifier = ">=3.16.0" },
     { name = "ipython", specifier = ">=9.0.2" },
     { name = "num2words", specifier = ">=0.5.14" },
     { name = "openpyxl", specifier = "==3.0.10" },
