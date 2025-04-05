@@ -33,7 +33,7 @@ class BaseAPITestCase(TestCase):
             name="Test Business",
             address="123 Test Street",
             gst_number="22AAAAA0000A1Z5",
-            state_name="Test State",
+            state_name="MAHARASHTRA",
             mobile_number="9876543210",
             pan_number="ABCDE1234F",
             bank_name="Test Bank",
@@ -47,7 +47,7 @@ class BaseAPITestCase(TestCase):
             name="Test Customer",
             address="456 Test Avenue",
             gst_number="22BBBBB0000B1Z5",
-            state_name="Test State",
+            state_name="MAHARASHTRA",
             mobile_number="9876543211",
         )
         self.customer.businesses.add(self.business)

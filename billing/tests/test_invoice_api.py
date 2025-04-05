@@ -131,6 +131,7 @@ class InvoiceAPITestCase(BaseAPITestCase):
             name="Another Customer",
             address="789 Another Avenue",
             gst_number="22HHHHH0000H1Z5",
+            state_name="TELANGANA",
         )
         another_invoice = Invoice.objects.create(
             invoice_number="INV-004",
@@ -251,4 +252,5 @@ class InvoiceAPITestCase(BaseAPITestCase):
             name="Another Business",
             address="456 Another Street",
             gst_number="22DDDDD0000D1Z5",
+            state_name="KARNATAKA",
         )

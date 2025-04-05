@@ -26,7 +26,7 @@ class BusinessAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["name"], "Test Business")
         self.assertEqual(response.data["gst_number"], "22AAAAA0000A1Z5")
-        self.assertEqual(response.data["state_name"], "Test State")
+        self.assertEqual(response.data["state_name"], "MAHARASHTRA")
         self.assertEqual(response.data["mobile_number"], "9876543210")
 
     def test_create_business(self):
@@ -36,7 +36,7 @@ class BusinessAPITestCase(BaseAPITestCase):
             "name": "New Business",
             "address": "789 New Street",
             "gst_number": "22CCCCC0000C1Z5",
-            "state_name": "New State",
+            "state_name": "GUJARAT",
             "mobile_number": "9876543212",
             "pan_number": "FGHIJ5678K",
             "bank_name": "New Bank",
@@ -46,7 +46,7 @@ class BusinessAPITestCase(BaseAPITestCase):
         }
         response = self.client.post(url, data, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, msg=response.json())
         self.assertEqual(Business.objects.count(), 2)
         self.assertEqual(response.data["name"], "New Business")
         self.assertEqual(response.data["gst_number"], "22CCCCC0000C1Z5")
@@ -58,15 +58,15 @@ class BusinessAPITestCase(BaseAPITestCase):
             "name": "Updated Business",
             "address": "123 Test Street",
             "gst_number": "22AAAAA0000A1Z5",
-            "state_name": "Updated State",
+            "state_name": "DELHI",
             "mobile_number": "9876543210",
         }
         response = self.client.put(url, data, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK, msg=response.json())
         self.business.refresh_from_db()
         self.assertEqual(self.business.name, "Updated Business")
-        self.assertEqual(self.business.state_name, "Updated State")
+        self.assertEqual(self.business.state_name, "DELHI")
 
     def test_partial_update_business(self):
         """Test partially updating an existing business."""

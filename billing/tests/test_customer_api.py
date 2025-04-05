@@ -1,7 +1,7 @@
 from django.urls import reverse
 from rest_framework import status
 
-from billing.models import Customer
+from billing.models import Business, Customer
 from billing.tests.test_base import BaseAPITestCase
 
 
@@ -26,7 +26,7 @@ class CustomerAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["name"], "Test Customer")
         self.assertEqual(response.data["gst_number"], "22BBBBB0000B1Z5")
-        self.assertEqual(response.data["state_name"], "Test State")
+        self.assertEqual(response.data["state_name"], "MAHARASHTRA")
         self.assertEqual(response.data["mobile_number"], "9876543211")
         self.assertIn(self.business.id, response.data["businesses"])
 
@@ -37,7 +37,7 @@ class CustomerAPITestCase(BaseAPITestCase):
             "name": "New Customer",
             "address": "789 New Avenue",
             "gst_number": "22EEEEE0000E1Z5",
-            "state_name": "New State",
+            "state_name": "GUJARAT",
             "mobile_number": "9876543213",
             "businesses": [self.business.id],
         }
@@ -56,7 +56,7 @@ class CustomerAPITestCase(BaseAPITestCase):
             "name": "Updated Customer",
             "address": "456 Test Avenue",
             "gst_number": "22BBBBB0000B1Z5",
-            "state_name": "Updated State",
+            "state_name": "DELHI",
             "mobile_number": "9876543211",
             "businesses": [self.business.id],
         }
@@ -65,7 +65,7 @@ class CustomerAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.customer.refresh_from_db()
         self.assertEqual(self.customer.name, "Updated Customer")
-        self.assertEqual(self.customer.state_name, "Updated State")
+        self.assertEqual(self.customer.state_name, "DELHI")
 
     def test_partial_update_customer(self):
         """Test partially updating an existing customer."""
@@ -93,6 +93,7 @@ class CustomerAPITestCase(BaseAPITestCase):
             name="Another Customer",
             address="456 Another Avenue",
             gst_number="22FFFFF0000F1Z5",
+            state_name="TELANGANA",
         )
         new_customer.businesses.add(self.business)
 
@@ -117,12 +118,14 @@ class CustomerAPITestCase(BaseAPITestCase):
             name="Another Business",
             address="456 Another Street",
             gst_number="22DDDDD0000D1Z5",
+            state_name="KARNATAKA",
         )
 
         another_customer = Customer.objects.create(
             name="Business-specific Customer",
             address="789 Specific Avenue",
             gst_number="22GGGGG0000G1Z5",
+            state_name="KARNATAKA",
         )
         another_customer.businesses.add(another_business)
 
