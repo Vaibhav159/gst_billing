@@ -1,0 +1,53 @@
+/* Print-specific styles */
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #panel {
+    width: 100%;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  /* Ensure no page breaks inside important elements */
+  table, tr, td, th {
+    page-break-inside: avoid;
+  }
+
+  /* Hide print button when printing */
+  .print\:hidden {
+    display: none !important;
+  }
+}
+
+/* General invoice styles */
+.invoice-container {
+  font-family: 'Arial', sans-serif;
+}
+
+.invoice-header {
+  margin-bottom: 1.5rem;
+}
+
+.invoice-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.invoice-table th,
+.invoice-table td {
+  border: 1px solid #ddd;
+}
+
+.invoice-footer {
+  margin-top: auto;
+}

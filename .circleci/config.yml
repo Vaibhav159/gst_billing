@@ -1,0 +1,118 @@
+version: 2.1
+
+commands:
+  uv_install_packages:
+    parameters:
+      cache_key:
+        type: string
+      cache_dir:
+        type: string
+        default: /home/circleci/.cache/uv
+    steps:
+      - restore_cache:
+          name: Restore python cache
+          keys:
+            - <<parameters.cache_key>>-uv-cache-{{ checksum "pyproject.toml" }}
+            - <<parameters.cache_key>>-uv-cache-
+      - run:
+          name: Install python dependencies
+          command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            mkdir -p "<<parameters.cache_dir>>" && \
+            uv sync --frozen --extra dev --cache-dir <<parameters.cache_dir>>
+      - run:
+          name: Clean pre-built wheels
+          command: uv cache prune --ci --cache-dir <<parameters.cache_dir>>
+      - save_cache:
+          name: Save cache
+          key: <<parameters.cache_key>>-uv-cache-{{ checksum "pyproject.toml" }}
+          paths:
+            - "<<parameters.cache_dir>>"
+
+jobs:
+  build-and-test:
+    docker:
+      - image: cimg/python:3.10
+        environment:
+          DJANGO_SETTINGS_MODULE: gst_billing.ci_settings
+          DATABASE_URL: postgresql://circleci:circleci@localhost/circle_test
+      - image: cimg/postgres:13.7
+        environment:
+          POSTGRES_USER: circleci
+          POSTGRES_PASSWORD: circleci
+          POSTGRES_DB: circle_test
+
+    steps:
+      - checkout
+
+      - run:
+          name: Install system dependencies
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+
+      - run:
+          name: Install uv
+          command: |
+            python -m venv .venv
+            . .venv/bin/activate
+            python -m pip install --upgrade uv
+
+      - uv_install_packages:
+          cache_key: v1
+
+      - run:
+          name: Check Python environment
+          command: |
+            . .venv/bin/activate
+            python --version
+            uv pip freeze
+
+      - run:
+          name: Wait for PostgreSQL
+          command: |
+            # Simple wait for PostgreSQL to be ready
+            for i in {1..30}; do
+              pg_isready -h localhost -p 5432 && echo "PostgreSQL is ready!" && break
+              echo "Waiting for PostgreSQL to be ready... ($i/30)"
+              sleep 1
+            done
+
+      - run:
+          name: Check PostgreSQL connection
+          command: |
+            PGPASSWORD=circleci psql -h localhost -p 5432 -U circleci -d circle_test -c "SELECT 1;"
+
+      - run:
+          name: Check Django project
+          command: |
+            . .venv/bin/activate
+            python manage.py check
+
+      - run:
+          name: Run migrations
+          command: |
+            . .venv/bin/activate
+            python manage.py migrate
+
+      # Test directory is created in the test run step
+
+      - run:
+          name: Run Django tests
+          command: |
+            . .venv/bin/activate
+            mkdir -p test-results/pytest
+            python -m pytest billing/tests/ --junitxml=test-results/pytest/junit.xml -v
+
+      - store_test_results:
+          path: test-results/pytest
+
+      - store_artifacts:
+          path: test-results/pytest
+          destination: test-reports
+
+workflows:
+  version: 2
+  build-test:
+    jobs:
+      - build-and-test
