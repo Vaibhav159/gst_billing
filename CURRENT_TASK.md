@@ -23,7 +23,8 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Fixed invoice detail and print views
 - Added reports generation functionality
 - Added comprehensive test cases for all API endpoints
-- Set up CircleCI for continuous integration
+- Set up CircleCI for continuous integration with uv package manager
+- Added pytest and coverage reporting to CI pipeline
 
 ### Pending Items
 - Ensure mobile responsiveness

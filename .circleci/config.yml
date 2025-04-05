@@ -1,8 +1,5 @@
 version: 2.1
 
-orbs:
-  python: circleci/python@2.1.1
-
 jobs:
   build-and-test:
     docker:
@@ -18,29 +15,81 @@ jobs:
 
     steps:
       - checkout
-      - python/install-packages:
-          pkg-manager: pip
-          packages:
-            - uv
+
+      - restore_cache:
+          name: Restore cached venv
+          keys:
+            - v1-venv-{{ checksum "requirements.txt" }}
+            - v1-venv-
+
       - run:
-          name: Install dependencies with uv
+          name: Install system dependencies
           command: |
-            python -m pip install uv
-            python -m uv pip install -r requirements.txt
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+            # Install dockerize
+            wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz
+            sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz
+            rm dockerize-linux-amd64-v0.6.1.tar.gz
+
+      - run:
+          name: Setup virtual environment and install dependencies
+          command: |
+            python -m venv .venv
+            . .venv/bin/activate
+            python -m pip install --upgrade uv
+            uv sync -r requirements.txt
+            uv pip install pytest pytest-django pytest-cov coverage
+
+      - save_cache:
+          name: Save cached venv
+          paths:
+            - ".venv/"
+          key: v1-venv-{{ checksum "requirements.txt" }}
+
+      - run:
+          name: Check Python environment
+          command: |
+            . .venv/bin/activate
+            python --version
+            uv pip freeze
+
+      - run:
+          name: Wait for PostgreSQL
+          command: |
+            dockerize -wait tcp://localhost:5432 -timeout 1m
+
+      - run:
+          name: Check PostgreSQL connection
+          command: |
+            psql -h localhost -p 5432 -U postgres -d circle_test -c "SELECT 1;"
+
+      - run:
+          name: Check Django project
+          command: |
+            . .venv/bin/activate
+            python manage.py check
+
       - run:
           name: Run migrations
           command: |
+            . .venv/bin/activate
             python manage.py migrate
+
       - run:
-          name: Install test dependencies
+          name: Create test results directory
           command: |
-            python -m uv pip install unittest-xml-reporting
+            mkdir -p test-results
+
       - run:
           name: Run Django tests
           command: |
-            python billing/tests/run_tests.py
+            . .venv/bin/activate
+            python -m pytest billing/tests/ --junitxml=test-results/junit.xml --cov=billing --cov-report=xml:test-results/coverage.xml
+
       - store_test_results:
           path: test-results
+
       - store_artifacts:
           path: test-results
           destination: tr

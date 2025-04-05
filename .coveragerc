@@ -1,0 +1,26 @@
+[run]
+source = billing
+omit = 
+    */tests/*
+    */migrations/*
+    */admin.py
+    */apps.py
+    */urls.py
+    */wsgi.py
+    */asgi.py
+    */settings.py
+    */manage.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError
+    except ImportError
+    def __str__
+
+[html]
+directory = htmlcov
