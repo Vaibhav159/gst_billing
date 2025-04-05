@@ -87,6 +87,11 @@ cd frontend
 npm test
 ```
 
+### Continuous Integration
+This project uses CircleCI for continuous integration. Every push to the repository triggers a build that runs all the tests. You can view the build status in the CircleCI dashboard.
+
+[![CircleCI](https://circleci.com/gh/yourusername/gst-billing.svg?style=shield)](https://circleci.com/gh/yourusername/gst-billing)
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

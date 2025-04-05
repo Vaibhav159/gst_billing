@@ -1,0 +1,52 @@
+version: 2.1
+
+orbs:
+  python: circleci/python@2.1.1
+
+jobs:
+  build-and-test:
+    docker:
+      - image: cimg/python:3.10
+        environment:
+          DATABASE_URL: postgresql://postgres:postgres@localhost/circle_test
+          DJANGO_SETTINGS_MODULE: gst_billing.ci_settings
+      - image: cimg/postgres:13.7
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: circle_test
+
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          packages:
+            - uv
+      - run:
+          name: Install dependencies with uv
+          command: |
+            python -m pip install uv
+            python -m uv pip install -r requirements.txt
+      - run:
+          name: Run migrations
+          command: |
+            python manage.py migrate
+      - run:
+          name: Install test dependencies
+          command: |
+            python -m uv pip install unittest-xml-reporting
+      - run:
+          name: Run Django tests
+          command: |
+            python billing/tests/run_tests.py
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+          destination: tr
+
+workflows:
+  version: 2
+  build-test:
+    jobs:
+      - build-and-test

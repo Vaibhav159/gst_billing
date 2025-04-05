@@ -16,6 +16,7 @@
 - **Database ORM**: Django ORM
 - **Task Queue**: Celery (for background tasks)
 - **Caching**: Django's built-in caching
+- **Package Manager**: uv (preferred over pip)
 
 ## Database
 - **Primary Database**: PostgreSQL
@@ -27,7 +28,7 @@
 - **Web Server**: Gunicorn + Nginx
 - **Package Management**: uv (preferred over pip)
 - **Version Control**: Git
-- **CI/CD**: GitHub Actions
+- **CI/CD**: CircleCI
 
 ## Development Tools
 - **Code Editor**: VS Code
