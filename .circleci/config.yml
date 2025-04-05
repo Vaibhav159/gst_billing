@@ -17,6 +17,7 @@ commands:
       - run:
           name: Install python dependencies
           command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
             mkdir -p "<<parameters.cache_dir>>" && \
             uv sync --editable --extras dev --cache-dir <<parameters.cache_dir>>
       - run:
