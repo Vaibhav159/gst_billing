@@ -5,7 +5,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import SearchableDropdown from '../components/SearchableDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+
+import lineItemService from '../api/lineItemService';
 import { formatIndianCurrency } from '../utils/formatters';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
@@ -170,14 +171,16 @@ function InvoiceDetail() {
     try {
       setSubmittingLineItem(true);
 
-      const response = await axios.post('/api/line-items/create_for_invoice/', {
+      const lineItemData = {
         invoice_id: invoiceId,
         item_name: newLineItem.item_name,
         qty: newLineItem.qty,
         rate: newLineItem.rate,
         hsn_code: newLineItem.hsn_code || '711319', // Default HSN code for jewelry
         gst_tax_rate: newLineItem.gst_tax_rate || 0.03 // Default GST rate (3%)
-      });
+      };
+
+      const response = await lineItemService.createLineItem(invoiceId, lineItemData);
 
       // Add the new line item to the list
       setLineItems(prev => [...prev, response.data]);

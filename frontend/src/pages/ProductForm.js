@@ -4,7 +4,7 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import productService from '../api/productService';
 
 function ProductForm() {
   const { productId } = useParams();
@@ -27,11 +27,11 @@ function ProductForm() {
       const fetchProduct = async () => {
         try {
           setLoading(true);
-          const response = await axios.get(`/api/products/${productId}/`);
+          const productData = await productService.getProduct(productId);
           setFormData({
-            name: response.data.name || '',
-            hsn_code: response.data.hsn_code || '',
-            description: response.data.description || ''
+            name: productData.name || '',
+            hsn_code: productData.hsn_code || '',
+            description: productData.description || ''
           });
         } catch (err) {
           console.error('Error fetching product:', err);
@@ -86,9 +86,9 @@ function ProductForm() {
       setSubmitting(true);
 
       if (isEditing) {
-        await axios.put(`/api/products/${productId}/`, formData);
+        await productService.updateProduct(productId, formData);
       } else {
-        await axios.post('/api/products/', formData);
+        await productService.createProduct(formData);
       }
 
       navigate('/billing/product/list');

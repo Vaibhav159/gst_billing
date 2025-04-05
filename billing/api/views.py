@@ -7,7 +7,7 @@ from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.vary import vary_on_cookie
 from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
@@ -43,6 +43,7 @@ class StandardResultsSetPagination(PageNumberPagination):
     max_page_size = 100
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class BusinessViewSet(viewsets.ModelViewSet):
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
@@ -71,6 +72,7 @@ class BusinessViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
@@ -121,6 +123,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
         return Response([])
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().order_by("name")
     serializer_class = ProductSerializer
@@ -169,6 +172,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response([])
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class InvoiceViewSet(viewsets.ModelViewSet):
     queryset = (
         Invoice.objects.all()
@@ -268,6 +272,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response(data)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class LineItemViewSet(viewsets.ModelViewSet):
     queryset = LineItem.objects.all().select_related("invoice")
     serializer_class = LineItemSerializer
@@ -312,6 +317,7 @@ class LineItemViewSet(viewsets.ModelViewSet):
         return Response(LineItemSerializer(line_item).data)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class ReportView(APIView):
     """
     API endpoint for generating reports.
@@ -614,6 +620,7 @@ class ReportView(APIView):
         return self.generate_csv_response(start_date, end_date, invoice_type)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class InvoiceImportView(APIView):
     """
     API endpoint for importing invoices from CSV files.
@@ -674,6 +681,7 @@ class InvoiceImportView(APIView):
             )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class CSRFTokenView(APIView):
     """
     API endpoint for getting a CSRF token.
@@ -683,3 +691,20 @@ class CSRFTokenView(APIView):
     @method_decorator(ensure_csrf_cookie)
     def get(self, request, *args, **kwargs):
         return Response({"detail": "CSRF cookie set"})
+
+
+class PublicAPIView(APIView):
+    """
+    Public API endpoint that doesn't require authentication.
+    This is useful for checking if the API is working without authentication.
+    """
+
+    permission_classes = []
+
+    def get(self, request, *args, **kwargs):
+        return Response(
+            {
+                "message": "This is a public endpoint that doesn't require authentication.",
+                "status": "API is working correctly.",
+            }
+        )

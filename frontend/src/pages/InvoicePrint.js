@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient, { createCancelToken } from '../api/client';
-import axios from 'axios';
 import { formatIndianCurrency } from '../utils/formatters';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
@@ -68,7 +67,7 @@ function InvoicePrint() {
           window.print();
         }, 1000); // Increased timeout to ensure data is rendered
       } catch (err) {
-        if (!axios.isCancel(err)) {
+        if (!(err.constructor && err.constructor.name === 'CanceledError')) {
           console.error('Error fetching invoice print data:', err);
           setError('Failed to load invoice data. Please try again.');
         }

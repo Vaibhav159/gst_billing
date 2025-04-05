@@ -1,19 +1,26 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import Navbar from './Navbar';
 import Toast from './Toast';
+import authService from '../api/authService';
 
 function Layout() {
   const [toasts, setToasts] = useState([]);
+  const navigate = useNavigate();
 
   const addToast = (message, type = 'success') => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, message, type }]);
-    
+
     // Auto-remove toast after 5 seconds
     setTimeout(() => {
       setToasts(prev => prev.filter(toast => toast.id !== id));
     }, 5000);
+  };
+
+  const handleLogout = () => {
+    authService.logout();
+    navigate('/login');
   };
 
   return (
@@ -39,11 +46,11 @@ function Layout() {
       {/* Toast Container */}
       <div className="fixed bottom-4 right-4 z-50 space-y-2">
         {toasts.map(toast => (
-          <Toast 
-            key={toast.id} 
-            message={toast.message} 
-            type={toast.type} 
-            onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))} 
+          <Toast
+            key={toast.id}
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
           />
         ))}
       </div>

@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import apiClient from '../api/client';
 import { formatIndianCurrency } from '../utils/formatters';
 
 function CustomerDetail() {
@@ -31,7 +31,7 @@ function CustomerDetail() {
     const fetchCustomer = async () => {
       try {
         updateLoadingState('customer', true);
-        const customerResponse = await axios.get(`/api/customers/${customerId}/`);
+        const customerResponse = await apiClient.get(`/customers/${customerId}/`);
 
         // Validate customer data
         const customerData = customerResponse.data;
@@ -53,7 +53,7 @@ function CustomerDetail() {
     const fetchInvoices = async () => {
       try {
         updateLoadingState('invoices', true);
-        const invoicesResponse = await axios.get(`/api/invoices/`, {
+        const invoicesResponse = await apiClient.get(`/invoices/`, {
           params: { customer_id: customerId }
         });
 
@@ -81,7 +81,7 @@ function CustomerDetail() {
   const handleDelete = async () => {
     if (window.confirm('Are you sure you want to delete this customer?')) {
       try {
-        await axios.delete(`/api/customers/${customerId}/`);
+        await apiClient.delete(`/customers/${customerId}/`);
         navigate('/billing/customer/list');
       } catch (err) {
         console.error('Error deleting customer:', err);

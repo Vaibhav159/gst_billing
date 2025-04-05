@@ -6,7 +6,7 @@ import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
-import axios from 'axios';
+import apiClient from '../api/client';
 import { formatIndianCurrency } from '../utils/formatters';
 
 function InvoiceList() {
@@ -44,7 +44,7 @@ function InvoiceList() {
         });
 
         // Fetch invoices for the current page
-        const response = await axios.get('/api/invoices/', { params });
+        const response = await apiClient.get('/invoices/', { params });
         setInvoices(response.data.results || response.data);
 
         // Set pagination data if available
@@ -56,7 +56,7 @@ function InvoiceList() {
         const totalsParams = { ...params };
         delete totalsParams.page; // Remove pagination parameter
 
-        const totalsResponse = await axios.get('/api/invoices/totals/', { params: totalsParams });
+        const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
 
         // Set totals from the API response
         setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
@@ -78,7 +78,7 @@ function InvoiceList() {
   useEffect(() => {
     const fetchBusinesses = async () => {
       try {
-        const response = await axios.get('/api/businesses/');
+        const response = await apiClient.get('/businesses/');
         setBusinesses(response.data.results || response.data);
       } catch (err) {
         console.error('Error fetching businesses:', err);

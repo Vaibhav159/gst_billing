@@ -37,14 +37,32 @@ const hideLoading = () => {
   }
 };
 
-// Add a request interceptor to include CSRF token and handle loading state
+// Add a request interceptor to handle authentication and loading state
 apiClient.interceptors.request.use(
   (config) => {
-    // Get CSRF token from cookie
+    // Add JWT token to request headers if available
+    const token = localStorage.getItem('access_token');
+    console.log('JWT Token in localStorage:', token ? 'Present' : 'Not found');
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+      console.log('Added Authorization header:', `Bearer ${token.substring(0, 10)}...`);
+    } else {
+      console.warn('No JWT token found in localStorage');
+    }
+
+    // Add CSRF token for session authentication
     const csrfToken = getCookie('csrftoken');
     if (csrfToken) {
       config.headers['X-CSRFToken'] = csrfToken;
+      console.log('Added X-CSRFToken header:', csrfToken.substring(0, 10) + '...');
+    } else {
+      console.warn('No CSRF token found in cookies');
     }
+
+    // Log all headers for debugging
+    console.log('Request headers:', config.headers);
+    console.log('Request URL:', config.url);
 
     // Don't show loading indicator for certain requests
     if (config.showLoading !== false) {
@@ -64,6 +82,14 @@ apiClient.interceptors.request.use(
 // Add a response interceptor to handle errors and loading state
 apiClient.interceptors.response.use(
   (response) => {
+    // Log successful response
+    console.log(`Response from ${response.config.url}:`, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      data: response.data
+    });
+
     // Decrease active requests counter
     if (response.config.showLoading !== false) {
       activeRequests = Math.max(0, activeRequests - 1);
@@ -71,11 +97,47 @@ apiClient.interceptors.response.use(
     }
     return response;
   },
-  (error) => {
+  async (error) => {
+    // Log error response
+    console.error(`Error response from ${error.config?.url || 'unknown URL'}:`, {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      headers: error.response?.headers,
+      data: error.response?.data,
+      error: error.message
+    });
+
     // Decrease active requests counter
     if (error.config && error.config.showLoading !== false) {
       activeRequests = Math.max(0, activeRequests - 1);
       hideLoading();
+    }
+
+    // Handle token expiration
+    if (error.response && error.response.status === 401) {
+      // Try to refresh the token
+      const refreshToken = localStorage.getItem('refresh_token');
+
+      if (refreshToken) {
+        try {
+          // Import here to avoid circular dependency
+          const authService = await import('./authService').then(module => module.default);
+
+          // Try to refresh the token
+          await authService.refreshToken();
+
+          // Retry the original request
+          return apiClient(error.config);
+        } catch (refreshError) {
+          // If refresh fails, redirect to login
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          window.location.href = '/login';
+        }
+      } else {
+        // No refresh token, redirect to login
+        window.location.href = '/login';
+      }
     }
 
     // Handle specific error types
@@ -129,8 +191,17 @@ export const createCancelToken = () => {
 // Function to fetch CSRF token
 export const fetchCSRFToken = async () => {
   try {
-    await apiClient.get('/csrf-token/');
-    return getCookie('csrftoken');
+    // Make a request to the CSRF token endpoint using apiClient
+    await apiClient.get('/csrf-token/', { withCredentials: true });
+
+    // Get the CSRF token from the cookie
+    const csrfToken = getCookie('csrftoken');
+
+    if (!csrfToken) {
+      console.warn('CSRF token not found in cookies after fetching');
+    }
+
+    return csrfToken;
   } catch (error) {
     console.error('Error fetching CSRF token:', error);
     return null;

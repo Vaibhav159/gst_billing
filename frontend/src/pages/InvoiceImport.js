@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import invoiceService from '../api/invoiceService';
+import businessService from '../api/businessService';
 
 const InvoiceImport = () => {
   const navigate = useNavigate();
@@ -21,12 +21,12 @@ const InvoiceImport = () => {
     const fetchBusinesses = async () => {
       try {
         setLoading(true);
-        const response = await axios.get('/api/businesses/');
-        setBusinesses(response.data.results || []);
-        
+        const businessData = await businessService.getBusinesses();
+        setBusinesses(businessData.results || []);
+
         // Set default business if available
-        if (response.data.results && response.data.results.length > 0) {
-          setBusinessId(response.data.results[0].id.toString());
+        if (businessData.results && businessData.results.length > 0) {
+          setBusinessId(businessData.results[0].id.toString());
         }
       } catch (err) {
         console.error('Error fetching businesses:', err);
@@ -82,20 +82,20 @@ const InvoiceImport = () => {
       setSuccess(null);
 
       const result = await invoiceService.importInvoices(file, businessId);
-      
+
       setSuccess({
         invoicesCreated: result.invoices_created,
         lineItemsCreated: result.line_items_created,
         errors: result.errors || []
       });
-      
+
       // Reset file input
       setFile(null);
       document.getElementById('csv-file-input').value = '';
-      
+
     } catch (err) {
       console.error('Error importing invoices:', err);
-      
+
       if (err.response && err.response.data && err.response.data.error) {
         setError(err.response.data.error);
       } else {

@@ -6,8 +6,8 @@ import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
-import axios from 'axios';
-import { createCancelToken } from '../api/client';
+
+import apiClient, { createCancelToken } from '../api/client';
 // import { formatIndianCurrency } from '../utils/formatters';
 
 console.log('CustomerList component loading');
@@ -65,14 +65,14 @@ function CustomerList() {
         console.error('API test failed with fetch:', error);
       }
 
-      // Also try with axios
+      // Also try with apiClient
       try {
-        console.log('Testing API connection with axios...');
-        console.log('Testing with correct endpoint: /api/customers/');
-        const response = await axios.get('/api/customers/');
-        console.log('API test successful with axios:', response);
+        console.log('Testing API connection with apiClient...');
+        console.log('Testing with correct endpoint: /customers/');
+        const response = await apiClient.get('/customers/');
+        console.log('API test successful with apiClient:', response);
       } catch (error) {
-        console.error('API test failed with axios:', error);
+        console.error('API test failed with apiClient:', error);
       }
     };
 
@@ -106,10 +106,9 @@ function CustomerList() {
       });
 
       console.log('Making API request to fetch customers');
-      // Use the correct API endpoint
-      console.log('Using correct API endpoint: /api/customers/');
-      // Use axios directly like in BusinessList.js instead of apiClient
-      const response = await axios.get('/api/customers/', {
+      // Use the correct API endpoint with apiClient
+      console.log('Using apiClient for API endpoint: /customers/');
+      const response = await apiClient.get('/customers/', {
         params,
         cancelToken: cancelTokenSource.token
       });
@@ -198,7 +197,7 @@ function CustomerList() {
         console.log('Component unmounted, not clearing error state');
       }
     } catch (err) {
-      if (!axios.isCancel(err)) {
+      if (!(err.constructor && err.constructor.name === 'CanceledError')) {
         console.error('Error fetching customers:', err);
         const errorMessage = 'Failed to load customers. Please try again.';
         console.log('Setting error state to:', errorMessage);
@@ -253,10 +252,9 @@ function CustomerList() {
       console.log('fetchBusinesses function executing');
       try {
         console.log('Making API request to fetch businesses');
-        // Use the correct API endpoint
-        console.log('Using correct API endpoint: /api/businesses/');
-        // Use axios directly like in BusinessList.js
-        const response = await axios.get('/api/businesses/', {
+        // Use the correct API endpoint with apiClient
+        console.log('Using apiClient for API endpoint: /businesses/');
+        const response = await apiClient.get('/businesses/', {
           cancelToken: cancelTokenSource.token,
           // Don't show loading indicator for this secondary request
           showLoading: false
@@ -305,7 +303,7 @@ function CustomerList() {
           console.log('Component unmounted, not setting businesses state');
         }
       } catch (err) {
-        if (!axios.isCancel(err)) {
+        if (!(err.constructor && err.constructor.name === 'CanceledError')) {
           console.error('Error fetching businesses:', err);
           // Set to empty array on error to prevent mapping issues
           if (isMounted.current) {

@@ -5,8 +5,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
-import axios from 'axios';
-import { formatIndianCurrency } from '../utils/formatters';
+import apiClient from '../api/client';
+import businessService from '../api/businessService';
 
 function BusinessList() {
   const [businesses, setBusinesses] = useState([]);
@@ -33,7 +33,7 @@ function BusinessList() {
           }
         });
 
-        const response = await axios.get('/api/businesses/', { params });
+        const response = await apiClient.get('/businesses/', { params });
         setBusinesses(response.data.results || response.data);
 
         // Set pagination data if available
@@ -68,7 +68,7 @@ function BusinessList() {
   const handleDelete = async (businessId) => {
     if (window.confirm('Are you sure you want to delete this business?')) {
       try {
-        await axios.delete(`/api/businesses/${businessId}/`);
+        await businessService.deleteBusiness(businessId);
 
         // Refresh the business list
         setBusinesses(businesses.filter(business => business.id !== businessId));

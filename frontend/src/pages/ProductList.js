@@ -5,7 +5,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
-import axios from 'axios';
+import apiClient from '../api/client';
+import productService from '../api/productService';
 
 function ProductList() {
   const [products, setProducts] = useState([]);
@@ -32,7 +33,7 @@ function ProductList() {
           }
         });
 
-        const response = await axios.get('/api/products/', { params });
+        const response = await apiClient.get('/products/', { params });
         setProducts(response.data.results || response.data);
 
         // Set pagination data if available
@@ -67,7 +68,7 @@ function ProductList() {
   const handleDelete = async (productId) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
       try {
-        await axios.delete(`/api/products/${productId}/`);
+        await productService.deleteProduct(productId);
 
         // Refresh the product list
         setProducts(products.filter(product => product.id !== productId));

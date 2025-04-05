@@ -3,10 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import apiClient from '../api/client';
 import { formatIndianCurrency } from '../utils/formatters';
 import businessService from '../api/businessService';
-import { fetchCSRFToken } from '../api/client';
 
 function BusinessDetail() {
   const { businessId } = useParams();
@@ -34,7 +33,7 @@ function BusinessDetail() {
     const fetchBusiness = async () => {
       try {
         updateLoadingState('business', true);
-        const businessResponse = await axios.get(`/api/businesses/${businessId}/`);
+        const businessResponse = await apiClient.get(`/businesses/${businessId}/`);
         setBusiness(businessResponse.data);
         setError(null);
       } catch (err) {
@@ -49,7 +48,7 @@ function BusinessDetail() {
     const fetchInvoices = async () => {
       try {
         updateLoadingState('invoices', true);
-        const invoicesResponse = await axios.get(`/api/invoices/`, {
+        const invoicesResponse = await apiClient.get(`/invoices/`, {
           params: { business_id: businessId }
         });
         setInvoices(invoicesResponse.data.results || invoicesResponse.data);
@@ -64,7 +63,7 @@ function BusinessDetail() {
     // Fetch customers for this business
     const fetchCustomers = async () => {
       try {
-        const customersResponse = await axios.get(`/api/customers/`);
+        const customersResponse = await apiClient.get(`/customers/`);
         const allCustomers = customersResponse.data.results || customersResponse.data;
 
         // Filter customers that have this business in their businesses array
@@ -88,8 +87,7 @@ function BusinessDetail() {
   const handleDelete = async () => {
     if (window.confirm('Are you sure you want to delete this business?')) {
       try {
-        // Ensure CSRF token is available
-        await fetchCSRFToken();
+        // Use businessService to delete the business
         await businessService.deleteBusiness(businessId);
         navigate('/billing/business/list');
       } catch (err) {

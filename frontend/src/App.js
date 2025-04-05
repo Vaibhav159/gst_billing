@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
-import { fetchCSRFToken } from './api/client';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import authService from './api/authService';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import CustomerList from './pages/CustomerList';
@@ -17,17 +17,63 @@ import InvoicePrint from './pages/InvoicePrint';
 import ProductList from './pages/ProductList';
 import ProductForm from './pages/ProductForm';
 import Reports from './pages/Reports';
+import Login from './pages/Login';
+
+// Protected Route component
+const ProtectedRoute = ({ children }) => {
+  console.log('ProtectedRoute: Checking authentication');
+  const isAuthenticated = authService.isAuthenticated();
+  console.log('ProtectedRoute: isAuthenticated =', isAuthenticated);
+
+  // Check token in localStorage
+  const token = localStorage.getItem('access_token');
+  console.log('ProtectedRoute: Token in localStorage:', token ? 'Present' : 'Not found');
+
+  if (!isAuthenticated) {
+    console.log('ProtectedRoute: Not authenticated, redirecting to login');
+    // Redirect to login if not authenticated
+    return <Navigate to="/login" replace />;
+  }
+
+  console.log('ProtectedRoute: Authenticated, rendering children');
+  return children;
+};
 
 function App() {
-  // Fetch CSRF token when the app loads
+  // Initialize authentication when the app loads
   useEffect(() => {
-    fetchCSRFToken();
+    const initializeAuth = () => {
+      console.log('App component: Initializing authentication');
+      try {
+        const isAuthenticated = authService.initializeAuth();
+        console.log('App component: Authentication initialized:', isAuthenticated ? 'Success' : 'Not authenticated');
+
+        // Check if headers are set correctly
+        const token = localStorage.getItem('access_token');
+        if (token) {
+          console.log('App component: Token in localStorage:', token.substring(0, 10) + '...');
+        } else {
+          console.warn('App component: No token in localStorage');
+        }
+      } catch (error) {
+        console.error('App component: Error initializing authentication:', error);
+      }
+    };
+
+    initializeAuth();
   }, []);
 
   return (
     <Routes>
-      {/* Main Layout Routes */}
-      <Route path="/" element={<Layout />}>
+      {/* Login Route */}
+      <Route path="/login" element={<Login />} />
+
+      {/* Main Layout Routes - Protected */}
+      <Route path="/" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      }>
         <Route index element={<Dashboard />} />
 
         {/* Customer Routes */}
