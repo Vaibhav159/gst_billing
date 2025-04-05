@@ -52,7 +52,9 @@ class LineItemAPITestCase(BaseAPITestCase):
         }
         response = self.client.post(url, data, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, msg=response.json())
+        self.assertEqual(
+            response.status_code, status.HTTP_201_CREATED, msg=response.json()
+        )
         self.assertEqual(LineItem.objects.count(), 2)
         self.assertEqual(response.data["product_name"], "New Product")
         self.assertEqual(Decimal(response.data["quantity"]), Decimal("2.00"))
@@ -103,7 +105,7 @@ class LineItemAPITestCase(BaseAPITestCase):
         """Test filtering line items by invoice."""
         # Create another invoice and line item
         another_invoice = self.create_another_invoice()
-        another_line_item = LineItem.objects.create(
+        LineItem.objects.create(
             invoice=another_invoice,
             product_name="Another Product",
             hsn_code="711319",

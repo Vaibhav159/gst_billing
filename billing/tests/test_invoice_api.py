@@ -35,7 +35,9 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(response.data["customer"], self.customer.id)
         # Refresh the invoice to get the updated total_amount
         self.invoice.refresh_from_db()
-        self.assertEqual(Decimal(response.data["total_amount"]), self.invoice.total_amount)
+        self.assertEqual(
+            Decimal(response.data["total_amount"]), self.invoice.total_amount
+        )
 
     def test_create_invoice(self):
         """Test creating a new invoice."""
@@ -101,7 +103,7 @@ class InvoiceAPITestCase(BaseAPITestCase):
         """Test filtering invoices by business."""
         # Create another business and invoice
         another_business = self.create_another_business()
-        another_invoice = Invoice.objects.create(
+        Invoice.objects.create(
             invoice_number="INV-003",
             invoice_date="2023-03-01",
             business=another_business,
@@ -135,7 +137,7 @@ class InvoiceAPITestCase(BaseAPITestCase):
             gst_number="22HHHHH0000H1Z5",
             state_name="TELANGANA",
         )
-        another_invoice = Invoice.objects.create(
+        Invoice.objects.create(
             invoice_number="INV-004",
             invoice_date="2023-04-01",
             business=self.business,
@@ -232,7 +234,8 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(response.data["total_items"], 1)
         # Check that the summary values match the line item values
         self.assertEqual(
-            Decimal(response.data["amount_without_tax"]), self.line_item.rate * self.line_item.quantity
+            Decimal(response.data["amount_without_tax"]),
+            self.line_item.rate * self.line_item.quantity,
         )
         self.assertEqual(Decimal(response.data["total_cgst_tax"]), self.line_item.cgst)
         self.assertEqual(Decimal(response.data["total_sgst_tax"]), self.line_item.sgst)
@@ -246,7 +249,9 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["invoice"]["invoice_number"], "INV-001")
         self.assertEqual(len(response.data["line_items"]), 1)
-        self.assertEqual(response.data["line_items"][0]["product_name"], self.line_item.product_name)
+        self.assertEqual(
+            response.data["line_items"][0]["product_name"], self.line_item.product_name
+        )
         self.assertEqual(Decimal(response.data["total_amount"]), self.line_item.amount)
 
     def create_another_business(self):

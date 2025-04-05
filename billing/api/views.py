@@ -400,10 +400,11 @@ class ReportView(APIView):
             month_wise_split_date.append((month_start_str, month_end_str))
 
             # Move to the first day of the next month
-            if month == 12:
-                current_date = datetime(year + 1, 1, 1)
-            else:
-                current_date = datetime(year, month + 1, 1)
+            current_date = (
+                datetime(year + 1, 1, 1)
+                if month == 12
+                else datetime(year, month + 1, 1)
+            )
 
         # Process each month separately
         for month_start_date, month_end_date in month_wise_split_date:
