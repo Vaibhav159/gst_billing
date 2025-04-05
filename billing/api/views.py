@@ -97,6 +97,12 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 | Q(mobile_number__icontains=search_term)
             )
 
+        # Filter by business_id
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            print(f"Filtering by business_id: {business_id}")
+            queryset = queryset.filter(businesses__id=business_id)
+
         return queryset
 
     @action(detail=False, methods=["get"])

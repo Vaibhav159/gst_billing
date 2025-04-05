@@ -38,6 +38,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Fixed item name display on InvoiceDetail and Print view pages
 - Updated Print view page to match the HTMX version
 - Updated InvoiceDetail view page to match the HTMX version
+- Fixed Business filter on CustomerList view page
 
 ### Notes
 - Using uv for package installation instead of pip
