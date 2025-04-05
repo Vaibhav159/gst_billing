@@ -43,6 +43,11 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Fixed report download to include proper file extension (.xlsx) and descriptive filename with robust handling of Content-Disposition headers
 - ✅ Added GST tax rate field to Product list and form pages
 - ✅ Fixed StateDropdown component to support dark mode with proper styling in Business and Customer forms
+- ✅ Fixed CSRF verification issue with Add Line Item API by removing CSRF middleware since we're using JWT authentication
+- ✅ Fixed line items API endpoint to properly handle nested routes for invoice line items
+- ✅ Fixed line item creation by using the backend's create_line_item_for_invoice method to handle all calculations and validations
+- ✅ Standardized field naming by using product_name consistently throughout the frontend instead of item_name
+- ✅ Added robust error handling for line item creation to handle potential undefined values
 - ✅ Fixed Add Line Item component to support dark mode with proper styling, including the SearchableDropdown component
 - ✅ Improved the Add/Cancel button in Line Items section to use appropriate colors and icons
 - ✅ Realigned View Bill and New Invoice buttons on invoice details page for better UX

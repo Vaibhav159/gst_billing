@@ -22,11 +22,20 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class LineItemSerializer(serializers.ModelSerializer):
+    # Keep item_name for backward compatibility
     item_name = serializers.CharField(source="product_name", read_only=True)
 
     class Meta:
         model = LineItem
         fields = "__all__"
+
+    def to_representation(self, instance):
+        # Ensure product_name is always included in the response
+        ret = super().to_representation(instance)
+        # Make sure product_name is present
+        if "product_name" not in ret or ret["product_name"] is None:
+            ret["product_name"] = ""
+        return ret
 
 
 class InvoiceSerializer(serializers.ModelSerializer):

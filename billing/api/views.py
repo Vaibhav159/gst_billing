@@ -336,12 +336,46 @@ class LineItemViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        # Filter by invoice if provided
-        invoice_id = self.request.query_params.get("invoice_id")
+        # Filter by invoice if provided in URL path or query params
+        invoice_id = self.kwargs.get("invoice_id") or self.request.query_params.get(
+            "invoice_id"
+        )
         if invoice_id:
             queryset = queryset.filter(invoice_id=invoice_id)
 
         return queryset
+
+    def create(self, request, *args, **kwargs):
+        # Get invoice_id from URL path if available
+        invoice_id = self.kwargs.get("invoice_id")
+        if invoice_id:
+            try:
+                # Get the invoice to get the customer_id
+                Invoice.objects.get(id=invoice_id)
+
+                # Use the LineItem.create_line_item_for_invoice method directly
+                # This method handles all the calculations and validations
+                line_item = LineItem.create_line_item_for_invoice(
+                    product_name=request.data.get("product_name"),
+                    quantity=request.data.get("quantity"),
+                    rate=request.data.get("rate"),
+                    invoice_id=invoice_id,
+                )
+
+                # Return the serialized line item
+                serializer = self.get_serializer(line_item)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+            except Invoice.DoesNotExist:
+                return Response(
+                    {"error": f"Invoice with ID {invoice_id} does not exist"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # If no invoice_id is provided, use the default create method
+        return super().create(request, *args, **kwargs)
 
     @action(detail=False, methods=["post"])
     def create_for_invoice(self, request):

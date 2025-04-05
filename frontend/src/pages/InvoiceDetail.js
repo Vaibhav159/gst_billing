@@ -32,7 +32,7 @@ function InvoiceDetail() {
   const [customerDetails, setCustomerDetails] = useState({});
   const [businessDetails, setBusinessDetails] = useState({});
   const [newLineItem, setNewLineItem] = useState({
-    item_name: '',
+    product_name: '',
     qty: '',
     rate: '',
     hsn_code: '',
@@ -164,7 +164,7 @@ function InvoiceDetail() {
   const handleProductSelect = (product) => {
     setNewLineItem(prev => ({
       ...prev,
-      item_name: product.name,
+      product_name: product.name,
       hsn_code: product.hsn_code,
       gst_tax_rate: product.gst_tax_rate
     }));
@@ -175,7 +175,7 @@ function InvoiceDetail() {
     e.preventDefault();
 
     // Basic validation
-    if (!newLineItem.item_name || !newLineItem.qty || !newLineItem.rate) {
+    if (!newLineItem.product_name || !newLineItem.qty || !newLineItem.rate) {
       alert('Please fill in all fields');
       return;
     }
@@ -184,9 +184,9 @@ function InvoiceDetail() {
       setSubmittingLineItem(true);
 
       const lineItemData = {
-        invoice_id: invoiceId,
-        item_name: newLineItem.item_name,
-        qty: newLineItem.qty,
+        invoice: invoiceId,
+        product_name: newLineItem.product_name,
+        quantity: newLineItem.qty,
         rate: newLineItem.rate,
         hsn_code: newLineItem.hsn_code || defaultValues.hsn_code, // Use default HSN code if not provided
         gst_tax_rate: newLineItem.gst_tax_rate || defaultValues.gst_tax_rate // Use default GST rate if not provided
@@ -195,11 +195,17 @@ function InvoiceDetail() {
       const response = await lineItemService.createLineItem(invoiceId, lineItemData);
 
       // Add the new line item to the list
-      setLineItems(prev => [...prev, response.data]);
+      // Make sure the response data has all required fields
+      const newItem = response.data || {};
+      // Ensure product_name exists
+      if (!newItem.product_name) {
+        newItem.product_name = newLineItem.product_name;
+      }
+      setLineItems(prev => [...prev, newItem]);
 
       // Reset the form
       setNewLineItem({
-        item_name: '',
+        product_name: '',
         qty: '',
         rate: '',
         hsn_code: '',
@@ -441,10 +447,10 @@ function InvoiceDetail() {
               <form onSubmit={handleAddLineItem} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <SearchableDropdown
-                    label="Item Name"
-                    id="item_name"
-                    name="item_name"
-                    value={newLineItem.item_name}
+                    label="Product Name"
+                    id="product_name"
+                    name="product_name"
+                    value={newLineItem.product_name}
                     onChange={handleLineItemChange}
                     onSelect={handleProductSelect}
                     placeholder="Search for a product"
@@ -547,7 +553,7 @@ function InvoiceDetail() {
                           <div className="text-sm text-gray-900 dark:text-gray-100">{index + 1}.</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">{item.item_name || item.product_name}</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">{item.product_name || '--'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-500 dark:text-gray-400">{item.hsn_code || defaultValues.hsn_code || '--'}</div>
