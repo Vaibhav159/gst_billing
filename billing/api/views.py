@@ -651,8 +651,12 @@ class ReportView(APIView):
         response = HttpResponse(
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        # Ensure the filename has the correct extension and is properly formatted for all browsers
+        date_range = cls.get_date_range_string(start_date, end_date)
+        filename = f"invoices_{date_range}.xlsx"
+        # Use both Content-Disposition formats for maximum browser compatibility
         response["Content-Disposition"] = (
-            f'attachment; filename="invoices_{cls.get_date_range_string(start_date, end_date)}.xlsx"'
+            f"attachment; filename=\"{filename}\"; filename*=UTF-8''{filename}"
         )
 
         workbook.save(response)

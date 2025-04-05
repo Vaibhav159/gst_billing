@@ -114,14 +114,47 @@ function Reports() {
         timeout: 300000, // 5 minutes timeout specifically for this request
       });
 
-      // Create a blob URL and open it in a new tab
-      const blob = new Blob([response.data], {
-        type: formData.format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv'
-      });
-      const url = window.URL.createObjectURL(blob);
+      // Get the filename from the Content-Disposition header if available
+      let fileName = '';
+      const contentDisposition = response.headers['content-disposition'];
 
-      // Open the report in a new tab
-      window.open(url, '_blank');
+      if (contentDisposition) {
+        // Extract filename from Content-Disposition header
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*)\2|[^;\n]*/);
+        if (filenameMatch && filenameMatch[1]) {
+          fileName = filenameMatch[1].replace(/['"]*/g, '');
+        }
+      }
+
+      // If no filename found in header, create one with the correct extension
+      if (!fileName) {
+        // Format date for filename
+        const startDate = new Date(formData.start_date).toISOString().split('T')[0];
+        const endDate = new Date(formData.end_date).toISOString().split('T')[0];
+        fileName = `GST_Report_${startDate}_to_${endDate}.xlsx`;
+      }
+
+      // Ensure the filename has the correct extension
+      if (!fileName.toLowerCase().endsWith('.xlsx')) {
+        fileName += '.xlsx';
+      }
+
+      // Create a blob with the correct MIME type
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+
+      // Create a download link and trigger it
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Clean up the blob URL
+      window.URL.revokeObjectURL(url);
 
     } catch (err) {
       console.error('Error generating report:', err);

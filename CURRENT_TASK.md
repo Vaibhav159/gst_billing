@@ -39,6 +39,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Dashboard already uses ₹ symbol correctly via the formatIndianCurrency utility and updated SVG icons to show the ₹ symbol instead of $
 - ✅ Fixed report generation issue where authentication credentials were not being passed to the new tab
 - ✅ Increased timeout for report generation to 5 minutes and added better loading indicators
+- ✅ Fixed report download to include proper file extension (.xlsx) and descriptive filename with robust handling of Content-Disposition headers
 - ✅ Fixed Add Line Item component to support dark mode with proper styling, including the SearchableDropdown component
 - ✅ Improved the Add/Cancel button in Line Items section to use appropriate colors and icons
 - ✅ Realigned View Bill and New Invoice buttons on invoice details page for better UX

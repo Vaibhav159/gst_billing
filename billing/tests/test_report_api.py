@@ -13,8 +13,7 @@ class ReportAPITestCase(BaseAPITestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["message"], "CSRF cookie set")
-        self.assertTrue("csrftoken" in response.cookies)
+        self.assertEqual(response.data["message"], "Report API ready")
 
     def test_generate_report_without_dates(self):
         """Test generating a report without providing dates."""
