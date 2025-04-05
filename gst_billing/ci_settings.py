@@ -11,7 +11,10 @@ import sys
 # This is needed because settings.py imports from gst_billing.local
 class MockLocal:
     SECRET_KEY = "django-insecure-ci-test-key-not-for-production"
+    DATABASES = {}
 
+
+DEBUG = True
 
 # Add the mock to sys.modules
 sys.modules["gst_billing.local"] = MockLocal
