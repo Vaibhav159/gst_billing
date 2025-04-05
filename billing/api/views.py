@@ -350,9 +350,6 @@ class LineItemViewSet(viewsets.ModelViewSet):
         invoice_id = self.kwargs.get("invoice_id")
         if invoice_id:
             try:
-                # Get the invoice to get the customer_id
-                Invoice.objects.get(id=invoice_id)
-
                 # Use the LineItem.create_line_item_for_invoice method directly
                 # This method handles all the calculations and validations
                 line_item = LineItem.create_line_item_for_invoice(
