@@ -20,7 +20,9 @@ Currently migrating the frontend from HTMX to React. See [CURRENT_TASK.md](CURRE
 - **Frontend**: React, Tailwind CSS
 - **Backend**: Django, Django REST Framework
 - **Database**: PostgreSQL
+- **Package Management**: uv (fast Python package manager)
 - **Deployment**: Docker, Nginx
+- **CI/CD**: CircleCI
 
 For a detailed breakdown of the technology stack, see [TECH_STACK.md](TECH_STACK.md).
 
@@ -44,39 +46,72 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
    cd gst-billing
    ```
 
-2. Set up the Python environment
+2. Install uv (if not already installed)
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   uv pip install -r requirements.txt
+   # On macOS and Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+   # On Windows
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+   # Or with pip
+   pip install uv
    ```
 
-3. Set up the database
+3. Set up the Python environment with uv
+   ```bash
+   # Create a virtual environment
+   uv venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+   # Install dependencies
+   uv sync
+   ```
+
+4. Set up the database
    ```bash
    python manage.py migrate
    ```
 
-4. Install frontend dependencies
+5. Install frontend dependencies
    ```bash
    cd frontend
    npm install
    ```
 
-5. Build the frontend
+6. Build the frontend
    ```bash
    npm run build
    ```
 
-6. Start the development server
+7. Start the development server
    ```bash
    python manage.py runserver
    ```
 
-7. Access the application at http://localhost:8000
+8. Access the application at http://localhost:8000
+
+### Note - To add and remove package using uv
+   ```bash
+   uv add <package_name>
+   uv remove <package_name>
+   ```
 
 ## 🧪 Running Tests
 
 ### Backend Tests
+We use pytest for running tests with coverage reporting:
+
+```bash
+# Install test dependencies
+uv pip install pytest pytest-django pytest-cov coverage
+
+# Run tests with coverage
+python -m pytest billing/tests/ --cov=billing
+```
+
+Alternatively, you can use Django's test runner:
+
 ```bash
 python manage.py test
 ```
@@ -88,7 +123,7 @@ npm test
 ```
 
 ### Continuous Integration
-This project uses CircleCI for continuous integration. Every push to the repository triggers a build that runs all the tests. You can view the build status in the CircleCI dashboard.
+This project uses CircleCI for continuous integration. Every push to the repository triggers a build that runs all the tests with PostgreSQL. You can view the build status in the CircleCI dashboard.
 
 [![CircleCI](https://circleci.com/gh/yourusername/gst-billing.svg?style=shield)](https://circleci.com/gh/yourusername/gst-billing)
 

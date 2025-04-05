@@ -26,12 +26,13 @@
 ## Infrastructure
 - **Deployment**: Docker containers
 - **Web Server**: Gunicorn + Nginx
-- **Package Management**: uv (preferred over pip)
+- **Package Management**: uv (fast Python package manager written in Rust)
 - **Version Control**: Git
 - **CI/CD**: CircleCI
 
 ## Development Tools
 - **Code Editor**: VS Code
+- **Virtual Environments**: uv venv (for creating and managing virtual environments)
 - **API Testing**: Postman
 - **Linting**: ESLint (JavaScript), Flake8 (Python)
 - **Formatting**: Prettier (JavaScript), Black (Python)
@@ -39,7 +40,8 @@
 
 ## Testing
 - **Frontend Testing**: Jest, React Testing Library
-- **Backend Testing**: Django Test Framework
+- **Backend Testing**: pytest, Django Test Framework
+- **Coverage Reporting**: pytest-cov
 - **E2E Testing**: Cypress
 
 ## Monitoring & Analytics
