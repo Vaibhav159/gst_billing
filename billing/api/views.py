@@ -145,6 +145,27 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    @action(detail=False, methods=["get"])
+    def search(self, request):
+        """Search products by name"""
+        query = request.query_params.get("product_name", "")
+        print(f"Product search query: {query}, {request.query_params}")
+
+        # If query is empty or too short, return all products (limited to 20)
+        if not query:
+            products = Product.objects.all().order_by("name")[:20]
+            serializer = self.get_serializer(products, many=True)
+            return Response(serializer.data)
+        # If query is provided and at least 2 characters, filter by it
+        elif len(query) >= 2:
+            products = Product.objects.filter(name__icontains=query).order_by("name")[
+                :20
+            ]
+            serializer = self.get_serializer(products, many=True)
+            return Response(serializer.data)
+        # If query is too short, return empty list
+        return Response([])
+
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     queryset = (

@@ -42,6 +42,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Enhanced InvoiceDetail view to match the HTMX version with improved layout and styling
 - Fixed issue with blank GSTIN, mobile, and address fields in InvoiceDetail page
 - Improved API service usage in InvoiceDetail page for better code organization
+- Made Item Name in invoice page a searchable dropdown of products list that shows all products when clicked
+- Updated invoice detail page to show quantity as "Quantity (gm)" and rate as "Rate (₹/g)"
+- Updated CustomerList page to show PAN number and fixed mobile number display
 
 ### Notes
 - Using uv for package installation instead of pip

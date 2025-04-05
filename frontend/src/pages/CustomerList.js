@@ -481,7 +481,10 @@ function CustomerList() {
                     GST Number
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Phone
+                    PAN Number
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Mobile
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
@@ -510,7 +513,10 @@ function CustomerList() {
                             <div className="text-sm text-gray-500">{customer.gst_number || '-'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-500">{customer.phone_number || '-'}</div>
+                            <div className="text-sm text-gray-500">{customer.pan_number || '-'}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-500">{customer.mobile_number || '-'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             {customer.id && (
@@ -530,7 +536,7 @@ function CustomerList() {
                   </React.Fragment>
                 ) : (
                   <tr>
-                    <td colSpan="4" className="px-6 py-4 text-center text-gray-500">
+                    <td colSpan="5" className="px-6 py-4 text-center text-gray-500">
                       No valid customer data found. {customers ? `Found ${customers.length} customers.` : 'Customers array is undefined.'}
                       <div className="mt-2 text-xs text-red-500">
                         Debug info: {JSON.stringify({ customersType: typeof customers, isArray: Array.isArray(customers) })}

@@ -3,12 +3,14 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
+import SearchableDropdown from '../components/SearchableDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
 import { formatIndianCurrency } from '../utils/formatters';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
 import invoiceService from '../api/invoiceService';
+import productService from '../api/productService';
 
 // Helper function to format dates consistently
 const formatDate = (dateString) => {
@@ -31,7 +33,9 @@ function InvoiceDetail() {
   const [newLineItem, setNewLineItem] = useState({
     item_name: '',
     qty: '',
-    rate: ''
+    rate: '',
+    hsn_code: '',
+    gst_tax_rate: ''
   });
   const [addingLineItem, setAddingLineItem] = useState(false);
   const [submittingLineItem, setSubmittingLineItem] = useState(false);
@@ -98,6 +102,16 @@ function InvoiceDetail() {
     }));
   };
 
+  // Handle product selection
+  const handleProductSelect = (product) => {
+    setNewLineItem(prev => ({
+      ...prev,
+      item_name: product.name,
+      hsn_code: product.hsn_code,
+      gst_tax_rate: product.gst_tax_rate
+    }));
+  };
+
   // Handle line item submission
   const handleAddLineItem = async (e) => {
     e.preventDefault();
@@ -115,7 +129,9 @@ function InvoiceDetail() {
         invoice_id: invoiceId,
         item_name: newLineItem.item_name,
         qty: newLineItem.qty,
-        rate: newLineItem.rate
+        rate: newLineItem.rate,
+        hsn_code: newLineItem.hsn_code || '711319', // Default HSN code for jewelry
+        gst_tax_rate: newLineItem.gst_tax_rate || 0.03 // Default GST rate (3%)
       });
 
       // Add the new line item to the list
@@ -125,16 +141,18 @@ function InvoiceDetail() {
       setNewLineItem({
         item_name: '',
         qty: '',
-        rate: ''
+        rate: '',
+        hsn_code: '',
+        gst_tax_rate: ''
       });
 
       // Refresh the invoice summary
-      const summaryResponse = await axios.get(`/api/invoices/${invoiceId}/summary/`);
-      setSummary(summaryResponse.data);
+      const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
+      setSummary(summaryData);
 
       // Refresh the invoice to get updated total
-      const invoiceResponse = await axios.get(`/api/invoices/${invoiceId}/`);
-      setInvoice(invoiceResponse.data);
+      const invoiceData = await invoiceService.getInvoice(invoiceId);
+      setInvoice(invoiceData);
 
       // Hide the form
       setAddingLineItem(false);
@@ -318,18 +336,20 @@ function InvoiceDetail() {
               <h3 className="text-lg font-medium mb-3">Add New Line Item</h3>
               <form onSubmit={handleAddLineItem} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <FormInput
+                  <SearchableDropdown
                     label="Item Name"
                     id="item_name"
                     name="item_name"
                     value={newLineItem.item_name}
                     onChange={handleLineItemChange}
-                    placeholder="Enter item name"
+                    onSelect={handleProductSelect}
+                    placeholder="Search for a product"
+                    searchFunction={productService.searchProducts}
                     required
                   />
 
                   <FormInput
-                    label="Quantity"
+                    label="Quantity (gm)"
                     id="qty"
                     name="qty"
                     type="number"
@@ -337,12 +357,12 @@ function InvoiceDetail() {
                     step="1"
                     value={newLineItem.qty}
                     onChange={handleLineItemChange}
-                    placeholder="Enter quantity"
+                    placeholder="Enter quantity in grams"
                     required
                   />
 
                   <FormInput
-                    label="Rate"
+                    label="Rate (₹/g)"
                     id="rate"
                     name="rate"
                     type="number"
@@ -350,7 +370,7 @@ function InvoiceDetail() {
                     step="0.01"
                     value={newLineItem.rate}
                     onChange={handleLineItemChange}
-                    placeholder="Enter rate"
+                    placeholder="Enter rate per gram"
                     required
                   />
                 </div>
