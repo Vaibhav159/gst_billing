@@ -33,7 +33,7 @@ function StateDropdown({
   // Filter options based on search term
   useEffect(() => {
     if (searchTerm) {
-      const filtered = STATE_CHOICES.filter(state => 
+      const filtered = STATE_CHOICES.filter(state =>
         state.label.toLowerCase().includes(searchTerm.toLowerCase())
       );
       setFilteredOptions(filtered);
@@ -49,7 +49,7 @@ function StateDropdown({
         setIsOpen(false);
       }
     }
-    
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -70,8 +70,8 @@ function StateDropdown({
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
       {label && (
-        <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
-          {label} {required && <span className="text-red-500">*</span>}
+        <label htmlFor={id} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          {label} {required && <span className="text-red-500 dark:text-red-400">*</span>}
         </label>
       )}
       <div className="relative">
@@ -83,18 +83,18 @@ function StateDropdown({
           onChange={handleInputChange}
           onFocus={() => setIsOpen(true)}
           placeholder={placeholder}
-          className={`block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm border-gray-300 ${
-            error ? 'border-red-300' : ''
+          className={`block w-full rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 ${
+            error ? 'border-red-300 dark:border-red-600' : ''
           }`}
           {...props}
         />
         <button
           type="button"
-          className="absolute inset-y-0 right-0 flex items-center pr-2"
+          className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-400 dark:text-gray-500"
           onClick={() => setIsOpen(!isOpen)}
         >
           <svg
-            className="h-5 w-5 text-gray-400"
+            className="h-5 w-5 text-gray-400 dark:text-gray-500"
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 20 20"
             fill="currentColor"
@@ -110,23 +110,23 @@ function StateDropdown({
       </div>
 
       {isOpen && (
-        <div className="absolute z-10 mt-1 w-full bg-white shadow-lg rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto max-h-60">
+        <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 shadow-lg rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 dark:ring-gray-700 overflow-auto max-h-60">
           {filteredOptions.length === 0 ? (
-            <div className="cursor-default select-none relative py-2 pl-3 pr-9 text-gray-500">
+            <div className="cursor-default select-none relative py-2 pl-3 pr-9 text-gray-500 dark:text-gray-400">
               No states found
             </div>
           ) : (
             filteredOptions.map((option) => (
               <div
                 key={option.value}
-                className="cursor-pointer select-none relative py-2 pl-3 pr-9 hover:bg-indigo-50"
+                className="cursor-pointer select-none relative py-2 pl-3 pr-9 hover:bg-primary-50 dark:hover:bg-primary-900/30 text-gray-900 dark:text-gray-200"
                 onClick={() => handleOptionSelect(option)}
               >
                 <div className="flex items-center">
                   <span className="font-normal block truncate">{option.label}</span>
                 </div>
                 {value === option.value && (
-                  <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-indigo-600">
+                  <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-primary-600 dark:text-primary-400">
                     <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
@@ -138,7 +138,7 @@ function StateDropdown({
         </div>
       )}
 
-      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
 }

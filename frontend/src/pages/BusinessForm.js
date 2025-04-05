@@ -143,7 +143,7 @@ function BusinessForm() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
           {isEditing ? 'Edit Business' : 'Add Business'}
         </h1>
         <Link to="/billing/business/list">
@@ -155,7 +155,7 @@ function BusinessForm() {
         <form className="space-y-4 p-6" onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
-              <h3 className="text-lg font-medium mb-4">Basic Information</h3>
+              <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Basic Information</h3>
             </div>
 
             <FormInput
@@ -223,7 +223,7 @@ function BusinessForm() {
             />
 
             <div className="md:col-span-2 pt-4">
-              <h3 className="text-lg font-medium mb-4">Bank Details</h3>
+              <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Bank Details</h3>
             </div>
 
             <FormInput
@@ -288,11 +288,11 @@ function BusinessForm() {
 
       <Card>
         <div className="p-6">
-          <h2 className="text-lg font-medium mb-4">Business Information</h2>
-          <p className="text-gray-600 mb-2">
+          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Business Information</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-2">
             Business profiles are used to generate invoices. Each business should have the following information:
           </p>
-          <ul className="list-disc pl-5 space-y-1 text-gray-600">
+          <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400">
             <li><strong>Name:</strong> The legal name of your business</li>
             <li><strong>GST Number:</strong> Your business's GST identification number</li>
             <li><strong>Address:</strong> The registered address of your business</li>
