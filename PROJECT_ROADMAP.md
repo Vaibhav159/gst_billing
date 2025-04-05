@@ -1,6 +1,6 @@
 # GST Billing Application Roadmap
 
-## Current Phase: Frontend Migration (Q2 2023)
+## Current Phase: Frontend Migration 
 
 ### Phase 1: Frontend Migration (Current)
 - ✅ Set up React application structure
@@ -13,17 +13,20 @@
 - ✅ Set up CircleCI for continuous integration
 - 🔄 Complete bug fixes
 - 🔄 Ensure feature parity with HTMX version
+- ⬜ Business Filter not working on CustomerList View page
+- ⬜ On InvoiceList view, total inward and outward are coming as the total of all invoices from the paginated list instead of aggregation of all invoices
+- ⬜ On InvoiceDetail View Page and print view page, item name is getting blank, item name is product name in line item
+- ⬜ Print view page is not the same as the HTMX version
+- ⬜ InvoiceDetail View Page is not the same as the HTMX version
+
+### Phase 2: Mordenization and Optimization 
+- ⬜ Add responsive design
+- ⬜ Update the UI/UX to more modern and user-friendly
+- ⬜ Implement lazy loading and code splitting
+
+### Phase 3: Enhanced Features 
+- ⬜ Add Dark Mode
 - ⬜ Phase out HTMX-specific code
-
-### Phase 2: Backend Optimization (Q3 2023)
-- ⬜ Optimize database queries
-- ⬜ Implement caching for frequently accessed data
-- ⬜ Add background processing for reports generation
-- ⬜ Improve API response times
-- ⬜ Add comprehensive API documentation
-- ⬜ Implement rate limiting and throttling
-
-### Phase 3: Enhanced Features (Q4 2023)
 - ⬜ Add dashboard analytics and visualizations
 - ⬜ Implement user roles and permissions
 - ⬜ Add multi-business support
@@ -31,14 +34,14 @@
 - ⬜ Add email notifications
 - ⬜ Implement document attachments
 
-### Phase 4: Mobile App Development (Q1 2024)
+### Phase 4: Mobile App Development 
 - ⬜ Develop mobile app using React Native
 - ⬜ Implement offline support
 - ⬜ Add push notifications
 - ⬜ Implement barcode/QR code scanning
 - ⬜ Add mobile-specific features
 
-### Phase 5: Advanced Features (Q2-Q3 2024)
+### Phase 5: Advanced Features 
 - ⬜ Implement inventory management
 - ⬜ Add purchase order management
 - ⬜ Implement recurring invoices
@@ -46,7 +49,7 @@
 - ⬜ Implement financial reporting
 - ⬜ Add tax filing assistance
 
-### Phase 6: Integration and Expansion (Q4 2024)
+### Phase 6: Integration and Expansion 
 - ⬜ Integrate with accounting software
 - ⬜ Add payment gateway integration
 - ⬜ Implement e-invoicing as per government regulations
