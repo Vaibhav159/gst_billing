@@ -42,27 +42,16 @@ apiClient.interceptors.request.use(
   (config) => {
     // Add JWT token to request headers if available
     const token = localStorage.getItem('access_token');
-    console.log('JWT Token in localStorage:', token ? 'Present' : 'Not found');
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-      console.log('Added Authorization header:', `Bearer ${token.substring(0, 10)}...`);
-    } else {
-      console.warn('No JWT token found in localStorage');
     }
 
     // Add CSRF token for session authentication
     const csrfToken = getCookie('csrftoken');
     if (csrfToken) {
       config.headers['X-CSRFToken'] = csrfToken;
-      console.log('Added X-CSRFToken header:', csrfToken.substring(0, 10) + '...');
-    } else {
-      console.warn('No CSRF token found in cookies');
     }
-
-    // Log all headers for debugging
-    console.log('Request headers:', config.headers);
-    console.log('Request URL:', config.url);
 
     // Don't show loading indicator for certain requests
     if (config.showLoading !== false) {
@@ -82,14 +71,6 @@ apiClient.interceptors.request.use(
 // Add a response interceptor to handle errors and loading state
 apiClient.interceptors.response.use(
   (response) => {
-    // Log successful response
-    console.log(`Response from ${response.config.url}:`, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-      data: response.data
-    });
-
     // Decrease active requests counter
     if (response.config.showLoading !== false) {
       activeRequests = Math.max(0, activeRequests - 1);
@@ -98,14 +79,6 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error) => {
-    // Log error response
-    console.error(`Error response from ${error.config?.url || 'unknown URL'}:`, {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      headers: error.response?.headers,
-      data: error.response?.data,
-      error: error.message
-    });
 
     // Decrease active requests counter
     if (error.config && error.config.showLoading !== false) {
@@ -142,13 +115,12 @@ apiClient.interceptors.response.use(
 
     // Handle specific error types
     if (error.code === 'ECONNABORTED') {
-      console.error('Request timeout:', error);
+      // Request timeout
       // You could show a user-friendly message here
     } else if (axios.isCancel(error)) {
-      console.log('Request cancelled:', error.message);
+      // Request was cancelled
     } else if (error.response) {
       // Server responded with an error status code
-      console.error(`API Error (${error.response.status}):`, error.response.data);
 
       // Handle authentication errors
       if (error.response.status === 401 || error.response.status === 403) {
@@ -156,11 +128,9 @@ apiClient.interceptors.response.use(
       }
     } else if (error.request) {
       // Request was made but no response received (network error)
-      console.error('Network Error:', error);
       // You could show a network error message
     } else {
       // Something else happened while setting up the request
-      console.error('Request Error:', error.message);
     }
 
     return Promise.reject(error);
@@ -196,14 +166,8 @@ export const fetchCSRFToken = async () => {
 
     // Get the CSRF token from the cookie
     const csrfToken = getCookie('csrftoken');
-
-    if (!csrfToken) {
-      console.warn('CSRF token not found in cookies after fetching');
-    }
-
     return csrfToken;
   } catch (error) {
-    console.error('Error fetching CSRF token:', error);
     return null;
   }
 };

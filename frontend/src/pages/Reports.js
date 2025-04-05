@@ -221,14 +221,27 @@ function Reports() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
+                    // Get current date in local time zone
                     const today = new Date();
+
+                    // Create first day of current month (set to day 1)
                     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+
+                    // Create last day of current month (set to day 0 of next month)
                     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+                    // Format dates as YYYY-MM-DD strings in local time zone
+                    const formatDate = (date) => {
+                      const year = date.getFullYear();
+                      const month = String(date.getMonth() + 1).padStart(2, '0');
+                      const day = String(date.getDate()).padStart(2, '0');
+                      return `${year}-${month}-${day}`;
+                    };
 
                     setFormData(prev => ({
                       ...prev,
-                      start_date: firstDay.toISOString().split('T')[0],
-                      end_date: lastDay.toISOString().split('T')[0]
+                      start_date: formatDate(firstDay),
+                      end_date: formatDate(lastDay)
                     }));
                   }}
                 >

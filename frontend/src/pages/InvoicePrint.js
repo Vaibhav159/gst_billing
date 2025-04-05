@@ -35,17 +35,15 @@ function InvoicePrint() {
           cancelToken: cancelTokenSource.token
         });
 
-        console.log('Print data:', response.data); // Debug log
         setPrintData(response.data);
 
         // Fetch business details
         if (response.data && response.data.invoice && response.data.invoice.business) {
           try {
             const businessResponse = await businessService.getBusiness(response.data.invoice.business);
-            console.log('Business data:', businessResponse);
             setBusinessData(businessResponse);
           } catch (businessErr) {
-            console.error('Error fetching business details:', businessErr);
+            // Handle error silently
           }
         }
 
@@ -53,10 +51,9 @@ function InvoicePrint() {
         if (response.data && response.data.invoice && response.data.invoice.customer) {
           try {
             const customerResponse = await customerService.getCustomer(response.data.invoice.customer);
-            console.log('Customer data:', customerResponse);
             setCustomerData(customerResponse);
           } catch (customerErr) {
-            console.error('Error fetching customer details:', customerErr);
+            // Handle error silently
           }
         }
 
@@ -150,13 +147,7 @@ function InvoicePrint() {
     return `${formattedAmount} Rupees Only`;
   }
 
-  // Add additional debug information in development
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('Invoice data:', printData);
-    console.log('Invoice:', invoice);
-    console.log('Line items:', line_items);
-    console.log('Tax information:', { total_cgst_tax, total_sgst_tax, total_igst_tax });
-  }
+  // No debug logging in production
 
   if (!invoice || Object.keys(invoice).length === 0) {
     return (

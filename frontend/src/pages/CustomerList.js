@@ -8,13 +8,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 
 import apiClient, { createCancelToken } from '../api/client';
-// import { formatIndianCurrency } from '../utils/formatters';
-
-console.log('CustomerList component loading');
 
 function CustomerList() {
-  console.log('CustomerList function initializing');
-  console.log('Initial render of CustomerList component');
   // Initialize state with default values
   const [customers, setCustomers] = useState([]);
   const [businesses, setBusinesses] = useState([]);
@@ -180,11 +175,8 @@ function CustomerList() {
         console.log('Request was cancelled, not setting error state');
       }
     } finally {
-      console.log('Setting loading state to false');
       if (isMounted.current) {
         setLoading(false);
-      } else {
-        console.log('Component unmounted, not setting loading state');
       }
     }
 
@@ -194,13 +186,11 @@ function CustomerList() {
 
   // Call fetchCustomers when dependencies change
   useEffect(() => {
-    console.log('fetchCustomers useEffect triggered', { currentPage, filters });
     if (isMounted.current) {
       const cancelFetch = fetchCustomers();
 
       // Cleanup function to cancel request when component unmounts or dependencies change
       return () => {
-        console.log('Cleaning up fetchCustomers effect');
         if (typeof cancelFetch === 'function') {
           cancelFetch();
         }
@@ -356,21 +346,7 @@ function CustomerList() {
     }
   }, [isMounted]);
 
-  // Log the current state for debugging
-  useEffect(() => {
-    console.log('CustomerList state updated:', {
-      customersLength: customers ? customers.length : 'undefined',
-      customersIsArray: Array.isArray(customers),
-      customersData: customers,
-      businessesLength: businesses ? businesses.length : 'undefined',
-      businessesIsArray: Array.isArray(businesses),
-      loading,
-      error,
-      currentPage,
-      totalPages,
-      filters
-    });
-  }, [customers, businesses, loading, error, currentPage, totalPages, filters]);
+  // No debug logging in production
 
   // Add a key to force re-render when customers change
   const renderKey = `customers-${customers.length}-${loading}-${error}`;
@@ -463,15 +439,12 @@ function CustomerList() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200" key={`tbody-${customers.length}`}>
-                {console.log('Rendering customer table with:', customers)}
                 {Array.isArray(customers) && customers.length > 0 ? (
                   // Add a key to force re-render when customers change
                   <React.Fragment key={`customers-${customers.length}`}>
                     {customers.map((customer, index) => {
                       // Skip rendering if customer doesn't have required properties
-                      console.log('Processing customer in map:', customer);
                       if (!customer || !customer.id) {
-                        console.warn('Invalid customer found:', customer);
                         return null;
                       }
 

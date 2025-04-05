@@ -19,38 +19,25 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log('Login form submitted');
 
     if (!username || !password) {
       setError('Please enter both username and password');
-      console.warn('Login form validation failed: missing username or password');
       return;
     }
 
     try {
       setLoading(true);
       setError('');
-      console.log('Attempting login for user:', username);
 
       const result = await authService.login(username, password);
-      console.log('Login successful, received tokens:', result ? 'Yes' : 'No');
-
-      // Check if token is in localStorage after login
-      const token = localStorage.getItem('access_token');
-      console.log('Token in localStorage after login:', token ? 'Present' : 'Not found');
 
       // Redirect to the page the user was trying to access
-      console.log('Redirecting to:', from);
       navigate(from, { replace: true });
     } catch (err) {
-      console.error('Login component error:', err);
-
       if (err.response && err.response.status === 401) {
         setError('Invalid username or password');
-        console.warn('Login failed: Invalid credentials');
       } else {
         setError('An error occurred during login. Please try again.');
-        console.error('Login failed with error:', err.message);
       }
     } finally {
       setLoading(false);
