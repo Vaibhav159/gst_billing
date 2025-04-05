@@ -73,8 +73,8 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": "circle_test",
-        "USER": "postgres",
-        "PASSWORD": "postgres",
+        "USER": "circleci",
+        "PASSWORD": "circleci",
         "HOST": "localhost",
         "PORT": "5432",
     }

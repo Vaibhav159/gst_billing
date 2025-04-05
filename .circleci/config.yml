@@ -6,11 +6,11 @@ jobs:
       - image: cimg/python:3.10
         environment:
           DJANGO_SETTINGS_MODULE: gst_billing.ci_settings
-          DATABASE_URL: postgresql://postgres:postgres@localhost/circle_test
+          DATABASE_URL: postgresql://circleci:circleci@localhost/circle_test
       - image: cimg/postgres:13.7
         environment:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: circleci
+          POSTGRES_PASSWORD: circleci
           POSTGRES_DB: circle_test
 
     steps:
@@ -63,7 +63,7 @@ jobs:
       - run:
           name: Check PostgreSQL connection
           command: |
-            psql -h localhost -p 5432 -U postgres -d circle_test -c "SELECT 1;"
+            PGPASSWORD=circleci psql -h localhost -p 5432 -U circleci -d circle_test -c "SELECT 1;"
 
       - run:
           name: Check Django project
@@ -77,23 +77,21 @@ jobs:
             . .venv/bin/activate
             python manage.py migrate
 
-      - run:
-          name: Create test results directory
-          command: |
-            mkdir -p test-results
+      # Test directory is created in the test run step
 
       - run:
           name: Run Django tests
           command: |
             . .venv/bin/activate
-            python -m pytest billing/tests/ --junitxml=test-results/junit.xml --cov=billing --cov-report=xml:test-results/coverage.xml
+            mkdir -p test-results/pytest
+            python -m pytest billing/tests/ --junitxml=test-results/pytest/junit.xml
 
       - store_test_results:
-          path: test-results
+          path: test-results/pytest
 
       - store_artifacts:
-          path: test-results
-          destination: tr
+          path: test-results/pytest
+          destination: test-reports
 
 workflows:
   version: 2
