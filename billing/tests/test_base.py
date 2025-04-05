@@ -64,7 +64,6 @@ class BaseAPITestCase(TestCase):
             business=self.business,
             customer=self.customer,
             type_of_invoice=INVOICE_TYPE_OUTWARD,
-            total_amount=Decimal("1180.00"),
         )
 
         # Create a test line item
@@ -81,3 +80,6 @@ class BaseAPITestCase(TestCase):
             sgst=Decimal("90.00"),
             igst=Decimal("0.00"),
         )
+
+        # Update the invoice total amount
+        self.invoice.save()

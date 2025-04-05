@@ -70,7 +70,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["name", "gst_number", "phone_number"]
+    search_fields = ["name", "gst_number", "mobile_number"]
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
@@ -89,7 +89,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(
                 Q(name__icontains=search_term)
                 | Q(gst_number__icontains=search_term)
-                | Q(phone_number__icontains=search_term)
+                | Q(mobile_number__icontains=search_term)
             )
 
         return queryset

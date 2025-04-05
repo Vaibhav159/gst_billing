@@ -39,6 +39,7 @@ class LineItemAPITestCase(BaseAPITestCase):
         url = reverse("lineitem-list")
         data = {
             "invoice": self.invoice.id,
+            "customer": self.customer.id,
             "product_name": "New Product",
             "hsn_code": "711319",
             "quantity": "2.00",
@@ -51,7 +52,7 @@ class LineItemAPITestCase(BaseAPITestCase):
         }
         response = self.client.post(url, data, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, msg=response.json())
         self.assertEqual(LineItem.objects.count(), 2)
         self.assertEqual(response.data["product_name"], "New Product")
         self.assertEqual(Decimal(response.data["quantity"]), Decimal("2.00"))
@@ -62,6 +63,7 @@ class LineItemAPITestCase(BaseAPITestCase):
         url = reverse("lineitem-detail", args=[self.line_item.id])
         data = {
             "invoice": self.invoice.id,
+            "customer": self.customer.id,
             "product_name": "Updated Product",
             "hsn_code": "711319",
             "quantity": "1.00",
@@ -74,7 +76,7 @@ class LineItemAPITestCase(BaseAPITestCase):
         }
         response = self.client.put(url, data, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK, msg=response.json())
         self.line_item.refresh_from_db()
         self.assertEqual(self.line_item.product_name, "Updated Product")
 
