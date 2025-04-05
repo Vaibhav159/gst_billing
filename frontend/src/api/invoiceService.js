@@ -47,6 +47,20 @@ const invoiceService = {
   printInvoice: async (id) => {
     const response = await apiClient.get(`/invoices/${id}/print/`);
     return response.data;
+  },
+
+  // Import invoices from CSV
+  importInvoices: async (file, businessId) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('business_id', businessId);
+
+    const response = await apiClient.post('/invoices/import/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
   }
 };
 

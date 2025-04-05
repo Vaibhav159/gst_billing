@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -22,6 +23,7 @@ from billing.constants import (
     INVOICE_TYPE_OUTWARD,
 )
 from billing.models import Business, Customer, Invoice, LineItem, Product
+from billing.utils import CSVImportError, process_invoice_csv
 
 from .serializers import (
     BusinessSerializer,
@@ -610,3 +612,63 @@ class ReportView(APIView):
 
         # Generate and return the Excel file
         return self.generate_csv_response(start_date, end_date, invoice_type)
+
+
+class InvoiceImportView(APIView):
+    """
+    API endpoint for importing invoices from CSV files.
+    """
+
+    parser_classes = [MultiPartParser]
+
+    @method_decorator(ensure_csrf_cookie)
+    def get(self, request, *args, **kwargs):
+        # Just return a simple response to set the CSRF cookie
+        return Response({"message": "CSRF cookie set"})
+
+    def post(self, request, *args, **kwargs):
+        # Check if file is provided
+        if "file" not in request.FILES:
+            return Response(
+                {"error": "No file provided"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if business_id is provided
+        business_id = request.data.get("business_id")
+        if not business_id:
+            return Response(
+                {"error": "Business ID is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Get the uploaded file
+        csv_file = request.FILES["file"]
+
+        # Check file extension
+        if not csv_file.name.endswith(".csv"):
+            return Response(
+                {"error": "File must be a CSV file"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Process the CSV file
+        try:
+            # Read the file content
+            file_content = csv_file.read()
+
+            # Process the CSV file
+            result = process_invoice_csv(file_content, int(business_id))
+
+            return Response(result, status=status.HTTP_201_CREATED)
+        except CSVImportError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            logging.error(f"Error processing CSV file: {e!s}")
+            return Response(
+                {"error": "An unexpected error occurred while processing the CSV file"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

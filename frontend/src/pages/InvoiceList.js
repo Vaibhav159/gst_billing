@@ -147,9 +147,14 @@ function InvoiceList() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-        <Link to="/billing/invoice/new">
-          <Button variant="primary">Create Invoice</Button>
-        </Link>
+        <div className="flex space-x-2">
+          <Link to="/billing/invoice/import">
+            <Button variant="outline">Import from CSV</Button>
+          </Link>
+          <Link to="/billing/invoice/new">
+            <Button variant="primary">Create Invoice</Button>
+          </Link>
+        </div>
       </div>
 
       {/* Summary Cards */}

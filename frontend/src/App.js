@@ -11,6 +11,7 @@ import BusinessForm from './pages/BusinessForm';
 import InvoiceList from './pages/InvoiceList';
 import InvoiceDetail from './pages/InvoiceDetail';
 import InvoiceForm from './pages/InvoiceForm';
+import InvoiceImport from './pages/InvoiceImport';
 import InvoicePrint from './pages/InvoicePrint';
 import ProductList from './pages/ProductList';
 import ProductForm from './pages/ProductForm';
@@ -39,6 +40,7 @@ function App() {
         <Route path="billing/invoice/list" element={<InvoiceList />} />
         <Route path="billing/invoice/add" element={<InvoiceForm />} />
         <Route path="billing/invoice/new" element={<InvoiceForm />} />
+        <Route path="billing/invoice/import" element={<InvoiceImport />} />
         <Route path="billing/invoice/:invoiceId" element={<InvoiceDetail />} />
         <Route path="billing/invoice" element={<InvoiceForm />} />
 

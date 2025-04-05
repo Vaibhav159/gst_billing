@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     BusinessViewSet,
     CustomerViewSet,
+    InvoiceImportView,
     InvoiceViewSet,
     LineItemViewSet,
     ProductViewSet,
@@ -20,4 +21,5 @@ router.register(r"products", ProductViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
+    path("invoices/import/", InvoiceImportView.as_view(), name="import-invoices"),
 ]

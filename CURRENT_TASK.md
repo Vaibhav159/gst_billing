@@ -28,11 +28,12 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- Ensure mobile responsiveness
-- Optimize performance for large datasets
-- Phase out HTMX-specific code
+- None
+- Invoice Details page takes time to load since we wait for all apis to resolve, instead we should render whatever api response we have recevied.
+- Add Serial Number in each List View.
 
 ### Recently Completed Items
+- Added Invoice Import feature that allows users to import invoices from CSV files
 - Fixed filters on CustomerList view page
 - Fixed total inward and outward calculations on InvoiceList view
 - Fixed item name display on InvoiceDetail and Print view pages
