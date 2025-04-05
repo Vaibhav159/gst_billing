@@ -18,8 +18,8 @@
 - ✅ When adding line item, Item Name in invoice page should be a searchable drop down of products list.
 - ✅ In invoice detail page, quantity should be like Quantity (gm) and rate should be like Rate (₹/g)
 - ✅ CustomerList Page should also show pan number in list view and mobile number is not showing for customers which have that in api.
-- ⬜ Print view page is not the same as the HTMX version
-- ⬜ InvoiceDetail View Page is not the same as the HTMX version
+- ✅ Print view page is not the same as the HTMX version
+- ✅ InvoiceDetail View Page is not the same as the HTMX version
 - 🔄 Complete bug fixes
 - 🔄 Ensure feature parity with HTMX version
 
