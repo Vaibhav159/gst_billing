@@ -4,6 +4,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient, { createCancelToken } from '../api/client';
 import axios from 'axios';
 import { formatIndianCurrency } from '../utils/formatters';
+import businessService from '../api/businessService';
+import customerService from '../api/customerService';
 
 // Helper function to format dates consistently
 const formatDate = (dateString) => {
@@ -17,6 +19,8 @@ function InvoicePrint() {
   const { invoiceId } = useParams();
   const navigate = useNavigate();
   const [printData, setPrintData] = useState(null);
+  const [businessData, setBusinessData] = useState(null);
+  const [customerData, setCustomerData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -33,6 +37,29 @@ function InvoicePrint() {
 
         console.log('Print data:', response.data); // Debug log
         setPrintData(response.data);
+
+        // Fetch business details
+        if (response.data && response.data.invoice && response.data.invoice.business) {
+          try {
+            const businessResponse = await businessService.getBusiness(response.data.invoice.business);
+            console.log('Business data:', businessResponse);
+            setBusinessData(businessResponse);
+          } catch (businessErr) {
+            console.error('Error fetching business details:', businessErr);
+          }
+        }
+
+        // Fetch customer details
+        if (response.data && response.data.invoice && response.data.invoice.customer) {
+          try {
+            const customerResponse = await customerService.getCustomer(response.data.invoice.customer);
+            console.log('Customer data:', customerResponse);
+            setCustomerData(customerResponse);
+          } catch (customerErr) {
+            console.error('Error fetching customer details:', customerErr);
+          }
+        }
+
         setError(null);
 
         // Auto-print after data is loaded
@@ -104,6 +131,10 @@ function InvoicePrint() {
   const total_amount = invoiceData.total_amount || 0;
   const round_off = invoiceData.round_off || '0.00';
 
+  // Get business and customer details
+  const business = businessData || {};
+  const customer = customerData || {};
+
   // Convert amount to words (since it's not in the API response)
   const amount_in_words = invoiceData.amount_in_words || convertAmountToWords(total_amount);
 
@@ -172,13 +203,19 @@ function InvoicePrint() {
         <div className="flex justify-between items-start mb-8 border-b pb-6">
           <div>
             <h1 className="text-2xl font-bold text-blue-500">
-              {invoice.business_name || 'SHREE LODHA JEWELLERS'}
+              {business.name || invoice.business_name || ''}
             </h1>
             <div className="text-sm text-gray-600 mt-2 space-y-1">
-              <p>{invoice.business_address || 'JADIO KI OLE, CLOCK TOWER, UDAIPUR'}</p>
-              <p>RAJASTHAN, {invoice.business_state_code || '8'}</p>
-              <p>GSTIN: {invoice.business_gst_number || '08AAKPL4741M1Z9'}</p>
-              <p>PAN: {invoice.business_pan_number || 'AAKPL4741M'}</p>
+              <p>{business.address || invoice.business_address || ''}</p>
+              {(business.state_name || business.state_code) && (
+                <p>{business.state_name || ''}{business.state_code ? `, ${business.state_code}` : ''}</p>
+              )}
+              {(business.gst_number || invoice.business_gst_number) && (
+                <p>GSTIN: {business.gst_number || invoice.business_gst_number || ''}</p>
+              )}
+              {(business.pan_number || invoice.business_pan_number) && (
+                <p>PAN: {business.pan_number || invoice.business_pan_number || ''}</p>
+              )}
             </div>
           </div>
 
@@ -195,12 +232,26 @@ function InvoicePrint() {
         <div className="mb-8">
           <h3 className="text-sm font-semibold mb-2">BILL TO</h3>
           <div className="text-sm space-y-1">
-            <p className="font-medium">{invoice.customer_name || 'LODHA JEWELLERS'}</p>
-            <p>{invoice.customer_address || 'UDAIPUR'}</p>
-            <p>RAJASTHAN, Code: {invoice.customer_state_code || '8'}</p>
-            <p>GSTIN: {invoice.customer_gst_number || '08AAGPL3375F1ZO'}</p>
-            <p>PAN: {invoice.customer_pan_number || 'AAGPL3375F'}</p>
-            <p>Mobile: {invoice.customer_mobile_number || '9414808909'}</p>
+            <p className="font-medium">{invoice.customer_name || customer.name || ''}</p>
+            {(invoice.customer_address || customer.address) && (
+              <p>{invoice.customer_address || customer.address}</p>
+            )}
+            {(invoice.customer_state || customer.state_name) && (
+              <p>
+                {invoice.customer_state || customer.state_name}
+                {(invoice.customer_state_code || customer.state_code) ?
+                  `, Code: ${invoice.customer_state_code || customer.state_code}` : ''}
+              </p>
+            )}
+            {(invoice.customer_gst_number || customer.gst_number) && (
+              <p>GSTIN: {invoice.customer_gst_number || customer.gst_number}</p>
+            )}
+            {(invoice.customer_pan_number || customer.pan_number) && (
+              <p>PAN: {invoice.customer_pan_number || customer.pan_number}</p>
+            )}
+            {(invoice.customer_mobile_number || customer.mobile_number) && (
+              <p>Mobile: {invoice.customer_mobile_number || customer.mobile_number}</p>
+            )}
           </div>
         </div>
 
@@ -221,9 +272,9 @@ function InvoicePrint() {
           {line_items && line_items.map((item, index) => (
             <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
               <td className="py-2 px-4 border-b border-r">{index + 1}</td>
-              <td className="py-2 px-4 border-b border-r">{item.item_name || item.product_name || 'SILVER ORNAMENTS'}</td>
-              <td className="py-2 px-4 border-b border-r text-center">{item.hsn_code || '711319'}</td>
-              <td className="py-2 px-4 border-b border-r text-center">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : '3'}%</td>
+              <td className="py-2 px-4 border-b border-r">{item.item_name || item.product_name || ''}</td>
+              <td className="py-2 px-4 border-b border-r text-center">{item.hsn_code || ''}</td>
+              <td className="py-2 px-4 border-b border-r text-center">{item.gst_tax_rate ? `${(item.gst_tax_rate * 100).toFixed(0)}%` : ''}</td>
               <td className="py-2 px-4 border-b border-r text-right">{item.quantity} gm</td>
               <td className="py-2 px-4 border-b border-r text-right">₹{item.rate || 0}/g</td>
               <td className="py-2 px-4 border-b text-right">{formatIndianCurrency(item.amount || 0)}</td>
@@ -236,7 +287,7 @@ function InvoicePrint() {
       <div className="mb-6 border-b pb-4">
         <div className="text-sm">
           <p><strong>Amount in Words:</strong></p>
-          <p>{amount_in_words || 'Nine Lakh, Sixty-Nine Thousand, Seven Hundred And Four'}</p>
+          <p>{amount_in_words || `${formatIndianCurrency(total_amount)} Rupees Only`}</p>
         </div>
       </div>
 
@@ -298,22 +349,30 @@ function InvoicePrint() {
           <h3 className="text-sm font-bold mb-2">BANK DETAILS</h3>
           <table className="w-full text-xs">
             <tbody>
-              <tr>
-                <td className="py-1 font-medium">Bank Name:</td>
-                <td className="py-1">ICICI Bank</td>
-              </tr>
-              <tr>
-                <td className="py-1 font-medium">A/c No:</td>
-                <td className="py-1">693453930014</td>
-              </tr>
-              <tr>
-                <td className="py-1 font-medium">IFSC Code:</td>
-                <td className="py-1">ICIC0006934</td>
-              </tr>
-              <tr>
-                <td className="py-1 font-medium">Branch:</td>
-                <td className="py-1">ICICI Bank, Clock Tower, Udaipur</td>
-              </tr>
+              {business.bank_name && (
+                <tr>
+                  <td className="py-1 font-medium">Bank Name:</td>
+                  <td className="py-1">{business.bank_name}</td>
+                </tr>
+              )}
+              {business.bank_account_number && (
+                <tr>
+                  <td className="py-1 font-medium">A/c No:</td>
+                  <td className="py-1">{business.bank_account_number}</td>
+                </tr>
+              )}
+              {business.bank_ifsc_code && (
+                <tr>
+                  <td className="py-1 font-medium">IFSC Code:</td>
+                  <td className="py-1">{business.bank_ifsc_code}</td>
+                </tr>
+              )}
+              {business.bank_branch_name && (
+                <tr>
+                  <td className="py-1 font-medium">Branch:</td>
+                  <td className="py-1">{business.bank_branch_name}</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
