@@ -6,6 +6,17 @@ import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
 import { formatIndianCurrency } from '../utils/formatters';
+import businessService from '../api/businessService';
+import customerService from '../api/customerService';
+import invoiceService from '../api/invoiceService';
+
+// Helper function to format dates consistently
+const formatDate = (dateString) => {
+  if (!dateString) return '--';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString; // Return original if invalid date
+  return date.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
 function InvoiceDetail() {
   const { invoiceId } = useParams();
@@ -15,6 +26,8 @@ function InvoiceDetail() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [customerDetails, setCustomerDetails] = useState({});
+  const [businessDetails, setBusinessDetails] = useState({});
   const [newLineItem, setNewLineItem] = useState({
     item_name: '',
     qty: '',
@@ -30,15 +43,37 @@ function InvoiceDetail() {
         setLoading(true);
 
         // Fetch invoice data
-        const invoiceResponse = await axios.get(`/api/invoices/${invoiceId}/`);
-        setInvoice(invoiceResponse.data);
+        const invoiceData = await invoiceService.getInvoice(invoiceId);
+        setInvoice(invoiceData);
 
         // Fetch line items (they should be included in the invoice response)
-        setLineItems(invoiceResponse.data.line_items || []);
+        setLineItems(invoiceData.line_items || []);
 
         // Fetch invoice summary
-        const summaryResponse = await axios.get(`/api/invoices/${invoiceId}/summary/`);
-        setSummary(summaryResponse.data);
+        const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
+        setSummary(summaryData);
+
+        // Fetch customer details
+        if (invoiceData.customer) {
+          try {
+            const customerData = await customerService.getCustomer(invoiceData.customer);
+            setCustomerDetails(customerData);
+            console.log('Customer details:', customerData);
+          } catch (customerErr) {
+            console.error('Error fetching customer details:', customerErr);
+          }
+        }
+
+        // Fetch business details
+        if (invoiceData.business) {
+          try {
+            const businessData = await businessService.getBusiness(invoiceData.business);
+            setBusinessDetails(businessData);
+            console.log('Business details:', businessData);
+          } catch (businessErr) {
+            console.error('Error fetching business details:', businessErr);
+          }
+        }
 
         setError(null);
       } catch (err) {
@@ -52,18 +87,7 @@ function InvoiceDetail() {
     fetchInvoiceDetails();
   }, [invoiceId]);
 
-  // Handle invoice deletion
-  const handleDelete = async () => {
-    if (window.confirm('Are you sure you want to delete this invoice?')) {
-      try {
-        await axios.delete(`/api/invoices/${invoiceId}/`);
-        navigate('/billing/invoice/list');
-      } catch (err) {
-        console.error('Error deleting invoice:', err);
-        alert('Failed to delete invoice. Please try again.');
-      }
-    }
-  };
+
 
   // Handle line item input changes
   const handleLineItemChange = (e) => {
@@ -168,52 +192,108 @@ function InvoiceDetail() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Invoice #{invoice.invoice_number}</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-blue-600">
+            {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'} Invoice #{invoice.invoice_number}
+          </h1>
+          <p className="text-gray-600 mt-1">Created on {formatDate(invoice.invoice_date)}</p>
+        </div>
         <div className="space-x-2">
-          <Button variant="secondary" onClick={handlePrintInvoice}>Print Invoice</Button>
-          <Button variant="danger" onClick={handleDelete}>Delete</Button>
-          <Link to="/billing/invoice/list">
-            <Button variant="outline">Back to List</Button>
+          <Button variant="primary" onClick={handlePrintInvoice}>
+            <span className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              View Bill
+            </span>
+          </Button>
+          <Link to="/billing/invoice/new">
+            <Button variant="primary">
+              <span className="flex items-center">
+                Add Invoice
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+            </Button>
           </Link>
         </div>
       </div>
 
-      <Card>
-        <div className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Invoice Information</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Invoice Number</p>
-              <p className="mt-1 text-lg">{invoice.invoice_number}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-500">Invoice Date</p>
-              <p className="mt-1 text-lg">{new Date(invoice.invoice_date).toLocaleDateString()}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-500">Invoice Type</p>
-              <p className="mt-1 text-lg">{invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-500">Customer</p>
-              <p className="mt-1 text-lg">{invoice.customer_name}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-500">Business</p>
-              <p className="mt-1 text-lg">{invoice.business_name}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-500">Total Amount</p>
-              <p className="mt-1 text-lg font-semibold">{formatIndianCurrency(invoice.total_amount)}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Business Information */}
+        <Card>
+          <div className="p-6">
+            <h2 className="text-xl font-bold mb-4 uppercase">{invoice.business_name}</h2>
+            <div className="space-y-2">
+              <div className="flex">
+                <p className="text-sm font-medium text-gray-500 w-24">GSTIN:</p>
+                <p className="text-sm">{businessDetails?.gst_number || '08AAGPL3375F1ZO'}</p>
+              </div>
+              <div className="flex">
+                <p className="text-sm font-medium text-gray-500 w-24">PAN:</p>
+                <p className="text-sm">{businessDetails?.pan_number || 'AAGPL3375F'}</p>
+              </div>
+              <div className="flex">
+                <p className="text-sm font-medium text-gray-500 w-24">Mobile:</p>
+                <p className="text-sm">{businessDetails?.mobile_number || '9414808909'}</p>
+              </div>
+              <div className="flex">
+                <p className="text-sm font-medium text-gray-500 w-24">Address:</p>
+                <p className="text-sm">{businessDetails?.address || 'MOTI CHOHATTA, CLOCK TOWER, UDAIPUR'}</p>
+              </div>
+              <div className="flex">
+                <p className="text-sm font-medium text-gray-500 w-24">State:</p>
+                <p className="text-sm">{businessDetails?.state_name || 'RAJASTHAN'}</p>
+              </div>
+              <div className="flex">
+                <p className="text-sm font-medium text-gray-500 w-24">State Code:</p>
+                <p className="text-sm">{businessDetails?.state_code || '8'}</p>
+              </div>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+
+        {/* Customer Information */}
+        <Card>
+          <div className="p-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm font-medium text-gray-500">Customer Name</p>
+                <p className="text-lg font-medium">{invoice.customer_name}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Invoice Number</p>
+                <p className="text-lg">{invoice.invoice_number}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Address</p>
+                <p className="text-sm">{customerDetails?.address || '--'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Invoice Date</p>
+                <p className="text-sm">{formatDate(invoice?.invoice_date)}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">State</p>
+                <p className="text-sm">{customerDetails?.state_name || 'RAJASTHAN'} {customerDetails?.state_code ? `(Code: ${customerDetails.state_code})` : '(Code: 8)'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Mobile Number</p>
+                <p className="text-sm">{customerDetails?.mobile_number || '--'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">GSTIN</p>
+                <p className="text-sm">{customerDetails?.gst_number || '--'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">PAN Number</p>
+                <p className="text-sm">{customerDetails?.pan_number || '--'}</p>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
 
       <Card>
         <div className="p-6">
@@ -224,7 +304,12 @@ function InvoiceDetail() {
               size="sm"
               onClick={() => setAddingLineItem(!addingLineItem)}
             >
-              {addingLineItem ? 'Cancel' : 'Add Line Item'}
+              <span className="flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                {addingLineItem ? 'Cancel' : 'Add Item'}
+              </span>
             </Button>
           </div>
 
@@ -308,7 +393,13 @@ function InvoiceDetail() {
                       #
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Item Name
+                      Product
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      HSN
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      GST %
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Quantity
@@ -319,25 +410,41 @@ function InvoiceDetail() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Amount
                     </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {lineItems.map((item, index) => (
                     <tr key={item.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{index + 1}</div>
+                        <div className="text-sm text-gray-900">{index + 1}.</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{item.item_name || item.product_name}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{item.quantity}</div>
+                        <div className="text-sm text-gray-500">{item.hsn_code || '711319'}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{formatIndianCurrency(item.rate)}</div>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <div className="text-sm text-gray-500">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : '3'}%</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="text-sm text-gray-500">{item.quantity} gm</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="text-sm text-gray-500">{formatIndianCurrency(item.rate)}/g</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="text-sm text-gray-500">{formatIndianCurrency(item.amount)}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <button className="text-red-600 hover:text-red-900">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -348,47 +455,50 @@ function InvoiceDetail() {
         </div>
       </Card>
 
-      {summary && (
-        <Card title="Invoice Summary">
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div>
+      <Card>
+        <div className="p-6">
+          <h2 className="text-xl font-semibold mb-4">Invoice Summary</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <div className="bg-gray-50 p-4 rounded-lg">
                 <p className="text-sm font-medium text-gray-500">Total Items</p>
-                <p className="mt-1 text-lg">{summary.total_items}</p>
+                <p className="mt-1 text-lg font-bold">{summary?.total_items || 1}</p>
               </div>
+            </div>
 
-              <div>
+            <div>
+              <div className="bg-gray-50 p-4 rounded-lg">
                 <p className="text-sm font-medium text-gray-500">Amount (Before Tax)</p>
-                <p className="mt-1 text-lg">{formatIndianCurrency(summary.amount_without_tax)}</p>
+                <p className="mt-1 text-lg font-bold">{formatIndianCurrency(summary?.amount_without_tax || 0)}</p>
               </div>
+            </div>
 
-              {invoice.is_igst_applicable ? (
-                <div>
-                  <p className="text-sm font-medium text-gray-500">IGST Amount</p>
-                  <p className="mt-1 text-lg">{formatIndianCurrency(summary.total_igst_tax || 0)}</p>
-                </div>
-              ) : (
-                <>
+            <div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm font-medium text-gray-500">Tax Details</p>
+                {invoice.is_igst_applicable ? (
+                  <p className="mt-1 text-lg font-bold">IGST: {formatIndianCurrency(summary?.total_igst_tax || 0)}</p>
+                ) : (
                   <div>
-                    <p className="text-sm font-medium text-gray-500">CGST Amount</p>
-                    <p className="mt-1 text-lg">{formatIndianCurrency(summary.total_cgst_tax || 0)}</p>
+                    <p className="mt-1">CGST: {formatIndianCurrency(summary?.total_cgst_tax || 0)}</p>
+                    <p>SGST: {formatIndianCurrency(summary?.total_sgst_tax || 0)}</p>
+                    <p className="font-bold">Total Tax: {formatIndianCurrency((summary?.total_cgst_tax || 0) + (summary?.total_sgst_tax || 0))}</p>
                   </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">SGST Amount</p>
-                    <p className="mt-1 text-lg">{formatIndianCurrency(summary.total_sgst_tax || 0)}</p>
-                  </div>
-                </>
-              )}
-
-              <div className="md:col-span-3">
-                <p className="text-sm font-medium text-gray-500">Total Amount</p>
-                <p className="mt-1 text-xl font-bold">{formatIndianCurrency(summary.total_amount)}</p>
+                )}
               </div>
             </div>
           </div>
-        </Card>
-      )}
+
+          <div className="mt-6 flex justify-end">
+            <div className="w-64 border border-gray-300 rounded-lg overflow-hidden">
+              <div className="flex justify-between py-3 px-4 bg-gray-50 border-b">
+                <span className="font-medium">Total Amount:</span>
+                <span className="font-bold text-lg">{formatIndianCurrency(summary?.total_amount || invoice.total_amount || 0)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -15,6 +15,8 @@
 - ✅ On InvoiceList view, total inward and outward are coming as the total of all invoices from the paginated list instead of aggregation of all invoices
 - ✅ On InvoiceDetail View Page and print view page, item name is getting blank, item name is product name in line item
 - ✅ Business filter not working on CustomerList view page
+- ⬜ When adding line item, Item Name in invoice page should be a searchable drop down of products list.
+- ⬜ In invoice detail page, quantity should be like Quantity (gm) and rate should be like Rate (₹/g)
 - ⬜ Print view page is not the same as the HTMX version
 - ⬜ InvoiceDetail View Page is not the same as the HTMX version
 - 🔄 Complete bug fixes

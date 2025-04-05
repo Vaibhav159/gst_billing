@@ -39,6 +39,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Updated Print view page to match the HTMX version
 - Updated InvoiceDetail view page to match the HTMX version
 - Fixed Business filter on CustomerList view page
+- Enhanced InvoiceDetail view to match the HTMX version with improved layout and styling
+- Fixed issue with blank GSTIN, mobile, and address fields in InvoiceDetail page
+- Improved API service usage in InvoiceDetail page for better code organization
 
 ### Notes
 - Using uv for package installation instead of pip
