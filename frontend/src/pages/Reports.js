@@ -89,21 +89,8 @@ function Reports() {
     return years;
   };
 
-  // Get CSRF token from cookie
-  const getCookie = (name) => {
-    let cookieValue = null;
-    if (document.cookie && document.cookie !== '') {
-      const cookies = document.cookie.split(';');
-      for (let i = 0; i < cookies.length; i++) {
-        const cookie = cookies[i].trim();
-        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-          break;
-        }
-      }
-    }
-    return cookieValue;
-  };
+  // Import apiClient
+  const apiClient = require('../api/client').default;
 
   // Handle form submission
   const handleSubmit = async (e) => {
@@ -118,28 +105,23 @@ function Reports() {
       setLoading(true);
       setError(null);
 
-      // Create a form to submit (this will trigger a file download)
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = '/api/reports/generate/';
-      form.target = '_blank'; // Open in new tab
+      // Show a more detailed loading message
+      setError('Generating report... This may take up to 5 minutes for large datasets.');
 
-      // JWT token is sent in the Authorization header automatically
-      // No need for CSRF token with JWT authentication
-
-      // Add form data
-      Object.entries(formData).forEach(([key, value]) => {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = key;
-        input.value = value;
-        form.appendChild(input);
+      // Use apiClient to make the request with proper JWT authentication and extended timeout
+      const response = await apiClient.post('/reports/generate/', formData, {
+        responseType: 'blob', // Important for file downloads
+        timeout: 300000, // 5 minutes timeout specifically for this request
       });
 
-      // Submit the form
-      document.body.appendChild(form);
-      form.submit();
-      document.body.removeChild(form);
+      // Create a blob URL and open it in a new tab
+      const blob = new Blob([response.data], {
+        type: formData.format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv'
+      });
+      const url = window.URL.createObjectURL(blob);
+
+      // Open the report in a new tab
+      window.open(url, '_blank');
 
     } catch (err) {
       console.error('Error generating report:', err);
@@ -271,7 +253,13 @@ function Reports() {
           </div>
 
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
+            <div className={`px-4 py-3 rounded flex items-center ${loading ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'}`}>
+              {loading && (
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
               {error}
             </div>
           )}
@@ -281,15 +269,14 @@ function Reports() {
               type="submit"
               variant="primary"
               disabled={loading}
+              className={loading ? 'opacity-80 cursor-not-allowed' : ''}
             >
               {loading ? (
-                <>
+                <span className="flex items-center">
                   <LoadingSpinner size="sm" className="mr-2" />
-                  Generating...
-                </>
-              ) : (
-                'Generate Report'
-              )}
+                  Generating Report... (may take up to 5 minutes)
+                </span>
+              ) : 'Generate Report'}
             </Button>
           </div>
         </form>
