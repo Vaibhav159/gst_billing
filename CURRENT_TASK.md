@@ -28,11 +28,12 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- None
-- Invoice Details page takes time to load since we wait for all apis to resolve, instead we should render whatever api response we have recevied.
+- Customer and Business Details page takes time to load since we wait for all apis to resolve, instead we should render whatever api response we have recevied.
 - Add Serial Number in each List View.
 
 ### Recently Completed Items
+- Fixed issue with total tax showing as 0 on invoice detail page by properly using the total_tax field from the summary API
+- Improved Invoice Detail page to render data as it becomes available instead of waiting for all API calls to complete
 - Added Invoice Import feature that allows users to import invoices from CSV files
 - Fixed filters on CustomerList view page
 - Fixed total inward and outward calculations on InvoiceList view

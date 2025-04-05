@@ -26,7 +26,13 @@ function InvoiceDetail() {
   const [invoice, setInvoice] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingStates, setLoadingStates] = useState({
+    invoice: true,
+    lineItems: true,
+    summary: true,
+    customer: true,
+    business: true
+  });
   const [error, setError] = useState(null);
   const [customerDetails, setCustomerDetails] = useState({});
   const [businessDetails, setBusinessDetails] = useState({});
@@ -40,55 +46,94 @@ function InvoiceDetail() {
   const [addingLineItem, setAddingLineItem] = useState(false);
   const [submittingLineItem, setSubmittingLineItem] = useState(false);
 
+  // Helper function to update a specific loading state
+  const updateLoadingState = (key, value) => {
+    setLoadingStates(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
   // Fetch invoice details
   useEffect(() => {
-    const fetchInvoiceDetails = async () => {
+    // Fetch invoice data
+    const fetchInvoice = async () => {
       try {
-        setLoading(true);
-
-        // Fetch invoice data
+        updateLoadingState('invoice', true);
         const invoiceData = await invoiceService.getInvoice(invoiceId);
         setInvoice(invoiceData);
 
-        // Fetch line items (they should be included in the invoice response)
+        // Line items are included in the invoice response
         setLineItems(invoiceData.line_items || []);
+        updateLoadingState('lineItems', false);
 
-        // Fetch invoice summary
-        const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
-        setSummary(summaryData);
-
-        // Fetch customer details
+        // Trigger customer and business data fetching once we have the invoice
         if (invoiceData.customer) {
-          try {
-            const customerData = await customerService.getCustomer(invoiceData.customer);
-            setCustomerDetails(customerData);
-            console.log('Customer details:', customerData);
-          } catch (customerErr) {
-            console.error('Error fetching customer details:', customerErr);
-          }
+          fetchCustomerDetails(invoiceData.customer);
+        } else {
+          updateLoadingState('customer', false);
         }
 
-        // Fetch business details
         if (invoiceData.business) {
-          try {
-            const businessData = await businessService.getBusiness(invoiceData.business);
-            setBusinessDetails(businessData);
-            console.log('Business details:', businessData);
-          } catch (businessErr) {
-            console.error('Error fetching business details:', businessErr);
-          }
+          fetchBusinessDetails(invoiceData.business);
+        } else {
+          updateLoadingState('business', false);
         }
 
         setError(null);
       } catch (err) {
-        console.error('Error fetching invoice details:', err);
-        setError('Failed to load invoice details. Please try again.');
+        console.error('Error fetching invoice:', err);
+        setError('Failed to load invoice. Please try again.');
       } finally {
-        setLoading(false);
+        updateLoadingState('invoice', false);
       }
     };
 
-    fetchInvoiceDetails();
+    // Fetch invoice summary
+    const fetchSummary = async () => {
+      try {
+        updateLoadingState('summary', true);
+        const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
+        setSummary(summaryData);
+      } catch (err) {
+        console.error('Error fetching invoice summary:', err);
+        // Don't set global error for summary - just log it
+      } finally {
+        updateLoadingState('summary', false);
+      }
+    };
+
+    // Fetch customer details
+    const fetchCustomerDetails = async (customerId) => {
+      try {
+        updateLoadingState('customer', true);
+        const customerData = await customerService.getCustomer(customerId);
+        setCustomerDetails(customerData);
+      } catch (err) {
+        console.error('Error fetching customer details:', err);
+        // Don't set global error for customer details - just log it
+      } finally {
+        updateLoadingState('customer', false);
+      }
+    };
+
+    // Fetch business details
+    const fetchBusinessDetails = async (businessId) => {
+      try {
+        updateLoadingState('business', true);
+        const businessData = await businessService.getBusiness(businessId);
+        setBusinessDetails(businessData);
+      } catch (err) {
+        console.error('Error fetching business details:', err);
+        // Don't set global error for business details - just log it
+      } finally {
+        updateLoadingState('business', false);
+      }
+    };
+
+    // Start fetching data in parallel
+    fetchInvoice();
+    fetchSummary();
   }, [invoiceId]);
 
 
@@ -147,12 +192,26 @@ function InvoiceDetail() {
       });
 
       // Refresh the invoice summary
-      const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
-      setSummary(summaryData);
+      updateLoadingState('summary', true);
+      try {
+        const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
+        setSummary(summaryData);
+      } catch (summaryErr) {
+        console.error('Error refreshing summary:', summaryErr);
+      } finally {
+        updateLoadingState('summary', false);
+      }
 
       // Refresh the invoice to get updated total
-      const invoiceData = await invoiceService.getInvoice(invoiceId);
-      setInvoice(invoiceData);
+      updateLoadingState('invoice', true);
+      try {
+        const invoiceData = await invoiceService.getInvoice(invoiceId);
+        setInvoice(invoiceData);
+      } catch (invoiceErr) {
+        console.error('Error refreshing invoice:', invoiceErr);
+      } finally {
+        updateLoadingState('invoice', false);
+      }
 
       // Hide the form
       setAddingLineItem(false);
@@ -169,7 +228,22 @@ function InvoiceDetail() {
     window.open(`/billing/invoice/${invoiceId}/print`, '_blank');
   };
 
-  if (loading) {
+  // Check if the main invoice data is still loading
+  const isMainDataLoading = loadingStates.invoice;
+
+  // Helper function to render a section with a loading indicator
+  const renderWithLoading = (isLoading, content) => {
+    if (isLoading) {
+      return (
+        <div className="flex justify-center items-center py-8">
+          <LoadingSpinner size="md" />
+        </div>
+      );
+    }
+    return content;
+  };
+
+  if (isMainDataLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <LoadingSpinner size="lg" />
@@ -241,75 +315,79 @@ function InvoiceDetail() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Business Information */}
         <Card>
-          <div className="p-6">
-            <h2 className="text-xl font-bold mb-4 uppercase">{invoice.business_name}</h2>
-            <div className="space-y-2">
-              <div className="flex">
-                <p className="text-sm font-medium text-gray-500 w-24">GSTIN:</p>
-                <p className="text-sm">{businessDetails?.gst_number || '08AAGPL3375F1ZO'}</p>
-              </div>
-              <div className="flex">
-                <p className="text-sm font-medium text-gray-500 w-24">PAN:</p>
-                <p className="text-sm">{businessDetails?.pan_number || 'AAGPL3375F'}</p>
-              </div>
-              <div className="flex">
-                <p className="text-sm font-medium text-gray-500 w-24">Mobile:</p>
-                <p className="text-sm">{businessDetails?.mobile_number || '9414808909'}</p>
-              </div>
-              <div className="flex">
-                <p className="text-sm font-medium text-gray-500 w-24">Address:</p>
-                <p className="text-sm">{businessDetails?.address || 'MOTI CHOHATTA, CLOCK TOWER, UDAIPUR'}</p>
-              </div>
-              <div className="flex">
-                <p className="text-sm font-medium text-gray-500 w-24">State:</p>
-                <p className="text-sm">{businessDetails?.state_name || 'RAJASTHAN'}</p>
-              </div>
-              <div className="flex">
-                <p className="text-sm font-medium text-gray-500 w-24">State Code:</p>
-                <p className="text-sm">{businessDetails?.state_code || '8'}</p>
+          {renderWithLoading(loadingStates.business, (
+            <div className="p-6">
+              <h2 className="text-xl font-bold mb-4 uppercase">{invoice.business_name}</h2>
+              <div className="space-y-2">
+                <div className="flex">
+                  <p className="text-sm font-medium text-gray-500 w-24">GSTIN:</p>
+                  <p className="text-sm">{businessDetails?.gst_number || '08AAGPL3375F1ZO'}</p>
+                </div>
+                <div className="flex">
+                  <p className="text-sm font-medium text-gray-500 w-24">PAN:</p>
+                  <p className="text-sm">{businessDetails?.pan_number || 'AAGPL3375F'}</p>
+                </div>
+                <div className="flex">
+                  <p className="text-sm font-medium text-gray-500 w-24">Mobile:</p>
+                  <p className="text-sm">{businessDetails?.mobile_number || '9414808909'}</p>
+                </div>
+                <div className="flex">
+                  <p className="text-sm font-medium text-gray-500 w-24">Address:</p>
+                  <p className="text-sm">{businessDetails?.address || 'MOTI CHOHATTA, CLOCK TOWER, UDAIPUR'}</p>
+                </div>
+                <div className="flex">
+                  <p className="text-sm font-medium text-gray-500 w-24">State:</p>
+                  <p className="text-sm">{businessDetails?.state_name || 'RAJASTHAN'}</p>
+                </div>
+                <div className="flex">
+                  <p className="text-sm font-medium text-gray-500 w-24">State Code:</p>
+                  <p className="text-sm">{businessDetails?.state_code || '8'}</p>
+                </div>
               </div>
             </div>
-          </div>
+          ))}
         </Card>
 
         {/* Customer Information */}
         <Card>
-          <div className="p-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Customer Name</p>
-                <p className="text-lg font-medium">{invoice.customer_name}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">Invoice Number</p>
-                <p className="text-lg">{invoice.invoice_number}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">Address</p>
-                <p className="text-sm">{customerDetails?.address || '--'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">Invoice Date</p>
-                <p className="text-sm">{formatDate(invoice?.invoice_date)}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">State</p>
-                <p className="text-sm">{customerDetails?.state_name || 'RAJASTHAN'} {customerDetails?.state_code ? `(Code: ${customerDetails.state_code})` : '(Code: 8)'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">Mobile Number</p>
-                <p className="text-sm">{customerDetails?.mobile_number || '--'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">GSTIN</p>
-                <p className="text-sm">{customerDetails?.gst_number || '--'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-500">PAN Number</p>
-                <p className="text-sm">{customerDetails?.pan_number || '--'}</p>
+          {renderWithLoading(loadingStates.customer, (
+            <div className="p-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Customer Name</p>
+                  <p className="text-lg font-medium">{invoice.customer_name}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Invoice Number</p>
+                  <p className="text-lg">{invoice.invoice_number}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Address</p>
+                  <p className="text-sm">{customerDetails?.address || '--'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Invoice Date</p>
+                  <p className="text-sm">{formatDate(invoice?.invoice_date)}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">State</p>
+                  <p className="text-sm">{customerDetails?.state_name || 'RAJASTHAN'} {customerDetails?.state_code ? `(Code: ${customerDetails.state_code})` : '(Code: 8)'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Mobile Number</p>
+                  <p className="text-sm">{customerDetails?.mobile_number || '--'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">GSTIN</p>
+                  <p className="text-sm">{customerDetails?.gst_number || '--'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">PAN Number</p>
+                  <p className="text-sm">{customerDetails?.pan_number || '--'}</p>
+                </div>
               </div>
             </div>
-          </div>
+          ))}
         </Card>
       </div>
 
@@ -393,131 +471,138 @@ function InvoiceDetail() {
             </div>
           )}
 
-          {lineItems.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-gray-500">No line items found for this invoice.</p>
-              <Button
-                variant="outline"
-                className="mt-4"
-                onClick={() => setAddingLineItem(true)}
-              >
-                Add Line Item
-              </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      #
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Product
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      HSN
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      GST %
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Quantity
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Rate
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Amount
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {lineItems.map((item, index) => (
-                    <tr key={item.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{index + 1}.</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{item.item_name || item.product_name}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{item.hsn_code || '711319'}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <div className="text-sm text-gray-500">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : '3'}%</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm text-gray-500">{item.quantity} gm</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm text-gray-500">{formatIndianCurrency(item.rate)}/g</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm text-gray-500">{formatIndianCurrency(item.amount)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <button className="text-red-600 hover:text-red-900">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                          </svg>
-                        </button>
-                      </td>
+          {renderWithLoading(loadingStates.lineItems, (
+            lineItems.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No line items found for this invoice.</p>
+                <Button
+                  variant="outline"
+                  className="mt-4"
+                  onClick={() => setAddingLineItem(true)}
+                >
+                  Add Line Item
+                </Button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        #
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Product
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        HSN
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        GST %
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Quantity
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Rate
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Amount
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {lineItems.map((item, index) => (
+                      <tr key={item.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{index + 1}.</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{item.item_name || item.product_name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">{item.hsn_code || '711319'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          <div className="text-sm text-gray-500">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : '3'}%</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm text-gray-500">{item.quantity} gm</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm text-gray-500">{formatIndianCurrency(item.rate)}/g</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm text-gray-500">{formatIndianCurrency(item.amount)}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          <button className="text-red-600 hover:text-red-900">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ))}
         </div>
       </Card>
 
       <Card>
-        <div className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Invoice Summary</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm font-medium text-gray-500">Total Items</p>
-                <p className="mt-1 text-lg font-bold">{summary?.total_items || 1}</p>
+        {renderWithLoading(loadingStates.summary, (
+          <div className="p-6">
+            <h2 className="text-xl font-semibold mb-4">Invoice Summary</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500">Total Items</p>
+                  <p className="mt-1 text-lg font-bold">{summary?.total_items || 1}</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500">Amount (Before Tax)</p>
+                  <p className="mt-1 text-lg font-bold">{formatIndianCurrency(summary?.amount_without_tax || 0)}</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-sm font-medium text-gray-500">Tax Details</p>
+                  {invoice.is_igst_applicable ? (
+                    <div>
+                      <p className="mt-1 text-lg font-bold">IGST: {formatIndianCurrency(summary?.total_igst_tax || 0)}</p>
+                      <p className="font-bold">Total Tax: {formatIndianCurrency(summary?.total_tax || summary?.total_igst_tax || 0)}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="mt-1">CGST: {formatIndianCurrency(summary?.total_cgst_tax || 0)}</p>
+                      <p>SGST: {formatIndianCurrency(summary?.total_sgst_tax || 0)}</p>
+                      <p className="font-bold">Total Tax: {formatIndianCurrency(summary?.total_tax || (summary?.total_cgst_tax || 0) + (summary?.total_sgst_tax || 0))}</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm font-medium text-gray-500">Amount (Before Tax)</p>
-                <p className="mt-1 text-lg font-bold">{formatIndianCurrency(summary?.amount_without_tax || 0)}</p>
-              </div>
-            </div>
-
-            <div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm font-medium text-gray-500">Tax Details</p>
-                {invoice.is_igst_applicable ? (
-                  <p className="mt-1 text-lg font-bold">IGST: {formatIndianCurrency(summary?.total_igst_tax || 0)}</p>
-                ) : (
-                  <div>
-                    <p className="mt-1">CGST: {formatIndianCurrency(summary?.total_cgst_tax || 0)}</p>
-                    <p>SGST: {formatIndianCurrency(summary?.total_sgst_tax || 0)}</p>
-                    <p className="font-bold">Total Tax: {formatIndianCurrency((summary?.total_cgst_tax || 0) + (summary?.total_sgst_tax || 0))}</p>
-                  </div>
-                )}
+            <div className="mt-6 flex justify-end">
+              <div className="w-64 border border-gray-300 rounded-lg overflow-hidden">
+                <div className="flex justify-between py-3 px-4 bg-gray-50 border-b">
+                  <span className="font-medium">Total Amount:</span>
+                  <span className="font-bold text-lg">{formatIndianCurrency(summary?.total_amount || invoice.total_amount || 0)}</span>
+                </div>
               </div>
             </div>
           </div>
-
-          <div className="mt-6 flex justify-end">
-            <div className="w-64 border border-gray-300 rounded-lg overflow-hidden">
-              <div className="flex justify-between py-3 px-4 bg-gray-50 border-b">
-                <span className="font-medium">Total Amount:</span>
-                <span className="font-bold text-lg">{formatIndianCurrency(summary?.total_amount || invoice.total_amount || 0)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        ))}
       </Card>
     </div>
   );

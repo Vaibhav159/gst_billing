@@ -37,12 +37,6 @@ const invoiceService = {
     return response.data;
   },
 
-  // Get invoice summary
-  getInvoiceSummary: async (id) => {
-    const response = await apiClient.get(`/invoices/${id}/summary/`);
-    return response.data;
-  },
-
   // Print invoice
   printInvoice: async (id) => {
     const response = await apiClient.get(`/invoices/${id}/print/`);
