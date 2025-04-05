@@ -28,19 +28,19 @@ class ProductAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["name"], "Test Product")
         self.assertEqual(response.data["hsn_code"], "711319")
-        self.assertEqual(Decimal(response.data["gst_percentage"]), Decimal("18.00"))
+        self.assertEqual(Decimal(response.data["gst_tax_rate"]), Decimal("0.18"))
 
     def test_create_product(self):
         """Test creating a new product."""
         url = reverse("product-list")
-        data = {"name": "New Product", "hsn_code": "711320", "gst_percentage": "12.00"}
+        data = {"name": "New Product", "hsn_code": "711320", "gst_tax_rate": "0.12"}
         response = self.client.post(url, data, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Product.objects.count(), 2)
         self.assertEqual(response.data["name"], "New Product")
         self.assertEqual(response.data["hsn_code"], "711320")
-        self.assertEqual(Decimal(response.data["gst_percentage"]), Decimal("12.00"))
+        self.assertEqual(Decimal(response.data["gst_tax_rate"]), Decimal("0.12"))
 
     def test_update_product(self):
         """Test updating an existing product."""
@@ -48,7 +48,7 @@ class ProductAPITestCase(BaseAPITestCase):
         data = {
             "name": "Updated Product",
             "hsn_code": "711319",
-            "gst_percentage": "18.00",
+            "gst_tax_rate": "0.18",
         }
         response = self.client.put(url, data, format="json")
 
@@ -125,21 +125,21 @@ class ProductAPITestCase(BaseAPITestCase):
         """Test filtering products by GST percentage."""
         # Create products with different GST percentages
         Product.objects.create(
-            name="GST Product 1", hsn_code="711321", gst_percentage=Decimal("5.00")
+            name="GST Product 1", hsn_code="711321", gst_tax_rate=Decimal("0.05")
         )
 
         Product.objects.create(
-            name="GST Product 2", hsn_code="711322", gst_percentage=Decimal("12.00")
+            name="GST Product 2", hsn_code="711322", gst_tax_rate=Decimal("0.12")
         )
 
-        url = reverse("product-list") + "?gst_percentage=18.00"
+        url = reverse("product-list") + "?gst_tax_rate=0.18"
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["name"], "Test Product")
 
-        url = reverse("product-list") + "?gst_percentage=5.00"
+        url = reverse("product-list") + "?gst_tax_rate=0.05"
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)

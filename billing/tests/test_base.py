@@ -54,7 +54,7 @@ class BaseAPITestCase(TestCase):
 
         # Create a test product
         self.product = Product.objects.create(
-            name="Test Product", hsn_code="711319", gst_percentage=Decimal("18.00")
+            name="Test Product", hsn_code="711319", gst_tax_rate=Decimal("0.18")
         )
 
         # Create a test invoice
@@ -71,13 +71,14 @@ class BaseAPITestCase(TestCase):
         # Create a test line item
         self.line_item = LineItem.objects.create(
             invoice=self.invoice,
-            item_name="Test Product",
+            customer=self.customer,
+            product_name="Test Product",
             hsn_code="711319",
             quantity=Decimal("1.00"),
             rate=Decimal("1000.00"),
             amount=Decimal("1180.00"),
-            amount_without_tax=Decimal("1000.00"),
-            cgst_tax=Decimal("90.00"),
-            sgst_tax=Decimal("90.00"),
-            igst_tax=Decimal("0.00"),
+            gst_tax_rate=Decimal("0.18"),
+            cgst=Decimal("90.00"),
+            sgst=Decimal("90.00"),
+            igst=Decimal("0.00"),
         )

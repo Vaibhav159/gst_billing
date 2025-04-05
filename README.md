@@ -125,7 +125,7 @@ npm test
 ### Continuous Integration
 This project uses CircleCI for continuous integration. Every push to the repository triggers a build that runs all the tests with PostgreSQL. You can view the build status in the CircleCI dashboard.
 
-[![CircleCI](https://circleci.com/gh/yourusername/gst-billing.svg?style=shield)](https://circleci.com/gh/yourusername/gst-billing)
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/Vaibhav159/gst_billing/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/Vaibhav159/gst_billing/tree/main)
 
 ## 📝 License
 
