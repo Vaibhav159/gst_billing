@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.urls import reverse
+from freezegun import freeze_time
 from rest_framework import status
 
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
@@ -253,6 +254,63 @@ class InvoiceAPITestCase(BaseAPITestCase):
             response.data["line_items"][0]["product_name"], self.line_item.product_name
         )
         self.assertEqual(Decimal(response.data["total_amount"]), self.line_item.amount)
+
+    @freeze_time("2023-06-01")
+    def test_next_invoice_number(self):
+        """Test retrieving the next invoice number."""
+        # Create a few more invoices to test the sequence
+        Invoice.objects.create(
+            invoice_number="1",
+            invoice_date="2023-04-01",  # Start of financial year 2023-24
+            business=self.business,
+            customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD,
+        )
+
+        Invoice.objects.create(
+            invoice_number="5",
+            invoice_date="2023-05-01",
+            business=self.business,
+            customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD,
+        )
+
+        # Test outward invoice number
+        url = (
+            reverse("invoice-next-invoice-number")
+            + f"?business_id={self.business.id}&type_of_invoice=outward"
+        )
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # The next number should be 003 for the current financial year
+        self.assertEqual(response.data["next_invoice_number"], "6")
+
+        # test for next fy year
+        with freeze_time("2024-06-01"):
+            response = self.client.get(url)
+
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            # The next number should be 001 for the next financial year
+            self.assertEqual(response.data["next_invoice_number"], "1")
+
+        # Test inward invoice number
+        url = (
+            reverse("invoice-next-invoice-number")
+            + f"?business_id={self.business.id}&type_of_invoice=inward"
+        )
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # The next number should be 001 for inward since we haven't created any
+        self.assertEqual(response.data["next_invoice_number"], "1")
+
+        # Test without business_id
+        url = reverse("invoice-next-invoice-number")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"], "Business ID is required")
 
     def create_another_business(self):
         """Helper method to create another business for testing."""

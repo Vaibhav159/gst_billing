@@ -96,6 +96,17 @@ class ProductAPITestCase(BaseAPITestCase):
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["name"], "Another Product")
 
+    def test_product_defaults(self):
+        """Test retrieving default values for products."""
+        from billing.constants import GST_TAX_RATE, HSN_CODE
+
+        url = reverse("product-defaults")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["hsn_code"], HSN_CODE)
+        self.assertEqual(float(response.data["gst_tax_rate"]), float(GST_TAX_RATE))
+
     def test_filter_product_by_hsn_code(self):
         """Test filtering products by HSN code."""
         # Create products with different HSN codes
