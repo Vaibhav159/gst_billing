@@ -28,11 +28,13 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- PAN Card missing in CustomerList view page, Email is not present in Customer table, so lets remove it from frontend as well.
-- Redesign the Dashboard page, be as creative and morden as possible.
-
+- None at the moment
 
 ### Recently Completed Items
+- ✅ Redesigned the Dashboard page with modern UI, including summary statistics, recent invoices, and quick stats
+- ✅ Added dark mode support to all components including tables, cards, and text elements
+- ✅ Fixed PAN Card display in CustomerList view page and removed email field since it's not in the database
+- ✅ Standardized date format across the application to be consistent (e.g., Feb 28, 2025)
 - ✅ Fixed Current Month button in reports to correctly set date range
 - ✅ Cleaned up unnecessary console logs from frontend code
 - ✅ Update Phone number is not working in customer add or edit section.

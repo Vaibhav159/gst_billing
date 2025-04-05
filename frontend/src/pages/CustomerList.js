@@ -416,29 +416,29 @@ function CustomerList() {
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 dark:bg-gray-800">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     #
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Name
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     GST Number
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     PAN Number
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Mobile
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200" key={`tbody-${customers.length}`}>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700" key={`tbody-${customers.length}`}>
                 {Array.isArray(customers) && customers.length > 0 ? (
                   // Add a key to force re-render when customers change
                   <React.Fragment key={`customers-${customers.length}`}>
@@ -454,19 +454,19 @@ function CustomerList() {
                       return (
                         <tr key={customer.id}>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-500">{serialNumber}</div>
+                            <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900 dark:text-white">{customer.name || 'Unnamed Customer'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-500">{customer.gst_number || '-'}</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{customer.gst_number || '-'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-500">{customer.pan_number || '-'}</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{customer.pan_number || '-'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-500">{customer.mobile_number || '-'}</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{customer.mobile_number || '-'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             {customer.id && (
@@ -486,9 +486,9 @@ function CustomerList() {
                   </React.Fragment>
                 ) : (
                   <tr>
-                    <td colSpan="5" className="px-6 py-4 text-center text-gray-500">
+                    <td colSpan="5" className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">
                       No valid customer data found. {customers ? `Found ${customers.length} customers.` : 'Customers array is undefined.'}
-                      <div className="mt-2 text-xs text-red-500">
+                      <div className="mt-2 text-xs text-red-500 dark:text-red-400">
                         Debug info: {JSON.stringify({ customersType: typeof customers, isArray: Array.isArray(customers) })}
                       </div>
                     </td>
