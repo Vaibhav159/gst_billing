@@ -47,37 +47,7 @@ function CustomerList() {
     business_id: ''
   });
 
-  // Test API connection on component mount using fetch API
-  useEffect(() => {
-    if (!isMounted.current) {
-      console.log('Component unmounted, not testing API connection');
-      return;
-    }
-
-    const testApiConnection = async () => {
-      try {
-        console.log('Testing API connection with fetch...');
-        console.log('Testing with correct endpoint: /api/customers/');
-        const response = await fetch('/api/customers/');
-        const data = await response.json();
-        console.log('API test successful with fetch:', { status: response.status, data });
-      } catch (error) {
-        console.error('API test failed with fetch:', error);
-      }
-
-      // Also try with apiClient
-      try {
-        console.log('Testing API connection with apiClient...');
-        console.log('Testing with correct endpoint: /customers/');
-        const response = await apiClient.get('/customers/');
-        console.log('API test successful with apiClient:', response);
-      } catch (error) {
-        console.error('API test failed with apiClient:', error);
-      }
-    };
-
-    testApiConnection();
-  }, [isMounted]);
+  // No need for test API connection in production code
 
   // Fetch customers with filters - memoized to prevent unnecessary re-renders
   const fetchCustomers = useCallback(async () => {
