@@ -19,7 +19,7 @@ commands:
           command: |
             curl -LsSf https://astral.sh/uv/install.sh | sh
             mkdir -p "<<parameters.cache_dir>>" && \
-            uv sync --editable --extras dev --cache-dir <<parameters.cache_dir>>
+            uv sync --frozen --extra dev --cache-dir <<parameters.cache_dir>>
       - run:
           name: Clean pre-built wheels
           command: uv cache prune --ci --cache-dir <<parameters.cache_dir>>
