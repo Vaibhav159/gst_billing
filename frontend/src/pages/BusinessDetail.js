@@ -5,6 +5,8 @@ import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
 import { formatIndianCurrency } from '../utils/formatters';
+import businessService from '../api/businessService';
+import { fetchCSRFToken } from '../api/client';
 
 function BusinessDetail() {
   const { businessId } = useParams();
@@ -86,7 +88,9 @@ function BusinessDetail() {
   const handleDelete = async () => {
     if (window.confirm('Are you sure you want to delete this business?')) {
       try {
-        await axios.delete(`/api/businesses/${businessId}/`);
+        // Ensure CSRF token is available
+        await fetchCSRFToken();
+        await businessService.deleteBusiness(businessId);
         navigate('/billing/business/list');
       } catch (err) {
         console.error('Error deleting business:', err);

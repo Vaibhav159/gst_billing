@@ -1,4 +1,4 @@
-import apiClient from './client';
+import apiClient, { fetchCSRFToken } from './client';
 
 const customerService = {
   // Get all customers with optional filters
@@ -6,31 +6,37 @@ const customerService = {
     const response = await apiClient.get('/customers/', { params: filters });
     return response.data;
   },
-  
+
   // Get a single customer by ID
   getCustomer: async (id) => {
     const response = await apiClient.get(`/customers/${id}/`);
     return response.data;
   },
-  
+
   // Create a new customer
   createCustomer: async (customerData) => {
+    // Ensure CSRF token is available
+    await fetchCSRFToken();
     const response = await apiClient.post('/customers/', customerData);
     return response.data;
   },
-  
+
   // Update an existing customer
   updateCustomer: async (id, customerData) => {
+    // Ensure CSRF token is available
+    await fetchCSRFToken();
     const response = await apiClient.put(`/customers/${id}/`, customerData);
     return response.data;
   },
-  
+
   // Delete a customer
   deleteCustomer: async (id) => {
+    // Ensure CSRF token is available
+    await fetchCSRFToken();
     const response = await apiClient.delete(`/customers/${id}/`);
     return response.data;
   },
-  
+
   // Search customers by name
   searchCustomers: async (query) => {
     const response = await apiClient.get('/customers/search/', { params: { customer_name: query } });

@@ -28,7 +28,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- Add Serial Number in each List View.
+- Add Serial Number in each List View.'
+- Remove Hard coded fallbacks from most of the pages.
+- Add Searchable Dropdown on StateName on Business Add, Edit and Customer Add, Edit and user can only submit if state is selected from dropdown.
 
 ### Recently Completed Items
 - Improved Customer and Business Detail pages to render data as it becomes available instead of waiting for all API calls to complete

@@ -126,4 +126,18 @@ export const createCancelToken = () => {
   return axios.CancelToken.source();
 };
 
+// Function to fetch CSRF token
+export const fetchCSRFToken = async () => {
+  try {
+    await apiClient.get('/csrf-token/');
+    return getCookie('csrftoken');
+  } catch (error) {
+    console.error('Error fetching CSRF token:', error);
+    return null;
+  }
+};
+
+// Export the getCookie function for use in other files
+export { getCookie };
+
 export default apiClient;

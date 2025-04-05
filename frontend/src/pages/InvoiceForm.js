@@ -6,6 +6,10 @@ import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
+import invoiceService from '../api/invoiceService';
+import businessService from '../api/businessService';
+import customerService from '../api/customerService';
+import { fetchCSRFToken } from '../api/client';
 
 function InvoiceForm() {
   const navigate = useNavigate();
@@ -31,12 +35,12 @@ function InvoiceForm() {
         setLoading(true);
 
         // Fetch businesses
-        const businessesResponse = await axios.get('/api/businesses/');
-        setBusinesses(businessesResponse.data.results || businessesResponse.data);
+        const businessesData = await businessService.getBusinesses();
+        setBusinesses(businessesData.results || businessesData);
 
         // Fetch customers
-        const customersResponse = await axios.get('/api/customers/');
-        setCustomers(customersResponse.data.results || customersResponse.data);
+        const customersData = await customerService.getCustomers();
+        setCustomers(customersData.results || customersData);
 
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -133,10 +137,13 @@ function InvoiceForm() {
     try {
       setSubmitting(true);
 
-      const response = await axios.post('/api/invoices/', formData);
+      // Ensure CSRF token is available
+      await fetchCSRFToken();
+
+      const response = await invoiceService.createInvoice(formData);
 
       // Navigate to the invoice detail page
-      navigate(`/billing/invoice/${response.data.id}`);
+      navigate(`/billing/invoice/${response.id}`);
     } catch (err) {
       console.error('Error creating invoice:', err);
 

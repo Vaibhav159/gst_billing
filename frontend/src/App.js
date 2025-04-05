@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { fetchCSRFToken } from './api/client';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import CustomerList from './pages/CustomerList';
@@ -18,6 +19,11 @@ import ProductForm from './pages/ProductForm';
 import Reports from './pages/Reports';
 
 function App() {
+  // Fetch CSRF token when the app loads
+  useEffect(() => {
+    fetchCSRFToken();
+  }, []);
+
   return (
     <Routes>
       {/* Main Layout Routes */}

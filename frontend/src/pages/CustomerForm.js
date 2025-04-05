@@ -6,6 +6,9 @@ import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
+import customerService from '../api/customerService';
+import businessService from '../api/businessService';
+import { fetchCSRFToken } from '../api/client';
 
 function CustomerForm() {
   const { customerId } = useParams();
@@ -30,11 +33,11 @@ function CustomerForm() {
   useEffect(() => {
     const fetchBusinesses = async () => {
       try {
-        const response = await axios.get('/api/businesses/');
+        const businessData = await businessService.getBusinesses();
         // Ensure we have a valid array of businesses with required properties
-        const businessData = response.data.results || response.data || [];
-        const validBusinesses = Array.isArray(businessData)
-          ? businessData.filter(business => business && typeof business === 'object' && business.id && business.name)
+        const businesses = businessData.results || businessData || [];
+        const validBusinesses = Array.isArray(businesses)
+          ? businesses.filter(business => business && typeof business === 'object' && business.id && business.name)
           : [];
 
         setBusinesses(validBusinesses);
@@ -54,10 +57,9 @@ function CustomerForm() {
       const fetchCustomer = async () => {
         try {
           setLoading(true);
-          const response = await axios.get(`/api/customers/${customerId}/`);
+          const customerData = await customerService.getCustomer(customerId);
 
           // Validate customer data
-          const customerData = response.data;
           if (!customerData || typeof customerData !== 'object') {
             throw new Error('Invalid customer data received');
           }
@@ -178,10 +180,13 @@ function CustomerForm() {
     try {
       setSubmitting(true);
 
+      // Ensure CSRF token is available
+      await fetchCSRFToken();
+
       if (isEditing) {
-        await axios.put(`/api/customers/${customerId}/`, formData);
+        await customerService.updateCustomer(customerId, formData);
       } else {
-        await axios.post('/api/customers/', formData);
+        await customerService.createCustomer(formData);
       }
 
       navigate('/billing/customer/list');

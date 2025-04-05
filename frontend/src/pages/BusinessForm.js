@@ -5,6 +5,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
+import businessService from '../api/businessService';
+import { fetchCSRFToken } from '../api/client';
 
 function BusinessForm() {
   const { businessId } = useParams();
@@ -34,18 +36,18 @@ function BusinessForm() {
       const fetchBusiness = async () => {
         try {
           setLoading(true);
-          const response = await axios.get(`/api/businesses/${businessId}/`);
+          const businessData = await businessService.getBusiness(businessId);
           setFormData({
-            name: response.data.name || '',
-            gst_number: response.data.gst_number || '',
-            address: response.data.address || '',
-            mobile_number: response.data.mobile_number || '',
-            pan_number: response.data.pan_number || '',
-            state_name: response.data.state_name || '',
-            bank_name: response.data.bank_name || '',
-            bank_account_number: response.data.bank_account_number || '',
-            bank_ifsc_code: response.data.bank_ifsc_code || '',
-            bank_branch_name: response.data.bank_branch_name || ''
+            name: businessData.name || '',
+            gst_number: businessData.gst_number || '',
+            address: businessData.address || '',
+            mobile_number: businessData.mobile_number || '',
+            pan_number: businessData.pan_number || '',
+            state_name: businessData.state_name || '',
+            bank_name: businessData.bank_name || '',
+            bank_account_number: businessData.bank_account_number || '',
+            bank_ifsc_code: businessData.bank_ifsc_code || '',
+            bank_branch_name: businessData.bank_branch_name || ''
           });
         } catch (err) {
           console.error('Error fetching business:', err);
@@ -107,10 +109,13 @@ function BusinessForm() {
     try {
       setSubmitting(true);
 
+      // Ensure CSRF token is available
+      await fetchCSRFToken();
+
       if (isEditing) {
-        await axios.put(`/api/businesses/${businessId}/`, formData);
+        await businessService.updateBusiness(businessId, formData);
       } else {
-        await axios.post('/api/businesses/', formData);
+        await businessService.createBusiness(formData);
       }
 
       navigate('/billing/business/list');

@@ -672,3 +672,14 @@ class InvoiceImportView(APIView):
                 {"error": "An unexpected error occurred while processing the CSV file"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class CSRFTokenView(APIView):
+    """
+    API endpoint for getting a CSRF token.
+    This view sets a CSRF cookie that can be used for making POST, PUT, PATCH, and DELETE requests.
+    """
+
+    @method_decorator(ensure_csrf_cookie)
+    def get(self, request, *args, **kwargs):
+        return Response({"detail": "CSRF cookie set"})
