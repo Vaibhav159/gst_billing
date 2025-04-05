@@ -33,7 +33,7 @@ function InvoiceDetail() {
   const [businessDetails, setBusinessDetails] = useState({});
   const [newLineItem, setNewLineItem] = useState({
     product_name: '',
-    qty: '',
+    quantity: '',
     rate: '',
     hsn_code: '',
     gst_tax_rate: ''
@@ -219,7 +219,7 @@ function InvoiceDetail() {
     e.preventDefault();
 
     // Basic validation
-    if (!newLineItem.product_name || !newLineItem.qty || !newLineItem.rate) {
+    if (!newLineItem.product_name || !newLineItem.quantity || !newLineItem.rate) {
       alert('Please fill in all fields');
       return;
     }
@@ -230,7 +230,7 @@ function InvoiceDetail() {
       const lineItemData = {
         invoice: invoiceId,
         product_name: newLineItem.product_name,
-        quantity: newLineItem.qty,
+        quantity: newLineItem.quantity,
         rate: newLineItem.rate,
         hsn_code: newLineItem.hsn_code || defaultValues.hsn_code, // Use default HSN code if not provided
         gst_tax_rate: newLineItem.gst_tax_rate || defaultValues.gst_tax_rate // Use default GST rate if not provided
@@ -250,7 +250,7 @@ function InvoiceDetail() {
       // Reset the form
       setNewLineItem({
         product_name: '',
-        qty: '',
+        quantity: '',
         rate: '',
         hsn_code: '',
         gst_tax_rate: ''
@@ -504,12 +504,12 @@ function InvoiceDetail() {
 
                   <FormInput
                     label="Quantity (gm)"
-                    id="qty"
-                    name="qty"
+                    id="quantity"
+                    name="quantity"
                     type="number"
                     min="1"
                     step="1"
-                    value={newLineItem.qty}
+                    value={newLineItem.quantity}
                     onChange={handleLineItemChange}
                     placeholder="Enter quantity in grams"
                     required
