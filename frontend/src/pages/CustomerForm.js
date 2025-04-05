@@ -31,9 +31,17 @@ function CustomerForm() {
     const fetchBusinesses = async () => {
       try {
         const response = await axios.get('/api/businesses/');
-        setBusinesses(response.data.results || response.data);
+        // Ensure we have a valid array of businesses with required properties
+        const businessData = response.data.results || response.data || [];
+        const validBusinesses = Array.isArray(businessData)
+          ? businessData.filter(business => business && typeof business === 'object' && business.id && business.name)
+          : [];
+
+        setBusinesses(validBusinesses);
       } catch (err) {
         console.error('Error fetching businesses:', err);
+        // Set to empty array on error to prevent mapping issues
+        setBusinesses([]);
       }
     };
 
@@ -47,13 +55,26 @@ function CustomerForm() {
         try {
           setLoading(true);
           const response = await axios.get(`/api/customers/${customerId}/`);
+
+          // Validate customer data
+          const customerData = response.data;
+          if (!customerData || typeof customerData !== 'object') {
+            throw new Error('Invalid customer data received');
+          }
+
+          // Ensure businesses is an array
+          let businessIds = [];
+          if (Array.isArray(customerData.businesses)) {
+            businessIds = customerData.businesses.filter(id => id !== null && id !== undefined);
+          }
+
           setFormData({
-            name: response.data.name || '',
-            gst_number: response.data.gst_number || '',
-            phone_number: response.data.phone_number || '',
-            email: response.data.email || '',
-            address: response.data.address || '',
-            businesses: response.data.businesses || []
+            name: customerData.name || '',
+            gst_number: customerData.gst_number || '',
+            phone_number: customerData.phone_number || '',
+            email: customerData.email || '',
+            address: customerData.address || '',
+            businesses: businessIds
           });
         } catch (err) {
           console.error('Error fetching customer:', err);
@@ -86,22 +107,44 @@ function CustomerForm() {
 
   // Handle business selection changes
   const handleBusinessChange = (e) => {
-    const { value, checked } = e.target;
-    const businessId = parseInt(value, 10);
-
-    setFormData(prev => {
-      if (checked) {
-        return {
-          ...prev,
-          businesses: [...prev.businesses, businessId]
-        };
-      } else {
-        return {
-          ...prev,
-          businesses: prev.businesses.filter(id => id !== businessId)
-        };
+    try {
+      const { value, checked } = e.target;
+      // Safely parse the business ID
+      let businessId;
+      try {
+        businessId = parseInt(value, 10);
+        if (isNaN(businessId)) {
+          console.warn('Invalid business ID:', value);
+          return; // Skip if not a valid number
+        }
+      } catch (err) {
+        console.error('Error parsing business ID:', err);
+        return; // Skip if parsing fails
       }
-    });
+
+      setFormData(prev => {
+        // Ensure businesses is an array
+        const currentBusinesses = Array.isArray(prev.businesses) ? prev.businesses : [];
+
+        if (checked) {
+          // Add the business ID if it's not already in the array
+          return {
+            ...prev,
+            businesses: currentBusinesses.includes(businessId)
+              ? currentBusinesses
+              : [...currentBusinesses, businessId]
+          };
+        } else {
+          // Remove the business ID
+          return {
+            ...prev,
+            businesses: currentBusinesses.filter(id => id !== businessId)
+          };
+        }
+      });
+    } catch (err) {
+      console.error('Error handling business change:', err);
+    }
   };
 
   // Form validation
@@ -235,22 +278,31 @@ function CustomerForm() {
               {businesses.length === 0 ? (
                 <p className="text-sm text-gray-500">No businesses available</p>
               ) : (
-                businesses.map(business => (
-                  <div key={business.id} className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id={`business-${business.id}`}
-                      name="businesses"
-                      value={business.id}
-                      checked={formData.businesses.includes(business.id)}
-                      onChange={handleBusinessChange}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor={`business-${business.id}`} className="ml-2 text-sm text-gray-700">
-                      {business.name}
-                    </label>
-                  </div>
-                ))
+                businesses.map(business => {
+                  // Skip rendering if business doesn't have required properties
+                  if (!business || !business.id) return null;
+
+                  // Safely check if business is included
+                  const isChecked = Array.isArray(formData.businesses) &&
+                    formData.businesses.includes(business.id);
+
+                  return (
+                    <div key={business.id} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id={`business-${business.id}`}
+                        name="businesses"
+                        value={business.id}
+                        checked={isChecked}
+                        onChange={handleBusinessChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor={`business-${business.id}`} className="ml-2 text-sm text-gray-700">
+                        {business.name}
+                      </label>
+                    </div>
+                  );
+                })
               )}
             </div>
             {errors.businesses && <p className="mt-1 text-sm text-red-600">{errors.businesses}</p>}

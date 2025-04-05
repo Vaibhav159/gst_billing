@@ -8,7 +8,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import axios from 'axios';
 import apiClient, { createCancelToken } from '../api/client';
-import { formatIndianCurrency } from '../utils/formatters';
+// import { formatIndianCurrency } from '../utils/formatters';
 
 function CustomerList() {
   const [customers, setCustomers] = useState([]);
@@ -46,7 +46,13 @@ function CustomerList() {
         cancelToken: cancelTokenSource.token
       });
 
-      setCustomers(response.data.results || response.data);
+      // Ensure we have a valid array of customers with required properties
+      const customerData = response.data.results || response.data || [];
+      const validCustomers = Array.isArray(customerData)
+        ? customerData.filter(customer => customer && typeof customer === 'object' && customer.id)
+        : [];
+
+      setCustomers(validCustomers);
 
       // Set pagination data if available
       if (response.data.count) {
@@ -86,10 +92,19 @@ function CustomerList() {
           // Don't show loading indicator for this secondary request
           showLoading: false
         });
-        setBusinesses(response.data.results || response.data);
+        // Ensure we have a valid array of businesses
+        const businessData = response.data.results || response.data || [];
+        // Validate that each business has the expected properties
+        const validBusinesses = Array.isArray(businessData)
+          ? businessData.filter(business => business && typeof business === 'object' && business.id && business.name)
+          : [];
+
+        setBusinesses(validBusinesses);
       } catch (err) {
         if (!axios.isCancel(err)) {
           console.error('Error fetching businesses:', err);
+          // Set to empty array on error to prevent mapping issues
+          setBusinesses([]);
         }
       }
     };
@@ -102,12 +117,28 @@ function CustomerList() {
 
   // Handle filter changes
   const handleFilterChange = (e) => {
-    const { name, value } = e.target;
-    setFilters(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    setCurrentPage(1); // Reset to first page when filters change
+    try {
+      const { name, value } = e.target;
+
+      // Ensure value is properly formatted, especially for business_id
+      let processedValue = value;
+      if (name === 'business_id' && value) {
+        // Make sure business_id is a valid value
+        const businessExists = businesses.some(business => business.id === parseInt(value) || business.id === value);
+        if (!businessExists) {
+          console.warn('Selected business ID not found in businesses list:', value);
+        }
+      }
+
+      setFilters(prev => ({
+        ...prev,
+        [name]: processedValue
+      }));
+      setCurrentPage(1); // Reset to first page when filters change
+    } catch (err) {
+      console.error('Error handling filter change:', err);
+      // Don't update filters if there's an error
+    }
   };
 
   // Handle page change
@@ -144,10 +175,10 @@ function CustomerList() {
               value={filters.business_id}
               onChange={handleFilterChange}
               placeholder="All Businesses"
-              options={businesses.map(business => ({
+              options={Array.isArray(businesses) ? businesses.map(business => ({
                 value: business.id,
                 label: business.name
-              }))}
+              })) : []}
             />
           </div>
         </div>
@@ -186,27 +217,36 @@ function CustomerList() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {customers.map((customer) => (
-                  <tr key={customer.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{customer.name}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">{customer.gst_number || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">{customer.phone_number || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <Link to={`/billing/customer/${customer.id}`} className="text-blue-600 hover:text-blue-900 mr-4">
-                        View
-                      </Link>
-                      <Link to={`/billing/customer/edit/${customer.id}`} className="text-indigo-600 hover:text-indigo-900 mr-4">
-                        Edit
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {customers.map((customer) => {
+                  // Skip rendering if customer doesn't have required properties
+                  if (!customer || !customer.id) return null;
+
+                  return (
+                    <tr key={customer.id}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{customer.name || 'Unnamed Customer'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-500">{customer.gst_number || '-'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-500">{customer.phone_number || '-'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        {customer.id && (
+                          <>
+                            <Link to={`/billing/customer/${customer.id}`} className="text-blue-600 hover:text-blue-900 mr-4">
+                              View
+                            </Link>
+                            <Link to={`/billing/customer/edit/${customer.id}`} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                              Edit
+                            </Link>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

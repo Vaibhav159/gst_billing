@@ -20,13 +20,25 @@ function CustomerDetail() {
       try {
         setLoading(true);
         const customerResponse = await axios.get(`/api/customers/${customerId}/`);
-        setCustomer(customerResponse.data);
+        // Validate customer data
+        const customerData = customerResponse.data;
+        if (!customerData || typeof customerData !== 'object') {
+          throw new Error('Invalid customer data received');
+        }
+        setCustomer(customerData);
 
         // Fetch invoices for this customer
         const invoicesResponse = await axios.get(`/api/invoices/`, {
           params: { customer_id: customerId }
         });
-        setInvoices(invoicesResponse.data.results || invoicesResponse.data);
+
+        // Validate invoices data
+        const invoiceData = invoicesResponse.data.results || invoicesResponse.data || [];
+        const validInvoices = Array.isArray(invoiceData)
+          ? invoiceData.filter(invoice => invoice && typeof invoice === 'object' && invoice.id)
+          : [];
+
+        setInvoices(validInvoices);
 
         setError(null);
       } catch (err) {
@@ -180,32 +192,59 @@ function CustomerDetail() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{invoice.invoice_number}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{new Date(invoice.invoice_date).toLocaleDateString()}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{invoice.business_name}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{formatIndianCurrency(invoice.total_amount)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                          {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <Link to={`/billing/invoice/${invoice.id}`} className="text-blue-600 hover:text-blue-900">
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {invoices.map((invoice) => {
+                    // Skip rendering if invoice doesn't have required properties
+                    if (!invoice || !invoice.id) return null;
+
+                    // Safely format date
+                    let formattedDate = '-';
+                    try {
+                      if (invoice.invoice_date) {
+                        formattedDate = new Date(invoice.invoice_date).toLocaleDateString();
+                      }
+                    } catch (err) {
+                      console.error('Error formatting date:', err);
+                    }
+
+                    // Safely format amount
+                    let formattedAmount = '-';
+                    try {
+                      if (invoice.total_amount !== undefined) {
+                        formattedAmount = formatIndianCurrency(invoice.total_amount);
+                      }
+                    } catch (err) {
+                      console.error('Error formatting amount:', err);
+                    }
+
+                    return (
+                      <tr key={invoice.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{invoice.invoice_number || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">{formattedDate}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">{invoice.business_name || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">{formattedAmount}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                            {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          {invoice.id && (
+                            <Link to={`/billing/invoice/${invoice.id}`} className="text-blue-600 hover:text-blue-900">
+                              View
+                            </Link>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
