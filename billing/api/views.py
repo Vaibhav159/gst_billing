@@ -359,6 +359,15 @@ class LineItemViewSet(viewsets.ModelViewSet):
                     invoice_id=invoice_id,
                 )
 
+                # Update the invoice total_amount
+                invoice_obj = Invoice.objects.get(id=invoice_id)
+                invoice_obj.total_amount = sum(
+                    LineItem.objects.filter(invoice_id=invoice_id).values_list(
+                        "amount", flat=True
+                    )
+                )
+                invoice_obj.save()
+
                 # Return the serialized line item
                 serializer = self.get_serializer(line_item)
                 return Response(serializer.data, status=status.HTTP_201_CREATED)

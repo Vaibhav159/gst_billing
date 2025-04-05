@@ -44,6 +44,7 @@ function InvoiceDetail() {
   });
   const [addingLineItem, setAddingLineItem] = useState(false);
   const [submittingLineItem, setSubmittingLineItem] = useState(false);
+  const [deletingLineItem, setDeletingLineItem] = useState(false);
 
   // Helper function to update a specific loading state
   const updateLoadingState = (key, value) => {
@@ -168,6 +169,49 @@ function InvoiceDetail() {
       hsn_code: product.hsn_code,
       gst_tax_rate: product.gst_tax_rate
     }));
+  };
+
+  // Handle line item deletion
+  const handleDeleteLineItem = async (lineItemId) => {
+    if (!window.confirm('Are you sure you want to delete this line item?')) {
+      return;
+    }
+
+    try {
+      setDeletingLineItem(true);
+      await lineItemService.deleteLineItem(lineItemId);
+
+      // Remove the line item from the list
+      setLineItems(prev => prev.filter(item => item.id !== lineItemId));
+
+      // Refresh the invoice summary
+      updateLoadingState('summary', true);
+      try {
+        const summaryData = await invoiceService.getInvoiceSummary(invoiceId);
+        setSummary(summaryData);
+      } catch (err) {
+        console.error('Error refreshing summary:', err);
+      } finally {
+        updateLoadingState('summary', false);
+      }
+
+      // Refresh the invoice to get the updated total_amount
+      updateLoadingState('invoice', true);
+      try {
+        const invoiceData = await invoiceService.getInvoice(invoiceId);
+        setInvoice(invoiceData);
+      } catch (err) {
+        console.error('Error refreshing invoice:', err);
+      } finally {
+        updateLoadingState('invoice', false);
+      }
+
+    } catch (err) {
+      console.error('Error deleting line item:', err);
+      alert('Failed to delete line item. Please try again.');
+    } finally {
+      setDeletingLineItem(false);
+    }
   };
 
   // Handle line item submission
@@ -571,7 +615,11 @@ function InvoiceDetail() {
                           <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.amount)}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <button className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">
+                          <button
+                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                            onClick={() => handleDeleteLineItem(item.id)}
+                            disabled={deletingLineItem}
+                          >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                             </svg>
