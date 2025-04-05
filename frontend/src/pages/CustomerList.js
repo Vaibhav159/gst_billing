@@ -8,6 +8,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import axios from 'axios';
 import apiClient, { createCancelToken } from '../api/client';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function CustomerList() {
   const [customers, setCustomers] = useState([]);

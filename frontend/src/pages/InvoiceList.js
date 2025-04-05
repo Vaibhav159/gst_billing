@@ -7,6 +7,7 @@ import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import axios from 'axios';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function InvoiceList() {
   const [invoices, setInvoices] = useState([]);
@@ -56,9 +57,9 @@ function InvoiceList() {
 
         (response.data.results || response.data).forEach(invoice => {
           if (invoice.type_of_invoice === 'inward') {
-            inwardTotal += parseFloat(invoice.total_amount);
+            inwardTotal += parseFloat(invoice.total_amount || 0);
           } else {
-            outwardTotal += parseFloat(invoice.total_amount);
+            outwardTotal += parseFloat(invoice.total_amount || 0);
           }
         });
 
@@ -161,7 +162,7 @@ function InvoiceList() {
           <div className="p-4">
             <h3 className="text-lg font-medium text-gray-900">Total Outward</h3>
             <p className="mt-2 text-2xl font-semibold text-green-600">
-              ₹{totalAmountOutward.toFixed(2)}
+              {formatIndianCurrency(totalAmountOutward)}
             </p>
           </div>
         </Card>
@@ -170,7 +171,7 @@ function InvoiceList() {
           <div className="p-4">
             <h3 className="text-lg font-medium text-gray-900">Total Inward</h3>
             <p className="mt-2 text-2xl font-semibold text-blue-600">
-              ₹{totalAmountInward.toFixed(2)}
+              {formatIndianCurrency(totalAmountInward)}
             </p>
           </div>
         </Card>
@@ -179,7 +180,7 @@ function InvoiceList() {
           <div className="p-4">
             <h3 className="text-lg font-medium text-gray-900">Net Amount</h3>
             <p className="mt-2 text-2xl font-semibold text-gray-900">
-              ₹{(totalAmountOutward - totalAmountInward).toFixed(2)}
+              {formatIndianCurrency(totalAmountOutward - totalAmountInward)}
             </p>
           </div>
         </Card>
@@ -315,7 +316,7 @@ function InvoiceList() {
                       <div className="text-sm text-gray-500">{invoice.business_name}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">₹{parseFloat(invoice.total_amount).toFixed(2)}</div>
+                      <div className="text-sm text-gray-500">{formatIndianCurrency(invoice.total_amount)}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>

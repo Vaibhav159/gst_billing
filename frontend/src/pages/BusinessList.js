@@ -6,6 +6,7 @@ import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import axios from 'axios';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function BusinessList() {
   const [businesses, setBusinesses] = useState([]);

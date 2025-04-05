@@ -4,6 +4,7 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function CustomerDetail() {
   const { customerId } = useParams();
@@ -191,7 +192,7 @@ function CustomerDetail() {
                         <div className="text-sm text-gray-500">{invoice.business_name}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">₹{parseFloat(invoice.total_amount).toFixed(2)}</div>
+                        <div className="text-sm text-gray-500">{formatIndianCurrency(invoice.total_amount)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>

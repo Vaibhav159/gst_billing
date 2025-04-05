@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient, { createCancelToken } from '../api/client';
 import axios from 'axios';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function InvoicePrint() {
   const { invoiceId } = useParams();
@@ -182,8 +183,8 @@ function InvoicePrint() {
               <td className="py-2 px-4 border-b border-r">{index + 1}</td>
               <td className="py-2 px-4 border-b border-r">{item.item_name}</td>
               <td className="py-2 px-4 border-b border-r text-right">{item.quantity}</td>
-              <td className="py-2 px-4 border-b border-r text-right">₹{parseFloat(item.rate || 0).toFixed(2)}</td>
-              <td className="py-2 px-4 border-b text-right">₹{parseFloat(item.amount || 0).toFixed(2)}</td>
+              <td className="py-2 px-4 border-b border-r text-right">{formatIndianCurrency(item.rate || 0)}</td>
+              <td className="py-2 px-4 border-b text-right">{formatIndianCurrency(item.amount || 0)}</td>
             </tr>
           ))}
         </tbody>
@@ -194,30 +195,30 @@ function InvoicePrint() {
         <div className="w-64 border border-gray-300">
           <div className="flex justify-between py-2 px-4 border-b">
             <span className="font-medium">Subtotal:</span>
-            <span>₹{parseFloat(amount_without_tax).toFixed(2)}</span>
+            <span>{formatIndianCurrency(amount_without_tax)}</span>
           </div>
 
           {invoice.is_igst_applicable ? (
             <div className="flex justify-between py-2 px-4 border-b">
               <span className="font-medium">IGST (18%):</span>
-              <span>₹{parseFloat(total_igst_tax || 0).toFixed(2)}</span>
+              <span>{formatIndianCurrency(total_igst_tax || 0)}</span>
             </div>
           ) : (
             <>
               <div className="flex justify-between py-2 px-4 border-b">
                 <span className="font-medium">CGST (9%):</span>
-                <span>₹{parseFloat(total_cgst_tax || 0).toFixed(2)}</span>
+                <span>{formatIndianCurrency(total_cgst_tax || 0)}</span>
               </div>
               <div className="flex justify-between py-2 px-4 border-b">
                 <span className="font-medium">SGST (9%):</span>
-                <span>₹{parseFloat(total_sgst_tax || 0).toFixed(2)}</span>
+                <span>{formatIndianCurrency(total_sgst_tax || 0)}</span>
               </div>
             </>
           )}
 
           <div className="flex justify-between py-2 px-4 bg-gray-100 font-bold">
             <span>Total:</span>
-            <span>₹{parseFloat(total_amount).toFixed(2)}</span>
+            <span>{formatIndianCurrency(total_amount)}</span>
           </div>
         </div>
       </div>

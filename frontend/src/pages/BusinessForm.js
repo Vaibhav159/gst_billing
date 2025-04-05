@@ -15,7 +15,13 @@ function BusinessForm() {
     name: '',
     gst_number: '',
     address: '',
-    mobile_number: ''
+    mobile_number: '',
+    pan_number: '',
+    state_name: '',
+    bank_name: '',
+    bank_account_number: '',
+    bank_ifsc_code: '',
+    bank_branch_name: ''
   });
 
   const [loading, setLoading] = useState(isEditing);
@@ -33,7 +39,13 @@ function BusinessForm() {
             name: response.data.name || '',
             gst_number: response.data.gst_number || '',
             address: response.data.address || '',
-            mobile_number: response.data.mobile_number || ''
+            mobile_number: response.data.mobile_number || '',
+            pan_number: response.data.pan_number || '',
+            state_name: response.data.state_name || '',
+            bank_name: response.data.bank_name || '',
+            bank_account_number: response.data.bank_account_number || '',
+            bank_ifsc_code: response.data.bank_ifsc_code || '',
+            bank_branch_name: response.data.bank_branch_name || ''
           });
         } catch (err) {
           console.error('Error fetching business:', err);
@@ -137,47 +149,119 @@ function BusinessForm() {
 
       <Card>
         <form className="space-y-4 p-6" onSubmit={handleSubmit}>
-          <FormInput
-            label="Business Name"
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            placeholder="Enter business name"
-            error={errors.name}
-            required
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="md:col-span-2">
+              <h3 className="text-lg font-medium mb-4">Basic Information</h3>
+            </div>
 
-          <FormInput
-            label="GST Number"
-            id="gst_number"
-            name="gst_number"
-            value={formData.gst_number}
-            onChange={handleChange}
-            placeholder="Enter GST number"
-            error={errors.gst_number}
-            required
-          />
+            <FormInput
+              label="Business Name"
+              id="name"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              placeholder="Enter business name"
+              error={errors.name}
+              required
+            />
 
-          <FormInput
-            label="Address"
-            id="address"
-            name="address"
-            value={formData.address}
-            onChange={handleChange}
-            placeholder="Enter business address"
-            error={errors.address}
-          />
+            <FormInput
+              label="GST Number"
+              id="gst_number"
+              name="gst_number"
+              value={formData.gst_number}
+              onChange={handleChange}
+              placeholder="Enter GST number"
+              error={errors.gst_number}
+              required
+            />
 
-          <FormInput
-            label="Phone Number"
-            id="mobile_number"
-            name="mobile_number"
-            value={formData.mobile_number}
-            onChange={handleChange}
-            placeholder="Enter phone number"
-            error={errors.mobile_number}
-          />
+            <FormInput
+              label="PAN Number"
+              id="pan_number"
+              name="pan_number"
+              value={formData.pan_number}
+              onChange={handleChange}
+              placeholder="Enter PAN number"
+              error={errors.pan_number}
+            />
+
+            <FormInput
+              label="State"
+              id="state_name"
+              name="state_name"
+              value={formData.state_name}
+              onChange={handleChange}
+              placeholder="Enter state name"
+              error={errors.state_name}
+            />
+
+            <div className="md:col-span-2">
+              <FormInput
+                label="Address"
+                id="address"
+                name="address"
+                value={formData.address}
+                onChange={handleChange}
+                placeholder="Enter business address"
+                error={errors.address}
+              />
+            </div>
+
+            <FormInput
+              label="Mobile Number"
+              id="mobile_number"
+              name="mobile_number"
+              value={formData.mobile_number}
+              onChange={handleChange}
+              placeholder="Enter mobile number"
+              error={errors.mobile_number}
+            />
+
+            <div className="md:col-span-2 pt-4">
+              <h3 className="text-lg font-medium mb-4">Bank Details</h3>
+            </div>
+
+            <FormInput
+              label="Bank Name"
+              id="bank_name"
+              name="bank_name"
+              value={formData.bank_name}
+              onChange={handleChange}
+              placeholder="Enter bank name"
+              error={errors.bank_name}
+            />
+
+            <FormInput
+              label="Account Number"
+              id="bank_account_number"
+              name="bank_account_number"
+              value={formData.bank_account_number}
+              onChange={handleChange}
+              placeholder="Enter account number"
+              error={errors.bank_account_number}
+            />
+
+            <FormInput
+              label="IFSC Code"
+              id="bank_ifsc_code"
+              name="bank_ifsc_code"
+              value={formData.bank_ifsc_code}
+              onChange={handleChange}
+              placeholder="Enter IFSC code"
+              error={errors.bank_ifsc_code}
+            />
+
+            <FormInput
+              label="Branch Name"
+              id="bank_branch_name"
+              name="bank_branch_name"
+              value={formData.bank_branch_name}
+              onChange={handleChange}
+              placeholder="Enter branch name"
+              error={errors.bank_branch_name}
+            />
+          </div>
 
           <div className="flex justify-end space-x-2 pt-4">
             <Button

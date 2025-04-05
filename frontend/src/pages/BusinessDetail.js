@@ -4,12 +4,14 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function BusinessDetail() {
   const { businessId } = useParams();
   const navigate = useNavigate();
   const [business, setBusiness] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -26,6 +28,16 @@ function BusinessDetail() {
           params: { business_id: businessId }
         });
         setInvoices(invoicesResponse.data.results || invoicesResponse.data);
+
+        // Fetch customers for this business
+        const customersResponse = await axios.get(`/api/customers/`);
+        const allCustomers = customersResponse.data.results || customersResponse.data;
+
+        // Filter customers that have this business in their businesses array
+        const businessCustomers = allCustomers.filter(customer =>
+          customer.businesses && customer.businesses.includes(parseInt(businessId))
+        );
+        setCustomers(businessCustomers);
 
         setError(null);
       } catch (err) {
@@ -105,107 +117,145 @@ function BusinessDetail() {
         </div>
       </div>
 
-      <Card>
-        <div className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Business Information</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Name</p>
-              <p className="mt-1 text-lg">{business.name}</p>
-            </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <div className="p-6">
+            <h2 className="text-xl font-semibold mb-4">Business Information</h2>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-gray-500">Name</p>
+                <p className="mt-1 text-lg">{business.name}</p>
+              </div>
 
-            <div>
-              <p className="text-sm font-medium text-gray-500">GST Number</p>
-              <p className="mt-1 text-lg">{business.gst_number || '-'}</p>
-            </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">GST Number</p>
+                <p className="mt-1 text-lg">{business.gst_number || '-'}</p>
+              </div>
 
-            <div>
-              <p className="text-sm font-medium text-gray-500">Phone Number</p>
-              <p className="mt-1 text-lg">{business.mobile_number || business.phone_number || '-'}</p>
-            </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">PAN Number</p>
+                <p className="mt-1 text-lg">{business.pan_number || '-'}</p>
+              </div>
 
-            <div className="md:col-span-2">
-              <p className="text-sm font-medium text-gray-500">Address</p>
-              <p className="mt-1 text-lg">{business.address || '-'}</p>
-            </div>
-          </div>
-        </div>
-      </Card>
+              <div>
+                <p className="text-sm font-medium text-gray-500">State</p>
+                <p className="mt-1 text-lg">{business.state_name || '-'}</p>
+              </div>
 
-      <Card>
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Invoices</h2>
-            <div className="text-sm text-gray-500">
-              Total: {invoices.length} invoice{invoices.length !== 1 ? 's' : ''}
+              <div>
+                <p className="text-sm font-medium text-gray-500">Address</p>
+                <p className="mt-1 text-lg">{business.address || '-'}</p>
+              </div>
             </div>
           </div>
+        </Card>
 
-          {invoices.length === 0 ? (
-            <div className="text-center py-4">
-              <p className="text-gray-500">No invoices found for this business.</p>
-              <Link to="/billing/invoice/new" className="mt-2 inline-block text-blue-600 hover:text-blue-800">
-                Create an invoice
+        <Card>
+          <div className="p-6">
+            <h2 className="text-xl font-semibold mb-4">Contact & Bank Details</h2>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-gray-500">Mobile Number</p>
+                <p className="mt-1 text-lg">{business.mobile_number || '-'}</p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-gray-500">Bank Name</p>
+                <p className="mt-1 text-lg">{business.bank_name || '-'}</p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-gray-500">Account Number</p>
+                <p className="mt-1 text-lg">{business.bank_account_number || '-'}</p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-gray-500">IFSC Code</p>
+                <p className="mt-1 text-lg">{business.bank_ifsc_code || '-'}</p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-gray-500">Branch Name</p>
+                <p className="mt-1 text-lg">{business.bank_branch_name || '-'}</p>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <div className="p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Customers ({customers.length})</h2>
+              <Link to={`/billing/customer?business=${businessId}`} className="text-blue-600 hover:text-blue-800">
+                Add Customer
               </Link>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Invoice Number
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Date
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Customer
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Amount
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Type
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{invoice.invoice_number}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{new Date(invoice.invoice_date).toLocaleDateString()}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{invoice.customer_name}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">₹{parseFloat(invoice.total_amount).toFixed(2)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+
+            {customers.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-gray-500">No customers linked to this business.</p>
+                <Link to="/billing/customer" className="mt-2 inline-block text-blue-600 hover:text-blue-800">
+                  Add a customer
+                </Link>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {customers.map((customer) => (
+                  <div key={customer.id} className="py-3">
+                    <Link to={`/billing/customer/${customer.id}`} className="text-blue-600 hover:text-blue-800 font-medium">
+                      {customer.name}
+                    </Link>
+                    <p className="text-sm text-gray-600">{customer.gst_number || 'No GST'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Recent Invoices ({invoices.length})</h2>
+              <Link to={`/billing/invoice/list?business_id=${businessId}`} className="text-blue-600 hover:text-blue-800">
+                View All
+              </Link>
+            </div>
+
+            {invoices.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-gray-500">No invoices found for this business.</p>
+                <Link to="/billing/invoice/new" className="mt-2 inline-block text-blue-600 hover:text-blue-800">
+                  Create an invoice
+                </Link>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {invoices.slice(0, 5).map((invoice) => (
+                  <div key={invoice.id} className="py-3 flex justify-between items-center">
+                    <div>
+                      <Link to={`/billing/invoice/${invoice.id}`} className="text-blue-600 hover:text-blue-800 font-medium">
+                        {invoice.invoice_number}
+                      </Link>
+                      <p className="text-sm text-gray-600">{new Date(invoice.invoice_date).toLocaleDateString()}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-medium">{formatIndianCurrency(invoice.total_amount)}</p>
+                      <p className="text-sm text-gray-600">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
                           {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'}
                         </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <Link to={`/billing/invoice/${invoice.id}`} className="text-blue-600 hover:text-blue-900">
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </Card>
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

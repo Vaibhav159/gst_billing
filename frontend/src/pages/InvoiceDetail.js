@@ -5,6 +5,7 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import axios from 'axios';
+import { formatIndianCurrency } from '../utils/formatters';
 
 function InvoiceDetail() {
   const { invoiceId } = useParams();
@@ -208,7 +209,7 @@ function InvoiceDetail() {
 
             <div>
               <p className="text-sm font-medium text-gray-500">Total Amount</p>
-              <p className="mt-1 text-lg font-semibold">₹{parseFloat(invoice.total_amount).toFixed(2)}</p>
+              <p className="mt-1 text-lg font-semibold">{formatIndianCurrency(invoice.total_amount)}</p>
             </div>
           </div>
         </div>
@@ -333,10 +334,10 @@ function InvoiceDetail() {
                         <div className="text-sm text-gray-500">{item.quantity}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">₹{parseFloat(item.rate).toFixed(2)}</div>
+                        <div className="text-sm text-gray-500">{formatIndianCurrency(item.rate)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">₹{parseFloat(item.amount).toFixed(2)}</div>
+                        <div className="text-sm text-gray-500">{formatIndianCurrency(item.amount)}</div>
                       </td>
                     </tr>
                   ))}
@@ -358,31 +359,31 @@ function InvoiceDetail() {
 
               <div>
                 <p className="text-sm font-medium text-gray-500">Amount (Before Tax)</p>
-                <p className="mt-1 text-lg">₹{parseFloat(summary.amount_without_tax).toFixed(2)}</p>
+                <p className="mt-1 text-lg">{formatIndianCurrency(summary.amount_without_tax)}</p>
               </div>
 
               {invoice.is_igst_applicable ? (
                 <div>
                   <p className="text-sm font-medium text-gray-500">IGST Amount</p>
-                  <p className="mt-1 text-lg">₹{parseFloat(summary.total_igst_tax || 0).toFixed(2)}</p>
+                  <p className="mt-1 text-lg">{formatIndianCurrency(summary.total_igst_tax || 0)}</p>
                 </div>
               ) : (
                 <>
                   <div>
                     <p className="text-sm font-medium text-gray-500">CGST Amount</p>
-                    <p className="mt-1 text-lg">₹{parseFloat(summary.total_cgst_tax || 0).toFixed(2)}</p>
+                    <p className="mt-1 text-lg">{formatIndianCurrency(summary.total_cgst_tax || 0)}</p>
                   </div>
 
                   <div>
                     <p className="text-sm font-medium text-gray-500">SGST Amount</p>
-                    <p className="mt-1 text-lg">₹{parseFloat(summary.total_sgst_tax || 0).toFixed(2)}</p>
+                    <p className="mt-1 text-lg">{formatIndianCurrency(summary.total_sgst_tax || 0)}</p>
                   </div>
                 </>
               )}
 
               <div className="md:col-span-3">
                 <p className="text-sm font-medium text-gray-500">Total Amount</p>
-                <p className="mt-1 text-xl font-bold">₹{parseFloat(summary.total_amount).toFixed(2)}</p>
+                <p className="mt-1 text-xl font-bold">{formatIndianCurrency(summary.total_amount)}</p>
               </div>
             </div>
           </div>
