@@ -37,6 +37,8 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Fixed total inward and outward calculations on InvoiceList view
 - Fixed item name display on InvoiceDetail and Print view pages
 - Updated Print view page to match the HTMX version with improved layout and styling, fixed date formatting, and added proper handling of API response data including round-off amount, dynamic business details, and customer details from API without hard-coded fallback values
+- Enhanced the Print view with optimized layout for A4 paper, including improved spacing for Bill To section, Amount in Words section, and Signature section
+- Fixed issue with jurisdiction text appearing on a separate page by moving it into the Bank Details section while maintaining the original design
 - Updated InvoiceDetail view page to match the HTMX version
 - Fixed Business filter on CustomerList view page
 - Enhanced InvoiceDetail view to match the HTMX version with improved layout and styling
