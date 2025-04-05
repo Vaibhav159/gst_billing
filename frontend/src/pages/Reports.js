@@ -151,13 +151,13 @@ function Reports() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
+      <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Reports</h1>
 
       <Card>
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h2 className="text-lg font-medium mb-4">Date Range</h2>
+              <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Date Range</h2>
 
               <FormSelect
                 label="Financial Year"
@@ -235,7 +235,7 @@ function Reports() {
             </div>
 
             <div>
-              <h2 className="text-lg font-medium mb-4">Report Options</h2>
+              <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Report Options</h2>
 
               <FormSelect
                 label="Invoice Type"
@@ -251,7 +251,7 @@ function Reports() {
               />
 
               <div className="mt-8">
-                <h3 className="text-sm font-medium text-gray-500 mb-2">Report Format</h3>
+                <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Report Format</h3>
                 <div className="flex items-center space-x-2">
                   <input
                     type="radio"
@@ -260,9 +260,9 @@ function Reports() {
                     value="excel"
                     checked
                     readOnly
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 dark:border-gray-600"
                   />
-                  <label htmlFor="format_excel" className="text-sm text-gray-700">
+                  <label htmlFor="format_excel" className="text-sm text-gray-700 dark:text-gray-300">
                     Excel (.xlsx)
                   </label>
                 </div>
@@ -271,7 +271,7 @@ function Reports() {
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
               {error}
             </div>
           )}
@@ -297,19 +297,19 @@ function Reports() {
 
       <Card>
         <div className="p-6">
-          <h2 className="text-lg font-medium mb-4">About Reports</h2>
-          <p className="text-gray-600 mb-4">
+          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">About Reports</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
             Reports provide a comprehensive summary of your invoices for the selected period.
             The generated Excel file includes:
           </p>
-          <ul className="list-disc pl-5 space-y-1 text-gray-600">
+          <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400">
             <li>Detailed list of all invoices in the selected date range</li>
             <li>Separate sheets for each business</li>
             <li>Breakdown of taxable value, CGST, SGST, and IGST</li>
             <li>Summary totals for inward and outward supplies</li>
             <li>Net tax liability calculation</li>
           </ul>
-          <p className="text-gray-600 mt-4">
+          <p className="text-gray-600 dark:text-gray-400 mt-4">
             These reports can be used for GST filing, tax planning, and business analysis.
           </p>
         </div>

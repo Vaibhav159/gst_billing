@@ -74,9 +74,9 @@ function Pagination({
   }
 
   return (
-    <nav className={`flex items-center justify-between border-t border-gray-200 px-4 sm:px-0 py-3 ${className}`}>
+    <nav className={`flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 sm:px-0 py-3 ${className}`}>
       <div className="hidden sm:block">
-        <p className="text-sm text-gray-700">
+        <p className="text-sm text-gray-700 dark:text-gray-300">
           Showing page <span className="font-medium">{currentPage}</span> of{' '}
           <span className="font-medium">{totalPages}</span>
         </p>
@@ -92,7 +92,7 @@ function Pagination({
             }
           }}
           disabled={currentPage === 1}
-          className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:bg-gray-100 disabled:text-gray-400"
+          className="relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600"
         >
           Previous
         </button>
@@ -100,7 +100,7 @@ function Pagination({
           {getPageNumbers().map((page, index) => (
             <React.Fragment key={index}>
               {page === '...' ? (
-                <span className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700">
+                <span className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                   ...
                 </span>
               ) : (
@@ -115,8 +115,8 @@ function Pagination({
                   }}
                   className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium rounded-md ${
                     currentPage === page
-                      ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
-                      : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+                      ? 'z-10 bg-primary-50 dark:bg-primary-900/30 border-primary-500 dark:border-primary-400 text-primary-600 dark:text-primary-300'
+                      : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
                 >
                   {page}
@@ -135,7 +135,7 @@ function Pagination({
             }
           }}
           disabled={currentPage === totalPages}
-          className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:bg-gray-100 disabled:text-gray-400"
+          className="relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-600"
         >
           Next
         </button>

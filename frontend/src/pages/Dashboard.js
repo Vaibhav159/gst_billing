@@ -8,13 +8,13 @@ import { formatIndianCurrency } from '../utils/formatters';
 
 function Dashboard() {
   const [stats, setStats] = useState({
-    totalCustomers: 0,
-    totalBusinesses: 0,
-    totalInvoices: 0,
-    totalProducts: 0,
-    totalOutward: 0,
-    totalInward: 0,
-    netAmount: 0
+    totalCustomers: null,
+    totalBusinesses: null,
+    totalInvoices: null,
+    totalProducts: null,
+    totalOutward: null,
+    totalInward: null,
+    netAmount: null
   });
   const [recentInvoices, setRecentInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
