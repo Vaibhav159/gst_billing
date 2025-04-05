@@ -85,7 +85,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
     @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     @method_decorator(vary_on_cookie)
     def list(self, request, *args, **kwargs):
-        print(f"List view called {request.query_params}")
         return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
@@ -93,7 +92,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
         # Apply search filter manually for more control
         search_term = self.request.query_params.get("search", "")
-        print(f"Search term: {search_term}")
         if search_term:
             queryset = queryset.filter(
                 Q(name__icontains=search_term)
@@ -104,7 +102,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
         # Filter by business_id
         business_id = self.request.query_params.get("business_id")
         if business_id:
-            print(f"Filtering by business_id: {business_id}")
             queryset = queryset.filter(businesses__id=business_id)
 
         return queryset
@@ -113,7 +110,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def search(self, request):
         """Search customers by name"""
         query = request.query_params.get("customer_name", "")
-        print(f"Search query: {query}, {request.query_params}")
         if query and len(query) >= 2:
             customers = Customer.objects.filter(name__icontains=query).prefetch_related(
                 "businesses"
@@ -154,7 +150,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     def search(self, request):
         """Search products by name"""
         query = request.query_params.get("product_name", "")
-        print(f"Product search query: {query}, {request.query_params}")
 
         # If query is empty or too short, return all products (limited to 20)
         if not query:

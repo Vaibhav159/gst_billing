@@ -248,6 +248,7 @@ dependencies = [
     { name = "pre-commit" },
     { name = "psycopg2-binary" },
     { name = "requests" },
+    { name = "rest-framework-simplejwt" },
     { name = "ruff" },
     { name = "setuptools" },
     { name = "xlsxwriter" },
@@ -269,6 +270,7 @@ requires-dist = [
     { name = "pre-commit", specifier = ">=4.1.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "requests", specifier = ">=2.32.3" },
+    { name = "rest-framework-simplejwt", specifier = ">=0.0.2" },
     { name = "ruff", specifier = ">=0.10.0" },
     { name = "setuptools", specifier = ">=76.0.0" },
     { name = "xlsxwriter", specifier = "==3.1.0" },
@@ -546,6 +548,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/63/70/2bf7780ad2d390a8d301ad0b550f1581eadbd9a20f896afe06353c2a2913/requests-2.32.3.tar.gz", hash = "sha256:55365417734eb18255590a9ff9eb97e9e1da868d4ccd6402399eaf68af20a760", size = 131218 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/9b/335f9764261e915ed497fcdeb11df5dfd6f7bf257d4a6a2a686d80da4d54/requests-2.32.3-py3-none-any.whl", hash = "sha256:70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6", size = 64928 },
+]
+
+[[package]]
+name = "rest-framework-simplejwt"
+version = "0.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/82/b33aeec7825b6c97dececb80234dacf458ee337727c5c00d4592182913b1/rest_framework_simplejwt-0.0.2.tar.gz", hash = "sha256:035187ce5380e18e8b966610a89b6460fb4b73cd179979343888fb190328125d", size = 2176 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/de/60ad25b09eb586d8b63b5246cce264b10055a4e09e4bb5aca9e9ec374807/rest_framework_simplejwt-0.0.2-py3-none-any.whl", hash = "sha256:620c56826ff4791c4aaa730ec52aed1f4c74b9c20ea15b9fc1a39bdf99a29a30", size = 2832 },
 ]
 
 [[package]]
