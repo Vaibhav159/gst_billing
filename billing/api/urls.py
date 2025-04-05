@@ -8,7 +8,6 @@ from rest_framework_simplejwt.views import (
 
 from .views import (
     BusinessViewSet,
-    CSRFTokenView,
     CustomerViewSet,
     InvoiceImportView,
     InvoiceViewSet,
@@ -29,7 +28,6 @@ urlpatterns = [
     path("", include(router.urls)),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
     path("invoices/import/", InvoiceImportView.as_view(), name="import-invoices"),
-    path("csrf-token/", CSRFTokenView.as_view(), name="csrf-token"),
     path("public/", PublicAPIView.as_view(), name="public-api"),
     # JWT Authentication endpoints
     path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),

@@ -3,13 +3,10 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
-import FormSelect from '../components/FormSelect';
 import StateDropdown from '../components/StateDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
-import apiClient from '../api/client';
 import customerService from '../api/customerService';
 import businessService from '../api/businessService';
-import { fetchCSRFToken } from '../api/client';
 
 function CustomerForm() {
   const { customerId } = useParams();
@@ -185,9 +182,6 @@ function CustomerForm() {
 
     try {
       setSubmitting(true);
-
-      // Ensure CSRF token is available
-      await fetchCSRFToken();
 
       if (isEditing) {
         await customerService.updateCustomer(customerId, formData);

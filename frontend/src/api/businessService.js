@@ -1,4 +1,4 @@
-import apiClient, { fetchCSRFToken } from './client';
+import apiClient from './client';
 
 const businessService = {
   // Get all businesses with optional filters
@@ -15,24 +15,18 @@ const businessService = {
 
   // Create a new business
   createBusiness: async (businessData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.post('/businesses/', businessData);
     return response.data;
   },
 
   // Update an existing business
   updateBusiness: async (id, businessData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.put(`/businesses/${id}/`, businessData);
     return response.data;
   },
 
   // Delete a business
   deleteBusiness: async (id) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.delete(`/businesses/${id}/`);
     return response.data;
   }

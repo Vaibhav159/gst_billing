@@ -1,4 +1,4 @@
-import apiClient, { fetchCSRFToken } from './client';
+import apiClient from './client';
 
 const invoiceService = {
   // Get all invoices with optional filters
@@ -15,16 +15,12 @@ const invoiceService = {
 
   // Create a new invoice
   createInvoice: async (invoiceData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.post('/invoices/', invoiceData);
     return response.data;
   },
 
   // Update an existing invoice
   updateInvoice: async (id, invoiceData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.put(`/invoices/${id}/`, invoiceData);
     return response.data;
   },
@@ -37,8 +33,6 @@ const invoiceService = {
 
   // Delete an invoice
   deleteInvoice: async (id) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.delete(`/invoices/${id}/`);
     return response.data;
   },
@@ -51,9 +45,6 @@ const invoiceService = {
 
   // Import invoices from CSV
   importInvoices: async (file, businessId) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
-
     const formData = new FormData();
     formData.append('file', file);
     formData.append('business_id', businessId);

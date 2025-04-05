@@ -7,7 +7,7 @@ from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.vary import vary_on_cookie
 from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
@@ -378,10 +378,9 @@ class ReportView(APIView):
     API endpoint for generating reports.
     """
 
-    @method_decorator(ensure_csrf_cookie)
     def get(self, request, *args, **kwargs):
-        # Just return a simple response to set the CSRF cookie
-        return Response({"message": "CSRF cookie set"})
+        # Just return a simple response
+        return Response({"message": "Report API ready"})
 
     @staticmethod
     def get_date_range_string(start_date, end_date):
@@ -683,10 +682,9 @@ class InvoiceImportView(APIView):
 
     parser_classes = [MultiPartParser]
 
-    @method_decorator(ensure_csrf_cookie)
     def get(self, request, *args, **kwargs):
-        # Just return a simple response to set the CSRF cookie
-        return Response({"message": "CSRF cookie set"})
+        # Just return a simple response
+        return Response({"message": "Import API ready"})
 
     def post(self, request, *args, **kwargs):
         # Check if file is provided
@@ -736,16 +734,7 @@ class InvoiceImportView(APIView):
             )
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class CSRFTokenView(APIView):
-    """
-    API endpoint for getting a CSRF token.
-    This view sets a CSRF cookie that can be used for making POST, PUT, PATCH, and DELETE requests.
-    """
-
-    @method_decorator(ensure_csrf_cookie)
-    def get(self, request, *args, **kwargs):
-        return Response({"detail": "CSRF cookie set"})
+# CSRF token endpoint removed - using JWT authentication instead
 
 
 class PublicAPIView(APIView):

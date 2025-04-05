@@ -15,23 +15,6 @@ function Reports() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [csrfTokenFetched, setCsrfTokenFetched] = useState(false);
-
-  // Fetch CSRF token when component mounts
-  useEffect(() => {
-    const fetchCsrfToken = async () => {
-      try {
-        // This will set the CSRF cookie
-        await apiClient.get('/reports/generate/');
-        setCsrfTokenFetched(true);
-      } catch (err) {
-        console.error('Error fetching CSRF token:', err);
-        setError('Failed to initialize report generation. Please refresh the page.');
-      }
-    };
-
-    fetchCsrfToken();
-  }, []);
 
   // Get current financial year dates
   const getCurrentFinancialYear = () => {
@@ -135,35 +118,14 @@ function Reports() {
       setLoading(true);
       setError(null);
 
-      // Check if CSRF token has been fetched
-      if (!csrfTokenFetched) {
-        setError('Please wait for the page to initialize or refresh the page.');
-        setLoading(false);
-        return;
-      }
-
-      // Get CSRF token
-      const csrfToken = getCookie('csrftoken');
-
       // Create a form to submit (this will trigger a file download)
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = '/api/reports/generate/';
       form.target = '_blank'; // Open in new tab
 
-      // Add CSRF token
-      if (csrfToken) {
-        const csrfInput = document.createElement('input');
-        csrfInput.type = 'hidden';
-        csrfInput.name = 'csrfmiddlewaretoken';
-        csrfInput.value = csrfToken;
-        form.appendChild(csrfInput);
-      } else {
-        console.error('CSRF token not found');
-        setError('CSRF token not found. Please refresh the page and try again.');
-        setLoading(false);
-        return;
-      }
+      // JWT token is sent in the Authorization header automatically
+      // No need for CSRF token with JWT authentication
 
       // Add form data
       Object.entries(formData).forEach(([key, value]) => {

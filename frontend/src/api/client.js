@@ -47,11 +47,7 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Add CSRF token for session authentication
-    const csrfToken = getCookie('csrftoken');
-    if (csrfToken) {
-      config.headers['X-CSRFToken'] = csrfToken;
-    }
+    // JWT authentication is used, no need for CSRF tokens
 
     // Don't show loading indicator for certain requests
     if (config.showLoading !== false) {
@@ -158,21 +154,6 @@ export const createCancelToken = () => {
   return axios.CancelToken.source();
 };
 
-// Function to fetch CSRF token
-export const fetchCSRFToken = async () => {
-  try {
-    // Make a request to the CSRF token endpoint using apiClient
-    await apiClient.get('/csrf-token/', { withCredentials: true });
-
-    // Get the CSRF token from the cookie
-    const csrfToken = getCookie('csrftoken');
-    return csrfToken;
-  } catch (error) {
-    return null;
-  }
-};
-
-// Export the getCookie function for use in other files
-export { getCookie };
+// No longer exporting getCookie as it's only used internally
 
 export default apiClient;

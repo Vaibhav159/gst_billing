@@ -1,4 +1,4 @@
-import apiClient, { fetchCSRFToken } from './client';
+import apiClient from './client';
 
 const productService = {
   // Get all products with optional filters
@@ -15,24 +15,18 @@ const productService = {
 
   // Create a new product
   createProduct: async (productData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.post('/products/', productData);
     return response.data;
   },
 
   // Update an existing product
   updateProduct: async (id, productData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.put(`/products/${id}/`, productData);
     return response.data;
   },
 
   // Delete a product
   deleteProduct: async (id) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.delete(`/products/${id}/`);
     return response.data;
   },

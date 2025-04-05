@@ -28,7 +28,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- No pending items at this time.
+- Do we still need csrf token in frontend and backend since we already have JWT authentication?
 
 ### Recently Completed Items
 - ✅ Fixed Current Month button in reports to correctly set date range

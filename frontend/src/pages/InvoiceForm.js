@@ -10,7 +10,6 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import invoiceService from '../api/invoiceService';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
-import { fetchCSRFToken } from '../api/client';
 
 function InvoiceForm() {
   const navigate = useNavigate();
@@ -200,9 +199,6 @@ function InvoiceForm() {
 
     try {
       setSubmitting(true);
-
-      // Ensure CSRF token is available
-      await fetchCSRFToken();
 
       const response = await invoiceService.createInvoice(formData);
 

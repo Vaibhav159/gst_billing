@@ -1,4 +1,4 @@
-import apiClient, { fetchCSRFToken } from './client';
+import apiClient from './client';
 
 const customerService = {
   // Get all customers with optional filters
@@ -15,24 +15,18 @@ const customerService = {
 
   // Create a new customer
   createCustomer: async (customerData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.post('/customers/', customerData);
     return response.data;
   },
 
   // Update an existing customer
   updateCustomer: async (id, customerData) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.put(`/customers/${id}/`, customerData);
     return response.data;
   },
 
   // Delete a customer
   deleteCustomer: async (id) => {
-    // Ensure CSRF token is available
-    await fetchCSRFToken();
     const response = await apiClient.delete(`/customers/${id}/`);
     return response.data;
   },

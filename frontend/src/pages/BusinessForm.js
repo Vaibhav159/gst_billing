@@ -4,10 +4,9 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
-import apiClient from '../api/client';
+
 import StateDropdown from '../components/StateDropdown';
 import businessService from '../api/businessService';
-import { fetchCSRFToken } from '../api/client';
 
 function BusinessForm() {
   const { businessId } = useParams();
@@ -111,9 +110,6 @@ function BusinessForm() {
 
     try {
       setSubmitting(true);
-
-      // Ensure CSRF token is available
-      await fetchCSRFToken();
 
       if (isEditing) {
         await businessService.updateBusiness(businessId, formData);
