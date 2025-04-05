@@ -181,8 +181,17 @@ function InvoiceDetail() {
       setDeletingLineItem(true);
       await lineItemService.deleteLineItem(lineItemId);
 
-      // Remove the line item from the list
-      setLineItems(prev => prev.filter(item => item.id !== lineItemId));
+      // Instead of just removing the item from the list,
+      // refresh the entire line items list to ensure we have complete data
+      updateLoadingState('lineItems', true);
+      try {
+        const lineItemsData = await lineItemService.getLineItems(invoiceId);
+        setLineItems(lineItemsData.results || lineItemsData);
+      } catch (err) {
+        console.error('Error refreshing line items:', err);
+      } finally {
+        updateLoadingState('lineItems', false);
+      }
 
       // Refresh the invoice summary
       updateLoadingState('summary', true);
@@ -236,16 +245,19 @@ function InvoiceDetail() {
         gst_tax_rate: newLineItem.gst_tax_rate || defaultValues.gst_tax_rate // Use default GST rate if not provided
       };
 
-      const response = await lineItemService.createLineItem(invoiceId, lineItemData);
+      await lineItemService.createLineItem(invoiceId, lineItemData);
 
-      // Add the new line item to the list
-      // Make sure the response data has all required fields
-      const newItem = response.data || {};
-      // Ensure product_name exists
-      if (!newItem.product_name) {
-        newItem.product_name = newLineItem.product_name;
+      // Instead of immediately adding the new line item to the list,
+      // refresh the entire line items list to ensure we have complete data
+      updateLoadingState('lineItems', true);
+      try {
+        const lineItemsData = await lineItemService.getLineItems(invoiceId);
+        setLineItems(lineItemsData.results || lineItemsData);
+      } catch (err) {
+        console.error('Error refreshing line items:', err);
+      } finally {
+        updateLoadingState('lineItems', false);
       }
-      setLineItems(prev => [...prev, newItem]);
 
       // Reset the form
       setNewLineItem({

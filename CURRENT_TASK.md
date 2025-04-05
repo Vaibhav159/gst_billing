@@ -48,6 +48,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Fixed line item creation by using the backend's create_line_item_for_invoice method to handle all calculations and validations
 - ✅ Standardized field naming by using consistent field names (product_name, quantity) throughout the frontend to match backend models
 - ✅ Added robust error handling for line item creation to handle potential undefined values
+- ✅ Fixed issue with blank line items appearing after adding by refreshing the entire line items list
 - ✅ Fixed total_amount not updating after adding a new line item
 - ✅ Implemented delete functionality for line items with confirmation dialog
 - ✅ Fixed Add Line Item component to support dark mode with proper styling, including the SearchableDropdown component
