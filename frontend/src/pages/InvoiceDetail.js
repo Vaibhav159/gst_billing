@@ -305,8 +305,8 @@ function InvoiceDetail() {
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">Created on {formatDate(invoice.invoice_date)}</p>
         </div>
-        <div className="space-x-2">
-          <Button variant="primary" onClick={handlePrintInvoice}>
+        <div className="flex space-x-3">
+          <Button variant="outline" onClick={handlePrintInvoice}>
             <span className="flex items-center">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -317,10 +317,10 @@ function InvoiceDetail() {
           <Link to="/billing/invoice/new">
             <Button variant="primary">
               <span className="flex items-center">
-                Add Invoice
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
+                New Invoice
               </span>
             </Button>
           </Link>
@@ -409,24 +409,35 @@ function InvoiceDetail() {
       <Card>
         <div className="p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Line Items</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Line Items</h2>
             <Button
-              variant="primary"
+              variant={addingLineItem ? "danger" : "primary"}
               size="sm"
               onClick={() => setAddingLineItem(!addingLineItem)}
             >
               <span className="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                {addingLineItem ? 'Cancel' : 'Add Item'}
+                {addingLineItem ? (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Cancel
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Item
+                  </>
+                )}
               </span>
             </Button>
           </div>
 
           {addingLineItem && (
-            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-              <h3 className="text-lg font-medium mb-3">Add New Line Item</h3>
+            <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-medium mb-3 text-gray-900 dark:text-white">Add New Line Item</h3>
               <form onSubmit={handleAddLineItem} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <SearchableDropdown
@@ -489,7 +500,7 @@ function InvoiceDetail() {
           {renderWithLoading(loadingStates.lineItems, (
             lineItems.length === 0 ? (
               <div className="text-center py-8">
-                <p className="text-gray-500">No line items found for this invoice.</p>
+                <p className="text-gray-500 dark:text-gray-400">No line items found for this invoice.</p>
                 <Button
                   variant="outline"
                   className="mt-4"

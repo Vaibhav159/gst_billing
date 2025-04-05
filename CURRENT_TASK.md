@@ -28,9 +28,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- Add Line item component is in light mode, even in dark mode
-- Post clicking add line item, cancel button is in blue color and + icon which is misleading for the given action
-- Realign view bill and add invoice button on invoice details page
+- None at the moment
 
 
 ### Recently Completed Items
@@ -39,6 +37,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Added proper loading state to the dashboard to prevent it from showing 0 values before data loads
 - ✅ Standardized date format across the application to be consistent (e.g., Feb 28, 2025) by creating a reusable formatDate utility function
 - ✅ Dashboard already uses ₹ symbol correctly via the formatIndianCurrency utility
+- ✅ Fixed Add Line Item component to support dark mode with proper styling
+- ✅ Improved the Add/Cancel button in Line Items section to use appropriate colors and icons
+- ✅ Realigned View Bill and New Invoice buttons on invoice details page for better UX
 - ✅ Added dark mode support to all components including tables, cards, and text elements
 - ✅ Fixed PAN Card display in CustomerList view page and removed email field since it's not in the database
 - ✅ Fixed Current Month button in reports to correctly set date range
