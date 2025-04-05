@@ -12,24 +12,56 @@ function BusinessDetail() {
   const [business, setBusiness] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingStates, setLoadingStates] = useState({
+    business: true,
+    invoices: true
+  });
   const [error, setError] = useState(null);
+
+  // Helper function to update a specific loading state
+  const updateLoadingState = (key, value) => {
+    setLoadingStates(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
 
   // Fetch business details
   useEffect(() => {
-    const fetchBusinessDetails = async () => {
+    // Fetch business data
+    const fetchBusiness = async () => {
       try {
-        setLoading(true);
+        updateLoadingState('business', true);
         const businessResponse = await axios.get(`/api/businesses/${businessId}/`);
         setBusiness(businessResponse.data);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching business details:', err);
+        setError('Failed to load business details. Please try again.');
+      } finally {
+        updateLoadingState('business', false);
+      }
+    };
 
-        // Fetch invoices for this business
+    // Fetch invoices for this business
+    const fetchInvoices = async () => {
+      try {
+        updateLoadingState('invoices', true);
         const invoicesResponse = await axios.get(`/api/invoices/`, {
           params: { business_id: businessId }
         });
         setInvoices(invoicesResponse.data.results || invoicesResponse.data);
+      } catch (err) {
+        console.error('Error fetching business invoices:', err);
+        // Don't set global error for invoices - just log it
+      } finally {
+        updateLoadingState('invoices', false);
+      }
+    };
 
-        // Fetch customers for this business
+    // Fetch customers for this business
+    const fetchCustomers = async () => {
+      try {
         const customersResponse = await axios.get(`/api/customers/`);
         const allCustomers = customersResponse.data.results || customersResponse.data;
 
@@ -38,17 +70,16 @@ function BusinessDetail() {
           customer.businesses && customer.businesses.includes(parseInt(businessId))
         );
         setCustomers(businessCustomers);
-
-        setError(null);
       } catch (err) {
-        console.error('Error fetching business details:', err);
-        setError('Failed to load business details. Please try again.');
-      } finally {
-        setLoading(false);
+        console.error('Error fetching business customers:', err);
+        // Don't set global error for customers - just log it
       }
     };
 
-    fetchBusinessDetails();
+    // Start fetching data in parallel
+    fetchBusiness();
+    fetchInvoices();
+    fetchCustomers();
   }, [businessId]);
 
   // Handle business deletion
@@ -64,7 +95,22 @@ function BusinessDetail() {
     }
   };
 
-  if (loading) {
+  // Check if the main business data is still loading
+  const isMainDataLoading = loadingStates.business;
+
+  // Helper function to render a section with a loading indicator
+  const renderWithLoading = (isLoading, content) => {
+    if (isLoading) {
+      return (
+        <div className="flex justify-center items-center py-8">
+          <LoadingSpinner size="md" />
+        </div>
+      );
+    }
+    return content;
+  };
+
+  if (isMainDataLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <LoadingSpinner size="lg" />
@@ -224,7 +270,8 @@ function BusinessDetail() {
               </Link>
             </div>
 
-            {invoices.length === 0 ? (
+            {renderWithLoading(loadingStates.invoices, (
+              invoices.length === 0 ? (
               <div className="text-center py-4">
                 <p className="text-gray-500">No invoices found for this business.</p>
                 <Link to="/billing/invoice/new" className="mt-2 inline-block text-blue-600 hover:text-blue-800">
@@ -252,7 +299,8 @@ function BusinessDetail() {
                   </div>
                 ))}
               </div>
-            )}
+            )
+            ))}
           </div>
         </Card>
       </div>

@@ -11,23 +11,48 @@ function CustomerDetail() {
   const navigate = useNavigate();
   const [customer, setCustomer] = useState(null);
   const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingStates, setLoadingStates] = useState({
+    customer: true,
+    invoices: true
+  });
   const [error, setError] = useState(null);
+
+  // Helper function to update a specific loading state
+  const updateLoadingState = (key, value) => {
+    setLoadingStates(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
 
   // Fetch customer details
   useEffect(() => {
-    const fetchCustomerDetails = async () => {
+    // Fetch customer data
+    const fetchCustomer = async () => {
       try {
-        setLoading(true);
+        updateLoadingState('customer', true);
         const customerResponse = await axios.get(`/api/customers/${customerId}/`);
+
         // Validate customer data
         const customerData = customerResponse.data;
         if (!customerData || typeof customerData !== 'object') {
           throw new Error('Invalid customer data received');
         }
-        setCustomer(customerData);
 
-        // Fetch invoices for this customer
+        setCustomer(customerData);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching customer details:', err);
+        setError('Failed to load customer details. Please try again.');
+      } finally {
+        updateLoadingState('customer', false);
+      }
+    };
+
+    // Fetch invoices for this customer
+    const fetchInvoices = async () => {
+      try {
+        updateLoadingState('invoices', true);
         const invoicesResponse = await axios.get(`/api/invoices/`, {
           params: { customer_id: customerId }
         });
@@ -39,17 +64,17 @@ function CustomerDetail() {
           : [];
 
         setInvoices(validInvoices);
-
-        setError(null);
       } catch (err) {
-        console.error('Error fetching customer details:', err);
-        setError('Failed to load customer details. Please try again.');
+        console.error('Error fetching customer invoices:', err);
+        // Don't set global error for invoices - just log it
       } finally {
-        setLoading(false);
+        updateLoadingState('invoices', false);
       }
     };
 
-    fetchCustomerDetails();
+    // Start fetching data in parallel
+    fetchCustomer();
+    fetchInvoices();
   }, [customerId]);
 
   // Handle customer deletion
@@ -65,7 +90,22 @@ function CustomerDetail() {
     }
   };
 
-  if (loading) {
+  // Check if the main customer data is still loading
+  const isMainDataLoading = loadingStates.customer;
+
+  // Helper function to render a section with a loading indicator
+  const renderWithLoading = (isLoading, content) => {
+    if (isLoading) {
+      return (
+        <div className="flex justify-center items-center py-8">
+          <LoadingSpinner size="md" />
+        </div>
+      );
+    }
+    return content;
+  };
+
+  if (isMainDataLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <LoadingSpinner size="lg" />
@@ -159,7 +199,8 @@ function CustomerDetail() {
             </div>
           </div>
 
-          {invoices.length === 0 ? (
+          {renderWithLoading(loadingStates.invoices, (
+            invoices.length === 0 ? (
             <div className="text-center py-4">
               <p className="text-gray-500">No invoices found for this customer.</p>
               <Link to="/billing/invoice/new" className="mt-2 inline-block text-blue-600 hover:text-blue-800">
@@ -248,7 +289,8 @@ function CustomerDetail() {
                 </tbody>
               </table>
             </div>
-          )}
+          )
+          ))}
         </div>
       </Card>
     </div>
