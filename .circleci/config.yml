@@ -84,7 +84,7 @@ jobs:
           command: |
             . .venv/bin/activate
             mkdir -p test-results/pytest
-            python -m pytest billing/tests/ --junitxml=test-results/pytest/junit.xml
+            python -m pytest billing/tests/ --junitxml=test-results/pytest/junit.xml -v
 
       - store_test_results:
           path: test-results/pytest

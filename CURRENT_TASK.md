@@ -35,6 +35,8 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Remove Hard coded fallbacks from most of the pages, like invoiceDetails still have that
 - Invoice Number should be auto generated based on business and type of invoice, for outward, it should be N+1 of the last invoice number of that business if its in same financial year. If its a new financial year, it start from 1.
 - Update test cases since the APIs have changed.
+- Figure out how to handle ci_settings.py since it is taking all objects from settings.py but on circleci local file wont be there.
+- Current Month button in reports gives wrong values.
 
 
 ### Recently Completed Items
