@@ -7,7 +7,7 @@ import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import apiClient from '../api/client';
-import { formatIndianCurrency } from '../utils/formatters';
+import { formatIndianCurrency, formatDate } from '../utils/formatters';
 
 function InvoiceList() {
   const [invoices, setInvoices] = useState([]);
@@ -318,7 +318,7 @@ function InvoiceList() {
                         <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</div>
                       </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500 dark:text-gray-400">{new Date(invoice.invoice_date).toLocaleDateString()}</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">{formatDate(invoice.invoice_date)}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.customer_name}</div>

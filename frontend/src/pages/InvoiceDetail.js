@@ -7,19 +7,13 @@ import SearchableDropdown from '../components/SearchableDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 import lineItemService from '../api/lineItemService';
-import { formatIndianCurrency } from '../utils/formatters';
+import { formatIndianCurrency, formatDate } from '../utils/formatters';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
 import invoiceService from '../api/invoiceService';
 import productService from '../api/productService';
 
-// Helper function to format dates consistently
-const formatDate = (dateString) => {
-  if (!dateString) return '--';
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return dateString; // Return original if invalid date
-  return date.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
-};
+// Using the formatDate function imported from utils/formatters.js
 
 function InvoiceDetail() {
   const { invoiceId } = useParams();

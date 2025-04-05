@@ -4,7 +4,7 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
-import { formatIndianCurrency } from '../utils/formatters';
+import { formatIndianCurrency, formatDate } from '../utils/formatters';
 
 function Dashboard() {
   const [stats, setStats] = useState({
@@ -59,12 +59,7 @@ function Dashboard() {
     fetchDashboardData();
   }, []);
 
-  // Format date for display
-  const formatDate = (dateString) => {
-    if (!dateString) return '--';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
+  // Using the formatDate function from utils/formatters.js
 
   return (
     <div className="space-y-8 animate-fade-in">
