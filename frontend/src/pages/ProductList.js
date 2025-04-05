@@ -82,7 +82,7 @@ function ProductList() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Products</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Products</h1>
         <Link to="/billing/product">
           <Button variant="primary">Add Product</Button>
         </Link>
@@ -112,31 +112,31 @@ function ProductList() {
           </div>
         ) : products.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500">No products found. {searchTerm && 'Try adjusting your search.'}</p>
+            <p className="text-gray-500 dark:text-gray-400">No products found. {searchTerm && 'Try adjusting your search.'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 dark:bg-gray-800">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     #
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Name
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     HSN Code
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Description
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {products.map((product, index) => {
                   // Calculate the serial number based on the current page
                   const serialNumber = (currentPage - 1) * 15 + index + 1;
@@ -144,24 +144,24 @@ function ProductList() {
                   return (
                     <tr key={product.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-500">{serialNumber}</div>
+                        <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{product.name}</div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
                       </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">{product.hsn_code || '-'}</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">{product.hsn_code || '-'}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm text-gray-500">{product.description || '-'}</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">{product.description || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <Link to={`/billing/product/edit/${product.id}`} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                      <Link to={`/billing/product/edit/${product.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
                         Edit
                       </Link>
                       <button
                         onClick={() => handleDelete(product.id)}
-                        className="text-red-600 hover:text-red-900"
+                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
                       >
                         Delete
                       </button>

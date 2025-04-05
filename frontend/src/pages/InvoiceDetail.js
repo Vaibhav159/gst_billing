@@ -306,10 +306,10 @@ function InvoiceDetail() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-blue-600">
+          <h1 className="text-3xl font-bold text-primary-600 dark:text-primary-400">
             {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'} Invoice #{invoice.invoice_number}
           </h1>
-          <p className="text-gray-600 mt-1">Created on {formatDate(invoice.invoice_date)}</p>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">Created on {formatDate(invoice.invoice_date)}</p>
         </div>
         <div className="space-x-2">
           <Button variant="primary" onClick={handlePrintInvoice}>
@@ -338,11 +338,11 @@ function InvoiceDetail() {
         <Card>
           {renderWithLoading(loadingStates.business, (
             <div className="p-6">
-              <h2 className="text-xl font-bold mb-4 uppercase">{invoice.business_name}</h2>
+              <h2 className="text-xl font-bold mb-4 uppercase text-gray-900 dark:text-white">{invoice.business_name}</h2>
               <div className="space-y-2">
                 <div className="flex">
-                  <p className="text-sm font-medium text-gray-500 w-24">GSTIN:</p>
-                  <p className="text-sm">{businessDetails?.gst_number || '--'}</p>
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400 w-24">GSTIN:</p>
+                  <p className="text-sm dark:text-gray-300">{businessDetails?.gst_number || '--'}</p>
                 </div>
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">PAN:</p>
@@ -375,8 +375,8 @@ function InvoiceDetail() {
             <div className="p-6">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Customer Name</p>
-                  <p className="text-lg font-medium">{invoice.customer_name}</p>
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Customer Name</p>
+                  <p className="text-lg font-medium dark:text-white">{invoice.customer_name}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Invoice Number</p>
@@ -507,60 +507,60 @@ function InvoiceDetail() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
                     <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         #
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Product
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         HSN
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         GST %
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Quantity
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Rate
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Amount
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Actions
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {lineItems.map((item, index) => (
                       <tr key={item.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{index + 1}.</div>
+                          <div className="text-sm text-gray-900 dark:text-gray-100">{index + 1}.</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">{item.item_name || item.product_name}</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">{item.item_name || item.product_name}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500">{item.hsn_code || defaultValues.hsn_code || '--'}</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.hsn_code || defaultValues.hsn_code || '--'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="text-sm text-gray-500">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500">{item.quantity} gm</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.quantity} gm</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500">{formatIndianCurrency(item.rate)}/g</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.rate)}/g</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500">{formatIndianCurrency(item.amount)}</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.amount)}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <button className="text-red-600 hover:text-red-900">
+                          <button className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                             </svg>
@@ -582,32 +582,32 @@ function InvoiceDetail() {
             <h2 className="text-xl font-semibold mb-4">Invoice Summary</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <p className="text-sm font-medium text-gray-500">Total Items</p>
-                  <p className="mt-1 text-lg font-bold">{summary?.total_items || 1}</p>
+                <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Items</p>
+                  <p className="mt-1 text-lg font-bold dark:text-white">{summary?.total_items || 1}</p>
                 </div>
               </div>
 
               <div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <p className="text-sm font-medium text-gray-500">Amount (Before Tax)</p>
-                  <p className="mt-1 text-lg font-bold">{formatIndianCurrency(summary?.amount_without_tax || 0)}</p>
+                <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Amount (Before Tax)</p>
+                  <p className="mt-1 text-lg font-bold dark:text-white">{formatIndianCurrency(summary?.amount_without_tax || 0)}</p>
                 </div>
               </div>
 
               <div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <p className="text-sm font-medium text-gray-500">Tax Details</p>
+                <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Tax Details</p>
                   {invoice.is_igst_applicable ? (
                     <div>
-                      <p className="mt-1 text-lg font-bold">IGST: {formatIndianCurrency(summary?.total_igst_tax || 0)}</p>
-                      <p className="font-bold">Total Tax: {formatIndianCurrency(summary?.total_tax || summary?.total_igst_tax || 0)}</p>
+                      <p className="mt-1 text-lg font-bold dark:text-white">IGST: {formatIndianCurrency(summary?.total_igst_tax || 0)}</p>
+                      <p className="font-bold dark:text-white">Total Tax: {formatIndianCurrency(summary?.total_tax || summary?.total_igst_tax || 0)}</p>
                     </div>
                   ) : (
                     <div>
-                      <p className="mt-1">CGST: {formatIndianCurrency(summary?.total_cgst_tax || 0)}</p>
-                      <p>SGST: {formatIndianCurrency(summary?.total_sgst_tax || 0)}</p>
-                      <p className="font-bold">Total Tax: {formatIndianCurrency(summary?.total_tax || (summary?.total_cgst_tax || 0) + (summary?.total_sgst_tax || 0))}</p>
+                      <p className="mt-1 dark:text-gray-300">CGST: {formatIndianCurrency(summary?.total_cgst_tax || 0)}</p>
+                      <p className="dark:text-gray-300">SGST: {formatIndianCurrency(summary?.total_sgst_tax || 0)}</p>
+                      <p className="font-bold dark:text-white">Total Tax: {formatIndianCurrency(summary?.total_tax || (summary?.total_cgst_tax || 0) + (summary?.total_sgst_tax || 0))}</p>
                     </div>
                   )}
                 </div>
@@ -615,10 +615,10 @@ function InvoiceDetail() {
             </div>
 
             <div className="mt-6 flex justify-end">
-              <div className="w-64 border border-gray-300 rounded-lg overflow-hidden">
-                <div className="flex justify-between py-3 px-4 bg-gray-50 border-b">
-                  <span className="font-medium">Total Amount:</span>
-                  <span className="font-bold text-lg">{formatIndianCurrency(summary?.total_amount || invoice.total_amount || 0)}</span>
+              <div className="w-64 border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div className="flex justify-between py-3 px-4 bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700">
+                  <span className="font-medium dark:text-gray-300">Total Amount:</span>
+                  <span className="font-bold text-lg dark:text-white">{formatIndianCurrency(summary?.total_amount || invoice.total_amount || 0)}</span>
                 </div>
               </div>
             </div>

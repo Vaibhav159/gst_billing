@@ -25,11 +25,12 @@
 
 ### Phase 2: Mordenization and Optimization
 - ⬜ Add responsive design
+- ⬜ Add Dark Mode
 - ⬜ Update the UI/UX to more modern and user-friendly
 - ⬜ Implement lazy loading and code splitting
+- ⬜ Use proper css standards and best practices 
 
 ### Phase 3: Enhanced Features
-- ⬜ Add Dark Mode
 - ⬜ Phase out HTMX-specific code
 - ⬜ Add dashboard analytics and visualizations
 - ⬜ Implement user roles and permissions

@@ -354,7 +354,7 @@ function CustomerList() {
   return (
     <div className="space-y-6" key={renderKey}>
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Customers</h1>
         <Link to="/billing/customer">
           <Button variant="primary">Add Customer</Button>
         </Link>
@@ -362,7 +362,7 @@ function CustomerList() {
 
       <Card>
         <div className="p-4">
-          <h2 className="text-lg font-medium mb-4">Filters</h2>
+          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Filters</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormInput
               label="Customer Name"
@@ -411,7 +411,7 @@ function CustomerList() {
           </div>
         ) : !customers || !Array.isArray(customers) || customers.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500">No customers found. Try adjusting your filters.</p>
+            <p className="text-gray-500 dark:text-gray-400">No customers found. Try adjusting your filters.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -457,7 +457,7 @@ function CustomerList() {
                             <div className="text-sm font-medium text-gray-500">{serialNumber}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">{customer.name || 'Unnamed Customer'}</div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">{customer.name || 'Unnamed Customer'}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm text-gray-500">{customer.gst_number || '-'}</div>
@@ -471,10 +471,10 @@ function CustomerList() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             {customer.id && (
                               <>
-                                <Link to={`/billing/customer/${customer.id}`} className="text-blue-600 hover:text-blue-900 mr-4">
+                                <Link to={`/billing/customer/${customer.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
                                   View
                                 </Link>
-                                <Link to={`/billing/customer/edit/${customer.id}`} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                                <Link to={`/billing/customer/edit/${customer.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
                                   Edit
                                 </Link>
                               </>

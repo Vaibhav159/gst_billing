@@ -28,7 +28,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items
-- Do we still need csrf token in frontend and backend since we already have JWT authentication?
+- PAN Card missing in CustomerList view page, Email is not present in Customer table, so lets remove it from frontend as well.
+- Redesign the Dashboard page, be as creative and morden as possible.
+
 
 ### Recently Completed Items
 - ✅ Fixed Current Month button in reports to correctly set date range

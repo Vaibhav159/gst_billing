@@ -82,7 +82,7 @@ function BusinessList() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Businesses</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Businesses</h1>
         <Link to="/billing/business">
           <Button variant="primary">Add Business</Button>
         </Link>
@@ -112,7 +112,7 @@ function BusinessList() {
           </div>
         ) : businesses.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500">No businesses found. {searchTerm && 'Try adjusting your search.'}</p>
+            <p className="text-gray-500 dark:text-gray-400">No businesses found. {searchTerm && 'Try adjusting your search.'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -162,15 +162,15 @@ function BusinessList() {
                       <div className="text-sm text-gray-500">{business.mobile_number || business.phone_number || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <Link to={`/billing/business/${business.id}`} className="text-blue-600 hover:text-blue-900 mr-4">
+                      <Link to={`/billing/business/${business.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
                         View
                       </Link>
-                      <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                      <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
                         Edit
                       </Link>
                       <button
                         onClick={() => handleDelete(business.id)}
-                        className="text-red-600 hover:text-red-900"
+                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
                       >
                         Delete
                       </button>
