@@ -14,6 +14,7 @@ function ProductForm() {
   const [formData, setFormData] = useState({
     name: '',
     hsn_code: '',
+    gst_tax_rate: 0.03, // Default to 3%
     description: ''
   });
 
@@ -31,6 +32,7 @@ function ProductForm() {
           setFormData({
             name: productData.name || '',
             hsn_code: productData.hsn_code || '',
+            gst_tax_rate: productData.gst_tax_rate || 0.03,
             description: productData.description || ''
           });
         } catch (err) {
@@ -148,6 +150,40 @@ function ProductForm() {
             error={errors.hsn_code}
           />
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormInput
+              label="GST Tax Rate (%)"
+              id="gst_tax_rate"
+              name="gst_tax_rate"
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={formData.gst_tax_rate * 100} // Convert decimal to percentage for display
+              onChange={(e) => {
+                // Convert percentage back to decimal for storage
+                const percentValue = parseFloat(e.target.value);
+                const decimalValue = isNaN(percentValue) ? 0 : percentValue / 100;
+
+                setFormData(prev => ({
+                  ...prev,
+                  gst_tax_rate: decimalValue
+                }));
+
+                // Clear error
+                if (errors.gst_tax_rate) {
+                  setErrors(prev => ({
+                    ...prev,
+                    gst_tax_rate: null
+                  }));
+                }
+              }}
+              placeholder="Enter GST tax rate"
+              error={errors.gst_tax_rate}
+              helpText="Enter the GST tax rate as a percentage (e.g., 3 for 3%)"
+            />
+          </div>
+
           <FormInput
             label="Description"
             id="description"
@@ -186,6 +222,7 @@ function ProductForm() {
           <ul className="list-disc pl-5 space-y-1 text-gray-600">
             <li><strong>Name:</strong> The name of the product or service</li>
             <li><strong>HSN Code:</strong> Harmonized System of Nomenclature code for GST classification</li>
+            <li><strong>GST Tax Rate:</strong> The GST tax rate applicable to this product (e.g., 3% for gold)</li>
             <li><strong>Description:</strong> Additional details about the product</li>
           </ul>
         </div>

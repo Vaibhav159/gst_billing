@@ -129,6 +129,9 @@ function ProductList() {
                     HSN Code
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    GST Rate
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Description
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -151,6 +154,9 @@ function ProductList() {
                       </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-500 dark:text-gray-400">{product.hsn_code || '-'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-500 dark:text-gray-400">{product.gst_tax_rate ? `${(product.gst_tax_rate * 100).toFixed(0)}%` : '-'}</div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-500 dark:text-gray-400">{product.description || '-'}</div>

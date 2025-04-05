@@ -28,7 +28,8 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items / Bugs
-- None at the moment
+- State dropdown is in white, even in dark mode.
+
 
 
 ### Recently Completed Items
@@ -40,6 +41,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Fixed report generation issue where authentication credentials were not being passed to the new tab
 - ✅ Increased timeout for report generation to 5 minutes and added better loading indicators
 - ✅ Fixed report download to include proper file extension (.xlsx) and descriptive filename with robust handling of Content-Disposition headers
+- ✅ Added GST tax rate field to Product list and form pages
 - ✅ Fixed Add Line Item component to support dark mode with proper styling, including the SearchableDropdown component
 - ✅ Improved the Add/Cancel button in Line Items section to use appropriate colors and icons
 - ✅ Realigned View Bill and New Invoice buttons on invoice details page for better UX
