@@ -4,8 +4,9 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
+import StateDropdown from '../components/StateDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import apiClient from '../api/client';
 import customerService from '../api/customerService';
 import businessService from '../api/businessService';
 import { fetchCSRFToken } from '../api/client';
@@ -18,9 +19,10 @@ function CustomerForm() {
   const [formData, setFormData] = useState({
     name: '',
     gst_number: '',
-    phone_number: '',
+    mobile_number: '',
     email: '',
     address: '',
+    state_name: '',
     businesses: []
   });
 
@@ -165,6 +167,10 @@ function CustomerForm() {
       newErrors.email = 'Invalid email format';
     }
 
+    if (!formData.state_name) {
+      newErrors.state_name = 'State is required';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -247,13 +253,13 @@ function CustomerForm() {
           />
 
           <FormInput
-            label="Phone Number"
-            id="phone_number"
-            name="phone_number"
-            value={formData.phone_number}
+            label="Mobile Number"
+            id="mobile_number"
+            name="mobile_number"
+            value={formData.mobile_number}
             onChange={handleChange}
-            placeholder="Enter phone number"
-            error={errors.phone_number}
+            placeholder="Enter mobile number"
+            error={errors.mobile_number}
           />
 
           <FormInput
@@ -275,6 +281,16 @@ function CustomerForm() {
             onChange={handleChange}
             placeholder="Enter address"
             error={errors.address}
+          />
+
+          <StateDropdown
+            label="State"
+            id="state_name"
+            name="state_name"
+            value={formData.state_name}
+            onChange={handleChange}
+            error={errors.state_name}
+            required
           />
 
           <div className="mt-4">

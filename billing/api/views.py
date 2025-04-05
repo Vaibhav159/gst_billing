@@ -171,6 +171,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         # If query is too short, return empty list
         return Response([])
 
+    @method_decorator(cache_page(60 * 60 * 30))  # Cache for 30 days
+    @action(detail=False, methods=["get"])
+    def defaults(self, request):
+        """Get default values for products"""
+        from billing.constants import GST_TAX_RATE, HSN_CODE
+
+        defaults = {"hsn_code": HSN_CODE, "gst_tax_rate": float(GST_TAX_RATE)}
+
+        return Response(defaults)
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -270,6 +280,56 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         }
 
         return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def next_invoice_number(self, request):
+        """Get the next invoice number for a business"""
+        business_id = request.query_params.get("business_id")
+        invoice_type = request.query_params.get("type_of_invoice", "outward")
+
+        if not business_id:
+            return Response(
+                {"error": "Business ID is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get the financial year
+        from datetime import datetime
+
+        today = datetime.now().date()
+        # Get financial year start date (April 1st)
+        start_date = (
+            datetime(today.year - 1, 4, 1).date()
+            if today.month < 4
+            else datetime(today.year, 4, 1).date()
+        )
+
+        # Get the last invoice number for this business in the current financial year
+        last_invoice = (
+            Invoice.objects.filter(
+                business_id=business_id,
+                invoice_date__gte=start_date,
+                type_of_invoice=invoice_type,
+            )
+            .order_by("-invoice_number")
+            .first()
+        )
+
+        next_number = 1
+
+        # Generate the next invoice number
+        if last_invoice:
+            try:
+                # Try to extract the numeric part of the invoice number
+                # Assuming the number to be of type str
+                next_number = int(last_invoice.invoice_number) + 1
+            except (ValueError, IndexError):
+                next_number = 1
+
+        # Format the invoice number
+        # prefix = "OUT" if invoice_type == "outward" else "IN"
+        invoice_number = f"{next_number!s}"
+
+        return Response({"next_invoice_number": invoice_number})
 
 
 @method_decorator(csrf_exempt, name="dispatch")

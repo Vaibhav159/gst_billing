@@ -41,6 +41,12 @@ const productService = {
   searchProducts: async (query) => {
     const response = await apiClient.get('/products/search/', { params: { product_name: query } });
     return response.data;
+  },
+
+  // Get default values for products
+  getDefaults: async () => {
+    const response = await apiClient.get('/products/defaults/');
+    return response.data;
   }
 };
 

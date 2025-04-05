@@ -39,8 +39,11 @@ const SearchableDropdown = ({
   const fetchAllOptions = async () => {
     try {
       setLoading(true);
+      // Pass empty string to get all options
       const results = await searchFunction('');
       setOptions(results);
+      // Show dropdown with all options
+      setIsOpen(true);
     } catch (error) {
       console.error('Error fetching all options:', error);
     } finally {
@@ -51,12 +54,6 @@ const SearchableDropdown = ({
   // Search for options when searchTerm changes
   useEffect(() => {
     const fetchOptions = async () => {
-      if (!searchTerm || searchTerm.length < 2) {
-        // Don't clear options when searchTerm is empty or too short
-        // This allows us to keep showing all options
-        return;
-      }
-
       try {
         setLoading(true);
         const results = await searchFunction(searchTerm);
@@ -68,12 +65,15 @@ const SearchableDropdown = ({
       }
     };
 
-    const timeoutId = setTimeout(() => {
-      fetchOptions();
-    }, 300);
+    // Always fetch options when dropdown is open
+    if (isOpen) {
+      const timeoutId = setTimeout(() => {
+        fetchOptions();
+      }, 300);
 
-    return () => clearTimeout(timeoutId);
-  }, [searchTerm, searchFunction]);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [searchTerm, searchFunction, isOpen]);
 
   const handleInputChange = (e) => {
     const value = e.target.value;
@@ -83,7 +83,8 @@ const SearchableDropdown = ({
 
   const handleOptionSelect = (option) => {
     setSearchTerm(option[displayProperty]);
-    onChange({ target: { name, value: option[displayProperty] } });
+    // Use valueProperty for the value
+    onChange({ target: { name, value: option[valueProperty] } });
     if (onSelect) {
       onSelect(option);
     }

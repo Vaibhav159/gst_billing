@@ -30,9 +30,12 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 ### Pending Items
 - Update Phone number is not working in customer add or edit section.
 - In Add Invoice, after selecting business, customer is not getting filtered as per that business, also customer list should be a searchable dropdown.
-- Add Serial Number in each List View.
-- Remove Hard coded fallbacks from most of the pages.
 - Add Searchable Dropdown on StateName on Business Add, Edit and Customer Add, Edit and user can only submit if state is selected from dropdown.
+- Add Serial Number in each List View.
+- Remove Hard coded fallbacks from most of the pages, like invoiceDetails still have that
+- Invoice Number should be auto generated based on business and type of invoice, for outward, it should be N+1 of the last invoice number of that business if its in same financial year. If its a new financial year, it start from 1.
+- Update test cases since the APIs have changed.
+
 
 ### Recently Completed Items
 - Implemented JWT Authentication for API security

@@ -64,6 +64,23 @@ const invoiceService = {
       },
     });
     return response.data;
+  },
+
+  // Get invoice totals
+  getInvoiceTotals: async (filters = {}) => {
+    const response = await apiClient.get('/invoices/totals/', { params: filters });
+    return response.data;
+  },
+
+  // Get next invoice number
+  getNextInvoiceNumber: async (businessId, invoiceType) => {
+    const response = await apiClient.get('/invoices/next_invoice_number/', {
+      params: {
+        business_id: businessId,
+        type_of_invoice: invoiceType
+      }
+    });
+    return response.data.next_invoice_number;
   }
 };
 

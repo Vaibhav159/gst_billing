@@ -4,7 +4,8 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import apiClient from '../api/client';
+import StateDropdown from '../components/StateDropdown';
 import businessService from '../api/businessService';
 import { fetchCSRFToken } from '../api/client';
 
@@ -92,7 +93,9 @@ function BusinessForm() {
       newErrors.gst_number = 'GST number must be 15 characters';
     }
 
-
+    if (!formData.state_name) {
+      newErrors.state_name = 'State is required';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -191,14 +194,14 @@ function BusinessForm() {
               error={errors.pan_number}
             />
 
-            <FormInput
+            <StateDropdown
               label="State"
               id="state_name"
               name="state_name"
               value={formData.state_name}
               onChange={handleChange}
-              placeholder="Enter state name"
               error={errors.state_name}
+              required
             />
 
             <div className="md:col-span-2">

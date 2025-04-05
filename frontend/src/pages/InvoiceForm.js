@@ -4,8 +4,9 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
+import SearchableDropdown from '../components/SearchableDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+
 import invoiceService from '../api/invoiceService';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
@@ -28,52 +29,115 @@ function InvoiceForm() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
 
-  // Fetch businesses and customers
+  // Fetch businesses
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchBusinesses = async () => {
       try {
         setLoading(true);
-
-        // Fetch businesses
         const businessesData = await businessService.getBusinesses();
         setBusinesses(businessesData.results || businessesData);
-
-        // Fetch customers
-        const customersData = await customerService.getCustomers();
-        setCustomers(customersData.results || customersData);
-
       } catch (err) {
-        console.error('Error fetching data:', err);
+        console.error('Error fetching businesses:', err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    fetchBusinesses();
   }, []);
+
+  // Fetch customers filtered by business
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        setLoading(true);
+
+        // If a business is selected, filter customers by that business
+        const filters = {};
+        if (formData.business) {
+          filters.business_id = formData.business;
+        }
+
+        const customersData = await customerService.getCustomers(filters);
+        setCustomers(customersData.results || customersData);
+
+        // If the currently selected customer is not associated with the selected business,
+        // clear the customer selection
+        if (formData.business && formData.customer) {
+          const customerStillValid = (customersData.results || customersData).some(
+            customer => customer.id.toString() === formData.customer.toString()
+          );
+
+          if (!customerStillValid) {
+            setFormData(prev => ({
+              ...prev,
+              customer: ''
+            }));
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching customers:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCustomers();
+  }, [formData.business]);
+
+  // Function to search customers
+  const searchCustomers = async (query) => {
+    try {
+      if (!formData.business) {
+        return [];
+      }
+
+      const filters = {
+        business_id: formData.business,
+        search: query
+      };
+
+      const response = await customerService.getCustomers(filters);
+      return response.results || response || [];
+    } catch (error) {
+      console.error('Error searching customers:', error);
+      return [];
+    }
+  };
 
   // Generate next invoice number
   useEffect(() => {
     if (formData.business && formData.type_of_invoice) {
       const generateInvoiceNumber = async () => {
         try {
-          // In a real implementation, you would call an API endpoint to get the next invoice number
-          // For now, we'll just generate a simple one based on the current date
-          const today = new Date();
-          const year = today.getFullYear().toString().slice(2); // Get last 2 digits of year
-          const month = (today.getMonth() + 1).toString().padStart(2, '0');
-          const day = today.getDate().toString().padStart(2, '0');
-          const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-
-          const prefix = formData.type_of_invoice === 'outward' ? 'OUT' : 'IN';
-          const invoiceNumber = `${prefix}/${year}${month}${day}/${random}`;
+          // Call the API to get the next invoice number
+          const nextInvoiceNumber = await invoiceService.getNextInvoiceNumber(
+            formData.business,
+            formData.type_of_invoice
+          );
 
           setFormData(prev => ({
             ...prev,
-            invoice_number: invoiceNumber
+            invoice_number: nextInvoiceNumber
           }));
         } catch (err) {
           console.error('Error generating invoice number:', err);
+
+          // Fallback to a simple invoice number if the API call fails
+          const today = new Date();
+          const year = today.getFullYear();
+          const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+
+          const prefix = formData.type_of_invoice === 'outward' ? 'OUT' : 'IN';
+          const financialYear = today.getMonth() < 3 ?
+            `${year-1}-${year.toString().slice(2)}` :
+            `${year}-${(year+1).toString().slice(2)}`;
+          const fallbackInvoiceNumber = `${prefix}/${financialYear}/${random}`;
+
+          setFormData(prev => ({
+            ...prev,
+            invoice_number: fallbackInvoiceNumber
+          }));
         }
       };
 
@@ -193,20 +257,31 @@ function InvoiceForm() {
               required
             />
 
-            <FormSelect
+            <SearchableDropdown
               label="Customer"
               id="customer"
               name="customer"
               value={formData.customer}
               onChange={handleChange}
-              placeholder="Select a customer"
-              options={customers.map(customer => ({
-                value: customer.id,
-                label: customer.name
-              }))}
+              onSelect={(customer) => {
+                setFormData(prev => ({
+                  ...prev,
+                  customer: customer.id
+                }));
+              }}
+              placeholder={formData.business ? "Search for a customer" : "Select a business first"}
+              searchFunction={searchCustomers}
+              displayProperty="name"
+              valueProperty="id"
               error={errors.customer}
               required
+              disabled={!formData.business}
             />
+            {formData.business && customers.length === 0 && (
+              <p className="text-sm text-red-500 -mt-3 ml-1">
+                No customers associated with this business. <Link to="/billing/customer" className="underline">Add a customer</Link>
+              </p>
+            )}
 
             <FormInput
               label="Invoice Number"

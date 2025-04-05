@@ -443,6 +443,9 @@ function CustomerList() {
               <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    #
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Name
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -464,7 +467,7 @@ function CustomerList() {
                 {Array.isArray(customers) && customers.length > 0 ? (
                   // Add a key to force re-render when customers change
                   <React.Fragment key={`customers-${customers.length}`}>
-                    {customers.map((customer) => {
+                    {customers.map((customer, index) => {
                       // Skip rendering if customer doesn't have required properties
                       console.log('Processing customer in map:', customer);
                       if (!customer || !customer.id) {
@@ -472,8 +475,14 @@ function CustomerList() {
                         return null;
                       }
 
+                      // Calculate the serial number based on the current page
+                      const serialNumber = (currentPage - 1) * 15 + index + 1;
+
                       return (
                         <tr key={customer.id}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-500">{serialNumber}</div>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">{customer.name || 'Unnamed Customer'}</div>
                           </td>

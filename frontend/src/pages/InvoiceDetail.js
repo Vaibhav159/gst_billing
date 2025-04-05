@@ -44,6 +44,10 @@ function InvoiceDetail() {
     hsn_code: '',
     gst_tax_rate: ''
   });
+  const [defaultValues, setDefaultValues] = useState({
+    hsn_code: '',
+    gst_tax_rate: 0
+  });
   const [addingLineItem, setAddingLineItem] = useState(false);
   const [submittingLineItem, setSubmittingLineItem] = useState(false);
 
@@ -54,6 +58,20 @@ function InvoiceDetail() {
       [key]: value
     }));
   };
+
+  // Fetch default values when component mounts
+  useEffect(() => {
+    const fetchDefaultValues = async () => {
+      try {
+        const defaults = await productService.getDefaults();
+        setDefaultValues(defaults);
+      } catch (err) {
+        console.error('Error fetching default values:', err);
+      }
+    };
+
+    fetchDefaultValues();
+  }, []);
 
   // Fetch invoice details
   useEffect(() => {
@@ -176,8 +194,8 @@ function InvoiceDetail() {
         item_name: newLineItem.item_name,
         qty: newLineItem.qty,
         rate: newLineItem.rate,
-        hsn_code: newLineItem.hsn_code || '711319', // Default HSN code for jewelry
-        gst_tax_rate: newLineItem.gst_tax_rate || 0.03 // Default GST rate (3%)
+        hsn_code: newLineItem.hsn_code || defaultValues.hsn_code, // Use default HSN code if not provided
+        gst_tax_rate: newLineItem.gst_tax_rate || defaultValues.gst_tax_rate // Use default GST rate if not provided
       };
 
       const response = await lineItemService.createLineItem(invoiceId, lineItemData);
@@ -324,27 +342,27 @@ function InvoiceDetail() {
               <div className="space-y-2">
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">GSTIN:</p>
-                  <p className="text-sm">{businessDetails?.gst_number || '08AAGPL3375F1ZO'}</p>
+                  <p className="text-sm">{businessDetails?.gst_number || '--'}</p>
                 </div>
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">PAN:</p>
-                  <p className="text-sm">{businessDetails?.pan_number || 'AAGPL3375F'}</p>
+                  <p className="text-sm">{businessDetails?.pan_number || '--'}</p>
                 </div>
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">Mobile:</p>
-                  <p className="text-sm">{businessDetails?.mobile_number || '9414808909'}</p>
+                  <p className="text-sm">{businessDetails?.mobile_number || '--'}</p>
                 </div>
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">Address:</p>
-                  <p className="text-sm">{businessDetails?.address || 'MOTI CHOHATTA, CLOCK TOWER, UDAIPUR'}</p>
+                  <p className="text-sm">{businessDetails?.address || '--'}</p>
                 </div>
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">State:</p>
-                  <p className="text-sm">{businessDetails?.state_name || 'RAJASTHAN'}</p>
+                  <p className="text-sm">{businessDetails?.state_name || '--'}</p>
                 </div>
                 <div className="flex">
                   <p className="text-sm font-medium text-gray-500 w-24">State Code:</p>
-                  <p className="text-sm">{businessDetails?.state_code || '8'}</p>
+                  <p className="text-sm">{businessDetails?.state_code || '--'}</p>
                 </div>
               </div>
             </div>
@@ -374,7 +392,7 @@ function InvoiceDetail() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">State</p>
-                  <p className="text-sm">{customerDetails?.state_name || 'RAJASTHAN'} {customerDetails?.state_code ? `(Code: ${customerDetails.state_code})` : '(Code: 8)'}</p>
+                  <p className="text-sm">{customerDetails?.state_name || '--'} {customerDetails?.state_code ? `(Code: ${customerDetails.state_code})` : ''}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Mobile Number</p>
@@ -527,10 +545,10 @@ function InvoiceDetail() {
                           <div className="text-sm font-medium text-gray-900">{item.item_name || item.product_name}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500">{item.hsn_code || '711319'}</div>
+                          <div className="text-sm text-gray-500">{item.hsn_code || defaultValues.hsn_code || '--'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="text-sm text-gray-500">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : '3'}%</div>
+                          <div className="text-sm text-gray-500">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
                           <div className="text-sm text-gray-500">{item.quantity} gm</div>
