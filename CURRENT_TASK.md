@@ -22,9 +22,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Added Indian currency formatting
 - Fixed invoice detail and print views
 - Added reports generation functionality
+- Added comprehensive test cases for all API endpoints
 
 ### Pending Items
-- Complete testing of all features
 - Ensure mobile responsiveness
 - Optimize performance for large datasets
 - Add any missing features from HTMX version
