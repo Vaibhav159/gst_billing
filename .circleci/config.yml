@@ -1,5 +1,33 @@
 version: 2.1
 
+commands:
+  uv_install_packages:
+    parameters:
+      cache_key:
+        type: string
+      cache_dir:
+        type: string
+        default: /home/circleci/.cache/uv
+    steps:
+      - restore_cache:
+          name: Restore python cache
+          keys:
+            - <<parameters.cache_key>>-uv-cache-{{ checksum "pyproject.toml" }}
+            - <<parameters.cache_key>>-uv-cache-
+      - run:
+          name: Install python dependencies
+          command: |
+            mkdir -p "<<parameters.cache_dir>>" && \
+            uv sync --editable --extras dev --cache-dir <<parameters.cache_dir>>
+      - run:
+          name: Clean pre-built wheels
+          command: uv cache prune --ci --cache-dir <<parameters.cache_dir>>
+      - save_cache:
+          name: Save cache
+          key: <<parameters.cache_key>>-uv-cache-{{ checksum "pyproject.toml" }}
+          paths:
+            - "<<parameters.cache_dir>>"
+
 jobs:
   build-and-test:
     docker:
@@ -16,12 +44,6 @@ jobs:
     steps:
       - checkout
 
-      - restore_cache:
-          name: Restore cached venv
-          keys:
-            - v1-venv-{{ checksum "requirements.txt" }}
-            - v1-venv-
-
       - run:
           name: Install system dependencies
           command: |
@@ -29,19 +51,14 @@ jobs:
             sudo apt-get install -y postgresql-client
 
       - run:
-          name: Setup virtual environment and install dependencies
+          name: Install uv
           command: |
             python -m venv .venv
             . .venv/bin/activate
             python -m pip install --upgrade uv
-            uv pip install -r requirements.txt
-            uv pip install pytest pytest-django pytest-cov coverage
 
-      - save_cache:
-          name: Save cached venv
-          paths:
-            - ".venv/"
-          key: v1-venv-{{ checksum "requirements.txt" }}
+      - uv_install_packages:
+          cache_key: v1
 
       - run:
           name: Check Python environment

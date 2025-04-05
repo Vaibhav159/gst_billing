@@ -64,8 +64,11 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
    uv venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-   # Install dependencies
+   # Install dependencies from pyproject.toml
    uv sync
+
+   # Or install in development mode with dev dependencies
+   uv sync --editable --extras dev
    ```
 
 4. Set up the database
@@ -91,11 +94,23 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
 
 8. Access the application at http://localhost:8000
 
-### Note - To add and remove package using uv
-   ```bash
-   uv add <package_name>
-   uv remove <package_name>
-   ```
+### Managing Dependencies with uv
+
+The project uses pyproject.toml for dependency management. To add or remove packages:
+
+```bash
+# Add a package
+uv add <package_name>
+
+# Remove a package
+uv remove <package_name>
+
+# Update all dependencies
+uv sync
+
+# Generate a lockfile (for reproducible builds)
+uv lock
+```
 
 ## 🧪 Running Tests
 
@@ -103,8 +118,8 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
 We use pytest for running tests with coverage reporting:
 
 ```bash
-# Install test dependencies
-uv pip install pytest pytest-django pytest-cov coverage
+# Make sure you have the dev dependencies installed
+uv sync --editable --extras dev
 
 # Run tests with coverage
 python -m pytest billing/tests/ --cov=billing
