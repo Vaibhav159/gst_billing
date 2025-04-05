@@ -43,7 +43,7 @@ function CustomerList() {
     totalPages
   });
   const [filters, setFilters] = useState({
-    customer_name: '',
+    search: '',
     business_id: ''
   });
 
@@ -422,11 +422,11 @@ function CustomerList() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormInput
               label="Customer Name"
-              id="customer_name"
-              name="customer_name"
-              value={filters.customer_name}
+              id="search"
+              name="search"
+              value={filters.search}
               onChange={handleFilterChange}
-              placeholder="Search by name"
+              placeholder="Search by name, GST or phone"
             />
 
             {console.log('Rendering FormSelect with businesses:', businesses)}

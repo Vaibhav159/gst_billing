@@ -1,6 +1,6 @@
 # GST Billing Application Roadmap
 
-## Current Phase: Frontend Migration 
+## Current Phase: Frontend Migration
 
 ### Phase 1: Frontend Migration (Current)
 - ✅ Set up React application structure
@@ -11,20 +11,21 @@
 - ✅ Add reports generation
 - ✅ Add comprehensive test suite
 - ✅ Set up CircleCI for continuous integration
-- 🔄 Complete bug fixes
-- 🔄 Ensure feature parity with HTMX version
-- ⬜ Business Filter not working on CustomerList View page
-- ⬜ On InvoiceList view, total inward and outward are coming as the total of all invoices from the paginated list instead of aggregation of all invoices
-- ⬜ On InvoiceDetail View Page and print view page, item name is getting blank, item name is product name in line item
+- ✅ Filters not working on CustomerList View page
+- ✅ On InvoiceList view, total inward and outward are coming as the total of all invoices from the paginated list instead of aggregation of all invoices
+- ✅ On InvoiceDetail View Page and print view page, item name is getting blank, item name is product name in line item
+- ⬜ Business filter not working on InvoiceList view page
 - ⬜ Print view page is not the same as the HTMX version
 - ⬜ InvoiceDetail View Page is not the same as the HTMX version
+- 🔄 Complete bug fixes
+- 🔄 Ensure feature parity with HTMX version
 
-### Phase 2: Mordenization and Optimization 
+### Phase 2: Mordenization and Optimization
 - ⬜ Add responsive design
 - ⬜ Update the UI/UX to more modern and user-friendly
 - ⬜ Implement lazy loading and code splitting
 
-### Phase 3: Enhanced Features 
+### Phase 3: Enhanced Features
 - ⬜ Add Dark Mode
 - ⬜ Phase out HTMX-specific code
 - ⬜ Add dashboard analytics and visualizations
@@ -34,14 +35,14 @@
 - ⬜ Add email notifications
 - ⬜ Implement document attachments
 
-### Phase 4: Mobile App Development 
+### Phase 4: Mobile App Development
 - ⬜ Develop mobile app using React Native
 - ⬜ Implement offline support
 - ⬜ Add push notifications
 - ⬜ Implement barcode/QR code scanning
 - ⬜ Add mobile-specific features
 
-### Phase 5: Advanced Features 
+### Phase 5: Advanced Features
 - ⬜ Implement inventory management
 - ⬜ Add purchase order management
 - ⬜ Implement recurring invoices
@@ -49,7 +50,7 @@
 - ⬜ Implement financial reporting
 - ⬜ Add tax filing assistance
 
-### Phase 6: Integration and Expansion 
+### Phase 6: Integration and Expansion
 - ⬜ Integrate with accounting software
 - ⬜ Add payment gateway integration
 - ⬜ Implement e-invoicing as per government regulations

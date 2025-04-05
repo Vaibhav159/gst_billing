@@ -43,6 +43,7 @@ function InvoiceList() {
           }
         });
 
+        // Fetch invoices for the current page
         const response = await axios.get('/api/invoices/', { params });
         setInvoices(response.data.results || response.data);
 
@@ -51,20 +52,15 @@ function InvoiceList() {
           setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
         }
 
-        // Calculate totals
-        let inwardTotal = 0;
-        let outwardTotal = 0;
+        // Fetch total amounts (using the same filters but without pagination)
+        const totalsParams = { ...params };
+        delete totalsParams.page; // Remove pagination parameter
 
-        (response.data.results || response.data).forEach(invoice => {
-          if (invoice.type_of_invoice === 'inward') {
-            inwardTotal += parseFloat(invoice.total_amount || 0);
-          } else {
-            outwardTotal += parseFloat(invoice.total_amount || 0);
-          }
-        });
+        const totalsResponse = await axios.get('/api/invoices/totals/', { params: totalsParams });
 
-        setTotalAmountInward(inwardTotal);
-        setTotalAmountOutward(outwardTotal);
+        // Set totals from the API response
+        setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
+        setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
 
         setError(null);
       } catch (err) {

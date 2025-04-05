@@ -3,7 +3,7 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
@@ -207,6 +207,33 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "invoice": InvoiceSerializer(invoice).data,
             "line_items": LineItemSerializer(line_items, many=True).data,
             **LineItem.get_invoice_summary(invoice_id=invoice.id),
+        }
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def totals(self, request):
+        """Get total amounts for invoices with the same filters as list"""
+        queryset = self.get_queryset()
+
+        # Calculate totals
+        inward_total = (
+            queryset.filter(type_of_invoice="inward").aggregate(Sum("total_amount"))[
+                "total_amount__sum"
+            ]
+            or 0
+        )
+        outward_total = (
+            queryset.filter(type_of_invoice="outward").aggregate(Sum("total_amount"))[
+                "total_amount__sum"
+            ]
+            or 0
+        )
+
+        data = {
+            "inward_total": inward_total,
+            "outward_total": outward_total,
+            "net_total": outward_total - inward_total,
         }
 
         return Response(data)

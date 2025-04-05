@@ -117,37 +117,54 @@ function InvoicePrint() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-8 bg-white">
-      {/* Print-only button */}
-      <div className="print:hidden mb-6 flex justify-between">
+    <div>
+      {/* Print controls - hidden when printing */}
+      <div className="flex items-center gap-3 p-4 print:hidden">
         <button
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+          className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
           onClick={() => navigate(`/billing/invoice/${invoiceId}`)}
         >
+          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+          </svg>
           Back to Invoice
         </button>
+
         <button
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           onClick={() => window.print()}
+          className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
         >
-          Print
+          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+          </svg>
+          Print Invoice
         </button>
       </div>
 
-      {/* Invoice Header */}
-      <div className="border-b-2 border-gray-300 pb-6 mb-6">
-        <div className="flex justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{invoice.type_of_invoice === 'outward' ? 'Tax Invoice' : 'Purchase Invoice'}</h1>
-            <p className="text-gray-600">Invoice #: {invoice.invoice_number}</p>
-            <p className="text-gray-600">Date: {new Date(invoice.invoice_date).toLocaleDateString()}</p>
-          </div>
-          <div className="text-right">
-            <h2 className="text-xl font-semibold">{invoice.business_name}</h2>
-            <p className="text-gray-600">GSTIN: {invoice.business_gst_number}</p>
+      {/* Invoice content - visible when printing */}
+      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-sm">
+        {/* Header: Business & Invoice Details */}
+        <div className="p-8 border-b border-gray-200">
+          <div className="flex justify-between items-start">
+            <div className="space-y-2">
+              <h1 className="text-2xl font-bold" style={{ color: '#d04e00' }}>
+                {invoice.business_name}
+              </h1>
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>{invoice.business_address || 'N/A'}</p>
+                <p>GSTIN: {invoice.business_gst_number || 'N/A'}</p>
+              </div>
+            </div>
+
+            <div className="text-right">
+              <h2 className="text-2xl font-bold text-gray-800">TAX INVOICE</h2>
+              <div className="mt-2 text-sm text-gray-600 space-y-1">
+                <p>Invoice #: {invoice.invoice_number}</p>
+                <p>Date: {new Date(invoice.invoice_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Customer and Business Details */}
       <div className="grid grid-cols-2 gap-6 mb-8">
@@ -181,7 +198,7 @@ function InvoicePrint() {
           {line_items && line_items.map((item, index) => (
             <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
               <td className="py-2 px-4 border-b border-r">{index + 1}</td>
-              <td className="py-2 px-4 border-b border-r">{item.item_name}</td>
+              <td className="py-2 px-4 border-b border-r">{item.item_name || item.product_name}</td>
               <td className="py-2 px-4 border-b border-r text-right">{item.quantity}</td>
               <td className="py-2 px-4 border-b border-r text-right">{formatIndianCurrency(item.rate || 0)}</td>
               <td className="py-2 px-4 border-b text-right">{formatIndianCurrency(item.amount || 0)}</td>
@@ -236,6 +253,7 @@ function InvoicePrint() {
       {/* Footer */}
       <div className="text-center text-gray-500 text-sm mt-12">
         <p>This is a computer-generated invoice and does not require a signature.</p>
+      </div>
       </div>
     </div>
   );

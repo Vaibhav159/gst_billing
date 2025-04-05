@@ -30,8 +30,14 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 ### Pending Items
 - Ensure mobile responsiveness
 - Optimize performance for large datasets
-- Add any missing features from HTMX version
 - Phase out HTMX-specific code
+
+### Recently Completed Items
+- Fixed filters on CustomerList view page
+- Fixed total inward and outward calculations on InvoiceList view
+- Fixed item name display on InvoiceDetail and Print view pages
+- Updated Print view page to match the HTMX version
+- Updated InvoiceDetail view page to match the HTMX version
 
 ### Notes
 - Using uv for package installation instead of pip

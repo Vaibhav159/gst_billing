@@ -22,6 +22,8 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class LineItemSerializer(serializers.ModelSerializer):
+    item_name = serializers.CharField(source="product_name", read_only=True)
+
     class Meta:
         model = LineItem
         fields = "__all__"
