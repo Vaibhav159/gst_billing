@@ -64,7 +64,6 @@ class BaseAPITestCase(TestCase):
             business=self.business,
             customer=self.customer,
             type_of_invoice=INVOICE_TYPE_OUTWARD,
-            is_igst_applicable=False,
             total_amount=Decimal("1180.00"),
         )
 

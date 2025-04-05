@@ -163,6 +163,5 @@ class LineItemAPITestCase(BaseAPITestCase):
             business=self.business,
             customer=self.customer,
             type_of_invoice="outward",
-            is_igst_applicable=False,
             total_amount=Decimal("0.00"),
         )

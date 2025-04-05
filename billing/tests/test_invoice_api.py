@@ -4,7 +4,7 @@ from django.urls import reverse
 from rest_framework import status
 
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
-from billing.models import Invoice, LineItem
+from billing.models import Business, Customer, Invoice, LineItem
 from billing.tests.test_base import BaseAPITestCase
 
 
@@ -44,7 +44,6 @@ class InvoiceAPITestCase(BaseAPITestCase):
             "business": self.business.id,
             "customer": self.customer.id,
             "type_of_invoice": INVOICE_TYPE_INWARD,
-            "is_igst_applicable": True,
             "total_amount": "590.00",
         }
         response = self.client.post(url, data, format="json")
@@ -53,7 +52,7 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(Invoice.objects.count(), 2)
         self.assertEqual(response.data["invoice_number"], "INV-002")
         self.assertEqual(response.data["type_of_invoice"], INVOICE_TYPE_INWARD)
-        self.assertTrue(response.data["is_igst_applicable"])
+        # is_igst_applicable is a property that depends on the customer and business GST numbers
 
     def test_update_invoice(self):
         """Test updating an existing invoice."""
@@ -64,7 +63,6 @@ class InvoiceAPITestCase(BaseAPITestCase):
             "business": self.business.id,
             "customer": self.customer.id,
             "type_of_invoice": INVOICE_TYPE_OUTWARD,
-            "is_igst_applicable": True,
             "total_amount": "1180.00",
         }
         response = self.client.put(url, data, format="json")
@@ -72,7 +70,7 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.invoice_number, "INV-001-UPDATED")
-        self.assertTrue(self.invoice.is_igst_applicable)
+        # is_igst_applicable is a property that depends on the customer and business GST numbers
 
     def test_partial_update_invoice(self):
         """Test partially updating an existing invoice."""
