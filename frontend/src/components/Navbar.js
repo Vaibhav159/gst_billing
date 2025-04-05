@@ -17,56 +17,66 @@ function Navbar() {
               <Link to="/" className="text-blue-600 font-bold text-xl">GST Billing</Link>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-              <NavLink 
-                to="/" 
+              <NavLink
+                to="/"
                 end
-                className={({ isActive }) => 
-                  isActive 
-                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" 
+                className={({ isActive }) =>
+                  isActive
+                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                     : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 }
               >
                 Dashboard
               </NavLink>
-              <NavLink 
-                to="/billing/customer/list" 
-                className={({ isActive }) => 
-                  isActive 
-                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" 
+              <NavLink
+                to="/billing/customer/list"
+                className={({ isActive }) =>
+                  isActive
+                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                     : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 }
               >
                 Customers
               </NavLink>
-              <NavLink 
-                to="/billing/business/list" 
-                className={({ isActive }) => 
-                  isActive 
-                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" 
+              <NavLink
+                to="/billing/business/list"
+                className={({ isActive }) =>
+                  isActive
+                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                     : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 }
               >
                 Businesses
               </NavLink>
-              <NavLink 
-                to="/billing/invoice/list" 
-                className={({ isActive }) => 
-                  isActive 
-                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" 
+              <NavLink
+                to="/billing/invoice/list"
+                className={({ isActive }) =>
+                  isActive
+                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                     : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 }
               >
                 Invoices
               </NavLink>
-              <NavLink 
-                to="/billing/product/list" 
-                className={({ isActive }) => 
-                  isActive 
-                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium" 
+              <NavLink
+                to="/billing/product/list"
+                className={({ isActive }) =>
+                  isActive
+                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                     : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                 }
               >
                 Products
+              </NavLink>
+              <NavLink
+                to="/billing/reports"
+                className={({ isActive }) =>
+                  isActive
+                    ? "border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                }
+              >
+                Reports
               </NavLink>
             </div>
           </div>
@@ -173,6 +183,17 @@ function Navbar() {
             onClick={toggleMobileMenu}
           >
             Products
+          </NavLink>
+          <NavLink
+            to="/billing/reports"
+            className={({ isActive }) =>
+              isActive
+                ? "bg-blue-50 border-blue-500 text-blue-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium"
+                : "border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium"
+            }
+            onClick={toggleMobileMenu}
+          >
+            Reports
           </NavLink>
         </div>
       </div>

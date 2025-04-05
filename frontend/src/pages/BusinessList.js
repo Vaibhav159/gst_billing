@@ -148,7 +148,7 @@ function BusinessList() {
                       <div className="text-sm text-gray-500">{business.address || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">{business.phone_number || '-'}</div>
+                      <div className="text-sm text-gray-500">{business.mobile_number || business.phone_number || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <Link to={`/billing/business/${business.id}`} className="text-blue-600 hover:text-blue-900 mr-4">

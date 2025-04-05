@@ -7,6 +7,7 @@ from .views import (
     InvoiceViewSet,
     LineItemViewSet,
     ProductViewSet,
+    ReportView,
 )
 
 router = DefaultRouter()
@@ -18,4 +19,5 @@ router.register(r"products", ProductViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("reports/generate/", ReportView.as_view(), name="generate-report"),
 ]

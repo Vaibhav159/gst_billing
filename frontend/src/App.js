@@ -14,6 +14,7 @@ import InvoiceForm from './pages/InvoiceForm';
 import InvoicePrint from './pages/InvoicePrint';
 import ProductList from './pages/ProductList';
 import ProductForm from './pages/ProductForm';
+import Reports from './pages/Reports';
 
 function App() {
   return (
@@ -45,6 +46,9 @@ function App() {
         <Route path="billing/product/list" element={<ProductList />} />
         <Route path="billing/product" element={<ProductForm />} />
         <Route path="billing/product/edit/:productId" element={<ProductForm />} />
+
+        {/* Reports Route */}
+        <Route path="billing/reports" element={<Reports />} />
       </Route>
 
       {/* Standalone Routes (without Layout) */}

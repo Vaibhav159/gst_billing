@@ -121,12 +121,7 @@ function BusinessDetail() {
 
             <div>
               <p className="text-sm font-medium text-gray-500">Phone Number</p>
-              <p className="mt-1 text-lg">{business.phone_number || '-'}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-500">Email</p>
-              <p className="mt-1 text-lg">{business.email || '-'}</p>
+              <p className="mt-1 text-lg">{business.mobile_number || business.phone_number || '-'}</p>
             </div>
 
             <div className="md:col-span-2">

@@ -6,8 +6,8 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <Link to="/billing/customer/list" className="block">
           <Card className="h-full transition-shadow hover:shadow-md">
             <div className="flex flex-col items-center justify-center p-6 text-center">
@@ -19,7 +19,7 @@ function Dashboard() {
             </div>
           </Card>
         </Link>
-        
+
         <Link to="/billing/business/list" className="block">
           <Card className="h-full transition-shadow hover:shadow-md">
             <div className="flex flex-col items-center justify-center p-6 text-center">
@@ -31,7 +31,7 @@ function Dashboard() {
             </div>
           </Card>
         </Link>
-        
+
         <Link to="/billing/invoice/list" className="block">
           <Card className="h-full transition-shadow hover:shadow-md">
             <div className="flex flex-col items-center justify-center p-6 text-center">
@@ -43,7 +43,7 @@ function Dashboard() {
             </div>
           </Card>
         </Link>
-        
+
         <Link to="/billing/product/list" className="block">
           <Card className="h-full transition-shadow hover:shadow-md">
             <div className="flex flex-col items-center justify-center p-6 text-center">
@@ -52,6 +52,18 @@ function Dashboard() {
               </svg>
               <h3 className="text-lg font-medium text-gray-900">Products</h3>
               <p className="mt-2 text-sm text-gray-500">Manage your product catalog</p>
+            </div>
+          </Card>
+        </Link>
+
+        <Link to="/billing/reports" className="block">
+          <Card className="h-full transition-shadow hover:shadow-md">
+            <div className="flex flex-col items-center justify-center p-6 text-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-blue-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <h3 className="text-lg font-medium text-gray-900">Reports</h3>
+              <p className="mt-2 text-sm text-gray-500">Generate and download reports</p>
             </div>
           </Card>
         </Link>

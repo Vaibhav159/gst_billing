@@ -15,8 +15,7 @@ function BusinessForm() {
     name: '',
     gst_number: '',
     address: '',
-    phone_number: '',
-    email: ''
+    mobile_number: ''
   });
 
   const [loading, setLoading] = useState(isEditing);
@@ -34,8 +33,7 @@ function BusinessForm() {
             name: response.data.name || '',
             gst_number: response.data.gst_number || '',
             address: response.data.address || '',
-            phone_number: response.data.phone_number || '',
-            email: response.data.email || ''
+            mobile_number: response.data.mobile_number || ''
           });
         } catch (err) {
           console.error('Error fetching business:', err);
@@ -80,9 +78,7 @@ function BusinessForm() {
       newErrors.gst_number = 'GST number must be 15 characters';
     }
 
-    if (formData.email && !/^\S+@\S+\.\S+$/.test(formData.email)) {
-      newErrors.email = 'Invalid email format';
-    }
+
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -175,23 +171,12 @@ function BusinessForm() {
 
           <FormInput
             label="Phone Number"
-            id="phone_number"
-            name="phone_number"
-            value={formData.phone_number}
+            id="mobile_number"
+            name="mobile_number"
+            value={formData.mobile_number}
             onChange={handleChange}
             placeholder="Enter phone number"
-            error={errors.phone_number}
-          />
-
-          <FormInput
-            label="Email"
-            id="email"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="Enter email address"
-            error={errors.email}
+            error={errors.mobile_number}
           />
 
           <div className="flex justify-end space-x-2 pt-4">
