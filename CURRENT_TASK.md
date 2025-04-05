@@ -37,6 +37,8 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Update test cases since the APIs have changed.
 - Figure out how to handle ci_settings.py since it is taking all objects from settings.py but on circleci local file wont be there.
 - Current Month button in reports gives wrong values.
+- Clean up unnecesary logs from frontend.
+
 
 
 ### Recently Completed Items
