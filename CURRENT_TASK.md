@@ -32,6 +32,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 
 
 ### Recently Completed Items
+- ✅ Fixed duplicate API calls in React StrictMode with request caching
+- ✅ Added request deduplication to prevent identical simultaneous requests
+- ✅ Implemented proper cleanup of request cache to prevent memory leaks
 - ✅ Fixed race condition in CustomerList with improved request tracking and cancellation
 - ✅ Enhanced error handling for API cancellations to prevent false error messages
 - ✅ Optimized loading state to only show when necessary

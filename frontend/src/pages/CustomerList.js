@@ -79,13 +79,41 @@ function CustomerList() {
     setCurrentPage(1); // Reset to first page when sorting changes
   };
 
-  // Use a ref to track the current request
+  // Use refs to track the current request and prevent duplicate requests in StrictMode
   const currentRequest = useRef(null);
+  const requestCache = useRef(new Map());
+  const requestId = useRef(0);
 
   // Single useEffect for fetching customers data
   useEffect(() => {
+    // Debug log to track when this effect runs and with what dependencies
+    console.log('CustomerList useEffect triggered with:', {
+      currentPage,
+      filters,
+      sortField,
+      sortDirection,
+      customersLength: customers.length
+    });
+
     // Skip if component is unmounted
     if (!isMounted.current) return;
+
+    // Generate a cache key based on the current request parameters
+    const cacheKey = JSON.stringify({
+      page: currentPage,
+      filters,
+      sortField,
+      sortDirection
+    });
+
+    // Check if we already have a request in progress with these exact parameters
+    if (requestCache.current.has(cacheKey)) {
+      console.log('Skipping duplicate request with same parameters');
+      return;
+    }
+
+    // Increment request ID to track this specific request
+    const thisRequestId = ++requestId.current;
 
     // Cancel any in-flight request
     if (currentRequest.current) {
@@ -95,6 +123,9 @@ function CustomerList() {
     // Create a new cancel token source
     const cancelTokenSource = createCancelToken();
     currentRequest.current = cancelTokenSource;
+
+    // Add this request to the cache
+    requestCache.current.set(cacheKey, thisRequestId);
 
     // Set loading state only if we don't already have data
     if (customers.length === 0) {
@@ -185,12 +216,16 @@ function CustomerList() {
 
     // Cleanup function
     return () => {
+      // Cancel the request if it's still the current one
       if (currentRequest.current === cancelTokenSource) {
         cancelTokenSource.cancel('Component unmounted or dependencies changed');
         currentRequest.current = null;
       }
+
+      // Remove this request from the cache
+      requestCache.current.delete(cacheKey);
     };
-  }, [currentPage, filters, sortField, sortDirection, customers.length]);
+  }, [currentPage, filters, sortField, sortDirection]);
 
 
 
