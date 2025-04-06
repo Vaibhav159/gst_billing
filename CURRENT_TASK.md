@@ -32,6 +32,11 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 
 
 ### Recently Completed Items
+- ✅ Fixed race condition in CustomerList with improved request tracking and cancellation
+- ✅ Enhanced error handling for API cancellations to prevent false error messages
+- ✅ Optimized loading state to only show when necessary
+- ✅ Completely refactored CustomerList data fetching to eliminate duplicate API calls
+- ✅ Simplified CustomerList component with a single useEffect for data fetching
 - ✅ Completely redesigned InvoiceList data fetching to eliminate multiple API calls
 - ✅ Consolidated all data fetching logic into a single useEffect with proper dependencies
 - ✅ Improved invoice deletion to work with the new data fetching approach
