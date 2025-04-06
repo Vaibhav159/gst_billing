@@ -536,7 +536,7 @@ function CustomerList() {
                     />
                     <SortableHeader
                       label="Mobile"
-                      field="mobile"
+                      field="mobile_number"
                       currentSortField={sortField}
                       currentSortDirection={sortDirection}
                       onSort={handleSort}

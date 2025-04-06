@@ -32,6 +32,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 
 
 ### Recently Completed Items
+- ✅ Fixed sorting field name in CustomerList from 'mobile' to 'mobile_number'
 - ✅ Implemented sortable tables in all list views (InvoiceList, CustomerList, BusinessList, ProductList)
 - ✅ Added ascending, descending, and no sorting options to all tables
 - ✅ Added default financial year filter to InvoiceList page
