@@ -1,17 +1,59 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  db:
+    image: postgres:13
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=${DB_NAME:-gst_billing}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Django web application
   web:
     build: .
     restart: always
-    ports:
-      - "8000:8000"
     volumes:
       - static_volume:/app/staticfiles
+      - media_volume:/app/media
     environment:
       - DJANGO_SETTINGS_MODULE=gst_billing.production_settings
-    command: gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000
+      - DB_HOST=db
+      - DB_NAME=${DB_NAME:-gst_billing}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - db
+      - redis
+    command: >
+      bash -c "python manage.py migrate &&
+               python manage.py collectstatic --noinput &&
+               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000"
 
+  # Nginx for serving static files and as a reverse proxy
   nginx:
     image: nginx:alpine
     restart: always
@@ -22,8 +64,12 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/ssl:/etc/nginx/ssl
       - static_volume:/var/www/static
+      - media_volume:/var/www/media
     depends_on:
       - web
 
 volumes:
+  postgres_data:
+  redis_data:
   static_volume:
+  media_volume:

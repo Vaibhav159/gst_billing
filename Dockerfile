@@ -23,7 +23,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 COPY . /app/
 
 # Install Python dependencies
-RUN /root/.cargo/bin/uv pip install --system gunicorn
+RUN /root/.cargo/bin/uv pip install --system gunicorn django-redis
 RUN /root/.cargo/bin/uv sync --system --frozen
 
 # Collect static files
