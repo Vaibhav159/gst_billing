@@ -41,6 +41,9 @@ function CustomerList() {
   // Local state for the search input field (updates immediately with typing)
   const [searchInput, setSearchInput] = useState('');
 
+  // Reference to the search input element to maintain focus
+  const searchInputRef = useRef(null);
+
   const [filters, setFilters] = useState({
     search: '',
     business_id: ''
@@ -303,6 +306,11 @@ function CustomerList() {
         search: debouncedSearchTerm
       }));
       setCurrentPage(1); // Reset to first page when search changes
+
+      // Maintain focus on the search input after the API call
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
     }
   }, [debouncedSearchTerm, isMounted]);
 
@@ -400,6 +408,8 @@ function CustomerList() {
               value={searchInput}
               onChange={handleFilterChange}
               placeholder="Search by name, GST or phone"
+              ref={searchInputRef}
+              autoFocus
             />
 
             {console.log('Rendering FormSelect with businesses:', businesses)}

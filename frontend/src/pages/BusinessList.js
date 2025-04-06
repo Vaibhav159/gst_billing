@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useDebounce from '../hooks/useDebounce';
 import { Link } from 'react-router-dom';
 import Card from '../components/Card';
@@ -19,6 +19,8 @@ function BusinessList() {
   const [searchInput, setSearchInput] = useState('');
   // State for the actual search term used in API calls (updated after debounce)
   const [searchTerm, setSearchTerm] = useState('');
+  // Reference to the search input element to maintain focus
+  const searchInputRef = useRef(null);
 
   // Fetch businesses
   useEffect(() => {
@@ -64,6 +66,11 @@ function BusinessList() {
   useEffect(() => {
     setSearchTerm(debouncedSearchTerm);
     setCurrentPage(1); // Reset to first page when search changes
+
+    // Maintain focus on the search input after the API call
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
   }, [debouncedSearchTerm]);
 
   // Handle search input change - updates immediately for visual feedback
@@ -109,6 +116,8 @@ function BusinessList() {
             value={searchInput}
             onChange={handleSearchChange}
             placeholder="Search by name or GST number"
+            ref={searchInputRef}
+            autoFocus
           />
         </div>
       </Card>

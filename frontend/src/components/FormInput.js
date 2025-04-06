@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 
-function FormInput({
+const FormInput = forwardRef(({
   label,
   id,
   name,
@@ -12,7 +12,7 @@ function FormInput({
   required = false,
   className = '',
   ...props
-}) {
+}, ref) => {
   return (
     <div className={`mb-4 ${className}`}>
       {label && (
@@ -31,11 +31,12 @@ function FormInput({
         className={`form-control-modern ${
           error ? 'border-red-300 dark:border-red-500 focus:border-red-500 focus:ring-red-500' : ''
         }`}
+        ref={ref}
         {...props}
       />
       {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
-}
+});
 
 export default FormInput;

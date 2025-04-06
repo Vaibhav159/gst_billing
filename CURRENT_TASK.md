@@ -49,7 +49,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Added robust error handling for line item creation to handle potential undefined values
 - ✅ Fixed issue with blank line items appearing after adding by refreshing the entire line items list
 - ✅ Added test cases for line item addition/deletion and invoice total amount verification
-- ✅ Added custom debounce hook for search filters in Customer and Business lists with immediate visual feedback and delayed API calls
+- ✅ Added custom debounce hook for search filters in Customer and Business lists with immediate visual feedback, delayed API calls, and maintained input focus
 - ✅ Fixed list refresh issues by removing API caching to ensure fresh data is always displayed
 - ✅ Added Delete action in Invoice List page with confirmation dialog and proper list refresh
 - ✅ Fixed total_amount not updating after adding a new line item
