@@ -28,8 +28,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items / Bugs
-- On Customer List search filter, only hit the api when the user have stopped typing, currently we hit api on every key stroke, without waitinig for the user to finish typing
-- Even after deleting the invoice, it still shows in the list, and only goes away after refreshing the page
+- None at the moment
 
 
 ### Recently Completed Items
@@ -51,6 +50,7 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Fixed issue with blank line items appearing after adding by refreshing the entire line items list
 - ✅ Added test cases for line item addition/deletion and invoice total amount verification
 - ✅ Added custom debounce implementation to the Customer List search filter for better performance
+- ✅ Fixed list refresh issues by removing API caching to ensure fresh data is always displayed
 - ✅ Added Delete action in Invoice List page with confirmation dialog and proper list refresh
 - ✅ Fixed total_amount not updating after adding a new line item
 - ✅ Implemented delete functionality for line items with confirmation dialog

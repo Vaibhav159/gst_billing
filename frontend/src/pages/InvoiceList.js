@@ -99,6 +99,8 @@ function InvoiceList() {
     fetchInvoices();
   }, [fetchInvoices]);
 
+
+
   // Fetch businesses for filter
   useEffect(() => {
     const fetchBusinesses = async () => {

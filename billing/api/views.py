@@ -8,7 +8,6 @@ from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.vary import vary_on_cookie
 from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -53,8 +52,7 @@ class BusinessViewSet(viewsets.ModelViewSet):
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
-    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
-    @method_decorator(vary_on_cookie)
+    # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
         # Optimize query with select_related if needed
         return super().list(request, *args, **kwargs)
@@ -82,8 +80,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
-    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
-    @method_decorator(vary_on_cookie)
+    # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -129,8 +126,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
-    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
-    @method_decorator(vary_on_cookie)
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -191,8 +186,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     ordering = ["-invoice_date"]
     pagination_class = StandardResultsSetPagination
 
-    @method_decorator(cache_page(60 * 2))  # Cache for 2 minutes
-    @method_decorator(vary_on_cookie)
+    # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 

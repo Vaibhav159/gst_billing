@@ -198,6 +198,8 @@ function CustomerList() {
     }
   }, [fetchCustomers, isMounted]);
 
+
+
   // Fetch businesses for filter
   useEffect(() => {
     console.log('fetchBusinesses useEffect triggered');
