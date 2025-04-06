@@ -212,14 +212,26 @@ function InvoicePrint() {
           </div>
 
           {/* Invoice Details */}
-          <div className="w-1/3 bg-gray-50 p-3 rounded">
-            <h2 className="text-lg font-bold text-center text-gray-800 mb-1">TAX INVOICE</h2>
-            <p className="text-center text-sm font-medium">#{invoice.invoice_number}</p>
-            <div className="text-xs mt-2 grid grid-cols-2 gap-1">
-              <p className="font-medium text-right">Date:</p>
-              <p>{formatDate(invoice.invoice_date)}</p>
-              <p className="font-medium text-right">Type:</p>
-              <p>{invoice.type_of_invoice ? invoice.type_of_invoice.charAt(0).toUpperCase() + invoice.type_of_invoice.slice(1) : 'Outward'}</p>
+          <div className="w-1/3">
+            <div className="border border-gray-200 rounded overflow-hidden">
+              <div className="bg-indigo-600 text-white py-2 px-4">
+                <h2 className="text-lg font-bold text-center">TAX INVOICE</h2>
+              </div>
+              <div className="p-3 bg-white">
+                <p className="text-center text-sm font-medium mb-3">#{invoice.invoice_number}</p>
+                <table className="w-full text-xs">
+                  <tbody>
+                    <tr>
+                      <td className="py-1 font-medium">Date:</td>
+                      <td className="py-1 text-right">{formatDate(invoice.invoice_date)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-1 font-medium">Type:</td>
+                      <td className="py-1 text-right">{invoice.type_of_invoice ? invoice.type_of_invoice.charAt(0).toUpperCase() + invoice.type_of_invoice.slice(1) : 'Outward'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -295,13 +307,16 @@ function InvoicePrint() {
             <p className="text-xs pl-2">
               {amount_in_words || `${formatIndianCurrency(total_amount).replace('₹', '')} Rupees Only`}
             </p>
-            <p className="text-xs mt-2 pl-2"><span className="font-medium">Total Items:</span> {total_items || line_items.length || 1}</p>
           </div>
 
           <div className="w-1/2 pl-2">
             <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">INVOICE SUMMARY</h3>
             <table className="w-full text-xs">
               <tbody>
+                <tr>
+                  <td className="py-0.5">Total Items:</td>
+                  <td className="py-0.5 text-right">{total_items || line_items.length || 1}</td>
+                </tr>
                 <tr>
                   <td className="py-0.5">Amount Without Tax:</td>
                   <td className="py-0.5 text-right">{formatIndianCurrency(amount_without_tax)}</td>
@@ -348,24 +363,24 @@ function InvoicePrint() {
         {/* Bank Details */}
         <div className="mb-4">
           <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">BANK DETAILS</h3>
-          <div className="flex">
-            <table className="w-full text-xs border-separate border-spacing-x-2">
+          <div className="border border-gray-200 rounded p-2">
+            <table className="w-full text-xs">
               <tbody>
                 <tr>
-                  <td className="py-0.5 font-medium w-1/4">Bank Name:</td>
-                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_name || ''}</td>
+                  <td className="py-1 font-medium w-1/4">Bank Name:</td>
+                  <td className="py-1">{business.bank_name || ''}</td>
                 </tr>
-                <tr>
-                  <td className="py-0.5 font-medium">A/c No:</td>
-                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_account_number || ''}</td>
+                <tr className="border-t border-gray-100">
+                  <td className="py-1 font-medium">A/c No:</td>
+                  <td className="py-1">{business.bank_account_number || ''}</td>
                 </tr>
-                <tr>
-                  <td className="py-0.5 font-medium">IFSC Code:</td>
-                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_ifsc_code || ''}</td>
+                <tr className="border-t border-gray-100">
+                  <td className="py-1 font-medium">IFSC Code:</td>
+                  <td className="py-1">{business.bank_ifsc_code || ''}</td>
                 </tr>
-                <tr>
-                  <td className="py-0.5 font-medium">Branch:</td>
-                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_branch_name || ''}</td>
+                <tr className="border-t border-gray-100">
+                  <td className="py-1 font-medium">Branch:</td>
+                  <td className="py-1">{business.bank_branch_name || ''}</td>
                 </tr>
               </tbody>
             </table>
