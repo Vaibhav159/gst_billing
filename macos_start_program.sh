@@ -32,9 +32,9 @@ echo "✅ Dependencies installed"
 
 echo "\n🔧 Running database migrations..."
 # Run migrations
-python manage.py migrate
+uv run python manage.py migrate
 echo "✅ Migrations complete"
 
 echo "\n🌐 Starting server and opening browser..."
 # Start the server and open the browser
-open http://127.0.0.1:8000/login & python manage.py runserver
+open http://127.0.0.1:8000/login & uv run python manage.py runserver
