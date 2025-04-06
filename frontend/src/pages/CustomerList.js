@@ -24,8 +24,8 @@ function CustomerList() {
 
   // Row click handler
   const handleCustomerRowClick = useRowClick('/billing/customer/', {
-    // Ignore clicks on action buttons
-    ignoreClasses: ['action-button', 'btn'],
+    // Ignore clicks on action buttons and menus
+    ignoreClasses: ['action-button', 'btn', 'relative'],
     // Special handling for business references
     specialHandling: {
       'business': (id) => navigate(`/billing/business/${id}`)
@@ -72,151 +72,6 @@ function CustomerList() {
 
   // No need for test API connection in production code
 
-  // Fetch customers with filters - memoized to prevent unnecessary re-renders
-  const fetchCustomers = useCallback(async () => {
-    console.log('fetchCustomers callback executing');
-    // Create a cancel token for this request
-    const cancelTokenSource = createCancelToken();
-
-    try {
-      console.log('Setting loading state to true');
-      if (isMounted.current) {
-        setLoading(true);
-      } else {
-        console.log('Component unmounted, not setting loading state');
-        return;
-      }
-      const params = {
-        page: currentPage,
-        ...filters
-      };
-
-      // Add sorting parameters if set
-      if (sortField && sortDirection) {
-        params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
-      }
-
-      // Remove empty filters
-      Object.keys(params).forEach(key => {
-        if (params[key] === '') {
-          delete params[key];
-        }
-      });
-
-      console.log('Making API request to fetch customers');
-      // Use the correct API endpoint with apiClient
-      console.log('Using apiClient for API endpoint: /customers/');
-      const response = await apiClient.get('/customers/', {
-        params,
-        cancelToken: cancelTokenSource.token
-      });
-
-      // Log the full response object
-      console.log('Customer API response object:', response);
-      console.log('Customer API response data type:', typeof response.data);
-      console.log('Customer API response data:', response.data);
-      console.log('Customer API response data structure:', {
-        hasResults: response.data && response.data.results ? 'yes' : 'no',
-        isArray: Array.isArray(response.data) ? 'yes' : 'no',
-        keys: response.data ? Object.keys(response.data) : 'none'
-      });
-
-      // Ensure we have a valid array of customers with required properties
-      let customerData;
-      if (response.data && response.data.results) {
-        console.log('Using response.data.results');
-        customerData = response.data.results;
-      } else if (Array.isArray(response.data)) {
-        console.log('Using response.data as array');
-        customerData = response.data;
-      } else if (response.data && typeof response.data === 'object') {
-        // Try to extract data from response object
-        console.log('Trying to extract data from response object');
-        if (response.data.data && Array.isArray(response.data.data)) {
-          console.log('Found data array in response.data.data');
-          customerData = response.data.data;
-        } else {
-          console.log('No valid data format found in object, using empty array');
-          customerData = [];
-        }
-      } else {
-        console.log('No valid data format found, using empty array');
-        customerData = [];
-      }
-      console.log('Customer data extracted from response:', customerData);
-
-      const validCustomers = Array.isArray(customerData)
-        ? customerData.filter(customer => {
-            const isValid = customer && typeof customer === 'object' && customer.id;
-            if (!isValid) {
-              console.warn('Invalid customer object found:', customer);
-            }
-            return isValid;
-          })
-        : [];
-
-      console.log('Valid customers after filtering:', validCustomers);
-      console.log('Setting customers state with:', validCustomers);
-      if (isMounted.current) {
-        setCustomers([...validCustomers]); // Create a new array to ensure state update
-      } else {
-        console.log('Component unmounted, not setting customers state');
-      }
-
-      // Set pagination data if available
-      console.log('Checking pagination data:', {
-        hasCount: response.data && response.data.count ? 'yes' : 'no',
-        count: response.data && response.data.count ? response.data.count : 'none'
-      });
-      if (response.data && response.data.count) {
-        const calculatedPages = Math.ceil(response.data.count / 15); // Assuming 15 items per page
-        console.log('Setting totalPages to:', calculatedPages);
-        if (isMounted.current) {
-          setTotalPages(calculatedPages);
-        } else {
-          console.log('Component unmounted, not setting totalPages state');
-        }
-      } else if (validCustomers.length > 0) {
-        // If we have customers but no pagination data, set totalPages to 1
-        console.log('No pagination data available but we have customers, setting totalPages to 1');
-        if (isMounted.current) {
-          setTotalPages(1);
-        } else {
-          console.log('Component unmounted, not setting totalPages state');
-        }
-      } else {
-        console.log('No pagination data available, keeping totalPages as:', totalPages);
-      }
-
-      console.log('Clearing error state');
-      if (isMounted.current) {
-        setError(null);
-      } else {
-        console.log('Component unmounted, not clearing error state');
-      }
-    } catch (err) {
-      if (!(err.constructor && err.constructor.name === 'CanceledError')) {
-        console.error('Error fetching customers:', err);
-        const errorMessage = 'Failed to load customers. Please try again.';
-        console.log('Setting error state to:', errorMessage);
-        if (isMounted.current) {
-          setError(errorMessage);
-        } else {
-          console.log('Component unmounted, not setting error state');
-        }
-      } else {
-        console.log('Request was cancelled, not setting error state');
-      }
-    } finally {
-      if (isMounted.current) {
-        setLoading(false);
-      }
-    }
-
-    // Return the cancel function
-    return () => cancelTokenSource.cancel('Component unmounted');
-  }, [currentPage, filters, sortField, sortDirection, isMounted]);
-
   // Handle sorting
   const handleSort = (field, direction) => {
     setSortField(field);
@@ -224,19 +79,153 @@ function CustomerList() {
     setCurrentPage(1); // Reset to first page when sorting changes
   };
 
-  // Call fetchCustomers when dependencies change
-  useEffect(() => {
-    if (isMounted.current) {
-      const cancelFetch = fetchCustomers();
+  // Use refs to track the current request and prevent duplicate requests in StrictMode
+  const currentRequest = useRef(null);
+  const requestCache = useRef(new Map());
+  const requestId = useRef(0);
 
-      // Cleanup function to cancel request when component unmounts or dependencies change
-      return () => {
-        if (typeof cancelFetch === 'function') {
-          cancelFetch();
-        }
-      };
+  // Single useEffect for fetching customers data
+  useEffect(() => {
+    // Debug log to track when this effect runs and with what dependencies
+    console.log('CustomerList useEffect triggered with:', {
+      currentPage,
+      filters,
+      sortField,
+      sortDirection,
+      customersLength: customers.length
+    });
+
+    // Skip if component is unmounted
+    if (!isMounted.current) return;
+
+    // Generate a cache key based on the current request parameters
+    const cacheKey = JSON.stringify({
+      page: currentPage,
+      filters,
+      sortField,
+      sortDirection
+    });
+
+    // Check if we already have a request in progress with these exact parameters
+    if (requestCache.current.has(cacheKey)) {
+      console.log('Skipping duplicate request with same parameters');
+      return;
     }
-  }, [fetchCustomers, isMounted]);
+
+    // Increment request ID to track this specific request
+    const thisRequestId = ++requestId.current;
+
+    // Cancel any in-flight request
+    if (currentRequest.current) {
+      currentRequest.current.cancel('New request initiated');
+    }
+
+    // Create a new cancel token source
+    const cancelTokenSource = createCancelToken();
+    currentRequest.current = cancelTokenSource;
+
+    // Add this request to the cache
+    requestCache.current.set(cacheKey, thisRequestId);
+
+    // Set loading state only if we don't already have data
+    if (customers.length === 0) {
+      setLoading(true);
+    }
+
+    const fetchCustomers = async () => {
+      try {
+        // Build request parameters
+        const params = {
+          page: currentPage,
+          ...filters
+        };
+
+        // Add sorting parameters if set
+        if (sortField && sortDirection) {
+          params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+        }
+
+        // Remove empty filters
+        Object.keys(params).forEach(key => {
+          if (params[key] === '') {
+            delete params[key];
+          }
+        });
+
+        // Make API request
+        const response = await apiClient.get('/customers/', {
+          params,
+          cancelToken: cancelTokenSource.token
+        });
+
+        // Process response data
+        let customerData;
+        if (response.data && response.data.results) {
+          customerData = response.data.results;
+        } else if (Array.isArray(response.data)) {
+          customerData = response.data;
+        } else if (response.data && typeof response.data === 'object' && response.data.data && Array.isArray(response.data.data)) {
+          customerData = response.data.data;
+        } else {
+          customerData = [];
+        }
+
+        // Filter valid customers
+        const validCustomers = Array.isArray(customerData)
+          ? customerData.filter(customer => customer && typeof customer === 'object' && customer.id)
+          : [];
+
+        // Update state if component is still mounted and this is still the current request
+        if (isMounted.current && currentRequest.current === cancelTokenSource) {
+          setCustomers(validCustomers);
+
+          // Set pagination data
+          if (response.data && response.data.count) {
+            setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+          } else if (validCustomers.length > 0) {
+            setTotalPages(1);
+          }
+
+          setError(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        // Only set error if this is still the current request and it wasn't cancelled
+        if (isMounted.current && currentRequest.current === cancelTokenSource) {
+          // Check if this is a cancellation error
+          const isCancelled = err.constructor &&
+                             (err.constructor.name === 'CanceledError' ||
+                              err.constructor.name === 'Cancel' ||
+                              err.name === 'CanceledError' ||
+                              err.name === 'Cancel');
+
+          if (!isCancelled) {
+            console.error('Error fetching customers:', err);
+            setError('Failed to load customers. Please try again.');
+          } else {
+            // This was a cancellation, don't show an error
+            console.log('Request was cancelled, not showing error');
+          }
+
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchCustomers();
+
+    // Cleanup function
+    return () => {
+      // Cancel the request if it's still the current one
+      if (currentRequest.current === cancelTokenSource) {
+        cancelTokenSource.cancel('Component unmounted or dependencies changed');
+        currentRequest.current = null;
+      }
+
+      // Remove this request from the cache
+      requestCache.current.delete(cacheKey);
+    };
+  }, [currentPage, filters, sortField, sortDirection]);
 
 
 

@@ -25,8 +25,8 @@ function ProductList() {
 
   // Row click handler
   const handleProductRowClick = useRowClick('/billing/product/', {
-    // Ignore clicks on action buttons
-    ignoreClasses: ['action-button', 'btn']
+    // Ignore clicks on action buttons and menus
+    ignoreClasses: ['action-button', 'btn', 'relative']
   });
 
   // Fetch products

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -16,6 +16,7 @@ import { useRowClick } from '../utils/navigationHelpers';
 
 function InvoiceList() {
   const navigate = useNavigate();
+  const isInitialRender = useRef(true);
   const [invoices, setInvoices] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -31,8 +32,8 @@ function InvoiceList() {
 
   // Row click handler
   const handleInvoiceRowClick = useRowClick('/billing/invoice/', {
-    // Ignore clicks on action buttons
-    ignoreClasses: ['action-button', 'btn'],
+    // Ignore clicks on action buttons and menus
+    ignoreClasses: ['action-button', 'btn', 'relative'],
     // Special handling for business and customer references
     specialHandling: {
       'business': (id) => navigate(`/billing/business/${id}`),
@@ -49,54 +50,7 @@ function InvoiceList() {
     type_of_invoice: ''
   });
 
-  // Function to fetch invoices
-  const fetchInvoices = useCallback(async () => {
-    try {
-      setLoading(true);
-      const params = {
-        page: currentPage,
-        ...filters
-      };
-
-      // Add sorting parameters if set
-      if (sortField && sortDirection) {
-        params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
-      }
-
-      // Remove empty filters
-      Object.keys(params).forEach(key => {
-        if (params[key] === '') {
-          delete params[key];
-        }
-      });
-
-      // Fetch invoices for the current page
-      const response = await apiClient.get('/invoices/', { params });
-      setInvoices(response.data.results || response.data);
-
-      // Set pagination data if available
-      if (response.data.count) {
-        setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
-      }
-
-      // Fetch total amounts (using the same filters but without pagination)
-      const totalsParams = { ...params };
-      delete totalsParams.page; // Remove pagination parameter
-
-      const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
-
-      // Set totals from the API response
-      setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
-      setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
-
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching invoices:', err);
-      setError('Failed to load invoices. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [currentPage, filters, sortField, sortDirection]);
+  // We've moved the fetchInvoices functionality directly into the useEffect
 
   // Handle sorting
   const handleSort = (field, direction) => {
@@ -115,8 +69,9 @@ function InvoiceList() {
       setDeleting(true);
       await apiClient.delete(`/invoices/${invoiceId}/`);
 
-      // Refresh the invoice list
-      await fetchInvoices();
+      // Force a re-render to refresh the invoice list by updating a dependency of the main useEffect
+      // We can do this by setting the current page to 1
+      setCurrentPage(1);
 
       // Show success message
       alert('Invoice deleted successfully');
@@ -126,12 +81,7 @@ function InvoiceList() {
     } finally {
       setDeleting(false);
     }
-  }, [fetchInvoices]);
-
-  // Fetch invoices with filters
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
+  }, []);
 
 
 
@@ -178,9 +128,10 @@ function InvoiceList() {
     setCurrentPage(page);
   };
 
-  // Set default financial year filter on initial load
+  // Single useEffect to handle both setting default filter and fetching invoices
   useEffect(() => {
-    const setCurrentFinancialYear = () => {
+    // Function to set the current financial year filter
+    const getCurrentFinancialYear = () => {
       const today = new Date();
       let startYear = today.getFullYear();
       let startMonth = 4; // April
@@ -196,26 +147,81 @@ function InvoiceList() {
         return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       };
 
-      const startDate = formatDate(startYear, startMonth, startDay);
-      const endDate = formatDate(startYear + 1, 3, 31); // March 31st of next year
-
-      setFilters(prev => ({
-        ...prev,
-        start_date: startDate,
-        end_date: endDate
-      }));
+      return {
+        startDate: formatDate(startYear, startMonth, startDay),
+        endDate: formatDate(startYear + 1, 3, 31) // March 31st of next year
+      };
     };
 
-    // Only set default filter if no date filters are already set
-    if (!filters.start_date && !filters.end_date) {
-      setCurrentFinancialYear();
-    }
-  }, []); // Empty dependency array means this runs once on mount
+    const loadData = async () => {
+      // Check if we need to set default financial year filter
+      if (isInitialRender.current && !filters.start_date && !filters.end_date) {
+        isInitialRender.current = false;
+        const { startDate, endDate } = getCurrentFinancialYear();
 
-  // Fetch invoices when page, filters, or sorting changes
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
+        // Update filters with financial year dates
+        setFilters(prev => ({
+          ...prev,
+          start_date: startDate,
+          end_date: endDate
+        }));
+
+        // Don't fetch here - the filters update will trigger this effect again
+        return;
+      }
+
+      // Fetch invoices
+      try {
+        setLoading(true);
+        const params = {
+          page: currentPage,
+          ...filters
+        };
+
+        // Add sorting parameters if set
+        if (sortField && sortDirection) {
+          params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+        }
+
+        // Remove empty filters
+        Object.keys(params).forEach(key => {
+          if (params[key] === '') {
+            delete params[key];
+          }
+        });
+
+        console.log('Fetching invoices with params:', params);
+
+        // Fetch invoices for the current page
+        const response = await apiClient.get('/invoices/', { params });
+        setInvoices(response.data.results || response.data);
+
+        // Set pagination data if available
+        if (response.data.count) {
+          setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+        }
+
+        // Fetch total amounts (using the same filters but without pagination)
+        const totalsParams = { ...params };
+        delete totalsParams.page; // Remove pagination parameter
+
+        const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
+
+        // Set totals from the API response
+        setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
+        setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
+
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching invoices:', err);
+        setError('Failed to load invoices. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [currentPage, filters, sortField, sortDirection]);
 
   // Handle date range selection
   const handleDateRangeChange = (e) => {
