@@ -1,8 +1,8 @@
-import csv
 import io
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import pandas as pd
 from django.db import transaction
 
 DATE_FORMAT_YEAR_MONTH_DATE = "%Y-%m-%d"
@@ -52,6 +52,10 @@ def process_invoice_csv(
     invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate
 
     Returns a dictionary with counts of created invoices and any errors encountered.
+
+    Improvements:
+    1. Uses pandas for more robust CSV handling
+    2. Validates that customers exist in the database (doesn't create new ones)
     """
     from billing.models import Business, Customer, Invoice, LineItem
 
@@ -68,10 +72,18 @@ def process_invoice_csv(
     except Business.DoesNotExist:
         raise CSVImportError(f"Business with ID {business_id} does not exist")
 
-    # Parse CSV file
+    # Parse CSV file using pandas
     try:
-        csv_file = io.StringIO(file_content.decode("utf-8"))
-        reader = csv.DictReader(csv_file)
+        # Read CSV with pandas
+        csv_file = io.BytesIO(file_content)
+        try:
+            df = pd.read_csv(csv_file)
+        except Exception as e:
+            raise CSVImportError(f"Error reading CSV file: {e}")
+
+        # Check if dataframe is empty
+        if df.empty:
+            raise CSVImportError("CSV file is empty")
 
         # Validate required fields
         required_fields = [
@@ -84,31 +96,74 @@ def process_invoice_csv(
         ]
 
         # Check if all required fields are present in the CSV
-        if not all(field in reader.fieldnames for field in required_fields):
-            missing_fields = [
-                field for field in required_fields if field not in reader.fieldnames
-            ]
+        missing_fields = [field for field in required_fields if field not in df.columns]
+        if missing_fields:
             raise CSVImportError(
                 f"Missing required fields in CSV: {', '.join(missing_fields)}"
             )
 
+        # Clean and validate data
+        # Convert to dict of records for easier processing
+        records = df.to_dict("records")
+
+        # Extract all unique customer names from the CSV
+        all_customer_names = set(str(row["customer_name"]).strip() for row in records)
+
+        # Get all existing customers in a single query
+        existing_customers = {}
+        for customer in Customer.objects.filter(name__in=all_customer_names):
+            existing_customers[customer.name] = customer
+
+        # Check if any customers are missing
+        missing_customers = all_customer_names - set(existing_customers.keys())
+        if missing_customers:
+            for customer_name in missing_customers:
+                result["errors"].append(
+                    f"Customer '{customer_name}' does not exist in the database. Related invoices will be skipped."
+                )
+
         # Group rows by invoice number to handle multiple line items per invoice
         invoice_data = {}
-        for row in reader:
-            invoice_number = row["invoice_number"]
+        invoice_dates = {}
+
+        # First pass: collect invoice data and dates
+        for row in records:
+            # Validate invoice number is provided
+            if (
+                pd.isna(row["invoice_number"])
+                or str(row["invoice_number"]).strip() == ""
+            ):
+                result["errors"].append(
+                    f"Missing invoice number for row with customer '{str(row['customer_name']).strip()}' and product '{str(row['product_name']).strip()}'. All rows must have an invoice number."
+                )
+                continue
+
+            invoice_number = str(row["invoice_number"]).strip()
+            customer_name = str(row["customer_name"]).strip()
+            invoice_date = row["invoice_date"]
+
+            # Skip if customer doesn't exist
+            if customer_name not in existing_customers:
+                continue
+
+            customer = existing_customers[customer_name]
+
             if invoice_number not in invoice_data:
                 invoice_data[invoice_number] = {
                     "invoice_info": {
                         "invoice_number": invoice_number,
-                        "invoice_date": row["invoice_date"],
-                        "customer_name": row["customer_name"],
+                        "invoice_date": invoice_date,
+                        "customer_name": customer_name,
+                        "customer": customer,
                     },
                     "line_items": [],
                 }
+                # Store the date for financial year checking
+                invoice_dates[invoice_number] = invoice_date
 
             # Add line item data
             line_item = {
-                "product_name": row["product_name"],
+                "product_name": str(row["product_name"]).strip(),
                 "quantity": row["quantity"],
                 "rate": row["rate"],
                 "hsn_code": row.get("hsn_code", None),  # Optional field
@@ -116,21 +171,49 @@ def process_invoice_csv(
             }
             invoice_data[invoice_number]["line_items"].append(line_item)
 
-        # Check for duplicate invoice numbers from Invoice model
-        existing_invoice_numbers = set(
-            Invoice.objects.filter(business=business)
-            .filter(invoice_number__in=invoice_data.keys())
-            .values_list("invoice_number", flat=True)
-        )
+        # Check for duplicate invoice numbers within the same financial year
+        duplicate_invoice_numbers = []
 
-        if existing_invoice_numbers:
+        # Process each invoice date to determine its financial year
+        for invoice_number, date_str in invoice_dates.items():
+            try:
+                # Parse the date
+                invoice_date = datetime.strptime(
+                    date_str, DATE_FORMAT_YEAR_MONTH_DATE
+                ).date()
+
+                # Determine financial year start date
+                fy_start_date = datetime(invoice_date.year, 4, 1).date()
+                if invoice_date.month < 4:  # Before April, use previous year's April
+                    fy_start_date = datetime(invoice_date.year - 1, 4, 1).date()
+
+                # Determine financial year end date
+                fy_end_date = datetime(fy_start_date.year + 1, 3, 31).date()
+
+                # Check if this invoice number already exists in the same financial year
+                existing = Invoice.objects.filter(
+                    business=business,
+                    invoice_number=invoice_number,
+                    invoice_date__gte=fy_start_date,
+                    invoice_date__lte=fy_end_date,
+                ).exists()
+
+                if existing:
+                    duplicate_invoice_numbers.append(invoice_number)
+
+            except ValueError:
+                # If date parsing fails, we'll catch it later in the validation
+                pass
+
+        # Report duplicate invoice numbers
+        if duplicate_invoice_numbers:
             result["errors"].append(
-                f"Duplicate invoice numbers found: {', '.join(existing_invoice_numbers)}"
+                f"Duplicate invoice numbers found in the same financial year: {', '.join(duplicate_invoice_numbers)}"
             )
 
         # Remove duplicate invoice numbers from invoice_data
         invoice_data = {
-            k: v for k, v in invoice_data.items() if k not in existing_invoice_numbers
+            k: v for k, v in invoice_data.items() if k not in duplicate_invoice_numbers
         }
 
         # Process each invoice with its line items in a transaction
@@ -150,20 +233,10 @@ def process_invoice_csv(
                     )
                     continue
 
-                # Get or create customer
-                customer_name = invoice_info["customer_name"]
-                customer, created = Customer.objects.get_or_create(
-                    name=customer_name, defaults={"name": customer_name}
-                )
-
-                # Add business to customer if not already associated
-                if business not in customer.businesses.all():
-                    customer.businesses.add(business)
-
-                # Create invoice
+                # Create invoice with the customer (already validated)
                 invoice = Invoice.objects.create(
                     business=business,
-                    customer=customer,
+                    customer=invoice_info["customer"],
                     invoice_number=invoice_number,
                     invoice_date=invoice_date,
                     type_of_invoice="outward",  # Default to outward invoice

@@ -4,10 +4,12 @@ import uuid
 from django.contrib.auth.models import User
 from django.test import TransactionTestCase
 from django.urls import reverse
+from freezegun import freeze_time
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from billing.models import Business, Customer, Invoice, LineItem
+from billing.utils import process_invoice_csv
 
 
 class CSVImportTestCase(TransactionTestCase):
@@ -50,6 +52,53 @@ class CSVImportTestCase(TransactionTestCase):
         # Clean up all created objects after each test
         LineItem.objects.all().delete()
         Invoice.objects.all().delete()
+
+    def test_process_invoice_csv_with_nonexistent_customer(self):
+        """Test that process_invoice_csv raises an error when customer doesn't exist."""
+        # Create a sample CSV content with a non-existent customer
+        csv_content = (
+            "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+            "1001,2023-01-15,Non Existent Customer,Gold Ring,10.5,4500,711319,0.03\n"
+        )
+
+        # Process the CSV content
+        result = process_invoice_csv(csv_content.encode("utf-8"), self.business.id)
+
+        # Check that no invoices were created
+        self.assertEqual(result["invoices_created"], 0)
+        self.assertEqual(result["line_items_created"], 0)
+
+        # Check that an error was reported
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn(
+            "Customer 'Non Existent Customer' does not exist in the database",
+            result["errors"][0],
+        )
+
+        # Verify no invoice was created in the database
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_process_invoice_csv_with_missing_invoice_number(self):
+        """Test that process_invoice_csv reports an error when invoice number is missing."""
+        # Create a sample CSV content with missing invoice number
+        csv_content = (
+            "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+            ",2023-05-15,Test Customer,Gold Ring,10.5,4500,711319,0.03\n"
+        )
+
+        # Process the CSV content
+        result = process_invoice_csv(csv_content.encode("utf-8"), self.business.id)
+
+        # Check that no invoices were created
+        self.assertEqual(result["invoices_created"], 0)
+        self.assertEqual(result["line_items_created"], 0)
+
+        # Check that an error was reported
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn("Missing invoice number", result["errors"][0])
+
+        # Verify no invoice was created in the database
+        self.assertEqual(Invoice.objects.count(), 0)
 
     def test_csv_import_endpoint(self):
         """Test the new CSV import endpoint."""
@@ -142,3 +191,163 @@ class CSVImportTestCase(TransactionTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("error", response.data)
         self.assertEqual(response.data["error"], "Business ID is required")
+
+    def test_csv_import_with_nonexistent_customer(self):
+        """Test CSV import with a customer that doesn't exist in the database."""
+        # Create a sample CSV file with non-existent customer
+        csv_content = (
+            "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+            "1003,2023-01-25,Non Existent Customer,Gold Earrings,3.5,5000,711319,0.03\n"
+        )
+        csv_file = io.StringIO(csv_content)
+        csv_file.name = "test_import.csv"
+
+        # Prepare the request data
+        data = {
+            "file": csv_file,
+            "business_id": self.business.id,
+        }
+
+        # Make the request
+        response = self.client.post(
+            self.csv_import_url,
+            data,
+            format="multipart",
+        )
+
+        # Check the response - should be successful but with errors in the result
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["invoices_created"], 0)
+        self.assertEqual(response.data["line_items_created"], 0)
+        self.assertIn("errors", response.data)
+        self.assertEqual(len(response.data["errors"]), 1)
+        self.assertIn(
+            "Customer 'Non Existent Customer' does not exist in the database",
+            response.data["errors"][0],
+        )
+
+    def test_csv_import_with_missing_invoice_number(self):
+        """Test CSV import with missing invoice number."""
+        # Create a sample CSV file with missing invoice number
+        csv_content = (
+            "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+            ",2023-05-15,Test Customer,Gold Ring,10.5,4500,711319,0.03\n"
+        )
+        csv_file = io.StringIO(csv_content)
+        csv_file.name = "test_import.csv"
+
+        # Prepare the request data
+        data = {
+            "file": csv_file,
+            "business_id": self.business.id,
+        }
+
+        # Make the request
+        response = self.client.post(
+            self.csv_import_url,
+            data,
+            format="multipart",
+        )
+
+        # Check the response - should be successful but with errors in the result
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.data["invoices_created"], 0
+        )  # No invoices should be created
+        self.assertEqual(response.data["line_items_created"], 0)
+        self.assertIn("errors", response.data)
+        self.assertEqual(len(response.data["errors"]), 1)
+        self.assertIn("Missing invoice number", response.data["errors"][0])
+
+    @freeze_time("2023-06-01")
+    def test_csv_import_with_duplicate_invoice_number_same_fy(self):
+        """Test CSV import with a duplicate invoice number in the same financial year."""
+        # Create an existing invoice in the current financial year
+        Invoice.objects.create(
+            invoice_number="1001",
+            invoice_date="2023-04-01",  # Start of financial year 2023-24
+            business=self.business,
+            customer=self.customer,
+            type_of_invoice="outward",
+        )
+
+        # Create a sample CSV file with the same invoice number
+        csv_content = (
+            "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+            "1001,2023-05-15,Test Customer,Gold Ring,10.5,4500,711319,0.03\n"
+        )
+        csv_file = io.StringIO(csv_content)
+        csv_file.name = "test_import.csv"
+
+        # Prepare the request data
+        data = {
+            "file": csv_file,
+            "business_id": self.business.id,
+        }
+
+        # Make the request
+        response = self.client.post(
+            self.csv_import_url,
+            data,
+            format="multipart",
+        )
+
+        # Check the response - should be successful but with errors in the result
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.data["invoices_created"], 0
+        )  # No new invoices should be created
+        self.assertEqual(response.data["line_items_created"], 0)
+        self.assertIn("errors", response.data)
+        self.assertEqual(len(response.data["errors"]), 1)
+        self.assertIn(
+            "Duplicate invoice numbers found in the same financial year",
+            response.data["errors"][0],
+        )
+
+        # Verify no new invoice was created
+        self.assertEqual(Invoice.objects.count(), 1)  # Only the one we created above
+
+    @freeze_time("2023-06-01")
+    def test_csv_import_with_duplicate_invoice_number_different_fy(self):
+        """Test CSV import with a duplicate invoice number but in a different financial year."""
+        # Create an existing invoice in the previous financial year
+        Invoice.objects.create(
+            invoice_number="1001",
+            invoice_date="2022-04-01",  # Previous financial year 2022-23
+            business=self.business,
+            customer=self.customer,
+            type_of_invoice="outward",
+        )
+
+        # Create a sample CSV file with the same invoice number but current FY
+        csv_content = (
+            "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+            "1001,2023-05-15,Test Customer,Gold Ring,10.5,4500,711319,0.03\n"
+        )
+        csv_file = io.StringIO(csv_content)
+        csv_file.name = "test_import.csv"
+
+        # Prepare the request data
+        data = {
+            "file": csv_file,
+            "business_id": self.business.id,
+        }
+
+        # Make the request
+        response = self.client.post(
+            self.csv_import_url,
+            data,
+            format="multipart",
+        )
+
+        # Check the response - should be successful with no errors
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.data["invoices_created"], 1
+        )  # New invoice should be created
+        self.assertEqual(response.data["line_items_created"], 1)
+        self.assertEqual(len(response.data["errors"]), 0)  # No errors
+
+        # Verify a new invoice was created
+        self.assertEqual(Invoice.objects.count(), 2)  # Both the old and new invoice
