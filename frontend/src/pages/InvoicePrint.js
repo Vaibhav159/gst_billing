@@ -189,220 +189,200 @@ function InvoicePrint() {
       </div>
 
       {/* Invoice content - visible when printing */}
-      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-sm p-8 print:p-6 min-h-[29.7cm] flex flex-col">
+      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container">
+        {/* Top border */}
+        <div className="w-full h-1 bg-indigo-600 mb-4"></div>
+
         {/* Header: Business & Invoice Details */}
-        <div className="invoice-header flex justify-between items-start mb-6 border-b pb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-blue-600">
+        <div className="flex justify-between mb-6">
+          {/* Business Info */}
+          <div className="w-1/2">
+            <h1 className="text-xl font-bold text-indigo-600 uppercase">
               {business.name || invoice.business_name || ''}
             </h1>
-            <div className="text-sm text-gray-600 mt-2 space-y-1">
+            <div className="text-xs text-gray-600 mt-1">
               <p>{business.address || invoice.business_address || ''}</p>
-              {(business.state_name || business.state_code) && (
-                <p>{business.state_name || ''}{business.state_code ? `, ${business.state_code}` : ''}</p>
-              )}
-              {(business.gst_number || invoice.business_gst_number) && (
-                <p>GSTIN: {business.gst_number || invoice.business_gst_number || ''}</p>
-              )}
-              {(business.pan_number || invoice.business_pan_number) && (
-                <p>PAN: {business.pan_number || invoice.business_pan_number || ''}</p>
-              )}
+              <p>{business.state_name || ''}</p>
+              <p>GSTIN: {business.gst_number || invoice.business_gst_number || ''}</p>
+              <p>PAN: {business.pan_number || invoice.business_pan_number || ''}</p>
             </div>
           </div>
 
-          <div className="text-right">
-            <h2 className="text-2xl font-bold text-gray-800">TAX INVOICE</h2>
-            <div className="mt-2 text-sm text-gray-600 space-y-1">
-              <p>Invoice #: {invoice.invoice_number}</p>
-              <p>Date: {formatDate(invoice.invoice_date)}</p>
+          {/* Invoice Details */}
+          <div className="w-1/3 bg-gray-50 p-3 rounded">
+            <h2 className="text-lg font-bold text-center text-gray-800 mb-1">TAX INVOICE</h2>
+            <p className="text-center text-sm font-medium">#{invoice.invoice_number}</p>
+            <div className="text-xs mt-2">
+              <p><span className="font-medium">Date:</span> {formatDate(invoice.invoice_date)}</p>
+              <p><span className="font-medium">Type:</span> {invoice.type_of_invoice ? invoice.type_of_invoice.charAt(0).toUpperCase() + invoice.type_of_invoice.slice(1) : 'Outward'}</p>
             </div>
           </div>
         </div>
 
-        {/* Bill To and Ship To Sections */}
-        <div className="flex justify-between mb-6">
-          <div className="w-1/2 pr-4">
-            <h3 className="text-sm font-bold mb-2 border-b pb-1">BILL TO</h3>
-            <div className="pl-4">
-              <p className="font-bold text-base">{invoice.customer_name || customer.name || ''}</p>
-              {(invoice.customer_address || customer.address) && (
-                <p>{invoice.customer_address || customer.address}</p>
+        {/* Bill To Section */}
+        <div className="mb-4">
+          <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">BILL TO</h3>
+          <div className="pl-2">
+            <p className="font-bold">{invoice.customer_name || customer.name || ''}</p>
+            {(invoice.customer_address || customer.address) && (
+              <p className="text-xs">{invoice.customer_address || customer.address}</p>
+            )}
+            {(invoice.customer_state || customer.state_name) && (
+              <p className="text-xs">{invoice.customer_state || customer.state_name}</p>
+            )}
+            <div className="text-xs mt-1">
+              {(invoice.customer_gst_number || customer.gst_number) && (
+                <p><span className="font-medium">GSTIN:</span> {invoice.customer_gst_number || customer.gst_number}</p>
               )}
-              {(invoice.customer_state || customer.state_name) && (
-                <p>
-                  {invoice.customer_state || customer.state_name}
-                </p>
+              {(invoice.customer_mobile_number || customer.mobile_number) && (
+                <p><span className="font-medium">Mobile:</span> {invoice.customer_mobile_number || customer.mobile_number}</p>
               )}
-              <div className="mt-1">
-                {(invoice.customer_gst_number || customer.gst_number) && (
-                  <p>GSTIN: {invoice.customer_gst_number || customer.gst_number}</p>
-                )}
-                {(invoice.customer_pan_number || customer.pan_number) && (
-                  <p>PAN: {invoice.customer_pan_number || customer.pan_number}</p>
-                )}
-                {(invoice.customer_mobile_number || customer.mobile_number) && (
-                  <p>Mobile: {invoice.customer_mobile_number || customer.mobile_number}</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="w-1/2 pl-4">
-            <h3 className="text-sm font-bold mb-2 border-b pb-1">PAYMENT DETAILS</h3>
-            <div className="pl-4">
-              <p><span className="font-medium">Payment Terms:</span> Due on Receipt</p>
-              <p><span className="font-medium">Invoice Type:</span> {invoice.type_of_invoice ? invoice.type_of_invoice.charAt(0).toUpperCase() + invoice.type_of_invoice.slice(1) : 'Outward'}</p>
             </div>
           </div>
         </div>
 
-      {/* Line Items */}
-      <table className="invoice-table min-w-full border border-gray-300 mb-4">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="py-1 px-2 border-b border-r text-left">#</th>
-            <th className="py-1 px-2 border-b border-r text-left">Item</th>
-            <th className="py-1 px-2 border-b border-r text-center">HSN</th>
-            <th className="py-1 px-2 border-b border-r text-center">GST %</th>
-            <th className="py-1 px-2 border-b border-r text-right">Qty</th>
-            <th className="py-1 px-2 border-b border-r text-right">Rate</th>
-            <th className="py-1 px-2 border-b text-right">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {line_items && line_items.map((item, index) => (
-            <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-              <td className="py-1 px-2 border-b border-r">{index + 1}</td>
-              <td className="py-1 px-2 border-b border-r font-medium">{item.item_name || item.product_name || ''}</td>
-              <td className="py-1 px-2 border-b border-r text-center">{item.hsn_code || ''}</td>
-              <td className="py-1 px-2 border-b border-r text-center">{item.gst_tax_rate ? `${(item.gst_tax_rate * 100).toFixed(0)}%` : ''}</td>
-              <td className="py-1 px-2 border-b border-r text-right">{item.quantity} gm</td>
-              <td className="py-1 px-2 border-b border-r text-right">₹{item.rate || 0}/g</td>
-              <td className="py-1 px-2 border-b text-right font-medium">{formatIndianCurrency(item.amount || 0)}</td>
-            </tr>
-          ))}
-          {/* Add empty rows if there are fewer than 2 items */}
-          {line_items && line_items.length < 2 && Array(2 - line_items.length).fill().map((_, index) => (
-            <tr key={`empty-${index}`} className={(line_items.length + index) % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-              <td className="py-1 px-2 border-b border-r">&nbsp;</td>
-              <td className="py-1 px-2 border-b border-r">&nbsp;</td>
-              <td className="py-1 px-2 border-b border-r">&nbsp;</td>
-              <td className="py-1 px-2 border-b border-r">&nbsp;</td>
-              <td className="py-1 px-2 border-b border-r">&nbsp;</td>
-              <td className="py-1 px-2 border-b border-r">&nbsp;</td>
-              <td className="py-1 px-2 border-b">&nbsp;</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Summary and Amount in Words */}
-      <div className="flex justify-between mb-4">
-        <div className="w-1/2 pr-4">
-          <div className="border-b pb-2">
-            <p className="text-sm font-medium">Amount in Words:</p>
-            <p className="text-sm pl-4">
-              {amount_in_words || `${formatIndianCurrency(total_amount).replace('₹', '')} Rupees Only`}
-            </p>
-            <p className="text-sm mt-2"><strong>Total Items:</strong> {total_items || 1}</p>
-          </div>
-        </div>
-        <div className="w-1/2 pl-4">
-          <table className="w-full text-sm">
+        {/* Line Items */}
+        <div className="mb-4 overflow-hidden border border-gray-200 rounded">
+          <table className="invoice-table w-full text-xs">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="py-1 px-2 text-left border-b">#</th>
+                <th className="py-1 px-2 text-left border-b">ITEM</th>
+                <th className="py-1 px-2 text-center border-b">HSN</th>
+                <th className="py-1 px-2 text-center border-b">GST %</th>
+                <th className="py-1 px-2 text-right border-b">QTY (GM)</th>
+                <th className="py-1 px-2 text-right border-b">RATE</th>
+                <th className="py-1 px-2 text-right border-b">AMOUNT</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr>
-                <td className="py-0.5">Amount Without Tax:</td>
-                <td className="py-0.5 text-right">{formatIndianCurrency(amount_without_tax)}</td>
-              </tr>
-
-              {invoice.is_igst_applicable ? (
-                <tr>
-                  <td className="py-0.5">IGST:</td>
-                  <td className="py-0.5 text-right">{formatIndianCurrency(total_igst_tax || 0)}</td>
+              {line_items && line_items.map((item, index) => (
+                <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="py-1 px-2 border-b">{index + 1}</td>
+                  <td className="py-1 px-2 border-b font-medium">{item.item_name || item.product_name || ''}</td>
+                  <td className="py-1 px-2 border-b text-center">{item.hsn_code || ''}</td>
+                  <td className="py-1 px-2 border-b text-center">{item.gst_tax_rate ? `${(item.gst_tax_rate * 100).toFixed(0)}%` : ''}</td>
+                  <td className="py-1 px-2 border-b text-right">{item.quantity}</td>
+                  <td className="py-1 px-2 border-b text-right">₹{item.rate || 0}/g</td>
+                  <td className="py-1 px-2 border-b text-right font-medium">{formatIndianCurrency(item.amount || 0)}</td>
                 </tr>
-              ) : (
-                <>
-                  <tr>
-                    <td className="py-0.5">CGST:</td>
-                    <td className="py-0.5 text-right">{formatIndianCurrency(total_cgst_tax || 0)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-0.5">SGST:</td>
-                    <td className="py-0.5 text-right">{formatIndianCurrency(total_sgst_tax || 0)}</td>
-                  </tr>
-                </>
-              )}
-
-              <tr>
-                <td className="py-0.5">Total Tax:</td>
-                <td className="py-0.5 text-right">{formatIndianCurrency(total_tax)}</td>
-              </tr>
-
-              <tr>
-                <td className="py-0.5">Round Off:</td>
-                <td className="py-0.5 text-right">{round_off}</td>
-              </tr>
-
-              <tr className="border-t">
-                <td className="py-1 font-bold">Total Amount:</td>
-                <td className="py-1 text-right font-bold">{formatIndianCurrency(total_amount)}</td>
-              </tr>
+              ))}
+              {/* Add empty rows if there are fewer than 2 items */}
+              {line_items && line_items.length < 2 && Array(2 - line_items.length).fill().map((_, index) => (
+                <tr key={`empty-${index}`} className={(line_items.length + index) % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                  <td className="py-1 px-2 border-b">&nbsp;</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Bank Details and Signatures */}
-      <div className="mt-auto">
-        <div className="grid grid-cols-3 gap-4 mb-4 mt-4">
-          <div className="col-span-1">
-            <h3 className="text-sm font-bold mb-2">BANK DETAILS</h3>
-            <table className="w-full text-sm">
-              <tbody>
-                {business.bank_name && (
-                  <tr>
-                    <td className="py-0.5 font-medium">Bank Name:</td>
-                    <td className="py-0.5">{business.bank_name}</td>
-                  </tr>
-                )}
-                {business.bank_account_number && (
-                  <tr>
-                    <td className="py-0.5 font-medium">A/c No:</td>
-                    <td className="py-0.5">{business.bank_account_number}</td>
-                  </tr>
-                )}
-                {business.bank_ifsc_code && (
-                  <tr>
-                    <td className="py-0.5 font-medium">IFSC Code:</td>
-                    <td className="py-0.5">{business.bank_ifsc_code}</td>
-                  </tr>
-                )}
-                {business.bank_branch_name && (
-                  <tr>
-                    <td className="py-0.5 font-medium">Branch:</td>
-                    <td className="py-0.5">{business.bank_branch_name}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            <p className="text-center font-bold text-sm mt-2">SUBJECT TO UDAIPUR JURISDICTION</p>
+        {/* Amount in Words and Invoice Summary */}
+        <div className="flex mb-4">
+          <div className="w-1/2 pr-2">
+            <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">AMOUNT IN WORDS</h3>
+            <p className="text-xs pl-2">
+              {amount_in_words || `${formatIndianCurrency(total_amount).replace('₹', '')} Rupees Only`}
+            </p>
+            <p className="text-xs mt-2 pl-2"><span className="font-medium">Total Items:</span> {total_items || line_items.length || 1}</p>
           </div>
 
-          <div className="col-span-1 text-center flex flex-col justify-end">
-            <div className="mt-8 pt-4 border-t border-gray-300 mx-4">
-              <p className="font-medium">Customer Signature</p>
+          <div className="w-1/2 pl-2">
+            <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">INVOICE SUMMARY</h3>
+            <table className="w-full text-xs">
+              <tbody>
+                <tr>
+                  <td className="py-0.5">Amount Without Tax:</td>
+                  <td className="py-0.5 text-right">{formatIndianCurrency(amount_without_tax)}</td>
+                </tr>
+
+                {invoice.is_igst_applicable ? (
+                  <tr>
+                    <td className="py-0.5">IGST:</td>
+                    <td className="py-0.5 text-right">{formatIndianCurrency(total_igst_tax || 0)}</td>
+                  </tr>
+                ) : (
+                  <>
+                    <tr>
+                      <td className="py-0.5">CGST:</td>
+                      <td className="py-0.5 text-right">{formatIndianCurrency(total_cgst_tax || 0)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5">SGST:</td>
+                      <td className="py-0.5 text-right">{formatIndianCurrency(total_sgst_tax || 0)}</td>
+                    </tr>
+                  </>
+                )}
+
+                <tr>
+                  <td className="py-0.5">Total Tax:</td>
+                  <td className="py-0.5 text-right">{formatIndianCurrency(total_tax)}</td>
+                </tr>
+
+                <tr>
+                  <td className="py-0.5">Round Off:</td>
+                  <td className="py-0.5 text-right">{round_off}</td>
+                </tr>
+
+                <tr className="border-t">
+                  <td className="py-1 font-bold">Total Amount:</td>
+                  <td className="py-1 text-right font-bold">{formatIndianCurrency(total_amount)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Bank Details */}
+        <div className="mb-4">
+          <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">BANK DETAILS</h3>
+          <div className="flex">
+            <table className="w-full text-xs">
+              <tbody>
+                <tr>
+                  <td className="py-0.5 font-medium w-1/4">Bank Name:</td>
+                  <td className="py-0.5">{business.bank_name || ''}</td>
+                </tr>
+                <tr>
+                  <td className="py-0.5 font-medium">A/c No:</td>
+                  <td className="py-0.5">{business.bank_account_number || ''}</td>
+                </tr>
+                <tr>
+                  <td className="py-0.5 font-medium">IFSC Code:</td>
+                  <td className="py-0.5">{business.bank_ifsc_code || ''}</td>
+                </tr>
+                <tr>
+                  <td className="py-0.5 font-medium">Branch:</td>
+                  <td className="py-0.5">{business.bank_branch_name || ''}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-center text-xs font-bold mt-2">SUBJECT TO UDAIPUR JURISDICTION</p>
+        </div>
+
+        {/* Signatures */}
+        <div className="flex justify-between mt-auto">
+          <div className="w-1/3 text-center">
+            <div className="mt-8 pt-2 border-t">
+              <p className="text-xs font-medium">Customer Signature</p>
               <p className="text-xs text-gray-500">Received the above goods in good condition</p>
             </div>
           </div>
 
-          <div className="col-span-1 text-center flex flex-col justify-end">
-            <div className="mt-8 pt-4 border-t border-gray-300 mx-4">
-              <p className="font-medium">Authorized Signature</p>
+          <div className="w-1/3 text-center">
+            <div className="mt-8 pt-2 border-t">
+              <p className="text-xs font-medium">Authorized Signature</p>
               <p className="text-xs text-gray-500">For {business.name || invoice.business_name || ''}</p>
             </div>
           </div>
         </div>
-      </div>
       </div>
     </div>
   );

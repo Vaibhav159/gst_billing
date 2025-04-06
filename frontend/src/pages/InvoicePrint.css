@@ -1,7 +1,7 @@
 /* Print-specific styles */
 @media print {
   @page {
-    size: A4;
+    size: A4 portrait;
     margin: 10mm;
   }
 
@@ -10,44 +10,253 @@
     padding: 0;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    background-color: white !important;
   }
 
   #panel {
-    width: 100%;
-    box-shadow: none;
-    border-radius: 0;
+    width: 210mm !important;
+    max-width: 210mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 10mm !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    position: relative !important;
   }
 
   /* Ensure no page breaks inside important elements */
   table, tr, td, th {
-    page-break-inside: avoid;
+    page-break-inside: avoid !important;
   }
 
   /* Hide print button when printing */
   .print\:hidden {
     display: none !important;
   }
+
+  /* Ensure background colors print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Prevent page breaks within sections */
+  .no-break {
+    page-break-inside: avoid !important;
+  }
+
+  /* Force single page */
+  .invoice-container {
+    page-break-after: always !important;
+    page-break-before: always !important;
+  }
+
+  /* Adjust font sizes for print */
+  body {
+    font-size: 9pt !important;
+  }
+
+  h1 {
+    font-size: 14pt !important;
+  }
+
+  h2 {
+    font-size: 12pt !important;
+  }
+
+  h3 {
+    font-size: 10pt !important;
+  }
+
+  /* Ensure grid layout works in print */
+  .print-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 5mm !important;
+  }
+
+  /* Ensure table fits on page */
+  .invoice-table {
+    width: 100% !important;
+    table-layout: fixed !important;
+  }
+
+  .invoice-table th,
+  .invoice-table td {
+    padding: 2mm 1mm !important;
+    font-size: 8pt !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+  }
 }
 
 /* General invoice styles */
 .invoice-container {
-  font-family: 'Arial', sans-serif;
+  font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif;
+  color: #1f2937;
 }
 
 .invoice-header {
   margin-bottom: 1.5rem;
 }
 
+/* Modern table styles */
 .invoice-table {
   border-collapse: collapse;
   width: 100%;
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.invoice-table th,
+.invoice-table thead {
+  background-color: #f3f4f6;
+}
+
+.invoice-table th {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-bottom: 1px solid #e5e7eb;
+  color: #4b5563;
+}
+
 .invoice-table td {
-  border: 1px solid #ddd;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.875rem;
 }
 
-.invoice-footer {
-  margin-top: auto;
+.invoice-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.invoice-table tbody tr:nth-child(even) {
+  background-color: #f9fafb;
+}
+
+/* Invoice sections */
+.invoice-section {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem;
+  border-radius: 8px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.invoice-section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #4b5563;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Summary table */
+.summary-table {
+  width: 100%;
+}
+
+.summary-table td {
+  padding: 0.375rem 0;
+  font-size: 0.875rem;
+}
+
+.summary-table td:last-child {
+  text-align: right;
+  font-weight: 500;
+}
+
+.summary-table tr.total-row td {
+  font-weight: 600;
+  font-size: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* Signature sections */
+.signature-section {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2rem;
+}
+
+.signature-box {
+  text-align: center;
+  width: 200px;
+}
+
+.signature-line {
+  margin-top: 3rem;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.5rem;
+}
+
+/* Invoice accent color */
+.invoice-accent {
+  color: #4f46e5; /* Indigo 600 */
+}
+
+.invoice-accent-bg {
+  background-color: #4f46e5;
+  color: white;
+}
+
+/* Invoice number badge */
+.invoice-number-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background-color: #f3f4f6;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #4b5563;
+}
+
+/* Amount in words box */
+.amount-in-words {
+  background-color: #f9fafb;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+
+/* Bank details section */
+.bank-details {
+  background-color: #f9fafb;
+  padding: 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.bank-details-table td {
+  padding: 0.25rem 0;
+}
+
+.bank-details-table td:first-child {
+  font-weight: 500;
+  padding-right: 1rem;
+}
+
+/* Jurisdiction notice */
+.jurisdiction-notice {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  color: #4b5563;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
