@@ -28,10 +28,11 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items / Bugs
-- All pages have been redesigned to be mobile-friendly and modern
+- All pending items have been completed
 
 
 ### Recently Completed Items
+- ✅ Added customer filter in Invoice List view
 - ✅ Redesigned NavBar with mobile-friendly layout and modern UI
 - ✅ Added responsive mobile menu with improved navigation
 - ✅ Enhanced visual hierarchy with icons for better usability

@@ -9,11 +9,13 @@ import Pagination from '../components/Pagination';
 import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
 import apiClient from '../api/client';
+import customerService from '../api/customerService';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
 
 function InvoiceList() {
   const [invoices, setInvoices] = useState([]);
   const [businesses, setBusinesses] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
@@ -24,6 +26,7 @@ function InvoiceList() {
   const [filters, setFilters] = useState({
     invoice_number: '',
     business_id: '',
+    customer_id: '',
     start_date: '',
     end_date: '',
     type_of_invoice: ''
@@ -115,6 +118,20 @@ function InvoiceList() {
     };
 
     fetchBusinesses();
+  }, []);
+
+  // Fetch customers for filter
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const response = await customerService.getCustomers();
+        setCustomers(response.results || response);
+      } catch (err) {
+        console.error('Error fetching customers:', err);
+      }
+    };
+
+    fetchCustomers();
   }, []);
 
   // Handle filter changes
@@ -286,6 +303,19 @@ function InvoiceList() {
             />
 
             <FormSelect
+              label="Customer"
+              id="customer_id"
+              name="customer_id"
+              value={filters.customer_id}
+              onChange={handleFilterChange}
+              placeholder="All Customers"
+              options={customers.map(customer => ({
+                value: customer.id,
+                label: customer.name
+              }))}
+            />
+
+            <FormSelect
               label="Invoice Type"
               id="type_of_invoice"
               name="type_of_invoice"
@@ -318,6 +348,7 @@ function InvoiceList() {
                   setFilters({
                     invoice_number: '',
                     business_id: '',
+                    customer_id: '',
                     start_date: '',
                     end_date: '',
                     type_of_invoice: ''
