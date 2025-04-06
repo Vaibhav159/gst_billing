@@ -25,8 +25,8 @@ function BusinessList() {
 
   // Row click handler
   const handleBusinessRowClick = useRowClick('/billing/business/', {
-    // Ignore clicks on action buttons
-    ignoreClasses: ['action-button', 'btn']
+    // Ignore clicks on action buttons and menus
+    ignoreClasses: ['action-button', 'btn', 'relative']
   });
   // Local state for the search input field (updates immediately with typing)
   const [searchInput, setSearchInput] = useState('');

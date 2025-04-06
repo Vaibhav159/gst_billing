@@ -24,8 +24,8 @@ function CustomerList() {
 
   // Row click handler
   const handleCustomerRowClick = useRowClick('/billing/customer/', {
-    // Ignore clicks on action buttons
-    ignoreClasses: ['action-button', 'btn'],
+    // Ignore clicks on action buttons and menus
+    ignoreClasses: ['action-button', 'btn', 'relative'],
     // Special handling for business references
     specialHandling: {
       'business': (id) => navigate(`/billing/business/${id}`)

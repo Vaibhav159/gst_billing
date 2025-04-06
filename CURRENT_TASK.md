@@ -32,6 +32,12 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 
 
 ### Recently Completed Items
+- ✅ Completely redesigned InvoiceList data fetching to eliminate multiple API calls
+- ✅ Consolidated all data fetching logic into a single useEffect with proper dependencies
+- ✅ Improved invoice deletion to work with the new data fetching approach
+- ✅ Fixed missing useRef import in InvoiceList.js
+- ✅ Fixed bug with action menu clicks in mobile view triggering row navigation
+- ✅ Added 'relative' class to ignoreClasses in all list views to properly handle action menus
 - ✅ Fixed sorting field name in CustomerList from 'mobile' to 'mobile_number'
 - ✅ Implemented sortable tables in all list views (InvoiceList, CustomerList, BusinessList, ProductList)
 - ✅ Added ascending, descending, and no sorting options to all tables
