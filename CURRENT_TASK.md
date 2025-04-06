@@ -28,10 +28,13 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items / Bugs
-- All pending items have been completed
+- [ ] Implement sortable tables in CustomerList, BusinessList, and ProductList pages
 
 
 ### Recently Completed Items
+- ✅ Implemented sortable tables in InvoiceList with ascending, descending, and no sorting options
+- ✅ Added default financial year filter to InvoiceList page
+- ✅ Created reusable SortableHeader component for table headers
 - ✅ Created ProductDetail page for viewing product details
 - ✅ Fixed customer and business links in InvoiceList page
 - ✅ Implemented clickable rows in all list views (InvoiceList, CustomerList, BusinessList, ProductList)
