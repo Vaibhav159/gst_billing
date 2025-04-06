@@ -35,6 +35,17 @@ echo "\n🔧 Running database migrations..."
 uv run python manage.py migrate
 echo "✅ Migrations complete"
 
+echo "\n🔍 Checking for existing servers on port 8000..."
+# Check if any process is using port 8000 and kill it
+PORT_PID=$(lsof -ti:8000)
+if [ -n "$PORT_PID" ]; then
+    echo "⚠️  Found process $PORT_PID using port 8000, killing it..."
+    kill -9 $PORT_PID
+    echo "✅ Process killed"
+else
+    echo "✅ No existing process found on port 8000"
+fi
+
 echo "\n🌐 Starting server and opening browser..."
 # Start the server and open the browser
 open http://127.0.0.1:8000/login & uv run python manage.py runserver
