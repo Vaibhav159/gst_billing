@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
@@ -11,8 +11,10 @@ import ActionMenu from '../components/ActionMenu';
 import apiClient from '../api/client';
 import customerService from '../api/customerService';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
+import { useRowClick } from '../utils/navigationHelpers';
 
 function InvoiceList() {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -23,6 +25,18 @@ function InvoiceList() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalAmountInward, setTotalAmountInward] = useState(0);
   const [totalAmountOutward, setTotalAmountOutward] = useState(0);
+
+  // Row click handler
+  const handleInvoiceRowClick = useRowClick('/billing/invoice/', {
+    // Ignore clicks on action buttons
+    ignoreClasses: ['action-button', 'btn'],
+    // Special handling for business and customer references
+    specialHandling: {
+      'business': (id) => navigate(`/billing/business/${id}`),
+      'customer': (id) => navigate(`/billing/customer/${id}`)
+    }
+  });
+
   const [filters, setFilters] = useState({
     invoice_number: '',
     business_id: '',
@@ -422,7 +436,11 @@ function InvoiceList() {
                     const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                     return (
-                      <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                      <tr
+                        key={invoice.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                        onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                         </td>
@@ -433,10 +451,22 @@ function InvoiceList() {
                           <div className="text-sm text-gray-500 dark:text-gray-400">{formatDate(invoice.invoice_date)}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.customer_name}</div>
+                          <div
+                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="customer"
+                            data-id={invoice.customer}
+                          >
+                            {invoice.customer_name}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.business_name}</div>
+                          <div
+                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="business"
+                            data-id={invoice.business}
+                          >
+                            {invoice.business_name}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(invoice.total_amount)}</div>
@@ -481,7 +511,11 @@ function InvoiceList() {
                   const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                   return (
-                    <div key={invoice.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                    <div
+                      key={invoice.id}
+                      className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md cursor-pointer"
+                      onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
@@ -503,11 +537,23 @@ function InvoiceList() {
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400">Customer</p>
-                          <p className="font-medium text-gray-900 dark:text-white truncate">{invoice.customer_name}</p>
+                          <p
+                            className="font-medium text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="customer"
+                            data-id={invoice.customer}
+                          >
+                            {invoice.customer_name}
+                          </p>
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400">Business</p>
-                          <p className="font-medium text-gray-900 dark:text-white truncate">{invoice.business_name}</p>
+                          <p
+                            className="font-medium text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="business"
+                            data-id={invoice.business}
+                          >
+                            {invoice.business_name}
+                          </p>
                         </div>
                       </div>
 

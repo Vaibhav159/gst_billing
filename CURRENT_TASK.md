@@ -32,6 +32,12 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 
 
 ### Recently Completed Items
+- ✅ Created ProductDetail page for viewing product details
+- ✅ Fixed customer and business links in InvoiceList page
+- ✅ Implemented clickable rows in all list views (InvoiceList, CustomerList, BusinessList, ProductList)
+- ✅ Added special handling for business and customer references
+- ✅ Created utility functions for row click handling
+- ✅ Fixed read-only function error in navigationHelpers.js
 - ✅ Added customer filter in Invoice List view
 - ✅ Redesigned NavBar with mobile-friendly layout and modern UI
 - ✅ Added responsive mobile menu with improved navigation
@@ -164,3 +170,4 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Using uv for package installation instead of pip
 - Ensuring all price fields display in Indian number format (e.g., ₹1,00,000.00)
 - Maintaining backward compatibility during the transition
+- All Dates in the system are in eg: 23 Mar 2026 DD MMM YYYY format

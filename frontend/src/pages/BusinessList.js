@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import useDebounce from '../hooks/useDebounce';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
@@ -10,13 +10,21 @@ import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
 import apiClient from '../api/client';
 import businessService from '../api/businessService';
+import { useRowClick } from '../utils/navigationHelpers';
 
 function BusinessList() {
+  const navigate = useNavigate();
   const [businesses, setBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  // Row click handler
+  const handleBusinessRowClick = useRowClick('/billing/business/', {
+    // Ignore clicks on action buttons
+    ignoreClasses: ['action-button', 'btn']
+  });
   // Local state for the search input field (updates immediately with typing)
   const [searchInput, setSearchInput] = useState('');
   // State for the actual search term used in API calls (updated after debounce)
@@ -200,7 +208,11 @@ function BusinessList() {
                     const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                     return (
-                      <tr key={business.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                      <tr
+                        key={business.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                        onClick={(e) => handleBusinessRowClick(business.id, e)}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                         </td>
@@ -250,7 +262,11 @@ function BusinessList() {
                   const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                   return (
-                    <div key={business.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                    <div
+                      key={business.id}
+                      className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md cursor-pointer"
+                      onClick={(e) => handleBusinessRowClick(business.id, e)}
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>

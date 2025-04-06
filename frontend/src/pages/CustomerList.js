@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import useDebounce from '../hooks/useDebounce';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
@@ -11,11 +11,23 @@ import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
 
 import apiClient, { createCancelToken } from '../api/client';
+import { useRowClick } from '../utils/navigationHelpers';
 
 function CustomerList() {
   // Initialize state with default values
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [businesses, setBusinesses] = useState([]);
+
+  // Row click handler
+  const handleCustomerRowClick = useRowClick('/billing/customer/', {
+    // Ignore clicks on action buttons
+    ignoreClasses: ['action-button', 'btn'],
+    // Special handling for business references
+    specialHandling: {
+      'business': (id) => navigate(`/billing/business/${id}`)
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -516,7 +528,11 @@ function CustomerList() {
                         const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                         return (
-                          <tr key={customer.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                          <tr
+                            key={customer.id}
+                            className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                            onClick={(e) => handleCustomerRowClick(customer.id, e)}
+                          >
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                             </td>
@@ -576,7 +592,11 @@ function CustomerList() {
                     const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                     return (
-                      <div key={customer.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                      <div
+                        key={customer.id}
+                        className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md cursor-pointer"
+                        onClick={(e) => handleCustomerRowClick(customer.id, e)}
+                      >
                         <div className="flex justify-between items-start mb-2">
                           <div>
                             <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
