@@ -7,6 +7,8 @@ import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import ActionButton from '../components/ActionButton';
+import ActionMenu from '../components/ActionMenu';
 
 import apiClient, { createCancelToken } from '../api/client';
 
@@ -532,14 +534,18 @@ function CustomerList() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               {customer.id && (
-                                <>
-                                  <Link to={`/billing/customer/${customer.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
-                                    View
-                                  </Link>
-                                  <Link to={`/billing/customer/edit/${customer.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
-                                    Edit
-                                  </Link>
-                                </>
+                                <div className="flex items-center space-x-2">
+                                  <ActionButton
+                                    type="view"
+                                    to={`/billing/customer/${customer.id}`}
+                                    label="View Customer"
+                                  />
+                                  <ActionButton
+                                    type="edit"
+                                    to={`/billing/customer/edit/${customer.id}`}
+                                    label="Edit Customer"
+                                  />
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -593,13 +599,21 @@ function CustomerList() {
                           </div>
                         </div>
 
-                        <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-                          <Link to={`/billing/customer/${customer.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
-                            View
-                          </Link>
-                          <Link to={`/billing/customer/edit/${customer.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
-                            Edit
-                          </Link>
+                        <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+                          <ActionMenu
+                            actions={[
+                              {
+                                type: 'view',
+                                label: 'View Customer',
+                                to: `/billing/customer/${customer.id}`
+                              },
+                              {
+                                type: 'edit',
+                                label: 'Edit Customer',
+                                to: `/billing/customer/edit/${customer.id}`
+                              }
+                            ]}
+                          />
                         </div>
                       </div>
                     );

@@ -5,6 +5,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import ActionButton from '../components/ActionButton';
+import ActionMenu from '../components/ActionMenu';
 import apiClient from '../api/client';
 import productService from '../api/productService';
 
@@ -194,15 +196,18 @@ function ProductList() {
                           <div className="text-sm text-gray-500 dark:text-gray-400">{product.description || '-'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <Link to={`/billing/product/edit/${product.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
-                            Edit
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(product.id)}
-                            className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                          >
-                            Delete
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <ActionButton
+                              type="edit"
+                              to={`/billing/product/edit/${product.id}`}
+                              label="Edit Product"
+                            />
+                            <ActionButton
+                              type="delete"
+                              onClick={() => handleDelete(product.id)}
+                              label="Delete Product"
+                            />
+                          </div>
                         </td>
                       </tr>
                     );
@@ -241,16 +246,21 @@ function ProductList() {
                         </div>
                       </div>
 
-                      <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700 space-x-4">
-                        <Link to={`/billing/product/edit/${product.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
-                          Edit
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(product.id)}
-                          className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-medium"
-                        >
-                          Delete
-                        </button>
+                      <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <ActionMenu
+                          actions={[
+                            {
+                              type: 'edit',
+                              label: 'Edit Product',
+                              to: `/billing/product/edit/${product.id}`
+                            },
+                            {
+                              type: 'delete',
+                              label: 'Delete Product',
+                              onClick: () => handleDelete(product.id)
+                            }
+                          ]}
+                        />
                       </div>
                     </div>
                   );

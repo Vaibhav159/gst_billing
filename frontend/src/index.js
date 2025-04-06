@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter as Router } from 'react-router-dom';
 import App from './App';
 import './index.css';
+import './styles/actionButtons.css';
 
 // Find the root element
 const container = document.getElementById('react-app');
@@ -10,7 +11,7 @@ const container = document.getElementById('react-app');
 // Create a root
 if (container) {
   const root = createRoot(container);
-  
+
   // Render the app
   root.render(
     <React.StrictMode>

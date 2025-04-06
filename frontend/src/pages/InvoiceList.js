@@ -6,6 +6,8 @@ import FormInput from '../components/FormInput';
 import FormSelect from '../components/FormSelect';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import ActionButton from '../components/ActionButton';
+import ActionMenu from '../components/ActionMenu';
 import apiClient from '../api/client';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
 
@@ -414,19 +416,24 @@ function InvoiceList() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <Link to={`/billing/invoice/${invoice.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
-                            View
-                          </Link>
-                          <Link to={`/billing/invoice/${invoice.id}/print`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
-                            Print
-                          </Link>
-                          <button
-                            onClick={() => handleDeleteInvoice(invoice.id)}
-                            className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                            disabled={deleting}
-                          >
-                            Delete
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <ActionButton
+                              type="view"
+                              to={`/billing/invoice/${invoice.id}`}
+                              label="View Invoice"
+                            />
+                            <ActionButton
+                              type="print"
+                              to={`/billing/invoice/${invoice.id}/print`}
+                              label="Print Invoice"
+                            />
+                            <ActionButton
+                              type="delete"
+                              onClick={() => handleDeleteInvoice(invoice.id)}
+                              label="Delete Invoice"
+                              disabled={deleting}
+                            />
+                          </div>
                         </td>
                       </tr>
                     );
@@ -473,20 +480,27 @@ function InvoiceList() {
                         </div>
                       </div>
 
-                      <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-                        <Link to={`/billing/invoice/${invoice.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
-                          View
-                        </Link>
-                        <Link to={`/billing/invoice/${invoice.id}/print`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
-                          Print
-                        </Link>
-                        <button
-                          onClick={() => handleDeleteInvoice(invoice.id)}
-                          className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-medium"
-                          disabled={deleting}
-                        >
-                          Delete
-                        </button>
+                      <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <ActionMenu
+                          actions={[
+                            {
+                              type: 'view',
+                              label: 'View Invoice',
+                              to: `/billing/invoice/${invoice.id}`
+                            },
+                            {
+                              type: 'print',
+                              label: 'Print Invoice',
+                              to: `/billing/invoice/${invoice.id}/print`
+                            },
+                            {
+                              type: 'delete',
+                              label: 'Delete Invoice',
+                              onClick: () => handleDeleteInvoice(invoice.id),
+                              disabled: deleting
+                            }
+                          ]}
+                        />
                       </div>
                     </div>
                   );

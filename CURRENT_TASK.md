@@ -38,6 +38,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Added collapsible filter sections for better mobile experience
 - ✅ Enhanced visual feedback with icons, animations, and better spacing
 - ✅ Added Customer field to Invoice List view
+- ✅ Created reusable ActionButton component with tooltips and confirmation dialogs
+- ✅ Implemented ActionMenu component for mobile-friendly action dropdowns
+- ✅ Added consistent styling for action buttons across all list views
 - ✅ Fixed pagination numbers in dark mode (previously white text on white background)
 - ✅ Made Reports section readable in dark mode by adding proper text colors
 - ✅ Added proper loading state to the dashboard to prevent it from showing 0 values before data loads

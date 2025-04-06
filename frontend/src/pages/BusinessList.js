@@ -6,6 +6,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
+import ActionButton from '../components/ActionButton';
+import ActionMenu from '../components/ActionMenu';
 import apiClient from '../api/client';
 import businessService from '../api/businessService';
 
@@ -215,18 +217,23 @@ function BusinessList() {
                           <div className="text-sm text-gray-500 dark:text-gray-400">{business.mobile_number || business.phone_number || '-'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <Link to={`/billing/business/${business.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
-                            View
-                          </Link>
-                          <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
-                            Edit
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(business.id)}
-                            className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                          >
-                            Delete
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <ActionButton
+                              type="view"
+                              to={`/billing/business/${business.id}`}
+                              label="View Business"
+                            />
+                            <ActionButton
+                              type="edit"
+                              to={`/billing/business/edit/${business.id}`}
+                              label="Edit Business"
+                            />
+                            <ActionButton
+                              type="delete"
+                              onClick={() => handleDelete(business.id)}
+                              label="Delete Business"
+                            />
+                          </div>
                         </td>
                       </tr>
                     );
@@ -266,19 +273,26 @@ function BusinessList() {
                         </div>
                       </div>
 
-                      <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-                        <Link to={`/billing/business/${business.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
-                          View
-                        </Link>
-                        <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
-                          Edit
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(business.id)}
-                          className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-medium"
-                        >
-                          Delete
-                        </button>
+                      <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <ActionMenu
+                          actions={[
+                            {
+                              type: 'view',
+                              label: 'View Business',
+                              to: `/billing/business/${business.id}`
+                            },
+                            {
+                              type: 'edit',
+                              label: 'Edit Business',
+                              to: `/billing/business/edit/${business.id}`
+                            },
+                            {
+                              type: 'delete',
+                              label: 'Delete Business',
+                              onClick: () => handleDelete(business.id)
+                            }
+                          ]}
+                        />
                       </div>
                     </div>
                   );

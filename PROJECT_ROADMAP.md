@@ -27,6 +27,7 @@
 - ✅ Add responsive design
 - ✅ Add Dark Mode
 - ✅ Update the UI/UX to more modern and user-friendly
+- ✅ Create reusable components for common UI patterns
 - ⬜ Implement lazy loading and code splitting
 - ⬜ Use proper css standards and best practices
 
