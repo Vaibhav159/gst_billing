@@ -59,10 +59,10 @@ function InvoicePrint() {
 
         setError(null);
 
-        // Auto-print after data is loaded
-        setTimeout(() => {
-          window.print();
-        }, 1000); // Increased timeout to ensure data is rendered
+        // Don't auto-print anymore as per user feedback
+        // setTimeout(() => {
+        //   window.print();
+        // }, 1000);
       } catch (err) {
         if (!(err.constructor && err.constructor.name === 'CanceledError')) {
           console.error('Error fetching invoice print data:', err);
@@ -127,6 +127,9 @@ function InvoicePrint() {
   const total_tax = invoiceData.total_tax || 0;
   const total_amount = invoiceData.total_amount || 0;
   const round_off = invoiceData.round_off || '0.00';
+
+  // Log the is_igst_applicable value for debugging
+  console.log('Invoice is_igst_applicable:', invoice.is_igst_applicable);
 
   // Get business and customer details
   const business = businessData || {};
@@ -212,9 +215,11 @@ function InvoicePrint() {
           <div className="w-1/3 bg-gray-50 p-3 rounded">
             <h2 className="text-lg font-bold text-center text-gray-800 mb-1">TAX INVOICE</h2>
             <p className="text-center text-sm font-medium">#{invoice.invoice_number}</p>
-            <div className="text-xs mt-2">
-              <p><span className="font-medium">Date:</span> {formatDate(invoice.invoice_date)}</p>
-              <p><span className="font-medium">Type:</span> {invoice.type_of_invoice ? invoice.type_of_invoice.charAt(0).toUpperCase() + invoice.type_of_invoice.slice(1) : 'Outward'}</p>
+            <div className="text-xs mt-2 grid grid-cols-2 gap-1">
+              <p className="font-medium text-right">Date:</p>
+              <p>{formatDate(invoice.invoice_date)}</p>
+              <p className="font-medium text-right">Type:</p>
+              <p>{invoice.type_of_invoice ? invoice.type_of_invoice.charAt(0).toUpperCase() + invoice.type_of_invoice.slice(1) : 'Outward'}</p>
             </div>
           </div>
         </div>
@@ -302,6 +307,7 @@ function InvoicePrint() {
                   <td className="py-0.5 text-right">{formatIndianCurrency(amount_without_tax)}</td>
                 </tr>
 
+                {/* Only show IGST or CGST/SGST based on is_igst_applicable flag */}
                 {invoice.is_igst_applicable ? (
                   <tr>
                     <td className="py-0.5">IGST:</td>
@@ -343,28 +349,27 @@ function InvoicePrint() {
         <div className="mb-4">
           <h3 className="text-xs font-bold uppercase border-b pb-1 mb-2">BANK DETAILS</h3>
           <div className="flex">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs border-separate border-spacing-x-2">
               <tbody>
                 <tr>
                   <td className="py-0.5 font-medium w-1/4">Bank Name:</td>
-                  <td className="py-0.5">{business.bank_name || ''}</td>
+                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_name || ''}</td>
                 </tr>
                 <tr>
                   <td className="py-0.5 font-medium">A/c No:</td>
-                  <td className="py-0.5">{business.bank_account_number || ''}</td>
+                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_account_number || ''}</td>
                 </tr>
                 <tr>
                   <td className="py-0.5 font-medium">IFSC Code:</td>
-                  <td className="py-0.5">{business.bank_ifsc_code || ''}</td>
+                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_ifsc_code || ''}</td>
                 </tr>
                 <tr>
                   <td className="py-0.5 font-medium">Branch:</td>
-                  <td className="py-0.5">{business.bank_branch_name || ''}</td>
+                  <td className="py-0.5 border-b border-dotted border-gray-300">{business.bank_branch_name || ''}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p className="text-center text-xs font-bold mt-2">SUBJECT TO UDAIPUR JURISDICTION</p>
         </div>
 
         {/* Signatures */}
@@ -383,6 +388,9 @@ function InvoicePrint() {
             </div>
           </div>
         </div>
+
+        {/* Jurisdiction notice moved below signatures as requested */}
+        <p className="text-center text-xs font-bold mt-6">SUBJECT TO UDAIPUR JURISDICTION</p>
       </div>
     </div>
   );

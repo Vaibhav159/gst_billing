@@ -42,6 +42,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     line_items = LineItemSerializer(many=True, read_only=True, source="lineitem_set")
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     business_name = serializers.CharField(source="business.name", read_only=True)
+    is_igst_applicable = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Invoice

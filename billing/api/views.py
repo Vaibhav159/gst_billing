@@ -8,6 +8,7 @@ from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.views.decorators.csrf import csrf_exempt
+from num2words import num2words
 from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -234,11 +235,24 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Get printable invoice data"""
         invoice = self.get_object()
         line_items = LineItem.objects.filter(invoice_id=invoice.id)
+        summary = LineItem.get_invoice_summary(invoice_id=invoice.id)
+
+        # Convert amount to words using num2words
+        total_amount = summary.get("total_amount", 0)
+        try:
+            # Convert to integer rupees for cleaner output
+            rupees = int(total_amount)
+            # Convert to words and capitalize first letter
+            amount_in_words = num2words(rupees, lang="en_IN").title() + " Rupees Only"
+        except Exception:
+            # Fallback if num2words fails
+            amount_in_words = f"{total_amount} Rupees Only"
 
         data = {
             "invoice": InvoiceSerializer(invoice).data,
             "line_items": LineItemSerializer(line_items, many=True).data,
-            **LineItem.get_invoice_summary(invoice_id=invoice.id),
+            "amount_in_words": amount_in_words,
+            **summary,
         }
 
         return Response(data)

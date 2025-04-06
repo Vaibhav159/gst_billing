@@ -52,6 +52,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Added custom debounce hook for search filters in Customer and Business lists with immediate visual feedback, delayed API calls, and maintained input focus
 - ✅ Redesigned the Invoice Print page with a modern, professional layout that fits on A4 size paper
 - ✅ Completely redesigned invoice print layout with simplified structure to ensure it fits on a single A4 page when printed
+- ✅ Improved invoice print layout based on feedback: added dotted lines in bank details, moved jurisdiction notice below signatures, fixed date display, and disabled auto-print
+- ✅ Added proper amount in words conversion using num2words library
+- ✅ Fixed tax display to properly use is_igst_applicable field to show either IGST or CGST/SGST
 - ✅ Fixed list refresh issues by removing API caching to ensure fresh data is always displayed
 - ✅ Added Delete action in Invoice List page with confirmation dialog and proper list refresh
 - ✅ Fixed total_amount not updating after adding a new line item
