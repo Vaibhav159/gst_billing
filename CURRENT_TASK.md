@@ -28,10 +28,16 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - Configured proper uv usage according to official documentation
 
 ### Pending Items / Bugs
-- None at the moment
+- No pending items for this phase.
 
 
 ### Recently Completed Items
+- ✅ Redesigned CustomerList, InvoiceList, BusinessList and ProductList views with a modern look and feel
+- ✅ Added responsive mobile-friendly card-based layouts for all list views
+- ✅ Improved dark mode support throughout all list components
+- ✅ Added collapsible filter sections for better mobile experience
+- ✅ Enhanced visual feedback with icons, animations, and better spacing
+- ✅ Added Customer field to Invoice List view
 - ✅ Fixed pagination numbers in dark mode (previously white text on white background)
 - ✅ Made Reports section readable in dark mode by adding proper text colors
 - ✅ Added proper loading state to the dashboard to prevent it from showing 0 values before data loads

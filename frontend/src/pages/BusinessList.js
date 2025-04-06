@@ -99,109 +99,193 @@ function BusinessList() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 animate-fade-in">
+      {/* Header Section with Responsive Design */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Businesses</h1>
         <Link to="/billing/business">
-          <Button variant="primary">Add Business</Button>
+          <Button
+            variant="primary"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+            </svg>}
+          >
+            Add Business
+          </Button>
         </Link>
       </div>
 
+      {/* Search with Improved Styling */}
       <Card>
         <div className="p-4">
-          <FormInput
-            label="Search Businesses"
-            id="search"
-            name="search"
-            value={searchInput}
-            onChange={handleSearchChange}
-            placeholder="Search by name or GST number"
-            ref={searchInputRef}
-            autoFocus
-          />
+          <div className="flex items-center justify-between cursor-pointer mb-2"
+               onClick={() => document.getElementById('businessSearchContent').classList.toggle('hidden')}>
+            <h2 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+              </svg>
+              Search
+            </h2>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500 dark:text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div id="businessSearchContent">
+            <FormInput
+              label="Search Businesses"
+              id="search"
+              name="search"
+              value={searchInput}
+              onChange={handleSearchChange}
+              placeholder="Search by name or GST number"
+              ref={searchInputRef}
+              autoFocus
+            />
+          </div>
         </div>
       </Card>
 
+      {/* Business List with Responsive Design */}
       <Card>
         {loading ? (
           <div className="flex justify-center items-center py-8">
             <LoadingSpinner size="lg" />
           </div>
         ) : error ? (
-          <div className="text-center py-8 text-red-500">
+          <div className="text-center py-8 text-red-500 dark:text-red-400">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
             <p>{error}</p>
           </div>
         ) : businesses.length === 0 ? (
           <div className="text-center py-8">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
             <p className="text-gray-500 dark:text-gray-400">No businesses found. {searchTerm && 'Try adjusting your search.'}</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    #
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Name
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    GST Number
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Address
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Phone
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+          <>
+            {/* Desktop View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="table-modern min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      #
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      GST Number
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Address
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Phone
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  {businesses.map((business, index) => {
+                    // Calculate the serial number based on the current page
+                    const serialNumber = (currentPage - 1) * 15 + index + 1;
+
+                    return (
+                      <tr key={business.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">{business.name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{business.gst_number || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{business.address || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{business.mobile_number || business.phone_number || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <Link to={`/billing/business/${business.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
+                            View
+                          </Link>
+                          <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
+                            Edit
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(business.id)}
+                            className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile View - Card-based layout */}
+            <div className="md:hidden">
+              <div className="space-y-4">
                 {businesses.map((business, index) => {
                   // Calculate the serial number based on the current page
                   const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                   return (
-                    <tr key={business.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-500">{serialNumber}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{business.name}</div>
-                      </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">{business.gst_number || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-500">{business.address || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">{business.mobile_number || business.phone_number || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <Link to={`/billing/business/${business.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
-                        View
-                      </Link>
-                      <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
-                        Edit
-                      </Link>
-                      <button
-                        onClick={() => handleDelete(business.id)}
-                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
+                    <div key={business.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
+                          <h3 className="text-lg font-medium text-gray-900 dark:text-white">{business.name}</h3>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 text-sm mb-3">
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400">GST Number</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{business.gst_number || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400">Address</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{business.address || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400">Phone</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{business.mobile_number || business.phone_number || '-'}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <Link to={`/billing/business/${business.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
+                          View
+                        </Link>
+                        <Link to={`/billing/business/edit/${business.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
+                          Edit
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(business.id)}
+                          className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 font-medium"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+          </>
         )}
 
         {totalPages > 1 && (
