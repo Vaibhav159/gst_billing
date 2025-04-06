@@ -8,6 +8,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
+import SortableHeader from '../components/SortableHeader';
 import apiClient from '../api/client';
 import businessService from '../api/businessService';
 import { useRowClick } from '../utils/navigationHelpers';
@@ -19,6 +20,8 @@ function BusinessList() {
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [sortField, setSortField] = useState('name');
+  const [sortDirection, setSortDirection] = useState('asc');
 
   // Row click handler
   const handleBusinessRowClick = useRowClick('/billing/business/', {
@@ -41,6 +44,11 @@ function BusinessList() {
           page: currentPage,
           search: searchTerm
         };
+
+        // Add sorting parameters if set
+        if (sortField && sortDirection) {
+          params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+        }
 
         // Remove empty filters
         Object.keys(params).forEach(key => {
@@ -67,7 +75,14 @@ function BusinessList() {
     };
 
     fetchBusinesses();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, sortField, sortDirection]);
+
+  // Handle sorting
+  const handleSort = (field, direction) => {
+    setSortField(field);
+    setSortDirection(direction);
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
 
   // Debounce the search input with a 500ms delay
   const debouncedSearchTerm = useDebounce(searchInput, 500);
@@ -185,18 +200,34 @@ function BusinessList() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       #
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      GST Number
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Address
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Phone
-                    </th>
+                    <SortableHeader
+                      label="Name"
+                      field="name"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="GST Number"
+                      field="gst_number"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Address"
+                      field="address"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Phone"
+                      field="mobile_number"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Actions
                     </th>

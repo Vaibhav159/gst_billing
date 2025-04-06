@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
+import SortableHeader from '../components/SortableHeader';
 import apiClient from '../api/client';
 import productService from '../api/productService';
 import { useRowClick } from '../utils/navigationHelpers';
@@ -19,6 +20,8 @@ function ProductList() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortField, setSortField] = useState('name');
+  const [sortDirection, setSortDirection] = useState('asc');
 
   // Row click handler
   const handleProductRowClick = useRowClick('/billing/product/', {
@@ -35,6 +38,11 @@ function ProductList() {
           page: currentPage,
           search: searchTerm
         };
+
+        // Add sorting parameters if set
+        if (sortField && sortDirection) {
+          params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+        }
 
         // Remove empty filters
         Object.keys(params).forEach(key => {
@@ -61,7 +69,14 @@ function ProductList() {
     };
 
     fetchProducts();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, sortField, sortDirection]);
+
+  // Handle sorting
+  const handleSort = (field, direction) => {
+    setSortField(field);
+    setSortDirection(direction);
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
 
   // Handle search input change
   const handleSearchChange = (e) => {
@@ -164,18 +179,34 @@ function ProductList() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       #
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      HSN Code
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      GST Rate
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Description
-                    </th>
+                    <SortableHeader
+                      label="Name"
+                      field="name"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="HSN Code"
+                      field="hsn_code"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="GST Rate"
+                      field="gst_tax_rate"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Description"
+                      field="description"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Actions
                     </th>
