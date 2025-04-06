@@ -165,14 +165,24 @@ function Reports() {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Reports</h1>
+    <div className="space-y-6 animate-fade-in">
+      <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        Reports
+      </h1>
 
-      <Card>
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+      <Card className="transform transition-all duration-300 hover:shadow-md">
+        <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Date Range</h2>
+              <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Date Range
+              </h2>
 
               <FormSelect
                 label="Financial Year"
@@ -184,12 +194,15 @@ function Reports() {
                 options={getFinancialYearOptions()}
               />
 
-              <div className="flex space-x-4 mt-4">
+              <div className="flex flex-wrap gap-2 mt-4">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={setCurrentFinancialYear}
+                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>}
                 >
                   Current FY
                 </Button>
@@ -221,12 +234,47 @@ function Reports() {
                       end_date: formatDate(lastDay)
                     }));
                   }}
+                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>}
                 >
                   Current Month
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // Get current date in local time zone
+                    const today = new Date();
+
+                    // Calculate dates for last month
+                    const firstDay = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                    const lastDay = new Date(today.getFullYear(), today.getMonth(), 0);
+
+                    // Format dates as YYYY-MM-DD strings in local time zone
+                    const formatDate = (date) => {
+                      const year = date.getFullYear();
+                      const month = String(date.getMonth() + 1).padStart(2, '0');
+                      const day = String(date.getDate()).padStart(2, '0');
+                      return `${year}-${month}-${day}`;
+                    };
+
+                    setFormData(prev => ({
+                      ...prev,
+                      start_date: formatDate(firstDay),
+                      end_date: formatDate(lastDay)
+                    }));
+                  }}
+                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>}
+                >
+                  Last Month
+                </Button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                 <FormInput
                   label="Start Date"
                   id="start_date"
@@ -235,6 +283,9 @@ function Reports() {
                   value={formData.start_date}
                   onChange={handleChange}
                   required
+                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>}
                 />
 
                 <FormInput
@@ -245,12 +296,21 @@ function Reports() {
                   value={formData.end_date}
                   onChange={handleChange}
                   required
+                  icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>}
                 />
               </div>
             </div>
 
             <div>
-              <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Report Options</h2>
+              <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Report Options
+              </h2>
 
               <FormSelect
                 label="Invoice Type"
@@ -263,11 +323,19 @@ function Reports() {
                   { value: 'outward', label: 'Outward Only' },
                   { value: 'inward', label: 'Inward Only' }
                 ]}
+                icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>}
               />
 
-              <div className="mt-8">
-                <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Report Format</h3>
-                <div className="flex items-center space-x-2">
+              <div className="mt-8 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Report Format
+                </h3>
+                <div className="flex items-center space-x-2 bg-white dark:bg-gray-700 p-3 rounded-md shadow-sm">
                   <input
                     type="radio"
                     id="format_excel"
@@ -277,7 +345,10 @@ function Reports() {
                     readOnly
                     className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 dark:border-gray-600"
                   />
-                  <label htmlFor="format_excel" className="text-sm text-gray-700 dark:text-gray-300">
+                  <label htmlFor="format_excel" className="text-sm text-gray-700 dark:text-gray-300 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1 text-green-600 dark:text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                    </svg>
                     Excel (.xlsx)
                   </label>
                 </div>
@@ -286,23 +357,30 @@ function Reports() {
           </div>
 
           {error && (
-            <div className={`px-4 py-3 rounded flex items-center ${loading ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'}`}>
-              {loading && (
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <div className={`p-4 rounded-lg flex items-start ${loading ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'}`}>
+              {loading ? (
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500 dark:text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-3 text-red-500 dark:text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
               )}
-              {error}
+              <span>{error}</span>
             </div>
           )}
 
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
             <Button
               type="submit"
               variant="primary"
               disabled={loading}
               className={loading ? 'opacity-80 cursor-not-allowed' : ''}
+              icon={!loading && <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>}
             >
               {loading ? (
                 <span className="flex items-center">
@@ -315,23 +393,60 @@ function Reports() {
         </form>
       </Card>
 
-      <Card>
-        <div className="p-6">
-          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">About Reports</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+      <Card className="transform transition-all duration-300 hover:shadow-md bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900/50 dark:to-gray-800/50 border border-gray-200 dark:border-gray-700/50">
+        <div className="p-4 md:p-6">
+          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            About Reports
+          </h2>
+          <p className="text-gray-700 dark:text-gray-300 mb-4">
             Reports provide a comprehensive summary of your invoices for the selected period.
             The generated Excel file includes:
           </p>
-          <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400">
-            <li>Detailed list of all invoices in the selected date range</li>
-            <li>Separate sheets for each business</li>
-            <li>Breakdown of taxable value, CGST, SGST, and IGST</li>
-            <li>Summary totals for inward and outward supplies</li>
-            <li>Net tax liability calculation</li>
-          </ul>
-          <p className="text-gray-600 dark:text-gray-400 mt-4">
-            These reports can be used for GST filing, tax planning, and business analysis.
-          </p>
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm mb-4">
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 text-gray-700 dark:text-gray-300">
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Detailed list of all invoices in the selected date range</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Separate sheets for each business</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Breakdown of taxable value, CGST, SGST, and IGST</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Summary totals for inward and outward supplies</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Net tax liability calculation</span>
+              </li>
+            </ul>
+          </div>
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 dark:border-yellow-600 p-4 rounded-r-md">
+            <p className="text-sm text-yellow-700 dark:text-yellow-300 flex items-start">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>These reports can be used for GST filing, tax planning, and business analysis.</span>
+            </p>
+          </div>
         </div>
       </Card>
     </div>

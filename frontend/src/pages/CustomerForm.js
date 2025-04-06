@@ -206,92 +206,131 @@ function CustomerForm() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <LoadingSpinner size="lg" />
+      <div className="flex flex-col justify-center items-center h-64 animate-pulse">
+        <LoadingSpinner size="lg" className="text-primary-600 dark:text-primary-400" />
+        <p className="mt-4 text-gray-600 dark:text-gray-400 font-medium">
+          {isEditing ? 'Loading customer details...' : 'Preparing form...'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
           {isEditing ? 'Edit Customer' : 'Add Customer'}
         </h1>
         <Link to="/billing/customer/list">
-          <Button variant="outline">Cancel</Button>
+          <Button
+            variant="outline"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>}
+          >
+            Cancel
+          </Button>
         </Link>
       </div>
 
-      <Card>
-        <form className="space-y-4 p-6" onSubmit={handleSubmit}>
-          <FormInput
-            label="Customer Name"
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            placeholder="Enter customer name"
-            error={errors.name}
-            required
-          />
+      <Card className="transform transition-all duration-300 hover:shadow-md">
+        <form className="space-y-6 p-4 md:p-6" onSubmit={handleSubmit}>
+          <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-2">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Customer Information
+            </h3>
+          </div>
 
-          <FormInput
-            label="GST Number"
-            id="gst_number"
-            name="gst_number"
-            value={formData.gst_number}
-            onChange={handleChange}
-            placeholder="Enter GST number"
-            error={errors.gst_number}
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            <FormInput
+              label="Customer Name"
+              id="name"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              placeholder="Enter customer name"
+              error={errors.name}
+              required
+            />
 
-          <FormInput
-            label="Mobile Number"
-            id="mobile_number"
-            name="mobile_number"
-            value={formData.mobile_number}
-            onChange={handleChange}
-            placeholder="Enter mobile number"
-            error={errors.mobile_number}
-          />
+            <FormInput
+              label="GST Number"
+              id="gst_number"
+              name="gst_number"
+              value={formData.gst_number}
+              onChange={handleChange}
+              placeholder="Enter GST number"
+              error={errors.gst_number}
+            />
 
-          <FormInput
-            label="Email"
-            id="email"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="Enter email address"
-            error={errors.email}
-          />
+            <FormInput
+              label="Mobile Number"
+              id="mobile_number"
+              name="mobile_number"
+              value={formData.mobile_number}
+              onChange={handleChange}
+              placeholder="Enter mobile number"
+              error={errors.mobile_number}
+            />
 
-          <FormInput
-            label="Address"
-            id="address"
-            name="address"
-            value={formData.address}
-            onChange={handleChange}
-            placeholder="Enter address"
-            error={errors.address}
-          />
+            <FormInput
+              label="Email"
+              id="email"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleChange}
+              placeholder="Enter email address"
+              error={errors.email}
+            />
 
-          <StateDropdown
-            label="State"
-            id="state_name"
-            name="state_name"
-            value={formData.state_name}
-            onChange={handleChange}
-            error={errors.state_name}
-            required
-          />
+            <div className="md:col-span-2">
+              <FormInput
+                label="Address"
+                id="address"
+                name="address"
+                value={formData.address}
+                onChange={handleChange}
+                placeholder="Enter address"
+                error={errors.address}
+              />
+            </div>
 
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Associated Businesses</label>
-            <div className="space-y-2">
+            <StateDropdown
+              label="State"
+              id="state_name"
+              name="state_name"
+              value={formData.state_name}
+              onChange={handleChange}
+              error={errors.state_name}
+              required
+            />
+          </div>
+
+          <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-2 pt-4">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+              Associated Businesses
+            </h3>
+          </div>
+
+          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {businesses.length === 0 ? (
-                <p className="text-sm text-gray-500">No businesses available</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 col-span-full text-center py-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mx-auto mb-2 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                  No businesses available
+                </p>
               ) : (
                 businesses.map(business => {
                   // Skip rendering if business doesn't have required properties
@@ -302,7 +341,7 @@ function CustomerForm() {
                     formData.businesses.includes(business.id);
 
                   return (
-                    <div key={business.id} className="flex items-center">
+                    <div key={business.id} className="flex items-center p-3 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all duration-200">
                       <input
                         type="checkbox"
                         id={`business-${business.id}`}
@@ -310,9 +349,9 @@ function CustomerForm() {
                         value={business.id}
                         checked={isChecked}
                         onChange={handleBusinessChange}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                       />
-                      <label htmlFor={`business-${business.id}`} className="ml-2 text-sm text-gray-700">
+                      <label htmlFor={`business-${business.id}`} className="ml-2 text-sm text-gray-700 dark:text-gray-300 font-medium">
                         {business.name}
                       </label>
                     </div>
@@ -320,14 +359,23 @@ function CustomerForm() {
                 })
               )}
             </div>
-            {errors.businesses && <p className="mt-1 text-sm text-red-600">{errors.businesses}</p>}
+            {errors.businesses && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{errors.businesses}</p>}
           </div>
 
-          <div className="flex justify-end space-x-2 pt-4">
+          <div className="flex justify-end space-x-2 pt-6 border-t border-gray-200 dark:border-gray-700 mt-4">
             <Button
               type="submit"
               variant="primary"
               disabled={submitting}
+              icon={isEditing ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+              )}
             >
               {submitting ? (
                 <>

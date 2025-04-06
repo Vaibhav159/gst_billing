@@ -220,24 +220,48 @@ function InvoiceForm() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <LoadingSpinner size="lg" />
+      <div className="flex flex-col justify-center items-center h-64 animate-pulse">
+        <LoadingSpinner size="lg" className="text-primary-600 dark:text-primary-400" />
+        <p className="mt-4 text-gray-600 dark:text-gray-400 font-medium">
+          Loading form data...
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Create Invoice</h1>
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Create Invoice
+        </h1>
         <Link to="/billing/invoice/list">
-          <Button variant="outline">Cancel</Button>
+          <Button
+            variant="outline"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>}
+          >
+            Cancel
+          </Button>
         </Link>
       </div>
 
-      <Card>
-        <form className="space-y-4 p-6" onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card className="transform transition-all duration-300 hover:shadow-md">
+        <form className="space-y-6 p-4 md:p-6" onSubmit={handleSubmit}>
+          <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-2">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Invoice Information
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
             <FormSelect
               label="Business"
               id="business"
@@ -316,26 +340,29 @@ function InvoiceForm() {
               required
             />
 
-            <div className="flex items-center h-full pt-6">
+            <div className="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg flex items-center">
               <input
                 id="is_igst_applicable"
                 name="is_igst_applicable"
                 type="checkbox"
                 checked={formData.is_igst_applicable}
                 onChange={handleChange}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
               />
-              <label htmlFor="is_igst_applicable" className="ml-2 block text-sm text-gray-900">
+              <label htmlFor="is_igst_applicable" className="ml-2 block text-sm text-gray-900 dark:text-gray-100">
                 Apply IGST (for inter-state transactions)
               </label>
             </div>
           </div>
 
-          <div className="flex justify-end space-x-2 pt-4">
+          <div className="flex justify-end space-x-2 pt-6 border-t border-gray-200 dark:border-gray-700 mt-4">
             <Button
               type="submit"
               variant="primary"
               disabled={submitting}
+              icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>}
             >
               {submitting ? (
                 <>
@@ -348,17 +375,39 @@ function InvoiceForm() {
         </form>
       </Card>
 
-      <Card>
-        <div className="p-6">
-          <h2 className="text-lg font-medium mb-4">Next Steps</h2>
-          <p className="text-gray-600 mb-2">
+      <Card className="transform transition-all duration-300 hover:shadow-md bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-800/30">
+        <div className="p-4 md:p-6">
+          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Next Steps
+          </h2>
+          <p className="text-gray-700 dark:text-gray-300 mb-4">
             After creating the invoice, you'll be redirected to the invoice detail page where you can:
           </p>
-          <ul className="list-disc pl-5 space-y-1 text-gray-600">
-            <li>Add line items to the invoice</li>
-            <li>View the invoice summary with tax calculations</li>
-            <li>Print the invoice</li>
-          </ul>
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
+            <ul className="list-none space-y-3 text-gray-700 dark:text-gray-300">
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">Add line items</strong> to the invoice</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">View the invoice summary</strong> with tax calculations</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">Print the invoice</strong> for your records</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </Card>
     </div>
