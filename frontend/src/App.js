@@ -16,6 +16,7 @@ import InvoiceImport from './pages/InvoiceImport';
 import InvoicePrint from './pages/InvoicePrint';
 import ProductList from './pages/ProductList';
 import ProductForm from './pages/ProductForm';
+import ProductDetail from './pages/ProductDetail';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 
@@ -98,6 +99,7 @@ function App() {
 
         {/* Product Routes */}
         <Route path="billing/product/list" element={<ProductList />} />
+        <Route path="billing/product/:productId" element={<ProductDetail />} />
         <Route path="billing/product" element={<ProductForm />} />
         <Route path="billing/product/edit/:productId" element={<ProductForm />} />
 

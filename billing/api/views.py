@@ -49,7 +49,7 @@ class BusinessViewSet(viewsets.ModelViewSet):
     serializer_class = BusinessSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "gst_number"]
-    ordering_fields = ["name", "created_at"]
+    ordering_fields = ["name", "created_at", "gst_number", "mobile_number", "address"]
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
@@ -77,7 +77,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     serializer_class = CustomerSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "gst_number", "mobile_number"]
-    ordering_fields = ["name", "created_at"]
+    ordering_fields = ["name", "gst_number", "mobile_number", "pan_number"]
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
@@ -123,7 +123,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "hsn_code"]
-    ordering_fields = ["name", "created_at"]
+    ordering_fields = ["name", "hsn_code", "gst_tax_rate"]
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
@@ -183,7 +183,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["invoice_number", "customer__name", "business__name"]
-    ordering_fields = ["invoice_date", "created_at", "invoice_number"]
+    ordering_fields = [
+        "invoice_date",
+        "created_at",
+        "invoice_number",
+        "total_amount",
+        "type_of_invoice",
+        "customer__name",
+        "business__name",
+    ]
     ordering = ["-invoice_date"]
     pagination_class = StandardResultsSetPagination
 

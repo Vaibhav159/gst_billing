@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
@@ -7,16 +7,27 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
+import SortableHeader from '../components/SortableHeader';
 import apiClient from '../api/client';
 import productService from '../api/productService';
+import { useRowClick } from '../utils/navigationHelpers';
 
 function ProductList() {
+  const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortField, setSortField] = useState('name');
+  const [sortDirection, setSortDirection] = useState('asc');
+
+  // Row click handler
+  const handleProductRowClick = useRowClick('/billing/product/', {
+    // Ignore clicks on action buttons
+    ignoreClasses: ['action-button', 'btn']
+  });
 
   // Fetch products
   useEffect(() => {
@@ -27,6 +38,11 @@ function ProductList() {
           page: currentPage,
           search: searchTerm
         };
+
+        // Add sorting parameters if set
+        if (sortField && sortDirection) {
+          params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+        }
 
         // Remove empty filters
         Object.keys(params).forEach(key => {
@@ -53,7 +69,14 @@ function ProductList() {
     };
 
     fetchProducts();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, sortField, sortDirection]);
+
+  // Handle sorting
+  const handleSort = (field, direction) => {
+    setSortField(field);
+    setSortDirection(direction);
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
 
   // Handle search input change
   const handleSearchChange = (e) => {
@@ -156,18 +179,34 @@ function ProductList() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       #
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      HSN Code
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      GST Rate
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Description
-                    </th>
+                    <SortableHeader
+                      label="Name"
+                      field="name"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="HSN Code"
+                      field="hsn_code"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="GST Rate"
+                      field="gst_tax_rate"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Description"
+                      field="description"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Actions
                     </th>
@@ -179,7 +218,11 @@ function ProductList() {
                     const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                     return (
-                      <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                      <tr
+                        key={product.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                        onClick={(e) => handleProductRowClick(product.id, e)}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                         </td>
@@ -224,7 +267,11 @@ function ProductList() {
                   const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                   return (
-                    <div key={product.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                    <div
+                      key={product.id}
+                      className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md cursor-pointer"
+                      onClick={(e) => handleProductRowClick(product.id, e)}
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>

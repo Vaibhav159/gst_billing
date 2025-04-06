@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
@@ -8,11 +8,14 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
+import SortableHeader from '../components/SortableHeader';
 import apiClient from '../api/client';
 import customerService from '../api/customerService';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
+import { useRowClick } from '../utils/navigationHelpers';
 
 function InvoiceList() {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -23,6 +26,20 @@ function InvoiceList() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalAmountInward, setTotalAmountInward] = useState(0);
   const [totalAmountOutward, setTotalAmountOutward] = useState(0);
+  const [sortField, setSortField] = useState('invoice_date');
+  const [sortDirection, setSortDirection] = useState('desc');
+
+  // Row click handler
+  const handleInvoiceRowClick = useRowClick('/billing/invoice/', {
+    // Ignore clicks on action buttons
+    ignoreClasses: ['action-button', 'btn'],
+    // Special handling for business and customer references
+    specialHandling: {
+      'business': (id) => navigate(`/billing/business/${id}`),
+      'customer': (id) => navigate(`/billing/customer/${id}`)
+    }
+  });
+
   const [filters, setFilters] = useState({
     invoice_number: '',
     business_id: '',
@@ -40,6 +57,11 @@ function InvoiceList() {
         page: currentPage,
         ...filters
       };
+
+      // Add sorting parameters if set
+      if (sortField && sortDirection) {
+        params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+      }
 
       // Remove empty filters
       Object.keys(params).forEach(key => {
@@ -74,7 +96,14 @@ function InvoiceList() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, filters]);
+  }, [currentPage, filters, sortField, sortDirection]);
+
+  // Handle sorting
+  const handleSort = (field, direction) => {
+    setSortField(field);
+    setSortDirection(direction);
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
 
   // Handle invoice deletion
   const handleDeleteInvoice = useCallback(async (invoiceId) => {
@@ -148,6 +177,45 @@ function InvoiceList() {
   const handlePageChange = (page) => {
     setCurrentPage(page);
   };
+
+  // Set default financial year filter on initial load
+  useEffect(() => {
+    const setCurrentFinancialYear = () => {
+      const today = new Date();
+      let startYear = today.getFullYear();
+      let startMonth = 4; // April
+      let startDay = 1;
+
+      // If current month is before April, use previous year as start
+      if (today.getMonth() < 3) { // 0-indexed, so 3 is April
+        startYear -= 1;
+      }
+
+      // Format dates as YYYY-MM-DD strings
+      const formatDate = (year, month, day) => {
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      };
+
+      const startDate = formatDate(startYear, startMonth, startDay);
+      const endDate = formatDate(startYear + 1, 3, 31); // March 31st of next year
+
+      setFilters(prev => ({
+        ...prev,
+        start_date: startDate,
+        end_date: endDate
+      }));
+    };
+
+    // Only set default filter if no date filters are already set
+    if (!filters.start_date && !filters.end_date) {
+      setCurrentFinancialYear();
+    }
+  }, []); // Empty dependency array means this runs once on mount
+
+  // Fetch invoices when page, filters, or sorting changes
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
 
   // Handle date range selection
   const handleDateRangeChange = (e) => {
@@ -393,24 +461,48 @@ function InvoiceList() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       #
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Invoice Number
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Date
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Customer
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Business
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Amount
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Type
-                    </th>
+                    <SortableHeader
+                      label="Invoice Number"
+                      field="invoice_number"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Date"
+                      field="invoice_date"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Customer"
+                      field="customer__name"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Business"
+                      field="business__name"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Amount"
+                      field="total_amount"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Type"
+                      field="type_of_invoice"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Actions
                     </th>
@@ -422,7 +514,11 @@ function InvoiceList() {
                     const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                     return (
-                      <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                      <tr
+                        key={invoice.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                        onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                         </td>
@@ -433,10 +529,22 @@ function InvoiceList() {
                           <div className="text-sm text-gray-500 dark:text-gray-400">{formatDate(invoice.invoice_date)}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.customer_name}</div>
+                          <div
+                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="customer"
+                            data-id={invoice.customer}
+                          >
+                            {invoice.customer_name}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.business_name}</div>
+                          <div
+                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="business"
+                            data-id={invoice.business}
+                          >
+                            {invoice.business_name}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(invoice.total_amount)}</div>
@@ -481,7 +589,11 @@ function InvoiceList() {
                   const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                   return (
-                    <div key={invoice.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                    <div
+                      key={invoice.id}
+                      className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md cursor-pointer"
+                      onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
@@ -503,11 +615,23 @@ function InvoiceList() {
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400">Customer</p>
-                          <p className="font-medium text-gray-900 dark:text-white truncate">{invoice.customer_name}</p>
+                          <p
+                            className="font-medium text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="customer"
+                            data-id={invoice.customer}
+                          >
+                            {invoice.customer_name}
+                          </p>
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400">Business</p>
-                          <p className="font-medium text-gray-900 dark:text-white truncate">{invoice.business_name}</p>
+                          <p
+                            className="font-medium text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                            data-type="business"
+                            data-id={invoice.business}
+                          >
+                            {invoice.business_name}
+                          </p>
                         </div>
                       </div>
 

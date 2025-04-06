@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import useDebounce from '../hooks/useDebounce';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import FormInput from '../components/FormInput';
@@ -9,13 +9,28 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Pagination from '../components/Pagination';
 import ActionButton from '../components/ActionButton';
 import ActionMenu from '../components/ActionMenu';
+import SortableHeader from '../components/SortableHeader';
 
 import apiClient, { createCancelToken } from '../api/client';
+import { useRowClick } from '../utils/navigationHelpers';
 
 function CustomerList() {
   // Initialize state with default values
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [businesses, setBusinesses] = useState([]);
+  const [sortField, setSortField] = useState('name');
+  const [sortDirection, setSortDirection] = useState('asc');
+
+  // Row click handler
+  const handleCustomerRowClick = useRowClick('/billing/customer/', {
+    // Ignore clicks on action buttons
+    ignoreClasses: ['action-button', 'btn'],
+    // Special handling for business references
+    specialHandling: {
+      'business': (id) => navigate(`/billing/business/${id}`)
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -75,6 +90,11 @@ function CustomerList() {
         page: currentPage,
         ...filters
       };
+
+      // Add sorting parameters if set
+      if (sortField && sortDirection) {
+        params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+      }
 
       // Remove empty filters
       Object.keys(params).forEach(key => {
@@ -195,7 +215,14 @@ function CustomerList() {
 
     // Return the cancel function
     return () => cancelTokenSource.cancel('Component unmounted');
-  }, [currentPage, filters, isMounted]);
+  }, [currentPage, filters, sortField, sortDirection, isMounted]);
+
+  // Handle sorting
+  const handleSort = (field, direction) => {
+    setSortField(field);
+    setSortDirection(direction);
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
 
   // Call fetchCustomers when dependencies change
   useEffect(() => {
@@ -486,18 +513,34 @@ function CustomerList() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       #
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      GST Number
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      PAN Number
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Mobile
-                    </th>
+                    <SortableHeader
+                      label="Name"
+                      field="name"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="GST Number"
+                      field="gst_number"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="PAN Number"
+                      field="pan_number"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Mobile"
+                      field="mobile_number"
+                      currentSortField={sortField}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Actions
                     </th>
@@ -516,7 +559,11 @@ function CustomerList() {
                         const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                         return (
-                          <tr key={customer.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                          <tr
+                            key={customer.id}
+                            className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                            onClick={(e) => handleCustomerRowClick(customer.id, e)}
+                          >
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
                             </td>
@@ -576,7 +623,11 @@ function CustomerList() {
                     const serialNumber = (currentPage - 1) * 15 + index + 1;
 
                     return (
-                      <div key={customer.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                      <div
+                        key={customer.id}
+                        className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md cursor-pointer"
+                        onClick={(e) => handleCustomerRowClick(customer.id, e)}
+                      >
                         <div className="flex justify-between items-start mb-2">
                           <div>
                             <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
