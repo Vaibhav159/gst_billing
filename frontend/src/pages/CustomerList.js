@@ -284,6 +284,33 @@ function CustomerList() {
     };
   }, [isMounted]);
 
+  // Custom debounce function
+  const useDebounce = (callback, delay) => {
+    const timeoutRef = useRef(null);
+
+    return useCallback((...args) => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+
+      timeoutRef.current = setTimeout(() => {
+        callback(...args);
+      }, delay);
+    }, [callback, delay]);
+  };
+
+  // Create a debounced search function
+  const debouncedSearch = useDebounce((searchValue) => {
+    console.log('Debounced search executing with value:', searchValue);
+    if (isMounted.current) {
+      setFilters(prev => ({
+        ...prev,
+        search: searchValue
+      }));
+      setCurrentPage(1); // Reset to first page when search changes
+    }
+  }, 500); // 500ms delay
+
   // Handle filter changes
   const handleFilterChange = useCallback((e) => {
     console.log('handleFilterChange called with', e?.target);
@@ -296,6 +323,13 @@ function CustomerList() {
       const { name, value } = e.target;
       if (!name) {
         console.error('Missing name in event target');
+        return;
+      }
+
+      // Handle search with debounce
+      if (name === 'search') {
+        console.log('Search filter changed, using debounce');
+        debouncedSearch(value);
         return;
       }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -13,6 +13,7 @@ function InvoiceList() {
   const [invoices, setInvoices] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -26,53 +27,77 @@ function InvoiceList() {
     type_of_invoice: ''
   });
 
+  // Function to fetch invoices
+  const fetchInvoices = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = {
+        page: currentPage,
+        ...filters
+      };
+
+      // Remove empty filters
+      Object.keys(params).forEach(key => {
+        if (params[key] === '') {
+          delete params[key];
+        }
+      });
+
+      // Fetch invoices for the current page
+      const response = await apiClient.get('/invoices/', { params });
+      setInvoices(response.data.results || response.data);
+
+      // Set pagination data if available
+      if (response.data.count) {
+        setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+      }
+
+      // Fetch total amounts (using the same filters but without pagination)
+      const totalsParams = { ...params };
+      delete totalsParams.page; // Remove pagination parameter
+
+      const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
+
+      // Set totals from the API response
+      setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
+      setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
+
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching invoices:', err);
+      setError('Failed to load invoices. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, filters]);
+
+  // Handle invoice deletion
+  const handleDeleteInvoice = useCallback(async (invoiceId) => {
+    if (!window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      await apiClient.delete(`/invoices/${invoiceId}/`);
+
+      // Refresh the invoice list
+      await fetchInvoices();
+
+      // Show success message
+      alert('Invoice deleted successfully');
+    } catch (err) {
+      console.error('Error deleting invoice:', err);
+      alert('Failed to delete invoice. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  }, [fetchInvoices]);
+
   // Fetch invoices with filters
   useEffect(() => {
-    const fetchInvoices = async () => {
-      try {
-        setLoading(true);
-        const params = {
-          page: currentPage,
-          ...filters
-        };
-
-        // Remove empty filters
-        Object.keys(params).forEach(key => {
-          if (params[key] === '') {
-            delete params[key];
-          }
-        });
-
-        // Fetch invoices for the current page
-        const response = await apiClient.get('/invoices/', { params });
-        setInvoices(response.data.results || response.data);
-
-        // Set pagination data if available
-        if (response.data.count) {
-          setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
-        }
-
-        // Fetch total amounts (using the same filters but without pagination)
-        const totalsParams = { ...params };
-        delete totalsParams.page; // Remove pagination parameter
-
-        const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
-
-        // Set totals from the API response
-        setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
-        setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
-
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching invoices:', err);
-        setError('Failed to load invoices. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchInvoices();
-  }, [currentPage, filters]);
+  }, [fetchInvoices]);
 
   // Fetch businesses for filter
   useEffect(() => {
@@ -338,9 +363,16 @@ function InvoiceList() {
                       <Link to={`/billing/invoice/${invoice.id}`} className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 mr-4">
                         View
                       </Link>
-                      <Link to={`/billing/invoice/${invoice.id}/print`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300">
+                      <Link to={`/billing/invoice/${invoice.id}/print`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 mr-4">
                         Print
                       </Link>
+                      <button
+                        onClick={() => handleDeleteInvoice(invoice.id)}
+                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+                        disabled={deleting}
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                   );
