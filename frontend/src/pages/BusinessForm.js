@@ -134,30 +134,48 @@ function BusinessForm() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <LoadingSpinner size="lg" />
+      <div className="flex flex-col justify-center items-center h-64 animate-pulse">
+        <LoadingSpinner size="lg" className="text-primary-600 dark:text-primary-400" />
+        <p className="mt-4 text-gray-600 dark:text-gray-400 font-medium">
+          {isEditing ? 'Loading business details...' : 'Preparing form...'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+          </svg>
           {isEditing ? 'Edit Business' : 'Add Business'}
         </h1>
         <Link to="/billing/business/list">
-          <Button variant="outline">Cancel</Button>
+          <Button
+            variant="outline"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>}
+          >
+            Cancel
+          </Button>
         </Link>
       </div>
 
-      <Card>
-        <form className="space-y-4 p-6" onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="md:col-span-2">
-              <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Basic Information</h3>
-            </div>
+      <Card className="transform transition-all duration-300 hover:shadow-md">
+        <form className="space-y-6 p-4 md:p-6" onSubmit={handleSubmit}>
+          <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-2">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Basic Information
+            </h3>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
             <FormInput
               label="Business Name"
               id="name"
@@ -221,11 +239,18 @@ function BusinessForm() {
               placeholder="Enter mobile number"
               error={errors.mobile_number}
             />
+          </div>
 
-            <div className="md:col-span-2 pt-4">
-              <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Bank Details</h3>
-            </div>
+          <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-2 pt-4">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+              Bank Details
+            </h3>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
             <FormInput
               label="Bank Name"
               id="bank_name"
@@ -267,11 +292,20 @@ function BusinessForm() {
             />
           </div>
 
-          <div className="flex justify-end space-x-2 pt-4">
+          <div className="flex justify-end space-x-2 pt-6 border-t border-gray-200 dark:border-gray-700 mt-4">
             <Button
               type="submit"
               variant="primary"
               disabled={submitting}
+              icon={isEditing ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+              )}
             >
               {submitting ? (
                 <>
@@ -286,18 +320,45 @@ function BusinessForm() {
         </form>
       </Card>
 
-      <Card>
-        <div className="p-6">
-          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Business Information</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-2">
+      <Card className="transform transition-all duration-300 hover:shadow-md bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-800/30">
+        <div className="p-4 md:p-6">
+          <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Business Information
+          </h2>
+          <p className="text-gray-700 dark:text-gray-300 mb-4">
             Business profiles are used to generate invoices. Each business should have the following information:
           </p>
-          <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400">
-            <li><strong>Name:</strong> The legal name of your business</li>
-            <li><strong>GST Number:</strong> Your business's GST identification number</li>
-            <li><strong>Address:</strong> The registered address of your business</li>
-            <li><strong>Contact Information:</strong> Phone number and email for business communications</li>
-          </ul>
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
+            <ul className="list-none space-y-3 text-gray-700 dark:text-gray-300">
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">Name:</strong> The legal name of your business</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">GST Number:</strong> Your business's GST identification number</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">Address:</strong> The registered address of your business</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">Contact Information:</strong> Phone number and email for business communications</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </Card>
     </div>

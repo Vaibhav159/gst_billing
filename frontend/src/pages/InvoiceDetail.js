@@ -5,6 +5,8 @@ import Button from '../components/Button';
 import FormInput from '../components/FormInput';
 import SearchableDropdown from '../components/SearchableDropdown';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ActionButton from '../components/ActionButton';
+import ActionMenu from '../components/ActionMenu';
 
 import lineItemService from '../api/lineItemService';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
@@ -309,11 +311,12 @@ function InvoiceDetail() {
   const isMainDataLoading = loadingStates.invoice;
 
   // Helper function to render a section with a loading indicator
-  const renderWithLoading = (isLoading, content) => {
+  const renderWithLoading = (isLoading, content, message = 'Loading...') => {
     if (isLoading) {
       return (
-        <div className="flex justify-center items-center py-8">
-          <LoadingSpinner size="md" />
+        <div className="flex flex-col justify-center items-center py-8 animate-pulse">
+          <LoadingSpinner size="md" className="text-primary-600 dark:text-primary-400" />
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{message}</p>
         </div>
       );
     }
@@ -322,38 +325,57 @@ function InvoiceDetail() {
 
   if (isMainDataLoading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <LoadingSpinner size="lg" />
+      <div className="flex flex-col justify-center items-center h-64 animate-pulse">
+        <LoadingSpinner size="lg" className="text-primary-600 dark:text-primary-400" />
+        <p className="mt-4 text-gray-600 dark:text-gray-400 font-medium">
+          Loading invoice details...
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="text-center py-8 text-red-500">
-        <p>{error}</p>
-        <Button
-          variant="outline"
-          className="mt-4"
-          onClick={() => navigate('/billing/invoice/list')}
-        >
-          Back to List
-        </Button>
+      <div className="text-center py-8 max-w-md mx-auto">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 rounded-lg p-6 mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => navigate('/billing/invoice/list')}
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>}
+          >
+            Back to List
+          </Button>
+        </div>
       </div>
     );
   }
 
   if (!invoice) {
     return (
-      <div className="text-center py-8">
-        <p className="text-gray-500">Invoice not found.</p>
-        <Button
-          variant="outline"
-          className="mt-4"
-          onClick={() => navigate('/billing/invoice/list')}
-        >
-          Back to List
-        </Button>
+      <div className="text-center py-8 max-w-md mx-auto">
+        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-6 mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-4 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">Invoice not found.</p>
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => navigate('/billing/invoice/list')}
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>}
+          >
+            Back to List
+          </Button>
+        </div>
       </div>
     );
   }
@@ -572,9 +594,11 @@ function InvoiceDetail() {
                 </Button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 dark:bg-gray-800">
+              <>
+                {/* Desktop View */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
                     <tr>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         #
@@ -640,8 +664,58 @@ function InvoiceDetail() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+
+                {/* Mobile View - Card-based layout */}
+                <div className="md:hidden space-y-4">
+                  {lineItems.map((item, index) => (
+                    <div key={item.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200 hover:shadow-md">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center">
+                          <span className="text-sm font-medium text-gray-500 dark:text-gray-400 mr-2">{index + 1}.</span>
+                          <span className="font-medium text-gray-900 dark:text-white">{item.product_name || '--'}</span>
+                        </div>
+                        <button
+                          className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 p-1"
+                          onClick={() => handleDeleteLineItem(item.id)}
+                          disabled={deletingLineItem}
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-sm mb-2">
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">HSN Code</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{item.hsn_code || defaultValues.hsn_code || '--'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">GST Rate</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">Quantity</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{item.quantity} gm</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">Rate</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{formatIndianCurrency(item.rate)}/g</p>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-gray-200 dark:border-gray-700 pt-2 mt-2">
+                        <div className="flex justify-between items-center">
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">Amount</p>
+                          <p className="font-medium text-gray-900 dark:text-white text-lg">{formatIndianCurrency(item.amount)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )
           ))}
         </div>

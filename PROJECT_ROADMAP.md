@@ -23,12 +23,13 @@
 - 🔄 Complete bug fixes
 - 🔄 Ensure feature parity with HTMX version
 
-### Phase 2: Mordenization and Optimization
-- ⬜ Add responsive design
-- ⬜ Add Dark Mode
-- ⬜ Update the UI/UX to more modern and user-friendly
+### Phase 2: Modernization and Optimization
+- ✅ Add responsive design
+- ✅ Add Dark Mode
+- ✅ Update the UI/UX to more modern and user-friendly
+- ✅ Create reusable components for common UI patterns
 - ⬜ Implement lazy loading and code splitting
-- ⬜ Use proper css standards and best practices 
+- ⬜ Use proper css standards and best practices
 
 ### Phase 3: Enhanced Features
 - ⬜ Phase out HTMX-specific code

@@ -1,0 +1,143 @@
+/* Action Buttons Styles */
+
+/* Animation for action buttons */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.action-button {
+  transition: all 0.2s ease-in-out;
+}
+
+.action-button:hover {
+  animation: pulse 0.5s ease-in-out;
+}
+
+/* Tooltip styles */
+.tooltip {
+  position: absolute;
+  z-index: 10;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s, visibility 0.2s;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.action-button:hover .tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Action menu styles */
+.action-menu {
+  position: relative;
+}
+
+.action-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 5px;
+  background-color: white;
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  min-width: 150px;
+  overflow: hidden;
+}
+
+.dark .action-menu-dropdown {
+  background-color: #1f2937;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.action-menu-item {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s;
+  cursor: pointer;
+}
+
+.action-menu-item:hover {
+  background-color: #f3f4f6;
+}
+
+.dark .action-menu-item:hover {
+  background-color: #374151;
+}
+
+.action-menu-item svg {
+  margin-right: 8px;
+  width: 16px;
+  height: 16px;
+}
+
+/* Table modern styles */
+.table-modern {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-modern th {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background-color: #f9fafb;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.dark .table-modern th {
+  background-color: #1f2937;
+  border-bottom: 2px solid #374151;
+}
+
+.table-modern td {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dark .table-modern td {
+  border-bottom: 1px solid #374151;
+}
+
+.table-modern tr:last-child td {
+  border-bottom: none;
+}
+
+.table-modern tr:hover {
+  background-color: #f9fafb;
+}
+
+.dark .table-modern tr:hover {
+  background-color: #1f2937;
+}
+
+/* Animation for fade in */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
