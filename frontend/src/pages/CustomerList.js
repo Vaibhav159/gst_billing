@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import useDebounce from '../hooks/useDebounce';
 import { Link } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -37,10 +38,17 @@ function CustomerList() {
     currentPage,
     totalPages
   });
+  // Local state for the search input field (updates immediately with typing)
+  const [searchInput, setSearchInput] = useState('');
+
   const [filters, setFilters] = useState({
     search: '',
     business_id: ''
   });
+
+  // Debounce the search input with a 500ms delay
+  // This will only update the actual search filter after the delay
+  const debouncedSearchTerm = useDebounce(searchInput, 500);
 
   // No need for test API connection in production code
 
@@ -286,32 +294,17 @@ function CustomerList() {
     };
   }, [isMounted]);
 
-  // Custom debounce function
-  const useDebounce = (callback, delay) => {
-    const timeoutRef = useRef(null);
-
-    return useCallback((...args) => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-
-      timeoutRef.current = setTimeout(() => {
-        callback(...args);
-      }, delay);
-    }, [callback, delay]);
-  };
-
-  // Create a debounced search function
-  const debouncedSearch = useDebounce((searchValue) => {
-    console.log('Debounced search executing with value:', searchValue);
+  // Update filters when debounced search term changes
+  useEffect(() => {
     if (isMounted.current) {
+      console.log('Debounced search term changed:', debouncedSearchTerm);
       setFilters(prev => ({
         ...prev,
-        search: searchValue
+        search: debouncedSearchTerm
       }));
       setCurrentPage(1); // Reset to first page when search changes
     }
-  }, 500); // 500ms delay
+  }, [debouncedSearchTerm, isMounted]);
 
   // Handle filter changes
   const handleFilterChange = useCallback((e) => {
@@ -328,10 +321,10 @@ function CustomerList() {
         return;
       }
 
-      // Handle search with debounce
+      // Handle search input separately with debounce
       if (name === 'search') {
-        console.log('Search filter changed, using debounce');
-        debouncedSearch(value);
+        console.log('Search input changed:', value);
+        setSearchInput(value); // This updates the input field immediately
         return;
       }
 
@@ -404,7 +397,7 @@ function CustomerList() {
               label="Customer Name"
               id="search"
               name="search"
-              value={filters.search}
+              value={searchInput}
               onChange={handleFilterChange}
               placeholder="Search by name, GST or phone"
             />

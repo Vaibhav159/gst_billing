@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import useDebounce from '../hooks/useDebounce';
 import { Link } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -14,6 +15,9 @@ function BusinessList() {
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  // Local state for the search input field (updates immediately with typing)
+  const [searchInput, setSearchInput] = useState('');
+  // State for the actual search term used in API calls (updated after debounce)
   const [searchTerm, setSearchTerm] = useState('');
 
   // Fetch businesses
@@ -53,10 +57,18 @@ function BusinessList() {
     fetchBusinesses();
   }, [currentPage, searchTerm]);
 
-  // Handle search input change
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
+  // Debounce the search input with a 500ms delay
+  const debouncedSearchTerm = useDebounce(searchInput, 500);
+
+  // Update searchTerm when debounced search term changes
+  useEffect(() => {
+    setSearchTerm(debouncedSearchTerm);
     setCurrentPage(1); // Reset to first page when search changes
+  }, [debouncedSearchTerm]);
+
+  // Handle search input change - updates immediately for visual feedback
+  const handleSearchChange = (e) => {
+    setSearchInput(e.target.value);
   };
 
   // Handle page change
@@ -94,7 +106,7 @@ function BusinessList() {
             label="Search Businesses"
             id="search"
             name="search"
-            value={searchTerm}
+            value={searchInput}
             onChange={handleSearchChange}
             placeholder="Search by name or GST number"
           />
