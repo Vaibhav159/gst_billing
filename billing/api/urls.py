@@ -8,8 +8,8 @@ from rest_framework_simplejwt.views import (
 
 from .views import (
     BusinessViewSet,
+    CSVImportView,
     CustomerViewSet,
-    InvoiceImportView,
     InvoiceViewSet,
     LineItemViewSet,
     ProductViewSet,
@@ -27,7 +27,7 @@ router.register(r"products", ProductViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
-    path("invoices/import/", InvoiceImportView.as_view(), name="import-invoices"),
+    path("csv/import/", CSVImportView.as_view(), name="csv-import"),
     path("public/", PublicAPIView.as_view(), name="public-api"),
     # Custom nested routes for line items
     path(

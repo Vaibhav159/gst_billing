@@ -726,19 +726,23 @@ class ReportView(APIView):
         return self.generate_csv_response(start_date, end_date, invoice_type)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class InvoiceImportView(APIView):
+class CSVImportView(APIView):
     """
     API endpoint for importing invoices from CSV files.
+    This is an alternative endpoint to avoid name clashing.
     """
 
     parser_classes = [MultiPartParser]
 
-    def get(self, request, *args, **kwargs):
+    def get(self, request):
         # Just return a simple response
-        return Response({"message": "Import API ready"})
+        return Response({"message": "CSV Import API ready"})
 
-    def post(self, request, *args, **kwargs):
+    def post(self, request):
+        # Log the request for debugging
+        logger.info(f"Received CSV import request: {request.data}")
+        logger.info(f"Files in request: {request.FILES}")
+
         # Check if file is provided
         if "file" not in request.FILES:
             return Response(
@@ -756,6 +760,7 @@ class InvoiceImportView(APIView):
 
         # Get the uploaded file
         csv_file = request.FILES["file"]
+        logger.info(f"Received file: {csv_file.name}, size: {csv_file.size}")
 
         # Check file extension
         if not csv_file.name.endswith(".csv"):
@@ -768,20 +773,23 @@ class InvoiceImportView(APIView):
         try:
             # Read the file content
             file_content = csv_file.read()
+            logger.info(f"File content length: {len(file_content)}")
 
             # Process the CSV file
             result = process_invoice_csv(file_content, int(business_id))
+            logger.info(f"Import result: {result}")
 
             return Response(result, status=status.HTTP_201_CREATED)
         except CSVImportError as e:
+            logger.error(f"CSV import error: {e}")
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as e:
-            logging.error(f"Error processing CSV file: {e!s}")
+            logger.error(f"Unexpected error during import: {e}", exc_info=True)
             return Response(
-                {"error": "An unexpected error occurred while processing the CSV file"},
+                {"error": "An unexpected error occurred during import"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

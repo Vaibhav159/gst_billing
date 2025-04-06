@@ -49,12 +49,24 @@ const invoiceService = {
     formData.append('file', file);
     formData.append('business_id', businessId);
 
-    const response = await apiClient.post('/invoices/import/', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
+    // Try the new CSV import endpoint first
+    try {
+      const response = await apiClient.post('/csv/import/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data;
+    } catch (error) {
+      console.log('CSV import endpoint failed, trying legacy endpoint:', error);
+      // Fall back to the old endpoint if the new one fails
+      const response = await apiClient.post('/invoices/import/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data;
+    }
   },
 
   // Get invoice totals

@@ -58,6 +58,9 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 - ✅ Improved invoice layout by moving Total Items to the Invoice Summary section
 - ✅ Redesigned Bank Details section with a cleaner, more professional look
 - ✅ Improved Tax Invoice header with better styling and alignment
+- ✅ Fixed InvoiceImportView to properly handle JWT authentication for CSV imports
+- ✅ Fixed CSV import functionality by adding a new endpoint to avoid name clashing
+- ✅ Added comprehensive test cases for CSV import functionality with proper authentication
 - ✅ Fixed list refresh issues by removing API caching to ensure fresh data is always displayed
 - ✅ Added Delete action in Invoice List page with confirmation dialog and proper list refresh
 - ✅ Fixed total_amount not updating after adding a new line item
