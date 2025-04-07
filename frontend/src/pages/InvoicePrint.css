@@ -14,7 +14,7 @@
     background-color: white !important;
   }
 
-  #panel {
+  #panel, .invoice-container {
     width: 210mm !important;
     max-width: 210mm !important;
     height: 297mm !important;
@@ -48,9 +48,12 @@
     page-break-inside: avoid !important;
   }
 
-  /* Force single page */
+  /* Force page breaks between invoices */
   .invoice-container {
     page-break-after: always !important;
+  }
+
+  .page-break-before {
     page-break-before: always !important;
   }
 
@@ -94,10 +97,40 @@
   }
 }
 
+/* Force light mode for print pages */
+.print-page {
+  background-color: white !important;
+  color: #1f2937 !important;
+}
+
+.print-page * {
+  color-scheme: light !important;
+}
+
+/* Override dark mode styles for print pages */
+.print-page .dark\:bg-gray-800,
+.print-page .dark\:bg-gray-700,
+.print-page .dark\:bg-gray-900 {
+  background-color: white !important;
+}
+
+.print-page .dark\:text-white,
+.print-page .dark\:text-gray-400,
+.print-page .dark\:text-gray-300,
+.print-page .dark\:text-gray-200,
+.print-page .dark\:text-gray-100 {
+  color: #1f2937 !important;
+}
+
+.print-page .dark\:border-gray-700 {
+  border-color: #e5e7eb !important;
+}
+
 /* General invoice styles */
 .invoice-container {
   font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif;
   color: #1f2937;
+  background-color: white;
 }
 
 .invoice-header {

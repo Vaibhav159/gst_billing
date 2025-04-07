@@ -29,17 +29,50 @@ function InvoiceList() {
   const [totalAmountOutward, setTotalAmountOutward] = useState(0);
   const [sortField, setSortField] = useState('invoice_date');
   const [sortDirection, setSortDirection] = useState('desc');
+  const [selectedInvoices, setSelectedInvoices] = useState([]);
+  const [selectAll, setSelectAll] = useState(false);
 
   // Row click handler
   const handleInvoiceRowClick = useRowClick('/billing/invoice/', {
     // Ignore clicks on action buttons and menus
-    ignoreClasses: ['action-button', 'btn', 'relative'],
+    ignoreClasses: ['action-button', 'btn', 'relative', 'checkbox-container', 'invoice-checkbox'],
     // Special handling for business and customer references
     specialHandling: {
       'business': (id) => navigate(`/billing/business/${id}`),
       'customer': (id) => navigate(`/billing/customer/${id}`)
     }
   });
+
+  // Handle invoice selection
+  const handleInvoiceSelection = (invoiceId) => {
+    setSelectedInvoices(prev => {
+      if (prev.includes(invoiceId)) {
+        return prev.filter(id => id !== invoiceId);
+      } else {
+        return [...prev, invoiceId];
+      }
+    });
+  };
+
+  // Handle select all invoices
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedInvoices([]);
+    } else {
+      setSelectedInvoices(invoices.map(invoice => invoice.id));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  // Handle bulk print
+  const handleBulkPrint = () => {
+    if (selectedInvoices.length === 0) {
+      alert('Please select at least one invoice to print.');
+      return;
+    }
+
+    navigate(`/billing/invoice/bulk-print?ids=${selectedInvoices.join(',')}`);
+  };
 
   const [filters, setFilters] = useState({
     invoice_number: '',
@@ -269,6 +302,16 @@ function InvoiceList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Invoices</h1>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            onClick={handleBulkPrint}
+            disabled={selectedInvoices.length === 0}
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
+            </svg>}
+          >
+            Print Selected ({selectedInvoices.length})
+          </Button>
           <Link to="/billing/invoice/import">
             <Button
               variant="outline"
@@ -465,7 +508,17 @@ function InvoiceList() {
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      #
+                      <div className="flex items-center">
+                        <div className="checkbox-container mr-2">
+                          <input
+                            type="checkbox"
+                            className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer"
+                            checked={selectAll}
+                            onChange={handleSelectAll}
+                          />
+                        </div>
+                        #
+                      </div>
                     </th>
                     <SortableHeader
                       label="Invoice Number"
@@ -526,7 +579,17 @@ function InvoiceList() {
                         onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
+                          <div className="flex items-center">
+                            <div className="checkbox-container mr-2" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer"
+                                checked={selectedInvoices.includes(invoice.id)}
+                                onChange={() => handleInvoiceSelection(invoice.id)}
+                              />
+                            </div>
+                            <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</div>
@@ -601,9 +664,19 @@ function InvoiceList() {
                       onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
                     >
                       <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
-                          <h3 className="text-lg font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</h3>
+                        <div className="flex items-center">
+                          <div className="checkbox-container mr-2" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer"
+                              checked={selectedInvoices.includes(invoice.id)}
+                              onChange={() => handleInvoiceSelection(invoice.id)}
+                            />
+                          </div>
+                          <div>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</h3>
+                          </div>
                         </div>
                         <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}`}>
                           {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'}
