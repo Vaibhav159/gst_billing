@@ -541,8 +541,8 @@ function InvoiceDetail() {
                     id="quantity"
                     name="quantity"
                     type="number"
-                    min="1"
-                    step="1"
+                    min="0.001"
+                    step="0.001"
                     value={newLineItem.quantity}
                     onChange={handleLineItemChange}
                     placeholder="Enter quantity in grams"
