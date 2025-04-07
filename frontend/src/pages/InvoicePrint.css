@@ -12,9 +12,19 @@
     print-color-adjust: exact !important;
     color-adjust: exact !important;
     background-color: white !important;
+    color-scheme: light !important;
   }
 
-  #panel {
+  /* Force light mode for all elements when printing */
+  * {
+    background-color: white !important;
+    color: #1f2937 !important;
+    border-color: #e5e7eb !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #panel, .invoice-container {
     width: 210mm !important;
     max-width: 210mm !important;
     height: 297mm !important;
@@ -48,9 +58,12 @@
     page-break-inside: avoid !important;
   }
 
-  /* Force single page */
+  /* Force page breaks between invoices */
   .invoice-container {
     page-break-after: always !important;
+  }
+
+  .page-break-before {
     page-break-before: always !important;
   }
 
@@ -94,10 +107,147 @@
   }
 }
 
+/* Force light mode for print pages */
+.print-page {
+  background-color: white !important;
+  color: #1f2937 !important;
+}
+
+.print-page * {
+  color-scheme: light !important;
+}
+
+/* Override dark mode styles for print pages */
+.print-page .dark\:bg-gray-800,
+.print-page .dark\:bg-gray-700,
+.print-page .dark\:bg-gray-900,
+.print-page .dark\:bg-gray-800\/50,
+.print-page [class*="dark:bg-"] {
+  background-color: white !important;
+}
+
+.print-page .dark\:text-white,
+.print-page .dark\:text-gray-400,
+.print-page .dark\:text-gray-300,
+.print-page .dark\:text-gray-200,
+.print-page .dark\:text-gray-100,
+.print-page [class*="dark:text-"] {
+  color: #1f2937 !important;
+}
+
+.print-page .dark\:border-gray-700,
+.print-page [class*="dark:border-"] {
+  border-color: #e5e7eb !important;
+}
+
+/* Force specific elements to have white background */
+.print-page table,
+.print-page th,
+.print-page td,
+.print-page thead,
+.print-page tbody,
+.print-page tr,
+.print-page .invoice-summary,
+.print-page .bank-details {
+  background-color: white !important;
+  color: #1f2937 !important;
+  border-color: #e5e7eb !important;
+}
+
+/* Light mode only class for invoice container */
+.light-mode-only {
+  background-color: white !important;
+  color: #1f2937 !important;
+}
+
+.light-mode-only * {
+  background-color: white !important;
+  color: #1f2937 !important;
+  border-color: #e5e7eb !important;
+}
+
+/* Specific overrides for table headers and dark sections */
+.light-mode-only thead,
+.light-mode-only th,
+.light-mode-only .bg-gray-50 {
+  background-color: #f9fafb !important;
+  color: #1f2937 !important;
+}
+
+/* Fix for dark backgrounds in tables */
+.light-mode-only .bg-gray-800,
+.light-mode-only .bg-gray-700,
+.light-mode-only .bg-gray-900 {
+  background-color: white !important;
+}
+
+.light-mode-only .text-white {
+  color: #1f2937 !important;
+}
+
+/* Override for invoice header */
+.light-mode-only .bg-indigo-600,
+.print-page .bg-indigo-600 {
+  background-color: #4f46e5 !important;
+}
+
+.light-mode-only .bg-indigo-600 *,
+.print-page .bg-indigo-600 * {
+  color: white !important;
+  background-color: transparent !important;
+}
+
+/* Exceptions for elements that should maintain their colors */
+@media print {
+  .bg-indigo-600 {
+    background-color: #4f46e5 !important;
+  }
+
+  .bg-indigo-600 * {
+    color: white !important;
+    background-color: transparent !important;
+  }
+
+  /* Top border */
+  .w-full.h-1.bg-indigo-600 {
+    background-color: #4f46e5 !important;
+  }
+
+  /* Invoice type badges */
+  .bg-green-100 {
+    background-color: #d1fae5 !important;
+  }
+
+  .bg-blue-100 {
+    background-color: #dbeafe !important;
+  }
+
+  .text-green-800 {
+    color: #065f46 !important;
+  }
+
+  .text-blue-800 {
+    color: #1e40af !important;
+  }
+
+  /* Force white background for specific sections */
+  .invoice-summary,
+  .bank-details,
+  table thead,
+  table tbody,
+  table tr,
+  table td,
+  table th {
+    background-color: white !important;
+    color: #1f2937 !important;
+  }
+}
+
 /* General invoice styles */
 .invoice-container {
   font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif;
   color: #1f2937;
+  background-color: white;
 }
 
 .invoice-header {

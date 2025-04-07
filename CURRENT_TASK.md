@@ -32,6 +32,17 @@ We are migrating the frontend of the GST Billing application from HTMX to React 
 
 
 ### Recently Completed Items
+- ✅ Refactored dashboard API endpoints into their respective model ViewSets for better organization
+- ✅ Fixed LineItem model field references in ProductViewSet's top action
+- ✅ Enhanced dashboard with interactive data visualizations and business insights
+- ✅ Added Revenue Chart showing monthly comparison of outward vs inward invoices
+- ✅ Implemented Invoice Distribution Chart with amount/count toggle
+- ✅ Created Top Customers Widget showing revenue and invoice count
+- ✅ Added Top Products Widget with amount/quantity sorting options
+- ✅ Implemented Business Performance Cards with profit margin indicators
+- ✅ Added dashboard filters for business and financial year selection
+- ✅ Created backend API endpoints for dashboard data visualization
+- ✅ Implemented proper filter propagation to all dashboard components
 - ✅ Fixed duplicate API calls in React StrictMode with request caching
 - ✅ Added request deduplication to prevent identical simultaneous requests
 - ✅ Implemented proper cleanup of request cache to prevent memory leaks

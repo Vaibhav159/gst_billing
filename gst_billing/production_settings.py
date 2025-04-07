@@ -15,9 +15,9 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+# Temporarily enabling debug for troubleshooting
+DEBUG = True
 
-ALLOWED_HOSTS = ["your-domain.com", "www.your-domain.com", "localhost", "127.0.0.1"]
 
 # Import all settings from the main settings file
 from gst_billing.settings import *
@@ -56,11 +56,18 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.your-domain.com",
 ]
 
-# Cache settings - using local memory cache for simplicity
-# Consider using Redis or Memcached for better performance
+# Cache settings - using Redis
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "unique-snowflake",
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": f"redis://{os.environ.get('REDIS_HOST', 'redis')}:{os.environ.get('REDIS_PORT', '6379')}/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
     }
 }
+
+# Media files
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+ALLOWED_HOSTS = ["*"]  # Allow all hosts for development/testing

@@ -81,7 +81,7 @@ function InvoicePrint() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-screen">
+      <div className="flex justify-center items-center h-screen print-page">
         <LoadingSpinner size="lg" />
       </div>
     );
@@ -89,7 +89,7 @@ function InvoicePrint() {
 
   if (error) {
     return (
-      <div className="text-center py-8 text-red-500">
+      <div className="text-center py-8 text-red-500 print-page">
         <p>{error}</p>
         <button
           className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
@@ -103,7 +103,7 @@ function InvoicePrint() {
 
   if (!printData) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-8 print-page">
         <p className="text-gray-500">Invoice data not found.</p>
         <button
           className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
@@ -154,7 +154,7 @@ function InvoicePrint() {
 
   if (!invoice || Object.keys(invoice).length === 0) {
     return (
-      <div className="text-center py-8">
+      <div className="text-center py-8 print-page">
         <p className="text-gray-500">Invoice details are incomplete.</p>
         <button
           className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
@@ -167,7 +167,7 @@ function InvoicePrint() {
   }
 
   return (
-    <div>
+    <div className="print-page">
       {/* Print controls - hidden when printing */}
       <div className="flex items-center gap-3 p-4 print:hidden">
         <button
@@ -192,7 +192,7 @@ function InvoicePrint() {
       </div>
 
       {/* Invoice content - visible when printing */}
-      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container">
+      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container light-mode-only">
         {/* Top border */}
         <div className="w-full h-1 bg-indigo-600 mb-4"></div>
 

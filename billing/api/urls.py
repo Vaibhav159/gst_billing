@@ -13,7 +13,6 @@ from .views import (
     InvoiceViewSet,
     LineItemViewSet,
     ProductViewSet,
-    PublicAPIView,
     ReportView,
 )
 
@@ -28,8 +27,6 @@ urlpatterns = [
     path("", include(router.urls)),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
     path("csv/import/", CSVImportView.as_view(), name="csv-import"),
-    path("public/", PublicAPIView.as_view(), name="public-api"),
-    # Custom nested routes for line items
     path(
         "invoices/<int:invoice_id>/line-items/",
         LineItemViewSet.as_view({"get": "list", "post": "create"}),

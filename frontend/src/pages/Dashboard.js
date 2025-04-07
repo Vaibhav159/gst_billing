@@ -1,10 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
+
+// Import dashboard chart components
+import RevenueChart from '../components/dashboard/RevenueChart';
+import InvoiceDistributionChart from '../components/dashboard/InvoiceDistributionChart';
+import TopCustomersWidget from '../components/dashboard/TopCustomersWidget';
+import TopProductsWidget from '../components/dashboard/TopProductsWidget';
+import BusinessPerformanceCard from '../components/dashboard/BusinessPerformanceCard';
+import RecentInvoicesWidget from '../components/dashboard/RecentInvoicesWidget';
+import DashboardFilters from '../components/dashboard/DashboardFilters';
 
 function Dashboard() {
   const [stats, setStats] = useState({
@@ -20,20 +29,38 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Dashboard filters state
+  const [filters, setFilters] = useState({
+    business: null,
+    startDate: null,
+    endDate: null
+  });
+
+  // Handle filter changes - memoized to prevent infinite re-renders
+  const handleFilterChange = useCallback((newFilters) => {
+    setFilters(newFilters);
+  }, []);
+
   // Fetch dashboard data
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
 
-        // Fetch counts
+        // Build params object with filters
+        const params = {};
+        if (filters.business) params.business = filters.business;
+        if (filters.startDate) params.start_date = filters.startDate;
+        if (filters.endDate) params.end_date = filters.endDate;
+
+        // Fetch counts with filters
         const [customersRes, businessesRes, invoicesRes, productsRes, invoiceTotalsRes, recentInvoicesRes] = await Promise.all([
-          apiClient.get('/customers/?limit=1'),
-          apiClient.get('/businesses/?limit=1'),
-          apiClient.get('/invoices/?limit=1'),
-          apiClient.get('/products/?limit=1'),
-          apiClient.get('/invoices/totals/'),
-          apiClient.get('/invoices/?limit=5&ordering=-invoice_date')
+          apiClient.get('/customers/?limit=1', { params }),
+          apiClient.get('/businesses/?limit=1', { params }),
+          apiClient.get('/invoices/?limit=1', { params }),
+          apiClient.get('/products/?limit=1', { params }),
+          apiClient.get('/invoices/totals/', { params }),
+          apiClient.get('/invoices/?limit=5&ordering=-invoice_date', { params })
         ]);
 
         setStats({
@@ -57,7 +84,7 @@ function Dashboard() {
     };
 
     fetchDashboardData();
-  }, []);
+  }, [filters]); // Re-fetch when filters change
 
   // Using the formatDate function from utils/formatters.js
 
@@ -80,6 +107,11 @@ function Dashboard() {
             System Online
           </span>
         </div>
+      </div>
+
+      {/* Dashboard Filters */}
+      <div className="mb-4">
+        <DashboardFilters onFilterChange={handleFilterChange} />
       </div>
 
       {/* Summary Statistics */}
@@ -311,6 +343,36 @@ function Dashboard() {
             </div>
           </Card>
         </div>
+      </div>
+
+      {/* Revenue Chart */}
+      <div className="mb-8">
+        <RevenueChart filters={filters} />
+      </div>
+
+      {/* Invoice Distribution and Top Customers */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <InvoiceDistributionChart filters={filters} />
+        <TopCustomersWidget filters={filters} />
+      </div>
+
+      {/* Top Products */}
+      <div className="mb-8">
+        <TopProductsWidget filters={filters} />
+      </div>
+
+      {/* Business Performance */}
+      <div className="mb-8">
+        <BusinessPerformanceCard filters={filters} />
+      </div>
+
+      {/* Recent Invoices */}
+      <div className="mb-8">
+        <RecentInvoicesWidget
+          invoices={recentInvoices}
+          loading={loading}
+          error={error}
+        />
       </div>
 
       {/* Quick Actions */}

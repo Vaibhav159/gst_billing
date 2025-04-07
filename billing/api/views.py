@@ -79,6 +79,52 @@ class BusinessViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    @action(detail=False, methods=["get"])
+    def performance(self, request):
+        """Get performance metrics for each business"""
+        from django.db.models import Count, Q, Sum
+
+        # Get query parameters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        # Base query
+        query = Invoice.objects.all()
+
+        # Apply filters
+        if start_date:
+            query = query.filter(invoice_date__gte=start_date)
+        if end_date:
+            query = query.filter(invoice_date__lte=end_date)
+
+        # Group by business, calculate totals
+        business_data = (
+            query.values("business", "business__name")
+            .annotate(
+                outward_total=Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                inward_total=Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                outward_count=Count("id", filter=Q(type_of_invoice="outward")),
+                inward_count=Count("id", filter=Q(type_of_invoice="inward")),
+            )
+            .order_by("-outward_total")
+        )
+
+        # Format the response
+        result = []
+        for business in business_data:
+            result.append(
+                {
+                    "id": business["business"],
+                    "name": business["business__name"],
+                    "outward_total": business["outward_total"] or 0,
+                    "inward_total": business["inward_total"] or 0,
+                    "outward_count": business["outward_count"] or 0,
+                    "inward_count": business["inward_count"] or 0,
+                }
+            )
+
+        return Response(result)
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -125,6 +171,54 @@ class CustomerViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response([])
 
+    @action(detail=False, methods=["get"])
+    def top(self, request):
+        """Get top customers by revenue"""
+        from django.db.models import Count, F, Sum
+
+        # Get query parameters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        business_id = request.query_params.get("business")
+        limit = int(request.query_params.get("limit", 5))
+
+        # Base query - focus on outward invoices (sales)
+        query = Invoice.objects.filter(type_of_invoice="outward")
+
+        # Apply filters
+        if start_date:
+            query = query.filter(invoice_date__gte=start_date)
+        if end_date:
+            query = query.filter(invoice_date__lte=end_date)
+        if business_id:
+            query = query.filter(business_id=business_id)
+
+        # Group by customer, calculate totals
+        top_customers = (
+            query.values("customer", "customer__name")
+            .annotate(
+                total_amount=Sum("total_amount"),
+                invoice_count=Count("id"),
+                type_of_invoice=F("type_of_invoice"),
+            )
+            .order_by("-total_amount")[:limit]
+        )
+
+        # Format the response
+        result = []
+        for customer in top_customers:
+            result.append(
+                {
+                    "id": customer["customer"],
+                    "name": customer["customer__name"],
+                    "total_amount": customer["total_amount"],
+                    "invoice_count": customer["invoice_count"],
+                    "type_of_invoice": customer["type_of_invoice"],
+                }
+            )
+
+        return Response(result)
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ProductViewSet(viewsets.ModelViewSet):
@@ -170,6 +264,66 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         # If query is too short, return empty list
         return Response([])
+
+    @action(detail=False, methods=["get"])
+    def top(self, request):
+        """Get top products by sales volume or amount"""
+        from django.db.models import Count, Sum
+
+        # Get query parameters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        business_id = request.query_params.get("business")
+        limit = int(request.query_params.get("limit", 5))
+        sort_by = request.query_params.get(
+            "sort_by", "amount"
+        )  # 'amount' or 'quantity'
+
+        # Base query - focus on outward invoices (sales)
+        query = LineItem.objects.filter(invoice__type_of_invoice="outward")
+
+        # Apply filters
+        if start_date:
+            query = query.filter(invoice__invoice_date__gte=start_date)
+        if end_date:
+            query = query.filter(invoice__invoice_date__lte=end_date)
+        if business_id:
+            query = query.filter(invoice__business_id=business_id)
+
+        # Group by product name, calculate totals
+        top_products = query.values(
+            "product_name", "hsn_code", "gst_tax_rate"
+        ).annotate(
+            total_amount=Sum("amount"),
+            total_quantity=Sum("quantity"),
+            invoice_count=Count("invoice", distinct=True),
+        )
+
+        # Sort by the requested field
+        if sort_by == "quantity":
+            top_products = top_products.order_by("-total_quantity")[:limit]
+        else:  # Default to 'amount'
+            top_products = top_products.order_by("-total_amount")[:limit]
+
+        # Format the response
+        result = []
+        for product in top_products:
+            # Try to find the corresponding Product model instance
+            product_obj = Product.objects.filter(name=product["product_name"]).first()
+
+            result.append(
+                {
+                    "id": product_obj.id if product_obj else None,
+                    "name": product["product_name"],
+                    "hsn_code": product["hsn_code"],
+                    "gst_tax_rate": product["gst_tax_rate"],
+                    "total_amount": product["total_amount"],
+                    "total_quantity": product["total_quantity"],
+                    "invoice_count": product["invoice_count"],
+                }
+            )
+
+        return Response(result)
 
     @method_decorator(cache_page(60 * 60 * 30))  # Cache for 30 days
     @action(detail=False, methods=["get"])
@@ -300,6 +454,79 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         }
 
         return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def all_ids(self, request):
+        """Get all invoice IDs matching the current filters"""
+        queryset = self.get_queryset()
+
+        # Get only the IDs to minimize data transfer
+        invoice_ids = list(queryset.values_list("id", flat=True))
+
+        data = {"ids": invoice_ids, "count": len(invoice_ids)}
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def monthly_totals(self, request):
+        """Get monthly totals for invoices (outward and inward)"""
+        from django.db.models.functions import ExtractMonth, ExtractYear
+
+        # Use the same queryset as list to apply filters
+        queryset = self.get_queryset()
+
+        # Annotate with month and year
+        queryset = queryset.annotate(
+            month=ExtractMonth("invoice_date"), year=ExtractYear("invoice_date")
+        )
+
+        # Group by month and year, calculate totals
+        from django.db.models import Count, Q
+
+        monthly_data = (
+            queryset.values("month", "year")
+            .annotate(
+                outward_total=Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                inward_total=Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                outward_count=Count("id", filter=Q(type_of_invoice="outward")),
+                inward_count=Count("id", filter=Q(type_of_invoice="inward")),
+            )
+            .order_by("year", "month")
+        )
+
+        return Response(monthly_data)
+
+    @action(detail=False, methods=["get"])
+    def distribution(self, request):
+        """Get distribution of invoices by type"""
+        # Use the same queryset as list to apply filters
+        queryset = self.get_queryset()
+
+        # Calculate totals by type
+        from django.db.models import Count
+
+        outward_total = queryset.filter(type_of_invoice="outward").aggregate(
+            total=Sum("total_amount"), count=Count("id")
+        )
+
+        inward_total = queryset.filter(type_of_invoice="inward").aggregate(
+            total=Sum("total_amount"), count=Count("id")
+        )
+
+        other_total = queryset.exclude(
+            type_of_invoice__in=["outward", "inward"]
+        ).aggregate(total=Sum("total_amount"), count=Count("id"))
+
+        distribution = {
+            "outward_total": outward_total["total"] or 0,
+            "outward_count": outward_total["count"] or 0,
+            "inward_total": inward_total["total"] or 0,
+            "inward_count": inward_total["count"] or 0,
+            "other_total": other_total["total"] or 0,
+            "other_count": other_total["count"] or 0,
+        }
+
+        return Response(distribution)
 
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
@@ -809,23 +1036,3 @@ class CSVImportView(APIView):
                 {"error": "An unexpected error occurred during import"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-
-# CSRF token endpoint removed - using JWT authentication instead
-
-
-class PublicAPIView(APIView):
-    """
-    Public API endpoint that doesn't require authentication.
-    This is useful for checking if the API is working without authentication.
-    """
-
-    permission_classes = []
-
-    def get(self, request, *args, **kwargs):
-        return Response(
-            {
-                "message": "This is a public endpoint that doesn't require authentication.",
-                "status": "API is working correctly.",
-            }
-        )

@@ -14,6 +14,7 @@ import InvoiceDetail from './pages/InvoiceDetail';
 import InvoiceForm from './pages/InvoiceForm';
 import InvoiceImport from './pages/InvoiceImport';
 import InvoicePrint from './pages/InvoicePrint';
+import BulkInvoicePrint from './pages/BulkInvoicePrint';
 import ProductList from './pages/ProductList';
 import ProductForm from './pages/ProductForm';
 import ProductDetail from './pages/ProductDetail';
@@ -109,6 +110,7 @@ function App() {
 
       {/* Standalone Routes (without Layout) */}
       <Route path="billing/invoice/:invoiceId/print" element={<InvoicePrint />} />
+      <Route path="billing/invoice/bulk-print" element={<BulkInvoicePrint />} />
     </Routes>
   );
 }

@@ -11,6 +11,7 @@ import ActionMenu from '../components/ActionMenu';
 import SortableHeader from '../components/SortableHeader';
 import apiClient from '../api/client';
 import customerService from '../api/customerService';
+import invoiceService from '../api/invoiceService';
 import { formatIndianCurrency, formatDate } from '../utils/formatters';
 import { useRowClick } from '../utils/navigationHelpers';
 
@@ -29,17 +30,112 @@ function InvoiceList() {
   const [totalAmountOutward, setTotalAmountOutward] = useState(0);
   const [sortField, setSortField] = useState('invoice_date');
   const [sortDirection, setSortDirection] = useState('desc');
+  const [selectedInvoices, setSelectedInvoices] = useState([]);
+  const [selectAll, setSelectAll] = useState(false);
 
   // Row click handler
   const handleInvoiceRowClick = useRowClick('/billing/invoice/', {
     // Ignore clicks on action buttons and menus
-    ignoreClasses: ['action-button', 'btn', 'relative'],
+    ignoreClasses: ['action-button', 'btn', 'relative', 'checkbox-container', 'invoice-checkbox'],
     // Special handling for business and customer references
     specialHandling: {
       'business': (id) => navigate(`/billing/business/${id}`),
       'customer': (id) => navigate(`/billing/customer/${id}`)
     }
   });
+
+  // Handle invoice selection
+  const handleInvoiceSelection = (invoiceId) => {
+    setSelectedInvoices(prev => {
+      if (prev.includes(invoiceId)) {
+        return prev.filter(id => id !== invoiceId);
+      } else {
+        return [...prev, invoiceId];
+      }
+    });
+  };
+
+  // Handle select all invoices (only affects current page)
+  const handleSelectAll = () => {
+    if (selectAll) {
+      // Remove all current page invoices from selection
+      const currentPageIds = invoices.map(invoice => invoice.id);
+      setSelectedInvoices(prev => prev.filter(id => !currentPageIds.includes(id)));
+    } else {
+      // Add all current page invoices to selection
+      const currentPageIds = invoices.map(invoice => invoice.id);
+      setSelectedInvoices(prev => {
+        // Create a new array with all previously selected IDs plus current page IDs
+        // Use Set to remove duplicates
+        return [...new Set([...prev, ...currentPageIds])];
+      });
+    }
+    setSelectAll(!selectAll);
+  };
+
+  // Handle bulk print
+  const handleBulkPrint = () => {
+    if (selectedInvoices.length === 0) {
+      alert('Please select at least one invoice to print.');
+      return;
+    }
+
+    navigate(`/billing/invoice/bulk-print?ids=${selectedInvoices.join(',')}`);
+  };
+
+  // Handle select all filtered invoices
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [totalFilteredCount, setTotalFilteredCount] = useState(0);
+
+  const handleSelectAllFiltered = async () => {
+    try {
+      setSelectingAll(true);
+
+      // Check if all filtered invoices are already selected
+      if (totalFilteredCount > 0 && selectedInvoices.length === totalFilteredCount) {
+        // If all are selected, unselect all
+        setSelectedInvoices([]);
+        setTotalFilteredCount(0);
+        return;
+      }
+
+      // Prepare filter parameters (same as used for the current list view)
+      const params = { ...filters };
+
+      // Add sorting parameters if set
+      if (sortField && sortDirection) {
+        params.ordering = sortDirection === 'desc' ? `-${sortField}` : sortField;
+      }
+
+      // Remove empty filters
+      Object.keys(params).forEach(key => {
+        if (params[key] === '') {
+          delete params[key];
+        }
+      });
+
+      // Get all invoice IDs matching the current filters
+      const result = await invoiceService.getAllInvoiceIds(params);
+
+      // Update the total count for display
+      setTotalFilteredCount(result.count);
+
+      // Select all the IDs
+      setSelectedInvoices(result.ids);
+
+      // Show a success message
+      if (result.count > 0) {
+        alert(`Selected ${result.count} invoices matching your current filters.`);
+      } else {
+        alert('No invoices match your current filters.');
+      }
+    } catch (error) {
+      console.error('Error selecting all filtered invoices:', error);
+      alert('Failed to select all invoices. Please try again.');
+    } finally {
+      setSelectingAll(false);
+    }
+  };
 
   const [filters, setFilters] = useState({
     invoice_number: '',
@@ -85,6 +181,17 @@ function InvoiceList() {
 
 
 
+  // Update selectAll state when invoices change
+  useEffect(() => {
+    if (invoices.length > 0) {
+      // Check if all invoices on the current page are selected
+      const allSelected = invoices.every(invoice => selectedInvoices.includes(invoice.id));
+      setSelectAll(allSelected);
+    } else {
+      setSelectAll(false);
+    }
+  }, [invoices, selectedInvoices]);
+
   // Fetch businesses for filter
   useEffect(() => {
     const fetchBusinesses = async () => {
@@ -126,6 +233,8 @@ function InvoiceList() {
   // Handle page change
   const handlePageChange = (page) => {
     setCurrentPage(page);
+    // Reset selectAll state when changing pages
+    setSelectAll(false);
   };
 
   // Single useEffect to handle both setting default filter and fetching invoices
@@ -269,6 +378,23 @@ function InvoiceList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Invoices</h1>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            onClick={handleBulkPrint}
+            disabled={selectedInvoices.length === 0}
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
+            </svg>}
+            className={`relative ${selectedInvoices.length === 0 ? 'opacity-60 cursor-not-allowed' : ''}`}
+            title={selectedInvoices.length === 0 ? "Select at least one invoice to print" : `Print ${selectedInvoices.length} selected invoice${selectedInvoices.length !== 1 ? 's' : ''}`}
+          >
+            <span>Print Selected</span>
+            {selectedInvoices.length > 0 && (
+              <span className="ml-2 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-primary-600 rounded-full">
+                {selectedInvoices.length}
+              </span>
+            )}
+          </Button>
           <Link to="/billing/invoice/import">
             <Button
               variant="outline"
@@ -291,6 +417,24 @@ function InvoiceList() {
           </Link>
         </div>
       </div>
+
+      {/* Selection notification */}
+      {selectedInvoices.length > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4 flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500 dark:text-blue-400 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="text-sm text-blue-700 dark:text-blue-300">
+            <p>
+              <strong>{selectedInvoices.length}</strong> invoice{selectedInvoices.length !== 1 ? 's' : ''} selected across all pages.
+              {totalFilteredCount > 0 && selectedInvoices.length === totalFilteredCount && (
+                <span className="font-medium"> All invoices matching your current filters are selected.</span>
+              )}
+              <span className="block mt-1">Your selection is maintained when navigating between pages. Use the "Print Selected" button to download all selected invoices.</span>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards with Improved Styling */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -465,7 +609,53 @@ function InvoiceList() {
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      #
+                      <div className="flex items-center">
+                        <div className="checkbox-container mr-2">
+                          <input
+                            type="checkbox"
+                            className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer"
+                            checked={selectAll}
+                            onChange={handleSelectAll}
+                          />
+                        </div>
+                        <span className="mr-2">#</span>
+
+                        {/* Select All Filtered button - only shown when some items are selected */}
+                        {selectedInvoices.length > 0 && (
+                          <button
+                            onClick={handleSelectAllFiltered}
+                            disabled={selectingAll}
+                            className="ml-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center"
+                            title={totalFilteredCount > 0 && selectedInvoices.length === totalFilteredCount
+                              ? "Unselect all invoices"
+                              : "Select all invoices matching your current filters"}
+                          >
+                            {selectingAll ? (
+                              <>
+                                <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span>Selecting...</span>
+                              </>
+                            ) : totalFilteredCount > 0 && selectedInvoices.length === totalFilteredCount ? (
+                              <>
+                                <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                </svg>
+                                <span>Unselect All</span>
+                              </>
+                            ) : (
+                              <>
+                                <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                  <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span>Select All Filtered</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </th>
                     <SortableHeader
                       label="Invoice Number"
@@ -526,7 +716,17 @@ function InvoiceList() {
                         onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
+                          <div className="flex items-center">
+                            <div className="checkbox-container mr-2" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer"
+                                checked={selectedInvoices.includes(invoice.id)}
+                                onChange={() => handleInvoiceSelection(invoice.id)}
+                              />
+                            </div>
+                            <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{serialNumber}</div>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</div>
@@ -589,6 +789,51 @@ function InvoiceList() {
 
             {/* Mobile View - Card-based layout */}
             <div className="md:hidden">
+              {/* Mobile Select All controls - only shown when some items are selected */}
+              {selectedInvoices.length > 0 && (
+                <div className="mb-4 flex justify-between items-center bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer mr-2"
+                      checked={selectAll}
+                      onChange={handleSelectAll}
+                    />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Current Page</span>
+                  </div>
+
+                  <button
+                    onClick={handleSelectAllFiltered}
+                    disabled={selectingAll}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center"
+                  >
+                    {selectingAll ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Selecting...</span>
+                      </>
+                    ) : totalFilteredCount > 0 && selectedInvoices.length === totalFilteredCount ? (
+                      <>
+                        <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                        <span>Unselect All</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span>Select All Filtered</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-4">
                 {invoices.map((invoice, index) => {
                   // Calculate the serial number based on the current page
@@ -601,9 +846,19 @@ function InvoiceList() {
                       onClick={(e) => handleInvoiceRowClick(invoice.id, e)}
                     >
                       <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
-                          <h3 className="text-lg font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</h3>
+                        <div className="flex items-center">
+                          <div className="checkbox-container mr-2" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="invoice-checkbox h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer"
+                              checked={selectedInvoices.includes(invoice.id)}
+                              onChange={() => handleInvoiceSelection(invoice.id)}
+                            />
+                          </div>
+                          <div>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">#{serialNumber}</span>
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">{invoice.invoice_number}</h3>
+                          </div>
                         </div>
                         <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${invoice.type_of_invoice === 'outward' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}`}>
                           {invoice.type_of_invoice === 'outward' ? 'Outward' : 'Inward'}

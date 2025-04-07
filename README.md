@@ -20,7 +20,7 @@ Currently migrating the frontend from HTMX to React. See [CURRENT_TASK.md](CURRE
 - **Frontend**: React, Tailwind CSS
 - **Backend**: Django, Django REST Framework
 - **Database**: PostgreSQL
-- **Package Management**: uv (fast Python package manager)
+- **Package Management**: pip (Python package manager)
 - **Deployment**: Docker, Nginx
 - **CI/CD**: CircleCI
 
@@ -34,6 +34,10 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
 
 ### Prerequisites
 
+#### Option 1: Using Docker (Recommended)
+- Docker and Docker Compose
+
+#### Option 2: Manual Setup
 - Python 3.10+
 - Node.js 16+
 - PostgreSQL 13+
@@ -46,70 +50,78 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
    cd gst-billing
    ```
 
-2. Install uv (if not already installed)
+#### Option 1: Using Docker (Recommended)
+
+1. Run the development server
    ```bash
-   # On macOS and Linux
-   curl -LsSf https://astral.sh/uv/install.sh | sh
+   # Make the script executable
+   chmod +x run_dev_pip.sh
 
-   # On Windows
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-   # Or with pip
-   pip install uv
+   # Start the development environment
+   ./run_dev_pip.sh
    ```
 
-3. Set up the Python environment with uv
+2. Access the application at http://localhost:8000
+
+3. For production deployment
+   ```bash
+   # Make the script executable
+   chmod +x deploy.sh
+
+   # Start the production environment
+   ./deploy.sh
+   ```
+
+4. Access the production deployment at http://localhost
+
+#### Option 2: Manual Setup
+
+1. Install dependencies with pip
    ```bash
    # Create a virtual environment
-   uv venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-   # Install dependencies from pyproject.toml
-   uv sync
-
-   # Or install in development mode with dev dependencies
-   uv sync --editable --extras dev
+   # Install the project and its dependencies
+   pip install -e .
    ```
 
-4. Set up the database
+2. Set up the database
    ```bash
    python manage.py migrate
    ```
 
-5. Install frontend dependencies
+3. Install frontend dependencies
    ```bash
    cd frontend
    npm install
    ```
 
-6. Build the frontend
+4. Build the frontend
    ```bash
    npm run build
    ```
 
-7. Start the development server
+5. Start the development server
    ```bash
    python manage.py runserver
    ```
 
-8. Access the application at http://localhost:8000
+6. Access the application at http://localhost:8000
 
-### Managing Dependencies with uv
+### Managing Dependencies with pip
 
 The project uses pyproject.toml for dependency management. To add or remove packages:
 
 ```bash
 # Add a package
-uv add <package_name>
+pip install <package_name>
 
-# Remove a package
-uv remove <package_name>
+# Update the project dependencies
+pip install -e .
 
-# Update all dependencies
-uv sync
-
-# Generate a lockfile (for reproducible builds)
-uv lock
+# Install development dependencies
+pip install -e ".[dev]"
 ```
 
 ## 🧪 Running Tests
@@ -119,7 +131,7 @@ We use pytest for running tests with coverage reporting:
 
 ```bash
 # Make sure you have the dev dependencies installed
-uv sync --editable --extras dev
+pip install -e ".[dev]"
 
 # Run tests with coverage
 python -m pytest billing/tests/ --cov=billing
