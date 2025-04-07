@@ -456,6 +456,18 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response(data)
 
     @action(detail=False, methods=["get"])
+    def all_ids(self, request):
+        """Get all invoice IDs matching the current filters"""
+        queryset = self.get_queryset()
+
+        # Get only the IDs to minimize data transfer
+        invoice_ids = list(queryset.values_list("id", flat=True))
+
+        data = {"ids": invoice_ids, "count": len(invoice_ids)}
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
     def monthly_totals(self, request):
         """Get monthly totals for invoices (outward and inward)"""
         from django.db.models.functions import ExtractMonth, ExtractYear

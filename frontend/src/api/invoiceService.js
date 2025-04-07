@@ -84,6 +84,28 @@ const invoiceService = {
       }
     });
     return response.data.next_invoice_number;
+  },
+
+  // Get all invoice IDs matching filters
+  getAllInvoiceIds: async (filters = {}) => {
+    // Add limit=1000 to get all results (up to 1000)
+    const params = { ...filters, limit: 1000 };
+
+    // Remove pagination parameter if present
+    if (params.page) {
+      delete params.page;
+    }
+
+    const response = await apiClient.get('/invoices/', { params });
+
+    // Extract just the IDs from the results
+    const invoices = response.data.results || response.data;
+    const ids = invoices.map(invoice => invoice.id);
+
+    return {
+      ids,
+      count: ids.length
+    };
   }
 };
 
