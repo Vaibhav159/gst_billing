@@ -239,7 +239,7 @@ function BulkInvoicePrint() {
         return (
           <div key={invoice.id} className={index > 0 ? 'page-break-before' : ''}>
             {/* Invoice content - visible when printing */}
-            <div id={`invoice-${invoice.id}`} className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container">
+            <div id={`invoice-${invoice.id}`} className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container light-mode-only">
               {/* Top border */}
               <div className="w-full h-1 bg-indigo-600 mb-4"></div>
 

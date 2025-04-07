@@ -192,7 +192,7 @@ function InvoicePrint() {
       </div>
 
       {/* Invoice content - visible when printing */}
-      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container">
+      <div id="panel" className="max-w-5xl mx-auto bg-white rounded-lg shadow-lg p-6 print:p-4 flex flex-col invoice-container light-mode-only">
         {/* Top border */}
         <div className="w-full h-1 bg-indigo-600 mb-4"></div>
 

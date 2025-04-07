@@ -54,12 +54,20 @@ function InvoiceList() {
     });
   };
 
-  // Handle select all invoices
+  // Handle select all invoices (only affects current page)
   const handleSelectAll = () => {
     if (selectAll) {
-      setSelectedInvoices([]);
+      // Remove all current page invoices from selection
+      const currentPageIds = invoices.map(invoice => invoice.id);
+      setSelectedInvoices(prev => prev.filter(id => !currentPageIds.includes(id)));
     } else {
-      setSelectedInvoices(invoices.map(invoice => invoice.id));
+      // Add all current page invoices to selection
+      const currentPageIds = invoices.map(invoice => invoice.id);
+      setSelectedInvoices(prev => {
+        // Create a new array with all previously selected IDs plus current page IDs
+        // Use Set to remove duplicates
+        return [...new Set([...prev, ...currentPageIds])];
+      });
     }
     setSelectAll(!selectAll);
   };
@@ -118,6 +126,17 @@ function InvoiceList() {
 
 
 
+  // Update selectAll state when invoices change
+  useEffect(() => {
+    if (invoices.length > 0) {
+      // Check if all invoices on the current page are selected
+      const allSelected = invoices.every(invoice => selectedInvoices.includes(invoice.id));
+      setSelectAll(allSelected);
+    } else {
+      setSelectAll(false);
+    }
+  }, [invoices, selectedInvoices]);
+
   // Fetch businesses for filter
   useEffect(() => {
     const fetchBusinesses = async () => {
@@ -159,6 +178,8 @@ function InvoiceList() {
   // Handle page change
   const handlePageChange = (page) => {
     setCurrentPage(page);
+    // Reset selectAll state when changing pages
+    setSelectAll(false);
   };
 
   // Single useEffect to handle both setting default filter and fetching invoices
@@ -309,8 +330,14 @@ function InvoiceList() {
             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
             </svg>}
+            className="relative"
           >
-            Print Selected ({selectedInvoices.length})
+            <span>Print Selected</span>
+            {selectedInvoices.length > 0 && (
+              <span className="ml-2 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-primary-600 rounded-full">
+                {selectedInvoices.length}
+              </span>
+            )}
           </Button>
           <Link to="/billing/invoice/import">
             <Button
@@ -334,6 +361,18 @@ function InvoiceList() {
           </Link>
         </div>
       </div>
+
+      {/* Selection notification */}
+      {selectedInvoices.length > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4 flex items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500 dark:text-blue-400 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="text-sm text-blue-700 dark:text-blue-300">
+            <p><strong>{selectedInvoices.length}</strong> invoice{selectedInvoices.length !== 1 ? 's' : ''} selected across all pages. Your selection is maintained when navigating between pages.</p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards with Improved Styling */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
