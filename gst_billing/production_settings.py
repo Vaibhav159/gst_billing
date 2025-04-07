@@ -15,9 +15,9 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+# Temporarily enabling debug for troubleshooting
+DEBUG = True
 
-ALLOWED_HOSTS = ["your-domain.com", "www.your-domain.com", "localhost", "127.0.0.1"]
 
 # Import all settings from the main settings file
 from gst_billing.settings import *
@@ -70,3 +70,4 @@ CACHES = {
 # Media files
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+ALLOWED_HOSTS = ["*"]  # Allow all hosts for development/testing
