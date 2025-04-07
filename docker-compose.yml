@@ -33,15 +33,20 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile.pip
+      dockerfile: Dockerfile
+    image: ${DOCKER_USERNAME:-yourusername}/gst-billing:latest
     restart: always
     ports:
       - "8000:8000"
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
+      - ./logs:/app/logs
     environment:
       - DJANGO_SETTINGS_MODULE=gst_billing.production_settings
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-insecure-key-for-dev-only}
+      - DEBUG=${DEBUG:-False}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
       - DB_HOST=db
       - DB_NAME=${DB_NAME:-gst_billing}
       - DB_USER=${DB_USER:-postgres}
@@ -49,13 +54,20 @@ services:
       - DB_PORT=5432
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-admin}
+    env_file:
+      - ./.env # Load environment variables from .env file
     depends_on:
       - db
       - redis
     command: >
-      bash -c "python manage.py migrate &&
+      bash -c "mkdir -p logs &&
+               python manage.py migrate &&
                python manage.py collectstatic --noinput &&
-               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000"
+               python create_superuser.py &&
+               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --log-level debug --access-logfile logs/gunicorn-access.log --error-logfile logs/gunicorn-error.log"
 
   # Nginx for serving static files and as a reverse proxy
   nginx:
