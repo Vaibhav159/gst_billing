@@ -345,7 +345,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     )
     serializer_class = InvoiceSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["invoice_number", "customer__name", "business__name"]
+    search_fields = [
+        "invoice_number",
+    ]
     ordering_fields = [
         "invoice_date",
         "created_at",

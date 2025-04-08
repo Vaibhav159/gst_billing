@@ -20,6 +20,7 @@ function CustomerForm() {
     email: '',
     address: '',
     state_name: '',
+    pan_number: '',
     businesses: []
   });
 
@@ -72,9 +73,11 @@ function CustomerForm() {
           setFormData({
             name: customerData.name || '',
             gst_number: customerData.gst_number || '',
-            phone_number: customerData.phone_number || '',
+            mobile_number: customerData.mobile_number || '',
             email: customerData.email || '',
             address: customerData.address || '',
+            state_name: customerData.state_name || '',
+            pan_number: customerData.pan_number || '',
             businesses: businessIds
           });
         } catch (err) {
@@ -162,6 +165,16 @@ function CustomerForm() {
 
     if (formData.email && !/^\S+@\S+\.\S+$/.test(formData.email)) {
       newErrors.email = 'Invalid email format';
+    }
+
+    // Only validate PAN number if it's provided
+    if (formData.pan_number && formData.pan_number.length !== 10) {
+      newErrors.pan_number = 'PAN number must be 10 characters';
+    }
+
+    // PAN number format validation (if provided)
+    if (formData.pan_number && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(formData.pan_number)) {
+      newErrors.pan_number = 'Invalid PAN format (e.g., ABCDE1234F)';
     }
 
     if (!formData.state_name) {
@@ -267,6 +280,16 @@ function CustomerForm() {
               onChange={handleChange}
               placeholder="Enter GST number"
               error={errors.gst_number}
+            />
+
+            <FormInput
+              label="PAN Number"
+              id="pan_number"
+              name="pan_number"
+              value={formData.pan_number}
+              onChange={handleChange}
+              placeholder="Enter PAN number (e.g., ABCDE1234F)"
+              error={errors.pan_number}
             />
 
             <FormInput
