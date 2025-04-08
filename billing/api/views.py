@@ -722,11 +722,17 @@ class ReportView(APIView):
         # Add data rows
         for idx, item in enumerate(line_items, start=1):
             # For tuples from get_line_item_data_for_download
-            sheet.append([idx] + list(item))
+            # Exclude the last two fields (invoice_type and invoice_id) which are used for filtering only
+            sheet.append([idx] + list(item[:14]))
 
             # Extract tax values from the tuple
             # The order matches the query in LineItem.get_line_item_data_for_download
-            taxable_value, cgst, sgst, igst, invoice_value = item[-5:]
+            # Indexes adjusted to account for the two new fields at the end
+            taxable_value = item[9]  # amount_before_tax
+            cgst = item[10]  # cgst
+            sgst = item[11]  # sgst
+            igst = item[12]  # igst
+            invoice_value = item[13]  # amount
 
             # Update totals
             total_taxable_value += taxable_value
@@ -827,17 +833,13 @@ class ReportView(APIView):
 
             # Process Outward if requested ('outward' or 'both')
             if invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
-                outwards_invoices = []
-                for item in base_line_item_data:
-                    # Check if this is an outward invoice
-                    # We need to determine this based on the invoice type
-                    # This is a simplification - adjust based on your actual data structure
-                    invoice_number = item[0]  # First element is invoice number
-                    invoice = Invoice.objects.filter(
-                        invoice_number=invoice_number
-                    ).first()
-                    if invoice and invoice.type_of_invoice == INVOICE_TYPE_OUTWARD:
-                        outwards_invoices.append(item)
+                # Use the invoice_type field (index 14) directly from the line item data
+                # This avoids individual database queries for each line item
+                outwards_invoices = [
+                    item
+                    for item in base_line_item_data
+                    if item[14] == INVOICE_TYPE_OUTWARD
+                ]
 
                 if outwards_invoices:  # Only add section if there's data
                     (out_taxable, out_cgst, out_sgst, out_igst, out_total) = (
@@ -858,17 +860,13 @@ class ReportView(APIView):
 
             # Process Inward if requested ('inward' or 'both')
             if invoice_type in [INVOICE_TYPE_INWARD, "both"]:
-                inward_invoices = []
-                for item in base_line_item_data:
-                    # Check if this is an inward invoice
-                    # We need to determine this based on the invoice type
-                    # This is a simplification - adjust based on your actual data structure
-                    invoice_number = item[0]  # First element is invoice number
-                    invoice = Invoice.objects.filter(
-                        invoice_number=invoice_number
-                    ).first()
-                    if invoice and invoice.type_of_invoice == INVOICE_TYPE_INWARD:
-                        inward_invoices.append(item)
+                # Use the invoice_type field (index 14) directly from the line item data
+                # This avoids individual database queries for each line item
+                inward_invoices = [
+                    item
+                    for item in base_line_item_data
+                    if item[14] == INVOICE_TYPE_INWARD
+                ]
 
                 if inward_invoices:  # Only add section if there's data
                     (in_taxable, in_cgst, in_sgst, in_igst, in_total) = (
