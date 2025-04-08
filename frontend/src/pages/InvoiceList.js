@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { debounce } from 'lodash'; // Import debounce from lodash
 import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -18,6 +19,7 @@ import { useRowClick } from '../utils/navigationHelpers';
 function InvoiceList() {
   const navigate = useNavigate();
   const isInitialRender = useRef(true);
+  const currentRequestRef = useRef(null);
   const [invoices, setInvoices] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -146,6 +148,11 @@ function InvoiceList() {
     type_of_invoice: ''
   });
 
+  // Separate state for input values to maintain UI responsiveness
+  const [inputValues, setInputValues] = useState({
+    invoice_number: ''
+  });
+
   // We've moved the fetchInvoices functionality directly into the useEffect
 
   // Handle sorting
@@ -220,14 +227,48 @@ function InvoiceList() {
     fetchCustomers();
   }, []);
 
+  // Initialize inputValues with filters
+  useEffect(() => {
+    setInputValues(prev => ({
+      ...prev,
+      invoice_number: filters.invoice_number
+    }));
+  }, [filters.invoice_number]);
+
+  // Create a debounced version of setFilters for text inputs
+  const debouncedSetFilters = useCallback(
+    debounce((name, value) => {
+      setFilters(prev => ({
+        ...prev,
+        [name]: value
+      }));
+      setCurrentPage(1); // Reset to first page when filters change
+    }, 500), // 500ms debounce delay
+    []
+  );
+
   // Handle filter changes
   const handleFilterChange = (e) => {
-    const { name, value } = e.target;
-    setFilters(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    setCurrentPage(1); // Reset to first page when filters change
+    const { name, value, type } = e.target;
+
+    // For text inputs (like invoice_number), use debounced update
+    if (type === 'text') {
+      // Update the input value immediately in the UI
+      setInputValues(prev => ({
+        ...prev,
+        [name]: value
+      }));
+
+      // But debounce the actual API call
+      debouncedSetFilters(name, value);
+    } else {
+      // For dropdowns and other non-text inputs, update immediately
+      setFilters(prev => ({
+        ...prev,
+        [name]: value
+      }));
+      setCurrentPage(1); // Reset to first page when filters change
+    }
   };
 
   // Handle page change
@@ -301,26 +342,36 @@ function InvoiceList() {
 
         console.log('Fetching invoices with params:', params);
 
+        // Create a request ID to track this specific request
+        const requestId = Date.now() + Math.random(); // Add randomness to ensure uniqueness
+        // Store the current request ID in a ref to ensure we're comparing the correct values
+        currentRequestRef.current = requestId;
+
         // Fetch invoices for the current page
         const response = await apiClient.get('/invoices/', { params });
-        setInvoices(response.data.results || response.data);
 
-        // Set pagination data if available
-        if (response.data.count) {
-          setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+        // Only update state if this is still the most recent request
+        // This prevents race conditions where older requests complete after newer ones
+        if (currentRequestRef.current === requestId) {
+          setInvoices(response.data.results || response.data);
+
+          // Set pagination data if available
+          if (response.data.count) {
+            setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+          }
+
+          // Fetch total amounts (using the same filters but without pagination)
+          const totalsParams = { ...params };
+          delete totalsParams.page; // Remove pagination parameter
+
+          const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
+
+          // Set totals from the API response
+          setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
+          setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
+
+          setError(null);
         }
-
-        // Fetch total amounts (using the same filters but without pagination)
-        const totalsParams = { ...params };
-        delete totalsParams.page; // Remove pagination parameter
-
-        const totalsResponse = await apiClient.get('/invoices/totals/', { params: totalsParams });
-
-        // Set totals from the API response
-        setTotalAmountInward(parseFloat(totalsResponse.data.inward_total || 0));
-        setTotalAmountOutward(parseFloat(totalsResponse.data.outward_total || 0));
-
-        setError(null);
       } catch (err) {
         console.error('Error fetching invoices:', err);
         setError('Failed to load invoices. Please try again.');
@@ -502,7 +553,7 @@ function InvoiceList() {
               label="Invoice Number"
               id="invoice_number"
               name="invoice_number"
-              value={filters.invoice_number}
+              value={inputValues.invoice_number}
               onChange={handleFilterChange}
               placeholder="Search by invoice number"
             />

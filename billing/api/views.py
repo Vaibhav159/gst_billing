@@ -347,6 +347,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         "invoice_number",
+        "customer__name",
+        "business__name",
     ]
     ordering_fields = [
         "invoice_date",

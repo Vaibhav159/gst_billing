@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { debounce } from 'lodash'; // Import debounce from lodash
 import { Link, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import Button from '../components/Button';
@@ -29,6 +30,9 @@ function ProductList() {
     ignoreClasses: ['action-button', 'btn', 'relative']
   });
 
+  // Track the latest request
+  const latestRequestIdRef = useRef(0);
+
   // Fetch products
   useEffect(() => {
     const fetchProducts = async () => {
@@ -51,15 +55,23 @@ function ProductList() {
           }
         });
 
+        // Create a request ID to track this specific request
+        const requestId = ++latestRequestIdRef.current;
+
         const response = await apiClient.get('/products/', { params });
-        setProducts(response.data.results || response.data);
 
-        // Set pagination data if available
-        if (response.data.count) {
-          setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+        // Only update state if this is still the most recent request
+        // This prevents race conditions where older requests complete after newer ones
+        if (requestId === latestRequestIdRef.current) {
+          setProducts(response.data.results || response.data);
+
+          // Set pagination data if available
+          if (response.data.count) {
+            setTotalPages(Math.ceil(response.data.count / 15)); // Assuming 15 items per page
+          }
+
+          setError(null);
         }
-
-        setError(null);
       } catch (err) {
         console.error('Error fetching products:', err);
         setError('Failed to load products. Please try again.');
@@ -78,10 +90,32 @@ function ProductList() {
     setCurrentPage(1); // Reset to first page when sorting changes
   };
 
+  // Create a debounced version of setSearchTerm
+  const debouncedSetSearchTerm = useCallback(
+    debounce((value) => {
+      setSearchTerm(value);
+      setCurrentPage(1); // Reset to first page when search changes
+    }, 500), // 500ms debounce delay
+    []
+  );
+
+  // State to track the input value separately from the search term
+  const [inputValue, setInputValue] = useState('');
+
+  // Initialize inputValue with searchTerm
+  useEffect(() => {
+    setInputValue(searchTerm);
+  }, [searchTerm]);
+
   // Handle search input change
   const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-    setCurrentPage(1); // Reset to first page when search changes
+    const value = e.target.value;
+
+    // Update the input value immediately for UI
+    setInputValue(value);
+
+    // Debounce the actual API call
+    debouncedSetSearchTerm(value);
   };
 
   // Handle page change
@@ -141,7 +175,7 @@ function ProductList() {
               label="Search Products"
               id="search"
               name="search"
-              value={searchTerm}
+              value={inputValue}
               onChange={handleSearchChange}
               placeholder="Search by name or HSN code"
             />
