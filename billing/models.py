@@ -493,6 +493,9 @@ class LineItem(AbstractBaseModel):
                     output_field=CharField(),
                 ),
                 amount_before_tax=F("quantity") * F("rate"),
+                # Include invoice type and ID to avoid additional queries
+                invoice_type=F("invoice__type_of_invoice"),
+                invoice_id_for_filter=F("invoice__id"),
             )
             .values_list(
                 "invoice__invoice_number",
@@ -509,6 +512,8 @@ class LineItem(AbstractBaseModel):
                 "sgst",
                 "igst",
                 "amount",
+                "invoice_type",  # Add invoice type to the result
+                "invoice_id_for_filter",  # Add invoice ID to the result
             )
             .order_by("invoice__invoice_date", "invoice__invoice_number")
         )
