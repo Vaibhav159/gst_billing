@@ -140,7 +140,7 @@ function InvoiceList() {
   };
 
   const [filters, setFilters] = useState({
-    invoice_number: '',
+    search: '',  // Changed from invoice_number to search
     business_id: '',
     customer_id: '',
     start_date: '',
@@ -150,7 +150,7 @@ function InvoiceList() {
 
   // Separate state for input values to maintain UI responsiveness
   const [inputValues, setInputValues] = useState({
-    invoice_number: ''
+    invoice_number: ''  // Keep as invoice_number for the input field
   });
 
   // We've moved the fetchInvoices functionality directly into the useEffect
@@ -231,9 +231,9 @@ function InvoiceList() {
   useEffect(() => {
     setInputValues(prev => ({
       ...prev,
-      invoice_number: filters.invoice_number
+      invoice_number: filters.search  // Map search filter to invoice_number input
     }));
-  }, [filters.invoice_number]);
+  }, [filters.search]);
 
   // Create a debounced version of setFilters for text inputs
   const debouncedSetFilters = useCallback(
@@ -259,8 +259,11 @@ function InvoiceList() {
         [name]: value
       }));
 
+      // Map invoice_number input to search filter
+      const filterName = name === 'invoice_number' ? 'search' : name;
+
       // But debounce the actual API call
-      debouncedSetFilters(name, value);
+      debouncedSetFilters(filterName, value);
     } else {
       // For dropdowns and other non-text inputs, update immediately
       setFilters(prev => ({
@@ -555,7 +558,7 @@ function InvoiceList() {
               name="invoice_number"
               value={inputValues.invoice_number}
               onChange={handleFilterChange}
-              placeholder="Search by invoice number"
+              placeholder="Search by invoice number, customer name or business name"
             />
 
             <FormSelect
@@ -615,12 +618,17 @@ function InvoiceList() {
                 </svg>}
                 onClick={() => {
                   setFilters({
-                    invoice_number: '',
+                    search: '',
                     business_id: '',
                     customer_id: '',
                     start_date: '',
                     end_date: '',
                     type_of_invoice: ''
+                  });
+
+                  // Also clear the input values
+                  setInputValues({
+                    invoice_number: ''
                   });
                   setCurrentPage(1);
                 }}
