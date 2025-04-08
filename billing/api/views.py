@@ -668,37 +668,45 @@ class LineItemViewSet(viewsets.ModelViewSet):
 class ReportView(APIView):
     """
     API endpoint for generating reports.
+    Provides functionality to generate Excel reports of invoice data
+    filtered by date range and invoice type.
     """
 
     def get(self, request, *args, **kwargs):
-        # Just return a simple response
+        # Just return a simple response for API health check
         return Response({"message": "Report API ready"})
 
     @staticmethod
     def get_date_range_string(start_date, end_date):
+        """Format date range into a readable string for display in reports."""
         start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
         end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
 
         start_date_str = datetime.strftime(start_date_obj, "%B %Y")
         end_date_str = datetime.strftime(end_date_obj, "%B %Y")
 
+        # If same month and year, just return one date
         if start_date_str == end_date_str:
             return start_date_str
+        # If same year, don't repeat the year
+        elif start_date_obj.year == end_date_obj.year:
+            return f"{start_date_str} to {datetime.strftime(end_date_obj, '%B')}-{end_date_obj.year}"
+        # Different years
         else:
-            if start_date_obj.year == end_date_obj.year:
-                return f"{start_date_str} to {datetime.strftime(end_date_obj, '%B')}-{end_date_obj.year}"
-            else:
-                return f"{start_date_str} to {end_date_str}"
+            return f"{start_date_str} to {end_date_str}"
 
     @staticmethod
     def add_invoice_data_to_sheet(
         business, business_name, date_range, line_items, sheet, supply_type
     ):
+        """Add invoice data to an Excel sheet and calculate totals."""
+
+        # Helper function to create rows with proper spacing
         def create_row_with_spacing(data):
             return ([""]) * 5 + [data]
 
+        # Return zeros if no data
         if not line_items:
-            # Return zero values if there are no invoices for this section
             return (
                 Decimal("0"),
                 Decimal("0"),
@@ -707,41 +715,39 @@ class ReportView(APIView):
                 Decimal("0"),
             )
 
+        # Initialize totals
         total_taxable_value = total_cgst = total_sgst = total_igst = (
             total_invoice_value
         ) = Decimal("0")
 
+        # Add header information
         sheet.append(create_row_with_spacing(business_name))
         sheet.append(create_row_with_spacing(supply_type))
         sheet.append(create_row_with_spacing(f"Month: {date_range}"))
         sheet.append(create_row_with_spacing(f"GSTIN: {business.gst_number}"))
         sheet.append([])
-
         sheet.append(DOWNLOAD_SHEET_FIELD_NAMES)
 
-        # Add data rows
+        # Add data rows and calculate totals
         for idx, item in enumerate(line_items, start=1):
-            # For tuples from get_line_item_data_for_download
-            # Exclude the last two fields (invoice_type and invoice_id) which are used for filtering only
+            # Exclude the metadata fields (invoice_type and invoice_id_for_filter)
             sheet.append([idx] + list(item[:14]))
 
-            # Extract tax values from the tuple
-            # The order matches the query in LineItem.get_line_item_data_for_download
-            # Indexes adjusted to account for the two new fields at the end
+            # Extract values for totals calculation
             taxable_value = item[9]  # amount_before_tax
             cgst = item[10]  # cgst
             sgst = item[11]  # sgst
             igst = item[12]  # igst
             invoice_value = item[13]  # amount
 
-            # Update totals
+            # Update running totals
             total_taxable_value += taxable_value
             total_cgst += cgst
             total_sgst += sgst
             total_igst += igst
             total_invoice_value += invoice_value
 
-        # Add totals row
+        # Add grand total row
         sheet.append(
             [""] * 5
             + [
@@ -767,33 +773,12 @@ class ReportView(APIView):
         )
 
     @classmethod
-    def generate_report_for_business(
-        cls, workbook, business, start_date, end_date, invoice_type
-    ):
-        # Create a sheet for this business
-        business_name = business.name
-        sheet_name = business_name[:31]  # Excel limits sheet names to 31 chars
-        sheet = workbook.create_sheet(title=sheet_name)
-
-        # Initialize summary totals
-        overall_outward_taxable = 0
-        overall_outward_cgst = 0
-        overall_outward_sgst = 0
-        overall_outward_igst = 0
-        overall_outward_total = 0
-
-        overall_inward_taxable = 0
-        overall_inward_cgst = 0
-        overall_inward_sgst = 0
-        overall_inward_igst = 0
-        overall_inward_total = 0
-
-        # Split date range into months
+    def get_monthly_date_ranges(cls, start_date, end_date):
+        """Split a date range into monthly chunks for more detailed reporting."""
         start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
         end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
 
-        # Generate month-wise date ranges
-        month_wise_split_date = []
+        monthly_ranges = []
         current_date = start_date_obj
 
         while current_date <= end_date_obj:
@@ -811,7 +796,7 @@ class ReportView(APIView):
             # Add the date range for this month
             month_start_str = current_date.strftime("%Y-%m-%d")
             month_end_str = month_end.strftime("%Y-%m-%d")
-            month_wise_split_date.append((month_start_str, month_end_str))
+            monthly_ranges.append((month_start_str, month_end_str))
 
             # Move to the first day of the next month
             current_date = (
@@ -820,77 +805,61 @@ class ReportView(APIView):
                 else datetime(year, month + 1, 1)
             )
 
-        # Process each month separately
-        for month_start_date, month_end_date in month_wise_split_date:
-            date_range_string = cls.get_date_range_string(
-                month_start_date, month_end_date
-            )
+        return monthly_ranges
 
-            # Get base data for the month
-            base_line_item_data = LineItem.get_line_item_data_for_download(
-                start_date=month_start_date, end_date=month_end_date, business=business
-            )
+    @classmethod
+    def process_invoice_data(
+        cls,
+        line_items,
+        invoice_type,
+        business,
+        business_name,
+        date_range_string,
+        sheet,
+        overall_totals,
+    ):
+        """Process invoice data for a specific type (inward or outward)."""
+        # Filter items by invoice type
+        if invoice_type == INVOICE_TYPE_OUTWARD:
+            filtered_items = [
+                item for item in line_items if item[14] == INVOICE_TYPE_OUTWARD
+            ]
+            supply_type = "Outward Supply"
+            totals_key = "outward"
+        else:  # INVOICE_TYPE_INWARD
+            filtered_items = [
+                item for item in line_items if item[14] == INVOICE_TYPE_INWARD
+            ]
+            supply_type = "Inward Supply"
+            totals_key = "inward"
 
-            # Process Outward if requested ('outward' or 'both')
-            if invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
-                # Use the invoice_type field (index 14) directly from the line item data
-                # This avoids individual database queries for each line item
-                outwards_invoices = [
-                    item
-                    for item in base_line_item_data
-                    if item[14] == INVOICE_TYPE_OUTWARD
-                ]
+        # Skip if no data for this type
+        if not filtered_items:
+            return
 
-                if outwards_invoices:  # Only add section if there's data
-                    (out_taxable, out_cgst, out_sgst, out_igst, out_total) = (
-                        cls.add_invoice_data_to_sheet(
-                            business,
-                            business_name,
-                            date_range_string,
-                            outwards_invoices,
-                            sheet,
-                            supply_type="Outward Supply",
-                        )
-                    )
-                    overall_outward_taxable += out_taxable
-                    overall_outward_cgst += out_cgst
-                    overall_outward_sgst += out_sgst
-                    overall_outward_igst += out_igst
-                    overall_outward_total += out_total
+        # Add data to sheet and get totals
+        totals = cls.add_invoice_data_to_sheet(
+            business,
+            business_name,
+            date_range_string,
+            filtered_items,
+            sheet,
+            supply_type,
+        )
 
-            # Process Inward if requested ('inward' or 'both')
-            if invoice_type in [INVOICE_TYPE_INWARD, "both"]:
-                # Use the invoice_type field (index 14) directly from the line item data
-                # This avoids individual database queries for each line item
-                inward_invoices = [
-                    item
-                    for item in base_line_item_data
-                    if item[14] == INVOICE_TYPE_INWARD
-                ]
+        # Update overall totals
+        overall_totals[f"{totals_key}_taxable"] += totals[0]
+        overall_totals[f"{totals_key}_cgst"] += totals[1]
+        overall_totals[f"{totals_key}_sgst"] += totals[2]
+        overall_totals[f"{totals_key}_igst"] += totals[3]
+        overall_totals[f"{totals_key}_total"] += totals[4]
 
-                if inward_invoices:  # Only add section if there's data
-                    (in_taxable, in_cgst, in_sgst, in_igst, in_total) = (
-                        cls.add_invoice_data_to_sheet(
-                            business,
-                            business_name,
-                            date_range_string,
-                            inward_invoices,
-                            sheet,
-                            supply_type="Inward Supply",
-                        )
-                    )
-                    overall_inward_taxable += in_taxable
-                    overall_inward_cgst += in_cgst
-                    overall_inward_sgst += in_sgst
-                    overall_inward_igst += in_igst
-                    overall_inward_total += in_total
-
-        # Add aggregated sections at the end
-        date_range_str = cls.get_date_range_string(start_date, end_date)
-
-        # Only add aggregated outward if it has data and was requested
-        if overall_outward_taxable and invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
-            sheet.append([])  # Add a blank row for spacing
+    @classmethod
+    def add_aggregated_totals(cls, sheet, totals, date_range_str, invoice_type):
+        """Add aggregated totals to the report sheet."""
+        # Add outward totals if applicable
+        if totals["outward_taxable"] and invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
+            sheet.append([])  # Add spacing
             sheet.append(
                 [""] * 5
                 + [
@@ -899,16 +868,16 @@ class ReportView(APIView):
                     "",
                     "",
                     "",
-                    overall_outward_taxable,
-                    overall_outward_cgst,
-                    overall_outward_sgst,
-                    overall_outward_igst,
-                    overall_outward_total,
+                    totals["outward_taxable"],
+                    totals["outward_cgst"],
+                    totals["outward_sgst"],
+                    totals["outward_igst"],
+                    totals["outward_total"],
                 ]
             )
 
-        # Only add aggregated inward if it has data and was requested
-        if overall_inward_taxable and invoice_type in [INVOICE_TYPE_INWARD, "both"]:
+        # Add inward totals if applicable
+        if totals["inward_taxable"] and invoice_type in [INVOICE_TYPE_INWARD, "both"]:
             sheet.append(
                 [""] * 5
                 + [
@@ -917,34 +886,102 @@ class ReportView(APIView):
                     "",
                     "",
                     "",
-                    overall_inward_taxable,
-                    overall_inward_cgst,
-                    overall_inward_sgst,
-                    overall_inward_igst,
-                    overall_inward_total,
+                    totals["inward_taxable"],
+                    totals["inward_cgst"],
+                    totals["inward_sgst"],
+                    totals["inward_igst"],
+                    totals["inward_total"],
                 ]
             )
-            sheet.append([])  # Add a blank row for spacing
+            sheet.append([])  # Add spacing
+
+    @classmethod
+    def generate_report_for_business(
+        cls, workbook, business, start_date, end_date, invoice_type
+    ):
+        """Generate a report sheet for a specific business."""
+        # Create a sheet for this business
+        business_name = business.name
+        sheet_name = business_name[:31]  # Excel limits sheet names to 31 chars
+        sheet = workbook.create_sheet(title=sheet_name)
+
+        # Initialize summary totals
+        overall_totals = {
+            "outward_taxable": Decimal("0"),
+            "outward_cgst": Decimal("0"),
+            "outward_sgst": Decimal("0"),
+            "outward_igst": Decimal("0"),
+            "outward_total": Decimal("0"),
+            "inward_taxable": Decimal("0"),
+            "inward_cgst": Decimal("0"),
+            "inward_sgst": Decimal("0"),
+            "inward_igst": Decimal("0"),
+            "inward_total": Decimal("0"),
+        }
+
+        # Get monthly date ranges
+        monthly_ranges = cls.get_monthly_date_ranges(start_date, end_date)
+
+        # Process each month separately
+        for month_start_date, month_end_date in monthly_ranges:
+            date_range_string = cls.get_date_range_string(
+                month_start_date, month_end_date
+            )
+
+            # Get all line item data for the month in a single query
+            line_items = LineItem.get_line_item_data_for_download(
+                start_date=month_start_date, end_date=month_end_date, business=business
+            )
+
+            # Process outward invoices if requested
+            if invoice_type in [INVOICE_TYPE_OUTWARD, "both"]:
+                cls.process_invoice_data(
+                    line_items,
+                    INVOICE_TYPE_OUTWARD,
+                    business,
+                    business_name,
+                    date_range_string,
+                    sheet,
+                    overall_totals,
+                )
+
+            # Process inward invoices if requested
+            if invoice_type in [INVOICE_TYPE_INWARD, "both"]:
+                cls.process_invoice_data(
+                    line_items,
+                    INVOICE_TYPE_INWARD,
+                    business,
+                    business_name,
+                    date_range_string,
+                    sheet,
+                    overall_totals,
+                )
+
+        # Add aggregated sections at the end
+        date_range_str = cls.get_date_range_string(start_date, end_date)
+        cls.add_aggregated_totals(sheet, overall_totals, date_range_str, invoice_type)
 
     @classmethod
     def generate_csv_response(cls, start_date, end_date, invoice_type):
-        # Generate Excel file and return HTTP response
+        """Generate an Excel file and return as an HTTP response."""
+        # Create workbook and remove default sheet
         workbook = Workbook()
-        # Remove default sheet
         workbook.remove(workbook.active)
 
+        # Generate a sheet for each business
         for business in Business.objects.all():
             cls.generate_report_for_business(
                 workbook, business, start_date, end_date, invoice_type
             )
 
+        # Prepare HTTP response with Excel file
         response = HttpResponse(
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        # Ensure the filename has the correct extension and is properly formatted for all browsers
+
+        # Set filename with date range
         date_range = cls.get_date_range_string(start_date, end_date)
         filename = f"invoices_{date_range}.xlsx"
-        # Use both Content-Disposition formats for maximum browser compatibility
         response["Content-Disposition"] = (
             f"attachment; filename=\"{filename}\"; filename*=UTF-8''{filename}"
         )
@@ -953,11 +990,13 @@ class ReportView(APIView):
         return response
 
     def post(self, request, *args, **kwargs):
+        """Handle POST request to generate a report."""
         # Get parameters from request
         start_date = request.data.get("start_date")
         end_date = request.data.get("end_date")
         invoice_type = request.data.get("invoice_type", "both")
 
+        # Validate required parameters
         if not start_date or not end_date:
             return Response(
                 {"error": "Start date and end date are required"},
