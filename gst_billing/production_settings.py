@@ -186,6 +186,14 @@ if os.environ.get("REDIS_HOST"):
             },
         }
     }
+
+    # Cacheops configuration with environment variables
+    CACHEOPS_REDIS = {
+        "host": os.environ.get("REDIS_HOST", "redis"),
+        "port": int(os.environ.get("REDIS_PORT", 6379)),
+        "db": 2,  # Use a different DB than the default cache
+        "socket_timeout": 3,
+    }
 else:
     CACHES = {
         "default": {
@@ -193,6 +201,35 @@ else:
             "LOCATION": "unique-snowflake",
         }
     }
+
+    # Fallback to local Redis for cacheops
+    CACHEOPS_REDIS = {
+        "host": "localhost",
+        "port": 6379,
+        "db": 2,
+        "socket_timeout": 3,
+    }
+
+# Cacheops configuration
+CACHEOPS_DEFAULTS = {
+    "timeout": 60 * 15,  # 15 minutes default cache timeout
+    "cache_on_save": True,
+    "invalidate_on_save": True,
+}
+
+# Register models for caching with longer timeouts for production
+CACHEOPS = {
+    # Cache all Business models queries for 2 hours
+    "billing.Business": {"ops": "all", "timeout": 60 * 60 * 2},
+    # Cache all Customer models queries for 1 hour
+    "billing.Customer": {"ops": "all", "timeout": 60 * 60},
+    # Cache all Product models queries for 2 hours
+    "billing.Product": {"ops": "all", "timeout": 60 * 60 * 2},
+    # Cache all Invoice models queries for 30 minutes
+    "billing.Invoice": {"ops": "all", "timeout": 60 * 30},
+    # Cache all LineItem models queries for 30 minutes
+    "billing.LineItem": {"ops": "all", "timeout": 60 * 30},
+}
 
 # Logging configuration
 LOGGING = {

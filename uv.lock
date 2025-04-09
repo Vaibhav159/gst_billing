@@ -29,6 +29,15 @@ wheels = [
 ]
 
 [[package]]
+name = "async-timeout"
+version = "5.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/ae/136395dfbfe00dfc94da3f3e136d0b13f394cba8f4841120e34226265780/async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3", size = 9274 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/ba/e2081de779ca30d473f21f5b30e0e737c438205440784c7dfc81efc2b029/async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c", size = 6233 },
+]
+
+[[package]]
 name = "black"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -260,6 +269,20 @@ wheels = [
 ]
 
 [[package]]
+name = "django-cacheops"
+version = "7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "funcy" },
+    { name = "redis" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/b6/b75807d706f7f1fca659627c2da21b70941c1f832a974fa922c05ff5e659/django_cacheops-7.1.tar.gz", hash = "sha256:ec079abb968557321ee208c6274820231820f98ca6377dda971f04981bc2ab52", size = 72352 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/e8/4de8b0fecffdc1b30fc23d5d157c217f094c53614247bb1f68db03f35ef8/django_cacheops-7.1-py2.py3-none-any.whl", hash = "sha256:7d5e0f42e41ab4a8052130d33d9f3b26c47bef944ef2df0a64db92d70e51d87e", size = 44881 },
+]
+
+[[package]]
 name = "django-cors-headers"
 version = "4.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -410,11 +433,21 @@ wheels = [
 ]
 
 [[package]]
+name = "funcy"
+version = "2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/b8/c6081521ff70afdff55cd9512b2220bbf4fa88804dae51d1b57b4b58ef32/funcy-2.0.tar.gz", hash = "sha256:3963315d59d41c6f30c04bc910e10ab50a3ac4a225868bfa96feed133df075cb", size = 537931 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/08/c2409cb01d5368dcfedcbaffa7d044cc8957d57a9d0855244a5eb4709d30/funcy-2.0-py2.py3-none-any.whl", hash = "sha256:53df23c8bb1651b12f095df764bfb057935d49537a56de211b098f4c79614bb0", size = 30891 },
+]
+
+[[package]]
 name = "gst-billing"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "django" },
+    { name = "django-cacheops" },
     { name = "django-cors-headers" },
     { name = "django-crispy-forms" },
     { name = "django-htmx" },
@@ -432,6 +465,7 @@ dependencies = [
     { name = "pre-commit" },
     { name = "psycopg2-binary" },
     { name = "python-dateutil" },
+    { name = "python-dotenv" },
     { name = "pytz" },
     { name = "requests" },
     { name = "setuptools" },
@@ -454,6 +488,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'" },
     { name = "coverage", marker = "extra == 'dev'" },
     { name = "django", specifier = "==4.2.2" },
+    { name = "django-cacheops", specifier = ">=7.1" },
     { name = "django-cors-headers", specifier = "==4.3.1" },
     { name = "django-crispy-forms", specifier = "==1.14.0" },
     { name = "django-htmx", specifier = "==1.12.0" },
@@ -475,6 +510,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "pytest-django", marker = "extra == 'dev'" },
     { name = "python-dateutil", specifier = ">=2.8.2" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "pytz", specifier = ">=2023.3" },
     { name = "requests", specifier = ">=2.28.1" },
     { name = "setuptools", specifier = ">=61.0" },
@@ -1082,6 +1118,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/2c/7bb1416c5620485aa793f2de31d3df393d3686aa8a8506d11e10e13c5baf/python_dotenv-1.1.0.tar.gz", hash = "sha256:41f90bc6f5f177fb41f53e87666db362025010eb28f60a01c9143bfa33a2b2d5", size = 39920 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/18/98a99ad95133c6a6e2005fe89faedf294a748bd5dc803008059409ac9b1e/python_dotenv-1.1.0-py3-none-any.whl", hash = "sha256:d7c01d9e2293916c18baf562d95698754b0dbbb5e74d457c45d4f6561fb9d55d", size = 20256 },
+]
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1132,6 +1177,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/0f/25911a9f080464c59fab9027482f822b86bf0608957a5fcc6eaac85aa515/PyYAML-6.0.2-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:68ccc6023a3400877818152ad9a1033e3db8625d899c72eacb5a668902e4d652", size = 751597 },
     { url = "https://files.pythonhosted.org/packages/14/0d/e2c3b43bbce3cf6bd97c840b46088a3031085179e596d4929729d8d68270/PyYAML-6.0.2-cp313-cp313-win32.whl", hash = "sha256:bc2fa7c6b47d6bc618dd7fb02ef6fdedb1090ec036abab80d4681424b84c1183", size = 140527 },
     { url = "https://files.pythonhosted.org/packages/fa/de/02b54f42487e3d3c6efb3f89428677074ca7bf43aae402517bc7cca949f3/PyYAML-6.0.2-cp313-cp313-win_amd64.whl", hash = "sha256:8388ee1976c416731879ac16da0aff3f63b286ffdd57cdeb95f3f2e085687563", size = 156446 },
+]
+
+[[package]]
+name = "redis"
+version = "5.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "async-timeout", marker = "python_full_version < '3.11.3'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/47/da/d283a37303a995cd36f8b92db85135153dc4f7a8e4441aa827721b442cfb/redis-5.2.1.tar.gz", hash = "sha256:16f2e22dff21d5125e8481515e386711a34cbec50f0e44413dd7d9c060a54e0f", size = 4608355 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/5f/fa26b9b2672cbe30e07d9a5bdf39cf16e3b80b42916757c5f92bca88e4ba/redis-5.2.1-py3-none-any.whl", hash = "sha256:ee7e1056b9aea0f04c6c2ed59452947f34c4940ee025f5dd83e6a6418b6989e4", size = 261502 },
 ]
 
 [[package]]

@@ -13,7 +13,11 @@ https://docs.djangoproject.com/en/4.0/ref/settings/
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from gst_billing import local
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -46,6 +50,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "frontend",
+    "cacheops",
 ]
 
 MIDDLEWARE = [
@@ -212,3 +217,39 @@ CACHES = {
         "LOCATION": "unique-snowflake",
     }
 }
+
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
+
+if REDIS_PASSWORD:
+    # Cacheops configuration
+    CACHEOPS_REDIS = {
+        "host": os.getenv("REDIS_HOST", "localhost"),  # Redis server host
+        "port": 6379,  # Redis server port
+        "db": 0,  # Redis database number
+        "socket_timeout": 3,  # Connection timeout in seconds
+        "password": os.getenv("REDIS_PASSWORD", None),  # Redis password (optional)
+        "ssl": True,
+    }
+
+    CACHEOPS_DEFAULTS = {
+        "timeout": 60 * 15,  # 15 minutes default cache timeout
+        "cache_on_save": True,  # Cache objects automatically when they are saved
+        "invalidate_on_save": True,  # Invalidate related caches when objects are saved
+    }
+
+    ONE_HOUR = 60 * 60
+    ONE_DAY = 60 * 60 * 24
+
+    # Register models for caching
+    CACHEOPS = {
+        # Cache all Business models queries for 1 day
+        "billing.Business": {"ops": "all", "timeout": ONE_DAY},
+        # Cache all Customer models queries for 1 day
+        "billing.Customer": {"ops": "all", "timeout": ONE_DAY},
+        # Cache all Product models queries for 1 day
+        "billing.Product": {"ops": "all", "timeout": ONE_DAY},
+        # Cache all Invoice models queries for 1 hour
+        "billing.Invoice": {"ops": "all", "timeout": ONE_HOUR},
+        # Cache all LineItem models queries for 1 hour
+        "billing.LineItem": {"ops": "all", "timeout": ONE_HOUR},
+    }

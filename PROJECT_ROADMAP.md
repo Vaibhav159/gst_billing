@@ -28,6 +28,7 @@
 - ✅ Add Dark Mode
 - ✅ Update the UI/UX to more modern and user-friendly
 - ✅ Create reusable components for common UI patterns
+- ✅ Implement smart caching with django-cacheops for improved API performance
 - ⬜ Implement lazy loading and code splitting
 - ⬜ Use proper css standards and best practices
 
