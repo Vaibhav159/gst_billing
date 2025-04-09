@@ -48,4 +48,4 @@ fi
 
 echo "\n🌐 Starting server and opening browser..."
 # Start the server and open the browser
-open http://0.0.0.1:8000/login & uv run python manage.py runserver
+open http://0.0.0.0:8000/login & uv run python manage.py runserver

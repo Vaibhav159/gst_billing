@@ -231,6 +231,8 @@ if REDIS_PASSWORD:
         "ssl": True,
     }
 
+    print(f"Using Redis with password: {CACHEOPS_REDIS=}")
+
     CACHEOPS_DEFAULTS = {
         "timeout": 60 * 15,  # 15 minutes default cache timeout
         "cache_on_save": True,  # Cache objects automatically when they are saved
