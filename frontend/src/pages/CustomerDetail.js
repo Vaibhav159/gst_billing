@@ -226,13 +226,23 @@ function CustomerDetail() {
             </div>
 
             <div className="bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg">
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">PAN Number</p>
+              <p className="mt-1 text-base md:text-lg font-medium text-gray-900 dark:text-white">{customer.pan_number || '-'}</p>
+            </div>
+
+            <div className="bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg">
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Phone Number</p>
-              <p className="mt-1 text-base md:text-lg font-medium text-gray-900 dark:text-white">{customer.phone_number || '-'}</p>
+              <p className="mt-1 text-base md:text-lg font-medium text-gray-900 dark:text-white">{customer.mobile_number || '-'}</p>
             </div>
 
             <div className="bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg">
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Email</p>
               <p className="mt-1 text-base md:text-lg font-medium text-gray-900 dark:text-white">{customer.email || '-'}</p>
+            </div>
+
+            <div className="bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg">
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">State</p>
+              <p className="mt-1 text-base md:text-lg font-medium text-gray-900 dark:text-white">{customer.state_name || '-'}</p>
             </div>
 
             <div className="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg">
