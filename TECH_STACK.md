@@ -15,7 +15,7 @@
 - **Authentication**: Django's built-in authentication
 - **Database ORM**: Django ORM
 - **Task Queue**: Celery (for background tasks)
-- **Caching**: Django's built-in caching
+- **Caching**: django-cacheops with Redis for intelligent query caching
 - **Package Manager**: uv (preferred over pip)
 
 ## Database

@@ -6,7 +6,6 @@ from decimal import Decimal
 from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
 from django.views.decorators.csrf import csrf_exempt
 from num2words import num2words
 from openpyxl import Workbook
@@ -325,7 +324,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
-    @method_decorator(cache_page(60 * 60 * 30))  # Cache for 30 days
     @action(detail=False, methods=["get"])
     def defaults(self, request):
         """Get default values for products"""
@@ -359,7 +357,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         "customer__name",
         "business__name",
     ]
-    ordering = ["-invoice_date"]
+    ordering = ["-invoice_date", "-created_at"]
     pagination_class = StandardResultsSetPagination
 
     # Removed caching to ensure fresh data

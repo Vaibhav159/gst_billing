@@ -49,3 +49,6 @@ CACHES = {
         "LOCATION": "unique-snowflake",
     }
 }
+
+# Use fake redis for cacheops in CI environment
+CACHEOPS_FAKE = True
