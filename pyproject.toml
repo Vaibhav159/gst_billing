@@ -29,6 +29,7 @@ dependencies = [
     "xlsxwriter==3.0.3",
     "django-cacheops>=7.1",
     "python-dotenv>=1.1.0",
+    "pip-system-certs>=4.0",
 ]
 
 [project.optional-dependencies]
