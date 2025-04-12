@@ -22,7 +22,12 @@ from billing.constants import (
     INVOICE_TYPE_OUTWARD,
 )
 from billing.models import Business, Customer, Invoice, LineItem, Product
-from billing.utils import CSVImportError, process_invoice_csv
+from billing.utils import (
+    CSVImportError,
+    process_customer_csv,
+    process_invoice_csv,
+    process_product_csv,
+)
 
 from .serializers import (
     BusinessSerializer,
@@ -1011,8 +1016,8 @@ class ReportView(APIView):
 
 class CSVImportView(APIView):
     """
-    API endpoint for importing invoices from CSV files.
-    This is an alternative endpoint to avoid name clashing.
+    API endpoint for importing data from CSV files.
+    Supports importing invoices, customers, and products.
     """
 
     parser_classes = [MultiPartParser]
@@ -1033,11 +1038,21 @@ class CSVImportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check if business_id is provided
-        business_id = request.data.get("business_id")
-        if not business_id:
+        # Get the import type
+        import_type = request.data.get("import_type", "invoice")
+        if import_type not in ["invoice", "customer", "product"]:
             return Response(
-                {"error": "Business ID is required"},
+                {
+                    "error": "Invalid import type. Must be one of: invoice, customer, product"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if business_id is provided for invoice and customer imports
+        business_id = request.data.get("business_id")
+        if import_type in ["invoice", "customer"] and not business_id:
+            return Response(
+                {"error": "Business ID is required for invoice and customer imports"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1058,9 +1073,15 @@ class CSVImportView(APIView):
             file_content = csv_file.read()
             logger.info(f"File content length: {len(file_content)}")
 
-            # Process the CSV file
-            result = process_invoice_csv(file_content, int(business_id))
-            logger.info(f"Import result: {result}")
+            # Process the CSV file based on import type
+            if import_type == "invoice":
+                result = process_invoice_csv(file_content, int(business_id))
+            elif import_type == "customer":
+                result = process_customer_csv(file_content, int(business_id))
+            elif import_type == "product":
+                result = process_product_csv(file_content)
+
+            logger.info(f"Import result for {import_type}: {result}")
 
             return Response(result, status=status.HTTP_201_CREATED)
         except CSVImportError as e:

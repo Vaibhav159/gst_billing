@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import CustomerList from './pages/CustomerList';
 import CustomerDetail from './pages/CustomerDetail';
 import CustomerForm from './pages/CustomerForm';
+import CustomerImport from './pages/CustomerImport';
 import BusinessList from './pages/BusinessList';
 import BusinessDetail from './pages/BusinessDetail';
 import BusinessForm from './pages/BusinessForm';
@@ -18,6 +19,7 @@ import BulkInvoicePrint from './pages/BulkInvoicePrint';
 import ProductList from './pages/ProductList';
 import ProductForm from './pages/ProductForm';
 import ProductDetail from './pages/ProductDetail';
+import ProductImport from './pages/ProductImport';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 
@@ -80,6 +82,7 @@ function App() {
 
         {/* Customer Routes */}
         <Route path="billing/customer/list" element={<CustomerList />} />
+        <Route path="billing/customer/import" element={<CustomerImport />} />
         <Route path="billing/customer/:customerId" element={<CustomerDetail />} />
         <Route path="billing/customer" element={<CustomerForm />} />
         <Route path="billing/customer/edit/:customerId" element={<CustomerForm />} />
@@ -100,6 +103,7 @@ function App() {
 
         {/* Product Routes */}
         <Route path="billing/product/list" element={<ProductList />} />
+        <Route path="billing/product/import" element={<ProductImport />} />
         <Route path="billing/product/:productId" element={<ProductDetail />} />
         <Route path="billing/product" element={<ProductForm />} />
         <Route path="billing/product/edit/:productId" element={<ProductForm />} />
