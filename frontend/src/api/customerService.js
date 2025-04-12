@@ -35,6 +35,21 @@ const customerService = {
   searchCustomers: async (query) => {
     const response = await apiClient.get('/customers/search/', { params: { customer_name: query } });
     return response.data;
+  },
+
+  // Import customers from CSV
+  importCustomers: async (file, businessId) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('business_id', businessId);
+    formData.append('import_type', 'customer');
+
+    const response = await apiClient.post('/csv/import/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
   }
 };
 

@@ -42,6 +42,251 @@ class CSVImportError(Exception):
     pass
 
 
+def process_customer_csv(
+    file_content: bytes, business_id: int
+) -> dict[str, int | list[str]]:
+    """
+    Process a CSV file containing customer data and create customers.
+
+    Expected CSV format:
+    name,address,gst_number,mobile_number,pan_number,state_name
+
+    Returns a dictionary with counts of created customers and any errors encountered.
+    """
+    from billing.models import Business, Customer
+
+    # Initialize result counters
+    result = {
+        "customers_created": 0,
+        "errors": [],
+    }
+
+    # Get the business
+    try:
+        business = Business.objects.get(id=business_id)
+    except Business.DoesNotExist:
+        raise CSVImportError(f"Business with ID {business_id} does not exist")
+
+    # Parse CSV file using pandas
+    try:
+        # Read CSV with pandas
+        csv_file = io.BytesIO(file_content)
+        try:
+            df = pd.read_csv(csv_file)
+        except Exception as e:
+            raise CSVImportError(f"Error reading CSV file: {e}")
+
+        # Check if dataframe is empty
+        if df.empty:
+            raise CSVImportError("CSV file is empty")
+
+        # Validate required fields
+        required_fields = ["name"]
+
+        # Check if all required fields are present in the CSV
+        missing_fields = [field for field in required_fields if field not in df.columns]
+        if missing_fields:
+            raise CSVImportError(
+                f"Missing required fields in CSV: {', '.join(missing_fields)}"
+            )
+
+        # Clean and validate data
+        # Convert to dict of records for easier processing
+        records = df.to_dict("records")
+
+        # Extract all unique customer names from the CSV
+        all_customer_names = set(str(row["name"]).strip() for row in records)
+
+        # Get all existing customers in a single query
+        existing_customers = {}
+        for customer in Customer.objects.filter(name__in=all_customer_names):
+            existing_customers[customer.name] = customer
+
+        # Process each customer
+        with transaction.atomic():
+            for row in records:
+                # Skip if name is missing
+                if pd.isna(row["name"]) or str(row["name"]).strip() == "":
+                    result["errors"].append("Missing customer name. Row skipped.")
+                    continue
+
+                customer_name = str(row["name"]).strip()
+
+                # Skip if customer already exists
+                if customer_name in existing_customers:
+                    result["errors"].append(
+                        f"Customer '{customer_name}' already exists. Row skipped."
+                    )
+                    continue
+
+                # Create new customer
+                try:
+                    customer = Customer.objects.create(
+                        name=customer_name,
+                        address=(
+                            str(row.get("address", "")).strip()
+                            if not pd.isna(row.get("address", ""))
+                            else None
+                        ),
+                        gst_number=(
+                            str(row.get("gst_number", "")).strip()
+                            if not pd.isna(row.get("gst_number", ""))
+                            else None
+                        ),
+                        mobile_number=(
+                            str(row.get("mobile_number", "")).strip()
+                            if not pd.isna(row.get("mobile_number", ""))
+                            else None
+                        ),
+                        pan_number=(
+                            str(row.get("pan_number", "")).strip()
+                            if not pd.isna(row.get("pan_number", ""))
+                            else None
+                        ),
+                        state_name=(
+                            str(row.get("state_name", "")).strip()
+                            if not pd.isna(row.get("state_name", ""))
+                            else None
+                        ),
+                    )
+
+                    # Add business to customer
+                    customer.businesses.add(business)
+
+                    # Add to existing customers dict to prevent duplicates
+                    existing_customers[customer_name] = customer
+
+                    result["customers_created"] += 1
+                except Exception as e:
+                    result["errors"].append(
+                        f"Error creating customer '{customer_name}': {e}"
+                    )
+
+    except Exception as e:
+        if isinstance(e, CSVImportError):
+            raise
+        raise CSVImportError(f"Error processing CSV file: {e}")
+
+    return result
+
+
+def process_product_csv(file_content: bytes) -> dict[str, int | list[str]]:
+    """
+    Process a CSV file containing product data and create products.
+
+    Expected CSV format:
+    name,hsn_code,gst_tax_rate,description
+
+    Returns a dictionary with counts of created products and any errors encountered.
+    """
+    from billing.models import Product
+
+    # Initialize result counters
+    result = {
+        "products_created": 0,
+        "errors": [],
+    }
+
+    # Parse CSV file using pandas
+    try:
+        # Read CSV with pandas
+        csv_file = io.BytesIO(file_content)
+        try:
+            df = pd.read_csv(csv_file)
+        except Exception as e:
+            raise CSVImportError(f"Error reading CSV file: {e}")
+
+        # Check if dataframe is empty
+        if df.empty:
+            raise CSVImportError("CSV file is empty")
+
+        # Validate required fields
+        required_fields = ["name"]
+
+        # Check if all required fields are present in the CSV
+        missing_fields = [field for field in required_fields if field not in df.columns]
+        if missing_fields:
+            raise CSVImportError(
+                f"Missing required fields in CSV: {', '.join(missing_fields)}"
+            )
+
+        # Clean and validate data
+        # Convert to dict of records for easier processing
+        records = df.to_dict("records")
+
+        # Extract all unique product names from the CSV
+        all_product_names = set(str(row["name"]).strip() for row in records)
+
+        # Get all existing products in a single query
+        existing_products = {}
+        for product in Product.objects.filter(name__in=all_product_names):
+            existing_products[product.name] = product
+
+        # Process each product
+        with transaction.atomic():
+            for row in records:
+                # Skip if name is missing
+                if pd.isna(row["name"]) or str(row["name"]).strip() == "":
+                    result["errors"].append("Missing product name. Row skipped.")
+                    continue
+
+                product_name = str(row["name"]).strip()
+
+                # Skip if product already exists
+                if product_name in existing_products:
+                    result["errors"].append(
+                        f"Product '{product_name}' already exists. Row skipped."
+                    )
+                    continue
+
+                # Create new product
+                try:
+                    # Handle gst_tax_rate - convert from percentage to decimal if needed
+                    gst_tax_rate = row.get("gst_tax_rate", 0.03)  # Default to 3%
+                    if not pd.isna(gst_tax_rate):
+                        # If it's a string with % sign, convert appropriately
+                        if isinstance(gst_tax_rate, str) and "%" in gst_tax_rate:
+                            gst_tax_rate = float(gst_tax_rate.replace("%", "")) / 100
+                        # If it's greater than 1, assume it's a percentage and convert to decimal
+                        elif float(gst_tax_rate) > 1:
+                            gst_tax_rate = float(gst_tax_rate) / 100
+                        else:
+                            gst_tax_rate = float(gst_tax_rate)
+                    else:
+                        gst_tax_rate = 0.03  # Default to 3%
+
+                    product = Product.objects.create(
+                        name=product_name,
+                        hsn_code=(
+                            str(row.get("hsn_code", "")).strip()
+                            if not pd.isna(row.get("hsn_code", ""))
+                            else None
+                        ),
+                        gst_tax_rate=gst_tax_rate,
+                        description=(
+                            str(row.get("description", "")).strip()
+                            if not pd.isna(row.get("description", ""))
+                            else None
+                        ),
+                    )
+
+                    # Add to existing products dict to prevent duplicates
+                    existing_products[product_name] = product
+
+                    result["products_created"] += 1
+                except Exception as e:
+                    result["errors"].append(
+                        f"Error creating product '{product_name}': {e}"
+                    )
+
+    except Exception as e:
+        if isinstance(e, CSVImportError):
+            raise
+        raise CSVImportError(f"Error processing CSV file: {e}")
+
+    return result
+
+
 def process_invoice_csv(
     file_content: bytes, business_id: int
 ) -> dict[str, int | list[str]]:

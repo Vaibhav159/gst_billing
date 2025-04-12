@@ -41,6 +41,20 @@ const productService = {
   getDefaults: async () => {
     const response = await apiClient.get('/products/defaults/');
     return response.data;
+  },
+
+  // Import products from CSV
+  importProducts: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('import_type', 'product');
+
+    const response = await apiClient.post('/csv/import/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
   }
 };
 

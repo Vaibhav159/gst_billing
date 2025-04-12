@@ -143,16 +143,29 @@ function ProductList() {
       {/* Header Section with Responsive Design */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Products</h1>
-        <Link to="/billing/product">
-          <Button
-            variant="primary"
-            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-            </svg>}
-          >
-            Add Product
-          </Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/billing/product/import">
+            <Button
+              variant="outline"
+              className="mr-2"
+              icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+              </svg>}
+            >
+              Import CSV
+            </Button>
+          </Link>
+          <Link to="/billing/product">
+            <Button
+              variant="primary"
+              icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>}
+            >
+              Add Product
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Search with Improved Styling */}
