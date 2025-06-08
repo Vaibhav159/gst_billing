@@ -3,7 +3,8 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db.models import Q, Sum
+from django.db.models import IntegerField, Q, Sum
+from django.db.models.functions import Cast
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -539,7 +540,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def next_invoice_number(self, request):
         """Get the next invoice number for a business"""
         business_id = request.query_params.get("business_id")
-        invoice_type = request.query_params.get("type_of_invoice", "outward")
+        invoice_type = request.query_params.get("type_of_invoice", INVOICE_TYPE_OUTWARD)
 
         if not business_id:
             return Response(
@@ -558,32 +559,52 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
 
         # Get the last invoice number for this business in the current financial year
-        last_invoice = (
-            Invoice.objects.filter(
-                business_id=business_id,
-                invoice_date__gte=start_date,
-                type_of_invoice=invoice_type,
+        last_invoice = None
+        if invoice_type == INVOICE_TYPE_OUTWARD:
+            # For 'outward' invoices, cast invoice_number to integer for correct numeric sorting.
+            last_invoice = (
+                Invoice.objects.filter(
+                    business_id=business_id,
+                    invoice_date__gte=start_date,
+                    type_of_invoice=invoice_type,
+                )
+                .annotate(
+                    invoice_number_as_int=Cast(
+                        "invoice_number", output_field=IntegerField()
+                    )
+                )
+                .order_by("-invoice_number_as_int")
+                .first()
             )
-            .order_by("-invoice_number")
-            .first()
-        )
+        else:
+            # For other invoice types, maintain the original behavior (lexical sort)
+            last_invoice = (
+                Invoice.objects.filter(
+                    business_id=business_id,
+                    invoice_date__gte=start_date,
+                    type_of_invoice=invoice_type,
+                )
+                .order_by("-invoice_number")
+                .first()
+            )
 
         next_number = 1
-
-        # Generate the next invoice number
         if last_invoice:
             try:
-                # Try to extract the numeric part of the invoice number
-                # Assuming the number to be of type str
+                # Attempt to convert the invoice_number string to an integer and increment.
                 next_number = int(last_invoice.invoice_number) + 1
             except (ValueError, IndexError):
-                next_number = 1
+                logger.warning(
+                    f"Could not parse invoice_number '{last_invoice.invoice_number}' as int "
+                    f"for business {business_id}, type {invoice_type}. Resetting next number to 1."
+                )
+                next_number = 1  # Reset if parsing fails
 
-        # Format the invoice number
+        # Format the invoice number string
         # prefix = "OUT" if invoice_type == "outward" else "IN"
-        invoice_number = f"{next_number!s}"
+        next_invoice_number_str = f"{next_number!s}"
 
-        return Response({"next_invoice_number": invoice_number})
+        return Response({"next_invoice_number": next_invoice_number_str})
 
 
 @method_decorator(csrf_exempt, name="dispatch")
