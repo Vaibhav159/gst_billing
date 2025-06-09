@@ -554,8 +554,8 @@ function InvoiceDetail() {
                     id="rate"
                     name="rate"
                     type="number"
-                    min="0.01"
-                    step="0.01"
+                    min="0.001"
+                    step="0.001"
                     value={newLineItem.rate}
                     onChange={handleLineItemChange}
                     placeholder="Enter rate per gram"
