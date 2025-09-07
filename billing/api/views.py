@@ -1,3 +1,4 @@
+import csv
 import logging
 from calendar import monthrange
 from datetime import datetime
@@ -223,6 +224,72 @@ class CustomerViewSet(viewsets.ModelViewSet):
             )
 
         return Response(result)
+
+    @action(detail=False, methods=["get"])
+    def export_csv(self, request):
+        """Export customers to CSV"""
+        # Get filter parameters from request
+        search_term = request.query_params.get("search", "")
+        business_id = request.query_params.get("business_id", "")
+
+        # Build filter kwargs
+        filter_kwargs = {}
+        if search_term:
+            filter_kwargs["name__icontains"] = search_term
+        if business_id:
+            filter_kwargs["businesses"] = business_id
+
+        # Get customers with related businesses
+        customers = (
+            Customer.objects.filter(**filter_kwargs)
+            .prefetch_related("businesses")
+            .order_by("id")
+        )
+
+        # Create HTTP response with CSV content type
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="customers_export.csv"'
+
+        # Create CSV writer
+        writer = csv.writer(response)
+
+        # Write header row
+        writer.writerow(
+            [
+                "Customer Name",
+                "Address",
+                "GST Number",
+                "PAN Number",
+                "Mobile Number",
+                "State Name",
+                "Associated Businesses",
+                "Created At",
+                "Updated At",
+            ]
+        )
+
+        # Write customer data
+        for customer in customers:
+            # Get associated business names
+            business_names = ", ".join(
+                [business.name for business in customer.businesses.all()]
+            )
+
+            writer.writerow(
+                [
+                    customer.name,
+                    customer.address or "",
+                    customer.gst_number or "",
+                    customer.pan_number or "",
+                    customer.mobile_number or "",
+                    customer.state_name or "",
+                    business_names,
+                    customer.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    customer.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+                ]
+            )
+
+        return response
 
 
 @method_decorator(csrf_exempt, name="dispatch")
