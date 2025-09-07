@@ -50,6 +50,15 @@ const customerService = {
       },
     });
     return response.data;
+  },
+
+  // Export customers to CSV
+  exportCustomers: async (filters = {}) => {
+    const response = await apiClient.get('/customers/export_csv/', {
+      params: filters,
+      responseType: 'blob', // Important for file downloads
+    });
+    return response;
   }
 };
 

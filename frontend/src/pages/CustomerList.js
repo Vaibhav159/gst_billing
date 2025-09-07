@@ -12,6 +12,7 @@ import ActionMenu from '../components/ActionMenu';
 import SortableHeader from '../components/SortableHeader';
 
 import apiClient, { createCancelToken } from '../api/client';
+import customerService from '../api/customerService';
 import { useRowClick } from '../utils/navigationHelpers';
 
 function CustomerList() {
@@ -401,6 +402,55 @@ function CustomerList() {
     }
   }, [isMounted]);
 
+  // Handle CSV export
+  const handleExportCSV = useCallback(async () => {
+    try {
+      console.log('Starting CSV export with filters:', filters);
+      
+      // Show loading state
+      setLoading(true);
+      
+      // Prepare filters for export (same as current view filters)
+      const exportFilters = {
+        search: filters.search,
+        business_id: filters.business_id
+      };
+      
+      // Remove empty filters
+      Object.keys(exportFilters).forEach(key => {
+        if (exportFilters[key] === '') {
+          delete exportFilters[key];
+        }
+      });
+      
+      // Call the export API
+      const response = await customerService.exportCustomers(exportFilters);
+      
+      // Create blob and download
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().split('T')[0];
+      link.download = `customers_export_${timestamp}.csv`;
+      
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log('CSV export completed successfully');
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+      setError('Failed to export CSV. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+
   // No debug logging in production
 
   // Add a key to force re-render when customers change
@@ -412,10 +462,19 @@ function CustomerList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Customers</h1>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={loading}
+            icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+            </svg>}
+          >
+            {loading ? 'Exporting...' : 'Export CSV'}
+          </Button>
           <Link to="/billing/customer/import">
             <Button
               variant="outline"
-              className="mr-2"
               icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
               </svg>}
