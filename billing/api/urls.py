@@ -7,6 +7,8 @@ from rest_framework_simplejwt.views import (
 )
 
 from .views import (
+    AIInvoiceCreateView,
+    AIInvoiceProcessingView,
     BusinessViewSet,
     CSVImportView,
     CustomerViewSet,
@@ -27,6 +29,12 @@ urlpatterns = [
     path("", include(router.urls)),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
     path("csv/import/", CSVImportView.as_view(), name="csv-import"),
+    path(
+        "ai/invoice/process/",
+        AIInvoiceProcessingView.as_view(),
+        name="ai-invoice-process",
+    ),
+    path("ai/invoice/create/", AIInvoiceCreateView.as_view(), name="ai-invoice-create"),
     path(
         "invoices/<int:invoice_id>/line-items/",
         LineItemViewSet.as_view({"get": "list", "post": "create"}),

@@ -25,6 +25,8 @@ from billing.constants import (
 )
 from billing.models import Business, Customer, Invoice, LineItem, Product
 from billing.utils import (
+    AIInvoiceProcessingError,
+    AIInvoiceProcessor,
     CSVImportError,
     process_customer_csv,
     process_invoice_csv,
@@ -1140,7 +1142,7 @@ class CSVImportView(APIView):
         business_id = request.data.get("business_id")
         if import_type in ["invoice", "customer"] and not business_id:
             return Response(
-                {"error": "Business ID is required for invoice and customer imports"},
+                {"error": "Business ID is required for invoice"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1182,5 +1184,175 @@ class CSVImportView(APIView):
             logger.error(f"Unexpected error during import: {e}", exc_info=True)
             return Response(
                 {"error": "An unexpected error occurred during import"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AIInvoiceProcessingView(APIView):
+    """
+    API endpoint for AI-powered invoice processing using Google Gemini.
+    Processes invoice images and extracts structured data.
+    """
+
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        """Process an invoice image and extract data"""
+        try:
+            # Validate request
+            if "image" not in request.FILES:
+                return Response(
+                    {"error": "No image file provided"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            image_file = request.FILES["image"]
+
+            # Validate file type
+            allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+            if image_file.content_type not in allowed_types:
+                return Response(
+                    {
+                        "error": "Invalid file type. Please upload a JPEG, PNG, or WebP image."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate file size (max 10MB)
+            if image_file.size > 10 * 1024 * 1024:
+                return Response(
+                    {
+                        "error": "File size too large. Please upload an image smaller than 10MB."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Process the image with AI
+            processor = AIInvoiceProcessor()
+            extracted_data = processor.process_invoice_image(image_file)
+
+            return Response(
+                {
+                    "success": True,
+                    "data": extracted_data,
+                    "message": "Invoice data extracted successfully",
+                }
+            )
+
+        except AIInvoiceProcessingError as e:
+            logger.error(f"AI invoice processing error: {e}")
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during AI invoice processing: {e}", exc_info=True
+            )
+            return Response(
+                {"error": "An unexpected error occurred while processing the invoice"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AIInvoiceCreateView(APIView):
+    """
+    API endpoint for creating invoices from AI-extracted data.
+    """
+
+    def post(self, request):
+        """Create invoice from AI-extracted data"""
+        try:
+            # Validate required fields
+            required_fields = ["business_id", "invoice_data"]
+            for field in required_fields:
+                if field not in request.data:
+                    return Response(
+                        {"error": f"Missing required field: {field}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            business_id = request.data["business_id"]
+            invoice_data = request.data["invoice_data"]
+
+            # Validate business exists
+            try:
+                business = Business.objects.get(id=business_id)
+            except Business.DoesNotExist:
+                return Response(
+                    {"error": "Business not found"}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Create or get customer
+            customer_data = {
+                "name": invoice_data.get("customer_name", ""),
+                "address": invoice_data.get("customer_address", ""),
+                "gst_number": invoice_data.get("customer_gst_number", ""),
+                "pan_number": invoice_data.get("customer_pan_number", ""),
+                "mobile_number": invoice_data.get("customer_mobile_number", ""),
+            }
+
+            customer, created = Customer.objects.get_or_create(
+                name=customer_data["name"], defaults=customer_data
+            )
+
+            if not created:
+                # Update existing customer with new data if provided
+                for key, value in customer_data.items():
+                    if value and not getattr(customer, key):
+                        setattr(customer, key, value)
+                customer.save()
+
+            # Associate customer with business
+            customer.businesses.add(business)
+
+            # Create invoice
+            invoice = Invoice.objects.create(
+                customer=customer,
+                business=business,
+                invoice_number=invoice_data.get("invoice_number", ""),
+                invoice_date=invoice_data.get("invoice_date", datetime.now().date()),
+                type_of_invoice=INVOICE_TYPE_OUTWARD,
+                total_amount=invoice_data.get("total_amount", 0),
+            )
+
+            # Create line items
+            line_items_created = 0
+            for item_data in invoice_data.get("line_items", []):
+                LineItem.objects.create(
+                    customer=customer,
+                    invoice=invoice,
+                    product_name=item_data.get("product_name", ""),
+                    hsn_code=item_data.get("hsn_code", ""),
+                    gst_tax_rate=item_data.get("gst_tax_rate", 0.03),
+                    quantity=item_data.get("quantity", 0),
+                    rate=item_data.get("rate", 0),
+                    amount=item_data.get("amount", 0),
+                )
+                line_items_created += 1
+
+            # Update invoice total
+            invoice.total_amount = sum(
+                LineItem.objects.filter(invoice=invoice).values_list(
+                    "amount", flat=True
+                )
+            )
+            invoice.save()
+
+            return Response(
+                {
+                    "success": True,
+                    "invoice_id": invoice.id,
+                    "invoice_number": invoice.invoice_number,
+                    "customer_name": customer.name,
+                    "line_items_created": line_items_created,
+                    "total_amount": invoice.total_amount,
+                    "message": "Invoice created successfully",
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Error creating invoice from AI data: {e}", exc_info=True)
+            return Response(
+                {"error": "An unexpected error occurred while creating the invoice"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

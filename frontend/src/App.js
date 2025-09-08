@@ -14,6 +14,7 @@ import InvoiceList from './pages/InvoiceList';
 import InvoiceDetail from './pages/InvoiceDetail';
 import InvoiceForm from './pages/InvoiceForm';
 import InvoiceImport from './pages/InvoiceImport';
+import AIInvoiceImport from './pages/AIInvoiceImport';
 import InvoicePrint from './pages/InvoicePrint';
 import BulkInvoicePrint from './pages/BulkInvoicePrint';
 import ProductList from './pages/ProductList';
@@ -98,6 +99,7 @@ function App() {
         <Route path="billing/invoice/add" element={<InvoiceForm />} />
         <Route path="billing/invoice/new" element={<InvoiceForm />} />
         <Route path="billing/invoice/import" element={<InvoiceImport />} />
+        <Route path="billing/invoice/ai-import" element={<AIInvoiceImport />} />
         <Route path="billing/invoice/:invoiceId" element={<InvoiceDetail />} />
         <Route path="billing/invoice" element={<InvoiceForm />} />
 

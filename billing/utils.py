@@ -1,8 +1,12 @@
+import base64
 import io
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import google.generativeai as genai
 import pandas as pd
+from django.conf import settings
 from django.db import transaction
 
 DATE_FORMAT_YEAR_MONTH_DATE = "%Y-%m-%d"
@@ -522,3 +526,162 @@ def process_invoice_csv(
         raise CSVImportError(f"Error processing CSV file: {e!s}")
 
     return result
+
+
+class AIInvoiceProcessor:
+    """AI-powered invoice processing using Google Gemini"""
+
+    def __init__(self):
+        # Configure Gemini API
+        if not settings.GEMINI_API_KEY:
+            raise AIInvoiceProcessingError("GEMINI_API_KEY not configured in settings")
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.model = genai.GenerativeModel("gemini-1.5-flash")
+
+    def process_invoice_image(self, image_file) -> dict:
+        """
+        Process an invoice image using Google Gemini and extract structured data
+
+        Args:
+            image_file: Uploaded image file
+
+        Returns:
+            dict: Extracted invoice data
+        """
+        try:
+            # Read and encode the image
+            image_data = image_file.read()
+            image_base64 = base64.b64encode(image_data).decode("utf-8")
+
+            # Create the prompt for invoice extraction
+            prompt = """
+            Analyze this invoice image and extract the following information in JSON format:
+            
+            {
+                "invoice_number": "string",
+                "invoice_date": "YYYY-MM-DD format",
+                "customer_name": "string",
+                "customer_address": "string",
+                "customer_gst_number": "string (if available)",
+                "customer_pan_number": "string (if available)",
+                "customer_mobile_number": "string (if available)",
+                "line_items": [
+                    {
+                        "product_name": "string",
+                        "quantity": "decimal number",
+                        "rate": "decimal number",
+                        "hsn_code": "string (if available)",
+                        "gst_tax_rate": "decimal (e.g., 0.03 for 3%)",
+                        "amount": "decimal number"
+                    }
+                ],
+                "total_amount": "decimal number",
+                "cgst_total": "decimal number (if available)",
+                "sgst_total": "decimal number (if available)",
+                "igst_total": "decimal number (if available)"
+            }
+            
+            Important instructions:
+            1. Extract all line items from the invoice
+            2. Convert all monetary values to decimal numbers
+            3. If GST tax rate is shown as percentage (e.g., 3%), convert to decimal (0.03)
+            4. If date is in DD/MM/YYYY format, convert to YYYY-MM-DD
+            5. If any field is not available, use null or empty string
+            6. Ensure all monetary values are accurate
+            7. Return only valid JSON, no additional text
+            """
+
+            # Generate content using Gemini
+            response = self.model.generate_content(
+                [prompt, {"mime_type": image_file.content_type, "data": image_base64}]
+            )
+
+            # Parse the response
+            response_text = response.text.strip()
+
+            # Clean up the response to extract JSON
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+
+            # Parse JSON response
+            extracted_data = json.loads(response_text)
+
+            # Validate and clean the data
+            return self._validate_extracted_data(extracted_data)
+
+        except json.JSONDecodeError as e:
+            raise AIInvoiceProcessingError(
+                f"Failed to parse AI response as JSON: {e!s}"
+            )
+        except Exception as e:
+            raise AIInvoiceProcessingError(f"Error processing invoice image: {e!s}")
+
+    def _validate_extracted_data(self, data: dict) -> dict:
+        """Validate and clean extracted invoice data"""
+
+        # Ensure required fields exist
+        required_fields = [
+            "invoice_number",
+            "invoice_date",
+            "customer_name",
+            "line_items",
+        ]
+        for field in required_fields:
+            if field not in data:
+                data[field] = None if field != "line_items" else []
+
+        # Validate line items
+        if not isinstance(data.get("line_items"), list):
+            data["line_items"] = []
+
+        # Clean and validate each line item
+        cleaned_line_items = []
+        for item in data["line_items"]:
+            if not isinstance(item, dict):
+                continue
+
+            cleaned_item = {
+                "product_name": str(item.get("product_name", "")),
+                "quantity": self._safe_decimal(item.get("quantity", 0)),
+                "rate": self._safe_decimal(item.get("rate", 0)),
+                "hsn_code": str(item.get("hsn_code", "")),
+                "gst_tax_rate": self._safe_decimal(item.get("gst_tax_rate", 0.03)),
+                "amount": self._safe_decimal(item.get("amount", 0)),
+            }
+
+            # Calculate amount if not provided
+            if cleaned_item["amount"] == 0:
+                cleaned_item["amount"] = cleaned_item["quantity"] * cleaned_item["rate"]
+
+            cleaned_line_items.append(cleaned_item)
+
+        data["line_items"] = cleaned_line_items
+
+        # Clean other fields
+        data["customer_address"] = str(data.get("customer_address", ""))
+        data["customer_gst_number"] = str(data.get("customer_gst_number", ""))
+        data["customer_pan_number"] = str(data.get("customer_pan_number", ""))
+        data["customer_mobile_number"] = str(data.get("customer_mobile_number", ""))
+        data["total_amount"] = self._safe_decimal(data.get("total_amount", 0))
+        data["cgst_total"] = self._safe_decimal(data.get("cgst_total", 0))
+        data["sgst_total"] = self._safe_decimal(data.get("sgst_total", 0))
+        data["igst_total"] = self._safe_decimal(data.get("igst_total", 0))
+
+        return data
+
+    def _safe_decimal(self, value) -> Decimal:
+        """Safely convert value to Decimal"""
+        if value is None or value == "":
+            return Decimal("0")
+        try:
+            return Decimal(str(value))
+        except (ValueError, TypeError):
+            return Decimal("0")
+
+
+class AIInvoiceProcessingError(Exception):
+    """Exception raised for errors during AI invoice processing."""
+
+    pass

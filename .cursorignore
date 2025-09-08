@@ -1,0 +1,6 @@
+.env
+*.log
+*.bak
+config/*.env
+node_modules/
+*.sqlite3

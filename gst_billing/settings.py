@@ -255,3 +255,6 @@ if REDIS_PASSWORD:
         # Cache all LineItem models queries for 1 hour
         "billing.LineItem": {"ops": "all", "timeout": ONE_HOUR},
     }
+
+# AI Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
