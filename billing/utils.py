@@ -301,6 +301,7 @@ def process_invoice_csv(
     Improvements:
     1. Uses pandas for more robust CSV handling
     2. Validates that customers exist in the database (doesn't create new ones)
+    3. Filters customers by business association to ensure data integrity
     """
     from billing.models import Business, Customer, Invoice, LineItem
 
@@ -354,17 +355,19 @@ def process_invoice_csv(
         # Extract all unique customer names from the CSV
         all_customer_names = set(str(row["customer_name"]).strip() for row in records)
 
-        # Get all existing customers in a single query
+        # Get all existing customers associated with this business in a single query
         existing_customers = {}
-        for customer in Customer.objects.filter(name__in=all_customer_names):
+        for customer in Customer.objects.filter(
+            name__in=all_customer_names, businesses=business
+        ):
             existing_customers[customer.name] = customer
 
-        # Check if any customers are missing
+        # Check if any customers are missing or not associated with this business
         missing_customers = all_customer_names - set(existing_customers.keys())
         if missing_customers:
             for customer_name in missing_customers:
                 result["errors"].append(
-                    f"Customer '{customer_name}' does not exist in the database. Related invoices will be skipped."
+                    f"Customer '{customer_name}' does not exist or is not associated with business '{business.name}'. Related invoices will be skipped."
                 )
 
         # Group rows by invoice number to handle multiple line items per invoice
