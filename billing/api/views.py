@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 15
     page_size_query_param = "page_size"
-    max_page_size = 100
+    max_page_size = 1000
 
     def get_page_size(self, request):
         limit = request.query_params.get("limit")
