@@ -1228,9 +1228,18 @@ class AIInvoiceProcessingView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            business_id = request.data.get("business_id")
+            if not business_id:
+                return Response(
+                    {"error": "Business ID is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             # Process the image with AI
             processor = AIInvoiceProcessor()
-            extracted_data = processor.process_invoice_image(image_file)
+            extracted_data = processor.process_invoice_image(
+                image_file, business_id=business_id
+            )
 
             return Response(
                 {

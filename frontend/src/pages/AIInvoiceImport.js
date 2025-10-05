@@ -93,7 +93,7 @@ const AIInvoiceImport = () => {
       setError('');
       setSuccess(null);
 
-      const result = await aiInvoiceService.processInvoiceImage(imageFile);
+      const result = await aiInvoiceService.processInvoiceImage(imageFile, businessId);
       
       setExtractedData(result.data);
       setEditableData(JSON.parse(JSON.stringify(result.data))); // Deep copy for editing
