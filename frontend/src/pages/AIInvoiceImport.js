@@ -145,7 +145,12 @@ const AIInvoiceImport = () => {
       setImageFile(null);
       setExtractedData(null);
       setEditableData(null);
-      document.getElementById('image-file-input').value = '';
+      
+      // Safely clear the file input
+      const fileInput = document.getElementById('image-file-input');
+      if (fileInput) {
+        fileInput.value = '';
+      }
 
     } catch (err) {
       console.error('Error creating invoice:', err);
@@ -166,7 +171,12 @@ const AIInvoiceImport = () => {
     setEditableData(null);
     setError('');
     setSuccess(null);
-    document.getElementById('image-file-input').value = '';
+    
+    // Safely clear the file input
+    const fileInput = document.getElementById('image-file-input');
+    if (fileInput) {
+      fileInput.value = '';
+    }
   };
 
   if (loading) {

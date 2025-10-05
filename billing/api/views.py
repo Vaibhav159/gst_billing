@@ -1291,19 +1291,7 @@ class AIInvoiceCreateView(APIView):
                 "mobile_number": invoice_data.get("customer_mobile_number", ""),
             }
 
-            customer, created = Customer.objects.get_or_create(
-                name=customer_data["name"], defaults=customer_data
-            )
-
-            if not created:
-                # Update existing customer with new data if provided
-                for key, value in customer_data.items():
-                    if value and not getattr(customer, key):
-                        setattr(customer, key, value)
-                customer.save()
-
-            # Associate customer with business
-            customer.businesses.add(business)
+            customer = Customer.objects.get(name=customer_data["name"])
 
             # Create invoice
             invoice = Invoice.objects.create(
