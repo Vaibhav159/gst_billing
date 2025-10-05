@@ -45,6 +45,8 @@ class CSVImportTestCase(TransactionTestCase):
             gst_number="27AADCB2230M1Z4",
         )
 
+        self.customer.businesses.add(self.business)
+
         # URL for testing
         self.csv_import_url = reverse("csv-import")
 
@@ -71,7 +73,7 @@ class CSVImportTestCase(TransactionTestCase):
         # Check that an error was reported
         self.assertEqual(len(result["errors"]), 1)
         self.assertIn(
-            "Customer 'Non Existent Customer' does not exist in the database",
+            f"Customer 'Non Existent Customer' does not exist or is not associated with business '{self.business.name}'. Related invoices will be skipped.",
             result["errors"][0],
         )
 
@@ -190,7 +192,7 @@ class CSVImportTestCase(TransactionTestCase):
         # Check the response
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("error", response.data)
-        self.assertEqual(response.data["error"], "Business ID is required")
+        self.assertEqual(response.data["error"], "Business ID is required for invoice")
 
     def test_csv_import_with_nonexistent_customer(self):
         """Test CSV import with a customer that doesn't exist in the database."""
@@ -222,7 +224,7 @@ class CSVImportTestCase(TransactionTestCase):
         self.assertIn("errors", response.data)
         self.assertEqual(len(response.data["errors"]), 1)
         self.assertIn(
-            "Customer 'Non Existent Customer' does not exist in the database",
+            f"Customer 'Non Existent Customer' does not exist or is not associated with business '{self.business.name}'. Related invoices will be skipped.",
             response.data["errors"][0],
         )
 
@@ -256,7 +258,7 @@ class CSVImportTestCase(TransactionTestCase):
         )  # No invoices should be created
         self.assertEqual(response.data["line_items_created"], 0)
         self.assertIn("errors", response.data)
-        self.assertEqual(len(response.data["errors"]), 1)
+        self.assertEqual(len(response.data["errors"]), 1, msg=response.data["errors"])
         self.assertIn("Missing invoice number", response.data["errors"][0])
 
     @freeze_time("2023-06-01")
@@ -274,7 +276,7 @@ class CSVImportTestCase(TransactionTestCase):
         # Create a sample CSV file with the same invoice number
         csv_content = (
             "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
-            "1001,2023-05-15,Test Customer,Gold Ring,10.5,4500,711319,0.03\n"
+            f"1001,2023-05-15,{self.customer.name},Gold Ring,10.5,4500,711319,0.03\n"
         )
         csv_file = io.StringIO(csv_content)
         csv_file.name = "test_import.csv"

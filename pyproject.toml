@@ -30,6 +30,7 @@ dependencies = [
     "django-cacheops>=7.1",
     "python-dotenv>=1.1.0",
     "pip-system-certs>=4.0",
+    "google-genai>=1.33.0",
 ]
 
 [project.optional-dependencies]

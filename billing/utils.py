@@ -1,11 +1,51 @@
+import base64
 import io
+import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import google.genai as genai
 import pandas as pd
+from django.conf import settings
 from django.db import transaction
+from google.genai import types
 
 DATE_FORMAT_YEAR_MONTH_DATE = "%Y-%m-%d"
+
+
+@dataclass
+class LineItemData:
+    """Structured data for invoice line items"""
+
+    product_name: str
+    quantity: float
+    rate: float
+    hsn_code: str | None = None
+    gst_tax_rate: float = 0.03
+    amount: float | None = None
+
+
+@dataclass
+class InvoiceData:
+    """Structured data for invoice extraction"""
+
+    invoice_number: str
+    invoice_date: str  # YYYY-MM-DD format
+    customer_name: str
+    customer_address: str | None = None
+    customer_gst_number: str | None = None
+    customer_pan_number: str | None = None
+    customer_mobile_number: str | None = None
+    line_items: list[LineItemData] = None
+    total_amount: float | None = None
+    cgst_total: float | None = None
+    sgst_total: float | None = None
+    igst_total: float | None = None
+
+    def __post_init__(self):
+        if self.line_items is None:
+            self.line_items = []
 
 
 def split_dates(start_date_str: str, end_date_str: str) -> list[tuple[str, str]]:
@@ -301,6 +341,7 @@ def process_invoice_csv(
     Improvements:
     1. Uses pandas for more robust CSV handling
     2. Validates that customers exist in the database (doesn't create new ones)
+    3. Filters customers by business association to ensure data integrity
     """
     from billing.models import Business, Customer, Invoice, LineItem
 
@@ -354,17 +395,19 @@ def process_invoice_csv(
         # Extract all unique customer names from the CSV
         all_customer_names = set(str(row["customer_name"]).strip() for row in records)
 
-        # Get all existing customers in a single query
+        # Get all existing customers associated with this business in a single query
         existing_customers = {}
-        for customer in Customer.objects.filter(name__in=all_customer_names):
+        for customer in Customer.objects.filter(
+            name__in=all_customer_names, businesses=business
+        ):
             existing_customers[customer.name] = customer
 
-        # Check if any customers are missing
+        # Check if any customers are missing or not associated with this business
         missing_customers = all_customer_names - set(existing_customers.keys())
         if missing_customers:
             for customer_name in missing_customers:
                 result["errors"].append(
-                    f"Customer '{customer_name}' does not exist in the database. Related invoices will be skipped."
+                    f"Customer '{customer_name}' does not exist or is not associated with business '{business.name}'. Related invoices will be skipped."
                 )
 
         # Group rows by invoice number to handle multiple line items per invoice
@@ -519,3 +562,241 @@ def process_invoice_csv(
         raise CSVImportError(f"Error processing CSV file: {e!s}")
 
     return result
+
+
+class AIInvoiceProcessor:
+    """AI-powered invoice processing using Google Gemini with structured output"""
+
+    def __init__(self):
+        # Configure Gemini API
+        if not settings.GEMINI_API_KEY:
+            raise AIInvoiceProcessingError("GEMINI_API_KEY not configured in settings")
+
+        # Initialize the client
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        # Define structured output schema for response
+        self._line_item_schema = types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "product_name": types.Schema(type=types.Type.STRING),
+                "quantity": types.Schema(type=types.Type.NUMBER),
+                "rate": types.Schema(type=types.Type.NUMBER),
+                "hsn_code": types.Schema(type=types.Type.STRING, nullable=True),
+                "gst_tax_rate": types.Schema(type=types.Type.NUMBER),
+                "amount": types.Schema(type=types.Type.NUMBER, nullable=True),
+            },
+            required=["product_name", "quantity", "rate", "gst_tax_rate"],
+        )
+
+        self._invoice_schema = types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "invoice_number": types.Schema(type=types.Type.STRING),
+                "invoice_date": types.Schema(type=types.Type.STRING),
+                "customer_name": types.Schema(type=types.Type.STRING),
+                "customer_address": types.Schema(type=types.Type.STRING, nullable=True),
+                "customer_gst_number": types.Schema(
+                    type=types.Type.STRING, nullable=True
+                ),
+                "customer_pan_number": types.Schema(
+                    type=types.Type.STRING, nullable=True
+                ),
+                "customer_mobile_number": types.Schema(
+                    type=types.Type.STRING, nullable=True
+                ),
+                "line_items": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=self._line_item_schema,
+                ),
+                "total_amount": types.Schema(type=types.Type.NUMBER, nullable=True),
+                "cgst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
+                "sgst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
+                "igst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
+            },
+            required=["invoice_number", "invoice_date", "customer_name", "line_items"],
+        )
+
+    def process_invoice_image(self, image_file) -> dict:
+        """
+        Process an invoice image using Google Gemini and extract structured data
+
+        Args:
+            image_file: Uploaded image file
+
+        Returns:
+            dict: Extracted invoice data
+        """
+        try:
+            # Read and encode the image
+            image_data = image_file.read()
+            image_base64 = base64.b64encode(image_data).decode("utf-8")
+
+            # Create the prompt for invoice extraction
+            prompt = """
+            Analyze this invoice image and extract the following information:
+            
+            Important instructions:
+            1. Extract all line items from the invoice
+            2. Convert all monetary values to decimal numbers
+            3. If GST tax rate is shown as percentage (e.g., 3%), convert to decimal (0.03)
+            4. If date is in DD/MM/YYYY format, convert to YYYY-MM-DD
+            5. If any field is not available, use null or empty string
+            6. Ensure all monetary values are accurate
+            7. Be precise with decimal calculations
+            8. Extract all visible line items, don't miss any
+            9. Convert any hindi text to english like customer name, product name, address, etc. eg: "अमरकान्त दार्शन मुस्काना" to "Amarakant Dashana Muskana"
+            10. DONT EXTRACT total_amount should be the sum of all line items amount + cgst_total + sgst_total + igst_total, eg: 100 + 10 + 10 + 10 = 130
+            """
+
+            # Generate content using Gemini with improved prompt for structured output
+            enhanced_prompt = f"""
+            {prompt}
+            
+            Please return the data in the following exact JSON format:
+            {{
+                "invoice_number": "string",
+                "invoice_date": "YYYY-MM-DD",
+                "customer_name": "string",
+                "customer_address": "string or null",
+                "customer_gst_number": "string or null",
+                "customer_pan_number": "string or null", 
+                "customer_mobile_number": "string or null",
+                "line_items": [
+                    {{
+                        "product_name": "string",
+                        "quantity": number,
+                        "rate": number,
+                        "hsn_code": "string or null",
+                        "gst_tax_rate": number,
+                        "amount": number
+                    }}
+                ],
+                "total_amount": number,
+                "cgst_total": number or null,
+                "sgst_total": number or null,
+                "igst_total": number or null
+            }}
+            
+            Return ONLY the JSON object, no additional text or formatting.
+            """
+
+            # Use google-genai API
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=[
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": enhanced_prompt},
+                            {
+                                "inline_data": {
+                                    "mime_type": image_file.content_type,
+                                    "data": image_base64,
+                                }
+                            },
+                        ],
+                    }
+                ],
+                config=types.GenerateContentConfig(
+                    candidate_count=1,
+                    max_output_tokens=8192,
+                    temperature=0.1,
+                    top_p=0.8,
+                    top_k=40,
+                    response_mime_type="application/json",
+                    response_schema=self._invoice_schema,
+                ),
+            )
+
+            # Parse the structured JSON response
+            response_text = response.text.strip()
+
+            # Log the response for debugging
+            print(f"AI Response: {response_text}")
+
+            # Clean up the response to extract JSON
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+
+            # Remove any leading/trailing whitespace
+            response_text = response_text.strip()
+
+            # Try to find JSON object in the response
+            if response_text.startswith("{") and response_text.endswith("}"):
+                extracted_data = json.loads(response_text)
+            else:
+                # Try to extract JSON from the response
+                import re
+
+                json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+                if json_match:
+                    extracted_data = json.loads(json_match.group())
+                else:
+                    raise AIInvoiceProcessingError("No valid JSON found in AI response")
+
+            # Convert to dict format for compatibility
+            return self._convert_to_dict(extracted_data)
+
+        except json.JSONDecodeError as e:
+            raise AIInvoiceProcessingError(
+                f"Failed to parse AI response as JSON: {e!s}"
+            )
+        except Exception as e:
+            raise AIInvoiceProcessingError(f"Error processing invoice image: {e!s}")
+
+    def _convert_to_dict(self, data: dict) -> dict:
+        """Convert structured data to dict format for frontend compatibility"""
+        # Convert line items to dict format
+        line_items = []
+        for item in data.get("line_items", []):
+            line_item_dict = {
+                "product_name": item.get("product_name", ""),
+                "quantity": self._safe_decimal(item.get("quantity", 0)),
+                "rate": self._safe_decimal(item.get("rate", 0)),
+                "hsn_code": item.get("hsn_code", ""),
+                "gst_tax_rate": self._safe_decimal(item.get("gst_tax_rate", 0.03)),
+                "amount": self._safe_decimal(item.get("amount", 0)),
+            }
+
+            # Calculate amount if not provided
+            if line_item_dict["amount"] == 0:
+                line_item_dict["amount"] = (
+                    line_item_dict["quantity"] * line_item_dict["rate"]
+                )
+
+            line_items.append(line_item_dict)
+
+        return {
+            "invoice_number": data.get("invoice_number", ""),
+            "invoice_date": data.get("invoice_date", ""),
+            "customer_name": data.get("customer_name", ""),
+            "customer_address": data.get("customer_address", ""),
+            "customer_gst_number": data.get("customer_gst_number", ""),
+            "customer_pan_number": data.get("customer_pan_number", ""),
+            "customer_mobile_number": data.get("customer_mobile_number", ""),
+            "line_items": line_items,
+            "total_amount": self._safe_decimal(data.get("total_amount", 0)),
+            "cgst_total": self._safe_decimal(data.get("cgst_total", 0)),
+            "sgst_total": self._safe_decimal(data.get("sgst_total", 0)),
+            "igst_total": self._safe_decimal(data.get("igst_total", 0)),
+        }
+
+    def _safe_decimal(self, value) -> Decimal:
+        """Safely convert value to Decimal"""
+        if value is None or value == "":
+            return Decimal("0")
+        try:
+            return Decimal(str(value))
+        except (ValueError, TypeError):
+            return Decimal("0")
+
+
+class AIInvoiceProcessingError(Exception):
+    """Exception raised for errors during AI invoice processing."""
+
+    pass
