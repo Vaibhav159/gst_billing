@@ -4,6 +4,37 @@ BILLING_DECIMAL_PLACE_PRECISION = 3
 GST_TAX_RATE = Decimal("0.03")
 HSN_CODE = 711319
 
+# Unit support: base/default unit is gram (gm). Add more units here as needed.
+UNIT_GM = "gm"
+UNIT_KG = "kg"
+UNIT_PCS = "pcs"
+
+UNIT_CHOICES = (
+    (UNIT_GM, "Gram (g)"),
+    (UNIT_KG, "Kilogram (kg)"),
+    (UNIT_PCS, "Units (pcs)"),
+)
+
+# Human-friendly suffixes used in CSV/export/display.
+UNIT_LABEL = {
+    UNIT_GM: " gm",
+    UNIT_KG: " kg",
+    UNIT_PCS: " pcs",
+}
+
+UNIT_RATE_LABEL = {
+    UNIT_GM: " / g",
+    UNIT_KG: " / kg",
+    UNIT_PCS: " / pc",
+}
+
+# Conversion factors to grams (useful later if we need to normalize quantities).
+UNIT_TO_GRAM = {
+    UNIT_GM: Decimal("1"),
+    UNIT_KG: Decimal("1000"),
+    UNIT_PCS: Decimal("1"),
+}
+
 PAGINATION_PAGE_SIZE = 15
 
 INVOICE_TYPE_INWARD = "inward"

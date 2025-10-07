@@ -5,8 +5,8 @@
     <td class="text-gray-800">{{ item.product_name }}</td>
     <td class="text-center text-gray-600">{{ item.hsn_code }}</td>
     <td class="text-center text-gray-600">{{ item.gst_tax_in_percentage }}</td>
-    <td class="text-right text-gray-600">{{ item.quantity }} gm</td>
-    <td class="text-right text-gray-600">₹{{ item.rate }}/g</td>
+    <td class="text-right text-gray-600">{{ item.quantity_with_unit_display }}</td>
+    <td class="text-right text-gray-600">{{ item.rate_with_unit_display }}</td>
     <td class="text-right text-gray-800">₹{{ item.amount_without_tax|floatformat:2 }}</td>
 </tr>
 {% else %}
@@ -16,8 +16,8 @@
     <td class="px-4 py-3 text-sm text-gray-900">{{ item.product_name }}</td>
     <td class="px-4 py-3 text-sm text-gray-900 text-center">{{ item.hsn_code }}</td>
     <td class="px-4 py-3 text-sm text-gray-900 text-center">{{ item.gst_tax_in_percentage }}</td>
-    <td class="px-4 py-3 text-sm text-gray-900 text-right">{{ item.quantity }} gm</td>
-    <td class="px-4 py-3 text-sm text-gray-900 text-right">₹{{ item.rate }}/g</td>
+    <td class="px-4 py-3 text-sm text-gray-900 text-right">{{ item.quantity_with_unit_display }}</td>
+    <td class="px-4 py-3 text-sm text-gray-900 text-right">{{ item.rate_with_unit_display }}</td>
     <td class="px-4 py-3 text-sm text-gray-900 text-right">₹{{ item.amount_without_tax|floatformat:3 }}</td>
     {% if not print_view %}
     <td class="px-4 py-3 text-sm text-right">

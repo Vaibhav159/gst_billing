@@ -15,6 +15,8 @@ import customerService from '../api/customerService';
 import invoiceService from '../api/invoiceService';
 import productService from '../api/productService';
 
+import { displayUnit } from '../utils/units';
+
 // Using the formatDate function imported from utils/formatters.js
 
 function InvoiceDetail() {
@@ -38,7 +40,8 @@ function InvoiceDetail() {
     quantity: '',
     rate: '',
     hsn_code: '',
-    gst_tax_rate: ''
+    gst_tax_rate: '',
+    unit: 'gm'
   });
   const [defaultValues, setDefaultValues] = useState({
     hsn_code: '',
@@ -243,6 +246,7 @@ function InvoiceDetail() {
         product_name: newLineItem.product_name,
         quantity: newLineItem.quantity,
         rate: newLineItem.rate,
+        unit: newLineItem.unit || 'gm',
         hsn_code: newLineItem.hsn_code || defaultValues.hsn_code, // Use default HSN code if not provided
         gst_tax_rate: newLineItem.gst_tax_rate || defaultValues.gst_tax_rate // Use default GST rate if not provided
       };
@@ -266,6 +270,7 @@ function InvoiceDetail() {
         product_name: '',
         quantity: '',
         rate: '',
+        unit: 'gm',
         hsn_code: '',
         gst_tax_rate: ''
       });
@@ -536,21 +541,39 @@ function InvoiceDetail() {
                     required
                   />
 
-                  <FormInput
-                    label="Quantity (gm)"
-                    id="quantity"
-                    name="quantity"
-                    type="number"
-                    min="0.001"
-                    step="0.001"
-                    value={newLineItem.quantity}
-                    onChange={handleLineItemChange}
-                    placeholder="Enter quantity in grams"
-                    required
-                  />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Quantity {newLineItem.unit ? `(${displayUnit(newLineItem.unit)})` : `(${displayUnit('gm')})`}
+                    </label>
+                    <div className="mt-1 flex space-x-2">
+                      <input
+                        id="quantity"
+                        name="quantity"
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        value={newLineItem.quantity}
+                        onChange={handleLineItemChange}
+                        placeholder={newLineItem.unit === 'kg' ? 'Enter quantity in kilograms' : newLineItem.unit === 'pcs' ? 'Enter quantity in units' : 'Enter quantity in grams'}
+                        className="flex-1 block w-full rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        required
+                      />
+                      <select
+                        id="unit"
+                        name="unit"
+                        value={newLineItem.unit}
+                        onChange={handleLineItemChange}
+                        className="w-28 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      >
+                        <option value="gm">{displayUnit('gm')}</option>
+                        <option value="kg">{displayUnit('kg')}</option>
+                        <option value="pcs">{displayUnit('pcs')}</option>
+                      </select>
+                    </div>
+                  </div>
 
                   <FormInput
-                    label="Rate (₹/g)"
+                    label={`Rate (₹/${displayUnit(newLineItem.unit || 'gm')})`}
                     id="rate"
                     name="rate"
                     type="number"
@@ -558,7 +581,7 @@ function InvoiceDetail() {
                     step="0.001"
                     value={newLineItem.rate}
                     onChange={handleLineItemChange}
-                    placeholder="Enter rate per gram"
+                    placeholder={newLineItem.unit === 'kg' ? 'Enter rate per kg' : newLineItem.unit === 'pcs' ? 'Enter rate per pc' : 'Enter rate per gram'}
                     required
                   />
                 </div>
@@ -642,10 +665,10 @@ function InvoiceDetail() {
                           <div className="text-sm text-gray-500 dark:text-gray-400">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.quantity} gm</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.quantity} {displayUnit(item.unit)}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.rate)}/g</div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.rate)}/{displayUnit(item.unit)}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
                           <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.amount)}</div>
@@ -698,11 +721,11 @@ function InvoiceDetail() {
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400 text-xs">Quantity</p>
-                          <p className="font-medium text-gray-900 dark:text-white">{item.quantity} gm</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{item.quantity} {displayUnit(item.unit)}</p>
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400 text-xs">Rate</p>
-                          <p className="font-medium text-gray-900 dark:text-white">{formatIndianCurrency(item.rate)}/g</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{formatIndianCurrency(item.rate)}/{displayUnit(item.unit)}</p>
                         </div>
                       </div>
 

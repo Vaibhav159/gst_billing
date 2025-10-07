@@ -20,26 +20,56 @@
                     </select>
                 </div>
 
-                <!-- Quantity -->
+                <!-- Quantity + Unit -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700">Quantity (gm)</label>
-                    <input type="number" 
-                           name="qty" 
-                           step="0.001"
-                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                           required>
+                    <label class="block text-sm font-medium text-gray-700">Quantity</label>
+                    <div class="mt-1 flex space-x-2">
+                        <input type="number" 
+                               name="qty" 
+                               id="line-item-qty"
+                               step="0.001"
+                               class="flex-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                               required>
+                        <select name="unit" id="line-item-unit"
+                                class="w-28 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                            <option value="gm" selected>g</option>
+                            <option value="kg">kg</option>
+                            <option value="pcs">pc</option>
+                        </select>
+                    </div>
                 </div>
 
                 <!-- Rate -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700">Rate (₹/g)</label>
+                    <label class="block text-sm font-medium text-gray-700"><span id="line-item-rate-label">Rate (₹/g)</span></label>
                     <input type="number" 
                            name="rate" 
+                           id="line-item-rate"
                            step="0.001"
                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                            required>
                 </div>
             </div>
+
+            <script>
+                (function(){
+                    const unitSelect = document.getElementById('line-item-unit');
+                    const rateLabel = document.getElementById('line-item-rate-label');
+
+                    function updateRateLabel() {
+                        const u = unitSelect.value;
+                        if (u === 'gm') rateLabel.textContent = 'Rate (₹/g)';
+                        else if (u === 'kg') rateLabel.textContent = 'Rate (₹/kg)';
+                        else rateLabel.textContent = 'Rate (₹/pc)';
+                    }
+
+                    if (unitSelect) {
+                        unitSelect.addEventListener('change', updateRateLabel);
+                        // initialize on DOM load (in case included via HTMX)
+                        updateRateLabel();
+                    }
+                })();
+            </script>
 
             <div class="flex justify-end space-x-3">
                 <button type="button"
