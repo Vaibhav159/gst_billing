@@ -7,7 +7,7 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
   // Add timeout to prevent hanging requests
-  timeout: 15000, // 15 seconds
+  timeout: 60000, // 60 seconds
   // Prevent broken pipe errors by properly handling request cancellation
   withCredentials: true,
 });

@@ -5,6 +5,7 @@ import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import FormInput from '../components/FormInput';
 import businessService from '../api/businessService';
+import customerService from '../api/customerService';
 import aiInvoiceService from '../api/aiInvoiceService';
 
 const AIInvoiceImport = () => {
@@ -12,6 +13,7 @@ const AIInvoiceImport = () => {
   const [imageFile, setImageFile] = useState(null);
   const [businessId, setBusinessId] = useState('');
   const [businesses, setBusinesses] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -42,6 +44,26 @@ const AIInvoiceImport = () => {
 
     fetchBusinesses();
   }, []);
+
+  // Fetch customers when businessId changes
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      if (businessId) {
+        try {
+          const customerData = await customerService.getCustomers({ business_id: businessId, limit: 1000 });
+          console.log('Fetched customers:', customerData);
+          setCustomers(customerData.results || []);
+        } catch (err) {
+          console.error('Error fetching customers:', err);
+          setError('Failed to load customers for the selected business.');
+        }
+      } else {
+        setCustomers([]);
+      }
+    };
+
+    fetchCustomers();
+  }, [businessId]);
 
   const handleImageChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -93,7 +115,7 @@ const AIInvoiceImport = () => {
       setError('');
       setSuccess(null);
 
-      const result = await aiInvoiceService.processInvoiceImage(imageFile);
+      const result = await aiInvoiceService.processInvoiceImage(imageFile, businessId);
       
       setExtractedData(result.data);
       setEditableData(JSON.parse(JSON.stringify(result.data))); // Deep copy for editing
@@ -444,12 +466,30 @@ const AIInvoiceImport = () => {
               <div className="mb-6">
                 <h4 className="text-md font-medium text-gray-900 dark:text-white mb-4">Customer Details</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormInput
-                    label="Customer Name"
-                    value={editableData?.customer_name || ''}
-                    onChange={(e) => handleDataChange('customer_name', e.target.value)}
-                    placeholder="Enter customer name"
-                  />
+                  <div>
+                    <label className="block text-gray-700 dark:text-gray-300 text-sm font-medium mb-2" htmlFor="customer_name">
+                      Customer Name
+                    </label>
+                    <select
+                      id="customer_name"
+                      className="shadow appearance-none border dark:border-gray-700 rounded w-full py-2 px-3 text-gray-700 dark:text-gray-300 dark:bg-gray-800 leading-tight focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      value={editableData?.customer_name || ''}
+                      onChange={(e) => handleDataChange('customer_name', e.target.value)}
+                    >
+                      <option value="">Select a customer</option>
+                      {/* Add the AI-detected name as an option if it's not in the list */}
+                      {editableData?.customer_name && !customers.some(c => c.name === editableData.customer_name) && (
+                        <option value={editableData.customer_name}>
+                          {editableData.customer_name} (AI Detected)
+                        </option>
+                      )}
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.name}>
+                          {customer.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <FormInput
                     label="GST Number"
                     value={editableData?.customer_gst_number || ''}

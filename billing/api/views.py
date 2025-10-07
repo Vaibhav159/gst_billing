@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 15
     page_size_query_param = "page_size"
-    max_page_size = 100
+    max_page_size = 1000
 
     def get_page_size(self, request):
         limit = request.query_params.get("limit")
@@ -1228,9 +1228,18 @@ class AIInvoiceProcessingView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            business_id = request.data.get("business_id")
+            if not business_id:
+                return Response(
+                    {"error": "Business ID is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             # Process the image with AI
             processor = AIInvoiceProcessor()
-            extracted_data = processor.process_invoice_image(image_file)
+            extracted_data = processor.process_invoice_image(
+                image_file, business_id=business_id
+            )
 
             return Response(
                 {

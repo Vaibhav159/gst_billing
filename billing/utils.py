@@ -617,23 +617,34 @@ class AIInvoiceProcessor:
             required=["invoice_number", "invoice_date", "customer_name", "line_items"],
         )
 
-    def process_invoice_image(self, image_file) -> dict:
+    def process_invoice_image(self, image_file, business_id: int) -> dict:
         """
         Process an invoice image using Google Gemini and extract structured data
 
         Args:
             image_file: Uploaded image file
+            business_id: ID of the business to associate with
 
         Returns:
             dict: Extracted invoice data
         """
+        from billing.models import Customer
+
         try:
+            # Get customer names for the business
+            customer_names = list(
+                Customer.objects.filter(businesses__id=business_id).values_list(
+                    "name", flat=True
+                )
+            )
+            customer_names_str = ", ".join(customer_names)
+
             # Read and encode the image
             image_data = image_file.read()
             image_base64 = base64.b64encode(image_data).decode("utf-8")
 
             # Create the prompt for invoice extraction
-            prompt = """
+            prompt = f"""
             Analyze this invoice image and extract the following information:
             
             Important instructions:
@@ -647,6 +658,7 @@ class AIInvoiceProcessor:
             8. Extract all visible line items, don't miss any
             9. Convert any hindi text to english like customer name, product name, address, etc. eg: "अमरकान्त दार्शन मुस्काना" to "Amarakant Dashana Muskana"
             10. DONT EXTRACT total_amount should be the sum of all line items amount + cgst_total + sgst_total + igst_total, eg: 100 + 10 + 10 + 10 = 130
+            11. The customer name must be one of the following: {customer_names_str}
             """
 
             # Generate content using Gemini with improved prompt for structured output
@@ -679,11 +691,12 @@ class AIInvoiceProcessor:
             }}
             
             Return ONLY the JSON object, no additional text or formatting.
+            Exisiting customer names in system - 
             """
 
             # Use google-genai API
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-2.5-flash",
                 contents=[
                     {
                         "role": "user",

@@ -2,9 +2,10 @@ import apiClient from './client';
 
 const aiInvoiceService = {
   // Process invoice image with AI
-  processInvoiceImage: async (imageFile) => {
+  processInvoiceImage: async (imageFile, businessId) => {
     const formData = new FormData();
     formData.append('image', imageFile);
+    formData.append('business_id', businessId);
 
     const response = await apiClient.post('/ai/invoice/process/', formData, {
       headers: {
