@@ -109,10 +109,10 @@ const InvoiceImport = () => {
   const handleDownloadSample = () => {
     // Create sample CSV content
     const csvContent = [
-      'invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate',
-      '1001,2023-01-15,Sample Customer,Gold Ring,10.5,4500,711319,0.03',
-      '1001,2023-01-15,Sample Customer,Gold Chain,5.2,4800,711319,0.03',
-      '1002,2023-01-20,Another Customer,Silver Bracelet,25,1200,711311,0.03'
+      'invoice_number,invoice_date,customer_name,product_name,quantity,unit,rate,hsn_code,gst_tax_rate',
+      '1001,2023-01-15,Sample Customer,Gold Ring,10.5,gm,4500,711319,0.03',
+      '1001,2023-01-15,Sample Customer,Gold Chain,5.2,gm,4800,711319,0.03',
+      '1002,2023-01-20,Another Customer,Silver Bracelet,25,pcs,1200,711311,0.03'
     ].join('\n');
 
     // Create a blob and download link
@@ -213,6 +213,12 @@ const InvoiceImport = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
                 <span><strong className="text-gray-900 dark:text-white">quantity</strong> - Quantity of the product</span>
+              </li>
+              <li className="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span><strong className="text-gray-900 dark:text-white">unit</strong> - Unit for the quantity (e.g., gm, kg, pcs). If omitted, 'gm' is assumed.</span>
               </li>
               <li className="flex items-start">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

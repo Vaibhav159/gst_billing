@@ -3,7 +3,7 @@ from crispy_forms.layout import Submit
 from django import forms
 from django.urls import reverse_lazy
 
-from billing.models import Business, Customer, Product
+from billing.models import Business, Customer, LineItem, Product
 
 
 class CustomerForm(forms.ModelForm):
@@ -32,6 +32,35 @@ class CustomerForm(forms.ModelForm):
             )
         else:
             self.helper.form_action = reverse_lazy("customer_form")
+        self.helper.add_input(
+            Submit(
+                "submit",
+                "Submit",
+                css_class="bg-blue-500 hover:bg-blue-700 text-white "
+                "font-bold py-2 px-4 rounded",
+            )
+        )
+
+
+class LineItemForm(forms.ModelForm):
+    """
+    ModelForm for LineItem. Includes the unit field and number widgets
+    for quantity and rate so unit-aware input is supported in server-side forms.
+    """
+
+    class Meta:
+        model = LineItem
+        fields = "__all__"
+        widgets = {
+            "quantity": forms.NumberInput(attrs={"step": "0.001", "min": "0"}),
+            "rate": forms.NumberInput(attrs={"step": "0.001", "min": "0"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.helper = FormHelper()
+        # Keep form_action generic; override where used if necessary
+        self.helper.form_action = reverse_lazy("line_item_form")
         self.helper.add_input(
             Submit(
                 "submit",

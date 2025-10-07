@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import CharField, Count, F, IntegerField, Sum, Value
+from django.db.models import Case, CharField, Count, F, IntegerField, Sum, Value, When
 from django.db.models.functions import (
     Cast,
     Coalesce,
@@ -23,7 +23,16 @@ from billing.constants import (
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_OUTWARD,
     STATE_CHOICES,
+    UNIT_LABEL,
+    UNIT_RATE_LABEL,
+    UNIT_TO_GRAM,
 )
+
+
+class Unit(models.TextChoices):
+    GM = "gm", "Gram (g)"
+    KG = "kg", "Kilogram (kg)"
+    PCS = "pcs", "Units (pcs)"
 
 
 class AbstractBaseModel(models.Model):
@@ -339,6 +348,13 @@ class LineItem(AbstractBaseModel):
         verbose_name="Quantity",
         help_text="Quantity of the product.",
     )
+    unit = models.CharField(
+        max_length=10,
+        choices=Unit.choices,
+        default=Unit.GM,
+        verbose_name="Unit",
+        help_text="Unit for quantity and rate (e.g., gm, kg, pcs).",
+    )
     rate = models.DecimalField(
         max_digits=12,
         decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
@@ -384,8 +400,75 @@ class LineItem(AbstractBaseModel):
     def amount_without_tax(self):
         return self.rate * self.quantity
 
+    @property
+    def quantity_in_grams(self):
+        """
+        Quantity normalized to grams for weight-based units.
+        Returns a Decimal when the unit is weight-based (gm/kg) or None for non-weight units (e.g., pcs).
+        """
+        from decimal import Decimal
+
+        # UNIT_TO_GRAM maps unit string to how many grams one unit represents (e.g., {"gm": 1, "kg": 1000})
+        factor = UNIT_TO_GRAM.get(self.unit)
+        if factor is None:
+            # No conversion available (e.g., pieces) — caller should handle None appropriately
+            return None
+
+        return Decimal(self.quantity) * Decimal(str(factor))
+
+    @property
+    def rate_per_gram(self):
+        """
+        Rate normalized to price per gram for weight-based units.
+        Returns a Decimal when the unit is weight-based (gm/kg) or None for non-weight units (e.g., pcs).
+        """
+        from decimal import Decimal
+
+        factor = UNIT_TO_GRAM.get(self.unit)
+        if factor is None:
+            return None
+
+        # rate is "price per unit" (e.g., price per kg). To get price per gram divide by factor.
+        return Decimal(self.rate) / Decimal(str(factor))
+
+    @property
+    def unit_label(self):
+        """
+        Human-friendly unit label for display (e.g., ' gm', ' kg', ' pcs').
+        """
+        return UNIT_LABEL.get(self.unit, UNIT_LABEL.get(Unit.GM))
+
+    @property
+    def rate_label(self):
+        """
+        Human-friendly rate suffix for display (e.g., ' / g', ' / kg', ' / pc').
+        """
+        return UNIT_RATE_LABEL.get(self.unit, UNIT_RATE_LABEL.get(Unit.GM))
+
+    @property
+    def quantity_with_unit_display(self):
+        """
+        Convenience display string for quantity with unit, e.g., '1.000 gm'
+        """
+        return f"{self.quantity}{self.unit_label}"
+
+    @property
+    def rate_with_unit_display(self):
+        """
+        Convenience display string for rate with unit, e.g., '₹100 / kg'
+        """
+        return f"₹{self.rate}{self.rate_label}"
+
     @classmethod
-    def create_line_item_for_invoice(cls, product_name, quantity, rate, invoice_id):
+    def create_line_item_for_invoice(
+        cls, product_name, quantity, rate, invoice_id, unit=Unit.GM
+    ):
+        """
+        Create a LineItem for an invoice.
+
+        unit: one of UNIT_GM, UNIT_KG, UNIT_PCS. Backwards compatible default is UNIT_GM.
+        The quantity and rate are assumed to be expressed in the provided unit (rate per unit).
+        """
         quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
         # gst_tax_rate_in_decimal = Decimal(str(gst_tax_rate)) / 100
 
@@ -398,6 +481,7 @@ class LineItem(AbstractBaseModel):
             product_name=product_name,
             quantity=quantity,
             rate=rate,
+            unit=unit,
             invoice_id=invoice_id,
             hsn_code=hsn_code,
             customer_id=Invoice.objects.get(id=invoice_id).customer_id,
@@ -484,12 +568,24 @@ class LineItem(AbstractBaseModel):
                 ),
                 quantity_with_unit=Concat(
                     F("quantity"),
-                    Value(" gm"),
+                    Case(
+                        When(unit=Unit.GM, then=Value(UNIT_LABEL[Unit.GM])),
+                        When(unit=Unit.KG, then=Value(UNIT_LABEL[Unit.KG])),
+                        When(unit=Unit.PCS, then=Value(UNIT_LABEL[Unit.PCS])),
+                        default=Value(UNIT_LABEL[Unit.GM]),
+                        output_field=CharField(),
+                    ),
                     output_field=CharField(),
                 ),
                 rate_with_unit=Concat(
                     F("rate"),
-                    Value(" / g"),
+                    Case(
+                        When(unit=Unit.GM, then=Value(UNIT_RATE_LABEL[Unit.GM])),
+                        When(unit=Unit.KG, then=Value(UNIT_RATE_LABEL[Unit.KG])),
+                        When(unit=Unit.PCS, then=Value(UNIT_RATE_LABEL[Unit.PCS])),
+                        default=Value(UNIT_RATE_LABEL[Unit.GM]),
+                        output_field=CharField(),
+                    ),
                     output_field=CharField(),
                 ),
                 amount_before_tax=F("quantity") * F("rate"),
