@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -10,6 +11,8 @@ import pandas as pd
 from django.conf import settings
 from django.db import transaction
 from google.genai import types
+
+logger = logging.getLogger(__name__)
 
 DATE_FORMAT_YEAR_MONTH_DATE = "%Y-%m-%d"
 
@@ -346,6 +349,7 @@ def process_invoice_csv(
     from billing.models import Business, Customer, Invoice, LineItem
 
     # Initialize result counters
+    logger.info(f"Processing invoices from CSV file: {file_content}")
     result = {
         "invoices_created": 0,
         "line_items_created": 0,
@@ -358,6 +362,10 @@ def process_invoice_csv(
     except Business.DoesNotExist:
         raise CSVImportError(f"Business with ID {business_id} does not exist")
 
+    logger.info(
+        f"Processing invoices from CSV file: {file_content} for business: {business}"
+    )
+
     # Parse CSV file using pandas
     try:
         # Read CSV with pandas
@@ -367,8 +375,11 @@ def process_invoice_csv(
         except Exception as e:
             raise CSVImportError(f"Error reading CSV file: {e}")
 
+        logger.info(f"Processing number of invoices: {len(df)}")
+
         # Check if dataframe is empty
         if df.empty:
+            logger.info(f"No invoices found for business: {business}")
             raise CSVImportError("CSV file is empty")
 
         # Validate required fields
@@ -401,6 +412,8 @@ def process_invoice_csv(
             name__in=all_customer_names, businesses=business
         ):
             existing_customers[customer.name] = customer
+
+        logger.info(f"Customers fetched: {len(existing_customers)}")
 
         # Check if any customers are missing or not associated with this business
         missing_customers = all_customer_names - set(existing_customers.keys())
@@ -459,6 +472,8 @@ def process_invoice_csv(
             }
             invoice_data[invoice_number]["line_items"].append(line_item)
 
+        logger.info(f"Invoices fetched: {len(invoice_data)}")
+
         # Check for duplicate invoice numbers within the same financial year
         duplicate_invoice_numbers = []
 
@@ -516,6 +531,9 @@ def process_invoice_csv(
                         invoice_info["invoice_date"], DATE_FORMAT_YEAR_MONTH_DATE
                     ).date()
                 except ValueError:
+                    logger.warning(
+                        f"Invalid date format for invoice {invoice_number}. Expected format: YYYY-MM-DD"
+                    )
                     result["errors"].append(
                         f"Invalid date format for invoice {invoice_number}. Expected format: YYYY-MM-DD"
                     )
@@ -529,6 +547,8 @@ def process_invoice_csv(
                     invoice_date=invoice_date,
                     type_of_invoice="outward",  # Default to outward invoice
                 )
+
+                print(f"Invoice {invoice_number} created with {invoice=}")
 
                 result["invoices_created"] += 1
 
@@ -549,6 +569,9 @@ def process_invoice_csv(
 
                         result["line_items_created"] += 1
                     except Exception as e:
+                        logger.warning(
+                            f"Error creating line item for invoice {invoice_number}: {e!s}"
+                        )
                         result["errors"].append(
                             f"Error creating line item for invoice {invoice_number}: {e!s}"
                         )
@@ -559,7 +582,7 @@ def process_invoice_csv(
     except Exception as e:
         if isinstance(e, CSVImportError):
             raise
-        raise CSVImportError(f"Error processing CSV file: {e!s}")
+        raise CSVImportError(f"Error processing CSV file: {e!s} as {result}")
 
     return result
 
