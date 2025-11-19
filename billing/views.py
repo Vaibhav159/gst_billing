@@ -413,11 +413,13 @@ class LineItemView(View):
             data["qty"],
             data["rate"],
         )
+        unit = data.get("unit", "gm")
         line_item = LineItem.create_line_item_for_invoice(
             invoice_id=invoice_id,
             product_name=product_name,
             rate=rate,
             quantity=qty,
+            unit=unit,
         )
         line_items = LineItem.objects.filter(invoice_id=invoice_id)
         Invoice.objects.filter(id=invoice_id).update(

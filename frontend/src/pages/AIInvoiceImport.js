@@ -7,6 +7,7 @@ import FormInput from '../components/FormInput';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
 import aiInvoiceService from '../api/aiInvoiceService';
+import { displayUnit } from '../utils/units';
 
 const AIInvoiceImport = () => {
   const navigate = useNavigate();
@@ -531,21 +532,38 @@ const AIInvoiceImport = () => {
                           onChange={(e) => handleDataChange('product_name', e.target.value, index)}
                           placeholder="Product name"
                         />
+
+                        {/* Quantity + Unit */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Quantity</label>
+                          <div className="mt-1 flex space-x-2">
+                            <input
+                              type="number"
+                              step="0.001"
+                              value={item.quantity || ''}
+                              onChange={(e) => handleDataChange('quantity', parseFloat(e.target.value) || 0, index)}
+                              placeholder="0.000"
+                              className="flex-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <select
+                              value={item.unit || 'gm'}
+                              onChange={(e) => handleDataChange('unit', e.target.value, index)}
+                              className="w-28 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            >
+                              <option value="gm">{displayUnit('gm')}</option>
+                              <option value="kg">{displayUnit('kg')}</option>
+                              <option value="pcs">{displayUnit('pcs')}</option>
+                            </select>
+                          </div>
+                        </div>
+
                         <FormInput
-                          label="Quantity"
-                          type="number"
-                          step="0.001"
-                          value={item.quantity || ''}
-                          onChange={(e) => handleDataChange('quantity', parseFloat(e.target.value) || 0, index)}
-                          placeholder="0.000"
-                        />
-                        <FormInput
-                          label="Rate"
+                          label={`Rate (₹/${displayUnit(item.unit || 'gm')})`}
                           type="number"
                           step="0.01"
                           value={item.rate || ''}
                           onChange={(e) => handleDataChange('rate', parseFloat(e.target.value) || 0, index)}
-                          placeholder="0.00"
+                          placeholder={`0.00 per ${displayUnit(item.unit || 'gm')}`}
                         />
                         <FormInput
                           label="HSN Code"

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient, { createCancelToken } from '../api/client';
 import { formatIndianCurrency } from '../utils/formatters';
+import { displayUnit } from '../utils/units';
 import businessService from '../api/businessService';
 import customerService from '../api/customerService';
 import './InvoicePrint.css';
@@ -314,7 +315,7 @@ function BulkInvoicePrint() {
                       <th className="py-1 px-2 text-left border-b">ITEM</th>
                       <th className="py-1 px-2 text-center border-b">HSN</th>
                       <th className="py-1 px-2 text-center border-b">GST %</th>
-                      <th className="py-1 px-2 text-right border-b">QTY (GM)</th>
+                      <th className="py-1 px-2 text-right border-b">QTY</th>
                       <th className="py-1 px-2 text-right border-b">RATE</th>
                       <th className="py-1 px-2 text-right border-b">AMOUNT</th>
                     </tr>
@@ -326,8 +327,8 @@ function BulkInvoicePrint() {
                         <td className="py-1 px-2 border-b font-medium">{item.item_name || item.product_name || ''}</td>
                         <td className="py-1 px-2 border-b text-center">{item.hsn_code || ''}</td>
                         <td className="py-1 px-2 border-b text-center">{item.gst_tax_rate ? `${(item.gst_tax_rate * 100).toFixed(0)}%` : ''}</td>
-                        <td className="py-1 px-2 border-b text-right">{item.quantity}</td>
-                        <td className="py-1 px-2 border-b text-right">₹{item.rate || 0}/g</td>
+                        <td className="py-1 px-2 border-b text-right">{item.quantity} {displayUnit(item.unit)}</td>
+                        <td className="py-1 px-2 border-b text-right">₹{item.rate || 0}/{displayUnit(item.unit)}</td>
                         <td className="py-1 px-2 border-b text-right font-medium">{formatIndianCurrency(item.amount || 0)}</td>
                       </tr>
                     ))}
