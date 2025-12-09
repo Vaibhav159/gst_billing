@@ -51,7 +51,7 @@ RUN pip install gunicorn django-redis
 COPY . /app/
 
 # Copy built frontend assets from Stage 1
-COPY --from=frontend-builder /app/static/frontend /app/static/frontend
+COPY --from=frontend-builder /app/frontend/static/frontend /app/static/frontend
 
 # Verify crispy_forms is installed
 RUN python -c "import crispy_forms; print('crispy_forms is installed')"
