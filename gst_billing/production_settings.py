@@ -16,7 +16,12 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "insecure-key-for-dev-only")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ["billing.cheq.dpdns.org", "localhost", "127.0.0.1"]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://billing.cheq.dpdns.org",
+    "http://billing.cheq.dpdns.org",
+]
 
 print(f"DEBUG: {DEBUG}, ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 

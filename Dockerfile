@@ -1,3 +1,20 @@
+# Stage 1: Build React Frontend
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Copy package.json and package-lock.json
+COPY package.json package-lock.json ./
+# Copy frontend directory
+COPY frontend ./frontend
+# Copy webpack config
+COPY webpack.config.js ./
+
+# Install dependencies and build
+RUN npm ci
+RUN npm run build
+
+# Stage 2: Python/Django Backend
 FROM python:3.12-slim
 
 # Set environment variables
@@ -31,6 +48,8 @@ RUN pip install gunicorn django-redis
 # Copy project files
 COPY . /app/
 
+# Copy built frontend assets from Stage 1
+COPY --from=frontend-builder /app/static/frontend /app/static/frontend
 
 # Verify crispy_forms is installed
 RUN python -c "import crispy_forms; print('crispy_forms is installed')"
