@@ -19,6 +19,9 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = "__all__"
+        extra_kwargs = {
+            "default_unit": {"required": False},
+        }
 
 
 class LineItemSerializer(serializers.ModelSerializer):

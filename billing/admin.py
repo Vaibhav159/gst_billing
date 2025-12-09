@@ -95,7 +95,7 @@ class LineInline(admin.TabularInline):
 
 @admin.register(Invoice)
 class InvoiceAdmin(SimpleHistoryAdmin):
-    list_display = ("customer", "business", "created_at", "updated_at")
+    list_display = ("customer", "business", "created_at", "updated_at", "invoice_date")
     list_filter = ("customer", "business", "created_at", "updated_at")
     search_fields = ("customer", "business", "created_at", "updated_at")
     ordering = ("customer", "business", "created_at", "updated_at")
@@ -115,6 +115,7 @@ class InvoiceAdmin(SimpleHistoryAdmin):
             {
                 "fields": (
                     "invoice_number",
+                    "invoice_date",
                     "total_amount",
                 )
             },

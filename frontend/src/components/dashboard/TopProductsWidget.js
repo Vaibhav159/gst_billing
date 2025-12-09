@@ -106,22 +106,20 @@ function TopProductsWidget({ filters = {} }) {
             <div className="flex rounded-md shadow-sm">
               <button
                 type="button"
-                className={`relative inline-flex items-center px-4 py-2 rounded-l-md border border-gray-300 dark:border-gray-700 text-sm font-medium ${
-                  viewMode === 'amount'
+                className={`relative inline-flex items-center px-4 py-2 rounded-l-md border border-gray-300 dark:border-gray-700 text-sm font-medium ${viewMode === 'amount'
                     ? 'bg-primary-500 text-white'
                     : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
+                  }`}
                 onClick={() => setViewMode('amount')}
               >
                 Amount
               </button>
               <button
                 type="button"
-                className={`relative inline-flex items-center px-4 py-2 rounded-r-md border border-gray-300 dark:border-gray-700 text-sm font-medium ${
-                  viewMode === 'quantity'
+                className={`relative inline-flex items-center px-4 py-2 rounded-r-md border border-gray-300 dark:border-gray-700 text-sm font-medium ${viewMode === 'quantity'
                     ? 'bg-primary-500 text-white'
                     : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
+                  }`}
                 onClick={() => setViewMode('quantity')}
               >
                 Quantity
@@ -163,7 +161,7 @@ function TopProductsWidget({ filters = {} }) {
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       {viewMode === 'amount'
                         ? formatIndianCurrency(product.total_amount)
-                        : `${product.total_quantity} units`}
+                        : `${product.total_quantity} ${product.unit ? (product.unit === 'gm' ? 'g' : product.unit) : 'units'}`}
                     </span>
                   </div>
                   <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">

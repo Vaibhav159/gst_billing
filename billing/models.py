@@ -643,3 +643,11 @@ class Product(AbstractBaseModel):
         verbose_name="GST Tax Rate",
         help_text="GST Tax Rate of the product.",
     )
+
+    default_unit = models.CharField(
+        max_length=10,
+        choices=Unit.choices,
+        default=Unit.GM,
+        verbose_name="Default Unit",
+        help_text="Default unit for this product (e.g., gm, kg, pcs).",
+    )
