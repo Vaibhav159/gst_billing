@@ -44,6 +44,9 @@ jobs:
 
     steps:
       - checkout
+      - run:
+          name: Create logs directory
+          command: mkdir -p logs
 
       - run:
           name: Install system dependencies
