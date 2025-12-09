@@ -9,6 +9,8 @@ COPY package.json package-lock.json ./
 COPY frontend ./frontend
 # Copy webpack config
 COPY webpack.config.js ./
+# Copy babel config
+COPY .babelrc ./
 
 # Install dependencies and build
 RUN npm ci

@@ -123,6 +123,10 @@ jobs:
       - run:
           name: Build Docker image
           command: |
+            if [ -z "$DOCKER_USERNAME" ]; then
+              echo "Error: DOCKER_USERNAME is not set"
+              exit 1
+            fi
             docker build -t $DOCKER_USERNAME/gst-billing:latest .
       - run:
           name: Login to Docker Hub
