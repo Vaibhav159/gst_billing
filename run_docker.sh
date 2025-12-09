@@ -110,7 +110,7 @@ echo "🚀 Starting the application with Docker Compose..."
 $DOCKER_COMPOSE up -d
 
 echo "✅ Application is running!"
-echo "Access it at http://localhost:80"
+echo "Access it at http://billing.cheq.dpdns.org"
 echo ""
 echo "📝 To view logs, run:"
 echo "$DOCKER_COMPOSE logs -f web"  # Docker logs
