@@ -18,11 +18,13 @@ RUN npm run build
 
 # Stage 2: Python/Django Backend
 FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-# DJANGO_SETTINGS_MODULE will be provided by docker-compose
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
 # Create a mock local.py file to avoid import errors
 # This will be overridden by environment variables in production
@@ -40,12 +42,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-COPY requirements.txt ./
-# Install Python dependencies
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install gunicorn django-redis
+# Install dependencies using uv
+COPY pyproject.toml uv.lock ./
+# Sync dependencies from lockfile
+RUN uv sync --frozen --no-cache --no-install-project
+
+# Install production server dependencies
+RUN uv pip install gunicorn django-redis
+
+# Add .venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy project files
 COPY . /app/
