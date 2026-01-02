@@ -15,6 +15,8 @@ import customerService from '../api/customerService';
 import invoiceService from '../api/invoiceService';
 import productService from '../api/productService';
 
+import { displayUnit } from '../utils/units';
+
 // Using the formatDate function imported from utils/formatters.js
 
 function InvoiceDetail() {
@@ -38,7 +40,8 @@ function InvoiceDetail() {
     quantity: '',
     rate: '',
     hsn_code: '',
-    gst_tax_rate: ''
+    gst_tax_rate: '',
+    unit: 'gm'
   });
   const [defaultValues, setDefaultValues] = useState({
     hsn_code: '',
@@ -169,7 +172,8 @@ function InvoiceDetail() {
       ...prev,
       product_name: product.name,
       hsn_code: product.hsn_code,
-      gst_tax_rate: product.gst_tax_rate
+      gst_tax_rate: product.gst_tax_rate,
+      unit: product.default_unit || 'gm'
     }));
   };
 
@@ -243,6 +247,7 @@ function InvoiceDetail() {
         product_name: newLineItem.product_name,
         quantity: newLineItem.quantity,
         rate: newLineItem.rate,
+        unit: newLineItem.unit || 'gm',
         hsn_code: newLineItem.hsn_code || defaultValues.hsn_code, // Use default HSN code if not provided
         gst_tax_rate: newLineItem.gst_tax_rate || defaultValues.gst_tax_rate // Use default GST rate if not provided
       };
@@ -266,6 +271,7 @@ function InvoiceDetail() {
         product_name: '',
         quantity: '',
         rate: '',
+        unit: 'gm',
         hsn_code: '',
         gst_tax_rate: ''
       });
@@ -536,21 +542,39 @@ function InvoiceDetail() {
                     required
                   />
 
-                  <FormInput
-                    label="Quantity (gm)"
-                    id="quantity"
-                    name="quantity"
-                    type="number"
-                    min="0.001"
-                    step="0.001"
-                    value={newLineItem.quantity}
-                    onChange={handleLineItemChange}
-                    placeholder="Enter quantity in grams"
-                    required
-                  />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Quantity {newLineItem.unit ? `(${displayUnit(newLineItem.unit)})` : `(${displayUnit('gm')})`}
+                    </label>
+                    <div className="mt-1 flex space-x-2">
+                      <input
+                        id="quantity"
+                        name="quantity"
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        value={newLineItem.quantity}
+                        onChange={handleLineItemChange}
+                        placeholder={newLineItem.unit === 'kg' ? 'Enter quantity in kilograms' : newLineItem.unit === 'pcs' ? 'Enter quantity in units' : 'Enter quantity in grams'}
+                        className="flex-1 block w-full rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        required
+                      />
+                      <select
+                        id="unit"
+                        name="unit"
+                        value={newLineItem.unit}
+                        onChange={handleLineItemChange}
+                        className="w-28 rounded-md border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      >
+                        <option value="gm">{displayUnit('gm')}</option>
+                        <option value="kg">{displayUnit('kg')}</option>
+                        <option value="pcs">{displayUnit('pcs')}</option>
+                      </select>
+                    </div>
+                  </div>
 
                   <FormInput
-                    label="Rate (₹/g)"
+                    label={`Rate (₹/${displayUnit(newLineItem.unit || 'gm')})`}
                     id="rate"
                     name="rate"
                     type="number"
@@ -558,7 +582,7 @@ function InvoiceDetail() {
                     step="0.001"
                     value={newLineItem.rate}
                     onChange={handleLineItemChange}
-                    placeholder="Enter rate per gram"
+                    placeholder={newLineItem.unit === 'kg' ? 'Enter rate per kg' : newLineItem.unit === 'pcs' ? 'Enter rate per pc' : 'Enter rate per gram'}
                     required
                   />
                 </div>
@@ -599,71 +623,71 @@ function InvoiceDetail() {
                 <div className="hidden md:block overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead className="bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        #
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Product
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        HSN
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        GST %
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Quantity
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Rate
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Amount
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {lineItems.map((item, index) => (
-                      <tr key={item.id}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900 dark:text-gray-100">{index + 1}.</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">{item.product_name || '--'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.hsn_code || defaultValues.hsn_code || '--'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{item.quantity} gm</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.rate)}/g</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.amount)}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <button
-                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
-                            onClick={() => handleDeleteLineItem(item.id)}
-                            disabled={deletingLineItem}
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                            </svg>
-                          </button>
-                        </td>
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          #
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Product
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          HSN
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          GST %
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Quantity
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Rate
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Amount
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                      {lineItems.map((item, index) => (
+                        <tr key={item.id}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900 dark:text-gray-100">{index + 1}.</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">{item.product_name || '--'}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{item.hsn_code || defaultValues.hsn_code || '--'}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{item.gst_tax_rate ? (item.gst_tax_rate * 100).toFixed(0) : defaultValues.gst_tax_rate ? (defaultValues.gst_tax_rate * 100).toFixed(0) : '--'}%</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{item.quantity} {displayUnit(item.unit)}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.rate)}/{displayUnit(item.unit)}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <div className="text-sm text-gray-500 dark:text-gray-400">{formatIndianCurrency(item.amount)}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            <button
+                              className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                              onClick={() => handleDeleteLineItem(item.id)}
+                              disabled={deletingLineItem}
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
                 </div>
 
@@ -682,7 +706,7 @@ function InvoiceDetail() {
                           disabled={deletingLineItem}
                         >
                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </button>
                       </div>
@@ -698,11 +722,11 @@ function InvoiceDetail() {
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400 text-xs">Quantity</p>
-                          <p className="font-medium text-gray-900 dark:text-white">{item.quantity} gm</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{item.quantity} {displayUnit(item.unit)}</p>
                         </div>
                         <div>
                           <p className="text-gray-500 dark:text-gray-400 text-xs">Rate</p>
-                          <p className="font-medium text-gray-900 dark:text-white">{formatIndianCurrency(item.rate)}/g</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{formatIndianCurrency(item.rate)}/{displayUnit(item.unit)}</p>
                         </div>
                       </div>
 

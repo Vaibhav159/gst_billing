@@ -366,24 +366,67 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         # Group by product name, calculate totals
         top_products = query.values(
-            "product_name", "hsn_code", "gst_tax_rate"
+            "product_name", "hsn_code", "gst_tax_rate", "unit"
         ).annotate(
             total_amount=Sum("amount"),
             total_quantity=Sum("quantity"),
             invoice_count=Count("invoice", distinct=True),
         )
 
+        # Post-process to normalize quantities and aggregate by product name
+        # (since we grouped by unit as well, we might have multiple entries for same product)
+        aggregated_products = {}
+
+        from billing.constants import UNIT_TO_GRAM
+
+        for product in top_products:
+            name = product["product_name"]
+            if name not in aggregated_products:
+                aggregated_products[name] = {
+                    "product_name": name,
+                    "hsn_code": product["hsn_code"],
+                    "gst_tax_rate": product["gst_tax_rate"],
+                    "total_amount": Decimal("0"),
+                    "total_quantity_normalized": Decimal("0"),  # In grams
+                    "invoice_count": 0,
+                    "units_found": set(),
+                }
+
+            entry = aggregated_products[name]
+            entry["total_amount"] += product["total_amount"]
+            entry["invoice_count"] += product["invoice_count"]
+            entry["units_found"].add(product["unit"])
+
+            # Normalize quantity
+            unit = product["unit"]
+            qty = product["total_quantity"]
+            conversion = UNIT_TO_GRAM.get(unit, Decimal("1"))
+            entry["total_quantity_normalized"] += qty * conversion
+
+        # Convert back to list
+        result_list = list(aggregated_products.values())
+
         # Sort by the requested field
         if sort_by == "quantity":
-            top_products = top_products.order_by("-total_quantity")[:limit]
+            result_list.sort(key=lambda x: x["total_quantity_normalized"], reverse=True)
         else:  # Default to 'amount'
-            top_products = top_products.order_by("-total_amount")[:limit]
+            result_list.sort(key=lambda x: x["total_amount"], reverse=True)
+
+        # Apply limit
+        result_list = result_list[:limit]
 
         # Format the response
         result = []
-        for product in top_products:
+        for product in result_list:
             # Try to find the corresponding Product model instance
             product_obj = Product.objects.filter(name=product["product_name"]).first()
+
+            # Determine display quantity (if mixed units, show normalized in grams, else show original)
+            # For simplicity in this widget, we'll show the normalized quantity if we sorted by it,
+            # or maybe just show the normalized quantity always with 'gm' label if mixed?
+            # Let's just return the normalized quantity for now as 'total_quantity'
+            # and maybe add a note or just assume grams for sorting purposes.
+            # Actually, let's stick to the existing API contract but return normalized quantity.
 
             result.append(
                 {
@@ -392,8 +435,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                     "hsn_code": product["hsn_code"],
                     "gst_tax_rate": product["gst_tax_rate"],
                     "total_amount": product["total_amount"],
-                    "total_quantity": product["total_quantity"],
+                    "total_quantity": product[
+                        "total_quantity_normalized"
+                    ],  # Sending normalized quantity
                     "invoice_count": product["invoice_count"],
+                    "unit": "gm",  # Implied base unit for normalized quantity
                 }
             )
 
@@ -706,6 +752,7 @@ class LineItemViewSet(viewsets.ModelViewSet):
                     quantity=request.data.get("quantity"),
                     rate=request.data.get("rate"),
                     invoice_id=invoice_id,
+                    unit=request.data.get("unit", "gm"),
                 )
 
                 # Update the invoice total_amount

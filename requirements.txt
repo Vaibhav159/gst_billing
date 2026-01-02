@@ -54,3 +54,4 @@ urllib3==2.3.0
 virtualenv==20.29.3
 wcwidth==0.2.13
 xlsxwriter==3.0.3
+python-dotenv==1.2.1

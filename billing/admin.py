@@ -38,12 +38,13 @@ class CustomerAdmin(admin.ModelAdmin):
 
 @admin.register(LineItem)
 class LineItemAdmin(admin.ModelAdmin):
+    # Display unit-aware fields in the admin list view
     list_display = (
         "customer",
         "product_name",
         "hsn_code",
-        "quantity",
-        "rate",
+        "quantity_with_unit_display",
+        "rate_with_unit_display",
         "cgst",
         "sgst",
         "amount",
@@ -52,21 +53,15 @@ class LineItemAdmin(admin.ModelAdmin):
         "customer",
         "product_name",
         "hsn_code",
-        "quantity",
-        "rate",
+        "unit",
         "cgst",
         "sgst",
         "amount",
     )
     search_fields = (
-        "customer",
+        "customer__name",
         "product_name",
         "hsn_code",
-        "quantity",
-        "rate",
-        "cgst",
-        "sgst",
-        "amount",
     )
     ordering = (
         "customer",
@@ -79,15 +74,28 @@ class LineItemAdmin(admin.ModelAdmin):
         "amount",
     )
 
+    def quantity_with_unit_display(self, obj):
+        # Use model helper for consistent formatting
+        return getattr(obj, "quantity_with_unit_display", obj.quantity)
+
+    quantity_with_unit_display.short_description = "Quantity"
+
+    def rate_with_unit_display(self, obj):
+        return getattr(obj, "rate_with_unit_display", obj.rate)
+
+    rate_with_unit_display.short_description = "Rate"
+
 
 class LineInline(admin.TabularInline):
     model = LineItem
     extra = 1
+    fields = ("product_name", "hsn_code", "quantity", "unit", "rate", "amount")
+    readonly_fields = ("amount",)
 
 
 @admin.register(Invoice)
 class InvoiceAdmin(SimpleHistoryAdmin):
-    list_display = ("customer", "business", "created_at", "updated_at")
+    list_display = ("customer", "business", "created_at", "updated_at", "invoice_date")
     list_filter = ("customer", "business", "created_at", "updated_at")
     search_fields = ("customer", "business", "created_at", "updated_at")
     ordering = ("customer", "business", "created_at", "updated_at")
@@ -107,6 +115,7 @@ class InvoiceAdmin(SimpleHistoryAdmin):
             {
                 "fields": (
                     "invoice_number",
+                    "invoice_date",
                     "total_amount",
                 )
             },
