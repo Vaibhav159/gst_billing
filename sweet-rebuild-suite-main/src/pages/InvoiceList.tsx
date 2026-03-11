@@ -3,7 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
   Trash2, Copy, CheckSquare, Square, LayoutGrid, LayoutList, TrendingUp,
-  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2,
+  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { financialYears, formatCurrency, formatDate } from "@/lib/mockData";
@@ -56,7 +56,7 @@ export default function InvoiceList() {
     monthFilter,
   }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter]);
 
-  const { items: invoices, remove: removeInvoice, isLoading, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
+  const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
 
   // Only client-side sorting (filtering is done server-side)
   const filtered = [...invoices].sort((a, b) => {
@@ -181,6 +181,14 @@ export default function InvoiceList() {
             </div>
           )}
         </div>
+
+        {/* Load More - Mobile */}
+        {hasMore && (
+          <button onClick={loadMore} disabled={isLoadingMore}
+            className="w-full py-3 rounded-xl border border-border/50 text-[13px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all flex items-center justify-center gap-2">
+            {isLoadingMore ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading...</> : <>Load More ({filtered.length} of {totalCount})</>}
+          </button>
+        )}
 
         {/* FAB */}
         <Link to="/billing/invoice/add" className="mobile-fab">
@@ -406,6 +414,16 @@ export default function InvoiceList() {
               <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found
             </div>
           )}
+        </div>
+      )}
+
+      {/* Load More - Desktop */}
+      {hasMore && (
+        <div className="flex justify-center">
+          <button onClick={loadMore} disabled={isLoadingMore}
+            className="px-8 py-3 rounded-xl border border-border/50 text-[13px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all flex items-center gap-2">
+            {isLoadingMore ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading...</> : <>Load More ({filtered.length} of {totalCount})</>}
+          </button>
         </div>
       )}
 

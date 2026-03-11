@@ -2,15 +2,15 @@
 
 ## 🔴 P0 — Fix Immediately (Broken)
 
-- [ ] Fix `inv.date` → `inv.invoice_date` in all remaining files:
-  - `InvoiceList.tsx` (L46, L70, L135, L244, L334, L366)
+- [x] Fix `inv.date` → `inv.invoice_date` in all remaining files:
+  - [x] `InvoiceList.tsx` — fixed
   - `InvoicePrint.tsx` (L109)
   - `GSTSummary.tsx` (L34)
   - `CustomerStatement.tsx` (L28, L99, L121)
   - `BulkPDF.tsx` (L26, L176)
   - `EasyDashboard.tsx` (L115)
-- [ ] Fix form field name mismatches in `CustomerForm.tsx` — JSX uses `form.gst_number`, `form.mobile_number`, `form.state_name` but form state keys are `gst`, `mobile`, `state`
-- [ ] Fix form field name mismatches in `BusinessForm.tsx` — same issue as above
+- [x] Fix form field name mismatches in `CustomerForm.tsx` — JSX uses `form.gst_number`, `form.mobile_number`, `form.state_name` but form state keys are `gst`, `mobile`, `state`
+- [x] Fix form field name mismatches in `BusinessForm.tsx` — same issue as above
 - [ ] Fix Dashboard to use `fetchAllPages` or a stats API — currently only fetches first page, so stats are incomplete
 
 ## 🟡 P1 — High Priority (Core features)
@@ -20,10 +20,13 @@
 - [ ] Add `email` field to `Business` model + migration + serializer
 
 ### Frontend
-- [ ] Add "Load More" / infinite scroll to `InvoiceList.tsx`
-- [ ] Add "Load More" / infinite scroll to `CustomerList.tsx`
-- [ ] Add "Load More" / infinite scroll to `ProductList.tsx`
-- [ ] Add "Load More" / infinite scroll to `BusinessList.tsx`
+- [x] Add "Load More" to `InvoiceList.tsx` (mobile + desktop)
+- [x] Add "Load More" to `CustomerList.tsx`
+- [x] Add "Load More" to `ProductList.tsx`
+- [x] Add "Load More" to `BusinessList.tsx`
+- [x] Server-side invoice filters (search, FY, month, business, customer, type) via API query params
+- [x] Show API `totalCount` instead of loaded page size in all list headers
+- [x] Proper error handling on Customer/Business form submit (show error toast on API failure)
 - [ ] Invoice creation flow — create invoice + line items in a single API call
 
 ### Deployment

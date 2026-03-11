@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Package, TrendingUp, Hash, Filter, LayoutGrid, List,
-  Copy, CheckCircle2, BarChart3, SlidersHorizontal,
+  Copy, CheckCircle2, BarChart3, SlidersHorizontal, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatCurrency } from "@/lib/mockData";
@@ -19,7 +19,7 @@ import { stagger, fadeUp } from "@/lib/animations";
 export default function ProductList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: products, remove: removeProduct, totalCount: productTotalCount } = useProducts();
+  const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore } = useProducts();
   const { items: invoices } = useInvoices();
   const [search, setSearch] = useState("");
   const [gstFilter, setGstFilter] = useState("all");
@@ -414,6 +414,16 @@ export default function ProductList() {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* Load More */}
+      {hasMore && (
+        <div className="flex justify-center">
+          <button onClick={loadMore} disabled={isLoadingMore}
+            className="px-8 py-3 rounded-xl border border-border/50 text-[13px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all flex items-center gap-2">
+            {isLoadingMore ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading...</> : <>Load More ({products.length} of {productTotalCount})</>}
+          </button>
+        </div>
       )}
 
       <DeleteConfirmDialog

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Building2, Users, TrendingUp, Filter, ChevronDown, Phone, MapPin, Star,
-  GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal,
+  GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal, Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatCurrency } from "@/lib/mockData";
@@ -20,7 +20,7 @@ export default function CustomerList() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { items: customers, remove: removeCustomer, totalCount } = useCustomers();
+  const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore } = useCustomers();
   const { items: businesses } = useBusinesses();
   const { items: invoices } = useInvoices();
   const [search, setSearch] = useState("");
@@ -436,6 +436,16 @@ export default function CustomerList() {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* Load More */}
+      {hasMore && (
+        <div className="flex justify-center">
+          <button onClick={loadMore} disabled={isLoadingMore}
+            className="px-8 py-3 rounded-xl border border-border/50 text-[13px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all flex items-center gap-2">
+            {isLoadingMore ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading...</> : <>Load More ({customers.length} of {totalCount})</>}
+          </button>
+        </div>
       )}
 
       <DeleteConfirmDialog

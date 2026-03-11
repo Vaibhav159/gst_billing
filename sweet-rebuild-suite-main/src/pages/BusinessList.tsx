@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Building2, TrendingUp, TrendingDown, MapPin, Phone, Mail,
-  LayoutGrid, List, Copy, CheckCircle2,
+  LayoutGrid, List, Copy, CheckCircle2, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatCurrency } from "@/lib/mockData";
@@ -23,7 +23,7 @@ const fadeUp = {
 export default function BusinessList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount } = useBusinesses();
+  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore } = useBusinesses();
   const { items: customers } = useCustomers();
   const { items: invoices } = useInvoices();
   const [search, setSearch] = useState("");
@@ -253,6 +253,16 @@ export default function BusinessList() {
       {/* Mobile FAB */}
       {isMobile && (
         <Link to="/billing/business/new" className="mobile-fab"><Plus className="w-5 h-5" /></Link>
+      )}
+
+      {/* Load More */}
+      {hasMore && (
+        <div className="flex justify-center">
+          <button onClick={loadMore} disabled={isLoadingMore}
+            className="px-8 py-3 rounded-xl border border-border/50 text-[13px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all flex items-center gap-2">
+            {isLoadingMore ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading...</> : <>Load More ({businesses.length} of {bizTotalCount})</>}
+          </button>
+        </div>
       )}
 
       <DeleteConfirmDialog
