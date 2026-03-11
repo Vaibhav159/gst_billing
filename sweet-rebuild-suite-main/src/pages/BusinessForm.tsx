@@ -38,32 +38,34 @@ export default function BusinessForm() {
 
   const [form, setForm] = useState({
     name: "",
-    gst: "",
-    pan: "",
-    state: "",
+    gst_number: "",
+    pan_number: "",
+    state_name: "",
     address: "",
-    mobile: "",
+    mobile_number: "",
     email: "",
-    bankName: "",
-    accountNo: "",
-    ifsc: "",
-    branch: "",
+    bank_name: "",
+    bank_account_number: "",
+    bank_ifsc_code: "",
+    bank_branch_name: "",
   });
 
   useEffect(() => {
     if (isEdit && existing) {
+      const apiState = existing.state_name || "";
+      const matchedState = indianStates.find(s => s.toLowerCase() === apiState.toLowerCase()) || apiState;
       setForm({
         name: existing.name || "",
-        gst: existing.gst_number || "",
-        pan: existing.pan_number || "",
-        state: existing.state_name || "",
+        gst_number: existing.gst_number || "",
+        pan_number: existing.pan_number || "",
+        state_name: matchedState,
         address: existing.address || "",
-        mobile: existing.mobile_number || "",
+        mobile_number: existing.mobile_number || "",
         email: existing.email || "",
-        bankName: existing.bank_name || "",
-        accountNo: existing.bank_account_number || "",
-        ifsc: existing.bank_ifsc_code || "",
-        branch: existing.bank_branch_name || "",
+        bank_name: existing.bank_name || "",
+        bank_account_number: existing.bank_account_number || "",
+        bank_ifsc_code: existing.bank_ifsc_code || "",
+        bank_branch_name: existing.bank_branch_name || "",
       });
     }
   }, [existing, isEdit]);
@@ -91,7 +93,7 @@ export default function BusinessForm() {
   };
 
   const handleChange = (field: string, val: string) => {
-    const processedVal = (field === "gst" || field === "pan" || field === "ifsc") ? val.toUpperCase() : val;
+    const processedVal = (field === "gst_number" || field === "pan_number" || field === "bank_ifsc_code") ? val.toUpperCase() : val;
     setForm((p) => ({ ...p, [field]: processedVal }));
     setDirty(true);
     if (errors[field]) setErrors((p) => ({ ...p, [field]: "" }));
@@ -99,18 +101,17 @@ export default function BusinessForm() {
 
   const handleGSTChange = (val: string) => {
     const upper = val.toUpperCase();
-    handleChange("gst", upper);
+    handleChange("gst_number", upper);
     if (upper.length >= 2 && !form.state_name) {
       const prefix = upper.substring(0, 2);
-      if (gstStateMap[prefix]) setForm((p) => ({ ...p, state: gstStateMap[prefix] }));
+      if (gstStateMap[prefix]) setForm((p) => ({ ...p, state_name: gstStateMap[prefix] }));
     }
   };
 
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Business name is required";
-    if (!form.mobile_number.trim()) errs.mobile_number = "Mobile is required";
-    else if (form.mobile_number.length !== 10 || !/^\d+$/.test(form.mobile_number)) errs.mobile_number = "Enter valid 10-digit number";
+    if (form.mobile_number && (form.mobile_number.length !== 10 || !/^\d+$/.test(form.mobile_number))) errs.mobile_number = "Enter valid 10-digit number";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = "Enter valid email";
     if (form.gst_number && form.gst_number.length !== 15) errs.gst_number = "GST must be 15 characters";
     if (form.pan_number && form.pan_number.length !== 10) errs.pan_number = "PAN must be 10 characters";
@@ -118,7 +119,7 @@ export default function BusinessForm() {
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) {
@@ -126,20 +127,31 @@ export default function BusinessForm() {
       toast({ title: "Validation Error", description: "Please fix the highlighted fields.", variant: "destructive" });
       return;
     }
-    setDirty(false);
-    if (isEdit) {
-      updateBusiness(id!, { ...form });
-      toast({ title: "Business Updated", description: form.name });
-    } else {
-      const newId = generateId("b-");
-      createBusiness({ id: newId, ...form, createdAt: new Date().toISOString() });
-      toast({ title: "Business Created", description: form.name });
+    const payload = { ...form, state_name: form.state_name ? form.state_name.toUpperCase() : "" };
+    try {
+      if (isEdit) {
+        await updateBusiness(id!, payload);
+        toast({ title: "Business Updated", description: form.name });
+      } else {
+        await createBusiness(payload);
+        toast({ title: "Business Created", description: form.name });
+      }
+      setDirty(false);
+      navigate("/billing/business/list");
+    } catch (err: any) {
+      const detail = err?.response?.data;
+      let errorMsg = "Something went wrong. Please try again.";
+      if (detail && typeof detail === "object") {
+        errorMsg = Object.entries(detail)
+          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
+          .join("\n");
+      }
+      toast({ title: "Save Failed", description: errorMsg, variant: "destructive" });
     }
-    navigate("/billing/business/list");
   };
 
   // Completion meter
-  const completionFields = ["name", "mobile", "gst", "pan", "email", "state", "address", "bankName", "accountNo", "ifsc", "branch"];
+  const completionFields = ["name", "mobile_number", "gst_number", "pan_number", "email", "state_name", "address", "bank_name", "bank_account_number", "bank_ifsc_code", "bank_branch_name"];
   const filledCount = completionFields.filter((f) => (form as any)[f]?.trim()).length;
   const completionPct = Math.round((filledCount / completionFields.length) * 100);
 
@@ -196,8 +208,8 @@ export default function BusinessForm() {
                     placeholder="e.g. Sharma Gold Pvt Ltd" className={cn("premium-input", errors.name && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
 
-                <FormField label="Mobile Number" icon={Phone} required error={errors.mobile_number}>
-                  <input type="text" value={form.mobile_number} onChange={(e) => handleChange("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                <FormField label="Mobile Number" icon={Phone} error={errors.mobile_number}>
+                  <input type="text" value={form.mobile_number} onChange={(e) => handleChange("mobile_number", e.target.value.replace(/\D/g, "").slice(0, 10))}
                     placeholder="10-digit number" maxLength={10} className={cn("premium-input tabular-nums", errors.mobile_number && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
 
@@ -207,9 +219,12 @@ export default function BusinessForm() {
                 </FormField>
 
                 <FormField label="State" icon={MapPin}>
-                  <select value={form.state_name} onChange={(e) => handleChange("state", e.target.value)} className="premium-select w-full">
+                  <select value={form.state_name} onChange={(e) => handleChange("state_name", e.target.value)} className="premium-select w-full">
                     <option value="">Select State</option>
                     {indianStates.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {form.state_name && !indianStates.includes(form.state_name) && (
+                      <option value={form.state_name}>{form.state_name}</option>
+                    )}
                   </select>
                 </FormField>
 
@@ -239,7 +254,7 @@ export default function BusinessForm() {
                 </FormField>
 
                 <FormField label="PAN Number" icon={CreditCard} error={errors.pan_number}>
-                  <input type="text" value={form.pan_number} onChange={(e) => handleChange("pan", e.target.value)}
+                  <input type="text" value={form.pan_number} onChange={(e) => handleChange("pan_number", e.target.value)}
                     placeholder="e.g. AABCS1429B" maxLength={10}
                     className={cn("premium-input font-mono uppercase tracking-wider", errors.pan_number && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
@@ -256,23 +271,23 @@ export default function BusinessForm() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <FormField label="Bank Name" icon={Landmark}>
-                  <input type="text" value={form.bank_name} onChange={(e) => handleChange("bankName", e.target.value)}
+                  <input type="text" value={form.bank_name} onChange={(e) => handleChange("bank_name", e.target.value)}
                     placeholder="e.g. State Bank of India" className="premium-input" />
                 </FormField>
 
                 <FormField label="Account Number" icon={CreditCard}>
-                  <input type="text" value={form.bank_account_number} onChange={(e) => handleChange("accountNo", e.target.value)}
+                  <input type="text" value={form.bank_account_number} onChange={(e) => handleChange("bank_account_number", e.target.value)}
                     placeholder="Account number" className="premium-input font-mono tabular-nums" />
                 </FormField>
 
                 <FormField label="IFSC Code" icon={Hash} error={errors.bank_ifsc_code}>
-                  <input type="text" value={form.bank_ifsc_code} onChange={(e) => handleChange("ifsc", e.target.value)}
+                  <input type="text" value={form.bank_ifsc_code} onChange={(e) => handleChange("bank_ifsc_code", e.target.value)}
                     placeholder="e.g. SBIN0001234" maxLength={11}
                     className={cn("premium-input font-mono uppercase tracking-wider", errors.bank_ifsc_code && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
 
                 <FormField label="Branch" icon={MapPin}>
-                  <input type="text" value={form.bank_branch_name} onChange={(e) => handleChange("branch", e.target.value)}
+                  <input type="text" value={form.bank_branch_name} onChange={(e) => handleChange("bank_branch_name", e.target.value)}
                     placeholder="e.g. Zaveri Bazaar" className="premium-input" />
                 </FormField>
               </div>
@@ -308,9 +323,9 @@ export default function BusinessForm() {
                   {completionFields.map((f) => {
                     const filled = !!(form as any)[f]?.trim();
                     const labels: Record<string, string> = {
-                      name: "Business Name", mobile: "Mobile", gst: "GST Number", pan: "PAN",
-                      email: "Email", state: "State", address: "Address",
-                      bankName: "Bank Name", accountNo: "Account No.", ifsc: "IFSC Code", branch: "Branch",
+                      name: "Business Name", mobile_number: "Mobile", gst_number: "GST Number", pan_number: "PAN",
+                      email: "Email", state_name: "State", address: "Address",
+                      bank_name: "Bank Name", bank_account_number: "Account No.", bank_ifsc_code: "IFSC Code", bank_branch_name: "Branch",
                     };
                     return (
                       <div key={f} className="flex items-center gap-2 text-[11px]">

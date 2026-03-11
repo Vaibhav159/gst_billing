@@ -30,26 +30,28 @@ export default function CustomerForm() {
 
   const [form, setForm] = useState({
     name: "",
-    gst: "",
-    pan: "",
-    mobile: "",
+    gst_number: "",
+    pan_number: "",
+    mobile_number: "",
     email: "",
-    state: "",
+    state_name: "",
     address: "",
     businesses: [] as string[],
   });
 
   useEffect(() => {
     if (isEdit && existing) {
+      const apiState = existing.state_name || "";
+      const matchedState = indianStates.find(s => s.toLowerCase() === apiState.toLowerCase()) || apiState;
       setForm({
         name: existing.name || "",
-        gst: existing.gst_number || "",
-        pan: existing.pan_number || "",
-        mobile: existing.mobile_number || "",
+        gst_number: existing.gst_number || "",
+        pan_number: existing.pan_number || "",
+        mobile_number: existing.mobile_number || "",
         email: existing.email || "",
-        state: existing.state_name || "",
+        state_name: matchedState,
         address: existing.address || "",
-        businesses: existing.businesses || [],
+        businesses: (existing.businesses || []).map(String),
       });
     }
   }, [existing, isEdit]);
@@ -72,7 +74,7 @@ export default function CustomerForm() {
 
   const handleChange = (field: string, val: string) => {
     // Auto-uppercase for GST and PAN
-    const processedVal = (field === "gst" || field === "pan") ? val.toUpperCase() : val;
+    const processedVal = (field === "gst_number" || field === "pan_number") ? val.toUpperCase() : val;
     setForm((p) => ({ ...p, [field]: processedVal }));
     setDirty(true);
     if (errors[field]) setErrors((p) => ({ ...p, [field]: "" }));
@@ -104,16 +106,16 @@ export default function CustomerForm() {
   const toggleBiz = (bid: string) => {
     setForm((p) => ({
       ...p,
-      businesses: p.businesses.includes(bid)
-        ? p.businesses.filter((b) => b !== bid)
-        : [...p.businesses, bid],
+      businesses: p.businesses.includes(String(bid))
+        ? p.businesses.filter((b) => b !== String(bid))
+        : [...p.businesses, String(bid)],
     }));
     setDirty(true);
   };
 
   const selectAllBiz = () => {
-    const allIds = businesses.map((b) => b.id);
-    const allSelected = allIds.every((id) => form.businesses.includes(id));
+    const allIds = businesses.map((b) => String(b.id));
+    const allSelected = allIds.every((bid) => form.businesses.includes(bid));
     setForm((p) => ({ ...p, businesses: allSelected ? [] : allIds }));
     setDirty(true);
   };
@@ -136,25 +138,25 @@ export default function CustomerForm() {
 
   const handleGSTChange = (val: string) => {
     const upper = val.toUpperCase();
-    handleChange("gst", upper);
+    handleChange("gst_number", upper);
     if (upper.length >= 2 && !form.state_name) {
       const prefix = upper.substring(0, 2);
-      if (gstStateMap[prefix]) setForm((p) => ({ ...p, state: gstStateMap[prefix] }));
+      if (gstStateMap[prefix]) setForm((p) => ({ ...p, state_name: gstStateMap[prefix] }));
     }
   };
 
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Name is required";
-    if (!form.mobile_number.trim()) errs.mobile_number = "Mobile is required";
-    else if (form.mobile_number.length !== 10 || !/^\d+$/.test(form.mobile_number)) errs.mobile_number = "Enter valid 10-digit number";
+    if (form.mobile_number && form.mobile_number.length !== 10) errs.mobile_number = "Enter 10-digit number";
+    if (form.mobile_number && !/^\d+$/.test(form.mobile_number)) errs.mobile_number = "Enter 10-digit number";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = "Enter valid email";
     if (form.gst_number && form.gst_number.length !== 15) errs.gst_number = "GST must be 15 characters";
     if (form.pan_number && form.pan_number.length !== 10) errs.pan_number = "PAN must be 10 characters";
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) {
@@ -162,16 +164,28 @@ export default function CustomerForm() {
       toast({ title: "Validation Error", description: "Please fix the highlighted fields.", variant: "destructive" });
       return;
     }
-    setDirty(false);
-    if (isEdit) {
-      updateCustomer(id!, { ...form });
-      toast({ title: "Customer Updated", description: form.name });
-    } else {
-      const newId = generateId("c-");
-      createCustomer({ id: newId, ...form, tags: [], createdAt: new Date().toISOString() });
-      toast({ title: "Customer Created", description: form.name });
+    // Uppercase state_name for backend compatibility
+    const payload = { ...form, state_name: form.state_name ? form.state_name.toUpperCase() : "" };
+    try {
+      if (isEdit) {
+        await updateCustomer(id!, payload);
+        toast({ title: "Customer Updated", description: form.name });
+      } else {
+        await createCustomer(payload);
+        toast({ title: "Customer Created", description: form.name });
+      }
+      setDirty(false);
+      navigate("/billing/customer/list");
+    } catch (err: any) {
+      const detail = err?.response?.data;
+      let errorMsg = "Something went wrong. Please try again.";
+      if (detail && typeof detail === "object") {
+        errorMsg = Object.entries(detail)
+          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
+          .join("\n");
+      }
+      toast({ title: "Save Failed", description: errorMsg, variant: "destructive" });
     }
-    navigate("/billing/customer/list");
   };
 
   // Fill form from existing customer (for edit use-case from suggestion)
@@ -198,10 +212,10 @@ export default function CustomerForm() {
     navigate(`/billing/customer/${mergeTarget}`);
   };
 
-  const completionFields = ["name", "mobile", "gst", "pan", "email", "state", "address"];
+  const completionFields = ["name", "mobile_number", "gst_number", "pan_number", "email", "state_name", "address"];
   const filledCount = completionFields.filter((f) => (form as any)[f]?.trim()).length;
   const completionPct = Math.round((filledCount / completionFields.length) * 100);
-  const allBizSelected = businesses.every((b) => form.businesses.includes(b.id));
+  const allBizSelected = businesses.every((b) => form.businesses.includes(String(b.id)));
 
   return (
     <div className="p-6 lg:p-10 space-y-7 max-w-[1440px] mx-auto">
@@ -317,8 +331,8 @@ export default function CustomerForm() {
                 </div>
 
                 {/* Mobile */}
-                <FormField label="Mobile Number" icon={Phone} required error={errors.mobile_number}>
-                  <input type="text" value={form.mobile_number} onChange={(e) => handleChange("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                <FormField label="Mobile Number" icon={Phone} error={errors.mobile_number}>
+                  <input type="text" value={form.mobile_number} onChange={(e) => handleChange("mobile_number", e.target.value.replace(/\D/g, "").slice(0, 10))}
                     placeholder="10-digit number" maxLength={10} className={cn("premium-input tabular-nums", errors.mobile_number && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
 
@@ -330,9 +344,13 @@ export default function CustomerForm() {
 
                 {/* State */}
                 <FormField label="State" icon={MapPin}>
-                  <select value={form.state_name} onChange={(e) => handleChange("state", e.target.value)} className="premium-select w-full">
+                  <select value={form.state_name} onChange={(e) => handleChange("state_name", e.target.value)} className="premium-select w-full">
                     <option value="">Select State</option>
                     {indianStates.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {/* Include the API value if it doesn't match any option */}
+                    {form.state_name && !indianStates.includes(form.state_name) && (
+                      <option value={form.state_name}>{form.state_name}</option>
+                    )}
                   </select>
                 </FormField>
 
@@ -365,7 +383,7 @@ export default function CustomerForm() {
                 </FormField>
 
                 <FormField label="PAN Number" icon={CreditCard} error={errors.pan_number}>
-                  <input type="text" value={form.pan_number} onChange={(e) => handleChange("pan", e.target.value.toUpperCase())}
+                  <input type="text" value={form.pan_number} onChange={(e) => handleChange("pan_number", e.target.value.toUpperCase())}
                     placeholder="e.g. AABCK5461H" maxLength={10}
                     className={cn("premium-input font-mono uppercase tracking-wider", errors.pan_number && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
@@ -400,7 +418,7 @@ export default function CustomerForm() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {businesses.map((biz) => {
-                  const checked = form.businesses.includes(biz.id);
+                  const checked = form.businesses.includes(String(biz.id));
                   return (
                     <label key={biz.id} className={cn(
                       "flex items-center gap-4 p-4 rounded-xl cursor-pointer transition-all duration-200",
@@ -469,7 +487,7 @@ export default function CustomerForm() {
                 <div className="space-y-1.5">
                   {completionFields.map((f) => {
                     const filled = !!(form as any)[f]?.trim();
-                    const labels: Record<string, string> = { name: "Full Name", mobile: "Mobile", gst: "GST Number", pan: "PAN", email: "Email", state: "State", address: "Address" };
+                    const labels: Record<string, string> = { name: "Full Name", mobile_number: "Mobile", gst_number: "GST Number", pan_number: "PAN", email: "Email", state_name: "State", address: "Address" };
                     return (
                       <div key={f} className="flex items-center gap-2 text-[11px]">
                         <div className={cn("w-1.5 h-1.5 rounded-full", filled ? "bg-success" : "bg-border")} />
