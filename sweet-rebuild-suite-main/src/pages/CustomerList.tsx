@@ -20,7 +20,7 @@ export default function CustomerList() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { items: customers, remove: removeCustomer } = useCustomers();
+  const { items: customers, remove: removeCustomer, totalCount } = useCustomers();
   const { items: businesses } = useBusinesses();
   const { items: invoices } = useInvoices();
   const [search, setSearch] = useState("");
@@ -46,7 +46,7 @@ export default function CustomerList() {
   });
 
   // Stats
-  const totalCustomers = customers.length;
+  const totalCustomers = totalCount;
   const vipCustomers = customers.filter((c) => (c as any).tags?.includes("VIP")).length;
   const totalRevenue = customers.reduce((sum, c) => {
     return sum + invoices.filter((inv) => inv.customerId === c.id && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);

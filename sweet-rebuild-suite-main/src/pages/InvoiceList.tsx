@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
@@ -8,6 +8,7 @@ import {
 import { motion } from "framer-motion";
 import { financialYears, formatCurrency, formatDate } from "@/lib/mockData";
 import { useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
 import { cn } from "@/lib/utils";
@@ -23,10 +24,10 @@ export default function InvoiceList() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: invoices, remove: removeInvoice } = useInvoices();
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [bizFilter, setBizFilter] = useState("all");
   const [custFilter, setCustFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -39,19 +40,28 @@ export default function InvoiceList() {
   const [monthFilter, setMonthFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
 
-  const filtered = invoices.filter((inv) => {
-    const q = search.toLowerCase();
-    if (monthFilter !== "all") {
-      const m = parseInt(monthFilter);
-      const invMonth = new Date(inv.date).getMonth() + 1;
-      if (invMonth !== m) return false;
-    }
-    return (typeFilter === "all" || inv.type === typeFilter) && (bizFilter === "all" || inv.businessId === bizFilter) &&
-      (custFilter === "all" || inv.customerId === custFilter) && (fyFilter === "all" || inv.financialYear === fyFilter) &&
-      (!q || inv.invoiceNumber.toLowerCase().includes(q) || inv.customerName.toLowerCase().includes(q) || inv.businessName.toLowerCase().includes(q));
-  }).sort((a, b) => {
+  // Debounce search input to avoid excessive API calls
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Build filters object for the API-driven hook
+  const apiFilters: InvoiceFilters = useMemo(() => ({
+    search: debouncedSearch || undefined,
+    businessId: bizFilter,
+    customerId: custFilter,
+    typeFilter,
+    fyFilter,
+    monthFilter,
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter]);
+
+  const { items: invoices, remove: removeInvoice, isLoading, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
+
+  // Only client-side sorting (filtering is done server-side)
+  const filtered = [...invoices].sort((a, b) => {
     const dir = sortDir === "asc" ? 1 : -1;
-    if (sortBy === "date") return dir * (new Date(a.date).getTime() - new Date(b.date).getTime());
+    if (sortBy === "date") return dir * (new Date(a.invoice_date).getTime() - new Date(b.invoice_date).getTime());
     if (sortBy === "total") return dir * (a.total - b.total);
     return dir * a.invoiceNumber.localeCompare(b.invoiceNumber);
   });
@@ -67,7 +77,7 @@ export default function InvoiceList() {
 
   const handleExportCSV = () => {
     const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total", "GST Type"];
-    const rows = filtered.map((inv) => [inv.invoiceNumber, inv.date, inv.customerName, inv.businessName, inv.type, inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
+    const rows = filtered.map((inv) => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -93,7 +103,7 @@ export default function InvoiceList() {
       <div className="p-4 space-y-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Invoices</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">{filtered.length} invoices · FY {fyFilter === "all" ? "All" : fyFilter}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{totalCount} invoices · FY {fyFilter === "all" ? "All" : fyFilter}</p>
         </div>
 
         {/* Stats scroll */}
@@ -132,7 +142,7 @@ export default function InvoiceList() {
                 <div>
                   <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
                   <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                    <Calendar className="w-3 h-3" />{formatDate(inv.date)}
+                    <Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}
                   </p>
                 </div>
                 <span className={cn(
@@ -228,7 +238,7 @@ export default function InvoiceList() {
           </div>
           <div>
             <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">Invoices</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">{filtered.length} invoices · FY {fyFilter === "all" ? "All" : fyFilter}</p>
+            <p className="text-sm text-muted-foreground mt-0.5">{totalCount} invoices · FY {fyFilter === "all" ? "All" : fyFilter}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -241,7 +251,7 @@ export default function InvoiceList() {
               <button onClick={() => {
                 const selectedInvs = filtered.filter(i => selected.has(i.id));
                 const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Total"];
-                const rows = selectedInvs.map(inv => [inv.invoiceNumber, inv.date, inv.customerName, inv.businessName, inv.type, inv.total]);
+                const rows = selectedInvs.map(inv => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.total]);
                 const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
                 const blob = new Blob([csv], { type: "text/csv" });
                 const url = URL.createObjectURL(blob);
@@ -331,7 +341,7 @@ export default function InvoiceList() {
                 <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.025, duration: 0.3 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
                   <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
                   <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
-                  <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.date)}</div></td>
+                  <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
                   <td className="text-foreground font-medium">{inv.customerName}</td>
                   <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
                   <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
@@ -363,7 +373,7 @@ export default function InvoiceList() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <Link to={`/billing/invoice/${inv.id}`} className="text-[14px] font-display font-bold text-primary hover:underline">{inv.invoiceNumber}</Link>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(inv.date)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(inv.invoice_date)}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span>

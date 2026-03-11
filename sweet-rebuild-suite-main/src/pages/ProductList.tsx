@@ -19,7 +19,7 @@ import { stagger, fadeUp } from "@/lib/animations";
 export default function ProductList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: products, remove: removeProduct } = useProducts();
+  const { items: products, remove: removeProduct, totalCount: productTotalCount } = useProducts();
   const { items: invoices } = useInvoices();
   const [search, setSearch] = useState("");
   const [gstFilter, setGstFilter] = useState("all");
@@ -44,7 +44,7 @@ export default function ProductList() {
   const getProductQtySold = (pid: string) =>
     invoices.reduce((qty, inv) => qty + inv.items.filter((it) => it.productId === pid).reduce((s, it) => s + it.qty, 0), 0);
 
-  const totalProducts = products.length;
+  const totalProducts = productTotalCount;
   const totalRevenue = products.reduce((sum, p) => sum + getProductRevenue(p.id), 0);
   const totalUsage = products.reduce((count, p) => count + getProductUsageCount(p.id), 0);
   const avgGSTRate = products.length > 0 ? (products.reduce((s, p) => s + p.gstRate, 0) / products.length).toFixed(1) : "0";

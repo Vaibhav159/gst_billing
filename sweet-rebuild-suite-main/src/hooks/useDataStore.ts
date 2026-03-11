@@ -215,18 +215,82 @@ function mapDjangoProduct(prod: any): Product {
   };
 }
 
-export function useInvoices() {
+export interface InvoiceFilters {
+  search?: string;
+  businessId?: string;
+  customerId?: string;
+  typeFilter?: string;  // "all" | "OUTWARD" | "INWARD"
+  fyFilter?: string;    // "all" | "2024-25" etc.
+  monthFilter?: string; // "all" | "1"-"12"
+}
+
+/**
+ * Compute start_date and end_date from FY + optional month filter.
+ * FY "2024-25" → April 2024 to March 2025.
+ */
+function buildDateRange(fyFilter?: string, monthFilter?: string): { start_date?: string; end_date?: string } {
+  if (!fyFilter || fyFilter === "all") return {};
+
+  const [startYearStr] = fyFilter.split("-");
+  const startYear = parseInt(startYearStr);
+  if (isNaN(startYear)) return {};
+
+  // FY 2024-25 → Apr 2024 to Mar 2025
+  const fyStart = new Date(startYear, 3, 1); // April 1
+  const fyEnd = new Date(startYear + 1, 2, 31); // March 31
+
+  if (monthFilter && monthFilter !== "all") {
+    const m = parseInt(monthFilter); // 1-12
+    // If month is Jan-Mar (1-3), it falls in the next calendar year of the FY
+    const year = m >= 4 ? startYear : startYear + 1;
+    const monthStart = new Date(year, m - 1, 1);
+    const monthEnd = new Date(year, m, 0); // last day of month
+    return {
+      start_date: monthStart.toISOString().split("T")[0],
+      end_date: monthEnd.toISOString().split("T")[0],
+    };
+  }
+
+  return {
+    start_date: fyStart.toISOString().split("T")[0],
+    end_date: fyEnd.toISOString().split("T")[0],
+  };
+}
+
+export function useInvoices(filters?: InvoiceFilters) {
   const [items, setItems] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
 
+  // Serialize filters to a stable string for useCallback dep
+  const filterKey = JSON.stringify(filters || {});
+
   const fetchInvoices = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>("invoices/");
+      const params = new URLSearchParams();
+      const f = filters || {};
+
+      if (f.search) params.set("search", f.search);
+      if (f.businessId && f.businessId !== "all") params.set("business_id", f.businessId);
+      if (f.customerId && f.customerId !== "all") params.set("customer_id", f.customerId);
+      if (f.typeFilter && f.typeFilter !== "all") {
+        params.set("type_of_invoice", f.typeFilter.toLowerCase());
+      }
+
+      const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
+      if (dateRange.start_date) params.set("start_date", dateRange.start_date);
+      if (dateRange.end_date) params.set("end_date", dateRange.end_date);
+
+      // Increase page size to get more results
+      params.set("page_size", "50");
+
+      const qs = params.toString();
+      const url = `invoices/${qs ? `?${qs}` : ""}`;
+      const res = await api.get<any>(url);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoInvoice));
@@ -237,7 +301,8 @@ export function useInvoices() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;

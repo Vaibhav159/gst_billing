@@ -23,7 +23,7 @@ const fadeUp = {
 export default function BusinessList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: businesses, remove: removeBusiness } = useBusinesses();
+  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount } = useBusinesses();
   const { items: customers } = useCustomers();
   const { items: invoices } = useInvoices();
   const [search, setSearch] = useState("");
@@ -79,7 +79,7 @@ export default function BusinessList() {
             </div>
             <div>
               <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>Businesses</h1>
-              <p className="text-xs text-muted-foreground">{businesses.length} registered</p>
+              <p className="text-xs text-muted-foreground">{bizTotalCount} registered</p>
             </div>
           </div>
           {!isMobile && (
