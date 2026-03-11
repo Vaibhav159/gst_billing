@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { indianStates } from "@/lib/mockData";
-import { useBusinesses, generateId } from "@/hooks/useDataStore";
+import { useBusinesses, useBusiness, generateId } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Save, X, AlertTriangle, Building2, Pencil, Phone, Mail, MapPin,
@@ -32,23 +32,41 @@ export default function BusinessForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { items: businesses, create: createBusiness, update: updateBusiness, getById } = useBusinesses();
+  const { items: businesses, create: createBusiness, update: updateBusiness } = useBusinesses();
   const isEdit = !!id;
-  const existing = isEdit ? getById(id) : null;
+  const { item: existing, isLoading } = useBusiness(isEdit ? id : undefined);
 
   const [form, setForm] = useState({
-    name: existing?.name || "",
-    gst: existing?.gst_number || "",
-    pan: existing?.pan_number || "",
-    state: existing?.state_name || "",
-    address: existing?.address || "",
-    mobile: existing?.mobile_number || "",
-    email: existing?.email || "",
-    bankName: existing?.bank_name || "",
-    accountNo: existing?.bank_account_number || "",
-    ifsc: existing?.bank_ifsc_code || "",
-    branch: existing?.bank_branch_name || "",
+    name: "",
+    gst: "",
+    pan: "",
+    state: "",
+    address: "",
+    mobile: "",
+    email: "",
+    bankName: "",
+    accountNo: "",
+    ifsc: "",
+    branch: "",
   });
+
+  useEffect(() => {
+    if (isEdit && existing) {
+      setForm({
+        name: existing.name || "",
+        gst: existing.gst_number || "",
+        pan: existing.pan_number || "",
+        state: existing.state_name || "",
+        address: existing.address || "",
+        mobile: existing.mobile_number || "",
+        email: existing.email || "",
+        bankName: existing.bank_name || "",
+        accountNo: existing.bank_account_number || "",
+        ifsc: existing.bank_ifsc_code || "",
+        branch: existing.bank_branch_name || "",
+      });
+    }
+  }, [existing, isEdit]);
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);

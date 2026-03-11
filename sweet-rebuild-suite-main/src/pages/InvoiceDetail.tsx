@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/lib/mockData";
-import { useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { useInvoice, useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
 import {
@@ -20,10 +20,12 @@ export default function InvoiceDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
+  const { item: inv, isLoading } = useInvoice(id);
   const { items: invoices } = useInvoices();
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
-  const inv = invoices.find((i) => i.id === id);
+
+  if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
   const biz = businesses.find((b) => b.id === inv.businessId);
   const customer = customers.find((c) => c.id === inv.customerId);
@@ -56,7 +58,7 @@ export default function InvoiceDetail() {
           <div>
             <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>{inv.invoiceNumber}</h1>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" />{formatDate(inv.date)}</span>
+              <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" />{formatDate(inv.invoice_date || "")}</span>
               <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span>
               {inv.isIGST && <span className="premium-badge bg-warning/12 text-warning text-[10px]">IGST</span>}
             </div>
@@ -241,7 +243,7 @@ export default function InvoiceDetail() {
                   <Link key={ci.id} to={`/billing/invoice/${ci.id}`} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-secondary/30 transition-colors group">
                     <div>
                       <p className="text-[12px] font-semibold text-primary group-hover:underline">{ci.invoiceNumber}</p>
-                      <p className="text-[10px] text-muted-foreground">{formatDate(ci.date)}</p>
+                      <p className="text-[10px] text-muted-foreground">{formatDate(ci.invoice_date || "")}</p>
                     </div>
                     <span className="text-[12px] font-bold text-foreground">{formatCurrency(ci.total)}</span>
                   </Link>

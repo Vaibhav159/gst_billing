@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/lib/mockData";
-import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
+import { useBusiness, useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   ArrowLeft, Pencil, Trash2, Phone, Mail, Building2, CreditCard,
@@ -23,13 +23,14 @@ export default function BusinessDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: businesses, remove: removeBusiness } = useBusinesses();
+  const { item: biz, isLoading } = useBusiness(id);
+  const { remove: removeBusiness } = useBusinesses();
   const { items: customers } = useCustomers();
   const { items: invoices } = useInvoices();
-  const biz = businesses.find((b) => b.id === id);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
+  if (isLoading) return <div className="p-8 text-muted-foreground">Loading business...</div>;
   if (!biz) return <div className="p-8 text-muted-foreground">Business not found.</div>;
 
   const bizInvoices = invoices.filter((inv) => inv.businessId === id);
@@ -46,8 +47,8 @@ export default function BusinessDetail() {
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
     const month = new Date(2024, i, 1);
     const monthStr = month.toLocaleDateString("en-IN", { month: "short" });
-    const outward = bizInvoices.filter((inv) => { const d = new Date(inv.date); return d.getMonth() === i && d.getFullYear() === 2024 && inv.type === "OUTWARD"; }).reduce((s, inv) => s + inv.total, 0);
-    const inward = bizInvoices.filter((inv) => { const d = new Date(inv.date); return d.getMonth() === i && d.getFullYear() === 2024 && inv.type === "INWARD"; }).reduce((s, inv) => s + inv.total, 0);
+    const outward = bizInvoices.filter((inv) => { const d = new Date(inv.invoice_date || ""); return d.getMonth() === i && d.getFullYear() === 2024 && inv.type === "OUTWARD"; }).reduce((s, inv) => s + inv.total, 0);
+    const inward = bizInvoices.filter((inv) => { const d = new Date(inv.invoice_date || ""); return d.getMonth() === i && d.getFullYear() === 2024 && inv.type === "INWARD"; }).reduce((s, inv) => s + inv.total, 0);
     return { month: monthStr, outward, inward };
   });
 
@@ -175,7 +176,7 @@ export default function BusinessDetail() {
                   <Link key={inv.id} to={`/billing/invoice/${inv.id}`} className="flex items-center gap-3 p-4 hover:bg-secondary/20">
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
-                      <p className="text-[11px] text-muted-foreground">{formatDate(inv.date)} · {inv.customerName}</p>
+                      <p className="text-[11px] text-muted-foreground">{formatDate(inv.invoice_date || "")} · {inv.customerName}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
@@ -191,7 +192,7 @@ export default function BusinessDetail() {
                   {bizInvoices.slice(0, 8).map((inv) => (
                     <tr key={inv.id}>
                       <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold text-[13px]">{inv.invoiceNumber}</Link></td>
-                      <td className="text-muted-foreground text-[13px]">{formatDate(inv.date)}</td>
+                      <td className="text-muted-foreground text-[13px]">{formatDate(inv.invoice_date || "")}</td>
                       <td className="text-foreground text-[13px]">{inv.customerName}</td>
                       <td className="font-bold text-foreground tabular-nums text-[13px]">{formatCurrency(inv.total)}</td>
                       <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span></td>

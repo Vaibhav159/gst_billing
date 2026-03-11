@@ -3,6 +3,44 @@ import api from "@/lib/api";
 
 import { Invoice, Product } from "@/lib/mockData";
 
+/**
+ * Extracts relative URL from a DRF absolute `next` URL.
+ * DRF returns e.g. "http://localhost:8000/api/invoices/?page=2"
+ * We need just "invoices/?page=2" for our axios baseURL.
+ */
+function parseNextUrl(absoluteUrl: string | null): string | null {
+  if (!absoluteUrl) return null;
+  try {
+    const u = new URL(absoluteUrl);
+    return u.pathname.replace(/^\/api\//, '') + u.search;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetches all pages from a DRF paginated endpoint (opt-in only).
+ * Use sparingly — only for pages that truly need aggregated data (e.g. Dashboard).
+ */
+async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
+  const allResults: T[] = [];
+  let url: string | null = endpoint;
+  while (url) {
+    const res = await api.get<any>(url);
+    const data = res.data;
+    if (data && Array.isArray(data.results)) {
+      allResults.push(...data.results);
+      url = parseNextUrl(data.next);
+    } else if (Array.isArray(data)) {
+      allResults.push(...data);
+      url = null;
+    } else {
+      url = null;
+    }
+  }
+  return allResults;
+}
+
 export interface Business {
   id: string; // DRF returns int id normally, but we can treat as string or number
   name: string;
@@ -180,21 +218,42 @@ function mapDjangoProduct(prod: any): Product {
 export function useInvoices() {
   const [items, setItems] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
 
   const fetchInvoices = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
       const res = await api.get<any>("invoices/");
-      const data = res.data as any;
-      const results = data.results || data;
+      const data = res.data;
+      const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoInvoice));
+      setNextUrl(parseNextUrl(data.next || null));
+      setTotalCount(data.count ?? results.length);
     } catch (e) {
       console.error("Failed to fetch invoices", e);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!nextUrl || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const res = await api.get<any>(nextUrl);
+      const data = res.data;
+      const results = (data.results || []).map(mapDjangoInvoice);
+      setItems((prev) => [...prev, ...results]);
+      setNextUrl(parseNextUrl(data.next || null));
+    } catch (e) {
+      console.error("Failed to load more invoices", e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [nextUrl, isLoadingMore]);
 
   useEffect(() => {
     fetchInvoices();
@@ -220,27 +279,48 @@ export function useInvoices() {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, refetch: fetchInvoices };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchInvoices };
 }
 
 // Custom Hook for API-driven Customers
 export function useCustomers() {
   const [items, setItems] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
 
   const fetchCustomers = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<Customer[]>("customers/");
-      const data = res.data as any;
-      setItems(data.results || data);
+      const res = await api.get<any>("customers/");
+      const data = res.data;
+      const results = Array.isArray(data) ? data : (data.results || []);
+      setItems(results);
+      setNextUrl(parseNextUrl(data.next || null));
+      setTotalCount(data.count ?? results.length);
     } catch (e) {
       console.error("Failed to fetch", e);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!nextUrl || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const res = await api.get<any>(nextUrl);
+      const data = res.data;
+      setItems((prev) => [...prev, ...(data.results || [])]);
+      setNextUrl(parseNextUrl(data.next || null));
+    } catch (e) {
+      console.error("Failed to load more customers", e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [nextUrl, isLoadingMore]);
 
   useEffect(() => {
     fetchCustomers();
@@ -266,27 +346,48 @@ export function useCustomers() {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, refetch: fetchCustomers };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchCustomers };
 }
 
 export function useProducts() {
   const [items, setItems] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
 
   const fetchProducts = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
       const res = await api.get<any>("products/");
-      const data = res.data as any;
-      const results = data.results || data;
+      const data = res.data;
+      const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoProduct));
+      setNextUrl(parseNextUrl(data.next || null));
+      setTotalCount(data.count ?? results.length);
     } catch (e) {
       console.error("Failed to fetch products", e);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!nextUrl || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const res = await api.get<any>(nextUrl);
+      const data = res.data;
+      const results = (data.results || []).map(mapDjangoProduct);
+      setItems((prev) => [...prev, ...results]);
+      setNextUrl(parseNextUrl(data.next || null));
+    } catch (e) {
+      console.error("Failed to load more products", e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [nextUrl, isLoadingMore]);
 
   useEffect(() => {
     fetchProducts();
@@ -297,7 +398,6 @@ export function useProducts() {
   }, [items]);
 
   const create = async (data: Partial<Product>) => {
-    // When saving back to DRF, we'd need to reverse-map, but we can just let DRF defaults figure it out or map if needed
     const payload = { ...data, hsn_code: data.hsn, gst_tax_rate: (data.gstRate || 0) / 100 };
     const res = await api.post<any>("products/", payload);
     setItems((prev) => [...prev, mapDjangoProduct(res.data)]);
@@ -318,7 +418,7 @@ export function useProducts() {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, refetch: fetchProducts };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchProducts };
 }
 
 export function useProduct(id: string | undefined) {
@@ -345,24 +445,117 @@ export function useProduct(id: string | undefined) {
   return { item, isLoading, refetch: fetchProduct };
 }
 
+export function useCustomer(id: string | undefined) {
+  const [item, setItem] = useState<Customer | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchCustomer = useCallback(async () => {
+    if (!id || !localStorage.getItem("gst_access_token")) return;
+    setIsLoading(true);
+    try {
+      const res = await api.get<any>(`customers/${id}/`);
+      setItem(res.data);
+    } catch (e) {
+      console.error("Failed to fetch customer", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchCustomer();
+  }, [fetchCustomer]);
+
+  return { item, isLoading, refetch: fetchCustomer };
+}
+
+export function useInvoice(id: string | undefined) {
+  const [item, setItem] = useState<Invoice | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchInvoice = useCallback(async () => {
+    if (!id || !localStorage.getItem("gst_access_token")) return;
+    setIsLoading(true);
+    try {
+      const res = await api.get<any>(`invoices/${id}/`);
+      setItem(mapDjangoInvoice(res.data));
+    } catch (e) {
+      console.error("Failed to fetch invoice", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchInvoice();
+  }, [fetchInvoice]);
+
+  return { item, isLoading, refetch: fetchInvoice };
+}
+
+export function useBusiness(id: string | undefined) {
+  const [item, setItem] = useState<Business | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchBusiness = useCallback(async () => {
+    if (!id || !localStorage.getItem("gst_access_token")) return;
+    setIsLoading(true);
+    try {
+      const res = await api.get<any>(`businesses/${id}/`);
+      setItem(res.data);
+    } catch (e) {
+      console.error("Failed to fetch business", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchBusiness();
+  }, [fetchBusiness]);
+
+  return { item, isLoading, refetch: fetchBusiness };
+}
+
 // Custom Hook for API-driven Businesses
 export function useBusinesses() {
   const [items, setItems] = useState<Business[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [nextUrl, setNextUrl] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
 
   const fetchBusinesses = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<Business[]>("businesses/");
-      const data = res.data as any;
-      setItems(data.results || data);
+      const res = await api.get<any>("businesses/");
+      const data = res.data;
+      const results = Array.isArray(data) ? data : (data.results || []);
+      setItems(results);
+      setNextUrl(parseNextUrl(data.next || null));
+      setTotalCount(data.count ?? results.length);
     } catch (e) {
       console.error("Failed to fetch", e);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!nextUrl || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const res = await api.get<any>(nextUrl);
+      const data = res.data;
+      setItems((prev) => [...prev, ...(data.results || [])]);
+      setNextUrl(parseNextUrl(data.next || null));
+    } catch (e) {
+      console.error("Failed to load more businesses", e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [nextUrl, isLoadingMore]);
 
   useEffect(() => {
     fetchBusinesses();
@@ -388,7 +581,7 @@ export function useBusinesses() {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, refetch: fetchBusinesses };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchBusinesses };
 }
 
 export function generateId(prefix: string = "") {

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { indianStates, formatCurrency } from "@/lib/mockData";
-import { useCustomers, useBusinesses, useInvoices, generateId } from "@/hooks/useDataStore";
+import { useCustomers, useCustomer, useBusinesses, useInvoices, generateId } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Save, X, AlertTriangle, UserPlus, Pencil, Phone, Mail, MapPin,
@@ -22,22 +22,37 @@ export default function CustomerForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { items: customers, create: createCustomer, update: updateCustomer, getById } = useCustomers();
+  const { items: customers, create: createCustomer, update: updateCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
   const { items: invoices } = useInvoices();
   const isEdit = !!id;
-  const existing = isEdit ? getById(id) : null;
+  const { item: existing, isLoading } = useCustomer(isEdit ? id : undefined);
 
   const [form, setForm] = useState({
-    name: existing?.name || "",
-    gst: existing?.gst_number || "",
-    pan: existing?.pan_number || "",
-    mobile: existing?.mobile_number || "",
-    email: existing?.email || "",
-    state: existing?.state_name || "",
-    address: existing?.address || "",
-    businesses: existing?.businesses || [] as string[],
+    name: "",
+    gst: "",
+    pan: "",
+    mobile: "",
+    email: "",
+    state: "",
+    address: "",
+    businesses: [] as string[],
   });
+
+  useEffect(() => {
+    if (isEdit && existing) {
+      setForm({
+        name: existing.name || "",
+        gst: existing.gst_number || "",
+        pan: existing.pan_number || "",
+        mobile: existing.mobile_number || "",
+        email: existing.email || "",
+        state: existing.state_name || "",
+        address: existing.address || "",
+        businesses: existing.businesses || [],
+      });
+    }
+  }, [existing, isEdit]);
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);

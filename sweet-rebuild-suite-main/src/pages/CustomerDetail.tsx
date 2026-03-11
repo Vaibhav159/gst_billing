@@ -7,7 +7,7 @@ import {
 import { motion } from "framer-motion";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
 import { formatCurrency, formatDate } from "@/lib/mockData";
-import { useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
+import { useCustomer, useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -28,11 +28,12 @@ export default function CustomerDetail() {
   const isMobile = useIsMobile();
   const [showDelete, setShowDelete] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const { items: customers, remove: removeCustomer } = useCustomers();
+  const { item: customer, isLoading } = useCustomer(id);
+  const { remove: removeCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
   const { items: invoices } = useInvoices();
 
-  const customer = customers.find((c) => c.id === id);
+  if (isLoading) return <div className="p-10 text-muted-foreground">Loading customer...</div>;
   if (!customer) return (
     <div className="p-10 flex flex-col items-center gap-4 text-muted-foreground">
       <p className="text-lg font-display font-semibold">Customer not found</p>
@@ -44,11 +45,11 @@ export default function CustomerDetail() {
   const totalSales = custInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
   const totalPurchases = custInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
   const netAmount = totalSales - totalPurchases;
-  const sortedInvoices = [...custInvoices].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const sortedInvoices = [...custInvoices].sort((a, b) => new Date(b.invoice_date || "").getTime() - new Date(a.invoice_date || "").getTime());
 
   const monthlyMap: Record<string, number> = {};
   custInvoices.filter((i) => i.type === "OUTWARD").forEach((inv) => {
-    const month = inv.date.slice(0, 7);
+    const month = (inv.invoice_date || "").slice(0, 7);
     monthlyMap[month] = (monthlyMap[month] || 0) + inv.total;
   });
   const trendData = Object.entries(monthlyMap).sort().map(([k, v]) => ({ month: k, value: v }));
@@ -84,7 +85,7 @@ export default function CustomerDetail() {
           <div className="flex-1 min-w-0">
             <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl lg:text-3xl")}>{customer.name}</h1>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              {customer.tags.map((t) => (
+              {(customer.tags || []).map((t) => (
                 <span key={t} className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider",
                   t === "VIP" ? "bg-chart-4/12 text-chart-4" : t === "Wholesale" ? "bg-chart-3/12 text-chart-3" : t === "Retail" ? "bg-success/12 text-success" : "bg-primary/10 text-primary"
                 )}><Tag className="w-2.5 h-2.5" />{t}</span>
@@ -195,7 +196,7 @@ export default function CustomerDetail() {
                   <Link key={inv.id} to={`/billing/invoice/${inv.id}`} className="flex items-center gap-3 p-4 hover:bg-secondary/20">
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
-                      <p className="text-[11px] text-muted-foreground">{formatDate(inv.date)} · {inv.businessName}</p>
+                      <p className="text-[11px] text-muted-foreground">{formatDate(inv.invoice_date || "")} · {inv.businessName}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
@@ -212,7 +213,7 @@ export default function CustomerDetail() {
                   {sortedInvoices.map((inv) => (
                     <tr key={inv.id}>
                       <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold text-[13px]">{inv.invoiceNumber}</Link></td>
-                      <td className="text-muted-foreground text-[13px]">{formatDate(inv.date)}</td>
+                      <td className="text-muted-foreground text-[13px]">{formatDate(inv.invoice_date || "")}</td>
                       <td className="text-foreground text-[13px]">{inv.businessName}</td>
                       <td className="font-bold text-foreground tabular-nums text-[13px]">{formatCurrency(inv.total)}</td>
                       <td className="text-muted-foreground text-[12px] tabular-nums">{formatCurrency(inv.totalTax)}</td>
