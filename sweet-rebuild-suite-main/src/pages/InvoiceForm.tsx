@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { formatCurrency } from "@/lib/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
+import api from "@/lib/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Plus, Trash2, Save, X, Info, AlertTriangle, Building2, User,
@@ -23,33 +24,106 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
-  const { items: invoices, create: createInvoice, update: updateInvoice, getById: getInvoiceById } = useInvoices();
+  const { create: createInvoice, update: updateInvoice } = useInvoices();
   const { items: businesses } = useBusinesses();
   const { items: allCustomers } = useCustomers();
   const { items: allProducts } = useProducts();
-  const existing = mode === "edit" && id ? getInvoiceById(id) : null;
 
   const [form, setForm] = useState({
-    businessId: existing?.businessId || "",
-    customerId: existing?.customerId || "",
-    invoiceNumber: existing?.invoiceNumber || "SGJ/2024-25/108",
-    date: existing?.date || new Date().toISOString().split("T")[0],
-    type: existing?.type || "OUTWARD",
-    isIGST: existing?.isIGST || false,
-    financialYear: existing?.financialYear || "2024-25",
+    businessId: "",
+    customerId: "",
+    invoiceNumber: "SGJ/2024-25/108",
+    date: new Date().toISOString().split("T")[0],
+    type: "OUTWARD",
+    isIGST: false,
+    financialYear: "2024-25",
   });
 
-  const [items, setItems] = useState(
-    existing?.items.map((it) => ({ productId: it.productId, qty: it.qty, rate: it.rate })) || [{ productId: "", qty: 1, rate: 0 }]
-  );
+  const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0 }]);
+  const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
+
+  // Fallback names from the invoice API for entities not in the loaded list
+  const [fallbackEntities, setFallbackEntities] = useState<{
+    customer?: { id: string; name: string };
+    business?: { id: string; name: string };
+    products: { id: string; name: string; hsn: string; gstRate: number }[];
+  }>({ products: [] });
+
+  // Fetch invoice by ID directly from API when editing
+  useEffect(() => {
+    if (mode !== "edit" || !id) return;
+    setIsLoadingInvoice(true);
+    api.get<any>(`invoices/${id}/`)
+      .then((res) => {
+        const inv = res.data;
+        setForm({
+          businessId: String(inv.business || ""),
+          customerId: String(inv.customer || ""),
+          invoiceNumber: inv.invoice_number || "",
+          date: inv.invoice_date || new Date().toISOString().split("T")[0],
+          type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
+          isIGST: inv.is_igst_applicable || false,
+          financialYear: inv.financial_year || "2024-25",
+        });
+
+        // Store fallback names for dropdown rendering
+        setFallbackEntities({
+          customer: inv.customer ? { id: String(inv.customer), name: inv.customer_name || `Customer #${inv.customer}` } : undefined,
+          business: inv.business ? { id: String(inv.business), name: inv.business_name || `Business #${inv.business}` } : undefined,
+          products: (inv.line_items || []).map((li: any) => ({
+            id: String(li.product || li.id || ""),
+            name: li.product_name || li.item_name || `Product #${li.product || li.id}`,
+            hsn: li.hsn_code || "",
+            gstRate: li.gst_tax_rate ? parseFloat(li.gst_tax_rate) * 100 : 0,
+          })),
+        });
+
+        const lineItems = (inv.line_items || []).map((li: any) => ({
+          productId: String(li.product || li.id || ""),
+          qty: parseFloat(li.quantity) || 1,
+          rate: parseFloat(li.rate) || 0,
+        }));
+        if (lineItems.length > 0) setItems(lineItems);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch invoice", err);
+        toast({ title: "Error", description: "Could not load invoice data.", variant: "destructive" });
+      })
+      .finally(() => setIsLoadingInvoice(false));
+  }, [id, mode]);
 
   const [dirty, setDirty] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [showQuickCustomer, setShowQuickCustomer] = useState(false);
   const [showQuickProduct, setShowQuickProduct] = useState(false);
-  const localCustomers = allCustomers;
-  const localProducts = allProducts;
+
+  // Merge fallback entities into the loaded lists so dropdowns always have the selected option
+  const localCustomers = (() => {
+    const list = [...allCustomers];
+    if (fallbackEntities.customer && !list.some(c => String(c.id) === fallbackEntities.customer!.id)) {
+      list.push({ id: fallbackEntities.customer.id, name: fallbackEntities.customer.name } as any);
+    }
+    return list;
+  })();
+
+  const localProducts = (() => {
+    const list = [...allProducts];
+    for (const fp of fallbackEntities.products) {
+      if (!list.some(p => String(p.id) === fp.id)) {
+        list.push({ id: fp.id, name: fp.name, hsn: fp.hsn, gstRate: fp.gstRate, description: "", createdAt: "" });
+      }
+    }
+    return list;
+  })();
+
+  const effectiveBusinesses = (() => {
+    const list = [...businesses];
+    if (fallbackEntities.business && !list.some(b => String(b.id) === fallbackEntities.business!.id)) {
+      list.push({ id: fallbackEntities.business.id, name: fallbackEntities.business.name } as any);
+    }
+    return list;
+  })();
 
   const safeNavigate = (to: string) => { if (dirty) { setPendingNav(to); setShowUnsavedModal(true); } else navigate(to); };
   const set = (field: string, val: any) => { setForm((p) => ({ ...p, [field]: val })); setDirty(true); };
@@ -75,7 +149,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const total = subtotal + totalTax;
 
   const selectedCustomer = localCustomers.find((c) => c.id === form.customerId);
-  const selectedBusiness = businesses.find((b) => b.id === form.businessId);
+  const selectedBusiness = effectiveBusinesses.find((b) => b.id === form.businessId);
   const isInterstate = selectedBusiness && selectedCustomer && selectedBusiness.state_name !== selectedCustomer.state_name;
 
   useEffect(() => {
@@ -103,7 +177,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
     setDirty(false);
 
-    const selectedBiz = businesses.find(b => b.id === form.businessId);
+    const selectedBiz = effectiveBusinesses.find(b => b.id === form.businessId);
     const selectedCust = localCustomers.find(c => c.id === form.customerId);
     const invoiceItems = items.map(it => {
       const product = localProducts.find(p => p.id === it.productId);
@@ -132,7 +206,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       const newInvoice = {
         id: newId,
         invoiceNumber: form.invoiceNumber,
-        date: form.date,
+        invoice_date: form.date,
         customerId: form.customerId,
         customerName: selectedCust?.name || "",
         businessId: form.businessId,
@@ -160,7 +234,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     } else {
       updateInvoice(id!, {
         invoiceNumber: form.invoiceNumber,
-        date: form.date,
+        invoice_date: form.date,
         customerId: form.customerId,
         customerName: selectedCust?.name || "",
         businessId: form.businessId,
@@ -195,6 +269,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         </div>
       </div>
 
+      {isLoadingInvoice ? (
+        <div className="flex flex-col items-center justify-center py-20 space-y-4">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading invoice details...</p>
+        </div>
+      ) : (
       <form onSubmit={handleSubmit}>
         <div className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
           <div className={cn(isMobile ? "" : "lg:col-span-2", "space-y-5")}>
@@ -209,7 +289,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1"><Building2 className="w-3 h-3 text-muted-foreground" /> Business<span className="text-destructive">*</span></label>
                   <select value={form.businessId} onChange={(e) => set("businessId", e.target.value)} className="premium-select w-full">
                     <option value="">Select Business</option>
-                    {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    {effectiveBusinesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
                   {selectedBusiness && <p className="text-[10px] text-muted-foreground font-mono">{selectedBusiness.gst_number}</p>}
                 </div>
@@ -373,6 +453,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           </div>
         )}
       </form>
+      )}
 
       <QuickCustomerModal open={showQuickCustomer} onClose={() => setShowQuickCustomer(false)}
         onCreated={(newCust) => { set("customerId", newCust.id); setShowQuickCustomer(false); }} />
