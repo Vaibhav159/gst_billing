@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { motion } from "framer-motion";
-import { stagger, fadeUp, scaleIn } from "@/lib/animations";
+import { stagger, fadeUp, scaleIn } from "@/utils/animations";
 
 const NotFound = () => {
   const location = useLocation();

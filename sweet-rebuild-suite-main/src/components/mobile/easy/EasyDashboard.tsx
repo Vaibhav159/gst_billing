@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
 import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt } from "lucide-react";
 import { motion } from "framer-motion";
-import { invoices, formatCurrency, formatDate } from "@/lib/mockData";
-import { shareInvoice } from "@/lib/shareInvoice";
-import { cn } from "@/lib/utils";
+import { invoices, formatCurrency, formatDate } from "@/utils/mockData";
+import { shareInvoice } from "@/utils/shareInvoice";
+import { cn } from "@/utils/utils";
 
 interface Props {
   selectedFY: string;

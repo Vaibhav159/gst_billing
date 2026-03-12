@@ -1,14 +1,14 @@
 import { useState, useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
-import { formatCurrency } from "@/lib/mockData";
+import { formatCurrency } from "@/utils/mockData";
 import { useInvoices, useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Download, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft, BarChart3, Receipt } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { motion } from "framer-motion";
-import { stagger, fadeUp } from "@/lib/animations";
+import { stagger, fadeUp } from "@/utils/animations";
 
 interface OutletCtx { selectedFY: string }
 const MONTHS = ["April","May","June","July","August","September","October","November","December","January","February","March"];

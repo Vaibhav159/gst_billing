@@ -6,7 +6,7 @@ import {
   Settings, History, Building2, Globe, Clock, AlertCircle
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";

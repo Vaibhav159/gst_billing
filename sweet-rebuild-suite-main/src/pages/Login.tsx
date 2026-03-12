@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Loader2, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { stagger, fadeUp, scaleIn } from "@/lib/animations";
+import { stagger, fadeUp, scaleIn } from "@/utils/animations";
 
 export default function LoginPage() {
   const navigate = useNavigate();

@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/lib/mockData";
+import { formatCurrency, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Download, FileArchive, ArrowLeft, Calendar, Building2, Filter,
   FileText, CheckSquare, Square, Printer, Package,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useInvoices, useBusinesses } from "@/hooks/useDataStore";
 

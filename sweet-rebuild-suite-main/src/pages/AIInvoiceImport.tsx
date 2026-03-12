@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { } from "@/lib/mockData";
+import { } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Upload, Bot, CheckCircle, ArrowRight, Image, Sparkles, Clock, Shield,
   FileText, ArrowLeft, Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 
 export default function AIInvoiceImport() {
   const [step, setStep] = useState<1 | 2 | 3>(1);

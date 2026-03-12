@@ -1,15 +1,15 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { formatCurrency } from "@/lib/mockData";
+import { formatCurrency } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
-import api from "@/lib/api";
+import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Plus, Trash2, Save, X, Info, AlertTriangle, Building2, User,
   FileText, Package, Calculator, CheckCircle2, IndianRupee, UserPlus,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import QuickCustomerModal from "@/components/QuickCustomerModal";
 import QuickProductModal from "@/components/QuickProductModal";

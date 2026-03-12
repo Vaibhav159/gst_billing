@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Wrench } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { financialYears } from "@/lib/mockData";
+import { cn } from "@/utils/utils";
+import { financialYears } from "@/utils/mockData";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { useAuth } from "@/contexts/AuthContext";
 

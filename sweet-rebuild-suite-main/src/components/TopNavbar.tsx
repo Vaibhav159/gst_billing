@@ -7,8 +7,8 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { cn } from "@/lib/utils";
-import { financialYears } from "@/lib/mockData";
+import { cn } from "@/utils/utils";
+import { financialYears } from "@/utils/mockData";
 
 const navItems = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },

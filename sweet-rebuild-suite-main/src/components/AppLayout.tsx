@@ -1,7 +1,7 @@
 import { useState } from "react";
 import TopNavbar from "./TopNavbar";
 import AnimatedOutlet from "./AnimatedOutlet";
-import { currentFY } from "@/lib/mockData";
+import { currentFY } from "@/utils/mockData";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileHeader from "./mobile/MobileHeader";
 import MobileBottomNav from "./mobile/MobileBottomNav";

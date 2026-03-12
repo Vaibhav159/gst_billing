@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { LucideIcon, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 
 interface EmptyStateProps {
   icon: LucideIcon;

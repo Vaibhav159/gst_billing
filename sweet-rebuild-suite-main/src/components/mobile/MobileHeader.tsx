@@ -3,8 +3,8 @@ import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Moon, Sun, Flame, Gem, TreePine } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { cn } from "@/lib/utils";
-import { financialYears } from "@/lib/mockData";
+import { cn } from "@/utils/utils";
+import { financialYears } from "@/utils/mockData";
 
 const themeOptions = [
   { id: "obsidian" as const, label: "Obsidian", icon: Moon },

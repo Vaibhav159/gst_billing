@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, FileText, Users, Package, Building2, BarChart3, Calculator, Settings, HardDrive, History, LayoutDashboard } from "lucide-react";
 import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
-import { formatCurrency } from "@/lib/mockData";
+import { formatCurrency } from "@/utils/mockData";
 import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
 
 const pages = [

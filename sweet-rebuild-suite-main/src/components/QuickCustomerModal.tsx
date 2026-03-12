@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, UserPlus, Phone, Mail, MapPin, Hash, CreditCard, Save } from "lucide-react";
-import { indianStates } from "@/lib/mockData";
+import { indianStates } from "@/utils/mockData";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useCustomers, generateId } from "@/hooks/useDataStore";
 
 interface QuickCustomerModalProps {

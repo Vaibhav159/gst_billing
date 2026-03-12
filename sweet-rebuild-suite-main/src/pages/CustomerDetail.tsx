@@ -6,10 +6,10 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
-import { formatCurrency, formatDate } from "@/lib/mockData";
+import { formatCurrency, formatDate } from "@/utils/mockData";
 import { useCustomer, useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useState } from "react";

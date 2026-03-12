@@ -1,14 +1,14 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/lib/mockData";
+import { formatCurrency, formatDate } from "@/utils/mockData";
 import { useInvoices, useCustomers, useProduct } from "@/hooks/useDataStore";
-import api from "@/lib/api";
+import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   ArrowLeft, Pencil, Trash2, Package, Hash, TrendingUp, BarChart3,
   Receipt, Eye, Printer, Copy, CheckCircle2, Users, ShoppingCart, Scale,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";

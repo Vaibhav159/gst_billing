@@ -6,15 +6,15 @@ import {
   GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal, Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { formatCurrency } from "@/lib/mockData";
+import { formatCurrency } from "@/utils/mockData";
 import { useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
-import { stagger, fadeUp } from "@/lib/animations";
+import { stagger, fadeUp } from "@/utils/animations";
 
 export default function CustomerList() {
   const { toast } = useToast();

@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/lib/mockData";
+import { formatCurrency, formatDate } from "@/utils/mockData";
 import { useBusiness, useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
@@ -8,7 +8,7 @@ import {
   Copy, CheckCircle2, Eye, Users, FileText, Landmark,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";

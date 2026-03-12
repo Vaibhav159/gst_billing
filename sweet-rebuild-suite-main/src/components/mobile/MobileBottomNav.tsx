@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { LayoutDashboard, Users, FileText, Package, MoreHorizontal } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useState } from "react";
 import MobileMoreDrawer from "./MobileMoreDrawer";
 

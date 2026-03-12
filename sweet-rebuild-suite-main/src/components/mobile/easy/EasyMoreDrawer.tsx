@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Settings, LogOut, X, Wrench, User } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { useAuth } from "@/contexts/AuthContext";
 

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import api from "@/lib/api";
+import api from "@/utils/api";
 import { jwtDecode } from "jwt-decode";
 import { useToast } from "@/hooks/use-toast";
 

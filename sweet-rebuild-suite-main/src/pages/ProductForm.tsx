@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 16 },

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles } from "lucide-react";
-import { financialYears } from "@/lib/mockData";
+import { financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { Switch } from "@/components/ui/switch";

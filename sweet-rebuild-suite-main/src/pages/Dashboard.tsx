@@ -11,10 +11,10 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatCurrency, formatDate } from "@/lib/mockData";
-import { stagger, fadeUp, fadeIn } from "@/lib/animations";
+import { formatCurrency, formatDate } from "@/utils/mockData";
+import { stagger, fadeUp, fadeIn } from "@/utils/animations";
 import { useInvoices, useBusinesses, useCustomers, useProducts } from "@/hooks/useDataStore";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import EasyDashboard from "@/components/mobile/easy/EasyDashboard";

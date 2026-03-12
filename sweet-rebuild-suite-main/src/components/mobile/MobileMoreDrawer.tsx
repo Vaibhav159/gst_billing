@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 const moreItems = [

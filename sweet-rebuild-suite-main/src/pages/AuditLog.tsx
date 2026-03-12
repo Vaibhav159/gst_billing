@@ -5,9 +5,9 @@ import {
   Settings, Plus, Pencil, Trash2, Printer, Download, Copy, Clock,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { auditLog, formatDate, type AuditAction, type AuditEntity } from "@/lib/mockData";
+import { auditLog, formatDate, type AuditAction, type AuditEntity } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const actionConfig: Record<AuditAction, { label: string; icon: typeof Plus; color: string; bg: string }> = {

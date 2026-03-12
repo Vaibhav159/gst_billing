@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { indianStates, formatCurrency } from "@/lib/mockData";
+import { indianStates, formatCurrency } from "@/utils/mockData";
 import { useCustomers, useCustomer, useBusinesses, useInvoices, generateId } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 16 },

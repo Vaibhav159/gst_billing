@@ -6,17 +6,17 @@ import {
   TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { financialYears, formatCurrency, formatDate } from "@/lib/mockData";
+import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
-import { shareInvoice } from "@/lib/shareInvoice";
+import { shareInvoice } from "@/utils/shareInvoice";
 
 interface OutletCtx { selectedFY: string }
 

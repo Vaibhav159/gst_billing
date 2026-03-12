@@ -1,12 +1,12 @@
 import { useParams } from "react-router-dom";
-import { formatCurrency, amountToWords, formatDate } from "@/lib/mockData";
+import { formatCurrency, amountToWords, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useInvoice } from "@/hooks/useDataStore";
 import { Printer, Download, Share2, ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useRef, useState } from "react";
-import { downloadInvoicePDF, sharePDFViaWebShare, sharePDFViaWhatsApp } from "@/lib/generatePDF";
+import { downloadInvoicePDF, sharePDFViaWebShare, sharePDFViaWhatsApp } from "@/utils/generatePDF";
 import { useToast } from "@/hooks/use-toast";
 
 export default function InvoicePrint() {

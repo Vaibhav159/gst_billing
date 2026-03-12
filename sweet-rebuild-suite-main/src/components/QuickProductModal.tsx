@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Package, Save, Hash, Percent, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useProducts, generateId } from "@/hooks/useDataStore";
 
 interface QuickProductModalProps {

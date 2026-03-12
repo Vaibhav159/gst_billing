@@ -3,9 +3,9 @@ import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Pac
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
 import { useBusinesses, useCustomers, useProducts, useInvoices } from "@/hooks/useDataStore";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { motion } from "framer-motion";
-import { stagger, fadeUp } from "@/lib/animations";
+import { stagger, fadeUp } from "@/utils/animations";
 
 export default function Backup() {
   const { toast } = useToast();

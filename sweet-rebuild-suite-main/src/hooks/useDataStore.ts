@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import api from "@/lib/api";
+import api from "@/utils/api";
 
-import { Invoice, Product } from "@/lib/mockData";
+import { Invoice, Product } from "@/utils/mockData";
 
 /**
  * Extracts relative URL from a DRF absolute `next` URL.

@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/lib/mockData";
+import { formatCurrency, formatDate } from "@/utils/mockData";
 import { useInvoice, useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
@@ -8,12 +8,12 @@ import {
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
   FileText, Share2, Download, MessageCircle,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { shareInvoice, shareViaWhatsApp } from "@/lib/shareInvoice";
+import { shareInvoice, shareViaWhatsApp } from "@/utils/shareInvoice";
 
 export default function InvoiceDetail() {
   const { id } = useParams<{ id: string }>();

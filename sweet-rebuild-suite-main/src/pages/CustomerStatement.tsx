@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { invoices, formatCurrency, formatDate } from "@/lib/mockData";
+import { invoices, formatCurrency, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useInvoices, useCustomers, useBusinesses } from "@/hooks/useDataStore";
 
