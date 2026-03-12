@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/utils/mockData";
-import { useInvoice, useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { useInvoice, useInvoices, useBusiness, useCustomer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
 import {
@@ -21,14 +21,13 @@ export default function InvoiceDetail() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const { item: inv, isLoading } = useInvoice(id);
-  const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined);
-  const { items: businesses } = useBusinesses();
-  const { items: customers } = useCustomers();
+  const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
+  const { item: biz } = useBusiness(inv?.businessId);
+  const { item: customer } = useCustomer(inv?.customerId);
 
   if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
-  const biz = businesses.find((b) => b.id === inv.businessId);
-  const customer = customers.find((c) => c.id === inv.customerId);
+
 
   const itemChartData = inv.items.map((item) => ({
     name: item.productName.length > 12 ? item.productName.slice(0, 12) + "…" : item.productName,

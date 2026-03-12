@@ -185,10 +185,10 @@ function mapDjangoInvoice(inv: any): Invoice {
     id: String(inv.id),
     invoiceNumber: inv.invoice_number || "",
     invoice_date: inv.invoice_date || "",
-    customerId: String(inv.customer || ""),
-    customerName: inv.customer_name || "",
-    businessId: String(inv.business || ""),
-    businessName: inv.business_name || "",
+    customerId: String(typeof inv.customer === 'object' ? inv.customer.id : (inv.customer || "")),
+    customerName: inv.customer_name || (typeof inv.customer === 'object' ? inv.customer.name : ""),
+    businessId: String(typeof inv.business === 'object' ? inv.business.id : (inv.business || "")),
+    businessName: inv.business_name || (typeof inv.business === 'object' ? inv.business.name : ""),
     type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
     isIGST: inv.is_igst_applicable || false,
     items,
@@ -257,7 +257,7 @@ function buildDateRange(fyFilter?: string, monthFilter?: string): { start_date?:
   };
 }
 
-export function useInvoices(filters?: InvoiceFilters) {
+export function useInvoices(filters?: InvoiceFilters, enabled = true) {
   const [items, setItems] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -268,7 +268,7 @@ export function useInvoices(filters?: InvoiceFilters) {
   const filterKey = JSON.stringify(filters || {});
 
   const fetchInvoices = useCallback(async () => {
-    if (!localStorage.getItem("gst_access_token")) return;
+    if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -302,7 +302,7 @@ export function useInvoices(filters?: InvoiceFilters) {
       setIsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey]);
+  }, [filterKey, enabled]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -363,7 +363,7 @@ export function useInvoices(filters?: InvoiceFilters) {
 }
 
 // Custom Hook for API-driven Customers
-export function useCustomers() {
+export function useCustomers(enabled = true) {
   const [items, setItems] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -371,7 +371,7 @@ export function useCustomers() {
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchCustomers = useCallback(async () => {
-    if (!localStorage.getItem("gst_access_token")) return;
+    if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
       const res = await api.get<any>("customers/");
@@ -385,7 +385,7 @@ export function useCustomers() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -429,7 +429,7 @@ export function useCustomers() {
   return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchCustomers };
 }
 
-export function useProducts() {
+export function useProducts(enabled = true) {
   const [items, setItems] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -437,7 +437,7 @@ export function useProducts() {
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchProducts = useCallback(async () => {
-    if (!localStorage.getItem("gst_access_token")) return;
+    if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
       const res = await api.get<any>("products/");
@@ -451,7 +451,7 @@ export function useProducts() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -598,7 +598,7 @@ export function useBusiness(id: string | undefined) {
 }
 
 // Custom Hook for API-driven Businesses
-export function useBusinesses() {
+export function useBusinesses(enabled = true) {
   const [items, setItems] = useState<Business[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -606,7 +606,7 @@ export function useBusinesses() {
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchBusinesses = useCallback(async () => {
-    if (!localStorage.getItem("gst_access_token")) return;
+    if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
       const res = await api.get<any>("businesses/");
@@ -620,7 +620,7 @@ export function useBusinesses() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;

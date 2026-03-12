@@ -24,10 +24,10 @@ const pages = [
 export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const { items: invoices } = useInvoices();
-  const { items: customers } = useCustomers();
-  const { items: products } = useProducts();
-  const { items: businesses } = useBusinesses();
+  const { items: invoices } = useInvoices(undefined, open);
+  const { items: customers } = useCustomers(open);
+  const { items: products } = useProducts(open);
+  const { items: businesses } = useBusinesses(open);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
