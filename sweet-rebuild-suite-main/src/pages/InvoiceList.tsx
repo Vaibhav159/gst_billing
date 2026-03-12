@@ -87,8 +87,8 @@ export default function InvoiceList() {
   };
 
   const stats = [
-    { label: "Sales", value: formatCurrency(totalOutward), sub: `${outwardCount} inv`, icon: TrendingUp, color: "text-chart-1" },
-    { label: "Purchases", value: formatCurrency(totalInward), sub: `${inwardCount} inv`, icon: TrendingDown, color: "text-destructive" },
+    { label: "Sales", value: formatCurrency(totalOutward), sub: `${outwardCount} inv`, icon: TrendingUp, color: "text-success" },
+    { label: "Purchases", value: formatCurrency(totalInward), sub: `${inwardCount} inv`, icon: TrendingDown, color: "text-warning" },
     { label: "Net Revenue", value: formatCurrency(totalOutward - totalInward), sub: "Sales-Purchases", icon: IndianRupee, color: "text-success" },
     { label: "Tax", value: formatCurrency(totalTaxCollected), sub: "GST total", icon: Receipt, color: "text-chart-3" },
   ];
@@ -147,7 +147,7 @@ export default function InvoiceList() {
                 </div>
                 <span className={cn(
                   "premium-badge text-[9px]",
-                  inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive"
+                  inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning"
                 )}>{inv.type}</span>
               </div>
               <div className="space-y-1.5 text-[12px]">
@@ -354,7 +354,7 @@ export default function InvoiceList() {
                   <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
                   <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
                   <td className="text-muted-foreground text-[12px]">{formatCurrency(inv.totalTax)}</td>
-                  <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span></td>
+                  <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                   <td>
                     <div className="flex items-center gap-0.5">
                       <Link to={`/billing/invoice/${inv.id}`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
@@ -384,7 +384,7 @@ export default function InvoiceList() {
                     <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(inv.invoice_date)}</p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span>
+                    <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span>
                     <button onClick={() => toggle(inv.id)} className="p-1 text-muted-foreground hover:text-primary">
                       {selected.has(inv.id) ? <CheckSquare className="w-3.5 h-3.5 text-primary" /> : <Square className="w-3.5 h-3.5" />}
                     </button>

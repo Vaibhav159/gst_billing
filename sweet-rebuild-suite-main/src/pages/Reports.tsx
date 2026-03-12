@@ -28,7 +28,7 @@ export default function Reports() {
   const filtered = useMemo(() => fyInvoices.filter((i) => {
     if (bizFilter !== "all" && i.businessId !== bizFilter) return false;
     if (typeFilter !== "all" && i.type !== typeFilter) return false;
-    if (i.date < startDate || i.date > endDate) return false;
+    if ((i.invoice_date || "") < startDate || (i.invoice_date || "") > endDate) return false;
     return true;
   }), [fyInvoices, bizFilter, typeFilter, startDate, endDate]);
 
@@ -45,7 +45,7 @@ export default function Reports() {
     const year = idx < 9 ? fyStart : fyStart + 1;
     const monthNum = idx < 9 ? idx + 4 : idx - 8;
     const prefix = `${year}-${String(monthNum).padStart(2, "0")}`;
-    const mInvs = filtered.filter((i) => i.date.startsWith(prefix));
+    const mInvs = filtered.filter((i) => (i.invoice_date || "").startsWith(prefix));
     return { month: m, sales: mInvs.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0) / 1000, purchases: mInvs.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0) / 1000 };
   });
 
@@ -64,16 +64,16 @@ export default function Reports() {
 
   const handleExportCSV = () => {
     const rows = [["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total"]];
-    filtered.forEach((i) => rows.push([i.invoiceNumber, i.date, i.customerName, i.businessName, i.type, i.subtotal.toString(), i.totalTax.toString(), i.total.toString()]));
+    filtered.forEach((i) => rows.push([i.invoiceNumber, i.invoice_date || "", i.customerName, i.businessName, i.type, i.subtotal.toString(), i.totalTax.toString(), i.total.toString()]));
     const csv = rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `report-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   const quickLinks = [
-    { label: "GST Summary", href: "/billing/gst-summary", desc: "GSTR-1 & 3B", icon: PieChart, color: "text-chart-1", bg: "bg-chart-1/10" },
-    { label: "Bulk PDF", href: "/billing/bulk-pdf", desc: "Download all PDFs", icon: FileText, color: "text-chart-2", bg: "bg-chart-2/10" },
-    { label: "Backup", href: "/billing/backup", desc: "Export full data", icon: Database, color: "text-chart-3", bg: "bg-chart-3/10" },
+    { label: "GST Summary", href: "/billing/gst-summary", desc: "GSTR-1 & 3B", icon: PieChart, color: "text-success", bg: "bg-success/10" },
+    { label: "Bulk PDF", href: "/billing/bulk-pdf", desc: "Download all PDFs", icon: FileText, color: "text-primary", bg: "bg-primary/10" },
+    { label: "Backup", href: "/billing/backup", desc: "Export full data", icon: Database, color: "text-warning", bg: "bg-warning/10" },
   ];
 
   return (
@@ -85,8 +85,8 @@ export default function Reports() {
         className="elevated-card rounded-2xl p-5">
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <div className={cn("rounded-2xl bg-gradient-to-br from-chart-3/20 to-chart-3/5 border border-chart-3/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
-              <BarChart3 className="w-5 h-5 text-chart-3" />
+            <div className={cn("rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
+              <BarChart3 className="w-5 h-5 text-primary" />
             </div>
             <div>
               <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl")}>Reports</h1>
@@ -141,10 +141,10 @@ export default function Reports() {
       <motion.div variants={stagger} initial="hidden" animate="visible"
         className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-5")}>
         {[
-          { label: "Sales", value: formatCurrency(totalSales), icon: ArrowUpRight, color: "text-chart-1" },
-          { label: "Purchases", value: formatCurrency(totalPurchases), icon: ArrowDownLeft, color: "text-chart-2" },
-          { label: "Tax Collected", value: formatCurrency(totalTaxCollected), icon: Receipt, color: "text-chart-3" },
-          { label: "ITC", value: formatCurrency(totalITC), icon: TrendingUp, color: "text-success" },
+          { label: "Sales", value: formatCurrency(totalSales), icon: ArrowUpRight, color: "text-success" },
+          { label: "Purchases", value: formatCurrency(totalPurchases), icon: ArrowDownLeft, color: "text-warning" },
+          { label: "Tax Collected", value: formatCurrency(totalTaxCollected), icon: Receipt, color: "text-success" },
+          { label: "ITC", value: formatCurrency(totalITC), icon: TrendingUp, color: "text-warning" },
           { label: "Net Tax", value: formatCurrency(netTax), icon: BarChart3, color: netTax >= 0 ? "text-destructive" : "text-success" },
         ].map((s) => (
           <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
@@ -165,8 +165,8 @@ export default function Reports() {
                 <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
-                <Bar dataKey="sales" name="Sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="sales" name="Sales" fill="hsl(var(--success))" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

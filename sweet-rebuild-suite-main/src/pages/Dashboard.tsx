@@ -115,7 +115,7 @@ export default function Dashboard() {
   const outwardCount = fyInvoices.filter((i) => i.type === "OUTWARD").length;
   const inwardCount = fyInvoices.filter((i) => i.type === "INWARD").length;
   const pieData = [{ name: "Outward", value: outwardCount }, { name: "Inward", value: inwardCount }];
-  const PIE_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))"];
+  const PIE_COLORS = ["hsl(var(--success))", "hsl(var(--warning))"];
   const recentInvoices = [...fyInvoices].sort((a, b) => new Date(b.invoice_date || 0).getTime() - new Date(a.invoice_date || 0).getTime()).slice(0, 5);
 
   const quickActions = [
@@ -140,8 +140,8 @@ export default function Dashboard() {
   );
 
   const statCards = [
-    { label: "Total Outward", value: formatCurrency(totalOutward), sub: `${outwardCount} invoices`, icon: TrendingUp, color: "text-chart-1", bgGlow: "from-chart-1/10 to-transparent", sparkType: "outward" as const, trend: trendPercent.outward },
-    { label: "Total Inward", value: formatCurrency(totalInward), sub: `${inwardCount} invoices`, icon: TrendingDown, color: "text-destructive", bgGlow: "from-destructive/10 to-transparent", sparkType: "inward" as const, trend: trendPercent.inward },
+    { label: "Total Outward", value: formatCurrency(totalOutward), sub: `${outwardCount} invoices`, icon: TrendingUp, color: "text-success", bgGlow: "from-success/10 to-transparent", sparkType: "outward" as const, trend: trendPercent.outward },
+    { label: "Total Inward", value: formatCurrency(totalInward), sub: `${inwardCount} invoices`, icon: TrendingDown, color: "text-warning", bgGlow: "from-warning/10 to-transparent", sparkType: "inward" as const, trend: trendPercent.inward },
     { label: "Net Amount", value: formatCurrency(netAmount), sub: "Outward − Inward", icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive", bgGlow: netAmount >= 0 ? "from-success/10 to-transparent" : "from-destructive/10 to-transparent", sparkType: "net" as const, trend: trendPercent.net },
     { label: "Total Invoices", value: totalCount.toString(), sub: `FY ${selectedFY}`, icon: FileText, color: "text-chart-4", bgGlow: "from-chart-4/10 to-transparent", sparkType: "outward" as const, trend: 0 },
   ];
@@ -226,8 +226,8 @@ export default function Dashboard() {
               <Tooltip cursor={{ fill: "hsl(var(--secondary) / 0.3)" }}
                 contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "11px" }}
                 formatter={(v: number, name: string) => [chartMode === "amount" ? formatCurrency(v) : v, name]} />
-              <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} name="Outward" />
-              <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Inward" />
+              <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--success))" radius={[4, 4, 0, 0]} name="Outward" />
+              <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} name="Inward" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -251,7 +251,7 @@ export default function Dashboard() {
                   </div>
                   <span className={cn(
                     "premium-badge text-[9px]",
-                    inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive"
+                    inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning"
                   )}>{inv.type}</span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -338,11 +338,11 @@ export default function Dashboard() {
                   <AreaChart data={sparkData} margin={{ top: 2, right: 2, bottom: 0, left: 2 }}>
                     <defs>
                       <linearGradient id={`spark-${card.label}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={`hsl(var(--${card.color === "text-chart-1" ? "chart-1" : card.color === "text-destructive" ? "destructive" : card.color === "text-success" ? "success" : "chart-4"}))`} stopOpacity={0.3} />
-                        <stop offset="100%" stopColor={`hsl(var(--${card.color === "text-chart-1" ? "chart-1" : card.color === "text-destructive" ? "destructive" : card.color === "text-success" ? "success" : "chart-4"}))`} stopOpacity={0} />
+                        <stop offset="0%" stopColor={`hsl(var(--${card.color.replace("text-", "")}))`} stopOpacity={0.3} />
+                        <stop offset="100%" stopColor={`hsl(var(--${card.color.replace("text-", "")}))`} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <Area type="monotone" dataKey="v" stroke={`hsl(var(--${card.color === "text-chart-1" ? "chart-1" : card.color === "text-destructive" ? "destructive" : card.color === "text-success" ? "success" : "chart-4"}))`}
+                    <Area type="monotone" dataKey="v" stroke={`hsl(var(--${card.color.replace("text-", "")}))`}
                       strokeWidth={1.5} fill={`url(#spark-${card.label})`} dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -372,9 +372,9 @@ export default function Dashboard() {
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Sales</p>
             <p className="text-xl font-display font-bold text-success"><AnimatedCounter value={formatCurrency(thisMonthData.outward)} /></p>
           </div>
-          <div className="text-center p-3 rounded-xl bg-destructive/5 border border-destructive/10">
+          <div className="text-center p-3 rounded-xl bg-warning/5 border border-warning/10">
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Purchases</p>
-            <p className="text-xl font-display font-bold text-destructive"><AnimatedCounter value={formatCurrency(thisMonthData.inward)} /></p>
+            <p className="text-xl font-display font-bold text-warning"><AnimatedCounter value={formatCurrency(thisMonthData.inward)} /></p>
           </div>
         </div>
       </motion.div>
@@ -405,8 +405,8 @@ export default function Dashboard() {
               <Tooltip cursor={{ fill: "hsl(var(--secondary) / 0.3)" }}
                 contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "12px", boxShadow: "0 8px 32px -4px rgba(0,0,0,0.3)" }}
                 formatter={(v: number, name: string) => [chartMode === "amount" ? formatCurrency(v) : v, name]} />
-              <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} name="Outward" />
-              <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} name="Inward" />
+              <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Outward" />
+              <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} name="Inward" />
             </BarChart>
           </ResponsiveContainer>
         </motion.div>
@@ -458,9 +458,9 @@ export default function Dashboard() {
               <div key={inv.id} className="flex gap-3 pb-4 relative">
                 {i < 5 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
                 <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5",
-                  inv.type === "OUTWARD" ? "bg-primary/15" : "bg-destructive/15"
+                  inv.type === "OUTWARD" ? "bg-success/15" : "bg-warning/15"
                 )}>
-                  <FileText className={cn("w-3 h-3", inv.type === "OUTWARD" ? "text-primary" : "text-destructive")} />
+                  <FileText className={cn("w-3 h-3", inv.type === "OUTWARD" ? "text-success" : "text-warning")} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
@@ -500,7 +500,7 @@ export default function Dashboard() {
                   <div className="w-full h-1.5 bg-secondary/40 rounded-full overflow-hidden">
                     <motion.div initial={{ width: 0 }} animate={{ width: `${(c.total / maxCustomerTotal) * 100}%` }}
                       transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}
-                      className="h-full bg-gradient-to-r from-chart-1/70 to-chart-1 rounded-full" />
+                      className="h-full bg-gradient-to-r from-success/70 to-success rounded-full" />
                   </div>
                 </div>
               </Link>
@@ -634,7 +634,7 @@ export default function Dashboard() {
                 <td>
                   <span className={cn(
                     "inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
-                    inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive"
+                    inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning"
                   )}>{inv.type}</span>
                 </td>
                 <td>

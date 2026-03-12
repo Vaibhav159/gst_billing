@@ -106,8 +106,8 @@ export default function CustomerDetail() {
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3">
         {[
-          { label: "Sales", value: formatCurrency(totalSales), icon: TrendingUp, color: "text-chart-1" },
-          { label: "Purchases", value: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-destructive" },
+          { label: "Sales", value: formatCurrency(totalSales), icon: TrendingUp, color: "text-success" },
+          { label: "Purchases", value: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-warning" },
           { label: "Net", value: formatCurrency(netAmount), icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive" },
           { label: "Invoices", value: custInvoices.length.toString(), icon: FileText, color: "text-chart-4" },
         ].map((stat) => {
@@ -200,7 +200,7 @@ export default function CustomerDetail() {
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
-                      <span className={cn("text-[10px] font-bold uppercase", inv.type === "OUTWARD" ? "text-primary" : "text-destructive")}>{inv.type}</span>
+                      <span className={cn("text-[10px] font-bold uppercase", inv.type === "OUTWARD" ? "text-success" : "text-warning")}>{inv.type}</span>
                     </div>
                   </Link>
                 ))}
@@ -217,7 +217,7 @@ export default function CustomerDetail() {
                       <td className="text-foreground text-[13px]">{inv.businessName}</td>
                       <td className="font-bold text-foreground tabular-nums text-[13px]">{formatCurrency(inv.total)}</td>
                       <td className="text-muted-foreground text-[12px] tabular-nums">{formatCurrency(inv.totalTax)}</td>
-                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span></td>
+                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                       <td><Link to={`/billing/invoice/${inv.id}`} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-secondary/40 text-muted-foreground"><Eye className="w-3.5 h-3.5" /></Link></td>
                     </tr>
                   ))}

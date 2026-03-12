@@ -89,7 +89,7 @@ export default function BusinessDetail() {
       <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-5")}>
         {[
           { label: "Outward", value: formatCurrency(totalOutward), color: "text-success" },
-          { label: "Inward", value: formatCurrency(totalInward), color: "text-destructive" },
+          { label: "Inward", value: formatCurrency(totalInward), color: "text-warning" },
           { label: "Net", value: formatCurrency(netAmount), color: netAmount >= 0 ? "text-success" : "text-destructive" },
           { label: "Invoices", value: bizInvoices.length.toString(), color: "text-chart-1" },
           { label: "Customers", value: bizCustomers.length.toString(), color: "text-chart-4" },
@@ -146,7 +146,7 @@ export default function BusinessDetail() {
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "12px", fontSize: "12px" }} formatter={(value: number) => [formatCurrency(value)]} />
                 <Area type="monotone" dataKey="outward" stroke="hsl(var(--success))" strokeWidth={2} fill="url(#bizOutGrad)" />
-                <Area type="monotone" dataKey="inward" stroke="hsl(var(--destructive))" strokeWidth={1.5} fill="transparent" />
+                <Area type="monotone" dataKey="inward" stroke="hsl(var(--warning))" strokeWidth={1.5} fill="transparent" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -180,7 +180,7 @@ export default function BusinessDetail() {
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
-                      <span className={cn("text-[10px] font-bold uppercase", inv.type === "OUTWARD" ? "text-primary" : "text-destructive")}>{inv.type}</span>
+                      <span className={cn("text-[10px] font-bold uppercase", inv.type === "OUTWARD" ? "text-success" : "text-warning")}>{inv.type}</span>
                     </div>
                   </Link>
                 ))}
@@ -195,7 +195,7 @@ export default function BusinessDetail() {
                       <td className="text-muted-foreground text-[13px]">{formatDate(inv.invoice_date || "")}</td>
                       <td className="text-foreground text-[13px]">{inv.customerName}</td>
                       <td className="font-bold text-foreground tabular-nums text-[13px]">{formatCurrency(inv.total)}</td>
-                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span></td>
+                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                       <td><Link to={`/billing/invoice/${inv.id}`} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-secondary/40 text-muted-foreground"><Eye className="w-3.5 h-3.5" /></Link></td>
                     </tr>
                   ))}

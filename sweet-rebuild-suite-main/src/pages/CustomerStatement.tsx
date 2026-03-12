@@ -25,7 +25,7 @@ export default function CustomerStatement() {
   if (!customer) return <div className="p-8 text-muted-foreground">Customer not found.</div>;
 
   const filtered = invoices.filter((inv) => {
-    const d = new Date(inv.date);
+    const d = new Date(inv.invoice_date || "");
     return inv.customerId === id && d >= new Date(startDate) && d <= new Date(endDate) && (bizFilter === "all" || inv.businessId === bizFilter);
   });
 
@@ -36,7 +36,7 @@ export default function CustomerStatement() {
   const netAmount = totalOutward - totalInward;
 
   let runningBalance = 0;
-  const sortedFiltered = [...filtered].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const sortedFiltered = [...filtered].sort((a, b) => new Date(a.invoice_date || "").getTime() - new Date(b.invoice_date || "").getTime());
 
   return (
     <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-20" : "p-6 lg:p-10 space-y-7")}>
@@ -72,8 +72,8 @@ export default function CustomerStatement() {
       <div className="grid grid-cols-2 gap-3">
         {[
           { label: "Invoices", value: filtered.length.toString(), color: "text-chart-1" },
-          { label: "Outward", value: formatCurrency(totalOutward), color: "text-primary" },
-          { label: "Inward", value: formatCurrency(totalInward), color: "text-destructive" },
+          { label: "Outward", value: formatCurrency(totalOutward), color: "text-success" },
+          { label: "Inward", value: formatCurrency(totalInward), color: "text-warning" },
           { label: "Net", value: formatCurrency(netAmount), color: netAmount >= 0 ? "text-success" : "text-destructive" },
         ].map((s) => (
           <div key={s.label} className="elevated-card rounded-2xl p-4">
@@ -96,11 +96,11 @@ export default function CustomerStatement() {
                 <Link key={inv.id} to={`/billing/invoice/${inv.id}`} className="flex items-center gap-3 p-4 hover:bg-secondary/20">
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
-                    <p className="text-[11px] text-muted-foreground">{formatDate(inv.date)}</p>
+                    <p className="text-[11px] text-muted-foreground">{formatDate(inv.invoice_date || "")}</p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
-                    <span className={cn("text-[10px] font-bold", inv.type === "OUTWARD" ? "text-primary" : "text-destructive")}>{inv.type}</span>
+                    <span className={cn("text-[10px] font-bold", inv.type === "OUTWARD" ? "text-success" : "text-warning")}>{inv.type}</span>
                   </div>
                 </Link>
               );
@@ -118,9 +118,9 @@ export default function CustomerStatement() {
                     <tr key={inv.id}>
                       <td className="text-muted-foreground text-[12px]">{idx + 1}</td>
                       <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold text-[13px]">{inv.invoiceNumber}</Link></td>
-                      <td className="text-muted-foreground text-[13px] tabular-nums">{formatDate(inv.date)}</td>
+                      <td className="text-muted-foreground text-[13px] tabular-nums">{formatDate(inv.invoice_date || "")}</td>
                       <td className="text-[13px]">{inv.businessName}</td>
-                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive")}>{inv.type}</span></td>
+                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/10 text-success" : "bg-warning/10 text-warning")}>{inv.type}</span></td>
                       <td className="tabular-nums text-[13px] font-semibold">{formatCurrency(inv.total)}</td>
                       <td className={cn("tabular-nums text-[13px] font-bold", rb >= 0 ? "text-success" : "text-destructive")}>{formatCurrency(Math.abs(rb))} <span className="text-[10px] font-normal text-muted-foreground">{rb >= 0 ? "Dr" : "Cr"}</span></td>
                     </tr>

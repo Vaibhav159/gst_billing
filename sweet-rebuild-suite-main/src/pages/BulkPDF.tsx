@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { invoices, formatCurrency, formatDate } from "@/lib/mockData";
+import { formatCurrency, formatDate } from "@/lib/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Download, FileArchive, ArrowLeft, Calendar, Building2, Filter,
@@ -9,6 +9,7 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useInvoices, useBusinesses } from "@/hooks/useDataStore";
 
 export default function BulkPDF() {
   const { toast } = useToast();
@@ -16,6 +17,8 @@ export default function BulkPDF() {
   const [year, setYear] = useState("2024");
   const [bizFilter, setBizFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const { items: invoices } = useInvoices();
+  const { items: businesses } = useBusinesses();
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
   const MONTHS = ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"];
 
@@ -23,7 +26,7 @@ export default function BulkPDF() {
   const monthIndex = MONTHS.indexOf(month);
   const actualMonth = monthIndex < 9 ? monthIndex + 4 : monthIndex - 8;
   const matchingInvoices = invoices.filter((inv) => {
-    const d = new Date(inv.date);
+    const d = new Date(inv.invoice_date || "");
     const monthMatch = d.getMonth() + 1 === actualMonth;
     const yearMatch = d.getFullYear().toString() === year;
     const bizMatch = bizFilter === "all" || inv.businessId === bizFilter;
@@ -173,10 +176,10 @@ export default function BulkPDF() {
                         </button>
                       </td>
                       <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold text-[13px]">{inv.invoiceNumber}</Link></td>
-                      <td className="text-muted-foreground text-[12px]">{formatDate(inv.date)}</td>
+                      <td className="text-muted-foreground text-[12px]">{formatDate(inv.invoice_date || "")}</td>
                       <td className="text-foreground text-[13px]">{inv.customerName}</td>
                       <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
-                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span></td>
+                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                     </motion.tr>
                   ))}
                 </tbody>

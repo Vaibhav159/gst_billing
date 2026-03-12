@@ -59,7 +59,7 @@ export default function InvoiceDetail() {
             <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>{inv.invoiceNumber}</h1>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" />{formatDate(inv.invoice_date || "")}</span>
-              <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/12 text-primary" : "bg-destructive/12 text-destructive")}>{inv.type}</span>
+              <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span>
               {inv.isIGST && <span className="premium-badge bg-warning/12 text-warning text-[10px]">IGST</span>}
             </div>
           </div>

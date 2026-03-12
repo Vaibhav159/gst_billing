@@ -189,7 +189,7 @@ function mapDjangoInvoice(inv: any): Invoice {
     customerName: inv.customer_name || "",
     businessId: String(inv.business || ""),
     businessName: inv.business_name || "",
-    type: inv.type_of_invoice || "OUTWARD",
+    type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
     isIGST: inv.is_igst_applicable || false,
     items,
     subtotal,
@@ -329,13 +329,28 @@ export function useInvoices(filters?: InvoiceFilters) {
   }, [items]);
 
   const create = async (data: Partial<Invoice>) => {
-    const res = await api.post<any>("invoices/", data);
+    const payload = { ...data };
+    if (payload.type) {
+      (payload as any).type_of_invoice = payload.type.toLowerCase();
+      delete payload.type;
+    }
+    // Map invoice_date if it exists
+    if (payload.invoice_date) {
+      (payload as any).invoice_date = payload.invoice_date;
+    }
+
+    const res = await api.post<any>("invoices/", payload);
     setItems((prev) => [...prev, mapDjangoInvoice(res.data)]);
     return res.data;
   };
 
   const update = async (id: string | number, updates: Partial<Invoice>) => {
-    const res = await api.patch<any>(`invoices/${id}/`, updates);
+    const payload = { ...updates };
+    if (payload.type) {
+      (payload as any).type_of_invoice = payload.type.toLowerCase();
+      delete payload.type;
+    }
+    const res = await api.patch<any>(`invoices/${id}/`, payload);
     setItems((prev) => prev.map((it) => (String(it.id) === String(id) ? mapDjangoInvoice(res.data) : it)));
   };
 

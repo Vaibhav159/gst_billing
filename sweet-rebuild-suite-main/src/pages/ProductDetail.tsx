@@ -198,7 +198,7 @@ export default function ProductDetail() {
                         <td><Link to={`/billing/customer/${inv.customerId}`} className="text-[13px] text-foreground hover:text-primary">{inv.customerName}</Link></td>
                         <td className="text-[13px] font-semibold tabular-nums">{qty}</td>
                         <td className="text-[13px] font-bold text-success tabular-nums">{formatCurrency(amount)}</td>
-                        <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive")}>{inv.type}</span></td>
+                        <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                         <td><Link to={`/billing/invoice/${inv.id}`} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-secondary/50 text-muted-foreground"><Eye className="w-3.5 h-3.5" /></Link></td>
                       </tr>
                     );

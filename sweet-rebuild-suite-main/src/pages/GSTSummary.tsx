@@ -31,7 +31,7 @@ export default function GSTSummary() {
   const prefix = !isAll ? `${year}-${String(monthNum).padStart(2, "0")}` : "";
 
   const filtered = useMemo(() => invoices.filter(
-    (inv) => (isAll || inv.date.startsWith(prefix)) && inv.financialYear === selectedFY && (bizFilter === "all" || inv.businessId === bizFilter)
+    (inv) => (isAll || (inv.invoice_date || "").startsWith(prefix)) && inv.financialYear === selectedFY && (bizFilter === "all" || inv.businessId === bizFilter)
   ), [prefix, isAll, selectedFY, bizFilter, invoices]);
 
   const outward = filtered.filter((i) => i.type === "OUTWARD");
@@ -55,7 +55,7 @@ export default function GSTSummary() {
     const y = idx < 9 ? fyStart : fyStart + 1;
     const mn = idx < 9 ? idx + 4 : idx - 8;
     const p = `${y}-${String(mn).padStart(2, "0")}`;
-    const mInvs = invoices.filter((i) => i.date.startsWith(p) && i.financialYear === selectedFY && (bizFilter === "all" || i.businessId === bizFilter));
+    const mInvs = invoices.filter((i) => (i.invoice_date || "").startsWith(p) && i.financialYear === selectedFY && (bizFilter === "all" || i.businessId === bizFilter));
     const out = mInvs.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.totalTax, 0);
     const inp = mInvs.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.totalTax, 0);
     return { month: m, output: out / 1000, itc: inp / 1000, isCurrent: m === SHORT[monthIdx] };
@@ -77,8 +77,8 @@ export default function GSTSummary() {
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
         className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className={cn("rounded-2xl bg-gradient-to-br from-chart-2/20 to-chart-2/5 border border-chart-2/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
-            <BarChart3 className="w-5 h-5 text-chart-2" />
+          <div className={cn("rounded-2xl bg-gradient-to-br from-success/20 to-success/5 border border-success/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
+            <BarChart3 className="w-5 h-5 text-success" />
           </div>
           <div>
             <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl")}>GST Summary</h1>
@@ -103,9 +103,9 @@ export default function GSTSummary() {
       {/* Stats */}
       <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3">
         {[
-          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-chart-1" },
-          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-chart-3" },
-          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-success" },
+          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-success" },
+          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-success" },
+          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-warning" },
           { label: "Net Tax", value: formatCurrency(Math.abs(netTax)), color: netTax >= 0 ? "text-destructive" : "text-success" },
         ].map((s) => (
           <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
@@ -125,10 +125,10 @@ export default function GSTSummary() {
               <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={35} />
               <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
-              <Bar dataKey="output" name="Output" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]}>
-                {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--chart-1))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
+              <Bar dataKey="output" name="Output" fill="hsl(var(--success))" radius={[4, 4, 0, 0]}>
+                {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--success))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
               </Bar>
-              <Bar dataKey="itc" name="ITC" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="itc" name="ITC" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -152,7 +152,7 @@ export default function GSTSummary() {
                 <motion.div key={r.rate} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
                   className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span>
+                    <span className="premium-badge bg-success/12 text-success">{r.rate}%</span>
                     <span className="text-[12px] text-muted-foreground">{r.count} inv</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[12px]">
@@ -169,7 +169,7 @@ export default function GSTSummary() {
               <tbody>
                 {gstr1Rows.map((r, i) => (
                   <motion.tr key={r.rate} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
-                    <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.count}</td>
+                    <td><span className="premium-badge bg-success/12 text-success">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.count}</td>
                   </motion.tr>
                 ))}
                 {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">No data</td></tr>}
@@ -181,8 +181,8 @@ export default function GSTSummary() {
             <motion.div variants={stagger} initial="hidden" animate="visible"
               className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3")}>
               {[
-                { label: "Outward taxable", value: formatCurrency(totalOutward), color: "text-chart-1" },
-                { label: "Eligible ITC", value: formatCurrency(totalITC), color: "text-success" },
+                { label: "Outward taxable", value: formatCurrency(totalOutward), color: "text-success" },
+                { label: "Eligible ITC", value: formatCurrency(totalITC), color: "text-warning" },
                 { label: "Payment of tax", value: formatCurrency(Math.max(netTax, 0)), color: "text-destructive" },
               ].map((item) => (
                 <motion.div key={item.label} variants={fadeUp} className="glass-surface rounded-xl p-4">
@@ -194,7 +194,7 @@ export default function GSTSummary() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               className="glass-surface rounded-xl p-4 flex items-center justify-between">
               <div><p className="text-[11px] text-muted-foreground">Net Tax</p><p className={cn("text-xl font-display font-bold mt-1", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</p></div>
-              <span className={cn("premium-badge", netTax >= 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success")}>{netTax >= 0 ? "Payable" : "Refundable"}</span>
+              <span className={cn("premium-badge", netTax >= 0 ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>{netTax >= 0 ? "Payable" : "Refundable"}</span>
             </motion.div>
           </div>
         )}
