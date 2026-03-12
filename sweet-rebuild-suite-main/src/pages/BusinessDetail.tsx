@@ -26,7 +26,7 @@ export default function BusinessDetail() {
   const { item: biz, isLoading } = useBusiness(id);
   const { remove: removeBusiness } = useBusinesses();
   const { items: customers } = useCustomers();
-  const { items: invoices } = useInvoices();
+  const { items: invoices, isLoading: isLoadingInvoices } = useInvoices({ businessId: id });
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 

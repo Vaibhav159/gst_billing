@@ -1,6 +1,6 @@
 import { useParams } from "react-router-dom";
 import { formatCurrency, amountToWords, formatDate } from "@/lib/mockData";
-import { useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { useInvoices, useBusinesses, useCustomers, useInvoice } from "@/hooks/useDataStore";
 import { Printer, Download, Share2, ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -15,14 +15,22 @@ export default function InvoicePrint() {
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [generating, setGenerating] = useState(false);
-  const { items: invoices } = useInvoices();
-  const { items: businesses } = useBusinesses();
-  const { items: customers } = useCustomers();
+  const { item: inv, isLoading: isLoadingInvoice } = useInvoice(id);
+  const { items: businesses, isLoading: isLoadingBusinesses } = useBusinesses();
+  const { items: customers, isLoading: isLoadingCustomers } = useCustomers();
 
-  const inv = invoices.find((i) => i.id === id);
+  if (isLoadingInvoice || isLoadingBusinesses || isLoadingCustomers) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-8 space-y-4">
+        <Loader2 className="w-10 h-10 animate-spin text-primary" />
+        <p className="text-sm font-medium text-muted-foreground animate-pulse">Preparing invoice for print...</p>
+      </div>
+    );
+  }
+
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
-  const biz = businesses.find((b) => b.id === inv.businessId);
-  const customer = customers.find((c) => c.id === inv.customerId);
+  const biz = businesses.find((b) => String(b.id) === String(inv.businessId));
+  const customer = customers.find((c) => String(c.id) === String(inv.customerId));
 
   const handleDownloadPDF = async () => {
     if (!printRef.current) return;
@@ -106,7 +114,7 @@ export default function InvoicePrint() {
               </div>
               <div className="mt-3 text-xs space-y-1" style={{ fontFamily: "'Helvetica Neue', sans-serif" }}>
                 <p><span className="font-semibold text-gray-500">Invoice No:</span> <span className="font-bold text-gray-900">{inv.invoiceNumber}</span></p>
-                <p><span className="font-semibold text-gray-500">Date:</span> <span className="font-medium">{formatDate(inv.date)}</span></p>
+                <p><span className="font-semibold text-gray-500">Date:</span> <span className="font-medium">{formatDate(inv.invoice_date)}</span></p>
               </div>
             </div>
           </div>

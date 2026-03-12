@@ -21,7 +21,7 @@ export default function InvoiceDetail() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const { item: inv, isLoading } = useInvoice(id);
-  const { items: invoices } = useInvoices();
+  const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined);
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
 

@@ -31,7 +31,7 @@ export default function CustomerDetail() {
   const { item: customer, isLoading } = useCustomer(id);
   const { remove: removeCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
-  const { items: invoices } = useInvoices();
+  const { items: invoices, isLoading: isLoadingInvoices } = useInvoices({ customerId: id });
 
   if (isLoading) return <div className="p-10 text-muted-foreground">Loading customer...</div>;
   if (!customer) return (
