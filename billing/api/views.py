@@ -86,10 +86,18 @@ class BusinessViewSet(viewsets.ModelViewSet):
 
         # Bulk fetch metrics to avoid N+1 subqueries
         # Total revenue (outward) and purchases (inward)
-        stats = (
-            Invoice.objects.filter(business_id__in=business_ids)
-            .values("business_id", "type_of_invoice")
-            .annotate(total=Sum("total_amount"), count=Count("id"))
+        invoices = Invoice.objects.filter(business_id__in=business_ids)
+
+        # Apply date filters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            invoices = invoices.filter(invoice_date__gte=start_date)
+        if end_date:
+            invoices = invoices.filter(invoice_date__lte=end_date)
+
+        stats = invoices.values("business_id", "type_of_invoice").annotate(
+            total=Sum("total_amount"), count=Count("id")
         )
 
         # Map stats for easy lookup
@@ -203,10 +211,18 @@ class CustomerViewSet(viewsets.ModelViewSet):
             return response
 
         # Bulk fetch metrics for all customers on the page
-        stats = (
-            Invoice.objects.filter(customer_id__in=customer_ids)
-            .values("customer_id", "type_of_invoice")
-            .annotate(total=Sum("total_amount"), count=Count("id"))
+        invoices = Invoice.objects.filter(customer_id__in=customer_ids)
+
+        # Apply date filters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            invoices = invoices.filter(invoice_date__gte=start_date)
+        if end_date:
+            invoices = invoices.filter(invoice_date__lte=end_date)
+
+        stats = invoices.values("customer_id", "type_of_invoice").annotate(
+            total=Sum("total_amount"), count=Count("id")
         )
 
         # Map stats for easy lookup
@@ -394,14 +410,20 @@ class ProductViewSet(viewsets.ModelViewSet):
             return response
 
         # Bulk fetch metrics from LineItem grouping by product_name
-        stats = (
-            LineItem.objects.filter(product_name__in=product_names)
-            .values("product_name", "invoice__type_of_invoice")
-            .annotate(
-                total_rev=Sum("amount"),
-                total_qty=Sum("quantity"),
-                total_usage=Count("id"),
-            )
+        line_items = LineItem.objects.filter(product_name__in=product_names)
+
+        # Apply date filters via the associated invoice
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            line_items = line_items.filter(invoice__invoice_date__gte=start_date)
+        if end_date:
+            line_items = line_items.filter(invoice__invoice_date__lte=end_date)
+
+        stats = line_items.values("product_name", "invoice__type_of_invoice").annotate(
+            total_rev=Sum("amount"),
+            total_qty=Sum("quantity"),
+            total_usage=Count("id"),
         )
 
         # Map stats for easy lookup

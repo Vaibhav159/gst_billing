@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Building2, Users, TrendingUp, Filter, ChevronDown, Phone, MapPin, Star,
@@ -20,9 +20,10 @@ export default function CustomerList() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore } = useCustomers();
-  const { items: businesses } = useBusinesses();
-  const { items: invoices } = useInvoices(undefined, false);
+  const { selectedFY } = useOutletContext<{ selectedFY: string }>();
+  const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore } = useCustomers(selectedFY);
+  const { items: businesses } = useBusinesses(selectedFY);
+  const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [bizFilter, setBizFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");

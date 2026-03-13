@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Package, TrendingUp, Hash, Filter, LayoutGrid, List,
@@ -19,8 +19,9 @@ import { stagger, fadeUp } from "@/utils/animations";
 export default function ProductList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore } = useProducts();
-  const { items: invoices } = useInvoices(undefined, false);
+  const { selectedFY } = useOutletContext<{ selectedFY: string }>();
+  const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore } = useProducts(selectedFY);
+  const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [gstFilter, setGstFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);

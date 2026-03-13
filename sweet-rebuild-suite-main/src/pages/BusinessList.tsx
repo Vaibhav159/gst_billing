@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Building2, TrendingUp, TrendingDown, MapPin, Phone, Mail,
@@ -23,9 +23,10 @@ const fadeUp = {
 export default function BusinessList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore } = useBusinesses();
-  const { items: customers } = useCustomers();
-  const { items: invoices } = useInvoices(undefined, false);
+  const { selectedFY } = useOutletContext<{ selectedFY: string }>();
+  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore } = useBusinesses(selectedFY);
+  const { items: customers } = useCustomers(selectedFY);
+  const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);

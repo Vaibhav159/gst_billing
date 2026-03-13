@@ -372,7 +372,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
 }
 
 // Custom Hook for API-driven Customers
-export function useCustomers(enabled = true) {
+export function useCustomers(fy?: string, enabled = true) {
   const [items, setItems] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -383,7 +383,14 @@ export function useCustomers(enabled = true) {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>("customers/");
+      const params = new URLSearchParams();
+      if (fy) {
+        const { start_date, end_date } = buildDateRange(fy);
+        if (start_date) params.set("start_date", start_date);
+        if (end_date) params.set("end_date", end_date);
+      }
+      const qs = params.toString();
+      const res = await api.get<any>(`customers/${qs ? `?${qs}` : ""}`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results);
@@ -394,7 +401,7 @@ export function useCustomers(enabled = true) {
     } finally {
       setIsLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, fy]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -438,7 +445,7 @@ export function useCustomers(enabled = true) {
   return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchCustomers };
 }
 
-export function useProducts(enabled = true) {
+export function useProducts(fy?: string, enabled = true) {
   const [items, setItems] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -449,7 +456,14 @@ export function useProducts(enabled = true) {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>("products/");
+      const params = new URLSearchParams();
+      if (fy) {
+        const { start_date, end_date } = buildDateRange(fy);
+        if (start_date) params.set("start_date", start_date);
+        if (end_date) params.set("end_date", end_date);
+      }
+      const qs = params.toString();
+      const res = await api.get<any>(`products/${qs ? `?${qs}` : ""}`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoProduct));
@@ -460,7 +474,7 @@ export function useProducts(enabled = true) {
     } finally {
       setIsLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, fy]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -606,8 +620,7 @@ export function useBusiness(id: string | undefined) {
   return { item, isLoading, refetch: fetchBusiness };
 }
 
-// Custom Hook for API-driven Businesses
-export function useBusinesses(enabled = true) {
+export function useBusinesses(fy?: string, enabled = true) {
   const [items, setItems] = useState<Business[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -618,7 +631,14 @@ export function useBusinesses(enabled = true) {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>("businesses/");
+      const params = new URLSearchParams();
+      if (fy) {
+        const { start_date, end_date } = buildDateRange(fy);
+        if (start_date) params.set("start_date", start_date);
+        if (end_date) params.set("end_date", end_date);
+      }
+      const qs = params.toString();
+      const res = await api.get<any>(`businesses/${qs ? `?${qs}` : ""}`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results);
@@ -629,7 +649,7 @@ export function useBusinesses(enabled = true) {
     } finally {
       setIsLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, fy]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
