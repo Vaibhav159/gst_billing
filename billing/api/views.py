@@ -4,8 +4,13 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, IntegerField, Q, Sum, Value
-from django.db.models.functions import Cast, Coalesce
+from django.db.models import (
+    Count,
+    IntegerField,
+    Q,
+    Sum,
+)
+from django.db.models.functions import Cast
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -72,18 +77,62 @@ class BusinessViewSet(viewsets.ModelViewSet):
 
     # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
-        # Optimize query with select_related if needed
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+
+        # Get business IDs from current page
+        business_ids = [item["id"] for item in response.data.get("results", [])]
+        if not business_ids:
+            return response
+
+        # Bulk fetch metrics to avoid N+1 subqueries
+        # Total revenue (outward) and purchases (inward)
+        stats = (
+            Invoice.objects.filter(business_id__in=business_ids)
+            .values("business_id", "type_of_invoice")
+            .annotate(total=Sum("total_amount"), count=Count("id"))
+        )
+
+        # Map stats for easy lookup
+        stats_map = {}
+        for s in stats:
+            bid = s["business_id"]
+            if bid not in stats_map:
+                stats_map[bid] = {
+                    "total_revenue": 0,
+                    "total_purchases": 0,
+                    "invoice_count": 0,
+                }
+
+            if s["type_of_invoice"] == INVOICE_TYPE_OUTWARD:
+                stats_map[bid]["total_revenue"] = float(s["total"] or 0)
+            else:
+                stats_map[bid]["total_purchases"] = float(s["total"] or 0)
+
+            stats_map[bid]["invoice_count"] += s["count"]
+
+        # Inject metrics into response
+        for item in response.data.get("results", []):
+            biz_stats = stats_map.get(item["id"], {})
+            item["total_revenue"] = biz_stats.get("total_revenue", 0)
+            item["total_purchases"] = biz_stats.get("total_purchases", 0)
+            item["invoice_count"] = biz_stats.get("invoice_count", 0)
+            # customer_count is already in get_queryset (simple join)
+
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        # Apply search filter manually for more control
+        # Filter by search term
         search_term = self.request.query_params.get("search", "")
         if search_term:
             queryset = queryset.filter(
                 Q(name__icontains=search_term) | Q(gst_number__icontains=search_term)
             )
+
+        # Only annotate customer_count here as it's a simple direct join and doesn't
+        # multiply rows based on invoices
+        queryset = queryset.annotate(customer_count=Count("customer", distinct=True))
 
         return queryset
 
@@ -146,7 +195,39 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
     # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+
+        # Get customer IDs from current page
+        customer_ids = [item["id"] for item in response.data.get("results", [])]
+        if not customer_ids:
+            return response
+
+        # Bulk fetch metrics for all customers on the page
+        stats = (
+            Invoice.objects.filter(customer_id__in=customer_ids)
+            .values("customer_id", "type_of_invoice")
+            .annotate(total=Sum("total_amount"), count=Count("id"))
+        )
+
+        # Map stats for easy lookup
+        stats_map = {}
+        for s in stats:
+            cid = s["customer_id"]
+            if cid not in stats_map:
+                stats_map[cid] = {"total_revenue": 0, "invoice_count": 0}
+
+            if s["type_of_invoice"] == INVOICE_TYPE_OUTWARD:
+                stats_map[cid]["total_revenue"] = float(s["total"] or 0)
+
+            stats_map[cid]["invoice_count"] += s["count"]
+
+        # Inject metrics into response
+        for item in response.data.get("results", []):
+            cust_stats = stats_map.get(item["id"], {})
+            item["total_revenue"] = cust_stats.get("total_revenue", 0)
+            item["invoice_count"] = cust_stats.get("invoice_count", 0)
+
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -164,19 +245,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
         business_id = self.request.query_params.get("business_id")
         if business_id:
             queryset = queryset.filter(businesses__id=business_id)
-
-        # Annotate with totals
-        queryset = queryset.annotate(
-            total_revenue=Coalesce(
-                Sum(
-                    "invoice__total_amount",
-                    filter=Q(invoice__type_of_invoice="outward"),
-                ),
-                Value(0),
-                output_field=DecimalField(),
-            ),
-            invoice_count=Count("invoice"),
-        )
 
         return queryset
 
@@ -318,7 +386,45 @@ class ProductViewSet(viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+
+        # Get product names from current page
+        product_names = [item["name"] for item in response.data.get("results", [])]
+        if not product_names:
+            return response
+
+        # Bulk fetch metrics from LineItem grouping by product_name
+        stats = (
+            LineItem.objects.filter(product_name__in=product_names)
+            .values("product_name", "invoice__type_of_invoice")
+            .annotate(
+                total_rev=Sum("amount"),
+                total_qty=Sum("quantity"),
+                total_usage=Count("id"),
+            )
+        )
+
+        # Map stats for easy lookup
+        stats_map = {}
+        for s in stats:
+            name = s["product_name"]
+            if name not in stats_map:
+                stats_map[name] = {"total_revenue": 0, "qty_sold": 0, "usage_count": 0}
+
+            if s["invoice__type_of_invoice"] == INVOICE_TYPE_OUTWARD:
+                stats_map[name]["total_revenue"] = float(s["total_rev"] or 0)
+                stats_map[name]["qty_sold"] = float(s["total_qty"] or 0)
+
+            stats_map[name]["usage_count"] += s["total_usage"]
+
+        # Inject metrics into response
+        for item in response.data.get("results", []):
+            prod_stats = stats_map.get(item["name"], {})
+            item["total_revenue"] = prod_stats.get("total_revenue", 0)
+            item["qty_sold"] = prod_stats.get("qty_sold", 0)
+            item["usage_count"] = prod_stats.get("usage_count", 0)
+
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()

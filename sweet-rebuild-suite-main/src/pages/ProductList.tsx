@@ -20,7 +20,7 @@ export default function ProductList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore } = useProducts();
-  const { items: invoices } = useInvoices();
+  const { items: invoices } = useInvoices(undefined, false);
   const [search, setSearch] = useState("");
   const [gstFilter, setGstFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -37,16 +37,13 @@ export default function ProductList() {
     return matchSearch && matchGST;
   });
 
-  const getProductRevenue = (pid: string) =>
-    invoices.reduce((sum, inv) => sum + inv.items.filter((it) => it.productId === pid).reduce((s, it) => s + it.amount, 0), 0);
-  const getProductUsageCount = (pid: string) =>
-    invoices.reduce((count, inv) => count + inv.items.filter((it) => it.productId === pid).length, 0);
-  const getProductQtySold = (pid: string) =>
-    invoices.reduce((qty, inv) => qty + inv.items.filter((it) => it.productId === pid).reduce((s, it) => s + it.qty, 0), 0);
+  const getProductRevenue = (p: any) => Number(p.total_revenue) || 0;
+  const getProductUsageCount = (p: any) => p.usage_count || 0;
+  const getProductQtySold = (p: any) => Number(p.qty_sold) || 0;
 
   const totalProducts = productTotalCount;
-  const totalRevenue = products.reduce((sum, p) => sum + getProductRevenue(p.id), 0);
-  const totalUsage = products.reduce((count, p) => count + getProductUsageCount(p.id), 0);
+  const totalRevenue = products.reduce((sum, p) => sum + getProductRevenue(p), 0);
+  const totalUsage = products.reduce((count, p) => count + getProductUsageCount(p), 0);
   const avgGSTRate = products.length > 0 ? (products.reduce((s, p) => s + p.gstRate, 0) / products.length).toFixed(1) : "0";
 
   const copyHSN = (hsn: string) => {
@@ -112,8 +109,8 @@ export default function ProductList() {
         {/* Cards */}
         <div className="space-y-3">
           {filtered.map((p) => {
-            const revenue = getProductRevenue(p.id);
-            const qtySold = getProductQtySold(p.id);
+            const revenue = getProductRevenue(p);
+            const qtySold = getProductQtySold(p);
             return (
               <Link key={p.id} to={`/billing/product/${p.id}`}
                 className="block elevated-card rounded-xl p-4 hover:border-chart-3/30 transition-all">
@@ -277,9 +274,9 @@ export default function ProductList() {
             </thead>
             <tbody>
               {filtered.map((p, i) => {
-                const revenue = getProductRevenue(p.id);
-                const usageCount = getProductUsageCount(p.id);
-                const qtySold = getProductQtySold(p.id);
+                const revenue = getProductRevenue(p);
+                const usageCount = getProductUsageCount(p);
+                const qtySold = getProductQtySold(p);
                 return (
                   <motion.tr key={p.id} variants={fadeUp}>
                     <td className="text-muted-foreground text-[13px] w-12">{i + 1}</td>
@@ -363,9 +360,9 @@ export default function ProductList() {
       {viewMode === "cards" && (
         <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((p) => {
-            const revenue = getProductRevenue(p.id);
-            const usageCount = getProductUsageCount(p.id);
-            const qtySold = getProductQtySold(p.id);
+            const revenue = getProductRevenue(p);
+            const usageCount = getProductUsageCount(p);
+            const qtySold = getProductQtySold(p);
             return (
               <motion.div key={p.id} variants={fadeUp}>
                 <Link to={`/billing/product/${p.id}`}

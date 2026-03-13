@@ -4,6 +4,15 @@ from billing.models import Business, Customer, Invoice, LineItem, Product
 
 
 class BusinessSerializer(serializers.ModelSerializer):
+    total_revenue = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    total_purchases = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    customer_count = serializers.IntegerField(read_only=True)
+    invoice_count = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Business
         fields = "__all__"
@@ -21,6 +30,12 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    total_revenue = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    qty_sold = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    usage_count = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Product
         fields = "__all__"

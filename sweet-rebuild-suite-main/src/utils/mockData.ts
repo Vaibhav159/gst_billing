@@ -41,6 +41,9 @@ export interface Product {
   gstRate: number;
   description: string;
   createdAt: string;
+  total_revenue?: number;
+  qty_sold?: number;
+  usage_count?: number;
 }
 
 export interface InvoiceItem {

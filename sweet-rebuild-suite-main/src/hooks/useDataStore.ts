@@ -57,6 +57,10 @@ export interface Business {
   email?: string | null;
   created_at?: string;
   updated_at?: string;
+  total_revenue?: number;
+  total_purchases?: number;
+  customer_count?: number;
+  invoice_count?: number;
 }
 
 export interface Customer {
@@ -214,6 +218,9 @@ function mapDjangoProduct(prod: any): Product {
     gstRate: Math.round(parseFloat(prod.gst_tax_rate) * 100) || 0,
     description: prod.description || "",
     createdAt: prod.created_at || "",
+    total_revenue: Number(prod.total_revenue) || 0,
+    qty_sold: Number(prod.qty_sold) || 0,
+    usage_count: Number(prod.usage_count) || 0,
   };
 }
 

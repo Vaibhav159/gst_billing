@@ -25,7 +25,7 @@ export default function BusinessList() {
   const isMobile = useIsMobile();
   const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore } = useBusinesses();
   const { items: customers } = useCustomers();
-  const { items: invoices } = useInvoices();
+  const { items: invoices } = useInvoices(undefined, false);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -42,22 +42,14 @@ export default function BusinessList() {
     return matchSearch && matchState;
   });
 
-  const totalRevenue = businesses.reduce((sum, b) => {
-    return sum + invoices.filter((inv) => inv.businessId === b.id && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  }, 0);
-  const totalPurchases = businesses.reduce((sum, b) => {
-    return sum + invoices.filter((inv) => inv.businessId === b.id && inv.type === "INWARD").reduce((s, i) => s + i.total, 0);
-  }, 0);
-  const totalCustomers = new Set(businesses.flatMap((b) => customers.filter((c) => (c.businesses || []).some((id: any) => String(id) === String(b.id))).map((c) => c.id))).size;
+  const totalRevenue = businesses.reduce((sum, b) => sum + (Number(b.total_revenue) || 0), 0);
+  const totalPurchases = businesses.reduce((sum, b) => sum + (Number(b.total_purchases) || 0), 0);
+  const totalCustomers = businesses.reduce((sum, b) => sum + (b.customer_count || 0), 0);
 
-  const getBizRevenue = (bizId: string) =>
-    invoices.filter((inv) => inv.businessId === bizId && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const getBizPurchases = (bizId: string) =>
-    invoices.filter((inv) => inv.businessId === bizId && inv.type === "INWARD").reduce((s, i) => s + i.total, 0);
-  const getBizInvoiceCount = (bizId: string) =>
-    invoices.filter((inv) => inv.businessId === bizId).length;
-  const getBizCustomerCount = (bizId: string) =>
-    customers.filter((c) => (c.businesses || []).some((id: any) => String(id) === String(bizId))).length;
+  const getBizRevenue = (b: any) => Number(b.total_revenue) || 0;
+  const getBizPurchases = (b: any) => Number(b.total_purchases) || 0;
+  const getBizInvoiceCount = (b: any) => b.invoice_count || 0;
+  const getBizCustomerCount = (b: any) => b.customer_count || 0;
 
   const copyGST = (gst: string) => {
     navigator.clipboard.writeText(gst);
@@ -149,10 +141,10 @@ export default function BusinessList() {
             </thead>
             <tbody>
               {filtered.map((b, i) => {
-                const revenue = getBizRevenue(b.id);
-                const purchases = getBizPurchases(b.id);
-                const invCount = getBizInvoiceCount(b.id);
-                const custCount = getBizCustomerCount(b.id);
+                const revenue = getBizRevenue(b);
+                const purchases = getBizPurchases(b);
+                const invCount = getBizInvoiceCount(b);
+                const custCount = getBizCustomerCount(b);
                 return (
                   <motion.tr key={b.id} variants={fadeUp}>
                     <td className="text-muted-foreground text-[13px] w-12">{i + 1}</td>
@@ -212,9 +204,9 @@ export default function BusinessList() {
       {effectiveViewMode === "cards" && (
         <motion.div variants={stagger} initial="hidden" animate="visible" className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4")}>
           {filtered.map((b) => {
-            const revenue = getBizRevenue(b.id);
-            const invCount = getBizInvoiceCount(b.id);
-            const custCount = getBizCustomerCount(b.id);
+            const revenue = getBizRevenue(b);
+            const invCount = getBizInvoiceCount(b);
+            const custCount = getBizCustomerCount(b);
             return (
               <motion.div key={b.id} variants={fadeUp}>
                 <Link to={`/billing/business/${b.id}`}
