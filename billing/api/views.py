@@ -10,7 +10,7 @@ from django.db.models import (
     Q,
     Sum,
 )
-from django.db.models.functions import Cast
+from django.db.models.functions import Cast, ExtractMonth, ExtractYear
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -745,6 +745,92 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         }
 
         return Response(distribution)
+
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        """Get consolidated dashboard stats"""
+        queryset = self.get_queryset()
+
+        # 1. Totals
+        inward_total = (
+            queryset.filter(type_of_invoice="inward").aggregate(Sum("total_amount"))[
+                "total_amount__sum"
+            ]
+            or 0
+        )
+        outward_total = (
+            queryset.filter(type_of_invoice="outward").aggregate(Sum("total_amount"))[
+                "total_amount__sum"
+            ]
+            or 0
+        )
+
+        # 2. Monthly totals
+        monthly_stats = (
+            queryset.annotate(
+                month=ExtractMonth("invoice_date"), year=ExtractYear("invoice_date")
+            )
+            .values("month", "year")
+            .annotate(
+                outward_total=Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                inward_total=Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                outward_count=Count("id", filter=Q(type_of_invoice="outward")),
+                inward_count=Count("id", filter=Q(type_of_invoice="inward")),
+            )
+            .order_by("year", "month")
+        )
+
+        # 3. Top Customers
+        top_customers = (
+            queryset.filter(type_of_invoice="outward")
+            .values("customer_id", "customer__name")
+            .annotate(total=Sum("total_amount"))
+            .order_by("-total")[:5]
+        )
+
+        # 4. Top Products
+        top_products = (
+            LineItem.objects.filter(
+                invoice__in=queryset, invoice__type_of_invoice="outward"
+            )
+            .values("product_name")
+            .annotate(total_rev=Sum("amount"), total_qty=Sum("quantity"))
+            .order_by("-total_rev")[:5]
+        )
+
+        # 5. Recent Invoices
+        recent_invoices = InvoiceSerializer(
+            queryset.order_by("-created_at")[:5], many=True
+        ).data
+
+        return Response(
+            {
+                "totals": {
+                    "inward": float(inward_total),
+                    "outward": float(outward_total),
+                    "net": float(outward_total - inward_total),
+                    "count": queryset.count(),
+                },
+                "monthly": list(monthly_stats),
+                "top_customers": [
+                    {
+                        "id": c["customer_id"],
+                        "name": c["customer__name"],
+                        "total": float(c["total"] or 0),
+                    }
+                    for c in top_customers
+                ],
+                "top_products": [
+                    {
+                        "name": p["product_name"],
+                        "total": float(p["total_rev"] or 0),
+                        "qty": float(p["total_qty"] or 0),
+                    }
+                    for p in top_products
+                ],
+                "recent_invoices": recent_invoices,
+            }
+        )
 
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):

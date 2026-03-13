@@ -13,7 +13,7 @@ import {
 import { motion } from "framer-motion";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 import { stagger, fadeUp, fadeIn } from "@/utils/animations";
-import { useInvoices, useBusinesses, useCustomers, useProducts } from "@/hooks/useDataStore";
+import { useDashboardStats, useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
@@ -22,22 +22,18 @@ import AnimatedCounter from "@/components/AnimatedCounter";
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
-function getMonthlyData(fy: string, businessId: string, allInvoices: any[]) {
+function getMonthlyDataFromStats(fy: string, monthlyRaw: any[]) {
   const fyStart = parseInt(fy.split("-")[0]);
   return MONTHS.map((month, i) => {
-    const year = i < 9 ? fyStart : fyStart + 1;
     const monthNum = i < 9 ? i + 4 : i - 8;
-    const prefix = `${year}-${String(monthNum).padStart(2, "0")}`;
-    const monthInvs = allInvoices.filter((inv: any) =>
-      (inv.invoice_date || "").startsWith(prefix) && inv.financialYear === fy &&
-      (businessId === "all" || inv.businessId === businessId)
-    );
+    const year = i < 9 ? fyStart : fyStart + 1;
+    const match = (monthlyRaw || []).find((m: any) => m.month === monthNum && m.year === year);
     return {
       month,
-      outward: monthInvs.filter((i: any) => i.type === "OUTWARD").reduce((s: number, i: any) => s + i.total, 0),
-      inward: monthInvs.filter((i: any) => i.type === "INWARD").reduce((s: number, i: any) => s + i.total, 0),
-      outwardCount: monthInvs.filter((i: any) => i.type === "OUTWARD").length,
-      inwardCount: monthInvs.filter((i: any) => i.type === "INWARD").length,
+      outward: match ? Number(match.outward_total) || 0 : 0,
+      inward: match ? Number(match.inward_total) || 0 : 0,
+      outwardCount: match ? Number(match.outward_count) || 0 : 0,
+      inwardCount: match ? Number(match.inward_count) || 0 : 0,
     };
   });
 }
@@ -57,16 +53,20 @@ export default function Dashboard() {
   const [selectedBusiness, setSelectedBusiness] = useState("all");
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
-  const { items: invoices } = useInvoices({ fyFilter: selectedFY, businessId: selectedBusiness });
+  const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(selectedFY, selectedBusiness);
   const { items: businesses } = useBusinesses();
-  const { items: customers } = useCustomers(selectedFY, selectedBusiness);
-  const { items: products } = useProducts(selectedFY, selectedBusiness);
 
-  const totalOutward = invoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const totalInward = invoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
-  const netAmount = totalOutward - totalInward;
-  const totalCount = invoices.length;
-  const monthlyData = getMonthlyData(selectedFY, selectedBusiness, invoices);
+  const totals = statsData?.totals || { inward: 0, outward: 0, net: 0, count: 0 };
+  const monthlyData = useMemo(() => getMonthlyDataFromStats(selectedFY, statsData?.monthly || []), [selectedFY, statsData?.monthly]);
+  const recentInvoices = useMemo(() => (statsData?.recent_invoices || []).map(mapDjangoInvoice), [statsData?.recent_invoices]);
+
+  const totalOutward = totals.outward;
+  const totalInward = totals.inward;
+  const netAmount = totals.net;
+  const totalCount = totals.count;
+
+  const outwardCount = useMemo(() => monthlyData.reduce((s, d) => s + d.outwardCount, 0), [monthlyData]);
+  const inwardCount = useMemo(() => monthlyData.reduce((s, d) => s + d.inwardCount, 0), [monthlyData]);
 
   // Trend calculation: compare last 2 months with data
   const trendPercent = useMemo(() => {
@@ -85,39 +85,34 @@ export default function Dashboard() {
   // This month at a glance
   const thisMonthData = useMemo(() => {
     const now = new Date();
-    const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const thisMonthInvs = invoices.filter(inv => (inv.invoice_date || "").startsWith(prefix));
+    const m = now.getMonth() + 1;
+    const y = now.getFullYear();
+    const match = (statsData?.monthly || []).find((d: any) => d.month === m && d.year === y);
     return {
-      count: thisMonthInvs.length,
-      outward: thisMonthInvs.filter(i => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0),
-      inward: thisMonthInvs.filter(i => i.type === "INWARD").reduce((s, i) => s + i.total, 0),
+      count: match ? (Number(match.outward_count) || 0) + (Number(match.inward_count) || 0) : 0,
+      outward: match ? Number(match.outward_total) || 0 : 0,
+      inward: match ? Number(match.inward_total) || 0 : 0,
       monthName: now.toLocaleString("en", { month: "long", year: "numeric" }),
     };
-  }, [invoices]);
+  }, [statsData?.monthly]);
 
-  const customerTotals = customers
-    .map((c) => ({
-      ...c,
-      total: Number(c.total_revenue) || 0,
-    }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 5);
+  const customerTotals = (statsData?.top_customers || []).map(c => ({
+    id: String(c.id),
+    name: c.name,
+    total: Number(c.total)
+  })).slice(0, 5);
   const maxCustomerTotal = customerTotals[0]?.total || 1;
 
-  const productTotals = products
-    .map((p) => ({
-      ...p,
-      totalAmt: Number(p.total_revenue) || 0,
-      totalQty: Number(p.qty_sold) || 0,
-    }))
-    .sort((a, b) => b.totalAmt - a.totalAmt)
-    .slice(0, 5);
+  const productTotals = (statsData?.top_products || []).map((p, i) => ({
+    id: `p-${i}`,
+    name: p.name,
+    totalAmt: Number(p.total),
+    totalQty: Number(p.qty),
+    hsn: "" // Backend doesn't return HSN in stats, but we can omit or add it
+  })).slice(0, 5);
 
-  const outwardCount = invoices.filter((i) => i.type === "OUTWARD").length;
-  const inwardCount = invoices.filter((i) => i.type === "INWARD").length;
-  const pieData = [{ name: "Outward", value: outwardCount }, { name: "Inward", value: inwardCount }];
+  const pieData = [{ name: "Outward", value: totals.outward }, { name: "Inward", value: totals.inward }];
   const PIE_COLORS = ["hsl(var(--success))", "hsl(var(--warning))"];
-  const recentInvoices = [...invoices].sort((a, b) => new Date(b.invoice_date || 0).getTime() - new Date(a.invoice_date || 0).getTime()).slice(0, 5);
 
   const quickActions = [
     { label: "Add Customer", href: "/billing/customer/new", icon: Users, desc: "New customer record" },
@@ -146,6 +141,15 @@ export default function Dashboard() {
     { label: "Net Amount", value: formatCurrency(netAmount), sub: "Outward − Inward", icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive", bgGlow: netAmount >= 0 ? "from-success/10 to-transparent" : "from-destructive/10 to-transparent", sparkType: "net" as const, trend: trendPercent.net },
     { label: "Total Invoices", value: totalCount.toString(), sub: `FY ${selectedFY}`, icon: FileText, color: "text-chart-4", bgGlow: "from-chart-4/10 to-transparent", sparkType: "outward" as const, trend: 0 },
   ];
+
+  if (isStatsLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+        <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading dashboard stats...</p>
+      </div>
+    );
+  }
 
   // ─── MOBILE DASHBOARD ───
   if (isMobile && mobileMode === "easy") {
@@ -455,7 +459,7 @@ export default function Dashboard() {
             <Clock className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-0">
-            {[...invoices].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6).map((inv, i) => (
+            {recentInvoices.map((inv, i) => (
               <div key={inv.id} className="flex gap-3 pb-4 relative">
                 {i < 5 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
                 <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5",

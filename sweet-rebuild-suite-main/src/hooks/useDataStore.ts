@@ -80,6 +80,27 @@ export interface Customer {
   invoice_count?: number;
 }
 
+export interface DashboardStats {
+  totals: {
+    inward: number;
+    outward: number;
+    net: number;
+    count: number;
+  };
+  monthly: any[];
+  top_customers: {
+    id: string;
+    name: string;
+    total: number;
+  }[];
+  top_products: {
+    name: string;
+    total: number;
+    qty: number;
+  }[];
+  recent_invoices: any[];
+}
+
 const STORE_KEYS = {
   invoices: "gst_data_invoices",
   products: "gst_data_products",
@@ -167,7 +188,7 @@ function getFinancialYear(date: string) {
   return `${y}-${(y + 1).toString().slice(-2)}`;
 }
 
-function mapDjangoInvoice(inv: any): Invoice {
+export function mapDjangoInvoice(inv: any): Invoice {
   const items = (inv.line_items || []).map((item: any) => ({
     productId: String(item.product || item.id || ""),
     productName: item.product_name || item.item_name || "",
@@ -210,7 +231,7 @@ function mapDjangoInvoice(inv: any): Invoice {
   };
 }
 
-function mapDjangoProduct(prod: any): Product {
+export function mapDjangoProduct(prod: any): Product {
   return {
     id: String(prod.id),
     name: prod.name || "",
@@ -599,6 +620,40 @@ export function useInvoice(id: string | undefined) {
   }, [fetchInvoice]);
 
   return { item, isLoading, refetch: fetchInvoice };
+}
+
+export function useDashboardStats(fy?: string, businessId?: string, enabled = true) {
+  const [data, setData] = useState<DashboardStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchStats = useCallback(async () => {
+    if (!enabled || !localStorage.getItem("gst_access_token")) return;
+    setIsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (fy && fy !== "all") {
+        const { start_date, end_date } = buildDateRange(fy);
+        if (start_date) params.set("start_date", start_date);
+        if (end_date) params.set("end_date", end_date);
+      }
+      if (businessId && businessId !== "all") {
+        params.set("business_id", businessId);
+      }
+      const qs = params.toString();
+      const res = await api.get<DashboardStats>(`invoices/stats/${qs ? `?${qs}` : ""}`);
+      setData(res.data);
+    } catch (e) {
+      console.error("Failed to fetch dashboard stats", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [enabled, fy, businessId]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  return { data, isLoading, refetch: fetchStats };
 }
 
 export function useBusiness(id: string | undefined) {
