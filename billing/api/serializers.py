@@ -10,6 +10,11 @@ class BusinessSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
+    total_revenue = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    invoice_count = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Customer
         fields = "__all__"

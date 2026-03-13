@@ -22,7 +22,7 @@ export default function CustomerList() {
   const isMobile = useIsMobile();
   const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore } = useCustomers();
   const { items: businesses } = useBusinesses();
-  const { items: invoices } = useInvoices();
+  const { items: invoices } = useInvoices(undefined, false);
   const [search, setSearch] = useState("");
   const [bizFilter, setBizFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
@@ -48,16 +48,12 @@ export default function CustomerList() {
   // Stats
   const totalCustomers = totalCount;
   const vipCustomers = customers.filter((c) => (c as any).tags?.includes("VIP")).length;
-  const totalRevenue = customers.reduce((sum, c) => {
-    return sum + invoices.filter((inv) => inv.customerId === c.id && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  }, 0);
+  const totalRevenue = customers.reduce((sum, c) => sum + (Number(c.total_revenue) || 0), 0);
   const statesCount = new Set(customers.map((c) => c.state_name)).size;
 
-  // Get customer revenue for table
-  const getCustomerRevenue = (customerId: string) =>
-    invoices.filter((inv) => inv.customerId === customerId && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const getCustomerInvoiceCount = (customerId: string) =>
-    invoices.filter((inv) => inv.customerId === customerId).length;
+  // Get customer revenue from backend-provided metrics
+  const getCustomerRevenue = (c: any) => Number(c.total_revenue) || 0;
+  const getCustomerInvoiceCount = (c: any) => c.invoice_count || 0;
 
   // ─── MOBILE VIEW ───
   if (isMobile) {
@@ -101,8 +97,8 @@ export default function CustomerList() {
         {/* Customer Cards */}
         <div className="space-y-2.5">
           {filtered.map((c) => {
-            const revenue = getCustomerRevenue(c.id);
-            const invCount = getCustomerInvoiceCount(c.id);
+            const revenue = getCustomerRevenue(c);
+            const invCount = getCustomerInvoiceCount(c);
             return (
               <Link key={c.id} to={`/billing/customer/${c.id}`}
                 className="block elevated-card rounded-xl p-4 hover:border-primary/30 transition-all">
@@ -291,8 +287,8 @@ export default function CustomerList() {
             </thead>
             <tbody>
               {filtered.map((c, i) => {
-                const revenue = getCustomerRevenue(c.id);
-                const invCount = getCustomerInvoiceCount(c.id);
+                const revenue = getCustomerRevenue(c);
+                const invCount = getCustomerInvoiceCount(c);
                 return (
                   <motion.tr key={c.id} variants={fadeUp}>
                     <td className="text-muted-foreground text-[13px] w-12">{i + 1}</td>
@@ -376,8 +372,8 @@ export default function CustomerList() {
       {viewMode === "cards" && (
         <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((c) => {
-            const revenue = getCustomerRevenue(c.id);
-            const invCount = getCustomerInvoiceCount(c.id);
+            const revenue = getCustomerRevenue(c);
+            const invCount = getCustomerInvoiceCount(c);
             return (
               <motion.div key={c.id} variants={fadeUp}>
                 <Link to={`/billing/customer/${c.id}`}
@@ -533,8 +529,8 @@ export default function CustomerList() {
                   {mergeFiltered.map((c) => {
                     const isSource = mergeSource === c.id;
                     const isTarget = mergeTarget === c.id;
-                    const invCount = invoices.filter((inv) => inv.customerId === c.id).length;
-                    const revenue = getCustomerRevenue(c.id);
+                    const invCount = getCustomerInvoiceCount(c);
+                    const revenue = getCustomerRevenue(c);
                     return (
                       <button key={c.id} type="button"
                         onClick={() => handleMergeSelect(c.id)}

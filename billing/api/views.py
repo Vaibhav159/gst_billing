@@ -4,8 +4,8 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db.models import IntegerField, Q, Sum
-from django.db.models.functions import Cast
+from django.db.models import Count, DecimalField, IntegerField, Q, Sum, Value
+from django.db.models.functions import Cast, Coalesce
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -164,6 +164,19 @@ class CustomerViewSet(viewsets.ModelViewSet):
         business_id = self.request.query_params.get("business_id")
         if business_id:
             queryset = queryset.filter(businesses__id=business_id)
+
+        # Annotate with totals
+        queryset = queryset.annotate(
+            total_revenue=Coalesce(
+                Sum(
+                    "invoice__total_amount",
+                    filter=Q(invoice__type_of_invoice="outward"),
+                ),
+                Value(0),
+                output_field=DecimalField(),
+            ),
+            invoice_count=Count("invoice"),
+        )
 
         return queryset
 

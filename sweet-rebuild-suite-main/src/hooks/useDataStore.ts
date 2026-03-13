@@ -72,6 +72,8 @@ export interface Customer {
   updated_at?: string;
   businesses?: string[]; // array of business IDs string or int
   tags?: string[];
+  total_revenue?: number;
+  invoice_count?: number;
 }
 
 const STORE_KEYS = {
