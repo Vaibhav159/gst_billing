@@ -57,18 +57,15 @@ export default function Dashboard() {
   const [selectedBusiness, setSelectedBusiness] = useState("all");
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
-  const { items: invoices } = useInvoices();
+  const { items: invoices } = useInvoices({ fyFilter: selectedFY, businessId: selectedBusiness });
   const { items: businesses } = useBusinesses();
-  const { items: customers } = useCustomers();
-  const { items: products } = useProducts();
+  const { items: customers } = useCustomers(selectedFY, selectedBusiness);
+  const { items: products } = useProducts(selectedFY, selectedBusiness);
 
-  const fyInvoices = invoices.filter(
-    (inv) => inv.financialYear === selectedFY && (selectedBusiness === "all" || inv.businessId === selectedBusiness)
-  );
-  const totalOutward = fyInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const totalInward = fyInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
+  const totalOutward = invoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
+  const totalInward = invoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
   const netAmount = totalOutward - totalInward;
-  const totalCount = fyInvoices.length;
+  const totalCount = invoices.length;
   const monthlyData = getMonthlyData(selectedFY, selectedBusiness, invoices);
 
   // Trend calculation: compare last 2 months with data
@@ -89,34 +86,38 @@ export default function Dashboard() {
   const thisMonthData = useMemo(() => {
     const now = new Date();
     const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const thisMonthInvs = fyInvoices.filter(inv => (inv.invoice_date || "").startsWith(prefix));
+    const thisMonthInvs = invoices.filter(inv => (inv.invoice_date || "").startsWith(prefix));
     return {
       count: thisMonthInvs.length,
       outward: thisMonthInvs.filter(i => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0),
       inward: thisMonthInvs.filter(i => i.type === "INWARD").reduce((s, i) => s + i.total, 0),
       monthName: now.toLocaleString("en", { month: "long", year: "numeric" }),
     };
-  }, [fyInvoices]);
+  }, [invoices]);
 
-  const customerTotals = customers.map((c) => ({
-    ...c,
-    total: invoices.filter((i) => i.customerId === c.id && i.type === "OUTWARD").reduce((s, i) => s + i.total, 0),
-  })).sort((a, b) => b.total - a.total).slice(0, 5);
+  const customerTotals = customers
+    .map((c) => ({
+      ...c,
+      total: Number(c.total_revenue) || 0,
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
   const maxCustomerTotal = customerTotals[0]?.total || 1;
 
-  const productTotals = products.map((p) => {
-    let totalAmt = 0, totalQty = 0;
-    fyInvoices.forEach((inv) => {
-      inv.items.filter((it) => it.productId === p.id).forEach((it) => { totalAmt += it.amount; totalQty += it.qty; });
-    });
-    return { ...p, totalAmt, totalQty };
-  }).sort((a, b) => b.totalAmt - a.totalAmt).slice(0, 5);
+  const productTotals = products
+    .map((p) => ({
+      ...p,
+      totalAmt: Number(p.total_revenue) || 0,
+      totalQty: Number(p.qty_sold) || 0,
+    }))
+    .sort((a, b) => b.totalAmt - a.totalAmt)
+    .slice(0, 5);
 
-  const outwardCount = fyInvoices.filter((i) => i.type === "OUTWARD").length;
-  const inwardCount = fyInvoices.filter((i) => i.type === "INWARD").length;
+  const outwardCount = invoices.filter((i) => i.type === "OUTWARD").length;
+  const inwardCount = invoices.filter((i) => i.type === "INWARD").length;
   const pieData = [{ name: "Outward", value: outwardCount }, { name: "Inward", value: inwardCount }];
   const PIE_COLORS = ["hsl(var(--success))", "hsl(var(--warning))"];
-  const recentInvoices = [...fyInvoices].sort((a, b) => new Date(b.invoice_date || 0).getTime() - new Date(a.invoice_date || 0).getTime()).slice(0, 5);
+  const recentInvoices = [...invoices].sort((a, b) => new Date(b.invoice_date || 0).getTime() - new Date(a.invoice_date || 0).getTime()).slice(0, 5);
 
   const quickActions = [
     { label: "Add Customer", href: "/billing/customer/new", icon: Users, desc: "New customer record" },
@@ -454,7 +455,7 @@ export default function Dashboard() {
             <Clock className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-0">
-            {[...fyInvoices].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6).map((inv, i) => (
+            {[...invoices].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 6).map((inv, i) => (
               <div key={inv.id} className="flex gap-3 pb-4 relative">
                 {i < 5 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
                 <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5",

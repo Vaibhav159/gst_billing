@@ -371,8 +371,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
   return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchInvoices };
 }
 
-// Custom Hook for API-driven Customers
-export function useCustomers(fy?: string, enabled = true) {
+export function useCustomers(fy?: string, businessId?: string, enabled = true) {
   const [items, setItems] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -384,10 +383,13 @@ export function useCustomers(fy?: string, enabled = true) {
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (fy) {
+      if (fy && fy !== "all") {
         const { start_date, end_date } = buildDateRange(fy);
         if (start_date) params.set("start_date", start_date);
         if (end_date) params.set("end_date", end_date);
+      }
+      if (businessId && businessId !== "all") {
+        params.set("business_id", businessId);
       }
       const qs = params.toString();
       const res = await api.get<any>(`customers/${qs ? `?${qs}` : ""}`);
@@ -401,7 +403,7 @@ export function useCustomers(fy?: string, enabled = true) {
     } finally {
       setIsLoading(false);
     }
-  }, [enabled, fy]);
+  }, [enabled, fy, businessId]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -445,7 +447,7 @@ export function useCustomers(fy?: string, enabled = true) {
   return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchCustomers };
 }
 
-export function useProducts(fy?: string, enabled = true) {
+export function useProducts(fy?: string, businessId?: string, enabled = true) {
   const [items, setItems] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -457,10 +459,13 @@ export function useProducts(fy?: string, enabled = true) {
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (fy) {
+      if (fy && fy !== "all") {
         const { start_date, end_date } = buildDateRange(fy);
         if (start_date) params.set("start_date", start_date);
         if (end_date) params.set("end_date", end_date);
+      }
+      if (businessId && businessId !== "all") {
+        params.set("business_id", businessId);
       }
       const qs = params.toString();
       const res = await api.get<any>(`products/${qs ? `?${qs}` : ""}`);
@@ -474,7 +479,7 @@ export function useProducts(fy?: string, enabled = true) {
     } finally {
       setIsLoading(false);
     }
-  }, [enabled, fy]);
+  }, [enabled, fy, businessId]);
 
   const loadMore = useCallback(async () => {
     if (!nextUrl || isLoadingMore) return;
@@ -632,7 +637,7 @@ export function useBusinesses(fy?: string, enabled = true) {
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (fy) {
+      if (fy && fy !== "all") {
         const { start_date, end_date } = buildDateRange(fy);
         if (start_date) params.set("start_date", start_date);
         if (end_date) params.set("end_date", end_date);
