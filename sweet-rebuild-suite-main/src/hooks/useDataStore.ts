@@ -86,6 +86,8 @@ export interface DashboardStats {
     outward: number;
     net: number;
     count: number;
+    tax: number;
+    inward_tax: number;
   };
   monthly: any[];
   top_customers: {
@@ -189,6 +191,8 @@ function getFinancialYear(date: string) {
 }
 
 export function mapDjangoInvoice(inv: any): Invoice {
+  const hasItems = Array.isArray(inv.line_items) && inv.line_items.length > 0;
+  
   const items = (inv.line_items || []).map((item: any) => ({
     productId: String(item.product || item.id || ""),
     productName: item.product_name || item.item_name || "",
@@ -202,11 +206,13 @@ export function mapDjangoInvoice(inv: any): Invoice {
     igst: parseFloat(item.igst) || 0,
   }));
 
-  const subtotal = items.reduce((sum: number, it: any) => sum + (it.qty * it.rate), 0);
+  const subtotal = hasItems ? items.reduce((sum: number, it: any) => sum + (it.qty * it.rate), 0) : 0;
   const totalCGST = items.reduce((sum: number, it: any) => sum + it.cgst, 0);
   const totalSGST = items.reduce((sum: number, it: any) => sum + it.sgst, 0);
   const totalIGST = items.reduce((sum: number, it: any) => sum + it.igst, 0);
-  const totalTax = totalCGST + totalSGST + totalIGST;
+  
+  // Use annotated total_tax if line_items is empty/missing
+  const totalTax = hasItems ? (totalCGST + totalSGST + totalIGST) : (parseFloat(inv.total_tax) || 0);
 
   return {
     id: String(inv.id),
@@ -228,6 +234,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     financialYear: getFinancialYear(inv.invoice_date),
     createdAt: inv.created_at || "",
     updatedAt: inv.updated_at || "",
+    lineItemCount: hasItems ? items.length : (inv.line_item_count || 0),
   };
 }
 
@@ -622,7 +629,7 @@ export function useInvoice(id: string | undefined) {
   return { item, isLoading, refetch: fetchInvoice };
 }
 
-export function useDashboardStats(fy?: string, businessId?: string, enabled = true) {
+export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
   const [data, setData] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -631,14 +638,27 @@ export function useDashboardStats(fy?: string, businessId?: string, enabled = tr
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (fy && fy !== "all") {
-        const { start_date, end_date } = buildDateRange(fy);
+      if (filters?.fyFilter && filters.fyFilter !== "all") {
+        const { start_date, end_date } = buildDateRange(filters.fyFilter);
         if (start_date) params.set("start_date", start_date);
         if (end_date) params.set("end_date", end_date);
       }
-      if (businessId && businessId !== "all") {
-        params.set("business_id", businessId);
+      if (filters?.businessId && filters.businessId !== "all") {
+        params.set("business_id", filters.businessId);
       }
+      if (filters?.customerId && filters.customerId !== "all") {
+        params.set("customer_id", filters.customerId);
+      }
+      if (filters?.typeFilter && filters.typeFilter !== "all") {
+        params.set("type_of_invoice", filters.typeFilter.toLowerCase());
+      }
+      if (filters?.monthFilter && filters.monthFilter !== "all") {
+        params.set("month", filters.monthFilter);
+      }
+      if (filters?.search) {
+        params.set("search", filters.search);
+      }
+      
       const qs = params.toString();
       const res = await api.get<DashboardStats>(`invoices/stats/${qs ? `?${qs}` : ""}`);
       setData(res.data);
@@ -647,7 +667,7 @@ export function useDashboardStats(fy?: string, businessId?: string, enabled = tr
     } finally {
       setIsLoading(false);
     }
-  }, [enabled, fy, businessId]);
+  }, [enabled, JSON.stringify(filters)]);
 
   useEffect(() => {
     fetchStats();

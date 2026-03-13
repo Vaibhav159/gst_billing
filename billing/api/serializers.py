@@ -69,6 +69,36 @@ class InvoiceSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class InvoiceListSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    business_name = serializers.CharField(source="business.name", read_only=True)
+    is_igst_applicable = serializers.BooleanField(read_only=True)
+    # Annotated fields
+    total_tax = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True, required=False
+    )
+    line_item_count = serializers.IntegerField(read_only=True, required=False)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "invoice_number",
+            "invoice_date",
+            "total_amount",
+            "type_of_invoice",
+            "customer",
+            "customer_name",
+            "business",
+            "business_name",
+            "is_igst_applicable",
+            "total_tax",
+            "line_item_count",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class InvoiceSummarySerializer(serializers.Serializer):
     total_items = serializers.IntegerField()
     amount_without_tax = serializers.DecimalField(max_digits=10, decimal_places=2)

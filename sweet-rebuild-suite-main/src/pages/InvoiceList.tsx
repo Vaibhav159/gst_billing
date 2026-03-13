@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
-import { useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { useInvoices, useBusinesses, useCustomers, useDashboardStats } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
@@ -32,6 +32,7 @@ export default function InvoiceList() {
   const [custFilter, setCustFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [fyFilter, setFyFilter] = useState(selectedFY);
+  const [selectedBusiness, setSelectedBusiness] = useState("all"); // New state for selected business
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<"date" | "total" | "invoiceNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -57,6 +58,7 @@ export default function InvoiceList() {
   }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
+  const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
 
   // Only client-side sorting (filtering is done server-side)
   const filtered = [...invoices].sort((a, b) => {
@@ -66,11 +68,10 @@ export default function InvoiceList() {
     return dir * a.invoiceNumber.localeCompare(b.invoiceNumber);
   });
 
-  const totalOutward = filtered.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const totalInward = filtered.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
-  const outwardCount = filtered.filter((i) => i.type === "OUTWARD").length;
-  const inwardCount = filtered.filter((i) => i.type === "INWARD").length;
-  const totalTaxCollected = filtered.reduce((s, i) => s + i.totalTax, 0);
+  const statsInfo = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, count: 0 };
+  const totalOutward = statsInfo.outward;
+  const totalInward = statsInfo.inward;
+  const totalTaxCollected = statsInfo.tax;
 
   const toggleAll = () => selected.size === filtered.length ? setSelected(new Set()) : setSelected(new Set(filtered.map((i) => i.id)));
   const toggle = (id: string) => { const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next); };
@@ -87,8 +88,8 @@ export default function InvoiceList() {
   };
 
   const stats = [
-    { label: "Sales", value: formatCurrency(totalOutward), sub: `${outwardCount} inv`, icon: TrendingUp, color: "text-success" },
-    { label: "Purchases", value: formatCurrency(totalInward), sub: `${inwardCount} inv`, icon: TrendingDown, color: "text-warning" },
+    { label: "Sales", value: formatCurrency(totalOutward), sub: "Total revenue", icon: TrendingUp, color: "text-success" },
+    { label: "Purchases", value: formatCurrency(totalInward), sub: "Total spend", icon: TrendingDown, color: "text-warning" },
     { label: "Net Revenue", value: formatCurrency(totalOutward - totalInward), sub: "Sales-Purchases", icon: IndianRupee, color: "text-success" },
     { label: "Tax", value: formatCurrency(totalTaxCollected), sub: "GST total", icon: Receipt, color: "text-chart-3" },
   ];
@@ -161,7 +162,7 @@ export default function InvoiceList() {
                 </div>
               </div>
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-border/30">
-                <span className="text-[11px] text-muted-foreground">{inv.items.length} items · Tax {formatCurrency(inv.totalTax)}</span>
+                <span className="text-[11px] text-muted-foreground">{inv.lineItemCount} items · Tax {formatCurrency(inv.totalTax)}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); shareInvoice(inv); }}
@@ -174,10 +175,16 @@ export default function InvoiceList() {
               </div>
             </Link>
           ))}
-          {filtered.length === 0 && (
+          {filtered.length === 0 && !isLoading && (
             <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
               <Receipt className="w-10 h-10 opacity-30" />
               <p className="text-sm font-medium">No invoices found</p>
+            </div>
+          )}
+          {isLoading && (
+            <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <p className="text-sm font-medium">Loading invoices...</p>
             </div>
           )}
         </div>
@@ -366,7 +373,8 @@ export default function InvoiceList() {
                   </td>
                 </motion.tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found</td></tr>}
+              {filtered.length === 0 && !isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found</td></tr>}
+              {isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...</td></tr>}
             </tbody>
           </table>
         </div>
@@ -393,7 +401,7 @@ export default function InvoiceList() {
                 <div className="space-y-2 text-[13px]">
                   <div className="flex justify-between"><span className="text-muted-foreground">Customer</span><span className="text-foreground font-medium">{inv.customerName}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Business</span><span className="text-foreground text-[12px]">{inv.businessName}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="text-foreground">{inv.items.length}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Items</span><span className="text-foreground">{inv.lineItemCount}</span></div>
                   <div className="border-t border-border/30 pt-2 flex justify-between">
                     <span className="text-muted-foreground">Total</span>
                     <span className="text-primary font-display font-bold text-[15px]">{formatCurrency(inv.total)}</span>
@@ -409,9 +417,14 @@ export default function InvoiceList() {
               </motion.div>
             ))}
           </>
-          {filtered.length === 0 && (
+          {filtered.length === 0 && !isLoading && (
             <div className="col-span-full elevated-card rounded-2xl p-16 text-center text-muted-foreground">
               <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found
+            </div>
+          )}
+          {isLoading && (
+            <div className="col-span-full elevated-card rounded-2xl p-16 text-center text-muted-foreground">
+              <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...
             </div>
           )}
         </div>

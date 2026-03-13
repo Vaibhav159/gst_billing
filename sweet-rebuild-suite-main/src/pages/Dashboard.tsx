@@ -53,10 +53,10 @@ export default function Dashboard() {
   const [selectedBusiness, setSelectedBusiness] = useState("all");
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
-  const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(selectedFY, selectedBusiness);
+  const { data: statsData, isLoading: isStatsLoading } = useDashboardStats({ fyFilter: selectedFY, businessId: selectedBusiness });
   const { items: businesses } = useBusinesses();
 
-  const totals = statsData?.totals || { inward: 0, outward: 0, net: 0, count: 0 };
+  const totals = statsData?.totals || { inward: 0, outward: 0, net: 0, tax: 0, inward_tax: 0, count: 0 };
   const monthlyData = useMemo(() => getMonthlyDataFromStats(selectedFY, statsData?.monthly || []), [selectedFY, statsData?.monthly]);
   const recentInvoices = useMemo(() => (statsData?.recent_invoices || []).map(mapDjangoInvoice), [statsData?.recent_invoices]);
 

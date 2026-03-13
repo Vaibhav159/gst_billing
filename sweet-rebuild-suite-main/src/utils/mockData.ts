@@ -79,6 +79,7 @@ export interface Invoice {
   financialYear: string;
   createdAt: string;
   updatedAt: string;
+  lineItemCount?: number;
 }
 
 

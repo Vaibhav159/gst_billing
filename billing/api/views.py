@@ -6,11 +6,12 @@ from decimal import Decimal
 
 from django.db.models import (
     Count,
+    F,
     IntegerField,
     Q,
     Sum,
 )
-from django.db.models.functions import Cast, ExtractMonth, ExtractYear
+from django.db.models.functions import Cast, Coalesce, ExtractMonth, ExtractYear
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -41,6 +42,7 @@ from billing.utils import (
 from .serializers import (
     BusinessSerializer,
     CustomerSerializer,
+    InvoiceListSerializer,
     InvoiceSerializer,
     InvoiceSummarySerializer,
     LineItemSerializer,
@@ -558,6 +560,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         .order_by("-invoice_date")
     )
     serializer_class = InvoiceSerializer
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return InvoiceListSerializer
+        return InvoiceSerializer
+
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         "invoice_number",
@@ -608,6 +616,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         invoice_type = self.request.query_params.get("type_of_invoice")
         if invoice_type:
             queryset = queryset.filter(type_of_invoice=invoice_type)
+
+        # Annotate with total tax and item count
+        queryset = queryset.annotate(
+            total_tax=Coalesce(
+                Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")),
+                Decimal("0.00"),
+            ),
+            line_item_count=Count("lineitem"),
+        )
 
         return queryset
 
@@ -751,34 +768,74 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Get consolidated dashboard stats"""
         queryset = self.get_queryset()
 
+        results = {}
         # 1. Totals
-        inward_total = (
-            queryset.filter(type_of_invoice="inward").aggregate(Sum("total_amount"))[
-                "total_amount__sum"
-            ]
-            or 0
-        )
-        outward_total = (
-            queryset.filter(type_of_invoice="outward").aggregate(Sum("total_amount"))[
-                "total_amount__sum"
-            ]
-            or 0
+        totals = queryset.aggregate(
+            outward=Coalesce(
+                Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                Decimal("0.00"),
+            ),
+            inward=Coalesce(
+                Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                Decimal("0.00"),
+            ),
+            outward_tax=Coalesce(
+                Sum(
+                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
+                    filter=Q(type_of_invoice="outward"),
+                ),
+                Decimal("0.00"),
+            ),
+            inward_tax=Coalesce(
+                Sum(
+                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
+                    filter=Q(type_of_invoice="inward"),
+                ),
+                Decimal("0.00"),
+            ),
+            count=Count("id"),
         )
 
-        # 2. Monthly totals
-        monthly_stats = (
+        # 2. Monthly summary
+        monthly_raw = (
             queryset.annotate(
                 month=ExtractMonth("invoice_date"), year=ExtractYear("invoice_date")
             )
             .values("month", "year")
             .annotate(
-                outward_total=Sum("total_amount", filter=Q(type_of_invoice="outward")),
-                inward_total=Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                outward_total=Coalesce(
+                    Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                    Decimal("0.00"),
+                ),
+                inward_total=Coalesce(
+                    Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                    Decimal("0.00"),
+                ),
                 outward_count=Count("id", filter=Q(type_of_invoice="outward")),
                 inward_count=Count("id", filter=Q(type_of_invoice="inward")),
             )
-            .order_by("year", "month")
+            .order_by("-year", "-month")
         )
+
+        results["totals"] = {
+            "outward": float(totals["outward"]),
+            "inward": float(totals["inward"]),
+            "net": float(totals["outward"] - totals["inward"]),
+            "tax": float(totals["outward_tax"]),
+            "inward_tax": float(totals["inward_tax"]),
+            "count": totals["count"],
+        }
+        results["monthly"] = [
+            {
+                "month": m["month"],
+                "year": m["year"],
+                "outward_total": float(m["outward_total"]),
+                "inward_total": float(m["inward_total"]),
+                "outward_count": m["outward_count"],
+                "inward_count": m["inward_count"],
+            }
+            for m in monthly_raw
+        ]
 
         # 3. Top Customers
         top_customers = (
@@ -787,6 +844,14 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             .annotate(total=Sum("total_amount"))
             .order_by("-total")[:5]
         )
+        results["top_customers"] = [
+            {
+                "id": c["customer_id"],
+                "name": c["customer__name"],
+                "total": float(c["total"] or 0),
+            }
+            for c in top_customers
+        ]
 
         # 4. Top Products
         top_products = (
@@ -797,40 +862,22 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             .annotate(total_rev=Sum("amount"), total_qty=Sum("quantity"))
             .order_by("-total_rev")[:5]
         )
+        results["top_products"] = [
+            {
+                "name": p["product_name"],
+                "total": float(p["total_rev"] or 0),
+                "qty": float(p["total_qty"] or 0),
+            }
+            for p in top_products
+        ]
 
         # 5. Recent Invoices
-        recent_invoices = InvoiceSerializer(
+        recent_invoices = InvoiceListSerializer(
             queryset.order_by("-created_at")[:5], many=True
         ).data
+        results["recent_invoices"] = recent_invoices
 
-        return Response(
-            {
-                "totals": {
-                    "inward": float(inward_total),
-                    "outward": float(outward_total),
-                    "net": float(outward_total - inward_total),
-                    "count": queryset.count(),
-                },
-                "monthly": list(monthly_stats),
-                "top_customers": [
-                    {
-                        "id": c["customer_id"],
-                        "name": c["customer__name"],
-                        "total": float(c["total"] or 0),
-                    }
-                    for c in top_customers
-                ],
-                "top_products": [
-                    {
-                        "name": p["product_name"],
-                        "total": float(p["total_rev"] or 0),
-                        "qty": float(p["total_qty"] or 0),
-                    }
-                    for p in top_products
-                ],
-                "recent_invoices": recent_invoices,
-            }
-        )
+        return Response(results)
 
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
