@@ -194,7 +194,7 @@ export default function BusinessList() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-16"><Building2 className="w-10 h-10 opacity-30 mx-auto mb-2" /><p className="text-sm text-muted-foreground">No found</p></td></tr>
+                <tr><td colSpan={8} className="text-center py-16"><Building2 className="w-10 h-10 opacity-30 mx-auto mb-2" /><p className="text-sm text-muted-foreground">No businesses found</p></td></tr>
               )}
             </tbody>
           </table>
@@ -237,7 +237,7 @@ export default function BusinessList() {
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center gap-3 py-16 text-muted-foreground">
               <Building2 className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No found</p>
+              <p className="text-sm font-medium">No businesses found</p>
             </div>
           )}
         </motion.div>

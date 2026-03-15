@@ -8,6 +8,7 @@ import {
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/utils/utils";
+import NotificationCenter from "@/components/NotificationCenter";
 import { financialYears } from "@/utils/mockData";
 
 const navItems = [
@@ -69,8 +70,8 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
 
   const handleLogout = () => { authLogout(); navigate("/login"); };
   const currentTheme = themeOptions.find((t) => t.id === theme);
-  const userInitial = user?.name?.charAt(0)?.toUpperCase() || "U";
-  const userName = user?.name || "User";
+  const userInitial = user?.username?.charAt(0)?.toUpperCase() || "U";
+  const userName = user?.username || "User";
 
   return (
     <nav className="sticky top-0 z-50 w-full glass-nav">
@@ -123,6 +124,10 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
             <span>Search</span>
             <kbd className="ml-1 text-[10px] font-mono bg-secondary/60 px-1.5 py-0.5 rounded">⌘K</kbd>
           </button>
+
+          {/* Notification Center */}
+          <NotificationCenter />
+
           {/* FY Selector */}
           <div className="relative" ref={fyRef}>
             <button

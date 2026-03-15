@@ -1,14 +1,18 @@
 import { useState, useMemo } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { formatCurrency } from "@/utils/mockData";
-import { useInvoices, useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { useInvoices, useBusinesses, useCustomers, mapDjangoInvoice } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, FileSpreadsheet, ExternalLink, TrendingUp, Receipt, ArrowUpRight, ArrowDownLeft, BarChart3, PieChart, FileText, Database } from "lucide-react";
+import { Download, FileSpreadsheet, ExternalLink, TrendingUp, Receipt, ArrowUpRight, ArrowDownLeft, BarChart3, PieChart, FileText, Database, FileDown, Loader2 } from "lucide-react";
+import { downloadReportExcel } from "@/utils/generateReportExcel";
+import DateRangePicker from "@/components/DateRangePicker";
+import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RPieChart, Pie, Cell } from "recharts";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { motion } from "framer-motion";
 import { stagger, fadeUp } from "@/utils/animations";
+import api from "@/utils/api";
 
 interface OutletCtx { selectedFY: string }
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
@@ -16,8 +20,9 @@ const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb
 export default function Reports() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const isMobile = useIsMobile();
-  const [startDate, setStartDate] = useState("2024-04-01");
-  const [endDate, setEndDate] = useState("2025-03-31");
+  const fyStartYear = parseInt(selectedFY.split("-")[0]);
+  const [startDate, setStartDate] = useState(new Date(fyStartYear, 3, 1));
+  const [endDate, setEndDate] = useState(new Date(fyStartYear + 1, 2, 31));
   const [bizFilter, setBizFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const { items: invoices } = useInvoices();
@@ -26,9 +31,11 @@ export default function Reports() {
 
   const fyInvoices = useMemo(() => invoices.filter((i) => i.financialYear === selectedFY), [selectedFY, invoices]);
   const filtered = useMemo(() => fyInvoices.filter((i) => {
-    if (bizFilter !== "all" && i.businessId !== bizFilter) return false;
+    if (bizFilter !== "all" && String(i.businessId) !== String(bizFilter)) return false;
     if (typeFilter !== "all" && i.type !== typeFilter) return false;
-    if ((i.invoice_date || "") < startDate || (i.invoice_date || "") > endDate) return false;
+    const startStr = format(startDate, "yyyy-MM-dd");
+    const endStr = format(endDate, "yyyy-MM-dd");
+    if (i.invoice_date < startStr || i.invoice_date > endStr) return false;
     return true;
   }), [fyInvoices, bizFilter, typeFilter, startDate, endDate]);
 
@@ -45,7 +52,7 @@ export default function Reports() {
     const year = idx < 9 ? fyStart : fyStart + 1;
     const monthNum = idx < 9 ? idx + 4 : idx - 8;
     const prefix = `${year}-${String(monthNum).padStart(2, "0")}`;
-    const mInvs = filtered.filter((i) => (i.invoice_date || "").startsWith(prefix));
+    const mInvs = filtered.filter((i) => i.invoice_date.startsWith(prefix));
     return { month: m, sales: mInvs.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0) / 1000, purchases: mInvs.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0) / 1000 };
   });
 
@@ -64,16 +71,51 @@ export default function Reports() {
 
   const handleExportCSV = () => {
     const rows = [["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total"]];
-    filtered.forEach((i) => rows.push([i.invoiceNumber, i.invoice_date || "", i.customerName, i.businessName, i.type, i.subtotal.toString(), i.totalTax.toString(), i.total.toString()]));
+    filtered.forEach((i) => rows.push([i.invoiceNumber, i.invoice_date, i.customerName, i.businessName, i.type, i.subtotal.toString(), i.totalTax.toString(), i.total.toString()]));
     const csv = rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `report-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
+  const [exporting, setExporting] = useState(false);
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      // Fetch all invoices with line items included
+      const params = new URLSearchParams();
+      params.set("include_items", "true");
+      params.set("page_size", "1000");
+      const startStr = format(startDate, "yyyy-MM-dd");
+      const endStr = format(endDate, "yyyy-MM-dd");
+      params.set("start_date", startStr);
+      params.set("end_date", endStr);
+      if (bizFilter !== "all") params.set("business_id", bizFilter);
+      if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
+
+      const res = await api.get<any>(`invoices/?${params.toString()}`);
+      const data = res.data;
+      const results = Array.isArray(data) ? data : (data.results || []);
+      const fullInvoices = results.map(mapDjangoInvoice);
+
+      const filename = `GST Report ${selectedFY}.xlsx`;
+      downloadReportExcel({
+        invoices: fullInvoices,
+        businesses,
+        customers,
+      }, filename);
+    } catch (e) {
+      console.error("Export failed", e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const quickLinks = [
-    { label: "GST Summary", href: "/billing/gst-summary", desc: "GSTR-1 & 3B", icon: PieChart, color: "text-success", bg: "bg-success/10" },
-    { label: "Bulk PDF", href: "/billing/bulk-pdf", desc: "Download all PDFs", icon: FileText, color: "text-primary", bg: "bg-primary/10" },
-    { label: "Backup", href: "/billing/backup", desc: "Export full data", icon: Database, color: "text-warning", bg: "bg-warning/10" },
+    { label: "GST Summary", href: "/billing/gst-summary", desc: "GSTR-1 & 3B rate-wise breakdown", icon: PieChart, color: "text-chart-1", bg: "bg-chart-1/10" },
+    { label: "Sales Invoices", href: "/billing/invoice/list", desc: `${outward.length} outward invoices this period`, icon: ArrowUpRight, color: "text-success", bg: "bg-success/10" },
+    { label: "Purchase Invoices", href: "/billing/invoice/list", desc: `${inward.length} inward invoices this period`, icon: ArrowDownLeft, color: "text-warning", bg: "bg-warning/10" },
+    { label: "Bulk PDF", href: "/billing/bulk-pdf", desc: "Download all PDFs as ZIP", icon: FileText, color: "text-chart-2", bg: "bg-chart-2/10" },
+    { label: "Backup", href: "/billing/backup", desc: "Export full database", icon: Database, color: "text-chart-3", bg: "bg-chart-3/10" },
   ];
 
   return (
@@ -85,8 +127,8 @@ export default function Reports() {
         className="elevated-card rounded-2xl p-5">
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <div className={cn("rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
-              <BarChart3 className="w-5 h-5 text-primary" />
+            <div className={cn("rounded-2xl bg-gradient-to-br from-chart-3/20 to-chart-3/5 border border-chart-3/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
+              <BarChart3 className="w-5 h-5 text-chart-3" />
             </div>
             <div>
               <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl")}>Reports</h1>
@@ -96,41 +138,21 @@ export default function Reports() {
           {!isMobile && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
               className="flex items-center gap-2.5">
+              <button onClick={handleExportExcel} disabled={exporting} className="premium-btn-outline text-[13px] border-success/30 text-success">{exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />} {exporting ? "Exporting..." : "Excel Report"}</button>
               <button onClick={handleExportCSV} className="premium-btn-outline text-[13px]"><FileSpreadsheet className="w-4 h-4" /> CSV</button>
               <button className="premium-btn-outline text-[13px] border-success/30 text-success"><Download className="w-4 h-4" /> GSTR-1</button>
             </motion.div>
           )}
         </div>
         <div className="border-t border-border/40 mt-4 pt-4 space-y-3">
-          {/* Preset date filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-medium text-muted-foreground uppercase mr-1">Quick:</span>
-            {[
-              { label: "Current FY", from: `${fyStart}-04-01`, to: `${fyStart + 1}-03-31` },
-              { label: "Current Month", from: (() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`; })(), to: (() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, "0")}`; })() },
-              { label: "Previous Month", from: (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; })(), to: (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()).padStart(2, "0")}`; })() },
-              { label: "Q1 (Apr–Jun)", from: `${fyStart}-04-01`, to: `${fyStart}-06-30` },
-              { label: "Q2 (Jul–Sep)", from: `${fyStart}-07-01`, to: `${fyStart}-09-30` },
-              { label: "Q3 (Oct–Dec)", from: `${fyStart}-10-01`, to: `${fyStart}-12-31` },
-              { label: "Q4 (Jan–Mar)", from: `${fyStart + 1}-01-01`, to: `${fyStart + 1}-03-31` },
-            ].map((p) => (
-              <button
-                key={p.label}
-                onClick={() => { setStartDate(p.from); setEndDate(p.to); }}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
-                  startDate === p.from && endDate === p.to
-                    ? "bg-primary/15 border-primary/30 text-primary"
-                    : "bg-muted/50 border-border/40 text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-1 md:grid-cols-2 xl:grid-cols-6")}>
-            <div className="space-y-1"><label className="text-[10px] font-medium text-muted-foreground uppercase">From</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="premium-input !w-full text-[12px]" /></div>
-            <div className="space-y-1"><label className="text-[10px] font-medium text-muted-foreground uppercase">To</label><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="premium-input !w-full text-[12px]" /></div>
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onStartChange={setStartDate}
+            onEndChange={setEndDate}
+            fyStart={fyStartYear}
+          />
+          <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-1 md:grid-cols-2 xl:grid-cols-4")}>
             <div className={cn("space-y-1", isMobile ? "col-span-2" : "xl:col-span-2")}><label className="text-[10px] font-medium text-muted-foreground uppercase">Business</label><select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select !w-full text-[12px]"><option value="all">All</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
             {!isMobile && <div className="space-y-1 xl:col-span-2"><label className="text-[10px] font-medium text-muted-foreground uppercase">Type</label><select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="premium-select !w-full text-[12px]"><option value="all">All</option><option value="OUTWARD">Sales</option><option value="INWARD">Purchases</option></select></div>}
           </div>
@@ -141,17 +163,24 @@ export default function Reports() {
       <motion.div variants={stagger} initial="hidden" animate="visible"
         className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-5")}>
         {[
-          { label: "Sales", value: formatCurrency(totalSales), icon: ArrowUpRight, color: "text-success" },
-          { label: "Purchases", value: formatCurrency(totalPurchases), icon: ArrowDownLeft, color: "text-warning" },
-          { label: "Tax Collected", value: formatCurrency(totalTaxCollected), icon: Receipt, color: "text-success" },
-          { label: "ITC", value: formatCurrency(totalITC), icon: TrendingUp, color: "text-warning" },
-          { label: "Net Tax", value: formatCurrency(netTax), icon: BarChart3, color: netTax >= 0 ? "text-destructive" : "text-success" },
-        ].map((s) => (
-          <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
-            <p className="text-[10px] text-muted-foreground font-medium">{s.label}</p>
-            <p className={cn("font-display font-bold mt-1", s.color, isMobile ? "text-sm" : "text-lg")}>{s.value}</p>
-          </motion.div>
-        ))}
+          { label: "Sales", value: formatCurrency(totalSales), icon: ArrowUpRight, color: "text-chart-1", count: outward.length },
+          { label: "Purchases", value: formatCurrency(totalPurchases), icon: ArrowDownLeft, color: "text-chart-2", count: inward.length },
+          { label: "Tax Collected", value: formatCurrency(totalTaxCollected), icon: Receipt, color: "text-chart-3", count: null },
+          { label: "ITC", value: formatCurrency(totalITC), icon: TrendingUp, color: "text-success", count: null },
+          { label: "Net Tax", value: formatCurrency(netTax), icon: BarChart3, color: netTax >= 0 ? "text-destructive" : "text-success", count: null },
+        ].map((s) => {
+          const Icon = s.icon;
+          return (
+            <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-muted-foreground font-medium">{s.label}</p>
+                <Icon className={cn("w-3.5 h-3.5", s.color)} />
+              </div>
+              <p className={cn("font-display font-bold mt-1", s.color, isMobile ? "text-sm" : "text-lg")}>{s.value}</p>
+              {s.count !== null && <p className="text-[10px] text-muted-foreground mt-0.5">{s.count} invoices</p>}
+            </motion.div>
+          );
+        })}
       </motion.div>
 
       {/* Charts */}
@@ -165,8 +194,8 @@ export default function Reports() {
                 <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
-                <Bar dataKey="sales" name="Sales" fill="hsl(var(--success))" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="sales" name="Sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

@@ -46,6 +46,29 @@ export interface Product {
   usage_count?: number;
 }
 
+export type ItemUnit = "gms" | "g" | "kg" | "pcs" | "unit" | "nos" | "mtr" | "ltr" | "ml" | "box" | "pair" | "ct" | "oz" | "tola" | "set" | "dozen";
+
+export const itemUnits: ItemUnit[] = ["gms", "g", "kg", "pcs", "unit", "nos", "mtr", "ltr", "ml", "box", "pair", "ct", "oz", "tola", "set", "dozen"];
+
+export const itemUnitLabels: Record<ItemUnit, string> = {
+  gms: "Grams (gms)",
+  g: "Grams (g)",
+  kg: "Kilograms (kg)",
+  pcs: "Pieces (pcs)",
+  unit: "Unit",
+  nos: "Numbers (nos)",
+  mtr: "Meters (mtr)",
+  ltr: "Litres (ltr)",
+  ml: "Millilitres (ml)",
+  box: "Box",
+  pair: "Pair",
+  ct: "Carat (ct)",
+  oz: "Ounce (oz)",
+  tola: "Tola",
+  set: "Set",
+  dozen: "Dozen",
+};
+
 export interface InvoiceItem {
   productId: string;
   productName: string;
@@ -53,6 +76,7 @@ export interface InvoiceItem {
   gstRate: number;
   qty: number;
   rate: number;
+  unit?: ItemUnit;
   amount: number;
   cgst: number;
   sgst: number;
@@ -474,8 +498,8 @@ export const auditLog: AuditLogEntry[] = [
 ];
 
 // ── FINANCIAL YEARS ──────────────────────────────────────
-export const financialYears = ["2024-25", "2023-24", "2022-23"];
-export const currentFY = "2024-25";
+export const financialYears = ["2025-26", "2024-25", "2023-24", "2022-23"];
+export const currentFY = "2025-26";
 
 // ── INDIAN STATES ──────────────────────────────────────
 export const indianStates = [

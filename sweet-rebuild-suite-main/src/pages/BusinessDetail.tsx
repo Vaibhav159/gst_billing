@@ -33,7 +33,7 @@ export default function BusinessDetail() {
   if (isLoading) return <div className="p-8 text-muted-foreground">Loading business...</div>;
   if (!biz) return <div className="p-8 text-muted-foreground">Business not found.</div>;
 
-  const bizInvoices = invoices.filter((inv) => inv.businessId === id);
+  const bizInvoices = invoices.filter((inv) => String(inv.businessId) === String(id));
   const bizCustomers = customers.filter((c) => (c.businesses || []).some(bid => String(bid) === String(id)));
   const totalOutward = bizInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
   const totalInward = bizInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
@@ -44,18 +44,22 @@ export default function BusinessDetail() {
     navigator.clipboard.writeText(text); setCopiedField(label); setTimeout(() => setCopiedField(null), 1500);
   };
 
+  // Build monthly data based on FY (Apr-Mar) instead of hardcoded 2024
+  const fyStartYear = biz ? parseInt((biz as any).financialYear?.split("-")[0] || new Date().getFullYear().toString()) : new Date().getFullYear();
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
-    const month = new Date(2024, i, 1);
+    const calMonth = i < 9 ? i + 3 : i - 9; // Apr=3, May=4, ..., Mar=2
+    const calYear = i < 9 ? fyStartYear : fyStartYear + 1;
+    const month = new Date(calYear, calMonth, 1);
     const monthStr = month.toLocaleDateString("en-IN", { month: "short" });
-    const outward = bizInvoices.filter((inv) => { const d = new Date(inv.invoice_date || ""); return d.getMonth() === i && d.getFullYear() === 2024 && inv.type === "OUTWARD"; }).reduce((s, inv) => s + inv.total, 0);
-    const inward = bizInvoices.filter((inv) => { const d = new Date(inv.invoice_date || ""); return d.getMonth() === i && d.getFullYear() === 2024 && inv.type === "INWARD"; }).reduce((s, inv) => s + inv.total, 0);
+    const outward = bizInvoices.filter((inv) => { const d = new Date(inv.invoice_date || ""); return d.getMonth() === calMonth && d.getFullYear() === calYear && inv.type === "OUTWARD"; }).reduce((s, inv) => s + inv.total, 0);
+    const inward = bizInvoices.filter((inv) => { const d = new Date(inv.invoice_date || ""); return d.getMonth() === calMonth && d.getFullYear() === calYear && inv.type === "INWARD"; }).reduce((s, inv) => s + inv.total, 0);
     return { month: monthStr, outward, inward };
   });
 
   const topCustomers = bizCustomers.map((c) => ({
     ...c,
-    revenue: bizInvoices.filter((inv) => inv.customerId === c.id && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0),
-    invCount: bizInvoices.filter((inv) => inv.customerId === c.id).length,
+    revenue: bizInvoices.filter((inv) => String(inv.customerId) === String(c.id) && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0),
+    invCount: bizInvoices.filter((inv) => String(inv.customerId) === String(c.id)).length,
   })).sort((a, b) => b.revenue - a.revenue).slice(0, 6);
 
   return (

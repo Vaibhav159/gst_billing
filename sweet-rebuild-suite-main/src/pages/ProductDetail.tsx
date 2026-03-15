@@ -51,11 +51,15 @@ export default function ProductDetail() {
     setTimeout(() => setCopiedField(null), 1500);
   };
 
+  // Build monthly data based on FY (Apr-Mar)
+  const fyStartYear = product ? parseInt((product as any).financialYear?.split("-")[0] || new Date().getFullYear().toString()) : new Date().getFullYear();
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
-    const month = new Date(2024, i, 1);
+    const calMonth = i < 9 ? i + 3 : i - 9; // Apr=3, May=4, ..., Mar=2
+    const calYear = i < 9 ? fyStartYear : fyStartYear + 1;
+    const month = new Date(calYear, calMonth, 1);
     const monthStr = month.toLocaleDateString("en-IN", { month: "short" });
     const qty = productInvoiceItems
-      .filter((it) => { const d = new Date(it.invoice.invoice_date || ""); return d.getMonth() === i && d.getFullYear() === 2024; })
+      .filter((it) => { const d = new Date(it.invoice.invoice_date || ""); return d.getMonth() === calMonth && d.getFullYear() === calYear; })
       .reduce((s, it) => s + it.qty, 0);
     return { month: monthStr, qty };
   });

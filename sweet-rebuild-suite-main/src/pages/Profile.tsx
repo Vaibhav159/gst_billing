@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
-  User, Mail, Phone, Camera, Bell,
+  User, Mail, Phone, Camera, Bell, Save,
   Settings, History, Building2, Globe, Clock, AlertCircle
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -10,38 +10,55 @@ import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Profile() {
   const isMobile = useIsMobile();
   const { user } = useAuth();
+  const { toast } = useToast();
   
-  const [profile, setProfile] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    company: "",
-    timezone: "Asia/Kolkata",
-    language: "English",
+  const [profile, setProfile] = useState(() => {
+    const saved = localStorage.getItem("gst_app_profile");
+    if (saved) {
+      try { return { ...JSON.parse(saved) }; } catch { /* ignore */ }
+    }
+    return {
+      name: "",
+      email: "",
+      phone: "",
+      company: "",
+      timezone: "Asia/Kolkata",
+      language: "English",
+    };
   });
 
   useEffect(() => {
-    if (user) {
-      setProfile({
-        name: user.username, // Just default to username since we don't fetch full profile yet
-        email: "",
-        phone: "",
-        company: "",
-        timezone: "Asia/Kolkata",
-        language: "English",
-      });
+    // Only set from auth user if no saved profile
+    if (user && !localStorage.getItem("gst_app_profile")) {
+      setProfile(prev => ({
+        ...prev,
+        name: prev.name || user.username,
+      }));
     }
   }, [user]);
 
-  const [notifications, setNotifications] = useState({
-    invoiceCreated: true,
-    dailySummary: false,
-    backupReminder: true,
+  const [notifications, setNotifications] = useState(() => {
+    const saved = localStorage.getItem("gst_app_notifications");
+    if (saved) {
+      try { return { ...JSON.parse(saved) }; } catch { /* ignore */ }
+    }
+    return {
+      invoiceCreated: true,
+      dailySummary: false,
+      backupReminder: true,
+    };
   });
+
+  const handleSaveProfile = () => {
+    localStorage.setItem("gst_app_profile", JSON.stringify(profile));
+    localStorage.setItem("gst_app_notifications", JSON.stringify(notifications));
+    toast({ title: "Profile Saved", description: "Your profile settings have been saved locally." });
+  };
 
   const fadeUp = {
     hidden: { opacity: 0, y: 12 },
@@ -55,14 +72,11 @@ export default function Profile() {
     <div className={cn("space-y-5 animate-fade-in max-w-4xl mx-auto", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-6")}>
       <Breadcrumbs items={[{ label: "Profile" }]} />
 
-      <div className="bg-chart-4/10 border border-chart-4/20 text-chart-4 p-4 rounded-xl flex gap-3 text-sm">
-        <AlertCircle className="w-5 h-5 shrink-0" />
-        <p>Profile and Settings modifications are not yet supported by the backend. This page is currently read-only.</p>
-      </div>
+
 
       {/* Header */}
       <div className="flex items-center gap-4">
-        <div className="relative group opacity-80">
+        <div className="relative group">
           <div className={cn(
             "rounded-2xl bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold font-display glow-sm",
             isMobile ? "w-16 h-16 text-xl" : "w-20 h-20 text-2xl"
@@ -71,7 +85,7 @@ export default function Profile() {
           </div>
         </div>
         <div>
-          <h1 className={cn("font-display font-bold text-foreground tracking-tight opacity-80", isMobile ? "text-xl" : "text-3xl")}>
+          <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>
             {profile.name || "User"}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -90,7 +104,7 @@ export default function Profile() {
           <motion.div key={link.href} custom={i} variants={fadeUp} initial="hidden" animate="visible">
             <Link
               to={link.href}
-              className="flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 hover:border-primary/30 transition-all opacity-80"
+              className="flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 hover:border-primary/30 transition-all"
             >
               <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center">
                 <link.icon className="w-5 h-5 text-primary" />
@@ -106,7 +120,7 @@ export default function Profile() {
 
       {/* Profile Details */}
       <motion.div custom={0} variants={fadeUp} initial="hidden" animate="visible"
-        className="elevated-card rounded-2xl p-5 space-y-4 opacity-70 pointer-events-none">
+        className="elevated-card rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
           <User className="w-4 h-4 text-primary" />
           <h2 className="text-[13px] font-display font-semibold text-foreground">Personal Information</h2>
@@ -116,40 +130,40 @@ export default function Profile() {
             <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Username</label>
             <div className="relative">
               <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input type="text" value={profile.name} readOnly disabled
-                className="premium-input pl-10 bg-secondary/30" />
+              <input type="text" value={profile.name} onChange={(e) => setProfile(p => ({ ...p, name: e.target.value }))}
+                className="premium-input pl-10" />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Email</label>
             <div className="relative">
               <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input type="email" value={profile.email} readOnly disabled
-                className="premium-input pl-10 bg-secondary/30" placeholder="Not configured" />
+              <input type="email" value={profile.email} onChange={(e) => setProfile(p => ({ ...p, email: e.target.value }))}
+                className="premium-input pl-10" placeholder="Enter email" />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Phone</label>
             <div className="relative">
               <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input type="tel" value={profile.phone} readOnly disabled
-                className="premium-input pl-10 bg-secondary/30" placeholder="Not configured" />
+              <input type="tel" value={profile.phone} onChange={(e) => setProfile(p => ({ ...p, phone: e.target.value }))}
+                className="premium-input pl-10" placeholder="Enter phone" />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Company</label>
             <div className="relative">
               <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input type="text" value={profile.company} readOnly disabled
-                className="premium-input pl-10 bg-secondary/30" placeholder="Not configured" />
+              <input type="text" value={profile.company} onChange={(e) => setProfile(p => ({ ...p, company: e.target.value }))}
+                className="premium-input pl-10" placeholder="Enter company" />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Timezone</label>
             <div className="relative">
               <Clock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <select value={profile.timezone} disabled
-                className="premium-select w-full pl-10 bg-secondary/30">
+              <select value={profile.timezone} onChange={(e) => setProfile(p => ({ ...p, timezone: e.target.value }))}
+                className="premium-select w-full pl-10">
                 <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
               </select>
             </div>
@@ -158,8 +172,8 @@ export default function Profile() {
             <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Language</label>
             <div className="relative">
               <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <select value={profile.language} disabled
-                className="premium-select w-full pl-10 bg-secondary/30">
+              <select value={profile.language} onChange={(e) => setProfile(p => ({ ...p, language: e.target.value }))}
+                className="premium-select w-full pl-10">
                 <option value="English">English</option>
               </select>
             </div>
@@ -169,7 +183,7 @@ export default function Profile() {
 
       {/* Notifications */}
       <motion.div custom={1} variants={fadeUp} initial="hidden" animate="visible"
-        className="elevated-card rounded-2xl p-5 space-y-4 opacity-70 pointer-events-none">
+        className="elevated-card rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Bell className="w-4 h-4 text-primary" />
           <h2 className="text-[13px] font-display font-semibold text-foreground">Notifications</h2>
@@ -186,7 +200,6 @@ export default function Profile() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">{item.desc}</p>
               </div>
               <Switch
-                disabled
                 checked={notifications[item.key]}
                 onCheckedChange={(checked) => setNotifications((n) => ({ ...n, [item.key]: checked }))}
               />
@@ -194,6 +207,10 @@ export default function Profile() {
           ))}
         </div>
       </motion.div>
+
+      <div className={cn("flex", isMobile ? "justify-center" : "justify-end")}>
+        <button onClick={handleSaveProfile} className={cn("premium-btn-primary text-[13px]", isMobile && "w-full")}><Save className="w-4 h-4" /> Save Profile</button>
+      </div>
     </div>
   );
 }

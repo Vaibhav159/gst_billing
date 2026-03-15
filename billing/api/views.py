@@ -392,6 +392,60 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
         return response
 
+    @action(detail=False, methods=["post"])
+    def merge(self, request):
+        """Merge source customer into target customer.
+        Transfers all invoices and line items from source to target, then deletes source.
+        """
+        source_id = request.data.get("source_id")
+        target_id = request.data.get("target_id")
+
+        if not source_id or not target_id:
+            return Response(
+                {"error": "Both source_id and target_id are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if str(source_id) == str(target_id):
+            return Response(
+                {"error": "Source and target must be different customers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            source = Customer.objects.get(id=source_id)
+            target = Customer.objects.get(id=target_id)
+        except Customer.DoesNotExist:
+            return Response(
+                {"error": "Customer not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Transfer all invoices from source to target
+        invoices_transferred = Invoice.objects.filter(customer=source).update(
+            customer=target
+        )
+
+        # Transfer all line items from source to target
+        LineItem.objects.filter(customer=source).update(customer=target)
+
+        # Merge business associations
+        for business in source.businesses.all():
+            target.businesses.add(business)
+
+        # Delete the source customer
+        source_name = source.name
+        source.delete()
+
+        return Response(
+            {
+                "message": f"Successfully merged '{source_name}' into '{target.name}'.",
+                "invoices_transferred": invoices_transferred,
+                "target_id": target.id,
+            }
+        )
+
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ProductViewSet(viewsets.ModelViewSet):
@@ -412,7 +466,13 @@ class ProductViewSet(viewsets.ModelViewSet):
             return response
 
         # Bulk fetch metrics from LineItem grouping by product_name
-        line_items = LineItem.objects.filter(product_name__in=product_names)
+        # Use case-insensitive matching via Lower() to handle case mismatches
+        from django.db.models.functions import Lower
+
+        product_names_lower = [name.lower() for name in product_names]
+        line_items = LineItem.objects.annotate(
+            product_name_lower=Lower("product_name")
+        ).filter(product_name_lower__in=product_names_lower)
 
         # Apply date filters via the associated invoice
         start_date = request.query_params.get("start_date")
@@ -422,16 +482,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         if end_date:
             line_items = line_items.filter(invoice__invoice_date__lte=end_date)
 
-        stats = line_items.values("product_name", "invoice__type_of_invoice").annotate(
+        stats = line_items.values("product_name_lower", "invoice__type_of_invoice").annotate(
             total_rev=Sum("amount"),
             total_qty=Sum("quantity"),
             total_usage=Count("id"),
         )
 
-        # Map stats for easy lookup
+        # Map stats for easy lookup (keyed by lowercase name)
         stats_map = {}
         for s in stats:
-            name = s["product_name"]
+            name = s["product_name_lower"]
             if name not in stats_map:
                 stats_map[name] = {"total_revenue": 0, "qty_sold": 0, "usage_count": 0}
 
@@ -441,9 +501,9 @@ class ProductViewSet(viewsets.ModelViewSet):
 
             stats_map[name]["usage_count"] += s["total_usage"]
 
-        # Inject metrics into response
+        # Inject metrics into response (lookup by lowercase name)
         for item in response.data.get("results", []):
-            prod_stats = stats_map.get(item["name"], {})
+            prod_stats = stats_map.get(item["name"].lower(), {})
             item["total_revenue"] = prod_stats.get("total_revenue", 0)
             item["qty_sold"] = prod_stats.get("qty_sold", 0)
             item["usage_count"] = prod_stats.get("usage_count", 0)
@@ -563,6 +623,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         if self.action == "list":
+            # Allow export to request full serializer with line items
+            if self.request.query_params.get("include_items") == "true":
+                return InvoiceSerializer
             return InvoiceListSerializer
         return InvoiceSerializer
 
@@ -590,6 +653,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+
+        # Prefetch line items when full serializer is requested (for export)
+        if self.request.query_params.get("include_items") == "true":
+            queryset = queryset.prefetch_related("lineitem_set")
 
         # Filter by invoice number
         invoice_number = self.request.query_params.get("invoice_number")
@@ -853,12 +920,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             for c in top_customers
         ]
 
-        # 4. Top Products
+        # 4. Top Products (include hsn_code for dashboard display)
         top_products = (
             LineItem.objects.filter(
                 invoice__in=queryset, invoice__type_of_invoice="outward"
             )
-            .values("product_name")
+            .values("product_name", "hsn_code")
             .annotate(total_rev=Sum("amount"), total_qty=Sum("quantity"))
             .order_by("-total_rev")[:5]
         )
@@ -867,6 +934,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 "name": p["product_name"],
                 "total": float(p["total_rev"] or 0),
                 "qty": float(p["total_qty"] or 0),
+                "hsn": p["hsn_code"] or "",
             }
             for p in top_products
         ]
@@ -1460,6 +1528,198 @@ class CSVImportView(APIView):
                 {"error": "An unexpected error occurred during import"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class BulkInvoiceImportView(APIView):
+    """
+    API endpoint for bulk importing invoices from parsed Excel data.
+    Accepts JSON with invoice data (parsed on the frontend from Excel files).
+    """
+
+    def post(self, request):
+        invoices_data = request.data.get("invoices", [])
+        business_id = request.data.get("business_id")
+
+        if not invoices_data:
+            return Response(
+                {"error": "No invoices provided"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_count = 0
+        skipped_count = 0
+        errors = []
+
+        for inv_data in invoices_data:
+            try:
+                firm_name = inv_data.get("firmName", "")
+                firm_gstin = inv_data.get("firmGSTIN", "")
+
+                # Find business by ID, GSTIN, or name
+                business = None
+                if business_id:
+                    try:
+                        business = Business.objects.get(id=int(business_id))
+                    except (Business.DoesNotExist, ValueError):
+                        pass
+
+                if not business and firm_gstin:
+                    business = Business.objects.filter(
+                        gst_number__iexact=firm_gstin
+                    ).first()
+
+                if not business and firm_name:
+                    business = Business.objects.filter(
+                        name__icontains=firm_name
+                    ).first()
+
+                if not business:
+                    errors.append(
+                        f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
+                    )
+                    skipped_count += 1
+                    continue
+
+                # Find or create customer
+                customer_name = inv_data.get("customerName", "")
+                customer_gst = inv_data.get("customerGST", "")
+
+                if not customer_name:
+                    errors.append(
+                        f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
+                    )
+                    skipped_count += 1
+                    continue
+
+                customer = None
+                if customer_gst and customer_gst not in ("-", ""):
+                    # Try by GST first
+                    is_pan = "(PAN)" in customer_gst
+                    clean_gst = customer_gst.replace("(PAN)", "").strip()
+                    if is_pan:
+                        customer = Customer.objects.filter(
+                            pan_number__iexact=clean_gst
+                        ).first()
+                    else:
+                        customer = Customer.objects.filter(
+                            gst_number__iexact=clean_gst
+                        ).first()
+
+                if not customer:
+                    customer = Customer.objects.filter(
+                        name__iexact=customer_name
+                    ).first()
+
+                if not customer:
+                    # Create customer
+                    clean_gst = ""
+                    clean_pan = ""
+                    if customer_gst and customer_gst not in ("-", ""):
+                        if "(PAN)" in customer_gst:
+                            clean_pan = customer_gst.replace("(PAN)", "").strip()
+                        else:
+                            clean_gst = customer_gst
+                    customer = Customer.objects.create(
+                        name=customer_name,
+                        gst_number=clean_gst,
+                        pan_number=clean_pan,
+                        state_name="RAJASTHAN",
+                    )
+                    customer.save()
+                    # Link customer to business
+                    if business and business.pk:
+                        customer.businesses.add(business)
+
+                # Check for duplicate invoice
+                invoice_number = str(inv_data.get("invoiceNumber", ""))
+                invoice_date = inv_data.get("invoice_date", "")
+                inv_type = inv_data.get("type", "OUTWARD")
+                type_of_invoice = (
+                    INVOICE_TYPE_INWARD
+                    if inv_type == "INWARD"
+                    else INVOICE_TYPE_OUTWARD
+                )
+
+                existing = Invoice.objects.filter(
+                    invoice_number=invoice_number,
+                    business=business,
+                    invoice_date=invoice_date,
+                ).first()
+
+                if existing:
+                    skipped_count += 1
+                    continue
+
+                # Create invoice
+                invoice = Invoice.objects.create(
+                    invoice_number=invoice_number,
+                    invoice_date=invoice_date,
+                    customer=customer,
+                    business=business,
+                    type_of_invoice=type_of_invoice,
+                    total_amount=Decimal(str(inv_data.get("total", 0))),
+                )
+
+                # Create line items
+                items = inv_data.get("items", [])
+                for item in items:
+                    qty = Decimal(str(item.get("qty", 0)))
+                    rate = Decimal(str(item.get("rate", 0)))
+                    gst_rate = Decimal(str(item.get("gstRate", 3))) / Decimal("100")
+                    net_amount = qty * rate
+                    tax_amount = net_amount * gst_rate
+
+                    cgst = Decimal(str(item.get("cgst", 0)))
+                    sgst = Decimal(str(item.get("sgst", 0)))
+                    igst = Decimal(str(item.get("igst", 0)))
+
+                    # If taxes weren't pre-calculated, calculate them
+                    if cgst == 0 and sgst == 0 and igst == 0:
+                        if invoice.is_igst_applicable:
+                            igst = tax_amount
+                        else:
+                            cgst = tax_amount / 2
+                            sgst = tax_amount / 2
+
+                    amount = net_amount + cgst + sgst + igst
+
+                    LineItem.objects.create(
+                        invoice=invoice,
+                        customer=customer,
+                        product_name=item.get("productName", "Item"),
+                        hsn_code=item.get("hsn", "711319"),
+                        gst_tax_rate=gst_rate,
+                        quantity=qty,
+                        rate=rate,
+                        cgst=cgst,
+                        sgst=sgst,
+                        igst=igst,
+                        amount=amount,
+                    )
+
+                # Update invoice total
+                invoice.save()
+                created_count += 1
+
+            except Exception as e:
+                logger.error(
+                    f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {e}",
+                    exc_info=True,
+                )
+                errors.append(
+                    f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {str(e)}"
+                )
+                skipped_count += 1
+
+        return Response(
+            {
+                "created": created_count,
+                "skipped": skipped_count,
+                "errors": errors[:20],  # Limit error messages
+                "message": f"Successfully imported {created_count} invoices. {skipped_count} skipped.",
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

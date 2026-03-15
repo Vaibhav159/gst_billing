@@ -35,7 +35,7 @@ export default function InvoiceDetail() {
     tax: inv.isIGST ? item.igst : item.cgst + item.sgst,
   }));
 
-  const customerInvoices = invoices.filter((i) => i.customerId === inv.customerId && i.id !== inv.id).slice(0, 5);
+  const customerInvoices = invoices.filter((i) => String(i.customerId) === String(inv.customerId) && String(i.id) !== String(inv.id)).slice(0, 5);
 
   const summaryCards = [
     { label: "Subtotal", value: formatCurrency(inv.subtotal), icon: Package, color: "text-foreground" },
@@ -67,7 +67,7 @@ export default function InvoiceDetail() {
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</button>
             <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
-            <button onClick={() => { toast({ title: "Duplicated", description: `Copy of ${inv.invoiceNumber} created` }); navigate("/billing/invoice/add"); }} className="premium-btn-ghost text-[13px]"><Copy className="w-4 h-4" /> Duplicate</button>
+            <button onClick={() => { navigate("/billing/invoice/add", { state: { duplicateFrom: inv } }); toast({ title: "Duplicating", description: `Creating copy of ${inv.invoiceNumber}` }); }} className="premium-btn-ghost text-[13px]"><Copy className="w-4 h-4" /> Duplicate</button>
             <Link to={`/billing/invoice/${id}/print`} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
             <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New</Link>
           </div>

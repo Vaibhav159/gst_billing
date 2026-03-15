@@ -1,9 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
+import { format } from "date-fns";
 import { formatCurrency } from "@/utils/mockData";
-import { useInvoices, useBusinesses } from "@/hooks/useDataStore";
+import { useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
+import type { Invoice } from "@/utils/mockData";
+import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft, BarChart3, Receipt } from "lucide-react";
+import { Download, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft, BarChart3, Receipt, Loader2 } from "lucide-react";
+import DateRangePicker from "@/components/DateRangePicker";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -14,13 +18,62 @@ interface OutletCtx { selectedFY: string }
 const MONTHS = ["April","May","June","July","August","September","October","November","December","January","February","March"];
 const SHORT = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
+/**
+ * Fetch ALL invoices with line items included (needed for GSTR-1 rate-wise breakdown).
+ * Uses include_items=true and paginates through all pages.
+ */
+function useInvoicesWithItems(selectedFY: string) {
+  const [items, setItems] = useState<Invoice[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchAll = useCallback(async () => {
+    if (!localStorage.getItem("gst_access_token")) return;
+    setIsLoading(true);
+    try {
+      const allResults: Invoice[] = [];
+      const [startYearStr] = selectedFY.split("-");
+      const startYear = parseInt(startYearStr);
+      const startDate = `${startYear}-04-01`;
+      const endDate = `${startYear + 1}-03-31`;
+
+      let url: string | null = `invoices/?include_items=true&page_size=100&start_date=${startDate}&end_date=${endDate}`;
+      while (url) {
+        const res = await api.get<any>(url);
+        const data = res.data;
+        const results = (data.results || []).map(mapDjangoInvoice);
+        allResults.push(...results);
+        if (data.next) {
+          try {
+            const u = new URL(data.next);
+            url = u.pathname.replace(/^\/api\//, '') + u.search;
+          } catch { url = null; }
+        } else {
+          url = null;
+        }
+      }
+      setItems(allResults);
+    } catch (e) {
+      console.error("Failed to fetch invoices with items", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedFY]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  return { items, isLoading };
+}
+
 export default function GSTSummary() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const isMobile = useIsMobile();
+  const [useCustomRange, setUseCustomRange] = useState(false);
+  const [customStart, setCustomStart] = useState(new Date(parseInt(selectedFY.split("-")[0]), 3, 1));
+  const [customEnd, setCustomEnd] = useState(new Date(parseInt(selectedFY.split("-")[0]) + 1, 2, 31));
   const [selectedMonth, setSelectedMonth] = useState("All");
   const [bizFilter, setBizFilter] = useState("all");
   const [activeTab, setActiveTab] = useState<"gstr1" | "gstr3b">("gstr1");
-  const { items: invoices } = useInvoices();
+  const { items: invoices, isLoading: invoicesLoading } = useInvoicesWithItems(selectedFY);
   const { items: businesses } = useBusinesses();
 
   const fyStart = parseInt(selectedFY.split("-")[0]);
@@ -30,9 +83,18 @@ export default function GSTSummary() {
   const monthNum = !isAll && monthIdx < 9 ? monthIdx + 4 : monthIdx - 8;
   const prefix = !isAll ? `${year}-${String(monthNum).padStart(2, "0")}` : "";
 
-  const filtered = useMemo(() => invoices.filter(
-    (inv) => (isAll || (inv.invoice_date || "").startsWith(prefix)) && inv.financialYear === selectedFY && (bizFilter === "all" || inv.businessId === bizFilter)
-  ), [prefix, isAll, selectedFY, bizFilter, invoices]);
+  const filtered = useMemo(() => {
+    if (useCustomRange) {
+      const startStr = format(customStart, "yyyy-MM-dd");
+      const endStr = format(customEnd, "yyyy-MM-dd");
+      return invoices.filter(
+        (inv) => inv.financialYear === selectedFY && (bizFilter === "all" || String(inv.businessId) === String(bizFilter)) && inv.invoice_date >= startStr && inv.invoice_date <= endStr
+      );
+    }
+    return invoices.filter(
+      (inv) => (isAll || inv.invoice_date.startsWith(prefix)) && inv.financialYear === selectedFY && (bizFilter === "all" || String(inv.businessId) === String(bizFilter))
+    );
+  }, [prefix, isAll, selectedFY, bizFilter, invoices, useCustomRange, customStart, customEnd]);
 
   const outward = filtered.filter((i) => i.type === "OUTWARD");
   const inward = filtered.filter((i) => i.type === "INWARD");
@@ -55,7 +117,7 @@ export default function GSTSummary() {
     const y = idx < 9 ? fyStart : fyStart + 1;
     const mn = idx < 9 ? idx + 4 : idx - 8;
     const p = `${y}-${String(mn).padStart(2, "0")}`;
-    const mInvs = invoices.filter((i) => (i.invoice_date || "").startsWith(p) && i.financialYear === selectedFY && (bizFilter === "all" || i.businessId === bizFilter));
+    const mInvs = invoices.filter((i) => i.invoice_date.startsWith(p) && i.financialYear === selectedFY && (bizFilter === "all" || String(i.businessId) === String(bizFilter)));
     const out = mInvs.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.totalTax, 0);
     const inp = mInvs.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.totalTax, 0);
     return { month: m, output: out / 1000, itc: inp / 1000, isCurrent: m === SHORT[monthIdx] };
@@ -70,15 +132,15 @@ export default function GSTSummary() {
   };
 
   return (
-    <div className={cn("space-y-5", isMobile ? "p-4 pb-20" : "p-8 space-y-6")}>
+    <div className={cn("space-y-4", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-5")}>
       <Breadcrumbs items={[{ label: "Reports", href: "/billing/reports" }, { label: "GST Summary" }]} />
 
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
         className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className={cn("rounded-2xl bg-gradient-to-br from-success/20 to-success/5 border border-success/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
-            <BarChart3 className="w-5 h-5 text-success" />
+          <div className={cn("rounded-2xl bg-gradient-to-br from-chart-2/20 to-chart-2/5 border border-chart-2/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
+            <BarChart3 className="w-5 h-5 text-chart-2" />
           </div>
           <div>
             <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl")}>GST Summary</h1>
@@ -90,22 +152,44 @@ export default function GSTSummary() {
 
       {/* Month filters */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
-        className="flex items-center gap-3 flex-wrap">
-        <div className={cn("flex rounded-xl overflow-hidden border border-border", isMobile ? "overflow-x-auto max-w-full -mx-1 px-1" : "flex-shrink-0")}>
-          <button onClick={() => setSelectedMonth("All")} className={cn("px-3 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === "All" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>All</button>
-          {MONTHS.map((m) => (
-            <button key={m} onClick={() => setSelectedMonth(m)} className={cn("px-2 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>{m.slice(0, 3)}</button>
-          ))}
+        className="space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setUseCustomRange(false)}
+              className={cn("px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all", !useCustomRange ? "bg-primary/15 border-primary/30 text-primary" : "bg-muted/50 border-border/40 text-muted-foreground hover:text-foreground")}
+            >By Month</button>
+            <button
+              onClick={() => setUseCustomRange(true)}
+              className={cn("px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all", useCustomRange ? "bg-primary/15 border-primary/30 text-primary" : "bg-muted/50 border-border/40 text-muted-foreground hover:text-foreground")}
+            >Custom Range</button>
+          </div>
+          {!isMobile && <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-auto text-[13px]"><option value="all">All Businesses</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>}
         </div>
-        {!isMobile && <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-auto text-[13px]"><option value="all">All Businesses</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>}
+        {useCustomRange ? (
+          <DateRangePicker
+            startDate={customStart}
+            endDate={customEnd}
+            onStartChange={setCustomStart}
+            onEndChange={setCustomEnd}
+            fyStart={fyStart}
+          />
+        ) : (
+          <div className={cn("flex rounded-xl overflow-hidden border border-border", isMobile ? "overflow-x-auto max-w-full -mx-1 px-1" : "flex-shrink-0")}>
+            <button onClick={() => setSelectedMonth("All")} className={cn("px-3 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === "All" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>All</button>
+            {MONTHS.map((m) => (
+              <button key={m} onClick={() => setSelectedMonth(m)} className={cn("px-2 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>{m.slice(0, 3)}</button>
+            ))}
+          </div>
+        )}
       </motion.div>
 
       {/* Stats */}
       <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3">
         {[
-          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-success" },
-          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-success" },
-          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-warning" },
+          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-chart-1" },
+          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-chart-3" },
+          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-success" },
           { label: "Net Tax", value: formatCurrency(Math.abs(netTax)), color: netTax >= 0 ? "text-destructive" : "text-success" },
         ].map((s) => (
           <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
@@ -124,11 +208,11 @@ export default function GSTSummary() {
             <BarChart data={monthlyTax} barGap={2}>
               <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={35} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
-              <Bar dataKey="output" name="Output" fill="hsl(var(--success))" radius={[4, 4, 0, 0]}>
-                {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--success))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} formatter={(value: number) => [`₹${value.toFixed(1)}k`, undefined]} />
+              <Bar dataKey="output" name="Output" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]}>
+                {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--chart-1))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
               </Bar>
-              <Bar dataKey="itc" name="ITC" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="itc" name="ITC" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -152,7 +236,7 @@ export default function GSTSummary() {
                 <motion.div key={r.rate} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
                   className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="premium-badge bg-success/12 text-success">{r.rate}%</span>
+                    <span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span>
                     <span className="text-[12px] text-muted-foreground">{r.count} inv</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[12px]">
@@ -161,7 +245,7 @@ export default function GSTSummary() {
                   </div>
                 </motion.div>
               ))}
-              {gstr1Rows.length === 0 && <div className="p-8 text-center text-muted-foreground text-sm">No data</div>}
+              {gstr1Rows.length === 0 && <div className="p-8 text-center text-muted-foreground text-sm">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading invoices...</span> : "No data for selected period"}</div>}
             </div>
           ) : (
             <table className="table-premium">
@@ -169,10 +253,10 @@ export default function GSTSummary() {
               <tbody>
                 {gstr1Rows.map((r, i) => (
                   <motion.tr key={r.rate} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
-                    <td><span className="premium-badge bg-success/12 text-success">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.count}</td>
+                    <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.count}</td>
                   </motion.tr>
                 ))}
-                {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">No data</td></tr>}
+                {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading invoices...</span> : "No data for selected period"}</td></tr>}
               </tbody>
             </table>
           )
@@ -181,8 +265,8 @@ export default function GSTSummary() {
             <motion.div variants={stagger} initial="hidden" animate="visible"
               className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3")}>
               {[
-                { label: "Outward taxable", value: formatCurrency(totalOutward), color: "text-success" },
-                { label: "Eligible ITC", value: formatCurrency(totalITC), color: "text-warning" },
+                { label: "Outward taxable", value: formatCurrency(totalOutward), color: "text-chart-1" },
+                { label: "Eligible ITC", value: formatCurrency(totalITC), color: "text-success" },
                 { label: "Payment of tax", value: formatCurrency(Math.max(netTax, 0)), color: "text-destructive" },
               ].map((item) => (
                 <motion.div key={item.label} variants={fadeUp} className="glass-surface rounded-xl p-4">
@@ -194,7 +278,7 @@ export default function GSTSummary() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               className="glass-surface rounded-xl p-4 flex items-center justify-between">
               <div><p className="text-[11px] text-muted-foreground">Net Tax</p><p className={cn("text-xl font-display font-bold mt-1", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</p></div>
-              <span className={cn("premium-badge", netTax >= 0 ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>{netTax >= 0 ? "Payable" : "Refundable"}</span>
+              <span className={cn("premium-badge", netTax >= 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success")}>{netTax >= 0 ? "Payable" : "Refundable"}</span>
             </motion.div>
           </div>
         )}

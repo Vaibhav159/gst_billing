@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles } from "lucide-react";
+import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Palette, Database, Download, Trash2, HardDrive } from "lucide-react";
 import { financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
@@ -9,15 +10,25 @@ import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { Switch } from "@/components/ui/switch";
+import { resetOnboarding } from "@/components/OnboardingWizard";
+import InvoiceTemplateSelector, { InvoiceTemplate, getStoredTemplate, setStoredTemplate } from "@/components/InvoiceTemplateSelector";
 
-export default function Settings() {
-  const { toast } = useToast();
-  const isMobile = useIsMobile();
-  const { mobileMode, setMobileMode } = useMobileMode();
-  const { items: businesses } = useBusinesses();
-  const [settings, setSettings] = useState({
-    defaultBusinessId:[0]?.id || "",
-    defaultFinancialYear: "2024-25",
+const SETTINGS_STORAGE_KEY = "gst_app_settings";
+
+function getCurrentFinancialYear(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed, so March = 2
+  // Indian FY runs Apr–Mar: if month >= March (index 3), FY starts this year
+  const startYear = month >= 3 ? year : year - 1;
+  const endYear = startYear + 1;
+  return `${startYear}-${String(endYear).slice(-2)}`;
+}
+
+function loadSettings(fallbackBusinessId: string) {
+  const defaults = {
+    defaultBusinessId: fallbackBusinessId,
+    defaultFinancialYear: getCurrentFinancialYear(),
     invoicePrefix: "SGJ",
     invoiceStartNumber: 108,
     defaultGstRate: 3,
@@ -25,10 +36,40 @@ export default function Settings() {
     autoDetectIGST: true,
     showHSN: true,
     amountInWords: true,
-  });
+  };
+  try {
+    const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (stored) {
+      return { ...defaults, ...JSON.parse(stored) };
+    }
+  } catch {
+    // ignore corrupt data
+  }
+  return defaults;
+}
+
+export default function Settings() {
+  const { toast } = useToast();
+  const isMobile = useIsMobile();
+  const { mobileMode, setMobileMode } = useMobileMode();
+  const { items: businesses } = useBusinesses();
+  const [settings, setSettings] = useState(() => loadSettings(businesses[0]?.id || ""));
+  const [invoiceTemplate, setInvoiceTemplate] = useState<InvoiceTemplate>(getStoredTemplate());
+
+  const handleTemplateChange = (t: InvoiceTemplate) => {
+    setInvoiceTemplate(t);
+    setStoredTemplate(t);
+  };
 
   const set = (field: string, val: any) => setSettings((p) => ({ ...p, [field]: val }));
-  const handleSave = () => { toast({ title: "Settings Saved", description: "Your preferences have been updated." }); };
+  const handleSave = () => {
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // storage full or unavailable
+    }
+    toast({ title: "Settings Saved", description: "Your preferences have been updated." });
+  };
 
   const sections = [
     ...(isMobile ? [{
@@ -97,6 +138,77 @@ export default function Settings() {
         </div>
       ),
     }] : []),
+    {
+      title: "Invoice Template", icon: Palette,
+      fields: (
+        <InvoiceTemplateSelector selected={invoiceTemplate} onChange={handleTemplateChange} />
+      ),
+    },
+    {
+      title: "Data Management", icon: Database,
+      fields: (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">Export All Data</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Download all invoices, customers, and products as JSON</p>
+            </div>
+            <button onClick={() => {
+              const data = { settings, exportedAt: new Date().toISOString() };
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = `gst-app-settings-export-${new Date().toISOString().split("T")[0]}.json`; a.click();
+              URL.revokeObjectURL(url);
+              toast({ title: "Settings Exported", description: "Settings backup downloaded." });
+            }}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5">
+              <Download className="w-3.5 h-3.5" /> Export
+            </button>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">Backup & Restore</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Full database backup from the Backup page</p>
+            </div>
+            <Link to="/billing/backup"
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-chart-3/10 text-chart-3 hover:bg-chart-3/20 transition-colors flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5" /> Go to Backup
+            </Link>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-destructive/5 border border-destructive/10">
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">Clear Local Settings</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Reset all app preferences to defaults (does not delete server data)</p>
+            </div>
+            <button onClick={() => {
+              localStorage.removeItem(SETTINGS_STORAGE_KEY);
+              setSettings(loadSettings(businesses[0]?.id || ""));
+              toast({ title: "Settings Cleared", description: "Preferences reset to defaults.", variant: "destructive" });
+            }}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors flex items-center gap-1.5">
+              <Trash2 className="w-3.5 h-3.5" /> Clear
+            </button>
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: "Setup", icon: RotateCcw,
+      fields: (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">Onboarding Wizard</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Re-run the getting started wizard</p>
+            </div>
+            <button onClick={() => { resetOnboarding(); toast({ title: "Onboarding Reset", description: "Visit Dashboard to see the wizard." }); }}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+              Reset
+            </button>
+          </div>
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -117,8 +229,14 @@ export default function Settings() {
           );
         })}
       </div>
-      <div className={cn("flex", isMobile ? "justify-center" : "justify-end")}>
-        <button onClick={handleSave} className={cn("premium-btn-primary text-[13px]", isMobile && "w-full")}><Save className="w-4 h-4" /> Save Settings</button>
+      {/* Sticky save bar */}
+      <div className={cn(
+        "sticky bottom-0 z-30 -mx-4 px-4 py-3 bg-card/95 backdrop-blur-md border-t border-border/50",
+        isMobile ? "-mx-4 px-4" : "-mx-6 lg:-mx-8 px-6 lg:px-8"
+      )}>
+        <div className={cn("flex max-w-4xl mx-auto", isMobile ? "justify-center" : "justify-end")}>
+          <button onClick={handleSave} className={cn("premium-btn-primary text-[13px]", isMobile && "w-full")}><Save className="w-4 h-4" /> Save Settings</button>
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sweet-rebuild-suite-main",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8080,
+      "autoPort": false,
+      "cwd": "/Users/lakshya/projects/gst/gst_billing/sweet-rebuild-suite-main"
+    }
+  ]
+}

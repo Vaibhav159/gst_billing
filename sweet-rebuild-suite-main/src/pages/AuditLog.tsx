@@ -5,10 +5,13 @@ import {
   Settings, Plus, Pencil, Trash2, Printer, Download, Copy, Clock,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { auditLog, formatDate, type AuditAction, type AuditEntity } from "@/utils/mockData";
+import { formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+
+type AuditAction = "created" | "updated" | "deleted" | "printed" | "exported" | "duplicated";
+type AuditEntity = "invoice" | "customer" | "product" | "business" | "settings";
 
 const actionConfig: Record<AuditAction, { label: string; icon: typeof Plus; color: string; bg: string }> = {
   created: { label: "Created", icon: Plus, color: "text-success", bg: "bg-success/12" },
@@ -35,18 +38,22 @@ function getEntityLink(entity: AuditEntity, entityId: string): string | null {
 
 function formatTime(ts: string) { return new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }); }
 
+const ITEMS_PER_PAGE = 20;
+
 export default function AuditLog() {
   const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("all");
   const [entityFilter, setEntityFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const filtered = auditLog.filter((entry) => {
-    const q = search.toLowerCase();
-    return (!q || entry.entityName.toLowerCase().includes(q) || (entry.details || "").toLowerCase().includes(q)) && (actionFilter === "all" || entry.action === actionFilter) && (entityFilter === "all" || entry.entity === entityFilter);
-  });
+  // Audit log API not yet implemented — show empty state
+  const auditLog: Array<{ id: string; action: AuditAction; entity: AuditEntity; entityId: string; entityName: string; details?: string; timestamp: string }> = [];
+  const filtered = auditLog;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const paginatedFiltered = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
-  const grouped = filtered.reduce<Record<string, typeof filtered>>((acc, entry) => {
+  const grouped = paginatedFiltered.reduce<Record<string, typeof filtered>>((acc, entry) => {
     const date = entry.timestamp.split("T")[0]; if (!acc[date]) acc[date] = []; acc[date].push(entry); return acc;
   }, {});
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
@@ -122,7 +129,39 @@ export default function AuditLog() {
           </div>
         ))}
         {filtered.length === 0 && (
-          <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground"><History className="w-10 h-10 opacity-30" /><p className="text-sm">No entries found</p></div>
+          <div className="elevated-card rounded-2xl p-12 flex flex-col items-center gap-4 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-chart-4/10 border border-chart-4/20 flex items-center justify-center">
+              <History className="w-8 h-8 text-chart-4/40" />
+            </div>
+            <div>
+              <p className="text-[15px] font-semibold text-foreground">No audit entries yet</p>
+              <p className="text-[12px] text-muted-foreground mt-1 max-w-sm">
+                Audit logging tracks all changes to invoices, customers, products, and businesses.
+                Entries will appear here as you use the application.
+              </p>
+            </div>
+            <span className="premium-badge bg-warning/12 text-warning text-[10px] mt-2">Coming Soon</span>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-4">
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+              Previous
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).slice(Math.max(0, currentPage - 3), currentPage + 2).map((page) => (
+              <button key={page} onClick={() => setCurrentPage(page)}
+                className={cn("w-8 h-8 rounded-lg text-[12px] font-semibold transition-all",
+                  page === currentPage ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/30"
+                )}>{page}</button>
+            ))}
+            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+              Next
+            </button>
+          </div>
         )}
       </div>
     </div>

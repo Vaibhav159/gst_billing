@@ -4,7 +4,7 @@ import { X, UserPlus, Phone, Mail, MapPin, Hash, CreditCard, Save } from "lucide
 import { indianStates } from "@/utils/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
-import { useCustomers, generateId } from "@/hooks/useDataStore";
+import { useCustomers, useBusinesses } from "@/hooks/useDataStore";
 
 interface QuickCustomerModalProps {
   open: boolean;
@@ -15,6 +15,7 @@ interface QuickCustomerModalProps {
 export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCustomerModalProps) {
   const { toast } = useToast();
   const { create: createCustomer } = useCustomers();
+  const { items: businesses } = useBusinesses();
   const [form, setForm] = useState({
     name: "", gst: "", pan: "", mobile: "", email: "", state: "", address: "",
   });
@@ -35,7 +36,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
   const handleGSTChange = (val: string) => {
     const upper = val.toUpperCase();
     handleChange("gst", upper);
-    if (upper.length >= 2 && !form.state_name) {
+    if (upper.length >= 2 && !form.state) {
       const prefix = upper.substring(0, 2);
       if (gstStateMap[prefix]) setForm((p) => ({ ...p, state: gstStateMap[prefix] }));
     }
@@ -44,38 +45,55 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Name is required";
-    if (!form.mobile_number.trim()) errs.mobile_number = "Mobile is required";
-    else if (form.mobile_number.length !== 10 || !/^\d+$/.test(form.mobile_number)) errs.mobile_number = "Valid 10-digit number";
-    if (form.gst_number && form.gst_number.length !== 15) errs.gst_number = "GST must be 15 chars";
+    if (form.mobile && (form.mobile.length !== 10 || !/^\d+$/.test(form.mobile))) errs.mobile = "Valid 10-digit number";
+    if (form.gst && form.gst.length !== 15) errs.gst = "GST must be 15 chars";
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       return;
     }
-    const newId = generateId("c-");
-    const newCustomer = {
-      id: newId,
-      name: form.name,
-      gst: form.gst_number,
-      pan: form.pan_number,
-      mobile: form.mobile_number,
-      email: form.email,
-      state: form.state_name,
-      address: form.address,
-      businesses: [] as string[],
-      tags: [] as string[],
-      createdAt: new Date().toISOString(),
-    };
-    createCustomer(newCustomer);
-    toast({ title: "Customer Created", description: form.name });
-    onCreated({ id: newId, name: form.name, gst: form.gst_number, state: form.state_name, mobile: form.mobile_number });
-    setForm({ name: "", gst: "", pan: "", mobile: "", email: "", state: "", address: "" });
-    setErrors({});
+    setSubmitting(true);
+    try {
+      // Send with correct API field names
+      const payload = {
+        name: form.name,
+        gst_number: form.gst,
+        pan_number: form.pan,
+        mobile_number: form.mobile,
+        email: form.email,
+        state_name: form.state ? form.state.toUpperCase() : "",
+        address: form.address,
+        businesses: businesses.map((b) => b.id),
+      };
+      const created = await createCustomer(payload);
+      toast({ title: "Customer Created", description: form.name });
+      onCreated({
+        id: String(created.id),
+        name: created.name || form.name,
+        gst: created.gst_number || form.gst,
+        state: created.state_name || form.state,
+        mobile: created.mobile_number || form.mobile,
+      });
+      setForm({ name: "", gst: "", pan: "", mobile: "", email: "", state: "", address: "" });
+      setErrors({});
+    } catch (err: any) {
+      const detail = err?.response?.data;
+      let errorMsg = "Could not create customer. Please try again.";
+      if (detail && typeof detail === "object") {
+        errorMsg = Object.entries(detail)
+          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
+          .join("\n");
+      }
+      toast({ title: "Creation Failed", description: errorMsg, variant: "destructive" });
+    }
+    setSubmitting(false);
   };
 
   return (
@@ -112,17 +130,17 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
                   <input type="text" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
                     placeholder="Customer name" className={cn("premium-input", errors.name && "border-destructive/50")} />
                 </Field>
-                <Field label="Mobile" icon={Phone} required error={errors.mobile_number}>
-                  <input type="text" value={form.mobile_number} onChange={(e) => handleChange("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
-                    placeholder="10-digit" maxLength={10} className={cn("premium-input tabular-nums", errors.mobile_number && "border-destructive/50")} />
+                <Field label="Mobile" icon={Phone} error={errors.mobile}>
+                  <input type="text" value={form.mobile} onChange={(e) => handleChange("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    placeholder="10-digit (optional)" maxLength={10} className={cn("premium-input tabular-nums", errors.mobile && "border-destructive/50")} />
                 </Field>
-                <Field label="GST Number" icon={Hash} error={errors.gst_number}>
-                  <input type="text" value={form.gst_number} onChange={(e) => handleGSTChange(e.target.value)}
+                <Field label="GST Number" icon={Hash} error={errors.gst}>
+                  <input type="text" value={form.gst} onChange={(e) => handleGSTChange(e.target.value)}
                     placeholder="e.g. 27AABCK5461H1ZO" maxLength={15}
-                    className={cn("premium-input font-mono uppercase tracking-wider", errors.gst_number && "border-destructive/50")} />
+                    className={cn("premium-input font-mono uppercase tracking-wider", errors.gst && "border-destructive/50")} />
                 </Field>
                 <Field label="State" icon={MapPin}>
-                  <select value={form.state_name} onChange={(e) => handleChange("state", e.target.value)} className="premium-select w-full">
+                  <select value={form.state} onChange={(e) => handleChange("state", e.target.value)} className="premium-select w-full">
                     <option value="">Select State</option>
                     {indianStates.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -132,7 +150,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
                     placeholder="email@example.com" className="premium-input" />
                 </Field>
                 <Field label="PAN" icon={CreditCard}>
-                  <input type="text" value={form.pan_number} onChange={(e) => handleChange("pan", e.target.value.toUpperCase())}
+                  <input type="text" value={form.pan} onChange={(e) => handleChange("pan", e.target.value.toUpperCase())}
                     placeholder="AABCK5461H" maxLength={10} className="premium-input font-mono uppercase" />
                 </Field>
               </div>

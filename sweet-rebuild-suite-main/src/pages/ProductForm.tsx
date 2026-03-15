@@ -199,8 +199,8 @@ export default function ProductForm() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="md:col-span-2">
                   <FormField label="Product Name" icon={Package} required error={errors.name}>
-                    <input type="text" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
-                      placeholder="e.g. Diamond Ring 22K" className={cn("premium-input", errors.name && "border-destructive/50 focus:ring-destructive/30")} />
+                    <input type="text" value={form.name} onChange={(e) => handleChange("name", e.target.value.toUpperCase())}
+                      placeholder="e.g. DIAMOND RING 22K" className={cn("premium-input uppercase", errors.name && "border-destructive/50 focus:ring-destructive/30")} />
                   </FormField>
                 </div>
 

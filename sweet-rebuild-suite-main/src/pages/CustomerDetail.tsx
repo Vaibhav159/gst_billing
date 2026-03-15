@@ -41,7 +41,7 @@ export default function CustomerDetail() {
     </div>
   );
 
-  const custInvoices = invoices.filter((inv) => inv.customerId === id);
+  const custInvoices = invoices.filter((inv) => String(inv.customerId) === String(id));
   const totalSales = custInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
   const totalPurchases = custInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
   const netAmount = totalSales - totalPurchases;

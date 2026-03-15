@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Package, TrendingUp, Hash, Filter, LayoutGrid, List,
   Copy, CheckCircle2, BarChart3, SlidersHorizontal, Loader2,
+  ArrowUpDown, AlertTriangle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatCurrency } from "@/utils/mockData";
@@ -28,14 +29,39 @@ export default function ProductList() {
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [copiedHSN, setCopiedHSN] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<"name" | "revenue" | "usage" | "gst" | "qty">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const gstRates = [...new Set(products.map((p) => p.gstRate))].sort((a, b) => a - b);
+
+  // Detect duplicate product names (case-insensitive)
+  const duplicateNames = useMemo(() => {
+    const nameMap = new Map<string, string[]>();
+    products.forEach((p) => {
+      const lower = p.name.toLowerCase();
+      if (!nameMap.has(lower)) nameMap.set(lower, []);
+      nameMap.get(lower)!.push(p.name);
+    });
+    const dupes = new Set<string>();
+    nameMap.forEach((names) => {
+      if (names.length > 1) names.forEach((n) => dupes.add(n));
+    });
+    return dupes;
+  }, [products]);
 
   const filtered = products.filter((p) => {
     const q = search.toLowerCase();
     const matchSearch = !q || p.name.toLowerCase().includes(q) || p.hsn.includes(q) || p.description.toLowerCase().includes(q);
     const matchGST = gstFilter === "all" || p.gstRate === Number(gstFilter);
     return matchSearch && matchGST;
+  }).sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortBy === "name") return dir * a.name.localeCompare(b.name);
+    if (sortBy === "revenue") return dir * (getProductRevenue(a) - getProductRevenue(b));
+    if (sortBy === "usage") return dir * (getProductUsageCount(a) - getProductUsageCount(b));
+    if (sortBy === "qty") return dir * (getProductQtySold(a) - getProductQtySold(b));
+    if (sortBy === "gst") return dir * (a.gstRate - b.gstRate);
+    return 0;
   });
 
   const getProductRevenue = (p: any) => Number(p.total_revenue) || 0;
@@ -57,7 +83,7 @@ export default function ProductList() {
     const headers = ["Name", "HSN Code", "GST Rate (%)", "Description", "Revenue", "Times Used"];
     const rows = filtered.map((p) => [
       p.name, p.hsn, p.gstRate.toString(), `"${p.description}"`,
-      getProductRevenue(p.id).toString(), getProductUsageCount(p.id).toString(),
+      getProductRevenue(p).toString(), getProductUsageCount(p).toString(),
     ]);
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -263,14 +289,33 @@ export default function ProductList() {
         </p>
       )}
 
+      {/* Duplicate Warning */}
+      {duplicateNames.size > 0 && (
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-3 p-4 rounded-xl border border-warning/30 bg-warning/5">
+          <AlertTriangle className="w-5 h-5 text-warning shrink-0" />
+          <div>
+            <p className="text-[13px] font-semibold text-foreground">Possible duplicate products detected</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {Math.floor(duplicateNames.size / 2)} product(s) may be duplicated with different casing: {[...duplicateNames].slice(0, 4).join(", ")}{duplicateNames.size > 4 ? "…" : ""}
+            </p>
+          </div>
+        </motion.div>
+      )}
+
       {viewMode === "table" && (
         <motion.div variants={stagger} initial="hidden" animate="visible" className="elevated-card rounded-2xl overflow-x-auto">
           <table className="table-premium">
             <thead>
               <tr>
-                {["#", "Product", "HSN Code", "GST Rate", "Revenue", "Qty Sold", "Usage", ""].map((h) => (
-                  <th key={h}>{h}</th>
-                ))}
+                <th>#</th>
+                <th><button onClick={() => { setSortBy("name"); setSortDir(d => sortBy === "name" ? (d === "asc" ? "desc" : "asc") : "asc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Product {sortBy === "name" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th>HSN Code</th>
+                <th><button onClick={() => { setSortBy("gst"); setSortDir(d => sortBy === "gst" ? (d === "asc" ? "desc" : "asc") : "asc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">GST Rate {sortBy === "gst" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th><button onClick={() => { setSortBy("revenue"); setSortDir(d => sortBy === "revenue" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Revenue {sortBy === "revenue" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th><button onClick={() => { setSortBy("qty"); setSortDir(d => sortBy === "qty" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Qty Sold {sortBy === "qty" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th><button onClick={() => { setSortBy("usage"); setSortDir(d => sortBy === "usage" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Usage {sortBy === "usage" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -321,7 +366,7 @@ export default function ProductList() {
                     <td>
                       <div className="flex items-center gap-2">
                         <div className="w-16 h-1.5 bg-secondary/40 rounded-full overflow-hidden">
-                          <div className="h-full bg-chart-3 rounded-full" style={{ width: `${Math.min((usageCount / Math.max(...products.map((pr) => getProductUsageCount(pr.id)), 1)) * 100, 100)}%` }} />
+                          <div className="h-full bg-chart-3 rounded-full" style={{ width: `${Math.min((usageCount / Math.max(...products.map((pr) => getProductUsageCount(pr)), 1)) * 100, 100)}%` }} />
                         </div>
                         <span className="text-[11px] text-muted-foreground tabular-nums">{usageCount}×</span>
                       </div>

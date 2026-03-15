@@ -124,8 +124,8 @@ export default function CustomerForm() {
   const nameSuggestions = !isEdit && form.name.length >= 2
     ? customers.filter((c) =>
         c.name.toLowerCase().includes(form.name.toLowerCase()) ||
-        c.mobile_number.includes(form.name) ||
-        c.gst_number.toLowerCase().includes(form.name.toLowerCase())
+        (c.mobile_number || "").includes(form.name) ||
+        (c.gst_number || "").toLowerCase().includes(form.name.toLowerCase())
       ).slice(0, 5)
     : [];
 
@@ -195,14 +195,14 @@ export default function CustomerForm() {
 
   // Merge logic
   const mergeFilteredCustomers = customers.filter((c) => {
-    if (isEdit && c.id === id) return false;
+    if (isEdit && String(c.id) === String(id)) return false;
     const q = mergeSearch.toLowerCase();
     return !q || c.name.toLowerCase().includes(q) || c.gst_number.toLowerCase().includes(q) || c.mobile_number.includes(q);
   });
 
   const handleMerge = () => {
     if (!mergeTarget) return;
-    const target = customers.find((c) => c.id === mergeTarget);
+    const target = customers.find((c) => String(c.id) === String(mergeTarget));
     if (!target) return;
     toast({
       title: "Customers Merged",
@@ -233,7 +233,7 @@ export default function CustomerForm() {
               {isEdit ? "Edit Customer" : "New Customer"}
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {isEdit ? `Editing ${existing?.name}` : "Fill in the details to register a new customer"}
+              {isEdit ? (isLoading ? "Loading customer..." : `Editing ${existing?.name || ""}`) : "Fill in the details to register a new customer"}
             </p>
           </div>
         </div>
@@ -558,8 +558,8 @@ export default function CustomerForm() {
               <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
                 {mergeFilteredCustomers.map((c) => {
                   const selected = mergeTarget === c.id;
-                  const invCount = invoices.filter((inv) => inv.customerId === c.id).length;
-                  const revenue = invoices.filter((inv) => inv.customerId === c.id && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
+                  const invCount = invoices.filter((inv) => String(inv.customerId) === String(c.id)).length;
+                  const revenue = invoices.filter((inv) => String(inv.customerId) === String(c.id) && inv.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
                   return (
                     <button key={c.id} type="button"
                       onClick={() => setMergeTarget(selected ? null : c.id)}
@@ -585,7 +585,7 @@ export default function CustomerForm() {
                           <span>{invCount} inv</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          {c.tags.map((t) => (
+                          {(c.tags || []).map((t) => (
                             <span key={t} className={cn(
                               "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
                               t === "VIP" ? "bg-chart-4/12 text-chart-4" :
@@ -625,7 +625,7 @@ export default function CustomerForm() {
                       </span>
                       <ArrowRight className="w-3.5 h-3.5 text-chart-4" />
                       <span className="font-semibold text-chart-4">
-                        {customers.find((c) => c.id === mergeTarget)?.name}
+                        {customers.find((c) => String(c.id) === String(mergeTarget))?.name}
                       </span>
                     </div>
                     <span className="text-muted-foreground">All invoices will be transferred</span>

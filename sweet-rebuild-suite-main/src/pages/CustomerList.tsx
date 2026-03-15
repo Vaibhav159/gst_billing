@@ -3,7 +3,7 @@ import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
   Building2, Users, TrendingUp, Filter, ChevronDown, Phone, MapPin, Star,
-  GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal, Loader2,
+  GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal, Loader2, ArrowUpDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatCurrency } from "@/utils/mockData";
@@ -34,6 +34,10 @@ export default function CustomerList() {
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<"name" | "revenue" | "invoices">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 25;
 
   // Collect unique tags
   const allTags = ["VIP", "Wholesale", "Retail"]; // Hardcoded for now since tags are removed from DRF
@@ -41,10 +45,22 @@ export default function CustomerList() {
     const q = search.toLowerCase();
     const cAny = c as any;
     const matchSearch = !q || c.name.toLowerCase().includes(q) || (c.gst_number && c.gst_number.toLowerCase().includes(q)) || (c.mobile_number && c.mobile_number.includes(q)) || (cAny.email && cAny.email.toLowerCase().includes(q));
-    const matchBiz = bizFilter === "all" || (c.businesses && c.businesses.includes ? c.businesses.includes(bizFilter) : false);
+    const matchBiz = bizFilter === "all" || (c.businesses && Array.isArray(c.businesses) ? c.businesses.some((bid: any) => String(bid) === String(bizFilter)) : false);
     const matchTag = tagFilter === "all" || (cAny.tags && cAny.tags.includes(tagFilter));
     return matchSearch && matchBiz && matchTag;
+  }).sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortBy === "name") return dir * a.name.localeCompare(b.name);
+    if (sortBy === "revenue") return dir * (getCustomerRevenue(a) - getCustomerRevenue(b));
+    if (sortBy === "invoices") return dir * (getCustomerInvoiceCount(a) - getCustomerInvoiceCount(b));
+    return 0;
   });
+
+  const totalFilteredPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const paginatedCustomers = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  // Reset page when filters change
+  const resetPage = () => setCurrentPage(1);
 
   // Stats
   const totalCustomers = totalCount;
@@ -97,7 +113,7 @@ export default function CustomerList() {
 
         {/* Customer Cards */}
         <div className="space-y-2.5">
-          {filtered.map((c) => {
+          {paginatedCustomers.map((c) => {
             const revenue = getCustomerRevenue(c);
             const invCount = getCustomerInvoiceCount(c);
             return (
@@ -142,10 +158,27 @@ export default function CustomerList() {
           {filtered.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
               <Users className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No found</p>
+              <p className="text-sm font-medium">No customers found</p>
             </div>
           )}
         </div>
+
+        {/* Mobile Pagination */}
+        {totalFilteredPages > 1 && (
+          <div className="flex items-center justify-center gap-2 py-2">
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+              Prev
+            </button>
+            <span className="text-[12px] text-muted-foreground">
+              {currentPage} / {totalFilteredPages}
+            </span>
+            <button onClick={() => setCurrentPage(p => Math.min(totalFilteredPages, p + 1))} disabled={currentPage === totalFilteredPages}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+              Next
+            </button>
+          </div>
+        )}
 
         {/* FAB */}
         <Link to="/billing/customer/new" className="mobile-fab">
@@ -237,20 +270,20 @@ export default function CustomerList() {
         className="flex flex-col lg:flex-row items-start lg:items-center gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); resetPage(); }}
             placeholder="Search name, GST, phone, email..." className="premium-input pl-11" />
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="relative">
             <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select pl-9 pr-8 text-[13px]">
+            <select value={bizFilter} onChange={(e) => { setBizFilter(e.target.value); resetPage(); }} className="premium-select pl-9 pr-8 text-[13px]">
               <option value="all">All Businesses</option>
               {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className="premium-select pl-9 pr-8 text-[13px]">
+            <select value={tagFilter} onChange={(e) => { setTagFilter(e.target.value); resetPage(); }} className="premium-select pl-9 pr-8 text-[13px]">
               <option value="all">All Tags</option>
               {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -268,9 +301,13 @@ export default function CustomerList() {
       </motion.div>
 
       {/* Results count */}
-      {(search || bizFilter !== "all" || tagFilter !== "all") && (
+      {(search || bizFilter !== "all" || tagFilter !== "all" || totalFilteredPages > 1) && (
         <p className="text-xs text-muted-foreground">
-          Showing <span className="font-semibold text-foreground">{filtered.length}</span> of {totalCustomers}
+          {filtered.length > 0 ? (
+            <>Showing <span className="font-semibold text-foreground">{(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}</span> of {filtered.length}{filtered.length < totalCustomers ? ` (${totalCustomers} total)` : ""}</>
+          ) : (
+            <>No results found{totalCustomers > 0 ? ` (${totalCustomers} total)` : ""}</>
+          )}
           {search && <> matching "<span className="text-primary">{search}</span>"</>}
         </p>
       )}
@@ -281,18 +318,23 @@ export default function CustomerList() {
           <table className="table-premium">
             <thead>
               <tr>
-                {["#", "Customer", "GST Number", "PAN", "Contact", "Revenue", "Business", ""].map((h) => (
-                  <th key={h}>{h}</th>
-                ))}
+                <th>#</th>
+                <th><button onClick={() => { setSortBy("name"); setSortDir(d => sortBy === "name" ? (d === "asc" ? "desc" : "asc") : "asc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Customer {sortBy === "name" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th>GST Number</th>
+                <th>PAN</th>
+                <th>Contact</th>
+                <th><button onClick={() => { setSortBy("revenue"); setSortDir(d => sortBy === "revenue" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Revenue {sortBy === "revenue" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+                <th>Business</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c, i) => {
+              {paginatedCustomers.map((c, i) => {
                 const revenue = getCustomerRevenue(c);
                 const invCount = getCustomerInvoiceCount(c);
                 return (
                   <motion.tr key={c.id} variants={fadeUp}>
-                    <td className="text-muted-foreground text-[13px] w-12">{i + 1}</td>
+                    <td className="text-muted-foreground text-[13px] w-12">{(currentPage - 1) * ITEMS_PER_PAGE + i + 1}</td>
                     <td className="min-w-[200px]">
                       <Link to={`/billing/customer/${c.id}`} className="group">
                         <div className="flex items-center gap-3">
@@ -326,8 +368,17 @@ export default function CustomerList() {
                     </td>
                     <td>
                       <div>
-                        <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(revenue)}</p>
-                        <p className="text-[10px] text-muted-foreground">{invCount} invoices</p>
+                        {revenue > 0 ? (
+                          <>
+                            <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(revenue)}</p>
+                            <p className="text-[10px] text-muted-foreground">{invCount} invoices</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-[13px] text-muted-foreground/60">—</p>
+                            <p className="text-[10px] text-muted-foreground/50 italic">No invoices yet</p>
+                          </>
+                        )}
                       </div>
                     </td>
                     <td>
@@ -358,7 +409,7 @@ export default function CustomerList() {
                   <td colSpan={8} className="text-center py-16">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Users className="w-10 h-10 opacity-30" />
-                      <p className="text-sm font-medium">No found</p>
+                      <p className="text-sm font-medium">No customers found</p>
                       <p className="text-xs">Try adjusting your search or filters</p>
                     </div>
                   </td>
@@ -372,7 +423,7 @@ export default function CustomerList() {
       {/* Cards View */}
       {viewMode === "cards" && (
         <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((c) => {
+          {paginatedCustomers.map((c) => {
             const revenue = getCustomerRevenue(c);
             const invCount = getCustomerInvoiceCount(c);
             return (
@@ -405,11 +456,15 @@ export default function CustomerList() {
                   <div className="flex items-center justify-between pt-3 border-t border-border/30">
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Revenue</p>
-                      <p className="text-[14px] font-bold text-foreground tabular-nums">{formatCurrency(revenue)}</p>
+                      {revenue > 0 ? (
+                        <p className="text-[14px] font-bold text-foreground tabular-nums">{formatCurrency(revenue)}</p>
+                      ) : (
+                        <p className="text-[13px] text-muted-foreground/50 italic">—</p>
+                      )}
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Invoices</p>
-                      <p className="text-[14px] font-bold text-foreground">{invCount}</p>
+                      <p className="text-[14px] font-bold text-foreground">{invCount || "—"}</p>
                     </div>
                     <div className="flex gap-1">
                       {(c.businesses || []).map((bid: string | number) => {
@@ -429,10 +484,38 @@ export default function CustomerList() {
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center gap-3 py-16 text-muted-foreground">
               <Users className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No found</p>
+              <p className="text-sm font-medium">No customers found</p>
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* Pagination */}
+      {totalFilteredPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            Previous
+          </button>
+          {Array.from({ length: totalFilteredPages }, (_, i) => i + 1)
+            .filter(page => page === 1 || page === totalFilteredPages || Math.abs(page - currentPage) <= 2)
+            .map((page, idx, arr) => {
+              const showEllipsis = idx > 0 && page - arr[idx - 1] > 1;
+              return (
+                <span key={page} className="flex items-center gap-1">
+                  {showEllipsis && <span className="text-muted-foreground text-[12px] px-1">…</span>}
+                  <button onClick={() => setCurrentPage(page)}
+                    className={cn("w-8 h-8 rounded-lg text-[12px] font-semibold transition-all",
+                      page === currentPage ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/30"
+                    )}>{page}</button>
+                </span>
+              );
+            })}
+          <button onClick={() => setCurrentPage(p => Math.min(totalFilteredPages, p + 1))} disabled={currentPage === totalFilteredPages}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            Next
+          </button>
+        </div>
       )}
 
       {/* Load More */}
@@ -579,7 +662,7 @@ export default function CustomerList() {
                   {mergeFiltered.length === 0 && (
                     <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
                       <Users className="w-8 h-8 opacity-30" />
-                      <p className="text-sm">No found</p>
+                      <p className="text-sm">No customers found</p>
                     </div>
                   )}
                 </div>

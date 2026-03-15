@@ -6,19 +6,19 @@ import { formatCurrency } from "@/utils/mockData";
 import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
 
 const pages = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
-  { label: "Customers", href: "/billing/customer/list", icon: Users },
-  { label: "Businesses", href: "/billing/business/list", icon: Building2 },
-  { label: "Products", href: "/billing/product/list", icon: Package },
-  { label: "Invoices", href: "/billing/invoice/list", icon: FileText },
-  { label: "Reports", href: "/billing/reports", icon: BarChart3 },
-  { label: "GST Summary", href: "/billing/gst-summary", icon: Calculator },
-  { label: "Backup", href: "/billing/backup", icon: HardDrive },
-  { label: "Audit Log", href: "/billing/audit-log", icon: History },
-  { label: "Settings", href: "/billing/settings", icon: Settings },
-  { label: "New Invoice", href: "/billing/invoice/add", icon: FileText },
-  { label: "New Customer", href: "/billing/customer/new", icon: Users },
-  { label: "New Product", href: "/billing/product/new", icon: Package },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, shortcut: "D" },
+  { label: "Customers", href: "/billing/customer/list", icon: Users, shortcut: "C" },
+  { label: "Businesses", href: "/billing/business/list", icon: Building2, shortcut: "B" },
+  { label: "Products", href: "/billing/product/list", icon: Package, shortcut: "P" },
+  { label: "Invoices", href: "/billing/invoice/list", icon: FileText, shortcut: "I" },
+  { label: "Reports", href: "/billing/reports", icon: BarChart3, shortcut: "R" },
+  { label: "GST Summary", href: "/billing/gst-summary", icon: Calculator, shortcut: "G" },
+  { label: "Backup", href: "/billing/backup", icon: HardDrive, shortcut: "" },
+  { label: "Audit Log", href: "/billing/audit-log", icon: History, shortcut: "" },
+  { label: "Settings", href: "/billing/settings", icon: Settings, shortcut: "S" },
+  { label: "New Invoice", href: "/billing/invoice/add", icon: FileText, shortcut: "N" },
+  { label: "New Customer", href: "/billing/customer/new", icon: Users, shortcut: "" },
+  { label: "New Product", href: "/billing/product/new", icon: Package, shortcut: "" },
 ];
 
 export default function CommandPalette() {
@@ -58,7 +58,8 @@ export default function CommandPalette() {
           {pages.map((p) => (
             <CommandItem key={p.href} onSelect={() => go(p.href)} className="gap-3">
               <p.icon className="w-4 h-4 text-muted-foreground" />
-              <span>{p.label}</span>
+              <span className="flex-1">{p.label}</span>
+              {p.shortcut && <kbd className="ml-auto text-[10px] font-mono bg-secondary/50 border border-border/40 px-1.5 py-0.5 rounded text-muted-foreground">{p.shortcut}</kbd>}
             </CommandItem>
           ))}
         </CommandGroup>

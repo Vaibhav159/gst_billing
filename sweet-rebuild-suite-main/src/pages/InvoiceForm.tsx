@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, itemUnits, itemUnitLabels } from "@/utils/mockData";
+import type { ItemUnit } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -12,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import QuickCustomerModal from "@/components/QuickCustomerModal";
+import SearchableSelect from "@/components/SearchableSelect";
 import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
@@ -39,7 +41,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     financialYear: "2024-25",
   });
 
-  const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0 }]);
+  const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
 
   // Fallback names from the invoice API for entities not in the loaded list
@@ -82,6 +84,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           productId: String(li.product || li.id || ""),
           qty: parseFloat(li.quantity) || 1,
           rate: parseFloat(li.rate) || 0,
+          unit: (li.unit || "gms") as ItemUnit,
         }));
         if (lineItems.length > 0) setItems(lineItems);
       })
@@ -127,7 +130,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const safeNavigate = (to: string) => { if (dirty) { setPendingNav(to); setShowUnsavedModal(true); } else navigate(to); };
   const set = (field: string, val: any) => { setForm((p) => ({ ...p, [field]: val })); setDirty(true); };
-  const addItem = () => { setItems((p) => [...p, { productId: "", qty: 1, rate: 0 }]); setDirty(true); };
+  const addItem = () => { setItems((p) => [...p, { productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]); setDirty(true); };
   const removeItem = (i: number) => { if (items.length === 1) return; setItems((p) => p.filter((_, idx) => idx !== i)); setDirty(true); };
   const updateItem = (i: number, field: string, val: any) => { setItems((p) => p.map((it, idx) => idx === i ? { ...it, [field]: val } : it)); setDirty(true); };
 
@@ -139,8 +142,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const calcItem = (item: { productId: string; qty: number; rate: number }) => {
     const product = localProducts.find((p) => p.id === item.productId);
-    const amount = item.qty * item.rate;
-    const tax = product ? (amount * product.gstRate) / 100 : 0;
+    const amount = Math.round(item.qty * item.rate * 100) / 100;
+    const tax = product ? Math.round((amount * product.gstRate) / 100 * 100) / 100 : 0;
     return { amount, tax, gstRate: product?.gstRate || 0 };
   };
 
@@ -181,8 +184,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     const selectedCust = localCustomers.find(c => c.id === form.customerId);
     const invoiceItems = items.map(it => {
       const product = localProducts.find(p => p.id === it.productId);
-      const amount = it.qty * it.rate;
-      const tax = product ? (amount * product.gstRate) / 100 : 0;
+      const amount = Math.round(it.qty * it.rate * 100) / 100;
+      const tax = product ? Math.round((amount * product.gstRate) / 100 * 100) / 100 : 0;
       return {
         productId: it.productId,
         productName: product?.name || "",
@@ -190,10 +193,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         gstRate: product?.gstRate || 0,
         qty: it.qty,
         rate: it.rate,
+        unit: it.unit,
         amount,
-        cgst: form.isIGST ? 0 : tax / 2,
-        sgst: form.isIGST ? 0 : tax / 2,
-        igst: form.isIGST ? tax : 0,
+        cgst: form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100,
+        sgst: form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100,
+        igst: form.isIGST ? Math.round(tax * 100) / 100 : 0,
       };
     });
 
@@ -263,9 +267,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         <div className={cn("rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
           <FileText className="w-5 h-5 text-primary" />
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-3xl")}>{mode === "create" ? "Create Invoice" : "Edit Invoice"}</h1>
           {!isMobile && <p className="text-sm text-muted-foreground mt-0.5">Fill in details to generate a GST-compliant invoice</p>}
+        </div>
+        {/* Sticky completion indicator in header */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="w-24 h-2 bg-secondary/50 rounded-full overflow-hidden">
+            <motion.div initial={{ width: 0 }} animate={{ width: `${completion}%` }} transition={{ duration: 0.6 }}
+              className={cn("h-full rounded-full", completion === 100 ? "bg-success" : "bg-primary")} />
+          </div>
+          <span className={cn("text-[12px] font-bold font-display tabular-nums", completion === 100 ? "text-success" : "text-primary")}>{completion}%</span>
         </div>
       </div>
 
@@ -287,18 +299,22 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               <div className={cn("grid gap-4", isMobile ? "grid-cols-1" : "grid-cols-2")}>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1"><Building2 className="w-3 h-3 text-muted-foreground" /> Business<span className="text-destructive">*</span></label>
-                  <select value={form.businessId} onChange={(e) => set("businessId", e.target.value)} className="premium-select w-full">
-                    <option value="">Select Business</option>
-                    {effectiveBusinesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.businessId}
+                    onChange={(val) => set("businessId", val)}
+                    options={effectiveBusinesses.map((b) => ({ value: String(b.id), label: b.name, sublabel: b.gst_number }))}
+                    placeholder="Search Business"
+                  />
                   {selectedBusiness && <p className="text-[10px] text-muted-foreground font-mono">{selectedBusiness.gst_number}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3 text-muted-foreground" /> Customer<span className="text-destructive">*</span></label>
-                  <select value={form.customerId} onChange={(e) => set("customerId", e.target.value)} className="premium-select w-full">
-                    <option value="">Select Customer</option>
-                    {localCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.customerId}
+                    onChange={(val) => set("customerId", val)}
+                    options={localCustomers.map((c) => ({ value: String(c.id), label: c.name, sublabel: c.gst_number }))}
+                    placeholder="Search Customer"
+                  />
                   <div className="flex items-center gap-2 mt-1">
                     {selectedCustomer && <p className="text-[10px] text-muted-foreground font-mono flex-1">{selectedCustomer.gst_number}</p>}
                     <button type="button" onClick={() => setShowQuickCustomer(true)} className="text-[11px] text-primary hover:underline font-semibold flex items-center gap-1 shrink-0"><UserPlus className="w-3 h-3" /> New</button>
@@ -355,13 +371,16 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                           <span className="text-[11px] text-muted-foreground font-mono">#{i + 1}</span>
                           <button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1 rounded text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
-                        <select value={item.productId} onChange={(e) => handleProductChange(i, e.target.value)} className="premium-select w-full text-[13px]">
-                          <option value="">Select Product</option>
-                          {localProducts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.hsn})</option>)}
-                        </select>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="number" value={item.qty} min={1} onChange={(e) => updateItem(i, "qty", Math.max(1, Number(e.target.value)))} className="premium-input h-9 w-full text-center" /></div>
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="number" value={item.rate} min={0} onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full" /></div>
+                        <SearchableSelect
+                          value={item.productId}
+                          onChange={(val) => handleProductChange(i, val)}
+                          options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))}
+                          placeholder="Search Product"
+                        />
+                        <div className="grid grid-cols-3 gap-2">
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="number" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full text-center" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Unit</label><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-full text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="number" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full" /></div>
                         </div>
                         <div className="flex items-center justify-between text-[12px]">
                           <span className="text-muted-foreground">GST: {gstRate}% · Tax: {formatCurrency(tax)}</span>
@@ -374,17 +393,18 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               ) : (
                 <div className="overflow-x-auto">
                   <table className="table-premium">
-                    <thead><tr>{["#", "Product", "GST%", "Qty", "Rate (₹)", "Amount", "Tax", ""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["#", "Product", "GST%", "Qty", "Unit", "Rate (₹)", "Amount", "Tax", ""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                     <tbody>
                       {items.map((item, i) => {
                         const { amount, tax, gstRate } = calcItem(item);
                         return (
                           <motion.tr key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
-                            <td><select value={item.productId} onChange={(e) => handleProductChange(i, e.target.value)} className="premium-select h-9 text-[13px] w-48"><option value="">Select Product</option>{localProducts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.hsn})</option>)}</select></td>
+                            <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" className="w-48" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
-                            <td><input type="number" value={item.qty} min={1} onChange={(e) => updateItem(i, "qty", Math.max(1, Number(e.target.value)))} className="premium-input h-9 w-20 text-center" /></td>
-                            <td><input type="number" value={item.rate} min={0} onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-32" /></td>
+                            <td><input type="number" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-24 text-center" /></td>
+                            <td><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-20 text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
+                            <td><input type="number" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-32" /></td>
                             <td className="font-bold text-foreground whitespace-nowrap">{formatCurrency(amount)}</td>
                             <td className="text-muted-foreground whitespace-nowrap text-[12px]">{formatCurrency(tax)}</td>
                             <td><button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></td>

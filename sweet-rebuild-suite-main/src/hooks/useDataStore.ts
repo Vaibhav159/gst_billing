@@ -99,6 +99,7 @@ export interface DashboardStats {
     name: string;
     total: number;
     qty: number;
+    hsn?: string;
   }[];
   recent_invoices: any[];
 }
@@ -207,12 +208,24 @@ export function mapDjangoInvoice(inv: any): Invoice {
   }));
 
   const subtotal = hasItems ? items.reduce((sum: number, it: any) => sum + (it.qty * it.rate), 0) : 0;
-  const totalCGST = items.reduce((sum: number, it: any) => sum + it.cgst, 0);
-  const totalSGST = items.reduce((sum: number, it: any) => sum + it.sgst, 0);
-  const totalIGST = items.reduce((sum: number, it: any) => sum + it.igst, 0);
+  let totalCGST = items.reduce((sum: number, it: any) => sum + it.cgst, 0);
+  let totalSGST = items.reduce((sum: number, it: any) => sum + it.sgst, 0);
+  let totalIGST = items.reduce((sum: number, it: any) => sum + it.igst, 0);
   
   // Use annotated total_tax if line_items is empty/missing
-  const totalTax = hasItems ? (totalCGST + totalSGST + totalIGST) : (parseFloat(inv.total_tax) || 0);
+  const itemBasedTax = totalCGST + totalSGST + totalIGST;
+  const totalTax = itemBasedTax > 0 ? itemBasedTax : (parseFloat(inv.total_tax) || 0);
+  
+  // If line items didn't have cgst/sgst/igst breakdown, infer from totalTax + isIGST flag
+  if (itemBasedTax === 0 && totalTax > 0) {
+    const isIGST = inv.is_igst_applicable || false;
+    if (isIGST) {
+      totalIGST = totalTax;
+    } else {
+      totalCGST = totalTax / 2;
+      totalSGST = totalTax / 2;
+    }
+  }
 
   return {
     id: String(inv.id),
@@ -420,7 +433,7 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
         params.set("business_id", businessId);
       }
       const qs = params.toString();
-      const res = await api.get<any>(`customers/${qs ? `?${qs}` : ""}`);
+      const res = await api.get<any>(`customers/${qs ? `?${qs}&` : "?"}page_size=1000`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results);
@@ -496,7 +509,7 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
         params.set("business_id", businessId);
       }
       const qs = params.toString();
-      const res = await api.get<any>(`products/${qs ? `?${qs}` : ""}`);
+      const res = await api.get<any>(`products/${qs ? `?${qs}&` : "?"}page_size=1000`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoProduct));

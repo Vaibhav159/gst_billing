@@ -242,9 +242,10 @@ class Invoice(AbstractBaseModel):
         return f"{self.invoice_number}_{self.customer.name}"
 
     def save(self, *args, **kwargs):
-        self.total_amount = sum(
-            LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
-        )
+        if self.pk:
+            self.total_amount = sum(
+                LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
+            )
         super().save(*args, **kwargs)
 
     @property

@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useNavigate } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
   Trash2, Copy, CheckSquare, Square, LayoutGrid, LayoutList, TrendingUp,
-  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2,
+  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
@@ -17,12 +17,14 @@ import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
 import { shareInvoice } from "@/utils/shareInvoice";
+import { downloadReportExcel } from "@/utils/generateReportExcel";
 
 interface OutletCtx { selectedFY: string }
 
 export default function InvoiceList() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
@@ -32,7 +34,8 @@ export default function InvoiceList() {
   const [custFilter, setCustFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [fyFilter, setFyFilter] = useState(selectedFY);
-  const [selectedBusiness, setSelectedBusiness] = useState("all"); // New state for selected business
+  // Sync fyFilter when navbar FY changes
+  useEffect(() => { setFyFilter(selectedFY); }, [selectedFY]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<"date" | "total" | "invoiceNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -260,7 +263,7 @@ export default function InvoiceList() {
           {selected.size > 0 && (
             <>
               <span className="text-[12px] text-muted-foreground font-medium">{selected.size} selected</span>
-              <button onClick={() => toast({ title: "Printing", description: `${selected.size} invoices sent to print.` })} className="premium-btn-ghost text-[13px]">
+              <button onClick={() => { const firstId = Array.from(selected)[0]; if (firstId) navigate(`/billing/invoice/${firstId}/print`); }} className="premium-btn-ghost text-[13px]">
                 <Printer className="w-4 h-4" /> Print
               </button>
               <button onClick={() => {
@@ -276,12 +279,23 @@ export default function InvoiceList() {
               }} className="premium-btn-ghost text-[13px]">
                 <Download className="w-4 h-4" /> Export
               </button>
-              <button onClick={() => { toast({ title: "Deleted", description: `${selected.size} invoices deleted`, variant: "destructive" }); setSelected(new Set()); }} className="premium-btn-ghost text-[13px] text-destructive">
+              <button onClick={() => {
+                if (confirm(`Delete ${selected.size} selected invoices? This cannot be undone.`)) {
+                  const ids = Array.from(selected);
+                  ids.forEach(id => removeInvoice(id));
+                  toast({ title: "Deleted", description: `${ids.length} invoices deleted`, variant: "destructive" });
+                  setSelected(new Set());
+                }
+              }} className="premium-btn-ghost text-[13px] text-destructive">
                 <Trash2 className="w-4 h-4" /> Delete
               </button>
             </>
           )}
-          <button onClick={handleExportCSV} className="premium-btn-ghost text-[13px]"><Download className="w-4 h-4" /> Export</button>
+          <button onClick={handleExportCSV} className="premium-btn-ghost text-[13px]"><Download className="w-4 h-4" /> CSV</button>
+          <button onClick={() => {
+            downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`);
+            toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
+          }} className="premium-btn-ghost text-[13px]"><FileSpreadsheet className="w-4 h-4" /> Excel</button>
           <Link to="/billing/invoice/import" className="premium-btn-ghost text-[13px]"><Upload className="w-4 h-4" /> Import</Link>
           <Link to="/billing/invoice/ai-import" className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Bot className="w-4 h-4" /> AI Import</Link>
           <Link to="/billing/bulk-pdf" className="premium-btn-ghost text-[13px]"><FileText className="w-4 h-4" /> Bulk PDF</Link>
@@ -302,9 +316,33 @@ export default function InvoiceList() {
         ))}
       </div>
 
-      <div className="elevated-card rounded-2xl p-4">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="relative w-[220px]">
+      {/* Month Pill Filters */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+        <button onClick={() => setMonthFilter("all")}
+          className={cn("px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap border",
+            monthFilter === "all" ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-secondary/30 text-muted-foreground border-border/40 hover:bg-secondary/50 hover:text-foreground"
+          )}>All Months</button>
+        {["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"].map((m, i) => {
+          const monthNum = String(i < 9 ? i + 4 : i - 8);
+          const hasInvoices = invoices.some((inv) => {
+            const d = new Date(inv.invoice_date);
+            return d.getMonth() + 1 === Number(monthNum);
+          });
+          return (
+            <button key={m} onClick={() => setMonthFilter(monthFilter === monthNum ? "all" : monthNum)}
+              className={cn("px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap border relative",
+                monthFilter === monthNum ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-secondary/30 text-muted-foreground border-border/40 hover:bg-secondary/50 hover:text-foreground"
+              )}>
+              {m}
+              {hasInvoices && monthFilter !== monthNum && <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-primary" />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="elevated-card rounded-2xl p-4 space-y-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex-1 min-w-[160px]">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search invoices..." className="premium-input pl-10 w-full" />
@@ -312,12 +350,6 @@ export default function InvoiceList() {
           <select value={fyFilter} onChange={(e) => setFyFilter(e.target.value)} className="premium-select">
             <option value="all">All FY</option>
             {financialYears.map((f) => <option key={f} value={f}>FY {f}</option>)}
-          </select>
-          <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="premium-select">
-            <option value="all">All Months</option>
-            {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
-              <option key={m} value={i + 1}>{m}</option>
-            ))}
           </select>
           <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select">
             <option value="all">All Businesses</option>
@@ -332,8 +364,8 @@ export default function InvoiceList() {
             <option value="OUTWARD">Outward (Sales)</option>
             <option value="INWARD">Inward (Purchases)</option>
           </select>
-          <button onClick={clearFilters} className="text-[12px] text-destructive hover:underline font-medium">Clear</button>
-          <div className="ml-auto flex items-center gap-1.5 bg-secondary/30 rounded-xl p-1">
+          <button onClick={clearFilters} className="text-[12px] text-destructive hover:underline font-medium shrink-0">Clear</button>
+          <div className="flex items-center gap-1.5 bg-secondary/30 rounded-xl p-1 shrink-0">
             <button onClick={() => setView("table")} className={cn("p-2 rounded-lg transition-all", view === "table" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}><LayoutList className="w-4 h-4" /></button>
             <button onClick={() => setView("grid")} className={cn("p-2 rounded-lg transition-all", view === "grid" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}><LayoutGrid className="w-4 h-4" /></button>
           </div>

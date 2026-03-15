@@ -13,14 +13,23 @@ import { useInvoices, useBusinesses } from "@/hooks/useDataStore";
 
 export default function BulkPDF() {
   const { toast } = useToast();
-  const [month, setMonth] = useState("April");
-  const [year, setYear] = useState("2024");
+  // Default to current month and year
+  const now = new Date();
+  const currentMonthIndex = now.getMonth(); // 0-based (0=Jan)
+  const MONTHS = ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"];
+  // Map JS month (0-11) to FY month name
+  const fyMonthMap: Record<number, string> = { 3: "April", 4: "May", 5: "June", 6: "July", 7: "August", 8: "September", 9: "October", 10: "November", 11: "December", 0: "January", 1: "February", 2: "March" };
+  const defaultMonth = fyMonthMap[currentMonthIndex] || "April";
+  const [month, setMonth] = useState(defaultMonth);
+  const [year, setYear] = useState(String(now.getFullYear()));
   const [bizFilter, setBizFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const { items: invoices } = useInvoices();
   const { items: businesses } = useBusinesses();
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
-  const MONTHS = ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"];
+  // Generate dynamic year options (current year -2 to current year +1)
+  const currentYear = now.getFullYear();
+  const YEAR_OPTIONS = Array.from({ length: 4 }, (_, i) => String(currentYear - 2 + i));
 
   // Filter invoices based on selections
   const monthIndex = MONTHS.indexOf(month);
@@ -29,7 +38,7 @@ export default function BulkPDF() {
     const d = new Date(inv.invoice_date || "");
     const monthMatch = d.getMonth() + 1 === actualMonth;
     const yearMatch = d.getFullYear().toString() === year;
-    const bizMatch = bizFilter === "all" || inv.businessId === bizFilter;
+    const bizMatch = bizFilter === "all" || String(inv.businessId) === String(bizFilter);
     const typeMatch = typeFilter === "all" || inv.type === typeFilter;
     return monthMatch && yearMatch && bizMatch && typeMatch;
   });
@@ -45,9 +54,43 @@ export default function BulkPDF() {
       : setSelectedInvoices(new Set(matchingInvoices.map((i) => i.id)));
   };
 
-  const handleDownload = () => {
-    const count = selectedInvoices.size > 0 ? selectedInvoices.size : matchingInvoices.length;
-    toast({ title: "Generating PDFs", description: `${count} invoices will be downloaded as ZIP` });
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+
+  const handleDownload = async () => {
+    const toDownload = selectedInvoices.size > 0
+      ? matchingInvoices.filter((inv) => selectedInvoices.has(inv.id))
+      : matchingInvoices;
+
+    if (toDownload.length === 0) return;
+
+    setDownloading(true);
+    setProgress({ current: 0, total: toDownload.length });
+    toast({ title: "Generating PDFs", description: `Creating ${toDownload.length} invoice PDFs...` });
+
+    try {
+      const { generateBulkPDFZip } = await import("@/utils/generateBulkPDF");
+      const zipBlob = await generateBulkPDFZip(
+        toDownload,
+        businesses,
+        (current, total) => setProgress({ current, total })
+      );
+
+      const url = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `invoices_${month}_${year}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+
+      toast({ title: "Download Complete", description: `${toDownload.length} PDFs downloaded as ZIP.` });
+    } catch (err) {
+      console.error("PDF generation failed", err);
+      toast({ title: "Download Failed", description: "Could not generate PDFs. Please try again.", variant: "destructive" });
+    }
+    setDownloading(false);
   };
 
   return (
@@ -88,7 +131,7 @@ export default function BulkPDF() {
               <div className="space-y-2">
                 <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Year</label>
                 <select value={year} onChange={(e) => setYear(e.target.value)} className="premium-select w-full">
-                  {["2024", "2025"].map((y) => <option key={y} value={y}>{y}</option>)}
+                  {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
@@ -117,14 +160,20 @@ export default function BulkPDF() {
               <p className="text-3xl font-display font-bold text-primary">{matchingInvoices.length}</p>
               <p className="text-[12px] text-muted-foreground">invoices match your filters</p>
             </div>
-            {selectedInvoices.size > 0 && (
-              <p className="text-[12px] text-center text-chart-3 font-medium">{selectedInvoices.size} selected for download</p>
-            )}
-            <button onClick={handleDownload} disabled={matchingInvoices.length === 0}
+            {selectedInvoices.size > 0 && (() => {
+              const selectedTotal = matchingInvoices.filter(inv => selectedInvoices.has(inv.id)).reduce((s, inv) => s + inv.total, 0);
+              return (
+                <div className="text-center space-y-1">
+                  <p className="text-[12px] text-chart-3 font-medium">{selectedInvoices.size} selected for download</p>
+                  <p className="text-[11px] text-muted-foreground">Total: <span className="font-semibold text-foreground">{formatCurrency(selectedTotal)}</span></p>
+                </div>
+              );
+            })()}
+            <button onClick={handleDownload} disabled={matchingInvoices.length === 0 || downloading}
               className={cn("w-full h-12 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 transition-all",
-                matchingInvoices.length > 0 ? "bg-primary text-primary-foreground hover:brightness-110 glow-sm" : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
+                matchingInvoices.length > 0 && !downloading ? "bg-primary text-primary-foreground hover:brightness-110 glow-sm" : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
               )}>
-              <Download className="w-5 h-5" /> Download {selectedInvoices.size > 0 ? `${selectedInvoices.size} PDFs` : "All PDFs"}
+              <Download className="w-5 h-5" /> {downloading ? `Generating ${progress.current}/${progress.total}...` : selectedInvoices.size > 0 ? `Download ${selectedInvoices.size} PDFs` : "Download All PDFs"}
             </button>
           </div>
 

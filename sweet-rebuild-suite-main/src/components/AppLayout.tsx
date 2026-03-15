@@ -2,6 +2,7 @@ import { useState } from "react";
 import TopNavbar from "./TopNavbar";
 import AnimatedOutlet from "./AnimatedOutlet";
 import { currentFY } from "@/utils/mockData";
+import OfflineBanner from "./OfflineBanner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileHeader from "./mobile/MobileHeader";
 import MobileBottomNav from "./mobile/MobileBottomNav";
@@ -21,6 +22,7 @@ function AppLayoutInner() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <OfflineBanner />
       {isMobile ? (
         isEasy ? (
           <EasyHeader selectedFY={selectedFY} onFYChange={setSelectedFY} />

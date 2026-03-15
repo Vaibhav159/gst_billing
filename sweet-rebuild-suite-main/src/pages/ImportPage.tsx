@@ -1,14 +1,19 @@
 import { Link } from "react-router-dom";
 import {
   Upload, Download, FileText, ArrowLeft, CheckCircle2, AlertTriangle,
-  FileSpreadsheet, Info, Package, Users, Receipt, Hash, Building2,
+  FileSpreadsheet, Info, Package, Users, Receipt, Hash, Building2, Eye,
+  UserPlus, X, Plus, AlertCircle, Check, Copy,
 } from "lucide-react";
-import { useState } from "react";
-import { useBusinesses } from "@/hooks/useDataStore";
+import { useState, useEffect, useMemo } from "react";
+import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
+import type { Business, Customer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
+import { parseInvoiceExcel, toImportReadyInvoices } from "@/utils/parseInvoiceExcel";
+import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
+import { indianStates } from "@/utils/mockData";
 
 interface ImportPageProps { type: "customer" | "product" | "invoice" | "business" }
 
@@ -51,14 +56,15 @@ const configs = {
     back: "/billing/invoice/list",
     breadcrumb: [{ label: "Invoices", href: "/billing/invoice/list" }, { label: "Import" }],
     columns: [
-      { name: "Invoice Number", required: true, example: "INV-001" },
-      { name: "Date", required: true, example: "2024-04-15" },
-      { name: "Customer", required: true, example: "Rajesh Kumar" },
-      { name: "Product", required: true, example: "Diamond Ring" },
-      { name: "Qty", required: true, example: "2" },
-      { name: "Rate", required: true, example: "45000" },
-      { name: "GST Rate (%)", required: true, example: "3" },
-      { name: "Type", required: true, example: "OUTWARD" },
+      { name: "Bill No.", required: true, example: "100" },
+      { name: "Invoice Date", required: true, example: "06-02-2026" },
+      { name: "Party Name", required: true, example: "Rajesh Kumar" },
+      { name: "GST Number", required: false, example: "27AABCK5461H1ZO" },
+      { name: "Commodity", required: true, example: "Gold Ornaments" },
+      { name: "HSN Code", required: true, example: "711319" },
+      { name: "GST Rate", required: true, example: "3%" },
+      { name: "Qty (gm)", required: true, example: "37.74" },
+      { name: "Rate (\u20b9/gm)", required: true, example: "16397" },
     ],
     showBusiness: true,
     icon: Receipt,
@@ -95,35 +101,386 @@ const fadeUp = {
 };
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } };
 
+// ─── Validation types ───
+interface ValidationResult {
+  invoice: ImportReadyInvoice;
+  businessMatch: Business | null;
+  customerMatch: Customer | null;
+  isDuplicate: boolean;
+  status: "ready" | "missing_business" | "missing_customer" | "duplicate";
+}
+
+// ─── Rounding: below .5 down, above .5 up (standard Math.round) ───
+function roundAmount(val: number): number {
+  return Math.round(val * 100) / 100;
+}
+
+// ─── Quick Add Customer Modal (inline) ───
+function InlineQuickAddCustomer({
+  defaultName,
+  defaultGST,
+  businessIds,
+  onCreated,
+  onCancel,
+}: {
+  defaultName: string;
+  defaultGST: string;
+  businessIds: string[];
+  onCreated: (c: Customer) => void;
+  onCancel: () => void;
+}) {
+  const { create: createCustomer } = useCustomers();
+  const { toast } = useToast();
+  const [form, setForm] = useState({
+    name: defaultName,
+    gst: defaultGST.includes("(PAN)") ? "" : defaultGST === "-" ? "" : defaultGST,
+    pan: defaultGST.includes("(PAN)") ? defaultGST.replace("(PAN)", "").trim() : "",
+    mobile: "",
+    state: "Rajasthan",
+    address: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const gstStateMap: Record<string, string> = {
+    "27": "Maharashtra", "24": "Gujarat", "29": "Karnataka",
+    "07": "Delhi", "08": "Rajasthan", "36": "Telangana", "33": "Tamil Nadu",
+    "09": "Uttar Pradesh", "19": "West Bengal", "32": "Kerala",
+  };
+
+  useEffect(() => {
+    if (form.gst.length >= 2) {
+      const prefix = form.gst.substring(0, 2);
+      if (gstStateMap[prefix] && !form.state) {
+        setForm(p => ({ ...p, state: gstStateMap[prefix] }));
+      }
+    }
+  }, [form.gst]);
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) return;
+    setSubmitting(true);
+    try {
+      const payload = {
+        name: form.name,
+        gst_number: form.gst,
+        pan_number: form.pan,
+        mobile_number: form.mobile,
+        state_name: form.state ? form.state.toUpperCase() : "",
+        address: form.address,
+        businesses: businessIds,
+      };
+      const created = await createCustomer(payload);
+      toast({ title: "Customer Created", description: form.name });
+      onCreated(created as Customer);
+    } catch (err: any) {
+      const detail = err?.response?.data;
+      let errorMsg = "Could not create customer.";
+      if (detail && typeof detail === "object") {
+        errorMsg = Object.entries(detail)
+          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
+          .join("; ");
+      }
+      toast({ title: "Creation Failed", description: errorMsg, variant: "destructive" });
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      className="border border-primary/30 rounded-xl p-4 bg-primary/5 space-y-3"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <UserPlus className="w-4 h-4 text-primary" />
+          <span className="text-[12px] font-semibold text-foreground">Add New Customer</span>
+        </div>
+        <button onClick={onCancel} className="p-1 rounded hover:bg-secondary/50">
+          <X className="w-3.5 h-3.5 text-muted-foreground" />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <input
+          value={form.name}
+          onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+          placeholder="Customer Name *"
+          className="premium-input text-[12px] h-8 col-span-2 sm:col-span-1"
+        />
+        <input
+          value={form.gst}
+          onChange={e => setForm(p => ({ ...p, gst: e.target.value.toUpperCase() }))}
+          placeholder="GST Number"
+          maxLength={15}
+          className="premium-input text-[12px] h-8 font-mono uppercase"
+        />
+        <input
+          value={form.pan}
+          onChange={e => setForm(p => ({ ...p, pan: e.target.value.toUpperCase() }))}
+          placeholder="PAN"
+          maxLength={10}
+          className="premium-input text-[12px] h-8 font-mono uppercase"
+        />
+        <input
+          value={form.mobile}
+          onChange={e => setForm(p => ({ ...p, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+          placeholder="Mobile"
+          maxLength={10}
+          className="premium-input text-[12px] h-8 tabular-nums"
+        />
+        <select
+          value={form.state}
+          onChange={e => setForm(p => ({ ...p, state: e.target.value }))}
+          className="premium-select text-[12px] h-8"
+        >
+          <option value="">State</option>
+          {indianStates.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input
+          value={form.address}
+          onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
+          placeholder="Address"
+          className="premium-input text-[12px] h-8"
+        />
+      </div>
+      <div className="flex gap-2 justify-end">
+        <button onClick={onCancel} className="premium-btn-ghost text-[11px] h-7 px-3">Cancel</button>
+        <button
+          onClick={handleSubmit}
+          disabled={!form.name.trim() || submitting}
+          className="premium-btn-primary text-[11px] h-7 px-3"
+        >
+          {submitting ? "Creating..." : "Create & Link"}
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function ImportPage({ type }: ImportPageProps) {
   const config = configs[type];
   const { toast } = useToast();
   const { items: businesses } = useBusinesses();
+  const { items: customers, refetch: refetchCustomers } = useCustomers();
+  const { items: existingInvoices, refetch: refetchInvoices } = useInvoices(undefined, type === "invoice");
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [bizFilter, setBizFilter] = useState("all");
   const [importing, setImporting] = useState(false);
   const [importDone, setImportDone] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+  const [excelPreview, setExcelPreview] = useState<ImportReadyInvoice[] | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+
+  // For inline customer creation
+  const [addingCustomerFor, setAddingCustomerFor] = useState<string | null>(null);
+  // Track newly created customers during this session
+  const [newlyCreatedCustomers, setNewlyCreatedCustomers] = useState<Customer[]>([]);
+  // Selected invoices for import (checked ones)
+  const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
 
   const Icon = config.icon;
 
+  const isExcelFile = (f: File) => f.name.endsWith(".xlsx") || f.name.endsWith(".xls");
+
+  // ─── Validate parsed invoices against existing data ───
+  const validationResults: ValidationResult[] = useMemo(() => {
+    if (!excelPreview || excelPreview.length === 0) return [];
+
+    const allCustomers = [...customers, ...newlyCreatedCustomers];
+
+    return excelPreview.map((inv) => {
+      // Match business by GSTIN or name
+      let businessMatch: Business | null = null;
+      if (inv.firmGSTIN) {
+        businessMatch = businesses.find(
+          b => b.gst_number?.toUpperCase() === inv.firmGSTIN.toUpperCase()
+        ) || null;
+      }
+      if (!businessMatch && inv.firmName) {
+        businessMatch = businesses.find(
+          b => b.name.toLowerCase().includes(inv.firmName.toLowerCase()) ||
+               inv.firmName.toLowerCase().includes(b.name.toLowerCase())
+        ) || null;
+      }
+      // If user selected a specific business, use that
+      if (!businessMatch && bizFilter !== "all") {
+        businessMatch = businesses.find(b => String(b.id) === bizFilter) || null;
+      }
+
+      // Match customer by GST/PAN or name
+      let customerMatch: Customer | null = null;
+      const custGst = inv.customerGST?.replace("(PAN)", "").trim();
+      if (custGst && custGst !== "-" && custGst !== "") {
+        const isPan = inv.customerGST?.includes("(PAN)");
+        if (isPan) {
+          customerMatch = allCustomers.find(
+            c => c.pan_number?.toUpperCase() === custGst.toUpperCase()
+          ) || null;
+        } else {
+          customerMatch = allCustomers.find(
+            c => c.gst_number?.toUpperCase() === custGst.toUpperCase()
+          ) || null;
+        }
+      }
+      if (!customerMatch && inv.customerName) {
+        customerMatch = allCustomers.find(
+          c => c.name.toLowerCase() === inv.customerName.toLowerCase()
+        ) || null;
+      }
+
+      // Check for duplicate invoice (same invoice number + same business + same date)
+      let isDuplicate = false;
+      if (businessMatch) {
+        isDuplicate = existingInvoices.some(
+          existing =>
+            existing.invoiceNumber === inv.invoiceNumber &&
+            String(existing.businessId) === String(businessMatch!.id) &&
+            existing.invoice_date === inv.invoice_date
+        );
+      }
+
+      // Determine status
+      let status: ValidationResult["status"] = "ready";
+      if (isDuplicate) status = "duplicate";
+      else if (!businessMatch) status = "missing_business";
+      else if (!customerMatch) status = "missing_customer";
+
+      return { invoice: inv, businessMatch, customerMatch, isDuplicate, status };
+    });
+  }, [excelPreview, businesses, customers, newlyCreatedCustomers, existingInvoices, bizFilter]);
+
+  // ─── Stats ───
+  const readyCount = validationResults.filter(v => v.status === "ready").length;
+  const missingBizCount = validationResults.filter(v => v.status === "missing_business").length;
+  const missingCustCount = validationResults.filter(v => v.status === "missing_customer").length;
+  const duplicateCount = validationResults.filter(v => v.status === "duplicate").length;
+
+  // Auto-select all importable invoices when validation results change
+  useEffect(() => {
+    if (validationResults.length > 0) {
+      const importableKeys = new Set(
+        validationResults
+          .filter(v => v.status === "ready" || v.status === "missing_customer")
+          .map(v => `${v.invoice.firmName}-${v.invoice.invoiceNumber}`)
+      );
+      setSelectedInvoices(importableKeys);
+    }
+  }, [validationResults]);
+
   const handleFile = (f: File | null) => {
-    if (f && !f.name.endsWith(".csv")) {
-      toast({ title: "Invalid File", description: "Please upload a CSV file.", variant: "destructive" });
+    if (f && !f.name.endsWith(".csv") && !isExcelFile(f)) {
+      toast({ title: "Invalid File", description: "Please upload a CSV or Excel (.xlsx) file.", variant: "destructive" });
       return;
     }
     setFile(f);
     setImportDone(false);
+    setImportResult(null);
+    setExcelPreview(null);
+    setShowPreview(false);
+    setNewlyCreatedCustomers([]);
+    setAddingCustomerFor(null);
+
+    // If Excel file and invoice type, parse for preview
+    if (f && isExcelFile(f) && type === "invoice") {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target?.result as ArrayBuffer;
+          const result = parseInvoiceExcel(data);
+          const invoices = toImportReadyInvoices(result);
+          setExcelPreview(invoices);
+          setShowPreview(true); // auto-show preview
+          if (invoices.length > 0) {
+            toast({ title: "Excel Parsed", description: `Found ${invoices.length} invoices from ${result.firms.length} firm(s)` });
+          } else {
+            toast({ title: "No Invoices Found", description: "Could not parse invoices from this Excel file.", variant: "destructive" });
+          }
+        } catch (err) {
+          console.error("Excel parse error:", err);
+          toast({ title: "Parse Error", description: "Could not read this Excel file. Check the format.", variant: "destructive" });
+        }
+      };
+      reader.readAsArrayBuffer(f);
+    }
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!file) return;
     setImporting(true);
-    setTimeout(() => {
-      setImporting(false);
-      setImportDone(true);
-      toast({ title: "Import Successful", description: `Records from ${file.name} imported successfully.` });
-    }, 1500);
+    try {
+      // For Excel invoice import, send only selected & ready invoices
+      if (isExcelFile(file) && type === "invoice" && excelPreview && excelPreview.length > 0) {
+        const toImport = validationResults
+          .filter(v =>
+            selectedInvoices.has(`${v.invoice.firmName}-${v.invoice.invoiceNumber}`) &&
+            (v.status === "ready" || v.status === "missing_customer") // missing_customer → backend will create
+          )
+          .map(v => {
+            const inv = { ...v.invoice };
+            // Round amounts before sending
+            inv.subtotal = roundAmount(inv.subtotal);
+            inv.totalCGST = roundAmount(inv.totalCGST);
+            inv.totalSGST = roundAmount(inv.totalSGST);
+            inv.totalIGST = roundAmount(inv.totalIGST);
+            inv.total = roundAmount(inv.total);
+            inv.items = inv.items.map(item => ({
+              ...item,
+              amount: roundAmount(item.amount),
+              cgst: roundAmount(item.cgst),
+              sgst: roundAmount(item.sgst),
+              igst: roundAmount(item.igst),
+            }));
+            return inv;
+          });
+
+        if (toImport.length === 0) {
+          toast({ title: "Nothing to Import", description: "No valid invoices selected.", variant: "destructive" });
+          setImporting(false);
+          return;
+        }
+
+        const { default: api } = await import("@/utils/api");
+        const res = await api.post("invoices/bulk-import/", {
+          invoices: toImport,
+          business_id: bizFilter !== "all" ? bizFilter : undefined,
+        });
+        const result = res.data;
+        setImportDone(true);
+        setImportResult(result);
+        toast({
+          title: "Import Complete",
+          description: `${result.created} imported, ${result.skipped} skipped.`,
+        });
+        // Refresh data
+        refetchInvoices();
+        refetchCustomers();
+      } else {
+        // CSV import (original flow)
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("type", type);
+        if (bizFilter !== "all") formData.append("business_id", bizFilter);
+        const { default: api } = await import("@/utils/api");
+        await api.post("csv/import/", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        setImportDone(true);
+        toast({ title: "Import Successful", description: `Records from ${file.name} imported successfully.` });
+      }
+    } catch (err: any) {
+      const data = err?.response?.data;
+      let msg = "Import failed. Check your file format.";
+      if (data?.error) msg = data.error;
+      else if (data?.detail) msg = data.detail;
+      else if (data?.message) msg = data.message;
+      else if (typeof data === "string") msg = data;
+      else if (err?.message) msg = err.message;
+      console.error("Import error:", err?.response?.status, data);
+      toast({ title: "Import Failed", description: msg, variant: "destructive" });
+    }
+    setImporting(false);
   };
 
   const handleSampleDownload = () => {
@@ -136,6 +493,63 @@ export default function ImportPage({ type }: ImportPageProps) {
     a.href = url; a.download = `${type}-import-sample.csv`; a.click();
     URL.revokeObjectURL(url);
     toast({ title: "Sample Downloaded", description: `${type}-import-sample.csv` });
+  };
+
+  const toggleInvoice = (key: string) => {
+    setSelectedInvoices(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    const importable = validationResults
+      .filter(v => v.status === "ready" || v.status === "missing_customer")
+      .map(v => `${v.invoice.firmName}-${v.invoice.invoiceNumber}`);
+    if (selectedInvoices.size === importable.length) {
+      setSelectedInvoices(new Set());
+    } else {
+      setSelectedInvoices(new Set(importable));
+    }
+  };
+
+  // Get unique missing customers
+  const missingCustomers = useMemo(() => {
+    const seen = new Set<string>();
+    return validationResults
+      .filter(v => v.status === "missing_customer")
+      .filter(v => {
+        const key = v.invoice.customerName.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [validationResults]);
+
+  const handleCustomerCreated = (customer: Customer) => {
+    setNewlyCreatedCustomers(prev => [...prev, customer]);
+    setAddingCustomerFor(null);
+    // The validation will re-run due to dependency on newlyCreatedCustomers
+  };
+
+  const statusIcon = (s: ValidationResult["status"]) => {
+    switch (s) {
+      case "ready": return <Check className="w-3.5 h-3.5 text-success" />;
+      case "duplicate": return <Copy className="w-3.5 h-3.5 text-amber-500" />;
+      case "missing_business": return <AlertCircle className="w-3.5 h-3.5 text-destructive" />;
+      case "missing_customer": return <UserPlus className="w-3.5 h-3.5 text-blue-500" />;
+    }
+  };
+
+  const statusLabel = (s: ValidationResult["status"]) => {
+    switch (s) {
+      case "ready": return "Ready";
+      case "duplicate": return "Duplicate";
+      case "missing_business": return "No Business";
+      case "missing_customer": return "New Customer";
+    }
   };
 
   return (
@@ -152,7 +566,7 @@ export default function ImportPage({ type }: ImportPageProps) {
           </div>
           <div>
             <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">{config.title}</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Upload a CSV file to bulk import records</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Upload a CSV or Excel file to bulk import records</p>
           </div>
         </div>
         <Link to={config.back} className="premium-btn-ghost text-[13px] h-9"><ArrowLeft className="w-4 h-4" /> Back</Link>
@@ -201,9 +615,11 @@ export default function ImportPage({ type }: ImportPageProps) {
             </div>
             <ul className="space-y-2 text-[11px] text-muted-foreground">
               <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Fields marked with * are required.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Download the sample CSV for exact format reference.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Duplicate entries are skipped automatically.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Maximum 500 rows per import.</li>
+              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Supports both CSV and Excel (.xlsx) files.</li>
+              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Excel: One sheet per firm or all firms at once.</li>
+              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Duplicate invoices (same Bill No. + Business) are detected.</li>
+              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Missing customers can be added inline before import.</li>
+              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Preview all data before importing.</li>
             </ul>
           </div>
         </motion.div>
@@ -219,7 +635,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                 <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Target Business</label>
               </div>
               <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full">
-                <option value="all">All Businesses</option>
+                <option value="all">Auto-detect from Excel (Match by GSTIN)</option>
                 {businesses.map((b) => <option key={b.id} value={b.id}>{b.name} — {b.gst_number}</option>)}
               </select>
             </div>
@@ -251,7 +667,12 @@ export default function ImportPage({ type }: ImportPageProps) {
                   <motion.div key="done" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-2">
                     <CheckCircle2 className="w-12 h-12 text-success mx-auto" />
                     <p className="text-[14px] font-semibold text-success">Import Complete!</p>
-                    <p className="text-[12px] text-muted-foreground">{file?.name}</p>
+                    {importResult && (
+                      <p className="text-[12px] text-muted-foreground">
+                        {importResult.created} imported, {importResult.skipped} skipped
+                      </p>
+                    )}
+                    <p className="text-[11px] text-muted-foreground">Click to upload another file</p>
                   </motion.div>
                 ) : file ? (
                   <motion.div key="file" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-2">
@@ -262,40 +683,358 @@ export default function ImportPage({ type }: ImportPageProps) {
                 ) : (
                   <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
                     <Upload className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-                    <p className="text-[14px] font-semibold text-foreground">Drag & drop your CSV file</p>
-                    <p className="text-[12px] text-muted-foreground">or click to browse · CSV only · Max 5MB</p>
+                    <p className="text-[14px] font-semibold text-foreground">Drag & drop your file</p>
+                    <p className="text-[12px] text-muted-foreground">or click to browse · CSV or Excel (.xlsx) · Max 5MB</p>
                   </motion.div>
                 )}
               </AnimatePresence>
-              <input id="file-input" type="file" accept=".csv" className="hidden"
+              <input id="file-input" type="file" accept=".csv,.xlsx,.xls" className="hidden"
                 onChange={(e) => handleFile(e.target.files?.[0] || null)} />
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-3">
-              <Link to={config.back} className="premium-btn-ghost text-[13px] h-10 flex-1">
-                <ArrowLeft className="w-4 h-4" /> Cancel
-              </Link>
-              <button onClick={handleImport} disabled={!file || importing || importDone}
-                className={cn(
-                  "flex-1 h-10 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 transition-all",
-                  file && !importing && !importDone
-                    ? "bg-primary text-primary-foreground hover:brightness-110"
-                    : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
-                )}>
-                {importing ? (
-                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                ) : (
-                  <FileText className="w-4 h-4" />
-                )}
-                {importing ? "Importing..." : importDone ? "Imported!" : "Import Records"}
-              </button>
             </div>
           </div>
 
-          {/* Preview hint */}
+          {/* ─── Validation Summary ─── */}
+          {validationResults.length > 0 && (
+            <div className="elevated-card rounded-2xl p-5 space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-chart-1/10 flex items-center justify-center">
+                  <Eye className="w-3.5 h-3.5 text-chart-1" />
+                </div>
+                <h2 className="text-[11px] font-display font-semibold text-muted-foreground uppercase tracking-wider">
+                  Validation Summary
+                </h2>
+              </div>
+
+              {/* Status badges */}
+              <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success/10 border border-success/20">
+                  <Check className="w-3.5 h-3.5 text-success" />
+                  <span className="text-[11px] font-semibold text-success">{readyCount} Ready</span>
+                </div>
+                {duplicateCount > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <Copy className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-[11px] font-semibold text-amber-500">{duplicateCount} Duplicate</span>
+                  </div>
+                )}
+                {missingCustCount > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <UserPlus className="w-3.5 h-3.5 text-blue-500" />
+                    <span className="text-[11px] font-semibold text-blue-500">{missingCustCount} New Customer</span>
+                  </div>
+                )}
+                {missingBizCount > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 border border-destructive/20">
+                    <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+                    <span className="text-[11px] font-semibold text-destructive">{missingBizCount} No Business</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Missing Business Warning */}
+              {missingBizCount > 0 && (
+                <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-destructive/20 bg-destructive/5">
+                  <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-muted-foreground">
+                    <p className="font-semibold text-destructive mb-1">Business not found</p>
+                    <p>
+                      {Array.from(new Set(
+                        validationResults.filter(v => v.status === "missing_business").map(v => `${v.invoice.firmName} (${v.invoice.firmGSTIN})`)
+                      )).join(", ")}
+                    </p>
+                    <p className="mt-1">Select a Target Business above, or add the business first from the Businesses page.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Missing Customers - inline add */}
+              {missingCustomers.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-blue-500/20 bg-blue-500/5">
+                    <UserPlus className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                    <div className="text-[11px] text-muted-foreground flex-1">
+                      <p className="font-semibold text-blue-600 mb-1">New customers detected</p>
+                      <p className="mb-2">These customers don't exist yet. Add them now or they'll be auto-created during import.</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {missingCustomers.map(v => {
+                          const key = v.invoice.customerName;
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => setAddingCustomerFor(addingCustomerFor === key ? null : key)}
+                              className={cn(
+                                "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors",
+                                addingCustomerFor === key
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-secondary/50 hover:bg-secondary text-foreground"
+                              )}
+                            >
+                              <Plus className="w-3 h-3" />
+                              {key}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {addingCustomerFor && (
+                      <InlineQuickAddCustomer
+                        defaultName={addingCustomerFor}
+                        defaultGST={
+                          validationResults.find(
+                            v => v.invoice.customerName === addingCustomerFor
+                          )?.invoice.customerGST || ""
+                        }
+                        businessIds={businesses.map(b => String(b.id))}
+                        onCreated={handleCustomerCreated}
+                        onCancel={() => setAddingCustomerFor(null)}
+                      />
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── Detailed Preview Table ─── */}
+          {validationResults.length > 0 && (
+            <div className="elevated-card rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-chart-3/10 flex items-center justify-center">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-chart-3" />
+                  </div>
+                  <h2 className="text-[11px] font-display font-semibold text-muted-foreground uppercase tracking-wider">
+                    Invoice Preview ({validationResults.length})
+                  </h2>
+                </div>
+                <button onClick={() => setShowPreview(!showPreview)} className="text-[11px] text-primary hover:underline flex items-center gap-1">
+                  <Eye className="w-3.5 h-3.5" /> {showPreview ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {showPreview && (
+                <div className="max-h-[500px] overflow-auto rounded-xl border border-border/40">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-secondary/50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-2 py-2 text-left w-8">
+                          <input
+                            type="checkbox"
+                            checked={selectedInvoices.size === (readyCount + missingCustCount) && (readyCount + missingCustCount) > 0}
+                            onChange={toggleAll}
+                            className="rounded"
+                          />
+                        </th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Status</th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Bill No.</th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Date</th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Party</th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">GST</th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Firm</th>
+                        <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Items</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Taxable</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">CGST</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">SGST</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {validationResults.map((v, idx) => {
+                        const inv = v.invoice;
+                        const key = `${inv.firmName}-${inv.invoiceNumber}`;
+                        const isSelected = selectedInvoices.has(key);
+                        const canSelect = v.status === "ready" || v.status === "missing_customer";
+
+                        return (
+                          <tr
+                            key={idx}
+                            className={cn(
+                              "transition-colors",
+                              v.status === "duplicate" && "bg-amber-500/5 text-muted-foreground line-through",
+                              v.status === "missing_business" && "bg-destructive/5",
+                              v.status === "missing_customer" && "bg-blue-500/5",
+                              v.status === "ready" && (idx % 2 === 0 ? "bg-background" : "bg-secondary/10"),
+                            )}
+                          >
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => canSelect && toggleInvoice(key)}
+                                disabled={!canSelect}
+                                className="rounded"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <span className="inline-flex items-center gap-1">
+                                {statusIcon(v.status)}
+                                <span className="text-[10px]">{statusLabel(v.status)}</span>
+                              </span>
+                            </td>
+                            <td className="px-2 py-1.5 font-medium text-primary">{inv.invoiceNumber}</td>
+                            <td className="px-2 py-1.5 tabular-nums">{inv.invoice_date}</td>
+                            <td className="px-2 py-1.5 truncate max-w-[120px]" title={inv.customerName}>
+                              {inv.customerName}
+                              {v.customerMatch && (
+                                <span className="text-[9px] text-success ml-1">(matched)</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-1.5 font-mono text-[10px] truncate max-w-[100px]" title={inv.customerGST}>
+                              {inv.customerGST || "-"}
+                            </td>
+                            <td className="px-2 py-1.5 truncate max-w-[100px]" title={inv.firmName}>
+                              {inv.firmName}
+                              {v.businessMatch && (
+                                <span className="text-[9px] text-success ml-1">(ok)</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-1.5 text-center">
+                              {inv.items.length}
+                              <span className="text-[9px] text-muted-foreground ml-0.5">
+                                ({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})
+                              </span>
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">
+                              {"\u20b9"}{roundAmount(inv.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">
+                              {"\u20b9"}{roundAmount(inv.totalCGST).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">
+                              {"\u20b9"}{roundAmount(inv.totalSGST).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
+                              {"\u20b9"}{roundAmount(inv.total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {/* Totals row */}
+                    <tfoot className="bg-secondary/40 border-t border-border/40">
+                      <tr className="font-semibold">
+                        <td colSpan={8} className="px-2 py-2 text-right text-[11px] text-muted-foreground uppercase">
+                          Selected Total ({selectedInvoices.size} invoices)
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-[11px]">
+                          {"\u20b9"}{roundAmount(
+                            validationResults
+                              .filter(v => selectedInvoices.has(`${v.invoice.firmName}-${v.invoice.invoiceNumber}`))
+                              .reduce((s, v) => s + v.invoice.subtotal, 0)
+                          ).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-[11px]">
+                          {"\u20b9"}{roundAmount(
+                            validationResults
+                              .filter(v => selectedInvoices.has(`${v.invoice.firmName}-${v.invoice.invoiceNumber}`))
+                              .reduce((s, v) => s + v.invoice.totalCGST, 0)
+                          ).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-[11px]">
+                          {"\u20b9"}{roundAmount(
+                            validationResults
+                              .filter(v => selectedInvoices.has(`${v.invoice.firmName}-${v.invoice.invoiceNumber}`))
+                              .reduce((s, v) => s + v.invoice.totalSGST, 0)
+                          ).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-[11px] font-bold">
+                          {"\u20b9"}{roundAmount(
+                            validationResults
+                              .filter(v => selectedInvoices.has(`${v.invoice.firmName}-${v.invoice.invoiceNumber}`))
+                              .reduce((s, v) => s + v.invoice.total, 0)
+                          ).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Import Result Details */}
+          {importResult && importResult.errors.length > 0 && (
+            <div className="elevated-card rounded-2xl p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <h3 className="text-[12px] font-semibold text-foreground">Import Warnings</h3>
+              </div>
+              <div className="max-h-[150px] overflow-auto space-y-1">
+                {importResult.errors.map((err, i) => (
+                  <p key={i} className="text-[11px] text-muted-foreground flex items-start gap-2">
+                    <span className="w-1 h-1 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                    {err}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
           {file && !importDone && (
+            <div className="elevated-card rounded-2xl p-5">
+              <div className="flex items-center gap-3">
+                <Link to={config.back} className="premium-btn-ghost text-[13px] h-10 flex-1">
+                  <ArrowLeft className="w-4 h-4" /> Cancel
+                </Link>
+                <button
+                  onClick={handleImport}
+                  disabled={
+                    !file || importing || importDone ||
+                    (isExcelFile(file) && type === "invoice" && selectedInvoices.size === 0)
+                  }
+                  className={cn(
+                    "flex-1 h-10 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 transition-all",
+                    file && !importing && !importDone && selectedInvoices.size > 0
+                      ? "bg-primary text-primary-foreground hover:brightness-110"
+                      : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
+                  )}
+                >
+                  {importing ? (
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                  ) : (
+                    <Plus className="w-4 h-4" />
+                  )}
+                  {importing
+                    ? "Importing..."
+                    : excelPreview
+                      ? `Add ${selectedInvoices.size} Invoice${selectedInvoices.size !== 1 ? "s" : ""} to Data`
+                      : "Import Records"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Post-import actions */}
+          {importDone && (
+            <div className="elevated-card rounded-2xl p-5">
+              <div className="flex items-center gap-3">
+                <Link to="/billing/invoice/list" className="premium-btn-primary text-[13px] h-10 flex-1">
+                  <Receipt className="w-4 h-4" /> View Invoices
+                </Link>
+                <button
+                  onClick={() => {
+                    setFile(null);
+                    setExcelPreview(null);
+                    setImportDone(false);
+                    setImportResult(null);
+                    setShowPreview(false);
+                    setNewlyCreatedCustomers([]);
+                  }}
+                  className="premium-btn-outline text-[13px] h-10 flex-1"
+                >
+                  <Upload className="w-4 h-4" /> Import More
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Preview hint */}
+          {file && !importDone && !excelPreview && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               className="flex items-center gap-3 px-5 py-3.5 rounded-xl border border-chart-3/20 bg-chart-3/5 text-[12px] text-muted-foreground">
               <AlertTriangle className="w-4 h-4 text-chart-3 shrink-0" />

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { } from "@/utils/mockData";
+import { useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Upload, Bot, CheckCircle, ArrowRight, Image, Sparkles, Clock, Shield,
@@ -14,6 +15,7 @@ export default function AIInvoiceImport() {
   const [file, setFile] = useState<File | null>(null);
   const [biz, setBiz] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const { items: businesses } = useBusinesses();
 
   const features = [
     { icon: Zap, label: "Instant OCR", desc: "Extract text from any invoice image" },

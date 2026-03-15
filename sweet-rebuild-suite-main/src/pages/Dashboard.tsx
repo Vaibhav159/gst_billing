@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useNavigate } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area,
@@ -19,6 +19,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import EasyDashboard from "@/components/mobile/easy/EasyDashboard";
 import AnimatedCounter from "@/components/AnimatedCounter";
+import OnboardingWizard, { shouldShowOnboarding } from "@/components/OnboardingWizard";
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
@@ -51,6 +52,8 @@ export default function Dashboard() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const [chartMode, setChartMode] = useState<"amount" | "count">("amount");
   const [selectedBusiness, setSelectedBusiness] = useState("all");
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats({ fyFilter: selectedFY, businessId: selectedBusiness });
@@ -108,7 +111,7 @@ export default function Dashboard() {
     name: p.name,
     totalAmt: Number(p.total),
     totalQty: Number(p.qty),
-    hsn: "" // Backend doesn't return HSN in stats, but we can omit or add it
+    hsn: p.hsn || ""
   })).slice(0, 5);
 
   const pieData = [{ name: "Outward", value: totals.outward }, { name: "Inward", value: totals.inward }];
@@ -293,6 +296,11 @@ export default function Dashboard() {
   // ─── DESKTOP DASHBOARD (unchanged) ───
   return (
     <div className="p-6 lg:p-10 space-y-7 max-w-[1440px] mx-auto">
+      {/* ── Onboarding Wizard ── */}
+      {shouldShowOnboarding(businesses.length) && !showOnboarding && (
+        <OnboardingWizard onDismiss={() => setShowOnboarding(true)} />
+      )}
+
       {/* ── Header ── */}
       <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -321,7 +329,12 @@ export default function Dashboard() {
           const sparkData = getMiniTrend(monthlyData, card.sparkType);
           return (
             <motion.div key={card.label} variants={fadeUp}
-              className="group relative overflow-hidden stat-card rounded-2xl p-5 space-y-3">
+              className={cn("group relative overflow-hidden stat-card rounded-2xl p-5 space-y-3 border-l-[3px]",
+                card.color === "text-success" ? "border-l-success" :
+                card.color === "text-warning" ? "border-l-warning" :
+                card.color === "text-chart-4" ? "border-l-chart-4" :
+                netAmount >= 0 ? "border-l-success" : "border-l-destructive"
+              )}>
               <div className={cn("absolute -top-8 -right-8 w-32 h-32 rounded-full bg-gradient-radial opacity-0 group-hover:opacity-100 transition-opacity duration-500", card.bgGlow)} />
               <div className="relative flex items-start justify-between">
                 <div className="space-y-1">
@@ -402,7 +415,15 @@ export default function Dashboard() {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={monthlyData} barSize={16} barGap={3}>
+            <BarChart data={monthlyData} barSize={16} barGap={3}
+              onClick={(data) => {
+                if (data?.activeLabel) {
+                  const monthMap: Record<string, string> = { Apr: "4", May: "5", Jun: "6", Jul: "7", Aug: "8", Sep: "9", Oct: "10", Nov: "11", Dec: "12", Jan: "1", Feb: "2", Mar: "3" };
+                  const monthNum = monthMap[data.activeLabel];
+                  if (monthNum) navigate(`/billing/invoice/list`);
+                }
+              }}
+              style={{ cursor: "pointer" }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} opacity={0.4} />
               <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false}
@@ -410,8 +431,8 @@ export default function Dashboard() {
               <Tooltip cursor={{ fill: "hsl(var(--secondary) / 0.3)" }}
                 contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "12px", boxShadow: "0 8px 32px -4px rgba(0,0,0,0.3)" }}
                 formatter={(v: number, name: string) => [chartMode === "amount" ? formatCurrency(v) : v, name]} />
-              <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Outward" />
-              <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} name="Inward" />
+              <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Outward" className="cursor-pointer" />
+              <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} name="Inward" className="cursor-pointer" />
             </BarChart>
           </ResponsiveContainer>
         </motion.div>
@@ -424,8 +445,13 @@ export default function Dashboard() {
           <div className="flex-1 flex items-center justify-center py-4">
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
-                <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={4} dataKey="value" strokeWidth={0}>
-                  {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i]} />)}
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={4} dataKey="value" strokeWidth={0}
+                  onClick={(_, index) => {
+                    const type = index === 0 ? "OUTWARD" : "INWARD";
+                    navigate(`/billing/invoice/list`);
+                  }}
+                  className="cursor-pointer">
+                  {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i]} className="cursor-pointer hover:opacity-80 transition-opacity" />)}
                 </Pie>
                 <Tooltip contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "12px" }} />
               </PieChart>
@@ -439,8 +465,8 @@ export default function Dashboard() {
                   <span className="text-muted-foreground">{d.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-foreground">{d.value}</span>
-                  <span className="text-[11px] text-muted-foreground/60">({totalCount > 0 ? Math.round((d.value / totalCount) * 100) : 0}%)</span>
+                  <span className="font-bold text-foreground">{formatCurrency(d.value)}</span>
+                  <span className="text-[11px] text-muted-foreground/60">({(totals.outward + totals.inward) > 0 ? Math.round((d.value / (totals.outward + totals.inward)) * 100) : 0}%)</span>
                 </div>
               </div>
             ))}
@@ -565,7 +591,8 @@ export default function Dashboard() {
                 <span className="w-7 h-7 rounded-lg bg-success/10 border border-success/20 flex items-center justify-center text-success text-[11px] font-bold shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-medium text-foreground group-hover:text-primary transition-colors truncate">{p.name}</p>
-                  <p className="text-[11px] text-muted-foreground">HSN: {p.hsn}</p>
+                  {p.hsn && <p className="text-[11px] text-muted-foreground">HSN: {p.hsn}</p>}
+                  {!p.hsn && <p className="text-[11px] text-muted-foreground/50 italic">No HSN</p>}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(p.totalAmt)}</p>

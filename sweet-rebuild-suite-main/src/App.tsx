@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -21,6 +21,7 @@ import BusinessForm from "@/pages/BusinessForm";
 import InvoiceList from "@/pages/InvoiceList";
 import InvoiceDetail from "@/pages/InvoiceDetail";
 import InvoicePrint from "@/pages/InvoicePrint";
+import InvoicePrintTally from "@/pages/InvoicePrintTally";
 import InvoiceForm from "@/pages/InvoiceForm";
 import AIInvoiceImport from "@/pages/AIInvoiceImport";
 import BulkPDF from "@/pages/BulkPDF";
@@ -53,8 +54,11 @@ const App = () => (
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
 
-                {/* Invoice print — no navbar needed */}
+                {/* Invoice print — Tally format is default */}
                 <Route path="/billing/invoice/:id/print" element={
+                  <ProtectedRoute><InvoicePrintTally /></ProtectedRoute>
+                } />
+                <Route path="/billing/invoice/:id/print-classic" element={
                   <ProtectedRoute><InvoicePrint /></ProtectedRoute>
                 } />
 
@@ -102,6 +106,7 @@ const App = () => (
                   <Route path="/billing/profile" element={<Profile />} />
                 </Route>
 
+                <Route path="/billing" element={<Navigate to="/" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>

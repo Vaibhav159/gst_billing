@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { invoices, formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt } from "lucide-react";
 import { motion } from "framer-motion";
@@ -13,11 +13,11 @@ const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.07 } }
 
 export default function CustomerStatement() {
   const { id } = useParams<{ id: string }>();
-  const { items: invoices } = useInvoices();
+  const { items: invoices } = useInvoices({ customerId: id });
   const { items: customers } = useCustomers();
   const { items: businesses } = useBusinesses();
   const isMobile = useIsMobile();
-  const customer = customers.find((c) => c.id === id);
+  const customer = customers.find((c) => String(c.id) === String(id));
   const [startDate, setStartDate] = useState("2024-04-01");
   const [endDate, setEndDate] = useState("2025-03-31");
   const [bizFilter, setBizFilter] = useState("all");
@@ -26,7 +26,7 @@ export default function CustomerStatement() {
 
   const filtered = invoices.filter((inv) => {
     const d = new Date(inv.invoice_date || "");
-    return inv.customerId === id && d >= new Date(startDate) && d <= new Date(endDate) && (bizFilter === "all" || inv.businessId === bizFilter);
+    return String(inv.customerId) === String(id) && d >= new Date(startDate) && d <= new Date(endDate) && (bizFilter === "all" || String(inv.businessId) === String(bizFilter));
   });
 
   const outward = filtered.filter((i) => i.type === "OUTWARD");
