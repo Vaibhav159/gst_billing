@@ -455,6 +455,17 @@
     @apply w-full h-10 px-4 rounded-xl border border-border bg-input/50 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-primary/50 backdrop-blur-sm transition-all;
   }
 
+  /* Hide number input spinners */
+  .premium-input[type="number"]::-webkit-inner-spin-button,
+  .premium-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .premium-input[type="number"] {
+    -moz-appearance: textfield;
+    font-variant-numeric: tabular-nums;
+  }
+
   .premium-select {
     @apply h-10 px-4 rounded-xl border border-border bg-input/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-primary/50 backdrop-blur-sm transition-all;
   }

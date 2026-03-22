@@ -349,7 +349,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             </div>
 
             {/* Line Items */}
-            <div className="elevated-card rounded-2xl overflow-hidden">
+            <div className="elevated-card rounded-2xl">
               <div className="flex items-center justify-between px-5 py-3 border-b border-border/50">
                 <div className="flex items-center gap-2">
                   <Package className="w-4 h-4 text-chart-3" />
@@ -391,20 +391,31 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   })}
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="table-premium">
-                    <thead><tr>{["#", "Product", "GST%", "Qty", "Unit", "Rate (₹)", "Amount", "Tax", ""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <div className="overflow-visible">
+                  <table className="table-premium" style={{ tableLayout: "fixed", width: "100%" }}>
+                    <colgroup>
+                      <col style={{ width: "3%" }} />
+                      <col style={{ width: "21%" }} />
+                      <col style={{ width: "7%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "6%" }} />
+                    </colgroup>
+                    <thead><tr>{["#", "Product", "GST%", "Qty", "Unit", "Rate (₹/unit)", "Amount", "Tax", ""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                     <tbody>
                       {items.map((item, i) => {
                         const { amount, tax, gstRate } = calcItem(item);
                         return (
                           <motion.tr key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
-                            <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" className="w-48" /></td>
+                            <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
-                            <td><input type="number" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-24 text-center" /></td>
-                            <td><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-20 text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
-                            <td><input type="number" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-32" /></td>
+                            <td><input type="number" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full text-center" /></td>
+                            <td><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-full text-[12px] !px-2">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
+                            <td><input type="number" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full" /></td>
                             <td className="font-bold text-foreground whitespace-nowrap">{formatCurrency(amount)}</td>
                             <td className="text-muted-foreground whitespace-nowrap text-[12px]">{formatCurrency(tax)}</td>
                             <td><button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></td>
@@ -440,6 +451,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             <div className="elevated-card rounded-2xl p-5 space-y-3">
               <div className="flex items-center gap-2"><Calculator className="w-4 h-4 text-primary" /><h3 className="text-[13px] font-display font-semibold text-foreground">Summary</h3></div>
               <div className="space-y-2 text-[13px]">
+                {items.map((item, i) => {
+                  const product = localProducts.find(p => p.id === item.productId);
+                  if (item.qty === 0 && item.rate === 0 && !product) return null;
+                  return (
+                    <div key={i} className="space-y-1.5 pb-2 border-b border-border/30">
+                      {product && <div className="text-[12px] font-medium text-foreground truncate">{product.name}</div>}
+                      <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{item.qty} {item.unit}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(item.rate)}/{item.unit}</span></div>
+                    </div>
+                  );
+                })}
                 <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">{formatCurrency(subtotal)}</span></div>
                 {form.isIGST ? (
                   <div className="flex justify-between"><span className="text-muted-foreground">IGST</span><span>{formatCurrency(totalTax)}</span></div>
@@ -447,7 +469,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   <><div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(totalTax / 2)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(totalTax / 2)}</span></div></>
                 )}
                 <div className="border-t border-border/50 pt-3 flex justify-between font-bold">
-                  <span className="text-foreground">Total</span>
+                  <span className="text-foreground">Grand Total</span>
                   <span className="text-primary text-lg font-display">{formatCurrency(total)}</span>
                 </div>
               </div>

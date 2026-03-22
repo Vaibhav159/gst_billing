@@ -115,10 +115,11 @@ export default function SearchableSelect({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className={cn(
-          "absolute z-50 w-full bg-popover border border-border/60 rounded-xl shadow-xl overflow-hidden animate-in fade-in duration-150",
-          openUpward ? "bottom-full mb-1 slide-in-from-bottom-1" : "top-full mt-1 slide-in-from-top-1"
-        )}>
+        <div
+          className={cn(
+            "absolute z-[100] min-w-[240px] w-full bg-popover border border-border/60 rounded-xl shadow-xl overflow-hidden animate-in fade-in duration-150",
+            openUpward ? "bottom-full mb-1 slide-in-from-bottom-1" : "top-full mt-1 slide-in-from-top-1"
+          )}>
           {/* Search input */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border/40">
             <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
