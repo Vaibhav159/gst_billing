@@ -20,7 +20,7 @@ from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -71,6 +71,7 @@ class StandardResultsSetPagination(PageNumberPagination):
 class BusinessViewSet(viewsets.ModelViewSet):
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "gst_number"]
     ordering_fields = ["name", "created_at", "gst_number", "mobile_number", "address"]
@@ -694,6 +695,41 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
 
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def update_line_items(self, request, pk=None):
+        """Replace all line items for an invoice"""
+        invoice = self.get_object()
+        line_items_data = request.data.get("line_items", [])
+
+        # Delete existing line items
+        LineItem.objects.filter(invoice=invoice).delete()
+
+        # Create new line items
+        for item_data in line_items_data:
+            qty = Decimal(str(item_data.get("quantity", 1)))
+            rate = Decimal(str(item_data.get("rate", 0)))
+            amount = Decimal(str(item_data.get("amount", qty * rate)))
+            LineItem.objects.create(
+                invoice=invoice,
+                customer=invoice.customer,
+                product_name=item_data.get("product_name", ""),
+                hsn_code=item_data.get("hsn_code", ""),
+                gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                quantity=qty,
+                rate=rate,
+                cgst=Decimal(str(item_data.get("cgst", 0))),
+                sgst=Decimal(str(item_data.get("sgst", 0))),
+                igst=Decimal(str(item_data.get("igst", 0))),
+                amount=amount,
+                unit=item_data.get("unit", "gms"),
+                workspace_id=1,
+            )
+
+        # Update invoice total
+        invoice.save()  # This triggers the total_amount recalculation
+
+        return Response(InvoiceSerializer(invoice).data)
 
     @action(detail=True, methods=["get"])
     def summary(self, request, pk=None):
@@ -1624,6 +1660,7 @@ class BulkInvoiceImportView(APIView):
                         gst_number=clean_gst,
                         pan_number=clean_pan,
                         state_name="RAJASTHAN",
+                        workspace_id=1,
                     )
                     customer.save()
                     # Link customer to business
@@ -1658,6 +1695,7 @@ class BulkInvoiceImportView(APIView):
                     business=business,
                     type_of_invoice=type_of_invoice,
                     total_amount=Decimal(str(inv_data.get("total", 0))),
+                    workspace_id=1,
                 )
 
                 # Create line items
@@ -1695,6 +1733,7 @@ class BulkInvoiceImportView(APIView):
                         sgst=sgst,
                         igst=igst,
                         amount=amount,
+                        workspace_id=1,
                     )
 
                 # Update invoice total

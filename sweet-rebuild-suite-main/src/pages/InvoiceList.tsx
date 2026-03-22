@@ -3,7 +3,7 @@ import { Link, useOutletContext, useNavigate } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
   Trash2, Copy, CheckSquare, Square, LayoutGrid, LayoutList, TrendingUp,
-  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet,
+  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet, QrCode,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
@@ -263,7 +263,7 @@ export default function InvoiceList() {
           {selected.size > 0 && (
             <>
               <span className="text-[12px] text-muted-foreground font-medium">{selected.size} selected</span>
-              <button onClick={() => { const firstId = Array.from(selected)[0]; if (firstId) navigate(`/billing/invoice/${firstId}/print`); }} className="premium-btn-ghost text-[13px]">
+              <button onClick={() => { sessionStorage.setItem('batch_print_ids', JSON.stringify(Array.from(selected))); navigate('/billing/batch-print'); }} className="premium-btn-ghost text-[13px]">
                 <Printer className="w-4 h-4" /> Print
               </button>
               <button onClick={() => {
@@ -299,6 +299,7 @@ export default function InvoiceList() {
           <Link to="/billing/invoice/import" className="premium-btn-ghost text-[13px]"><Upload className="w-4 h-4" /> Import</Link>
           <Link to="/billing/invoice/ai-import" className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Bot className="w-4 h-4" /> AI Import</Link>
           <Link to="/billing/bulk-pdf" className="premium-btn-ghost text-[13px]"><FileText className="w-4 h-4" /> Bulk PDF</Link>
+          <Link to="/billing/qr-scanner" className="premium-btn-ghost text-[13px]"><QrCode className="w-4 h-4" /> QR Verify</Link>
           <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New Invoice</Link>
         </div>
       </div>

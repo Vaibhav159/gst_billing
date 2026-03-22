@@ -191,6 +191,7 @@ def process_customer_csv(
                             if not pd.isna(row.get("state_name", ""))
                             else None
                         ),
+                        workspace_id=1,
                     )
 
                     # Add business to customer
@@ -311,6 +312,7 @@ def process_product_csv(file_content: bytes) -> dict[str, int | list[str]]:
                             if not pd.isna(row.get("description", ""))
                             else None
                         ),
+                        workspace_id=1,
                     )
 
                     # Add to existing products dict to prevent duplicates
@@ -546,6 +548,7 @@ def process_invoice_csv(
                     invoice_number=invoice_number,
                     invoice_date=invoice_date,
                     type_of_invoice="outward",  # Default to outward invoice
+                    workspace_id=1,
                 )
 
                 print(f"Invoice {invoice_number} created with {invoice=}")

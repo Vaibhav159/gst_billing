@@ -2,7 +2,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Pencil, FileText, Trash2, Plus, Phone, Mail, MapPin,
   Tag, Building2, TrendingUp, TrendingDown, Activity, Calendar,
-  Eye, Printer, ExternalLink, Copy, CheckCircle2,
+  Eye, Printer, ExternalLink, Copy, CheckCircle2, Download, Loader2, FileArchive,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
@@ -28,6 +28,8 @@ export default function CustomerDetail() {
   const isMobile = useIsMobile();
   const [showDelete, setShowDelete] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [dlProgress, setDlProgress] = useState({ current: 0, total: 0 });
   const { item: customer, isLoading } = useCustomer(id);
   const { remove: removeCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
@@ -53,6 +55,34 @@ export default function CustomerDetail() {
     monthlyMap[month] = (monthlyMap[month] || 0) + inv.total;
   });
   const trendData = Object.entries(monthlyMap).sort().map(([k, v]) => ({ month: k, value: v }));
+
+  const handleDownloadAll = async () => {
+    if (custInvoices.length === 0) return;
+    setDownloading(true);
+    setDlProgress({ current: 0, total: custInvoices.length });
+    toast({ title: "Generating PDFs", description: `Creating ${custInvoices.length} invoice PDFs...` });
+    try {
+      const { generateBulkPDFZip } = await import("@/utils/generateBulkPDF");
+      const zipBlob = await generateBulkPDFZip(
+        custInvoices,
+        businesses,
+        (current, total) => setDlProgress({ current, total })
+      );
+      const url = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${customer.name.replace(/[^a-zA-Z0-9]/g, "_")}_invoices.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      toast({ title: "Download Complete", description: `${custInvoices.length} PDFs downloaded as ZIP.` });
+    } catch (err) {
+      console.error("Bulk PDF failed", err);
+      toast({ title: "Download Failed", description: "Could not generate PDFs.", variant: "destructive" });
+    }
+    setDownloading(false);
+  };
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -97,6 +127,9 @@ export default function CustomerDetail() {
           <div className="flex items-center gap-2 mt-4">
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px] h-9"><ArrowLeft className="w-4 h-4" /> Back</button>
             <Link to={`/billing/customer/${id}/statement`} className="premium-btn-ghost text-[13px] h-9"><FileText className="w-4 h-4" /> Statement</Link>
+            <button onClick={handleDownloadAll} disabled={downloading || custInvoices.length === 0} className="premium-btn-ghost text-[13px] h-9">
+              {downloading ? <><Loader2 className="w-4 h-4 animate-spin" /> {dlProgress.current}/{dlProgress.total}</> : <><Download className="w-4 h-4" /> Download All PDFs</>}
+            </button>
             <Link to={`/billing/customer/edit/${id}`} className="premium-btn-outline text-[13px] h-9 border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
             <button onClick={() => setShowDelete(true)} className="premium-btn-outline text-[13px] h-9 border-destructive/30 text-destructive"><Trash2 className="w-4 h-4" /> Delete</button>
           </div>
@@ -234,6 +267,9 @@ export default function CustomerDetail() {
         <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
           <div className="flex items-center gap-2">
             <Link to={`/billing/customer/edit/${id}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
+            <button onClick={handleDownloadAll} disabled={downloading || custInvoices.length === 0} className="premium-btn-outline flex-1 text-[12px] h-10 border-chart-3/30 text-chart-3">
+              {downloading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {dlProgress.current}/{dlProgress.total}</> : <><Download className="w-3.5 h-3.5" /> PDFs</>}
+            </button>
             <Link to={`/billing/customer/${id}/statement`} className="premium-btn-primary flex-1 text-[12px] h-10"><FileText className="w-3.5 h-3.5" /> Statement</Link>
             <button onClick={() => setShowDelete(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-destructive/30 text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
           </div>

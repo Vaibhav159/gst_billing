@@ -100,6 +100,8 @@ export interface Invoice {
   totalIGST: number;
   totalTax: number;
   total: number;
+  roundedOff?: number;
+  jurisdictionCity?: string;
   financialYear: string;
   createdAt: string;
   updatedAt: string;

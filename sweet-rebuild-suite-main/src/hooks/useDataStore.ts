@@ -54,6 +54,8 @@ export interface Business {
   bank_branch_name?: string | null;
   state_name?: string | null;
   primary_color_theme?: string;
+  signature_image?: string | null;
+  signature_image_base64?: string | null;
   email?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -201,6 +203,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     gstRate: Math.round(parseFloat(item.gst_tax_rate) * 100) || 0,
     qty: parseFloat(item.quantity) || 0,
     rate: parseFloat(item.rate) || 0,
+    unit: item.unit || "gms",
     amount: parseFloat(item.amount) || 0,
     cgst: parseFloat(item.cgst) || 0,
     sgst: parseFloat(item.sgst) || 0,
@@ -227,6 +230,10 @@ export function mapDjangoInvoice(inv: any): Invoice {
     }
   }
 
+  const rawTotal = subtotal + totalTax;
+  const roundedTotal = Math.round(rawTotal);
+  const roundedOff = +(roundedTotal - rawTotal).toFixed(2);
+
   return {
     id: String(inv.id),
     invoiceNumber: inv.invoice_number || "",
@@ -243,7 +250,8 @@ export function mapDjangoInvoice(inv: any): Invoice {
     totalSGST,
     totalIGST,
     totalTax,
-    total: parseFloat(inv.total_amount) || 0,
+    total: roundedTotal,
+    roundedOff: roundedOff !== 0 ? roundedOff : undefined,
     financialYear: getFinancialYear(inv.invoice_date),
     createdAt: inv.created_at || "",
     updatedAt: inv.updated_at || "",
@@ -379,28 +387,80 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
   }, [items]);
 
   const create = async (data: Partial<Invoice>) => {
-    const payload = { ...data };
-    if (payload.type) {
-      (payload as any).type_of_invoice = payload.type.toLowerCase();
-      delete payload.type;
-    }
-    // Map invoice_date if it exists
-    if (payload.invoice_date) {
-      (payload as any).invoice_date = payload.invoice_date;
+    // Map frontend field names to Django API field names
+    const apiPayload: Record<string, any> = {};
+
+    if (data.customerId) apiPayload.customer = data.customerId;
+    if (data.businessId) apiPayload.business = data.businessId;
+    if (data.invoiceNumber) apiPayload.invoice_number = data.invoiceNumber;
+    if (data.invoice_date) apiPayload.invoice_date = data.invoice_date;
+    if (data.type) apiPayload.type_of_invoice = data.type.toLowerCase();
+    if (data.total !== undefined) apiPayload.total_amount = data.total;
+
+    const res = await api.post<any>("invoices/", apiPayload);
+    const createdInvoice = res.data;
+
+    // Create line items if provided
+    if (data.items && data.items.length > 0) {
+      try {
+        await api.post(`invoices/${createdInvoice.id}/update_line_items/`, {
+          line_items: data.items.map((it: any) => ({
+            product_name: it.productName || it.product_name || "",
+            hsn_code: it.hsn || it.hsn_code || "",
+            gst_tax_rate: it.gstRate || it.gst_tax_rate || 0,
+            quantity: it.qty || it.quantity || 1,
+            rate: it.rate || 0,
+            unit: it.unit || "pcs",
+            cgst: it.cgst || 0,
+            sgst: it.sgst || 0,
+            igst: it.igst || 0,
+            amount: it.amount || 0,
+          })),
+        });
+      } catch (e) {
+        console.warn("Line items creation endpoint not available, skipping", e);
+      }
     }
 
-    const res = await api.post<any>("invoices/", payload);
-    setItems((prev) => [...prev, mapDjangoInvoice(res.data)]);
-    return res.data;
+    setItems((prev) => [...prev, mapDjangoInvoice(createdInvoice)]);
+    return createdInvoice;
   };
 
   const update = async (id: string | number, updates: Partial<Invoice>) => {
-    const payload = { ...updates };
-    if (payload.type) {
-      (payload as any).type_of_invoice = payload.type.toLowerCase();
-      delete payload.type;
+    // Map frontend field names to Django API field names
+    const apiPayload: Record<string, any> = {};
+
+    if (updates.customerId) apiPayload.customer = updates.customerId;
+    if (updates.businessId) apiPayload.business = updates.businessId;
+    if (updates.invoiceNumber) apiPayload.invoice_number = updates.invoiceNumber;
+    if (updates.invoice_date) apiPayload.invoice_date = updates.invoice_date;
+    if (updates.type) apiPayload.type_of_invoice = updates.type.toLowerCase();
+    if (updates.total !== undefined) apiPayload.total_amount = updates.total;
+
+    const res = await api.patch<any>(`invoices/${id}/`, apiPayload);
+
+    // Also update line items if provided
+    if (updates.items && updates.items.length > 0) {
+      try {
+        await api.post(`invoices/${id}/update_line_items/`, {
+          line_items: updates.items.map((it: any) => ({
+            product_name: it.productName || it.product_name || "",
+            hsn_code: it.hsn || it.hsn_code || "",
+            gst_tax_rate: it.gstRate || it.gst_tax_rate || 0,
+            quantity: it.qty || it.quantity || 1,
+            rate: it.rate || 0,
+            unit: it.unit || "pcs",
+            cgst: it.cgst || 0,
+            sgst: it.sgst || 0,
+            igst: it.igst || 0,
+            amount: it.amount || 0,
+          })),
+        });
+      } catch (e) {
+        console.warn("Line items update endpoint not available, skipping", e);
+      }
     }
-    const res = await api.patch<any>(`invoices/${id}/`, payload);
+
     setItems((prev) => prev.map((it) => (String(it.id) === String(id) ? mapDjangoInvoice(res.data) : it)));
   };
 
@@ -767,13 +827,13 @@ export function useBusinesses(fy?: string, enabled = true) {
     return items.find((it) => String(it.id) === String(id)) || null;
   }, [items]);
 
-  const create = async (data: Partial<Business>) => {
+  const create = async (data: Partial<Business> | FormData) => {
     const res = await api.post<Business>("businesses/", data);
     setItems((prev) => [...prev, res.data]);
     return res.data;
   };
 
-  const update = async (id: string | number, updates: Partial<Business>) => {
+  const update = async (id: string | number, updates: Partial<Business> | FormData) => {
     const res = await api.patch<Business>(`businesses/${id}/`, updates);
     setItems((prev) => prev.map((it) => (String(it.id) === String(id) ? res.data : it)));
   };

@@ -120,17 +120,20 @@ function InlineQuickAddCustomer({
   defaultName,
   defaultGST,
   businessIds,
+  allCustomers,
   onCreated,
   onCancel,
 }: {
   defaultName: string;
   defaultGST: string;
   businessIds: string[];
+  allCustomers: Customer[];
   onCreated: (c: Customer) => void;
   onCancel: () => void;
 }) {
   const { create: createCustomer } = useCustomers();
   const { toast } = useToast();
+  const [mode, setMode] = useState<"new" | "existing">("new");
   const [form, setForm] = useState({
     name: defaultName,
     gst: defaultGST.includes("(PAN)") ? "" : defaultGST === "-" ? "" : defaultGST,
@@ -140,6 +143,8 @@ function InlineQuickAddCustomer({
     address: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  const [selectedExistingId, setSelectedExistingId] = useState<string>("");
+  const [existingSearch, setExistingSearch] = useState(defaultName);
 
   const gstStateMap: Record<string, string> = {
     "27": "Maharashtra", "24": "Gujarat", "29": "Karnataka",
@@ -185,6 +190,22 @@ function InlineQuickAddCustomer({
     setSubmitting(false);
   };
 
+  const handleLinkExisting = () => {
+    const customer = allCustomers.find(c => String(c.id) === selectedExistingId);
+    if (customer) {
+      toast({ title: "Customer Linked", description: customer.name });
+      onCreated(customer);
+    }
+  };
+
+  const filteredCustomers = allCustomers.filter(c => {
+    const q = existingSearch.toLowerCase();
+    return c.name.toLowerCase().includes(q) ||
+      c.gst_number?.toLowerCase().includes(q) ||
+      c.pan_number?.toLowerCase().includes(q) ||
+      c.mobile_number?.includes(q);
+  });
+
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }}
@@ -195,65 +216,163 @@ function InlineQuickAddCustomer({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <UserPlus className="w-4 h-4 text-primary" />
-          <span className="text-[12px] font-semibold text-foreground">Add New Customer</span>
+          <span className="text-[12px] font-semibold text-foreground">
+            {defaultName}
+          </span>
         </div>
         <button onClick={onCancel} className="p-1 rounded hover:bg-secondary/50">
           <X className="w-3.5 h-3.5 text-muted-foreground" />
         </button>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        <input
-          value={form.name}
-          onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-          placeholder="Customer Name *"
-          className="premium-input text-[12px] h-8 col-span-2 sm:col-span-1"
-        />
-        <input
-          value={form.gst}
-          onChange={e => setForm(p => ({ ...p, gst: e.target.value.toUpperCase() }))}
-          placeholder="GST Number"
-          maxLength={15}
-          className="premium-input text-[12px] h-8 font-mono uppercase"
-        />
-        <input
-          value={form.pan}
-          onChange={e => setForm(p => ({ ...p, pan: e.target.value.toUpperCase() }))}
-          placeholder="PAN"
-          maxLength={10}
-          className="premium-input text-[12px] h-8 font-mono uppercase"
-        />
-        <input
-          value={form.mobile}
-          onChange={e => setForm(p => ({ ...p, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-          placeholder="Mobile"
-          maxLength={10}
-          className="premium-input text-[12px] h-8 tabular-nums"
-        />
-        <select
-          value={form.state}
-          onChange={e => setForm(p => ({ ...p, state: e.target.value }))}
-          className="premium-select text-[12px] h-8"
-        >
-          <option value="">State</option>
-          {indianStates.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <input
-          value={form.address}
-          onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
-          placeholder="Address"
-          className="premium-input text-[12px] h-8"
-        />
-      </div>
-      <div className="flex gap-2 justify-end">
-        <button onClick={onCancel} className="premium-btn-ghost text-[11px] h-7 px-3">Cancel</button>
+
+      {/* Mode toggle */}
+      <div className="flex gap-1 p-0.5 rounded-lg bg-secondary/30 w-fit">
         <button
-          onClick={handleSubmit}
-          disabled={!form.name.trim() || submitting}
-          className="premium-btn-primary text-[11px] h-7 px-3"
+          onClick={() => setMode("new")}
+          className={cn(
+            "px-3 py-1 rounded-md text-[11px] font-medium transition-all",
+            mode === "new"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          )}
         >
-          {submitting ? "Creating..." : "Create & Link"}
+          <UserPlus className="w-3 h-3 inline mr-1" />
+          Create New
+        </button>
+        <button
+          onClick={() => setMode("existing")}
+          className={cn(
+            "px-3 py-1 rounded-md text-[11px] font-medium transition-all",
+            mode === "existing"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Users className="w-3 h-3 inline mr-1" />
+          Link Existing
         </button>
       </div>
+
+      {mode === "new" ? (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <input
+              value={form.name}
+              onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+              placeholder="Customer Name *"
+              className="premium-input text-[12px] h-8 col-span-2 sm:col-span-1"
+            />
+            <input
+              value={form.gst}
+              onChange={e => setForm(p => ({ ...p, gst: e.target.value.toUpperCase() }))}
+              placeholder="GST Number"
+              maxLength={15}
+              className="premium-input text-[12px] h-8 font-mono uppercase"
+            />
+            <input
+              value={form.pan}
+              onChange={e => setForm(p => ({ ...p, pan: e.target.value.toUpperCase() }))}
+              placeholder="PAN"
+              maxLength={10}
+              className="premium-input text-[12px] h-8 font-mono uppercase"
+            />
+            <input
+              value={form.mobile}
+              onChange={e => setForm(p => ({ ...p, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+              placeholder="Mobile"
+              maxLength={10}
+              className="premium-input text-[12px] h-8 tabular-nums"
+            />
+            <select
+              value={form.state}
+              onChange={e => setForm(p => ({ ...p, state: e.target.value }))}
+              className="premium-select text-[12px] h-8"
+            >
+              <option value="">State</option>
+              {indianStates.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <input
+              value={form.address}
+              onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
+              placeholder="Address"
+              className="premium-input text-[12px] h-8"
+            />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onCancel} className="premium-btn-ghost text-[11px] h-7 px-3">Cancel</button>
+            <button
+              onClick={handleSubmit}
+              disabled={!form.name.trim() || submitting}
+              className="premium-btn-primary text-[11px] h-7 px-3"
+            >
+              {submitting ? "Creating..." : "Create & Link"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="space-y-2">
+            <input
+              value={existingSearch}
+              onChange={e => { setExistingSearch(e.target.value); setSelectedExistingId(""); }}
+              placeholder="Search by name, GST, PAN, or mobile..."
+              className="premium-input text-[12px] h-8 w-full"
+            />
+            <div className="max-h-36 overflow-y-auto rounded-lg border border-border/30 divide-y divide-border/20">
+              {filteredCustomers.length === 0 ? (
+                <div className="p-3 text-center text-[11px] text-muted-foreground">
+                  No matching customers found
+                </div>
+              ) : (
+                filteredCustomers.slice(0, 20).map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedExistingId(String(c.id))}
+                    className={cn(
+                      "w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors text-[11px]",
+                      selectedExistingId === String(c.id)
+                        ? "bg-primary/15 border-l-2 border-l-primary"
+                        : "hover:bg-secondary/30"
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className={cn(
+                        "font-medium truncate",
+                        selectedExistingId === String(c.id) ? "text-primary" : "text-foreground"
+                      )}>
+                        {c.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {[c.gst_number, c.pan_number, c.mobile_number, c.state_name]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    {selectedExistingId === String(c.id) && (
+                      <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+            {filteredCustomers.length > 20 && (
+              <p className="text-[10px] text-muted-foreground text-center">
+                Showing 20 of {filteredCustomers.length} — type more to narrow down
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={onCancel} className="premium-btn-ghost text-[11px] h-7 px-3">Cancel</button>
+            <button
+              onClick={handleLinkExisting}
+              disabled={!selectedExistingId}
+              className="premium-btn-primary text-[11px] h-7 px-3"
+            >
+              Link Customer
+            </button>
+          </div>
+        </>
+      )}
     </motion.div>
   );
 }
@@ -277,6 +396,8 @@ export default function ImportPage({ type }: ImportPageProps) {
   const [addingCustomerFor, setAddingCustomerFor] = useState<string | null>(null);
   // Track newly created customers during this session
   const [newlyCreatedCustomers, setNewlyCreatedCustomers] = useState<Customer[]>([]);
+  // Track manual name→customer mappings (for "Link Existing" where names differ)
+  const [customerNameMap, setCustomerNameMap] = useState<Record<string, Customer>>({});
   // Selected invoices for import (checked ones)
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
 
@@ -329,6 +450,10 @@ export default function ImportPage({ type }: ImportPageProps) {
           c => c.name.toLowerCase() === inv.customerName.toLowerCase()
         ) || null;
       }
+      // Check manual name→customer mappings (from "Link Existing")
+      if (!customerMatch && inv.customerName && customerNameMap[inv.customerName.toLowerCase()]) {
+        customerMatch = customerNameMap[inv.customerName.toLowerCase()];
+      }
 
       // Check for duplicate invoice (same invoice number + same business + same date)
       let isDuplicate = false;
@@ -349,7 +474,7 @@ export default function ImportPage({ type }: ImportPageProps) {
 
       return { invoice: inv, businessMatch, customerMatch, isDuplicate, status };
     });
-  }, [excelPreview, businesses, customers, newlyCreatedCustomers, existingInvoices, bizFilter]);
+  }, [excelPreview, businesses, customers, newlyCreatedCustomers, existingInvoices, bizFilter, customerNameMap]);
 
   // ─── Stats ───
   const readyCount = validationResults.filter(v => v.status === "ready").length;
@@ -528,10 +653,15 @@ export default function ImportPage({ type }: ImportPageProps) {
       });
   }, [validationResults]);
 
-  const handleCustomerCreated = (customer: Customer) => {
+  const handleCustomerCreated = (customer: Customer, importName?: string) => {
     setNewlyCreatedCustomers(prev => [...prev, customer]);
+    // Store manual name mapping if the import name differs from the linked customer name
+    const nameToMap = importName || addingCustomerFor;
+    if (nameToMap && customer.name.toLowerCase() !== nameToMap.toLowerCase()) {
+      setCustomerNameMap(prev => ({ ...prev, [nameToMap.toLowerCase()]: customer }));
+    }
     setAddingCustomerFor(null);
-    // The validation will re-run due to dependency on newlyCreatedCustomers
+    // The validation will re-run due to dependency on newlyCreatedCustomers / customerNameMap
   };
 
   const statusIcon = (s: ValidationResult["status"]) => {
@@ -787,6 +917,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                             v => v.invoice.customerName === addingCustomerFor
                           )?.invoice.customerGST || ""
                         }
+                        allCustomers={customers}
                         businessIds={businesses.map(b => String(b.id))}
                         onCreated={handleCustomerCreated}
                         onCancel={() => setAddingCustomerFor(null)}

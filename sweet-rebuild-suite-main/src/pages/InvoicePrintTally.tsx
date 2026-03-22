@@ -41,7 +41,8 @@ export default function InvoicePrintTally() {
   if (!biz || !customer) return <div className="p-8 text-muted-foreground">Business or customer not found.</div>;
 
   const fileName = `${inv.invoiceNumber.replace(/\//g, "-")}.pdf`;
-  const document = <TallyInvoicePDF invoice={inv} business={biz} customer={customer} qrDataUrl={qrDataUrl} />;
+  const bizWithSig = biz ? { ...biz, signature_image: biz.signature_image_base64 || null } : biz;
+  const document = <TallyInvoicePDF invoice={inv} business={bizWithSig} customer={customer} qrDataUrl={qrDataUrl} />;
 
   const handleDownload = (blob: Blob | null) => {
     if (!blob) return;

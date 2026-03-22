@@ -25,6 +25,8 @@ import InvoicePrintTally from "@/pages/InvoicePrintTally";
 import InvoiceForm from "@/pages/InvoiceForm";
 import AIInvoiceImport from "@/pages/AIInvoiceImport";
 import BulkPDF from "@/pages/BulkPDF";
+import QRScanner from "@/pages/QRScanner";
+import BatchPrint from "@/pages/BatchPrint";
 import ProductList from "@/pages/ProductList";
 import ProductDetail from "@/pages/ProductDetail";
 import ProductForm from "@/pages/ProductForm";
@@ -61,6 +63,9 @@ const App = () => (
                 <Route path="/billing/invoice/:id/print-classic" element={
                   <ProtectedRoute><InvoicePrint /></ProtectedRoute>
                 } />
+                <Route path="/billing/batch-print" element={
+                  <ProtectedRoute><BatchPrint /></ProtectedRoute>
+                } />
 
                 {/* Main app layout */}
                 <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
@@ -89,6 +94,7 @@ const App = () => (
                   <Route path="/billing/invoice/ai-import" element={<AIInvoiceImport />} />
                   <Route path="/billing/invoice/:id" element={<InvoiceDetail />} />
                   <Route path="/billing/bulk-pdf" element={<BulkPDF />} />
+                  <Route path="/billing/qr-scanner" element={<QRScanner />} />
 
                   {/* Products */}
                   <Route path="/billing/product/list" element={<ProductList />} />

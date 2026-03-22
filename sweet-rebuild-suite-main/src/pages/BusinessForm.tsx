@@ -5,7 +5,7 @@ import { useBusinesses, useBusiness, generateId } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Save, X, AlertTriangle, Building2, Pencil, Phone, Mail, MapPin,
-  Hash, CreditCard, Landmark, CheckCircle2, Info, FileText,
+  Hash, CreditCard, Landmark, CheckCircle2, Info, FileText, Upload, Trash2, Image,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
@@ -73,6 +73,16 @@ export default function BusinessForm() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [removeSignature, setRemoveSignature] = useState(false);
+
+  // Load existing signature preview
+  useEffect(() => {
+    if (isEdit && existing?.signature_image) {
+      setSignaturePreview(existing.signature_image);
+    }
+  }, [existing, isEdit]);
 
   // Browser beforeunload guard
   useEffect(() => {
@@ -127,13 +137,24 @@ export default function BusinessForm() {
       toast({ title: "Validation Error", description: "Please fix the highlighted fields.", variant: "destructive" });
       return;
     }
-    const payload = { ...form, state_name: form.state_name ? form.state_name.toUpperCase() : "" };
+    const payload: any = { ...form, state_name: form.state_name ? form.state_name.toUpperCase() : "" };
+    // Use FormData if there's a signature file to upload
+    let data: any;
+    if (signatureFile || removeSignature) {
+      const fd = new FormData();
+      Object.entries(payload).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v as string); });
+      if (signatureFile) fd.append("signature_image", signatureFile);
+      if (removeSignature) fd.append("signature_image", "");
+      data = fd;
+    } else {
+      data = payload;
+    }
     try {
       if (isEdit) {
-        await updateBusiness(id!, payload);
+        await updateBusiness(id!, data);
         toast({ title: "Business Updated", description: form.name });
       } else {
-        await createBusiness(payload);
+        await createBusiness(data);
         toast({ title: "Business Created", description: form.name });
       }
       setDirty(false);
@@ -291,6 +312,57 @@ export default function BusinessForm() {
                     placeholder="e.g. Zaveri Bazaar" className="premium-input" />
                 </FormField>
               </div>
+            </div>
+
+            {/* Signature Upload */}
+            <div className="elevated-card rounded-2xl p-6 lg:p-7 space-y-6">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-chart-1/10 flex items-center justify-center">
+                  <Image className="w-4 h-4 text-chart-1" />
+                </div>
+                <h2 className="text-sm font-display font-semibold text-foreground uppercase tracking-wider">Authorised Signatory</h2>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Upload a signature image to appear on invoices above "Authorised Signatory".</p>
+              {signaturePreview && !removeSignature ? (
+                <div className="space-y-3">
+                  <div className="relative border border-border/50 rounded-xl p-4 bg-secondary/10 flex items-center justify-center">
+                    <img src={signaturePreview} alt="Signature" className="max-h-24 object-contain" />
+                  </div>
+                  <div className="flex gap-2">
+                    <label className="premium-btn-ghost text-[12px] flex-1 cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" /> Change
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setSignatureFile(file);
+                          setSignaturePreview(URL.createObjectURL(file));
+                          setRemoveSignature(false);
+                          setDirty(true);
+                        }
+                      }} />
+                    </label>
+                    <button type="button" onClick={() => { setRemoveSignature(true); setSignatureFile(null); setSignaturePreview(null); setDirty(true); }}
+                      className="premium-btn-outline text-[12px] border-destructive/30 text-destructive">
+                      <Trash2 className="w-3.5 h-3.5" /> Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label className="block border-2 border-dashed border-border/50 rounded-xl p-8 text-center cursor-pointer hover:border-primary/30 hover:bg-primary/2 transition-all">
+                  <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-[12px] font-medium text-foreground">Click to upload signature</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">PNG or JPG, transparent background recommended</p>
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setSignatureFile(file);
+                      setSignaturePreview(URL.createObjectURL(file));
+                      setRemoveSignature(false);
+                      setDirty(true);
+                    }
+                  }} />
+                </label>
+              )}
             </div>
           </motion.div>
 

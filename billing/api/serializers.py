@@ -1,3 +1,6 @@
+import base64
+import mimetypes
+
 from rest_framework import serializers
 
 from billing.models import Business, Customer, Invoice, LineItem, Product
@@ -12,10 +15,30 @@ class BusinessSerializer(serializers.ModelSerializer):
     )
     customer_count = serializers.IntegerField(read_only=True)
     invoice_count = serializers.IntegerField(read_only=True)
+    signature_image_base64 = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
         fields = "__all__"
+
+    def get_signature_image_base64(self, obj):
+        if not obj.signature_image:
+            return None
+        try:
+            img_path = obj.signature_image.path
+            with open(img_path, "rb") as f:
+                data = f.read()
+            # Detect actual mime type from file magic bytes, not extension
+            if data[:3] == b"\xff\xd8\xff":
+                mime = "image/jpeg"
+            elif data[:8] == b"\x89PNG\r\n\x1a\n":
+                mime = "image/png"
+            else:
+                mime = "image/png"  # fallback
+            encoded = base64.b64encode(data).decode("utf-8")
+            return f"data:{mime};base64,{encoded}"
+        except Exception:
+            return None
 
 
 class CustomerSerializer(serializers.ModelSerializer):

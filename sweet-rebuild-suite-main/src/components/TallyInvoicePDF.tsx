@@ -183,7 +183,7 @@ function buildHSNSummary(invoice: Invoice): HSNSummary[] {
     const key = `${item.hsn}-${item.gstRate}`;
     const existing = map.get(key);
     if (existing) {
-      existing.taxableValue += item.amount;
+      existing.taxableValue += item.qty * item.rate;
       existing.cgst += item.cgst;
       existing.sgst += item.sgst;
       existing.igst += item.igst;
@@ -191,7 +191,7 @@ function buildHSNSummary(invoice: Invoice): HSNSummary[] {
     } else {
       map.set(key, {
         hsn: item.hsn,
-        taxableValue: item.amount,
+        taxableValue: item.qty * item.rate,
         gstRate: item.gstRate,
         cgst: item.cgst,
         sgst: item.sgst,
@@ -344,7 +344,7 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
 
   return (
     <Document title={`Invoice ${invoice.invoiceNumber}`} author={business.name}>
-      {/* ════════════════════ PAGE 1 ════════════════════ */}
+      {/* ════════════════════ SINGLE PAGE ════════════════════ */}
       <Page size="A4" style={s.page}>
         <View style={s.outer}>
           {/* TITLE */}
@@ -407,7 +407,7 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
               </Text>
               <Text style={s.colRate}>{formatINR(item.rate)}</Text>
               <Text style={s.colPer}>{item.unit || "pcs"}</Text>
-              <Text style={[s.colAmt, s.bold]}>{formatINR(item.amount)}</Text>
+              <Text style={[s.colAmt, s.bold]}>{formatINR(item.qty * item.rate)}</Text>
             </View>
           ))}
 
@@ -445,39 +445,6 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
             </>
           )}
 
-          {/* SPACER — fills remaining page 1 space */}
-          <View style={{ flex: 1, borderBottom: B_THIN }} />
-
-          {/* "Continued to page 2" */}
-          <View style={{ borderBottom: B, paddingVertical: 3, paddingHorizontal: 5 }} wrap={false}>
-            <Text style={[s.italic, { textAlign: "right", fontSize: 8 }]}>Continued to page number : 2</Text>
-          </View>
-
-          {/* JURISDICTION (page 1 footer) */}
-          <View style={s.jurisdiction}>
-            <Text>SUBJECT TO {(invoice.jurisdictionCity || business.state_name || "").toUpperCase()} JURISDICTION</Text>
-          </View>
-
-          <View style={s.computerGen}>
-            <Text>This is a Computer Generated Invoice</Text>
-          </View>
-        </View>
-      </Page>
-
-      {/* ════════════════════ PAGE 2 ════════════════════ */}
-      <Page size="A4" style={s.page}>
-        <View style={s.outer}>
-          {/* TITLE — "(Page 2)" */}
-          <View style={s.titleRow}>
-            <Text style={s.titleText}>TAX INVOICE (Page 2)</Text>
-          </View>
-
-          {/* REPEATED HEADER: Business / Consignee / Buyer + Metadata */}
-          <InfoBlock {...infoProps} />
-
-          {/* TABLE HEADER (repeated) */}
-          <TableHeader />
-
           {/* ROUNDING ROW */}
           {invoice.roundedOff !== undefined && invoice.roundedOff !== 0 && (
             <View style={s.row} wrap={false}>
@@ -491,8 +458,16 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
             </View>
           )}
 
-          {/* SPACER — fills space before total */}
-          <View style={{ flex: 1, borderBottom: B_THIN }} />
+          {/* SPACER — fills remaining space with column borders */}
+          <View style={{ flex: 1, flexDirection: "row", borderBottom: B_THIN }}>
+            <View style={{ width: 24, borderRight: B }} />
+            <View style={{ flex: 1, borderRight: B }} />
+            <View style={{ width: 50, borderRight: B }} />
+            <View style={{ width: 62, borderRight: B }} />
+            <View style={{ width: 58, borderRight: B }} />
+            <View style={{ width: 30, borderRight: B }} />
+            <View style={{ width: 80 }} />
+          </View>
 
           {/* TOTAL ROW */}
           <View style={s.totalRow} wrap={false}>
@@ -513,7 +488,7 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
               <Text style={s.small}>Amount Chargeable (in words)</Text>
               <Text style={[s.small, { textAlign: "right" }]}>E. & O.E</Text>
             </View>
-            <Text style={[s.bold, { fontSize: 9, marginTop: 1 }]}>
+            <Text style={[s.bold, { fontSize: 8, marginTop: 1 }]}>
               INR {amountToWords(Number(invoice.total) || 0)}
             </Text>
           </View>
@@ -551,11 +526,11 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
                 <View style={s.taxHeader}>
                   <Text style={[s.taxCell, { width: 55, textAlign: "center" }]}>HSN/SAC</Text>
                   <Text style={[s.taxCell, { flex: 1, textAlign: "center" }]}>Taxable{"\n"}Value</Text>
-                  <Text style={[s.taxCell, { width: 30, textAlign: "center", fontSize: 8 }]}>Rate</Text>
-                  <Text style={[s.taxCell, { width: 55, textAlign: "center", fontSize: 8 }]}>CGST{"\n"}Amount</Text>
-                  <Text style={[s.taxCell, { width: 30, textAlign: "center", fontSize: 8 }]}>Rate</Text>
-                  <Text style={[s.taxCell, { width: 55, textAlign: "center", fontSize: 8 }]}>SGST{"\n"}Amount</Text>
-                  <Text style={[s.taxCellLast, { width: 60, textAlign: "center", fontSize: 8 }]}>Total{"\n"}Tax Amount</Text>
+                  <Text style={[s.taxCell, { width: 30, textAlign: "center", fontSize: 7 }]}>Rate</Text>
+                  <Text style={[s.taxCell, { width: 55, textAlign: "center", fontSize: 7 }]}>CGST{"\n"}Amount</Text>
+                  <Text style={[s.taxCell, { width: 30, textAlign: "center", fontSize: 7 }]}>Rate</Text>
+                  <Text style={[s.taxCell, { width: 55, textAlign: "center", fontSize: 7 }]}>SGST{"\n"}Amount</Text>
+                  <Text style={[s.taxCellLast, { width: 60, textAlign: "center", fontSize: 7 }]}>Total{"\n"}Tax Amount</Text>
                 </View>
                 {hsnSummary.map((h, i) => (
                   <View key={i} style={s.taxRow}>
@@ -582,37 +557,40 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
           </View>
 
           {/* TAX AMOUNT IN WORDS */}
-          <View style={{ borderBottom: B, padding: 4, flexDirection: "row" }} wrap={false}>
-            <Text style={s.small}>Tax Amount (in words) : </Text>
-            <Text style={[s.small, s.bold, { flex: 1 }]}>
+          <View style={{ borderBottom: B, padding: 3, flexDirection: "row" }} wrap={false}>
+            <Text style={s.tiny}>Tax Amount (in words) : </Text>
+            <Text style={[s.tiny, s.bold, { flex: 1 }]}>
               INR {amountToWords(Number(invoice.totalTax) || 0)}
             </Text>
           </View>
 
           {/* COMPANY PAN */}
-          <View style={s.panRow} wrap={false}>
-            <Text style={s.small}>Company's PAN</Text>
-            <Text style={[s.small, s.bold, { marginLeft: 20 }]}>: {business.pan_number}</Text>
+          <View style={[s.panRow, { paddingVertical: 2 }]} wrap={false}>
+            <Text style={s.tiny}>Company's PAN</Text>
+            <Text style={[s.tiny, s.bold, { marginLeft: 20 }]}>: {business.pan_number}</Text>
           </View>
 
           {/* DECLARATION + SIGNATORY */}
           <View style={s.footerRow} wrap={false}>
-            <View style={s.declaration}>
-              <Text style={[s.bold, { marginBottom: 2 }]}>Declaration</Text>
+            <View style={[s.declaration, { fontSize: 6.5 }]}>
+              <Text style={[s.bold, { marginBottom: 1 }]}>Declaration</Text>
               <Text>
                 {invoice.declaration ||
-                  "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct. No E-Way Bill is required to be generated as the goods covered under this invoice are exempted as per serial no. 150 & 151 to the rule 138(14) of the CGST rule 2017."}
+                  "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."}
               </Text>
             </View>
             <View style={s.signatory}>
-              <Text style={[s.bold, { fontSize: 8 }]}>for {business.name}</Text>
-              <Text style={{ marginTop: 35, fontSize: 8 }}>Authorised Signatory</Text>
+              <Text style={[s.bold, { fontSize: 7 }]}>for {business.name}</Text>
+              {business.signature_image && (
+                <Image src={business.signature_image} style={{ width: 80, height: 30, marginTop: 3, alignSelf: "flex-end" }} />
+              )}
+              <Text style={{ marginTop: business.signature_image ? 3 : 20, fontSize: 7 }}>Authorised Signatory</Text>
             </View>
           </View>
 
           {/* JURISDICTION */}
           <View style={s.jurisdiction}>
-            <Text>SUBJECT TO {(invoice.jurisdictionCity || business.state_name || "").toUpperCase()} JURISDICTION</Text>
+            <Text>SUBJECT TO {(invoice.jurisdictionCity || "Udaipur").toUpperCase()} JURISDICTION</Text>
           </View>
 
           {/* COMPUTER GENERATED */}

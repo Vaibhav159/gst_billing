@@ -29,6 +29,7 @@ from billing.constants import (
 class AbstractBaseModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    workspace_id = models.IntegerField(default=1)
 
     class Meta:
         abstract = True
@@ -114,6 +115,13 @@ class Business(AbstractBaseModel):
         verbose_name="Primary Color Theme",
         help_text="Primary Color Theme of the business.",
         max_length=15,
+    )
+    signature_image = models.ImageField(
+        upload_to="signatures/",
+        verbose_name="Signature Image",
+        help_text="Authorised signatory signature for invoices.",
+        blank=True,
+        null=True,
     )
 
     class Meta:
@@ -372,6 +380,13 @@ class LineItem(AbstractBaseModel):
         decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
         verbose_name="Amount",
         help_text="Amount of the product.",
+    )
+    unit = models.CharField(
+        max_length=20,
+        default="gms",
+        blank=True,
+        verbose_name="Unit",
+        help_text="Unit of measurement (e.g., gms, pcs, kg, nos, etc.)",
     )
 
     def __str__(self):
