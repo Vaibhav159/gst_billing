@@ -20,6 +20,7 @@ const navItems = [
   { label: "Invoices", href: "/billing/invoice/list", icon: FileText },
   { label: "Reports", href: "/billing/reports", icon: BarChart3 },
   { label: "GST", href: "/billing/gst-summary", icon: Calculator },
+  { label: "GSTR Filing", href: "/billing/gstr-export", icon: FileText },
 ];
 
 const settingsItems = [

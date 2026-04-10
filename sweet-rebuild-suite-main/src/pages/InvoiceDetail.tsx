@@ -282,8 +282,8 @@ export default function InvoiceDetail() {
           <div className="flex items-center gap-2">
             <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
             <Link to={{printUrl}} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
-            <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title={customer?.mobile_number ? `WhatsApp ${customer.mobile_number}` : "WhatsApp"}><MessageCircle className="w-3.5 h-3.5" /></button>
-            <button onClick={() => shareInvoice(inv)} className="premium-btn-outline h-10 px-3 text-[12px] border-border text-muted-foreground"><Share2 className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setShowEway(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-chart-2/30 text-chart-2" title="E-way Bill"><Truck className="w-3.5 h-3.5" /></button>
+            <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>
           </div>
         </div>
       )}

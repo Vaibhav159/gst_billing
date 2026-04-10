@@ -16,6 +16,8 @@ const pages = [
   { label: "Backup", href: "/billing/backup", icon: HardDrive, shortcut: "" },
   { label: "Audit Log", href: "/billing/audit-log", icon: History, shortcut: "" },
   { label: "Settings", href: "/billing/settings", icon: Settings, shortcut: "S" },
+  { label: "GSTR Filing Export", href: "/billing/gstr-export", icon: FileText, shortcut: "" },
+  { label: "User Management", href: "/billing/users", icon: Users, shortcut: "" },
   { label: "New Invoice", href: "/billing/invoice/add", icon: FileText, shortcut: "N" },
   { label: "New Customer", href: "/billing/customer/new", icon: Users, shortcut: "" },
   { label: "New Product", href: "/billing/product/new", icon: Package, shortcut: "" },

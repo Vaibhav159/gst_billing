@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User,
+  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, FileText, Users, Truck,
 } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,8 +11,10 @@ const moreItems = [
   { label: "Businesses", href: "/billing/business/list", icon: Building2 },
   { label: "Reports", href: "/billing/reports", icon: BarChart3 },
   { label: "GST Summary", href: "/billing/gst-summary", icon: Calculator },
+  { label: "GSTR Filing", href: "/billing/gstr-export", icon: FileText },
   { label: "Backup", href: "/billing/backup", icon: HardDrive },
   { label: "Audit Log", href: "/billing/audit-log", icon: History },
+  { label: "User Management", href: "/billing/users", icon: Users },
   { label: "Settings", href: "/billing/settings", icon: Settings },
 ];
 
