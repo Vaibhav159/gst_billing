@@ -1,14 +1,18 @@
-import { useState } from "react";
-import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
-import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
+import { useCustomers, useProducts, useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { cn } from "@/utils/utils";
 import { motion } from "framer-motion";
 import { stagger, fadeUp } from "@/utils/animations";
 import DataExportPanel from "@/components/DataExportPanel";
 import DataImportWizard from "@/components/DataImportWizard";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { downloadReportExcel } from "@/utils/generateReportExcel";
+import api from "@/utils/api";
+
+const LAST_BACKUP_KEY = "gst_last_backup";
 
 export default function Backup() {
   const { toast } = useToast();
@@ -16,35 +20,92 @@ export default function Backup() {
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
   const { items: products } = useProducts();
-  const { items: invoices } = useInvoices();
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [exported, setExported] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState<"customers" | "products" | "businesses" | null>(null);
+  const [totalInvoices, setTotalInvoices] = useState(0);
+  const [lastBackup, setLastBackup] = useState<string | null>(null);
+  const [bizFilter, setBizFilter] = useState("all");
+
+  // Fetch real invoice count from API
+  useEffect(() => {
+    api.get("invoices/stats/").then(res => {
+      setTotalInvoices(res.data?.totals?.count || 0);
+    }).catch(() => {});
+  }, []);
+
+  // Load last backup info
+  useEffect(() => {
+    setLastBackup(localStorage.getItem(LAST_BACKUP_KEY));
+  }, []);
 
   const dataItems = [
-    { label: "Businesses", count: businesses.length, icon: Package, color: "text-chart-1" },
-    { label: "Customers", count: customers.length, icon: Package, color: "text-chart-2" },
+    { label: "Businesses", count: businesses.length, icon: Building2, color: "text-chart-1" },
+    { label: "Customers", count: customers.length, icon: Users, color: "text-chart-2" },
     { label: "Products", count: products.length, icon: Package, color: "text-chart-3" },
-    { label: "Invoices", count: invoices.length, icon: Package, color: "text-chart-4" },
+    { label: "Invoices", count: totalInvoices, icon: Receipt, color: "text-chart-4" },
   ];
-  const totalRecords = businesses.length + customers.length + products.length + invoices.length;
+  const totalRecords = businesses.length + customers.length + products.length + totalInvoices;
 
-  const handleExport = async () => {
+  // Full JSON backup via API
+  const handleExportJSON = async () => {
     setExporting(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    const data = { businesses, customers, products, invoices, exportedAt: new Date().toISOString(), version: "3.0" };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `gst-backup-${new Date().toISOString().split("T")[0]}.json`; a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const params = new URLSearchParams({ page_size: "5000", include_items: "true" });
+      if (bizFilter !== "all") params.set("business_id", bizFilter);
+      const [invRes] = await Promise.all([
+        api.get(`invoices/?${params.toString()}`),
+      ]);
+      const invData = invRes.data;
+      const allInvoices = Array.isArray(invData) ? invData : (invData.results || []);
+
+      const data = {
+        businesses,
+        customers,
+        products,
+        invoices: allInvoices,
+        exportedAt: new Date().toISOString(),
+        version: "4.0",
+        totalRecords: businesses.length + customers.length + products.length + allInvoices.length,
+      };
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `gst-backup-${new Date().toISOString().split("T")[0]}.json`; a.click();
+      URL.revokeObjectURL(url);
+
+      const backupInfo = `${new Date().toLocaleString("en-IN")} (${data.totalRecords} records, ${(blob.size / 1024).toFixed(0)} KB)`;
+      localStorage.setItem(LAST_BACKUP_KEY, backupInfo);
+      setLastBackup(backupInfo);
+
+      toast({ title: "Backup Downloaded", description: `${data.totalRecords} records exported.` });
+    } catch (err) {
+      console.error("Export failed", err);
+      toast({ title: "Export Failed", description: "Could not export data.", variant: "destructive" });
+    }
     setExporting(false);
-    setExported(true);
-    toast({ title: "Backup Downloaded", description: `${totalRecords} records exported successfully.` });
-    setTimeout(() => setExported(false), 3000);
+  };
+
+  // Excel export
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ page_size: "5000", include_items: "true" });
+      if (bizFilter !== "all") params.set("business_id", bizFilter);
+      const res = await api.get(`invoices/?${params.toString()}`);
+      const results = Array.isArray(res.data) ? res.data : (res.data.results || []);
+      const fullInvoices = results.map(mapDjangoInvoice);
+
+      downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${new Date().toISOString().split("T")[0]}.xlsx`);
+      toast({ title: "Excel Downloaded", description: `${fullInvoices.length} invoices exported.` });
+    } catch (err) {
+      console.error("Excel export failed", err);
+      toast({ title: "Export Failed", description: "Could not generate Excel.", variant: "destructive" });
+    }
+    setExporting(false);
   };
 
   const handleImport = async () => {
@@ -54,7 +115,6 @@ export default function Backup() {
       const text = await file.text();
       const data = JSON.parse(text);
 
-      // Validate expected structure
       const requiredKeys = ["businesses", "customers", "products", "invoices"] as const;
       for (const key of requiredKeys) {
         if (!Array.isArray(data[key])) {
@@ -62,27 +122,27 @@ export default function Backup() {
         }
       }
 
-      // Write each array to localStorage under the correct keys
+      // Show summary before restoring
+      const summary = `${data.businesses.length} businesses, ${data.customers.length} customers, ${data.products.length} products, ${data.invoices.length} invoices`;
+      toast({ title: "Backup Loaded", description: `Found: ${summary}. Restoring...` });
+
+      // TODO: When backend bulk-import endpoint exists, use that instead
       localStorage.setItem("gst_data_businesses", JSON.stringify(data.businesses));
       localStorage.setItem("gst_data_customers", JSON.stringify(data.customers));
       localStorage.setItem("gst_data_products", JSON.stringify(data.products));
       localStorage.setItem("gst_data_invoices", JSON.stringify(data.invoices));
 
-      toast({ title: "Data Imported", description: `Restored from ${file.name}` });
-
-      // Reload so all hooks pick up the new data
+      toast({ title: "Restore Complete", description: `${summary} restored from ${file.name}` });
       window.location.reload();
     } catch (err) {
       setImporting(false);
       toast({
         title: "Import Failed",
-        description: err instanceof Error ? err.message : "The file is not a valid backup JSON.",
+        description: err instanceof Error ? err.message : "Invalid backup file.",
         variant: "destructive",
       });
     }
   };
-
-  const estSize = ((JSON.stringify({ businesses, customers, products, invoices }).length) / 1024).toFixed(1);
 
   return (
     <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 space-y-6")}>
@@ -94,10 +154,16 @@ export default function Backup() {
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-chart-3/20 to-chart-3/5 border border-chart-3/20 flex items-center justify-center">
           <HardDrive className="w-5 h-5 text-chart-3" />
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Backup & Restore</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Export your complete data or restore from a previous backup</p>
         </div>
+        {lastBackup && (
+          <div className="hidden lg:block text-right">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Last Backup</p>
+            <p className="text-[12px] text-foreground font-medium">{lastBackup}</p>
+          </div>
+        )}
       </motion.div>
 
       {/* Data Overview */}
@@ -114,8 +180,21 @@ export default function Backup() {
         ))}
       </motion.div>
 
+      {/* Business Filter */}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+        className="elevated-card rounded-2xl p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Filter by Business</label>
+          <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select text-[13px]">
+            <option value="all">All Businesses</option>
+            {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+      </motion.div>
+
       <motion.div variants={stagger} initial="hidden" animate="visible" className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2 gap-6")}>
-        {/* Advanced Export */}
+        {/* Export Panel */}
         <motion.div variants={fadeUp} className={cn("elevated-card rounded-2xl space-y-5", isMobile ? "p-4" : "p-7")}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -123,13 +202,32 @@ export default function Backup() {
             </div>
             <div>
               <h2 className="text-[15px] font-display font-semibold text-foreground">Export Data</h2>
-              <p className="text-[12px] text-muted-foreground">Download as CSV or JSON</p>
+              <p className="text-[12px] text-muted-foreground">Download as CSV, JSON, or Excel</p>
             </div>
           </div>
+
           <DataExportPanel />
+
+          <div className="border-t border-border/30 pt-4 space-y-3">
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Full Backup</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={handleExportJSON} disabled={exporting} className="premium-btn-primary text-[12px] h-10 disabled:opacity-40">
+                {exporting ? <Clock className="w-4 h-4 animate-spin" /> : <FileJson className="w-4 h-4" />}
+                JSON Backup
+              </button>
+              <button onClick={handleExportExcel} disabled={exporting} className="premium-btn-outline text-[12px] h-10 border-success/30 text-success disabled:opacity-40">
+                {exporting ? <Clock className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                Excel Report
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              JSON: full backup with all data for restore. Excel: formatted report for viewing.
+              {bizFilter !== "all" && " (filtered by selected business)"}
+            </p>
+          </div>
         </motion.div>
 
-        {/* Import */}
+        {/* Import Panel */}
         <motion.div variants={fadeUp} className={cn("elevated-card rounded-2xl space-y-5", isMobile ? "p-4" : "p-7")}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
@@ -170,9 +268,9 @@ export default function Backup() {
                 >
                   {file ? (
                     <>
-                      <FileJson className="w-8 h-8 text-success mx-auto mb-2" />
+                      <CheckCircle2 className="w-8 h-8 text-success mx-auto mb-2" />
                       <p className="text-[13px] font-semibold text-foreground">{file.name}</p>
-                      <p className="text-[11px] text-muted-foreground mt-1">{(file.size / 1024).toFixed(1)} KB</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">{(file.size / 1024).toFixed(1)} KB · Ready to restore</p>
                     </>
                   ) : (
                     <>
@@ -185,15 +283,11 @@ export default function Backup() {
                 </div>
 
                 <div className="flex items-center gap-2 text-[11px] text-warning mt-3">
-                  <Shield className="w-3 h-3" /> <span>Replaces existing data</span>
+                  <Shield className="w-3 h-3" /> <span>Replaces existing local data</span>
                 </div>
 
                 <button onClick={handleImport} disabled={!file || importing} className="premium-btn-primary w-full mt-3 bg-success disabled:opacity-40">
-                  {importing ? (
-                    <><Clock className="w-4 h-4 animate-spin" /> Importing...</>
-                  ) : (
-                    <><Upload className="w-4 h-4" /> Restore Backup</>
-                  )}
+                  {importing ? <><Clock className="w-4 h-4 animate-spin" /> Restoring...</> : <><Upload className="w-4 h-4" /> Restore Backup</>}
                 </button>
               </div>
             </div>
