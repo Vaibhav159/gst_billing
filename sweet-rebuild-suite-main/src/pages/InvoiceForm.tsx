@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
 import type { ItemUnit } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
@@ -23,8 +23,10 @@ interface InvoiceFormProps { mode: "create" | "edit" }
 export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const isMobile = useIsMobile();
+  const duplicateFrom = (location.state as any)?.duplicateFrom;
   const { mobileMode } = useMobileMode();
   const { create: createInvoice, update: updateInvoice } = useInvoices();
   const { items: businesses } = useBusinesses();
@@ -43,6 +45,28 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
+
+  // Pre-fill from duplicate source
+  useEffect(() => {
+    if (mode !== "create" || !duplicateFrom) return;
+    setForm({
+      businessId: String(duplicateFrom.businessId || ""),
+      customerId: String(duplicateFrom.customerId || ""),
+      invoiceNumber: "", // blank — will auto-fetch next number
+      date: new Date().toISOString().split("T")[0],
+      type: duplicateFrom.type || "OUTWARD",
+      isIGST: duplicateFrom.isIGST || false,
+      financialYear: "",
+    });
+    if (duplicateFrom.items?.length > 0) {
+      setItems(duplicateFrom.items.map((it: any) => ({
+        productId: String(it.productId || it.product || ""),
+        qty: it.qty || it.quantity || 1,
+        rate: it.rate || 0,
+        unit: (it.unit || "gms") as ItemUnit,
+      })));
+    }
+  }, [mode, duplicateFrom]);
 
   // Fallback names from the invoice API for entities not in the loaded list
   const [fallbackEntities, setFallbackEntities] = useState<{
@@ -308,6 +332,23 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       navigate("/billing/invoice/list");
     }
   };
+
+  if (mode === "create" && businesses.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-5 p-8">
+        <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+          <Building2 className="w-8 h-8 text-primary/40" />
+        </div>
+        <div className="text-center">
+          <h2 className="text-xl font-display font-bold text-foreground">Create a Business First</h2>
+          <p className="text-sm text-muted-foreground mt-2 max-w-sm">You need at least one business to start creating invoices. Set up your business with GST details to get started.</p>
+        </div>
+        <Link to="/billing/business/new" className="premium-btn-primary text-[14px] h-11 px-6">
+          <Building2 className="w-4 h-4" /> Create Business
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-28" : "p-6 lg:p-8 space-y-6")}>

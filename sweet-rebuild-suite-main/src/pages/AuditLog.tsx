@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Link } from "react-router-dom";
 import {
   History, Search, FileText, Users, Package, Building2,
@@ -73,15 +74,9 @@ function prettyValue(field: string, val: string | null): string {
 export default function AuditLog() {
   const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 400);
   const [actionFilter, setActionFilter] = useState("all");
   const [entityFilter, setEntityFilter] = useState("all");
-
-  // Debounce search
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const { toast } = useToast();
   const { items: auditLog, isLoading, isLoadingMore, hasMore, totalCount, loadMore, undoEntry } = useAuditLog({

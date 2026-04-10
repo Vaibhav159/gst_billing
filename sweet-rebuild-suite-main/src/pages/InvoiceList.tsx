@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { toCSV, downloadCSV } from "@/utils/csv";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Link, useOutletContext, useNavigate } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
@@ -30,12 +31,11 @@ export default function InvoiceList() {
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 400);
   const [bizFilter, setBizFilter] = useState("all");
   const [custFilter, setCustFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [fyFilter, setFyFilter] = useState(selectedFY);
-  // Sync fyFilter when navbar FY changes
   useEffect(() => { setFyFilter(selectedFY); }, [selectedFY]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<"date" | "total" | "invoiceNumber">("date");
@@ -44,12 +44,6 @@ export default function InvoiceList() {
   const [view, setView] = useState<"table" | "grid">("table");
   const [monthFilter, setMonthFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
-
-  // Debounce search input to avoid excessive API calls
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 400);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   // Build filters object for the API-driven hook
   const apiFilters: InvoiceFilters = useMemo(() => ({
@@ -379,7 +373,7 @@ export default function InvoiceList() {
             </tr></thead>
             <tbody>
               {filtered.map((inv, i) => (
-                <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.025, duration: 0.3 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
+                <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
                   <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
                   <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
                   <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>

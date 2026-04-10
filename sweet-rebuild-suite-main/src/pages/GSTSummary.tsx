@@ -18,7 +18,7 @@ const MONTHS = ["April","May","June","July","August","September","October","Nove
 const SHORT = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
 /** Fetch server-side GST summary (rate slabs, HSN breakdown, GSTR-3B) */
-function useGSTSummary(selectedFY: string, bizFilter: string) {
+function useGSTSummary(selectedFY: string, bizFilter: string, startDate?: string, endDate?: string) {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -29,8 +29,8 @@ function useGSTSummary(selectedFY: string, bizFilter: string) {
       const [startYearStr] = selectedFY.split("-");
       const startYear = parseInt(startYearStr);
       const params = new URLSearchParams();
-      params.set("start_date", `${startYear}-04-01`);
-      params.set("end_date", `${startYear + 1}-03-31`);
+      params.set("start_date", startDate || `${startYear}-04-01`);
+      params.set("end_date", endDate || `${startYear + 1}-03-31`);
       if (bizFilter !== "all") params.set("business_id", bizFilter);
 
       const res = await api.get<any>(`invoices/gst_summary/?${params.toString()}`);
@@ -40,7 +40,7 @@ function useGSTSummary(selectedFY: string, bizFilter: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedFY, bizFilter]);
+  }, [selectedFY, bizFilter, startDate, endDate]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
@@ -87,13 +87,28 @@ export default function GSTSummary() {
   const [bizFilter, setBizFilter] = useState("all");
   const [activeTab, setActiveTab] = useState<"gstr1" | "gstr3b" | "hsn">("gstr1");
   const { items: businesses } = useBusinesses();
-  const { data: gstData, isLoading: gstLoading } = useGSTSummary(selectedFY, bizFilter);
+  const fyStart = parseInt(selectedFY.split("-")[0]);
+  const monthIdx = MONTHS.indexOf(selectedMonth);
+
+  // Compute date range for selected month or custom range
+  const { gstStartDate, gstEndDate } = useMemo(() => {
+    if (useCustomRange) {
+      return { gstStartDate: format(customStart, "yyyy-MM-dd"), gstEndDate: format(customEnd, "yyyy-MM-dd") };
+    }
+    if (selectedMonth === "All") {
+      return { gstStartDate: `${fyStart}-04-01`, gstEndDate: `${fyStart + 1}-03-31` };
+    }
+    // Calculate month-specific range
+    const y = monthIdx < 9 ? fyStart : fyStart + 1;
+    const m = monthIdx < 9 ? monthIdx + 4 : monthIdx - 8;
+    const lastDay = new Date(y, m, 0).getDate();
+    return { gstStartDate: `${y}-${String(m).padStart(2, "0")}-01`, gstEndDate: `${y}-${String(m).padStart(2, "0")}-${lastDay}` };
+  }, [selectedMonth, selectedFY, useCustomRange, customStart, customEnd, fyStart, monthIdx]);
+
+  const { data: gstData, isLoading: gstLoading } = useGSTSummary(selectedFY, bizFilter, gstStartDate, gstEndDate);
   const { data: statsData, isLoading: statsLoading } = useGSTStats(selectedFY, bizFilter);
 
   const invoicesLoading = gstLoading || statsLoading;
-
-  const fyStart = parseInt(selectedFY.split("-")[0]);
-  const monthIdx = MONTHS.indexOf(selectedMonth);
 
   // Server-side data
   const gstr1Rows = (gstData?.rate_slabs?.outward || []).filter((r: any) => r.taxable > 0);
