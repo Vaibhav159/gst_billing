@@ -2,6 +2,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 import { useInvoice, useInvoices, useBusiness, useCustomer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
+// Tally format is the only invoice print format
 
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
@@ -20,6 +21,7 @@ export default function InvoiceDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
+  const printUrl = `/billing/invoice/${id}/print`;
   const { item: inv, isLoading } = useInvoice(id);
   const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
@@ -68,7 +70,7 @@ export default function InvoiceDetail() {
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</button>
             <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
             <button onClick={() => { navigate("/billing/invoice/add", { state: { duplicateFrom: inv } }); toast({ title: "Duplicating", description: `Creating copy of ${inv.invoiceNumber}` }); }} className="premium-btn-ghost text-[13px]"><Copy className="w-4 h-4" /> Duplicate</button>
-            <Link to={`/billing/invoice/${id}/print`} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
+            <Link to={{printUrl}} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
             <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New</Link>
           </div>
         )}
@@ -214,9 +216,9 @@ export default function InvoiceDetail() {
             <>
               <div className="elevated-card rounded-2xl p-5 space-y-2.5">
                 <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
-                <Link to={`/billing/invoice/${id}/print`} className="premium-btn-primary w-full text-[13px]"><Printer className="w-4 h-4" /> Print / PDF</Link>
+                <Link to={{printUrl}} className="premium-btn-primary w-full text-[13px]"><Printer className="w-4 h-4" /> Print / PDF</Link>
                 <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline w-full text-[13px] border-success/30 text-success"><MessageCircle className="w-4 h-4" /> WhatsApp {customer?.mobile_number ? `(${customer.mobile_number})` : ""}</button>
-                <Link to={`/billing/invoice/${id}/print`} className="premium-btn-ghost w-full text-[13px]"><Download className="w-4 h-4" /> Download PDF</Link>
+                <Link to={{printUrl}} className="premium-btn-ghost w-full text-[13px]"><Download className="w-4 h-4" /> Download PDF</Link>
               </div>
 
               <div className="elevated-card rounded-2xl p-5 space-y-2 text-[13px]">
@@ -258,7 +260,7 @@ export default function InvoiceDetail() {
         <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
           <div className="flex items-center gap-2">
             <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
-            <Link to={`/billing/invoice/${id}/print`} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
+            <Link to={{printUrl}} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
             <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title={customer?.mobile_number ? `WhatsApp ${customer.mobile_number}` : "WhatsApp"}><MessageCircle className="w-3.5 h-3.5" /></button>
             <button onClick={() => shareInvoice(inv)} className="premium-btn-outline h-10 px-3 text-[12px] border-border text-muted-foreground"><Share2 className="w-3.5 h-3.5" /></button>
           </div>

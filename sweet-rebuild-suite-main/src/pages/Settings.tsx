@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Palette, Database, Download, Trash2, HardDrive } from "lucide-react";
+import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Database, Download, Trash2, HardDrive, Info } from "lucide-react";
 import { financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
+import api from "@/utils/api";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -11,7 +12,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { Switch } from "@/components/ui/switch";
 import { resetOnboarding } from "@/components/OnboardingWizard";
-import InvoiceTemplateSelector, { InvoiceTemplate, getStoredTemplate, setStoredTemplate } from "@/components/InvoiceTemplateSelector";
+// Invoice template removed — Tally format is the standard
 
 const SETTINGS_STORAGE_KEY = "gst_app_settings";
 
@@ -54,12 +55,26 @@ export default function Settings() {
   const { mobileMode, setMobileMode } = useMobileMode();
   const { items: businesses } = useBusinesses();
   const [settings, setSettings] = useState(() => loadSettings(businesses[0]?.id || ""));
-  const [invoiceTemplate, setInvoiceTemplate] = useState<InvoiceTemplate>(getStoredTemplate());
+  const [nextInvoiceInfo, setNextInvoiceInfo] = useState<string>("");
 
-  const handleTemplateChange = (t: InvoiceTemplate) => {
-    setInvoiceTemplate(t);
-    setStoredTemplate(t);
-  };
+  // Fetch real next invoice number when business changes
+  useEffect(() => {
+    if (!settings.defaultBusinessId) return;
+    api.get(`invoices/next_invoice_number/?business_id=${settings.defaultBusinessId}&type_of_invoice=outward`)
+      .then(res => {
+        const next = res.data?.next_invoice_number || "";
+        setNextInvoiceInfo(next);
+        // Extract prefix and number from format like "SGJ/2026-27/1" or plain "125"
+        const match = next.match(/^([A-Za-z]+\/)\d{4}-\d{2}\/(\d+)$/);
+        if (match) {
+          setSettings(p => ({ ...p, invoicePrefix: match[1].replace("/", ""), invoiceStartNumber: parseInt(match[2]) }));
+        } else {
+          const num = parseInt(next);
+          if (!isNaN(num)) setSettings(p => ({ ...p, invoicePrefix: "", invoiceStartNumber: num }));
+        }
+      })
+      .catch(() => {});
+  }, [settings.defaultBusinessId]);
 
   const set = (field: string, val: any) => setSettings((p) => ({ ...p, [field]: val }));
   const handleSave = () => {
@@ -106,8 +121,8 @@ export default function Settings() {
       title: "Invoice Config", icon: FileText,
       fields: (
         <div className={cn("grid gap-4", isMobile ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
-          <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Invoice Prefix</label><input type="text" value={settings.invoicePrefix} onChange={(e) => set("invoicePrefix", e.target.value.toUpperCase())} className="premium-input font-mono uppercase" /><p className="text-[10px] text-muted-foreground">Preview: {settings.invoicePrefix}/{settings.defaultFinancialYear}/{settings.invoiceStartNumber}</p></div>
-          <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Next Number</label><input type="number" value={settings.invoiceStartNumber} onChange={(e) => set("invoiceStartNumber", Number(e.target.value))} className="premium-input" min={1} /></div>
+          <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Invoice Prefix</label><input type="text" value={settings.invoicePrefix} onChange={(e) => set("invoicePrefix", e.target.value.toUpperCase())} className="premium-input font-mono uppercase" placeholder="e.g. SGJ (leave empty for plain numbers)" /><p className="text-[10px] text-muted-foreground">Preview: {settings.invoicePrefix ? `${settings.invoicePrefix}/${settings.defaultFinancialYear}/${settings.invoiceStartNumber}` : settings.invoiceStartNumber}</p></div>
+          <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Next Number</label><input type="number" value={settings.invoiceStartNumber} onChange={(e) => set("invoiceStartNumber", Number(e.target.value))} className="premium-input" min={1} />{nextInvoiceInfo && <p className="text-[10px] text-success flex items-center gap-1"><Info className="w-3 h-3" />Next from API: {nextInvoiceInfo}</p>}</div>
           <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Currency</label><select value={settings.currency} onChange={(e) => set("currency", e.target.value)} className="premium-select w-full"><option value="INR">₹ INR</option><option value="USD">$ USD</option></select></div>
         </div>
       ),
@@ -138,12 +153,7 @@ export default function Settings() {
         </div>
       ),
     }] : []),
-    {
-      title: "Invoice Template", icon: Palette,
-      fields: (
-        <InvoiceTemplateSelector selected={invoiceTemplate} onChange={handleTemplateChange} />
-      ),
-    },
+    // Invoice template removed — using Tally Classic format
     {
       title: "Data Management", icon: Database,
       fields: (
