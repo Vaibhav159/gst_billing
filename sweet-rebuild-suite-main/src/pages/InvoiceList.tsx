@@ -387,7 +387,7 @@ export default function InvoiceList() {
                       <Link to={`/billing/invoice/${inv.id}`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
                       <Link to={`/billing/invoice/edit/${inv.id}`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
                       <Link to={`/billing/invoice/${inv.id}/print`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
-                      <button onClick={() => toast({ title: "Duplicated", description: inv.invoiceNumber })} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
+                      <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
                       <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </td>
@@ -431,7 +431,7 @@ export default function InvoiceList() {
                   <Link to={`/billing/invoice/${inv.id}`} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></Link>
                   <Link to={`/billing/invoice/edit/${inv.id}`} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></Link>
                   <Link to={`/billing/invoice/${inv.id}/print`} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success"><Printer className="w-3.5 h-3.5" /></Link>
-                  <button onClick={() => toast({ title: "Duplicated", description: inv.invoiceNumber })} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
                   <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive ml-auto"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </motion.div>

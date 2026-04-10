@@ -106,6 +106,12 @@ export interface Invoice {
   createdAt: string;
   updatedAt: string;
   lineItemCount?: number;
+  // E-way bill fields
+  eway_bill_number?: string;
+  transporter_name?: string;
+  vehicle_number?: string;
+  transport_mode?: string;
+  distance_km?: number;
 }
 
 
