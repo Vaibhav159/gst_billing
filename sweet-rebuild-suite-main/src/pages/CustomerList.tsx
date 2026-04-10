@@ -554,14 +554,27 @@ export default function CustomerList() {
             else { setMergeTarget(id); }
           };
 
-          const handleMerge = () => {
+          const handleMerge = async () => {
             if (!sourceCustomer || !targetCustomer) return;
-            toast({
-              title: "Customers Merged",
-              description: `${sourceCustomer.name} merged into ${targetCustomer.name}. All invoices transferred.`,
-            });
-            setShowMergeModal(false);
-            navigate(`/billing/customer/${mergeTarget}`);
+            try {
+              const { default: api } = await import("@/utils/api");
+              const res = await api.post("customers/merge/", {
+                source_id: mergeSource,
+                target_id: mergeTarget,
+              });
+              toast({
+                title: "Customers Merged",
+                description: res.data?.message || `${sourceCustomer.name} merged into ${targetCustomer.name}. All invoices transferred.`,
+              });
+              setShowMergeModal(false);
+              navigate(`/billing/customer/${mergeTarget}`);
+            } catch (err: any) {
+              toast({
+                title: "Merge Failed",
+                description: err?.response?.data?.error || "Could not merge customers.",
+                variant: "destructive",
+              });
+            }
           };
 
           return (

@@ -573,10 +573,16 @@ export default function ImportPage({ type }: ImportPageProps) {
           const data = e.target?.result as ArrayBuffer;
           const result = parseInvoiceExcel(data);
           const invoices = toImportReadyInvoices(result);
-          setExcelPreview(invoices);
-          setShowPreview(true); // auto-show preview
           if (invoices.length > 0) {
             toast({ title: "Excel Parsed", description: `Found ${invoices.length} invoices from ${result.firms.length} firm(s)` });
+            // Navigate to full-screen review page
+            navigate("/billing/import/review", {
+              state: {
+                parsedInvoices: invoices,
+                fileName: f.name,
+                bizFilter: bizFilter !== "all" ? bizFilter : undefined,
+              },
+            });
           } else {
             toast({ title: "No Invoices Found", description: "Could not parse invoices from this Excel file.", variant: "destructive" });
           }

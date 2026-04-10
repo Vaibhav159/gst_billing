@@ -200,16 +200,29 @@ export default function CustomerForm() {
     return !q || c.name.toLowerCase().includes(q) || c.gst_number.toLowerCase().includes(q) || c.mobile_number.includes(q);
   });
 
-  const handleMerge = () => {
-    if (!mergeTarget) return;
+  const handleMerge = async () => {
+    if (!mergeTarget || !id) return;
     const target = customers.find((c) => String(c.id) === String(mergeTarget));
     if (!target) return;
-    toast({
-      title: "Customers Merged",
-      description: `${form.name || existing?.name} merged into ${target.name}. All invoices transferred.`,
-    });
-    setShowMergeModal(false);
-    navigate(`/billing/customer/${mergeTarget}`);
+    try {
+      const { default: api } = await import("@/utils/api");
+      const res = await api.post("customers/merge/", {
+        source_id: id,
+        target_id: mergeTarget,
+      });
+      toast({
+        title: "Customers Merged",
+        description: res.data?.message || `${form.name || existing?.name} merged into ${target.name}. All invoices transferred.`,
+      });
+      setShowMergeModal(false);
+      navigate(`/billing/customer/${mergeTarget}`);
+    } catch (err: any) {
+      toast({
+        title: "Merge Failed",
+        description: err?.response?.data?.error || "Could not merge customers.",
+        variant: "destructive",
+      });
+    }
   };
 
   const completionFields = ["name", "mobile_number", "gst_number", "pan_number", "email", "state_name", "address"];
