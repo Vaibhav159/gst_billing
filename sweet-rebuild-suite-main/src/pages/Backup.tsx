@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomers, useProducts, useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
@@ -28,13 +29,38 @@ export default function Backup() {
   const [totalInvoices, setTotalInvoices] = useState(0);
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const [bizFilter, setBizFilter] = useState("all");
+  const [fyFilter, setFyFilter] = useState(currentFY);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [exportEntity, setExportEntity] = useState<"all" | "invoices" | "customers" | "products" | "businesses">("all");
+
+  // Compute date range from FY
+  const fyStartYear = parseInt(fyFilter.split("-")[0]);
+  const fyStartDate = dateFrom || `${fyStartYear}-04-01`;
+  const fyEndDate = dateTo || `${fyStartYear + 1}-03-31`;
+
+  // Build common API params
+  const buildParams = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("page_size", "5000");
+    params.set("include_items", "true");
+    params.set("start_date", fyStartDate);
+    params.set("end_date", fyEndDate);
+    if (bizFilter !== "all") params.set("business_id", bizFilter);
+    if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
+    return params;
+  }, [fyStartDate, fyEndDate, bizFilter, typeFilter]);
 
   // Fetch real invoice count from API
   useEffect(() => {
-    api.get("invoices/stats/").then(res => {
-      setTotalInvoices(res.data?.totals?.count || 0);
+    const params = buildParams();
+    params.delete("include_items");
+    params.set("page_size", "1");
+    api.get(`invoices/?${params.toString()}`).then(res => {
+      setTotalInvoices(res.data?.count || res.data?.results?.length || 0);
     }).catch(() => {});
-  }, []);
+  }, [buildParams]);
 
   // Load last backup info
   useEffect(() => {
@@ -53,8 +79,7 @@ export default function Backup() {
   const handleExportJSON = async () => {
     setExporting(true);
     try {
-      const params = new URLSearchParams({ page_size: "5000", include_items: "true" });
-      if (bizFilter !== "all") params.set("business_id", bizFilter);
+      const params = buildParams();
       const [invRes] = await Promise.all([
         api.get(`invoices/?${params.toString()}`),
       ]);
@@ -93,8 +118,7 @@ export default function Backup() {
   const handleExportExcel = async () => {
     setExporting(true);
     try {
-      const params = new URLSearchParams({ page_size: "5000", include_items: "true" });
-      if (bizFilter !== "all") params.set("business_id", bizFilter);
+      const params = buildParams();
       const res = await api.get(`invoices/?${params.toString()}`);
       const results = Array.isArray(res.data) ? res.data : (res.data.results || []);
       const fullInvoices = results.map(mapDjangoInvoice);
@@ -180,17 +204,47 @@ export default function Backup() {
         ))}
       </motion.div>
 
-      {/* Business Filter */}
+      {/* Filters */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
-        className="elevated-card rounded-2xl p-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Filter by Business</label>
-          <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select text-[13px]">
-            <option value="all">All Businesses</option>
-            {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+        className="elevated-card rounded-2xl p-5 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Filter className="w-4 h-4 text-primary" />
+          <h3 className="text-[12px] font-display font-semibold text-foreground">Export Filters</h3>
         </div>
+        <div className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-2 lg:grid-cols-4")}>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1"><Building2 className="w-3 h-3" /> Business</label>
+            <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full text-[12px]">
+              <option value="all">All Businesses</option>
+              {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1"><Calendar className="w-3 h-3" /> Financial Year</label>
+            <select value={fyFilter} onChange={(e) => setFyFilter(e.target.value)} className="premium-select w-full text-[12px]">
+              {financialYears.map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1"><ArrowUpRight className="w-3 h-3" /> Type</label>
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="premium-select w-full text-[12px]">
+              <option value="all">All Types</option>
+              <option value="OUTWARD">Outward (Sales)</option>
+              <option value="INWARD">Inward (Purchases)</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Date Range (optional)</label>
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="premium-input text-[11px] flex-1" placeholder="From" />
+              <span className="text-[10px] text-muted-foreground">to</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="premium-input text-[11px] flex-1" placeholder="To" />
+            </div>
+          </div>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Showing: {bizFilter === "all" ? "All businesses" : businesses.find(b => String(b.id) === bizFilter)?.name} · FY {fyFilter} · {typeFilter === "all" ? "All types" : typeFilter} · <span className="font-semibold text-primary">{totalInvoices} invoices</span>
+        </p>
       </motion.div>
 
       <motion.div variants={stagger} initial="hidden" animate="visible" className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2 gap-6")}>
