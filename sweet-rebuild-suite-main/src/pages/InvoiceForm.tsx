@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
+import DraftRestoreBanner from "@/components/DraftRestoreBanner";
 import type { ItemUnit } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
 import api from "@/utils/api";
@@ -173,6 +174,57 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [showQuickCustomer, setShowQuickCustomer] = useState(false);
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+
+  const DRAFT_KEY = "gst_invoice_draft";
+
+  // Check for saved draft on mount (create mode only)
+  useEffect(() => {
+    if (mode !== "create" || duplicateFrom) return;
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        // Only show if draft has meaningful data
+        if (draft.form?.businessId || draft.form?.customerId || draft.items?.some((it: any) => it.rate > 0)) {
+          setShowDraftBanner(true);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [mode, duplicateFrom]);
+
+  // Auto-save draft when dirty (debounced)
+  useEffect(() => {
+    if (mode !== "create" || !dirty) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ form, items, savedAt: new Date().toISOString() }));
+      } catch { /* storage full */ }
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [form, items, dirty, mode]);
+
+  const restoreDraft = () => {
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        if (draft.form) setForm(draft.form);
+        if (draft.items?.length > 0) setItems(draft.items);
+        setDirty(true);
+        toast({ title: "Draft Restored", description: "Your unsaved invoice has been restored." });
+      }
+    } catch { /* ignore */ }
+    setShowDraftBanner(false);
+  };
+
+  const discardDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setShowDraftBanner(false);
+  };
+
+  // Clear draft after successful save
+  const clearDraft = () => { localStorage.removeItem(DRAFT_KEY); };
   const [showQuickProduct, setShowQuickProduct] = useState(false);
 
   // Merge fallback entities into the loaded lists so dropdowns always have the selected option
@@ -303,6 +355,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         updatedAt: new Date().toISOString(),
       };
       createInvoice(newInvoice);
+      clearDraft();
       toast({ title: "Invoice Created", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
       if (isMobile && mobileMode === "easy") {
         navigate(`/billing/invoice/${newId}`);
@@ -353,6 +406,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   return (
     <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-28" : "p-6 lg:p-8 space-y-6")}>
       <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: mode === "create" ? "New Invoice" : "Edit Invoice" }]} />
+
+      {showDraftBanner && <DraftRestoreBanner onRestore={restoreDraft} onDiscard={discardDraft} />}
 
       <div className="flex items-center gap-3">
         <div className={cn("rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
