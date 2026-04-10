@@ -3,9 +3,12 @@ import api from "@/utils/api";
 import { jwtDecode } from "jwt-decode";
 import { useToast } from "@/hooks/use-toast";
 
+export type UserRole = "admin" | "editor" | "viewer";
+
 export interface AppUser {
-  id: string; // From jwt payload
-  username: string; // The active username
+  id: string;
+  username: string;
+  role: UserRole;
 }
 
 interface AuthContextType {
@@ -30,8 +33,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessToken = localStorage.getItem(ACCESS_KEY);
     if (accessToken) {
       try {
-        const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string }>(accessToken);
-        setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || "User" });
+        const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string; role?: string }>(accessToken);
+        setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || "User", role: (decoded.role as UserRole) || "editor" });
       } catch (e) {
         localStorage.removeItem(ACCESS_KEY);
         localStorage.removeItem(REFRESH_KEY);
@@ -48,8 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(ACCESS_KEY, access);
       localStorage.setItem(REFRESH_KEY, refresh);
 
-      const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string }>(access);
-      setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || username });
+      const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string; role?: string }>(access);
+      setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || username, role: (decoded.role as UserRole) || "editor" });
 
       return { success: true };
     } catch (error: any) {

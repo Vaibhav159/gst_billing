@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePermission } from "@/hooks/usePermission";
 import { cn } from "@/utils/utils";
 import NotificationCenter from "@/components/NotificationCenter";
 import { financialYears } from "@/utils/mockData";
@@ -45,6 +46,7 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { user, logout: authLogout } = useAuth();
+  const { canManageUsers } = usePermission();
   const [themeOpen, setThemeOpen] = useState(false);
   const [fyOpen, setFyOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -240,6 +242,12 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
                     </Link>
                   );
                 })}
+                {canManageUsers && (
+                  <Link to="/billing/users" onClick={() => setProfileOpen(false)}
+                    className={cn("w-full flex items-center gap-3 px-4 py-2.5 text-[13px] transition-colors", isActive("/billing/users") ? "text-primary font-semibold bg-primary/10" : "text-foreground hover:bg-secondary/50")}>
+                    <Users className="w-4 h-4" /> User Management
+                  </Link>
+                )}
                 <div className="border-t border-border/40 mt-1 pt-1">
                   <button
                     onClick={() => { setProfileOpen(false); handleLogout(); }}

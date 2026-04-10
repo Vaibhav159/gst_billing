@@ -20,6 +20,7 @@ from .views import (
     ProductViewSet,
     ProfileView,
     ReportView,
+    UserManagementView,
 )
 
 router = DefaultRouter()
@@ -47,8 +48,9 @@ urlpatterns = [
         LineItemViewSet.as_view({"get": "list", "post": "create"}),
         name="invoice-line-items",
     ),
-    # Profile
+    # Profile & User Management
     path("profile/", ProfileView.as_view(), name="profile"),
+    path("users/", UserManagementView.as_view(), name="user-management"),
     # JWT Authentication endpoints
     path("token/", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

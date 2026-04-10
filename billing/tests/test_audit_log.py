@@ -2,13 +2,15 @@
 from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APIClient
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Group
 from billing.models import AuditLog, Business, Customer, Invoice, Product
 
 
 class AuditLogTestCase(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="testuser", password="testpass123")
+        admin_group, _ = Group.objects.get_or_create(name="admin")
+        self.user.groups.add(admin_group)
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
 

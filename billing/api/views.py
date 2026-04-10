@@ -40,6 +40,7 @@ from billing.utils import (
 )
 
 from .mixins import AuditLogMixin
+from .permissions import RoleBasedPermission, AdminOnlyPermission, get_user_role
 from .serializers import (
     AuditLogSerializer,
     BusinessSerializer,
@@ -74,6 +75,7 @@ class BusinessViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "business"
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
+    permission_classes = [RoleBasedPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_entity_name(self, instance):
@@ -205,6 +207,7 @@ class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "customer"
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
+    permission_classes = [RoleBasedPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     def get_entity_name(self, instance):
@@ -490,6 +493,7 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "product"
     queryset = Product.objects.all().order_by("name")
     serializer_class = ProductSerializer
+    permission_classes = [RoleBasedPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     def get_entity_name(self, instance):
@@ -657,6 +661,7 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
 @method_decorator(csrf_exempt, name="dispatch")
 class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "invoice"
+    permission_classes = [RoleBasedPermission]
     queryset = (
         Invoice.objects.all()
         .select_related("customer", "business")
@@ -1299,6 +1304,7 @@ class LineItemViewSet(viewsets.ModelViewSet):
     queryset = LineItem.objects.all().select_related("invoice")
     serializer_class = LineItemSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [RoleBasedPermission]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -2392,4 +2398,98 @@ class ProfileView(APIView):
             "first_name": user.first_name,
             "last_name": user.last_name,
             "full_name": user.get_full_name() or user.username,
+        })
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UserManagementView(APIView):
+    """Admin-only endpoint to list, create, and manage users with roles."""
+    permission_classes = [AdminOnlyPermission]
+
+    def get(self, request):
+        from django.contrib.auth.models import User
+        users = User.objects.all().prefetch_related("groups").order_by("username")
+        return Response([
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "full_name": u.get_full_name() or u.username,
+                "role": get_user_role(u),
+                "is_active": u.is_active,
+                "date_joined": u.date_joined.isoformat(),
+                "last_login": u.last_login.isoformat() if u.last_login else None,
+            }
+            for u in users
+        ])
+
+    def post(self, request):
+        """Create a new user with a role."""
+        from django.contrib.auth.models import User, Group
+        username = request.data.get("username", "").strip()
+        password = request.data.get("password", "")
+        email = request.data.get("email", "")
+        role = request.data.get("role", "editor")
+        first_name = request.data.get("first_name", "")
+        last_name = request.data.get("last_name", "")
+
+        if not username or not password:
+            return Response({"error": "Username and password required"}, status=400)
+
+        if User.objects.filter(username=username).exists():
+            return Response({"error": f"User '{username}' already exists"}, status=400)
+
+        if role not in ("admin", "editor", "viewer"):
+            return Response({"error": "Role must be admin, editor, or viewer"}, status=400)
+
+        user = User.objects.create_user(
+            username=username, password=password, email=email,
+            first_name=first_name, last_name=last_name,
+        )
+        group = Group.objects.get(name=role)
+        user.groups.add(group)
+
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "role": role,
+            "message": f"User '{username}' created with role '{role}'",
+        }, status=201)
+
+    def patch(self, request):
+        """Update a user's role or status."""
+        from django.contrib.auth.models import User, Group
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return Response({"error": "user_id required"}, status=400)
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+
+        # Update role
+        new_role = request.data.get("role")
+        if new_role and new_role in ("admin", "editor", "viewer"):
+            user.groups.clear()
+            user.groups.add(Group.objects.get(name=new_role))
+
+        # Update active status
+        if "is_active" in request.data:
+            user.is_active = request.data["is_active"]
+            user.save(update_fields=["is_active"])
+
+        # Update password
+        if request.data.get("password"):
+            user.set_password(request.data["password"])
+            user.save()
+
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "role": get_user_role(user),
+            "is_active": user.is_active,
+            "message": "User updated",
         })

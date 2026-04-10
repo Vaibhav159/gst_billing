@@ -24,6 +24,7 @@ import InvoicePrint from "@/pages/InvoicePrint";
 import InvoicePrintTally from "@/pages/InvoicePrintTally";
 import InvoiceForm from "@/pages/InvoiceForm";
 import AIInvoiceImport from "@/pages/AIInvoiceImport";
+import UserManagement from "@/pages/UserManagement";
 import ImportPreview from "@/pages/ImportPreview";
 import ImportReview from "@/pages/ImportReview";
 import BulkPDF from "@/pages/BulkPDF";
@@ -113,6 +114,7 @@ const App = () => (
                   <Route path="/billing/backup" element={<Backup />} />
                   <Route path="/billing/settings" element={<Settings />} />
                   <Route path="/billing/audit-log" element={<AuditLog />} />
+                  <Route path="/billing/users" element={<UserManagement />} />
                   <Route path="/billing/profile" element={<Profile />} />
                 </Route>
 

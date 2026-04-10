@@ -173,7 +173,9 @@ class AuditLogSerializer(serializers.ModelSerializer):
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
+        from .permissions import get_user_role
         token = super().get_token(user)
         token["username"] = user.username
         token["full_name"] = user.get_full_name() or user.username
+        token["role"] = get_user_role(user)
         return token

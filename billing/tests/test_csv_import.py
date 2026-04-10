@@ -1,7 +1,7 @@
 import io
 import uuid
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Group
 from django.test import TransactionTestCase
 from django.urls import reverse
 from freezegun import freeze_time
@@ -26,6 +26,8 @@ class CSVImportTestCase(TransactionTestCase):
         self.user = User.objects.create_user(
             username="testuser", email="test@example.com", password="testpassword"
         )
+        admin_group, _ = Group.objects.get_or_create(name="admin")
+        self.user.groups.add(admin_group)
         self.client.force_authenticate(user=self.user)
 
         # Create a business for testing with a unique name
