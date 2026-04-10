@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link, useOutletContext } from "react-router-dom";
-import { formatCurrency, itemUnits, itemUnitLabels } from "@/utils/mockData";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
 import type { ItemUnit } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
 import api from "@/utils/api";
@@ -25,7 +25,6 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { mobileMode } = useMobileMode();
   const { create: createInvoice, update: updateInvoice } = useInvoices();
   const { items: businesses } = useBusinesses();
@@ -137,7 +136,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     const today = new Date();
     const warns: Record<string, string> = {};
     if (d > today) warns.date = "Date is in the future";
-    const fy = parseInt((form.financialYear || selectedFY).split("-")[0]);
+    const fy = parseInt((form.financialYear || currentFY).split("-")[0]);
     if (fy) {
       const fyStart = new Date(fy, 3, 1);
       const fyEnd = new Date(fy + 1, 2, 31);
