@@ -265,6 +265,15 @@ class Invoice(AbstractBaseModel):
         default=INVOICE_TYPE_OUTWARD,
     )
 
+    # E-way Bill fields
+    eway_bill_number = models.CharField(max_length=20, blank=True, default="", verbose_name="E-way Bill Number")
+    transporter_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Transporter Name")
+    transporter_gstin = models.CharField(max_length=15, blank=True, default="", verbose_name="Transporter GSTIN")
+    vehicle_number = models.CharField(max_length=20, blank=True, default="", verbose_name="Vehicle Number")
+    vehicle_type = models.CharField(max_length=10, blank=True, default="Regular", choices=[("Regular", "Regular"), ("ODC", "Over Dimensional Cargo")])
+    transport_mode = models.CharField(max_length=10, blank=True, default="Road", choices=[("Road", "Road"), ("Rail", "Rail"), ("Air", "Air"), ("Ship", "Ship")])
+    distance_km = models.IntegerField(blank=True, null=True, verbose_name="Distance (KM)")
+
     history = HistoricalRecords()
 
     def __str__(self):

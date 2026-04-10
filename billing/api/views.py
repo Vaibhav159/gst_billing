@@ -852,6 +852,46 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         return Response(data)
 
+    @action(detail=True, methods=["get", "post"])
+    def eway_bill(self, request, pk=None):
+        """Get or update e-way bill details for an invoice."""
+        invoice = self.get_object()
+
+        if request.method == "GET":
+            return Response({
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "total_amount": float(invoice.total_amount),
+                "eway_bill_number": invoice.eway_bill_number,
+                "transporter_name": invoice.transporter_name,
+                "transporter_gstin": invoice.transporter_gstin,
+                "vehicle_number": invoice.vehicle_number,
+                "vehicle_type": invoice.vehicle_type,
+                "transport_mode": invoice.transport_mode,
+                "distance_km": invoice.distance_km,
+                "requires_eway": float(invoice.total_amount) > 50000,
+            })
+
+        # POST — save e-way bill details
+        fields = ["eway_bill_number", "transporter_name", "transporter_gstin",
+                   "vehicle_number", "vehicle_type", "transport_mode", "distance_km"]
+        for field in fields:
+            if field in request.data:
+                setattr(invoice, field, request.data[field])
+        invoice.save()
+
+        try:
+            AuditLog.objects.create(
+                action="updated", entity="invoice", entity_id=invoice.pk,
+                entity_name=f"#{invoice.invoice_number} - E-way Bill",
+                user=request.user if request.user.is_authenticated else None,
+                details=f"E-way bill updated: {invoice.eway_bill_number or 'pending'}",
+            )
+        except Exception:
+            pass
+
+        return Response({"message": "E-way bill details saved", "eway_bill_number": invoice.eway_bill_number})
+
     @action(detail=False, methods=["get"])
     def totals(self, request):
         """Get total amounts for invoices with the same filters as list"""
@@ -1208,6 +1248,175 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "rate_slabs": rate_slabs,
             "hsn_summary": hsn_summary,
             "gstr3b": gstr3b,
+        })
+
+    @action(detail=False, methods=["get"])
+    def gstr_export(self, request):
+        """Export GSTR-1, GSTR-3B, and 2B matching data in GST portal format."""
+        queryset = self.get_queryset()
+        invoice_ids = list(queryset.values_list("id", flat=True))
+
+        outward_invoices = queryset.filter(type_of_invoice="outward").select_related("customer", "business")
+        inward_invoices = queryset.filter(type_of_invoice="inward").select_related("customer", "business")
+
+        # ── GSTR-1 ──
+
+        # B2B: Invoices to registered dealers (customer has GSTIN)
+        b2b_data = {}
+        for inv in outward_invoices:
+            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
+            if not cust_gst or len(cust_gst) < 15:
+                continue  # Skip unregistered
+            items = LineItem.objects.filter(invoice=inv)
+            inv_items = []
+            for li in items:
+                inv_items.append({
+                    "num": int(li.id),
+                    "itm_det": {
+                        "txval": float(li.quantity * li.rate),
+                        "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                        "camt": float(li.cgst),
+                        "samt": float(li.sgst),
+                        "iamt": float(li.igst),
+                    },
+                })
+            if cust_gst not in b2b_data:
+                b2b_data[cust_gst] = {"ctin": cust_gst, "inv": []}
+            b2b_data[cust_gst]["inv"].append({
+                "inum": inv.invoice_number,
+                "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                "val": float(inv.total_amount),
+                "pos": inv.customer.gst_number[:2] if inv.customer.gst_number else "",
+                "rchrg": "N",
+                "inv_typ": "R",
+                "itms": inv_items,
+            })
+        b2b = list(b2b_data.values())
+
+        # B2CS: Invoices to unregistered (no GSTIN, intra-state, <=2.5L)
+        b2cs = []
+        b2cs_agg = {}
+        for inv in outward_invoices:
+            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
+            if cust_gst and len(cust_gst) >= 15:
+                continue  # Skip registered
+            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
+            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
+            if cust_state != biz_state:
+                continue  # Inter-state goes to B2CL
+            items = LineItem.objects.filter(invoice=inv)
+            for li in items:
+                rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
+                key = f"{biz_state}-{rate}"
+                if key not in b2cs_agg:
+                    b2cs_agg[key] = {"pos": biz_state, "rt": rate, "txval": 0, "camt": 0, "samt": 0, "typ": "OE"}
+                b2cs_agg[key]["txval"] += float(li.quantity * li.rate)
+                b2cs_agg[key]["camt"] += float(li.cgst)
+                b2cs_agg[key]["samt"] += float(li.sgst)
+        b2cs = list(b2cs_agg.values())
+
+        # B2CL: Large invoices to unregistered (>2.5L, inter-state)
+        b2cl = []
+        for inv in outward_invoices:
+            if float(inv.total_amount) <= 250000:
+                continue
+            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
+            if cust_gst and len(cust_gst) >= 15:
+                continue
+            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
+            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
+            if cust_state == biz_state:
+                continue  # Intra-state goes to B2CS
+            items = LineItem.objects.filter(invoice=inv)
+            inv_items = [{
+                "num": int(li.id),
+                "itm_det": {
+                    "txval": float(li.quantity * li.rate),
+                    "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                    "iamt": float(li.igst),
+                },
+            } for li in items]
+            b2cl.append({
+                "pos": cust_state,
+                "inv": [{
+                    "inum": inv.invoice_number,
+                    "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                    "val": float(inv.total_amount),
+                    "itms": inv_items,
+                }],
+            })
+
+        # HSN Summary
+        items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
+        hsn_agg = {}
+        for li in items_all.filter(invoice__type_of_invoice="outward"):
+            hsn = li.hsn_code or "0"
+            if hsn not in hsn_agg:
+                hsn_agg[hsn] = {"hsn_sc": hsn, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0}
+            hsn_agg[hsn]["qty"] += float(li.quantity)
+            hsn_agg[hsn]["txval"] += float(li.quantity * li.rate)
+            hsn_agg[hsn]["camt"] += float(li.cgst)
+            hsn_agg[hsn]["samt"] += float(li.sgst)
+            hsn_agg[hsn]["iamt"] += float(li.igst)
+        hsn = list(hsn_agg.values())
+
+        gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": {"data": hsn}}
+
+        # ── GSTR-3B ──
+        outward_items = items_all.filter(invoice__type_of_invoice="outward")
+        inward_items = items_all.filter(invoice__type_of_invoice="inward")
+
+        ot = outward_items.aggregate(
+            txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+        it = inward_items.aggregate(
+            txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+
+        gstr3b = {
+            "sup_details": {
+                "osup_det": {"txval": float(ot["txval"]), "camt": float(ot["cgst"]), "samt": float(ot["sgst"]), "iamt": float(ot["igst"])},
+            },
+            "itc_elg": {
+                "itc_avl": [{"ty": "IMPG", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
+            },
+            "intr_ltfee": {
+                "intr_details": {"iamt": 0, "camt": 0, "samt": 0},
+            },
+            "tax_pmt": {
+                "cgst": float(ot["cgst"] - it["cgst"]),
+                "sgst": float(ot["sgst"] - it["sgst"]),
+                "igst": float(ot["igst"] - it["igst"]),
+            },
+        }
+
+        # ── GSTR-2B Matching (basic) ──
+        # Compare inward invoices against expected data
+        inward_list = []
+        for inv in inward_invoices:
+            items = LineItem.objects.filter(invoice=inv)
+            total_tax = sum(float(li.cgst + li.sgst + li.igst) for li in items)
+            total_taxable = sum(float(li.quantity * li.rate) for li in items)
+            inward_list.append({
+                "invoice_number": inv.invoice_number,
+                "invoice_date": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                "supplier_name": inv.customer.name,
+                "supplier_gstin": inv.customer.gst_number or "",
+                "taxable_value": total_taxable,
+                "tax_amount": total_tax,
+                "total": float(inv.total_amount),
+            })
+
+        return Response({
+            "gstr1": gstr1,
+            "gstr3b": gstr3b,
+            "gstr2b": {"inward_invoices": inward_list},
         })
 
     @action(detail=False, methods=["get"])
