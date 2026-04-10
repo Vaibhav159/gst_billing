@@ -1123,16 +1123,21 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def check_duplicate(self, request):
-        """Check if an invoice number already exists for a business."""
+        """Check if an invoice number already exists for a business in the current FY."""
         invoice_number = request.query_params.get("invoice_number", "")
         business_id = request.query_params.get("business_id", "")
-        exclude_id = request.query_params.get("exclude_id", "")  # for edit mode
+        exclude_id = request.query_params.get("exclude_id", "")
 
         if not invoice_number or not business_id:
             return Response({"exists": False})
 
+        # Only check within current FY (invoice numbers reset per FY)
+        today = datetime.now().date()
+        fy_start = datetime(today.year if today.month >= 4 else today.year - 1, 4, 1).date()
+
         qs = Invoice.objects.filter(
             invoice_number=invoice_number, business_id=business_id,
+            invoice_date__gte=fy_start,
         )
         if exclude_id:
             qs = qs.exclude(id=exclude_id)
