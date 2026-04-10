@@ -11,6 +11,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import api from "@/utils/api";
 
 export default function Profile() {
   const isMobile = useIsMobile();
@@ -33,13 +34,18 @@ export default function Profile() {
   });
 
   useEffect(() => {
-    // Only set from auth user if no saved profile
-    if (user && !localStorage.getItem("gst_app_profile")) {
+    // Fetch profile from backend
+    api.get("profile/").then(res => {
+      const d = res.data;
       setProfile(prev => ({
         ...prev,
-        name: prev.name || user.username,
+        name: d.full_name || d.username || prev.name,
+        email: d.email || prev.email,
       }));
-    }
+    }).catch(() => {
+      // Fallback to auth user
+      if (user) setProfile(prev => ({ ...prev, name: prev.name || user.username }));
+    });
   }, [user]);
 
   const [notifications, setNotifications] = useState(() => {
@@ -54,10 +60,20 @@ export default function Profile() {
     };
   });
 
-  const handleSaveProfile = () => {
-    localStorage.setItem("gst_app_profile", JSON.stringify(profile));
-    localStorage.setItem("gst_app_notifications", JSON.stringify(notifications));
-    toast({ title: "Profile Saved", description: "Your profile settings have been saved locally." });
+  const handleSaveProfile = async () => {
+    try {
+      const nameParts = (profile.name || "").split(" ");
+      await api.patch("profile/", {
+        first_name: nameParts[0] || "",
+        last_name: nameParts.slice(1).join(" ") || "",
+        email: profile.email || "",
+      });
+      localStorage.setItem("gst_app_profile", JSON.stringify(profile));
+      localStorage.setItem("gst_app_notifications", JSON.stringify(notifications));
+      toast({ title: "Profile Saved", description: "Your profile has been updated." });
+    } catch {
+      toast({ title: "Save Failed", description: "Could not update profile.", variant: "destructive" });
+    }
   };
 
   const fadeUp = {

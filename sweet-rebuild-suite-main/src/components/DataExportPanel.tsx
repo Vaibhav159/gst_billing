@@ -81,9 +81,10 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
     }
 
     if (entity === "all" || entity === "customers") {
-      const custData = customers.map((c) => ({
-        Name: c.name, GST: c.gst, PAN: c.pan, Mobile: c.mobile,
-        Email: c.email, State: c.state, Address: c.address, Tags: c.tags.join(";"),
+      const custData = customers.map((c: any) => ({
+        Name: c.name, GST: c.gst_number || c.gst || "", PAN: c.pan_number || c.pan || "",
+        Mobile: c.mobile_number || c.mobile || "", Email: c.email || "",
+        State: c.state_name || c.state || "", Address: c.address || "",
       }));
       if (entity === "customers") {
         if (format === "csv") exportCSV(custData, Object.keys(custData[0] || {}), `customers-${dateStr}`);
@@ -102,10 +103,12 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
     }
 
     if (entity === "all" || entity === "businesses") {
-      const bizData = businesses.map((b) => ({
-        Name: b.name, GST: b.gst, PAN: b.pan, State: b.state,
-        Address: b.address, Mobile: b.mobile, Email: b.email,
-        "Bank Name": b.bankName, "Account No": b.accountNo, IFSC: b.ifsc, Branch: b.branch,
+      const bizData = businesses.map((b: any) => ({
+        Name: b.name, GST: b.gst_number || b.gst || "", PAN: b.pan_number || b.pan || "",
+        State: b.state_name || b.state || "", Address: b.address || "",
+        Mobile: b.mobile_number || b.mobile || "", Email: b.email || "",
+        "Bank Name": b.bank_name || b.bankName || "", "Account No": b.account_number || b.accountNo || "",
+        IFSC: b.ifsc_code || b.ifsc || "", Branch: b.branch || "",
       }));
       if (entity === "businesses") {
         if (format === "csv") exportCSV(bizData, Object.keys(bizData[0] || {}), `businesses-${dateStr}`);

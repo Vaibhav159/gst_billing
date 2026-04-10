@@ -37,28 +37,38 @@ export default function QRScanner() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const parseScanData = (raw: string): ScanResult | null => {
-    // Format: invoiceNumber|gstNumber|date|total
-    const parts = raw.split("|");
-    if (parts.length >= 4) {
-      return {
-        invoiceNumber: parts[0],
-        gstNumber: parts[1],
-        date: parts[2],
-        total: parts[3],
-      };
-    }
-    // Try JSON format from InvoiceQRCode component
+    if (!raw || !raw.trim()) return null;
+    const trimmed = raw.trim();
+
+    // Try JSON format first (from InvoiceQRCode or TallyInvoicePDF)
     try {
-      const json = JSON.parse(raw);
-      if (json.inv) {
+      const json = JSON.parse(trimmed);
+      if (json.inv || json.invoiceNumber || json.invoice_number) {
         return {
-          invoiceNumber: json.inv,
-          gstNumber: "",
-          date: json.dt || "",
-          total: String(json.amt || ""),
+          invoiceNumber: json.inv || json.invoiceNumber || json.invoice_number || "",
+          gstNumber: json.gst || json.biz || "",
+          date: json.dt || json.date || "",
+          total: String(json.amt || json.total || ""),
         };
       }
     } catch { /* not JSON */ }
+
+    // Pipe-separated format: invoiceNumber|gstNumber|date|total
+    const parts = trimmed.split("|");
+    if (parts.length >= 2) {
+      return {
+        invoiceNumber: parts[0],
+        gstNumber: parts[1] || "",
+        date: parts[2] || "",
+        total: parts[3] || "",
+      };
+    }
+
+    // Plain invoice number
+    if (trimmed.length > 0 && trimmed.length < 50) {
+      return { invoiceNumber: trimmed, gstNumber: "", date: "", total: "" };
+    }
+
     return null;
   };
 

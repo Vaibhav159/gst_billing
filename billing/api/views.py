@@ -2354,3 +2354,38 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             logger.exception(f"Undo failed for audit entry {pk}")
             return Response({"error": str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProfileView(APIView):
+    """Get/update user profile."""
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.get_full_name() or user.username,
+            "date_joined": user.date_joined.isoformat(),
+        })
+
+    def patch(self, request):
+        user = request.user
+        if "first_name" in request.data:
+            user.first_name = request.data["first_name"]
+        if "last_name" in request.data:
+            user.last_name = request.data["last_name"]
+        if "email" in request.data:
+            user.email = request.data["email"]
+        user.save()
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.get_full_name() or user.username,
+        })

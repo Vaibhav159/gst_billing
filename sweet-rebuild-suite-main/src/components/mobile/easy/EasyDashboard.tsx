@@ -1,27 +1,29 @@
 import { Link } from "react-router-dom";
 import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3 } from "lucide-react";
 import { motion } from "framer-motion";
-import { invoices, formatCurrency, formatDate } from "@/utils/mockData";
-import { shareInvoice } from "@/utils/shareInvoice";
+import { formatCurrency, formatDate } from "@/utils/mockData";
+import { useDashboardStats, useInvoices, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { cn } from "@/utils/utils";
+import { useMemo } from "react";
 
 interface Props {
   selectedFY: string;
 }
 
 export default function EasyDashboard({ selectedFY }: Props) {
-  const fyInvoices = invoices.filter((inv) => inv.financialYear === selectedFY);
-  const totalOutward = fyInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const outwardCount = fyInvoices.filter((i) => i.type === "OUTWARD").length;
-  const recentInvoices = [...fyInvoices]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 10);
+  const { data: statsData, isLoading } = useDashboardStats({ fyFilter: selectedFY });
+  const totals = statsData?.totals || { outward: 0, inward: 0, count: 0 };
+
+  const recentInvoices = useMemo(
+    () => (statsData?.recent_invoices || []).map(mapDjangoInvoice),
+    [statsData?.recent_invoices]
+  );
 
   return (
     <div className="p-4 space-y-5 pb-24">
       {/* Greeting */}
       <div>
-        <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Welcome back 👋</h1>
+        <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Welcome back</h1>
         <p className="text-xs text-muted-foreground mt-0.5">FY {selectedFY} · Easy Mode</p>
       </div>
 
@@ -50,15 +52,15 @@ export default function EasyDashboard({ selectedFY }: Props) {
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Total Sales</p>
             <IndianRupee className="w-3.5 h-3.5 text-chart-1" />
           </div>
-          <p className="text-xl font-display font-bold text-chart-1 tracking-tight">{formatCurrency(totalOutward)}</p>
-          <p className="text-[10px] text-muted-foreground/70">{outwardCount} invoices</p>
+          <p className="text-xl font-display font-bold text-chart-1 tracking-tight">{formatCurrency(totals.outward)}</p>
+          <p className="text-[10px] text-muted-foreground/70">FY {selectedFY}</p>
         </div>
         <div className="stat-card rounded-2xl p-4">
           <div className="flex items-center justify-between mb-1">
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Invoices</p>
             <Receipt className="w-3.5 h-3.5 text-chart-4" />
           </div>
-          <p className="text-xl font-display font-bold text-chart-4 tracking-tight">{fyInvoices.length}</p>
+          <p className="text-xl font-display font-bold text-chart-4 tracking-tight">{totals.count}</p>
           <p className="text-[10px] text-muted-foreground/70">FY {selectedFY}</p>
         </div>
       </div>
@@ -95,23 +97,17 @@ export default function EasyDashboard({ selectedFY }: Props) {
           {recentInvoices.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
               <FileText className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No invoices yet</p>
-              <p className="text-xs">Create your first invoice above</p>
+              <p className="text-sm font-medium">{isLoading ? "Loading..." : "No invoices yet"}</p>
+              {!isLoading && <p className="text-xs">Create your first invoice above</p>}
             </div>
           )}
           {recentInvoices.map((inv) => (
-            <div key={inv.id} className="elevated-card rounded-xl p-4 transition-all">
+            <Link key={inv.id} to={`/billing/invoice/${inv.id}`} className="elevated-card rounded-xl p-4 transition-all block">
               <div className="flex items-start justify-between mb-2">
-                <Link to={`/billing/invoice/${inv.id}`} className="flex-1">
+                <div>
                   <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
-                  <p className="text-[11px] text-muted-foreground">{formatDate(inv.date)} · {inv.customerName}</p>
-                </Link>
-                <button
-                  onClick={(e) => { e.preventDefault(); shareInvoice(inv); }}
-                  className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
-                >
-                  <Share2 className="w-4 h-4" />
-                </button>
+                  <p className="text-[11px] text-muted-foreground">{formatDate(inv.invoice_date || "")} · {inv.customerName}</p>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className={cn(
@@ -120,7 +116,7 @@ export default function EasyDashboard({ selectedFY }: Props) {
                 )}>{inv.type}</span>
                 <p className="text-[15px] font-display font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </div>

@@ -67,6 +67,13 @@ class Business(AbstractBaseModel):
         verbose_name="Mobile Number",
         help_text="Mobile Number of the business.",
     )
+    email = models.EmailField(
+        max_length=255,
+        verbose_name="Email",
+        help_text="Email address of the business.",
+        blank=True,
+        null=True,
+    )
     pan_number = models.CharField(
         max_length=10,
         verbose_name="PAN Number",
@@ -185,6 +192,13 @@ class Customer(AbstractBaseModel):
         max_length=12,
         verbose_name="Mobile Number",
         help_text="Mobile Number of the customer.",
+        blank=True,
+        null=True,
+    )
+    email = models.EmailField(
+        max_length=255,
+        verbose_name="Email",
+        help_text="Email address of the customer.",
         blank=True,
         null=True,
     )
