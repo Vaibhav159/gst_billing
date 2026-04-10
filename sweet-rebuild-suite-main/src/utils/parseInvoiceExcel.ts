@@ -94,7 +94,9 @@ export function normalizeDate(dateStr: string): string {
  */
 function isHeaderRow(row: any[]): boolean {
   const joined = row.map(c => strVal(c).toLowerCase()).join("|");
-  return joined.includes("s.no") && (joined.includes("bill no") || joined.includes("invoice"));
+  // Match both "S.No. | Bill No." format and "Bill No. | Invoice Date" format (no S.No.)
+  return (joined.includes("s.no") && (joined.includes("bill no") || joined.includes("invoice"))) ||
+    (joined.includes("bill no") && joined.includes("invoice date") && joined.includes("party name"));
 }
 
 /**
@@ -124,6 +126,32 @@ function isMergedHeaderRow(row: any[]): boolean {
 }
 
 /**
+ * Detect column mapping from header row. Returns a map of logical field -> column index.
+ */
+function detectColumnMap(row: any[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  row.forEach((cell, idx) => {
+    const val = strVal(cell).toLowerCase();
+    if (val.includes("s.no") || val === "s.no." || val === "sno") map.sNo = idx;
+    if (val.includes("bill no") || val === "invoice no" || val === "invoice number" || val === "inv no") map.billNo = idx;
+    if (val.includes("invoice date") || val === "date" || val === "inv date") map.invoiceDate = idx;
+    if (val.includes("party name") || val === "customer" || val === "customer name") map.partyName = idx;
+    if (val.includes("gst number") || val.includes("gstin") || val === "gst no") map.gstNumber = idx;
+    if (val.includes("commodity") || val.includes("product") || val.includes("item") || val.includes("description")) map.commodity = idx;
+    if (val.includes("hsn")) map.hsnCode = idx;
+    if (val.includes("gst rate") || val === "rate %" || val === "tax rate") map.gstRate = idx;
+    if (val.includes("qty") || val.includes("quantity") || val.includes("weight")) map.qty = idx;
+    if ((val.includes("rate") && !val.includes("gst") && !val.includes("tax")) || val.includes("price") || val.includes("rate (")) map.rate = idx;
+    if (val.includes("taxable")) map.taxableValue = idx;
+    if (val === "cgst" || val.includes("cgst")) map.cgst = idx;
+    if (val === "sgst" || val.includes("sgst")) map.sgst = idx;
+    if (val === "igst" || val.includes("igst")) map.igst = idx;
+    if (val.includes("total") && !val.includes("cgst") && !val.includes("sgst") && !val.includes("igst")) map.total = idx;
+  });
+  return map;
+}
+
+/**
  * Parse a single sheet into firm data.
  */
 function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
@@ -132,7 +160,7 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
 
   for (let r = range.s.r; r <= range.e.r; r++) {
     const row: any[] = [];
-    for (let c = range.s.c; c <= Math.min(range.e.c, 15); c++) {
+    for (let c = range.s.c; c <= Math.min(range.e.c, 20); c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
       const cell = ws[addr];
       row.push(cell ? cell.v : null);
@@ -146,6 +174,7 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
   let month = "";
   const invoices: ParsedInvoiceRow[] = [];
   let headerFound = false;
+  let colMap: Record<string, number> = {};
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -179,6 +208,7 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
     // Column header row
     if (isHeaderRow(row)) {
       headerFound = true;
+      colMap = detectColumnMap(row);
       continue;
     }
 
@@ -190,37 +220,41 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
 
     // Data row - must have at least a bill number or party name
     if (headerFound) {
-      const sNo = numVal(row[0]);
-      const billNo = strVal(row[1]);
-      const invoiceDate = strVal(row[2]);
-      const partyName = strVal(row[3]);
-      const gstNumber = strVal(row[4]);
-      const commodity = strVal(row[5]);
-      const hsnCode = strVal(row[6]);
-      const gstRateStr = strVal(row[7]).replace("%", "");
-      const gstRate = numVal(gstRateStr);
-      const qty = numVal(row[8]);
-      const rate = numVal(row[9]);
+      // Use detected column map, with fallbacks to positional
+      const hasSNo = colMap.sNo !== undefined;
+      const offset = hasSNo ? 0 : -1; // If no S.No column, all columns shift left by 1
 
-      // Taxable value: if it's a formula string, calculate from qty * rate
-      let taxableValue = numVal(row[10]);
+      const sNo = colMap.sNo !== undefined ? numVal(row[colMap.sNo]) : 0;
+      const billNo = strVal(row[colMap.billNo ?? (hasSNo ? 1 : 0)]);
+      const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]);
+      const partyName = strVal(row[colMap.partyName ?? (hasSNo ? 3 : 2)]);
+      const gstNumber = strVal(row[colMap.gstNumber ?? (hasSNo ? 4 : 3)]);
+      const commodity = strVal(row[colMap.commodity ?? (hasSNo ? 5 : 4)]);
+      const hsnCode = strVal(row[colMap.hsnCode ?? (hasSNo ? 6 : 5)]);
+      const gstRateStr = strVal(row[colMap.gstRate ?? (hasSNo ? 7 : 6)]).replace("%", "");
+      const gstRate = numVal(gstRateStr);
+      const qty = numVal(row[colMap.qty ?? (hasSNo ? 8 : 7)]);
+      const rate = numVal(row[colMap.rate ?? (hasSNo ? 9 : 8)]);
+
+      // Taxable value: from column or calculate from qty * rate
+      let taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : numVal(row[hasSNo ? 10 : 9]);
       if (taxableValue === 0 && qty > 0 && rate > 0) {
         taxableValue = Math.round(qty * rate * 100) / 100;
       }
 
-      // Tax values - calculate if formula
-      let cgst = numVal(row[11]);
-      let sgst = numVal(row[12]);
-      let igst = numVal(row[13]);
+      // Tax values - from columns or calculate
+      let cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : numVal(row[hasSNo ? 11 : 10]);
+      let sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : numVal(row[hasSNo ? 12 : 11]);
+      let igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : numVal(row[hasSNo ? 13 : 12]);
 
-      if (cgst === 0 && taxableValue > 0 && gstRate > 0) {
+      if (cgst === 0 && sgst === 0 && igst === 0 && taxableValue > 0 && gstRate > 0) {
         const halfRate = gstRate / 2;
         cgst = Math.round(taxableValue * halfRate / 100 * 100) / 100;
         sgst = Math.round(taxableValue * halfRate / 100 * 100) / 100;
       }
 
-      // Total: calculate if formula
-      let totalInvoiceValue = numVal(row[14]) || numVal(row[15]);
+      // Total: from column or calculate
+      let totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : (numVal(row[hasSNo ? 14 : 13]) || numVal(row[hasSNo ? 15 : 14]));
       if (totalInvoiceValue === 0 && taxableValue > 0) {
         totalInvoiceValue = Math.round((taxableValue + cgst + sgst + igst) * 100) / 100;
       }

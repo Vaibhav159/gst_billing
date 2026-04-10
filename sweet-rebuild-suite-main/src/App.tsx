@@ -24,6 +24,7 @@ import InvoicePrint from "@/pages/InvoicePrint";
 import InvoicePrintTally from "@/pages/InvoicePrintTally";
 import InvoiceForm from "@/pages/InvoiceForm";
 import AIInvoiceImport from "@/pages/AIInvoiceImport";
+import ImportPreview from "@/pages/ImportPreview";
 import BulkPDF from "@/pages/BulkPDF";
 import QRScanner from "@/pages/QRScanner";
 import BatchPrint from "@/pages/BatchPrint";
@@ -92,6 +93,7 @@ const App = () => (
                   <Route path="/billing/invoice/edit/:id" element={<InvoiceForm mode="edit" />} />
                   <Route path="/billing/invoice/import" element={<ImportPage type="invoice" />} />
                   <Route path="/billing/invoice/ai-import" element={<AIInvoiceImport />} />
+                  <Route path="/billing/import/preview" element={<ImportPreview />} />
                   <Route path="/billing/invoice/:id" element={<InvoiceDetail />} />
                   <Route path="/billing/bulk-pdf" element={<BulkPDF />} />
                   <Route path="/billing/qr-scanner" element={<QRScanner />} />

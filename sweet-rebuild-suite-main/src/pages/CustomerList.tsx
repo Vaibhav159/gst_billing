@@ -39,6 +39,10 @@ export default function CustomerList() {
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 25;
 
+  // Get customer revenue from backend-provided metrics
+  const getCustomerRevenue = (c: any) => Number(c.total_revenue) || 0;
+  const getCustomerInvoiceCount = (c: any) => c.invoice_count || 0;
+
   // Collect unique tags
   const allTags = ["VIP", "Wholesale", "Retail"]; // Hardcoded for now since tags are removed from DRF
   const filtered = customers.filter((c) => {
@@ -67,10 +71,6 @@ export default function CustomerList() {
   const vipCustomers = customers.filter((c) => (c as any).tags?.includes("VIP")).length;
   const totalRevenue = customers.reduce((sum, c) => sum + (Number(c.total_revenue) || 0), 0);
   const statesCount = new Set(customers.map((c) => c.state_name)).size;
-
-  // Get customer revenue from backend-provided metrics
-  const getCustomerRevenue = (c: any) => Number(c.total_revenue) || 0;
-  const getCustomerInvoiceCount = (c: any) => c.invoice_count || 0;
 
   // ─── MOBILE VIEW ───
   if (isMobile) {

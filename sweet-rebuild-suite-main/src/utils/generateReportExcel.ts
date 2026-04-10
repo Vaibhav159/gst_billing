@@ -285,6 +285,75 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
       }
     });
 
+    // ── Period Summary at the bottom ──
+    if (mKeys.length > 0) {
+      r += 2; // 2 blank rows
+
+      // Summary header
+      const summS = () => ({ font: { bold: true, sz: 12, name: "Arial", color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK_BLUE } }, alignment: { horizontal: "center" as const, vertical: "center" as const }, border: bdr() });
+      const dateRange = `${ml(mKeys[0])} to ${ml(mKeys[mKeys.length - 1])}`;
+      sc(bws, r, 0, `PERIOD SUMMARY (${dateRange})`, summS());
+      fillR(bws, r, TC, summS());
+      merges.push({ s: { r, c: 0 }, e: { r, c: TC - 1 } });
+      r++;
+
+      // Sub-header row for values
+      const subHdrS = () => ({ font: { bold: true, sz: 9, name: "Arial", color: { rgb: DARK_BLUE } }, fill: { fgColor: { rgb: LIGHT_BLUE } }, alignment: { horizontal: "center" as const, vertical: "center" as const }, border: bdr() });
+      sc(bws, r, 0, "Supply Type", subHdrS());
+      fillR(bws, r, 10, subHdrS());
+      merges.push({ s: { r, c: 0 }, e: { r, c: 9 } });
+      sc(bws, r, 10, "Taxable Value", subHdrS());
+      sc(bws, r, 11, "CGST", subHdrS());
+      sc(bws, r, 12, "SGST", subHdrS());
+      sc(bws, r, 13, "IGST", subHdrS());
+      sc(bws, r, 14, "Total Invoice Value", subHdrS());
+      r++;
+
+      const allOut = list.filter(i => i.type === "OUTWARD");
+      const allIn = list.filter(i => i.type === "INWARD");
+
+      const rowS = (ev: boolean) => ({ font: { sz: 10, name: "Arial" }, fill: ev ? { fgColor: { rgb: LIGHT_BLUE } } : undefined, border: bdr() });
+      const rowSR = (ev: boolean) => ({ ...rowS(ev), alignment: { horizontal: "right" as const } });
+
+      // Outward row
+      if (allOut.length > 0) {
+        sc(bws, r, 0, `Outward Supply (${allOut.length} invoices)`, rowS(true));
+        fillR(bws, r, 10, rowS(true));
+        merges.push({ s: { r, c: 0 }, e: { r, c: 9 } });
+        sc(bws, r, 10, r2(allOut.reduce((s, i) => s + i.subtotal, 0)), rowSR(true), NF);
+        sc(bws, r, 11, r2(allOut.reduce((s, i) => s + i.totalCGST, 0)), rowSR(true), NF);
+        sc(bws, r, 12, r2(allOut.reduce((s, i) => s + i.totalSGST, 0)), rowSR(true), NF);
+        sc(bws, r, 13, allOut.some(i => i.totalIGST > 0) ? r2(allOut.reduce((s, i) => s + i.totalIGST, 0)) : 0, rowSR(true), NF);
+        sc(bws, r, 14, r2(allOut.reduce((s, i) => s + i.total, 0)), rowSR(true), NF);
+        r++;
+      }
+
+      // Inward row
+      if (allIn.length > 0) {
+        sc(bws, r, 0, `Inward Supply (${allIn.length} invoices)`, rowS(false));
+        fillR(bws, r, 10, rowS(false));
+        merges.push({ s: { r, c: 0 }, e: { r, c: 9 } });
+        sc(bws, r, 10, r2(allIn.reduce((s, i) => s + i.subtotal, 0)), rowSR(false), NF);
+        sc(bws, r, 11, r2(allIn.reduce((s, i) => s + i.totalCGST, 0)), rowSR(false), NF);
+        sc(bws, r, 12, r2(allIn.reduce((s, i) => s + i.totalSGST, 0)), rowSR(false), NF);
+        sc(bws, r, 13, allIn.some(i => i.totalIGST > 0) ? r2(allIn.reduce((s, i) => s + i.totalIGST, 0)) : 0, rowSR(false), NF);
+        sc(bws, r, 14, r2(allIn.reduce((s, i) => s + i.total, 0)), rowSR(false), NF);
+        r++;
+      }
+
+      // Grand Total row
+      const ts = totS(); const tsr = { ...ts, alignment: { horizontal: "right" as const } };
+      sc(bws, r, 0, "GRAND TOTAL", ts);
+      fillR(bws, r, 10, ts);
+      merges.push({ s: { r, c: 0 }, e: { r, c: 9 } });
+      sc(bws, r, 10, r2(list.reduce((s, i) => s + i.subtotal, 0)), tsr, NF);
+      sc(bws, r, 11, r2(list.reduce((s, i) => s + i.totalCGST, 0)), tsr, NF);
+      sc(bws, r, 12, r2(list.reduce((s, i) => s + i.totalSGST, 0)), tsr, NF);
+      sc(bws, r, 13, list.some(i => i.totalIGST > 0) ? r2(list.reduce((s, i) => s + i.totalIGST, 0)) : 0, tsr, NF);
+      sc(bws, r, 14, r2(list.reduce((s, i) => s + i.total, 0)), tsr, NF);
+      r++;
+    }
+
     bws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: TC - 1 } });
     bws["!merges"] = merges;
     bws["!cols"] = COL_W;

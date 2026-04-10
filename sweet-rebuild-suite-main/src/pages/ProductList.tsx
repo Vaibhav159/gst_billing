@@ -49,6 +49,10 @@ export default function ProductList() {
     return dupes;
   }, [products]);
 
+  const getProductRevenue = (p: any) => Number(p.total_revenue) || 0;
+  const getProductUsageCount = (p: any) => p.usage_count || 0;
+  const getProductQtySold = (p: any) => Number(p.qty_sold) || 0;
+
   const filtered = products.filter((p) => {
     const q = search.toLowerCase();
     const matchSearch = !q || p.name.toLowerCase().includes(q) || p.hsn.includes(q) || p.description.toLowerCase().includes(q);
@@ -63,10 +67,6 @@ export default function ProductList() {
     if (sortBy === "gst") return dir * (a.gstRate - b.gstRate);
     return 0;
   });
-
-  const getProductRevenue = (p: any) => Number(p.total_revenue) || 0;
-  const getProductUsageCount = (p: any) => p.usage_count || 0;
-  const getProductQtySold = (p: any) => Number(p.qty_sold) || 0;
 
   const totalProducts = productTotalCount;
   const totalRevenue = products.reduce((sum, p) => sum + getProductRevenue(p), 0);

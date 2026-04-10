@@ -981,6 +981,18 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         ).data
         results["recent_invoices"] = recent_invoices
 
+        # 6. Tax Distribution (CGST/SGST/IGST breakdown)
+        tax_agg = LineItem.objects.filter(invoice__in=queryset).aggregate(
+            cgst=Coalesce(Sum("cgst"), Decimal("0.00")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0.00")),
+            igst=Coalesce(Sum("igst"), Decimal("0.00")),
+        )
+        results["tax_distribution"] = {
+            "cgst": float(tax_agg["cgst"]),
+            "sgst": float(tax_agg["sgst"]),
+            "igst": float(tax_agg["igst"]),
+        }
+
         return Response(results)
 
     @action(detail=False, methods=["get"])
@@ -1368,7 +1380,29 @@ class ReportView(APIView):
                     totals["inward_total"],
                 ]
             )
-            sheet.append([])  # Add spacing
+
+        # Grand Total (Outward + Inward combined)
+        if invoice_type == "both" and (
+            totals["outward_taxable"] or totals["inward_taxable"]
+        ):
+            sheet.append([])
+            sheet.append(
+                [""] * 5
+                + [
+                    f"GRAND TOTAL ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    totals["outward_taxable"] + totals["inward_taxable"],
+                    totals["outward_cgst"] + totals["inward_cgst"],
+                    totals["outward_sgst"] + totals["inward_sgst"],
+                    totals["outward_igst"] + totals["inward_igst"],
+                    totals["outward_total"] + totals["inward_total"],
+                ]
+            )
+
+        sheet.append([])  # Add spacing
 
     @classmethod
     def generate_report_for_business(

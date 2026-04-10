@@ -620,7 +620,27 @@ class DownloadInvoicesView(View):
                     overall_inward_total,
                 ]
             )
-            sheet.append([])  # Add a blank row for spacing
+
+        # Grand Total (Outward + Inward combined)
+        if invoice_type == "both" and (overall_outward_taxable or overall_inward_taxable):
+            sheet.append([])
+            sheet.append(
+                [""] * 5
+                + [
+                    f"GRAND TOTAL ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    overall_outward_taxable + overall_inward_taxable,
+                    overall_outward_cgst + overall_inward_cgst,
+                    overall_outward_sgst + overall_inward_sgst,
+                    overall_outward_igst + overall_inward_igst,
+                    overall_outward_total + overall_inward_total,
+                ]
+            )
+
+        sheet.append([])  # Add a blank row for spacing
 
     @staticmethod
     def add_invoice_data_to_sheet(

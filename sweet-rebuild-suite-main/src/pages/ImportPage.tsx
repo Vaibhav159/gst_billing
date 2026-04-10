@@ -1,8 +1,8 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Upload, Download, FileText, ArrowLeft, CheckCircle2, AlertTriangle,
   FileSpreadsheet, Info, Package, Users, Receipt, Hash, Building2, Eye,
-  UserPlus, X, Plus, AlertCircle, Check, Copy,
+  UserPlus, X, Plus, AlertCircle, Check, Copy, Pencil, Save,
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { parseInvoiceExcel, toImportReadyInvoices } from "@/utils/parseInvoiceExcel";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { indianStates } from "@/utils/mockData";
+import { downloadSampleExcel } from "@/utils/generateSampleExcel";
 
 interface ImportPageProps { type: "customer" | "product" | "invoice" | "business" }
 
@@ -56,15 +57,21 @@ const configs = {
     back: "/billing/invoice/list",
     breadcrumb: [{ label: "Invoices", href: "/billing/invoice/list" }, { label: "Import" }],
     columns: [
+      { name: "S.No.", required: false, example: "1" },
       { name: "Bill No.", required: true, example: "100" },
       { name: "Invoice Date", required: true, example: "06-02-2026" },
       { name: "Party Name", required: true, example: "Rajesh Kumar" },
-      { name: "GST Number", required: false, example: "27AABCK5461H1ZO" },
+      { name: "GST Number", required: false, example: "08AABCK5461H1ZO" },
       { name: "Commodity", required: true, example: "Gold Ornaments" },
       { name: "HSN Code", required: true, example: "711319" },
       { name: "GST Rate", required: true, example: "3%" },
-      { name: "Qty (gm)", required: true, example: "37.74" },
-      { name: "Rate (\u20b9/gm)", required: true, example: "16397" },
+      { name: "Qty (gm)", required: true, example: "37.740" },
+      { name: "Rate (\u20b9/gm)", required: true, example: "16397.00" },
+      { name: "Taxable Value (\u20b9)", required: false, example: "618661.80" },
+      { name: "CGST (\u20b9)", required: false, example: "9279.93" },
+      { name: "SGST (\u20b9)", required: false, example: "9279.93" },
+      { name: "IGST (\u20b9)", required: false, example: "0.00" },
+      { name: "Total Invoice Value (\u20b9)", required: false, example: "637221.66" },
     ],
     showBusiness: true,
     icon: Receipt,
@@ -380,6 +387,7 @@ function InlineQuickAddCustomer({
 export default function ImportPage({ type }: ImportPageProps) {
   const config = configs[type];
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { items: businesses } = useBusinesses();
   const { items: customers, refetch: refetchCustomers } = useCustomers();
   const { items: existingInvoices, refetch: refetchInvoices } = useInvoices(undefined, type === "invoice");
@@ -400,6 +408,56 @@ export default function ImportPage({ type }: ImportPageProps) {
   const [customerNameMap, setCustomerNameMap] = useState<Record<string, Customer>>({});
   // Selected invoices for import (checked ones)
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
+  // Inline editing state: index of row being edited, null if none
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<{ date: string; party: string; gst: string; qty: string; rate: string }>({ date: "", party: "", gst: "", qty: "", rate: "" });
+
+  const startEditing = (idx: number) => {
+    const inv = excelPreview?.[idx];
+    if (!inv) return;
+    setEditingIdx(idx);
+    setEditForm({
+      date: inv.invoice_date,
+      party: inv.customerName,
+      gst: inv.customerGST,
+      qty: inv.items[0]?.qty?.toString() || "0",
+      rate: inv.items[0]?.rate?.toString() || "0",
+    });
+  };
+
+  const saveEditing = () => {
+    if (editingIdx === null || !excelPreview) return;
+    const updated = [...excelPreview];
+    const inv = { ...updated[editingIdx] };
+    inv.invoice_date = editForm.date;
+    inv.customerName = editForm.party;
+    inv.customerGST = editForm.gst;
+    // Recalculate amounts if qty/rate changed
+    const newQty = parseFloat(editForm.qty) || 0;
+    const newRate = parseFloat(editForm.rate) || 0;
+    if (inv.items.length > 0) {
+      const item = { ...inv.items[0] };
+      item.qty = newQty;
+      item.rate = newRate;
+      item.amount = Math.round(newQty * newRate * 100) / 100;
+      const gstRate = item.gstRate || 0;
+      const halfRate = gstRate / 2;
+      item.cgst = Math.round(item.amount * halfRate / 100 * 100) / 100;
+      item.sgst = Math.round(item.amount * halfRate / 100 * 100) / 100;
+      item.igst = 0;
+      inv.items = [item, ...inv.items.slice(1)];
+      inv.subtotal = inv.items.reduce((s, i) => s + i.amount, 0);
+      inv.totalCGST = inv.items.reduce((s, i) => s + i.cgst, 0);
+      inv.totalSGST = inv.items.reduce((s, i) => s + i.sgst, 0);
+      inv.totalIGST = inv.items.reduce((s, i) => s + i.igst, 0);
+      inv.total = Math.round((inv.subtotal + inv.totalCGST + inv.totalSGST + inv.totalIGST) * 100) / 100;
+    }
+    updated[editingIdx] = inv;
+    setExcelPreview(updated);
+    setEditingIdx(null);
+  };
+
+  const cancelEditing = () => setEditingIdx(null);
 
   const Icon = config.icon;
 
@@ -581,6 +639,14 @@ export default function ImportPage({ type }: ImportPageProps) {
         // Refresh data
         refetchInvoices();
         refetchCustomers();
+        // Navigate to preview page with import results
+        navigate("/billing/import/preview", {
+          state: {
+            invoices: toImport,
+            result,
+            businessName: businesses.find(b => String(b.id) === bizFilter)?.name || "All Businesses",
+          },
+        });
       } else {
         // CSV import (original flow)
         const formData = new FormData();
@@ -732,9 +798,16 @@ export default function ImportPage({ type }: ImportPageProps) {
               ))}
             </div>
 
-            <button onClick={handleSampleDownload} className="premium-btn-outline w-full text-[13px] h-10">
-              <Download className="w-4 h-4" /> Download Sample CSV
-            </button>
+            <div className="flex gap-2">
+              <button onClick={handleSampleDownload} className="premium-btn-outline flex-1 text-[12px] h-10">
+                <Download className="w-3.5 h-3.5" /> Sample CSV
+              </button>
+              {type === "invoice" && (
+                <button onClick={() => { downloadSampleExcel(); toast({ title: "Template Downloaded", description: "invoice-import-template.xlsx" }); }} className="premium-btn-outline flex-1 text-[12px] h-10">
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> Excel Template
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Tips */}
@@ -970,6 +1043,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                         <th className="px-2 py-2 text-right font-semibold text-muted-foreground">CGST</th>
                         <th className="px-2 py-2 text-right font-semibold text-muted-foreground">SGST</th>
                         <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Total</th>
+                        <th className="px-2 py-2 text-center font-semibold text-muted-foreground w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1006,15 +1080,32 @@ export default function ImportPage({ type }: ImportPageProps) {
                               </span>
                             </td>
                             <td className="px-2 py-1.5 font-medium text-primary">{inv.invoiceNumber}</td>
-                            <td className="px-2 py-1.5 tabular-nums">{inv.invoice_date}</td>
+                            <td className="px-2 py-1.5 tabular-nums">
+                              {editingIdx === idx ? (
+                                <input type="date" value={editForm.date} onChange={(e) => setEditForm(p => ({ ...p, date: e.target.value }))}
+                                  className="w-[110px] px-1 py-0.5 rounded bg-input border border-border text-[11px]" />
+                              ) : (
+                                <span className={inv.invoice_date.length > 10 || inv.invoice_date.startsWith("4") ? "text-destructive font-bold" : ""}>{inv.invoice_date}</span>
+                              )}
+                            </td>
                             <td className="px-2 py-1.5 truncate max-w-[120px]" title={inv.customerName}>
-                              {inv.customerName}
-                              {v.customerMatch && (
-                                <span className="text-[9px] text-success ml-1">(matched)</span>
+                              {editingIdx === idx ? (
+                                <input type="text" value={editForm.party} onChange={(e) => setEditForm(p => ({ ...p, party: e.target.value }))}
+                                  className="w-full px-1 py-0.5 rounded bg-input border border-border text-[11px]" />
+                              ) : (
+                                <>
+                                  {inv.customerName}
+                                  {v.customerMatch && <span className="text-[9px] text-success ml-1">(matched)</span>}
+                                </>
                               )}
                             </td>
                             <td className="px-2 py-1.5 font-mono text-[10px] truncate max-w-[100px]" title={inv.customerGST}>
-                              {inv.customerGST || "-"}
+                              {editingIdx === idx ? (
+                                <input type="text" value={editForm.gst} onChange={(e) => setEditForm(p => ({ ...p, gst: e.target.value }))}
+                                  className="w-full px-1 py-0.5 rounded bg-input border border-border text-[10px] font-mono" placeholder="GST Number" />
+                              ) : (
+                                inv.customerGST || "-"
+                              )}
                             </td>
                             <td className="px-2 py-1.5 truncate max-w-[100px]" title={inv.firmName}>
                               {inv.firmName}
@@ -1023,10 +1114,22 @@ export default function ImportPage({ type }: ImportPageProps) {
                               )}
                             </td>
                             <td className="px-2 py-1.5 text-center">
-                              {inv.items.length}
-                              <span className="text-[9px] text-muted-foreground ml-0.5">
-                                ({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})
-                              </span>
+                              {editingIdx === idx ? (
+                                <div className="flex items-center gap-1">
+                                  <input type="number" value={editForm.qty} onChange={(e) => setEditForm(p => ({ ...p, qty: e.target.value }))}
+                                    className="w-[50px] px-1 py-0.5 rounded bg-input border border-border text-[11px] tabular-nums" step="0.01" />
+                                  <span className="text-[9px] text-muted-foreground">@</span>
+                                  <input type="number" value={editForm.rate} onChange={(e) => setEditForm(p => ({ ...p, rate: e.target.value }))}
+                                    className="w-[60px] px-1 py-0.5 rounded bg-input border border-border text-[11px] tabular-nums" step="0.01" />
+                                </div>
+                              ) : (
+                                <>
+                                  {inv.items.length}
+                                  <span className="text-[9px] text-muted-foreground ml-0.5">
+                                    ({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})
+                                  </span>
+                                </>
+                              )}
                             </td>
                             <td className="px-2 py-1.5 text-right tabular-nums">
                               {"\u20b9"}{roundAmount(inv.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
@@ -1040,6 +1143,22 @@ export default function ImportPage({ type }: ImportPageProps) {
                             <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
                               {"\u20b9"}{roundAmount(inv.total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                             </td>
+                            <td className="px-2 py-1.5 text-center">
+                              {editingIdx === idx ? (
+                                <div className="flex items-center gap-0.5">
+                                  <button onClick={saveEditing} className="w-6 h-6 rounded flex items-center justify-center hover:bg-success/20 text-success" title="Save">
+                                    <Check className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={cancelEditing} className="w-6 h-6 rounded flex items-center justify-center hover:bg-destructive/20 text-destructive" title="Cancel">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button onClick={() => startEditing(idx)} className="w-6 h-6 rounded flex items-center justify-center hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors" title="Edit">
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -1047,7 +1166,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                     {/* Totals row */}
                     <tfoot className="bg-secondary/40 border-t border-border/40">
                       <tr className="font-semibold">
-                        <td colSpan={8} className="px-2 py-2 text-right text-[11px] text-muted-foreground uppercase">
+                        <td colSpan={9} className="px-2 py-2 text-right text-[11px] text-muted-foreground uppercase">
                           Selected Total ({selectedInvoices.size} invoices)
                         </td>
                         <td className="px-2 py-2 text-right tabular-nums text-[11px]">

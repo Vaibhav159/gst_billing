@@ -5,8 +5,7 @@
       "name": "sweet-rebuild-suite-main",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 8080,
-      "autoPort": false,
+      "port": 8081,
       "cwd": "/Users/lakshya/projects/gst/gst_billing/sweet-rebuild-suite-main"
     }
   ]

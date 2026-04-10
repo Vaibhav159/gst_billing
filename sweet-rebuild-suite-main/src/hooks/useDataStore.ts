@@ -92,6 +92,11 @@ export interface DashboardStats {
     inward_tax: number;
   };
   monthly: any[];
+  tax_distribution?: {
+    cgst: number;
+    sgst: number;
+    igst: number;
+  };
   top_customers: {
     id: string;
     name: string;
@@ -210,7 +215,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     igst: parseFloat(item.igst) || 0,
   }));
 
-  const subtotal = hasItems ? items.reduce((sum: number, it: any) => sum + (it.qty * it.rate), 0) : 0;
+  let subtotal = hasItems ? items.reduce((sum: number, it: any) => sum + (it.qty * it.rate), 0) : 0;
   let totalCGST = items.reduce((sum: number, it: any) => sum + it.cgst, 0);
   let totalSGST = items.reduce((sum: number, it: any) => sum + it.sgst, 0);
   let totalIGST = items.reduce((sum: number, it: any) => sum + it.igst, 0);
@@ -230,9 +235,17 @@ export function mapDjangoInvoice(inv: any): Invoice {
     }
   }
 
-  const rawTotal = subtotal + totalTax;
+  // Prefer the API-provided total_amount (always accurate), fall back to calculated
+  const apiTotal = parseFloat(inv.total_amount) || 0;
+  const calculatedTotal = subtotal + totalTax;
+  const rawTotal = apiTotal > 0 ? apiTotal : calculatedTotal;
   const roundedTotal = Math.round(rawTotal);
   const roundedOff = +(roundedTotal - rawTotal).toFixed(2);
+
+  // Also fix subtotal: if line items are missing, derive from total - tax
+  if (subtotal === 0 && apiTotal > 0) {
+    subtotal = apiTotal - totalTax;
+  }
 
   return {
     id: String(inv.id),
@@ -280,6 +293,8 @@ export interface InvoiceFilters {
   typeFilter?: string;  // "all" | "OUTWARD" | "INWARD"
   fyFilter?: string;    // "all" | "2024-25" etc.
   monthFilter?: string; // "all" | "1"-"12"
+  startDate?: string;   // "YYYY-MM-DD" explicit date range override
+  endDate?: string;     // "YYYY-MM-DD" explicit date range override
 }
 
 /**
@@ -711,7 +726,11 @@ export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (filters?.fyFilter && filters.fyFilter !== "all") {
+      // Explicit date range takes priority over FY filter
+      if (filters?.startDate && filters?.endDate) {
+        params.set("start_date", filters.startDate);
+        params.set("end_date", filters.endDate);
+      } else if (filters?.fyFilter && filters.fyFilter !== "all") {
         const { start_date, end_date } = buildDateRange(filters.fyFilter);
         if (start_date) params.set("start_date", start_date);
         if (end_date) params.set("end_date", end_date);
@@ -731,7 +750,7 @@ export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
       if (filters?.search) {
         params.set("search", filters.search);
       }
-      
+
       const qs = params.toString();
       const res = await api.get<DashboardStats>(`invoices/stats/${qs ? `?${qs}` : ""}`);
       setData(res.data);
