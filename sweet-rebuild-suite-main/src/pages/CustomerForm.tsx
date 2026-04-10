@@ -151,8 +151,8 @@ export default function CustomerForm() {
     if (form.mobile_number && form.mobile_number.length !== 10) errs.mobile_number = "Enter 10-digit number";
     if (form.mobile_number && !/^\d+$/.test(form.mobile_number)) errs.mobile_number = "Enter 10-digit number";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = "Enter valid email";
-    if (form.gst_number && form.gst_number.length !== 15) errs.gst_number = "GST must be 15 characters";
-    if (form.pan_number && form.pan_number.length !== 10) errs.pan_number = "PAN must be 10 characters";
+    if (form.gst_number && !/^\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z]\d$/.test(form.gst_number)) errs.gst_number = "Invalid GSTIN format (e.g. 08AAKPL4741M1Z9)";
+    if (form.pan_number && !/^[A-Z]{5}\d{4}[A-Z]$/.test(form.pan_number)) errs.pan_number = "Invalid PAN format (e.g. AAKPL4741M)";
     return errs;
   };
 

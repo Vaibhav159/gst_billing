@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
-  User, Mail, Phone, Camera, Bell, Save,
-  Settings, History, Building2, Globe, Clock, AlertCircle
+  User, Mail, Phone, Bell, Save,
+  Settings, History, Building2, Globe, Clock
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -203,6 +203,7 @@ export default function Profile() {
         <div className="flex items-center gap-2">
           <Bell className="w-4 h-4 text-primary" />
           <h2 className="text-[13px] font-display font-semibold text-foreground">Notifications</h2>
+          <span className="text-[9px] text-muted-foreground bg-secondary/30 px-1.5 py-0.5 rounded">Preferences saved locally</span>
         </div>
         <div className="space-y-3">
           {[

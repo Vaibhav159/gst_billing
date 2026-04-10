@@ -11,6 +11,7 @@ import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuditLog } from "@/hooks/useAuditLog";
 import type { AuditLogEntry } from "@/hooks/useAuditLog";
+import { useToast } from "@/hooks/use-toast";
 
 type AuditAction = "created" | "updated" | "deleted" | "printed" | "exported" | "duplicated" | "imported" | "merged";
 type AuditEntity = "invoice" | "customer" | "product" | "business" | "settings";
@@ -82,21 +83,23 @@ export default function AuditLog() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const { toast } = useToast();
   const { items: auditLog, isLoading, isLoadingMore, hasMore, totalCount, loadMore, undoEntry } = useAuditLog({
     search: debouncedSearch,
     action: actionFilter,
     entity: entityFilter,
   });
   const [undoingId, setUndoingId] = useState<string | null>(null);
+  const [confirmUndoId, setConfirmUndoId] = useState<string | null>(null);
 
   const handleUndo = async (entryId: string) => {
-    if (!confirm("Are you sure you want to undo this action?")) return;
+    setConfirmUndoId(null);
     setUndoingId(entryId);
     try {
       const res = await undoEntry(entryId);
-      alert(res.message || "Undo successful");
+      toast({ title: "Undo Successful", description: res.message || "Action has been reversed." });
     } catch (e: any) {
-      alert(e?.response?.data?.error || "Undo failed");
+      toast({ title: "Undo Failed", description: e?.response?.data?.error || "Could not undo this action.", variant: "destructive" });
     } finally {
       setUndoingId(null);
     }
@@ -218,17 +221,25 @@ export default function AuditLog() {
 
                         {/* Undo button */}
                         {entry.canUndo && (
-                          <button
-                            onClick={() => handleUndo(entry.id)}
-                            disabled={undoingId === entry.id}
-                            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium border border-border/40 text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all disabled:opacity-40"
-                          >
-                            {undoingId === entry.id
-                              ? <Loader2 className="w-3 h-3 animate-spin" />
-                              : <Undo2 className="w-3 h-3" />
-                            }
-                            {entry.action === "deleted" ? "Restore" : entry.action === "created" ? "Undo Create" : "Revert"}
-                          </button>
+                          confirmUndoId === entry.id ? (
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-[10px] text-muted-foreground">Are you sure?</span>
+                              <button onClick={() => handleUndo(entry.id)} className="px-2 py-0.5 rounded text-[10px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors">Yes</button>
+                              <button onClick={() => setConfirmUndoId(null)} className="px-2 py-0.5 rounded text-[10px] font-medium bg-secondary/30 text-muted-foreground hover:bg-secondary/50 transition-colors">No</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmUndoId(entry.id)}
+                              disabled={undoingId === entry.id}
+                              className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium border border-border/40 text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-all disabled:opacity-40"
+                            >
+                              {undoingId === entry.id
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <Undo2 className="w-3 h-3" />
+                              }
+                              {entry.action === "deleted" ? "Restore" : entry.action === "created" ? "Undo Create" : "Revert"}
+                            </button>
+                          )
                         )}
                       </div>
                     </motion.div>

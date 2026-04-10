@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { toCSV, downloadCSV } from "@/utils/csv";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
@@ -82,14 +83,10 @@ export default function ProductList() {
   const handleExport = () => {
     const headers = ["Name", "HSN Code", "GST Rate (%)", "Description", "Revenue", "Times Used"];
     const rows = filtered.map((p) => [
-      p.name, p.hsn, p.gstRate.toString(), `"${p.description}"`,
-      getProductRevenue(p).toString(), getProductUsageCount(p).toString(),
+      p.name, p.hsn, p.gstRate, p.description,
+      getProductRevenue(p), getProductUsageCount(p),
     ]);
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "products-export.csv"; a.click();
+    downloadCSV(toCSV([headers, ...rows]), "products-export.csv");
     URL.revokeObjectURL(url);
     toast({ title: "CSV Exported", description: `${filtered.length} products exported.` });
   };

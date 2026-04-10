@@ -198,6 +198,7 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
           <div className="relative hidden sm:block" ref={profileRef}>
             <button
               onClick={() => { setProfileOpen(!profileOpen); setFyOpen(false); setThemeOpen(false); }}
+              aria-label="User profile menu"
               className="flex items-center gap-3 pl-3 ml-1 border-l border-border/40 cursor-pointer hover:opacity-80 transition-opacity"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground text-xs font-bold glow-sm">

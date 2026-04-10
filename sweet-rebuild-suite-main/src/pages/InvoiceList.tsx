@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { toCSV, downloadCSV } from "@/utils/csv";
 import { Link, useOutletContext, useNavigate } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
@@ -82,11 +83,7 @@ export default function InvoiceList() {
   const handleExportCSV = () => {
     const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total", "GST Type"];
     const rows = filtered.map((inv) => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "invoices-export.csv"; a.click();
-    URL.revokeObjectURL(url);
+    downloadCSV(toCSV([headers, ...rows]), "invoices-export.csv");
     toast({ title: "Exported", description: `${filtered.length} invoices exported to CSV` });
   };
 
@@ -270,11 +267,7 @@ export default function InvoiceList() {
                 const selectedInvs = filtered.filter(i => selected.has(i.id));
                 const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Total"];
                 const rows = selectedInvs.map(inv => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.total]);
-                const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-                const blob = new Blob([csv], { type: "text/csv" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a"); a.href = url; a.download = "selected-invoices.csv"; a.click();
-                URL.revokeObjectURL(url);
+                downloadCSV(toCSV([headers, ...rows]), "selected-invoices.csv");
                 toast({ title: "Exported", description: `${selected.size} invoices exported` });
               }} className="premium-btn-ghost text-[13px]">
                 <Download className="w-4 h-4" /> Export
