@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt } from "lucide-react";
+import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3 } from "lucide-react";
 import { motion } from "framer-motion";
 import { invoices, formatCurrency, formatDate } from "@/utils/mockData";
 import { shareInvoice } from "@/utils/shareInvoice";
@@ -65,29 +65,21 @@ export default function EasyDashboard({ selectedFY }: Props) {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 gap-3">
-        <Link
-          to="/billing/customer/new"
-          className="flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 transition-all"
-        >
-          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center">
-            <Users className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <p className="text-[13px] font-semibold text-foreground">Add Customer</p>
-            <p className="text-[10px] text-muted-foreground">New entry</p>
-          </div>
+        <Link to="/billing/customer/new" className="flex items-center gap-3 p-3.5 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 transition-all">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center"><Users className="w-4 h-4 text-primary" /></div>
+          <div><p className="text-[12px] font-semibold text-foreground">Add Customer</p></div>
         </Link>
-        <Link
-          to="/billing/product/new"
-          className="flex items-center gap-3 p-4 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 transition-all"
-        >
-          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center">
-            <Package className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <p className="text-[13px] font-semibold text-foreground">Add Product</p>
-            <p className="text-[10px] text-muted-foreground">New item</p>
-          </div>
+        <Link to="/billing/product/new" className="flex items-center gap-3 p-3.5 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 transition-all">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center"><Package className="w-4 h-4 text-primary" /></div>
+          <div><p className="text-[12px] font-semibold text-foreground">Add Product</p></div>
+        </Link>
+        <Link to="/billing/invoice/import" className="flex items-center gap-3 p-3.5 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 transition-all">
+          <div className="w-9 h-9 rounded-xl bg-chart-2/10 border border-chart-2/15 flex items-center justify-center"><Upload className="w-4 h-4 text-chart-2" /></div>
+          <div><p className="text-[12px] font-semibold text-foreground">Import Excel</p></div>
+        </Link>
+        <Link to="/billing/reports" className="flex items-center gap-3 p-3.5 rounded-xl border border-border/40 bg-secondary/10 hover:bg-primary/8 transition-all">
+          <div className="w-9 h-9 rounded-xl bg-chart-3/10 border border-chart-3/15 flex items-center justify-center"><BarChart3 className="w-4 h-4 text-chart-3" /></div>
+          <div><p className="text-[12px] font-semibold text-foreground">Reports</p></div>
         </Link>
       </div>
 

@@ -1077,6 +1077,135 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         return Response(results)
 
     @action(detail=False, methods=["get"])
+    def check_duplicate(self, request):
+        """Check if an invoice number already exists for a business."""
+        invoice_number = request.query_params.get("invoice_number", "")
+        business_id = request.query_params.get("business_id", "")
+        exclude_id = request.query_params.get("exclude_id", "")  # for edit mode
+
+        if not invoice_number or not business_id:
+            return Response({"exists": False})
+
+        qs = Invoice.objects.filter(
+            invoice_number=invoice_number, business_id=business_id,
+        )
+        if exclude_id:
+            qs = qs.exclude(id=exclude_id)
+
+        exists = qs.exists()
+        return Response({
+            "exists": exists,
+            "message": f"Invoice #{invoice_number} already exists for this business" if exists else "",
+        })
+
+    @action(detail=False, methods=["get"])
+    def gst_summary(self, request):
+        """Server-side GST summary for GSTR-1/3B — grouped by rate slab and HSN."""
+        queryset = self.get_queryset()
+        invoice_ids = list(queryset.values_list("id", flat=True))
+        items = LineItem.objects.filter(invoice_id__in=invoice_ids)
+
+        # 1. Rate-wise breakdown (GSTR-1 style)
+        rate_slabs = {}
+        for inv_type in ["outward", "inward"]:
+            type_items = items.filter(invoice__type_of_invoice=inv_type)
+            slab_data = (
+                type_items
+                .values("gst_tax_rate")
+                .annotate(
+                    taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+                    cgst=Coalesce(Sum("cgst"), Decimal("0")),
+                    sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                    igst=Coalesce(Sum("igst"), Decimal("0")),
+                    total=Coalesce(Sum("amount"), Decimal("0")),
+                    count=Count("invoice", distinct=True),
+                )
+                .order_by("gst_tax_rate")
+            )
+            rate_slabs[inv_type] = [
+                {
+                    "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
+                    "taxable": float(s["taxable"]),
+                    "cgst": float(s["cgst"]),
+                    "sgst": float(s["sgst"]),
+                    "igst": float(s["igst"]),
+                    "total": float(s["total"]),
+                    "invoice_count": s["count"],
+                }
+                for s in slab_data
+            ]
+
+        # 2. HSN-wise breakdown
+        hsn_data = (
+            items
+            .values("hsn_code")
+            .annotate(
+                taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+                cgst=Coalesce(Sum("cgst"), Decimal("0")),
+                sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                igst=Coalesce(Sum("igst"), Decimal("0")),
+                total=Coalesce(Sum("amount"), Decimal("0")),
+                total_qty=Coalesce(Sum("quantity"), Decimal("0")),
+                count=Count("id"),
+            )
+            .order_by("-taxable")
+        )
+        hsn_summary = [
+            {
+                "hsn_code": h["hsn_code"] or "N/A",
+                "taxable": float(h["taxable"]),
+                "cgst": float(h["cgst"]),
+                "sgst": float(h["sgst"]),
+                "igst": float(h["igst"]),
+                "total": float(h["total"]),
+                "qty": float(h["total_qty"]),
+                "count": h["count"],
+            }
+            for h in hsn_data
+        ]
+
+        # 3. GSTR-3B summary (net tax)
+        outward_tax = items.filter(invoice__type_of_invoice="outward").aggregate(
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+        inward_tax = items.filter(invoice__type_of_invoice="inward").aggregate(
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+        gstr3b = {
+            "output_tax": {
+                "cgst": float(outward_tax["cgst"]),
+                "sgst": float(outward_tax["sgst"]),
+                "igst": float(outward_tax["igst"]),
+                "total": float(outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"]),
+            },
+            "input_tax_credit": {
+                "cgst": float(inward_tax["cgst"]),
+                "sgst": float(inward_tax["sgst"]),
+                "igst": float(inward_tax["igst"]),
+                "total": float(inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"]),
+            },
+            "net_payable": {
+                "cgst": float(outward_tax["cgst"] - inward_tax["cgst"]),
+                "sgst": float(outward_tax["sgst"] - inward_tax["sgst"]),
+                "igst": float(outward_tax["igst"] - inward_tax["igst"]),
+                "total": float(
+                    (outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"])
+                    - (inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"])
+                ),
+            },
+        }
+
+        return Response({
+            "rate_slabs": rate_slabs,
+            "hsn_summary": hsn_summary,
+            "gstr3b": gstr3b,
+        })
+
+    @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
         """Get the next invoice number for a business"""
         business_id = request.query_params.get("business_id")

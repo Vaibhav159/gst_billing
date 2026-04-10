@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useOutletContext } from "react-router-dom";
 import { formatCurrency, itemUnits, itemUnitLabels } from "@/utils/mockData";
 import type { ItemUnit } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
@@ -25,6 +25,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
+  const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { mobileMode } = useMobileMode();
   const { create: createInvoice, update: updateInvoice } = useInvoices();
   const { items: businesses } = useBusinesses();
@@ -106,6 +107,44 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       })
       .catch(() => {}); // silently fail
   }, [form.businessId, form.type, mode]);
+
+  // ─── Validation state ───
+  const [warnings, setWarnings] = useState<Record<string, string>>({});
+
+  // Duplicate invoice check
+  useEffect(() => {
+    if (mode !== "create" || !form.invoiceNumber || !form.businessId) {
+      setWarnings(w => { const n = { ...w }; delete n.invoiceNumber; return n; });
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.get<any>(`invoices/check_duplicate/?invoice_number=${encodeURIComponent(form.invoiceNumber)}&business_id=${form.businessId}`);
+        if (res.data?.exists) {
+          setWarnings(w => ({ ...w, invoiceNumber: res.data.message }));
+        } else {
+          setWarnings(w => { const n = { ...w }; delete n.invoiceNumber; return n; });
+        }
+      } catch {}
+    }, 500);
+    return () => clearTimeout(t);
+  }, [form.invoiceNumber, form.businessId, mode]);
+
+  // Date validation
+  useEffect(() => {
+    if (!form.date) return;
+    const d = new Date(form.date);
+    const today = new Date();
+    const warns: Record<string, string> = {};
+    if (d > today) warns.date = "Date is in the future";
+    const fy = parseInt((form.financialYear || selectedFY).split("-")[0]);
+    if (fy) {
+      const fyStart = new Date(fy, 3, 1);
+      const fyEnd = new Date(fy + 1, 2, 31);
+      if (d < fyStart || d > fyEnd) warns.date = `Date is outside FY ${fy}-${String(fy + 1).slice(2)}`;
+    }
+    setWarnings(w => { const n = { ...w }; delete n.date; return warns.date ? { ...n, date: warns.date } : n; });
+  }, [form.date, form.financialYear]);
 
   const [dirty, setDirty] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -334,11 +373,13 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Invoice Number</label>
-                  <input type="text" value={form.invoiceNumber} onChange={(e) => set("invoiceNumber", e.target.value)} className="premium-input" />
+                  <input type="text" value={form.invoiceNumber} onChange={(e) => set("invoiceNumber", e.target.value)} className={cn("premium-input", warnings.invoiceNumber && "border-amber-500")} />
+                  {warnings.invoiceNumber && <p className="text-[10px] text-amber-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{warnings.invoiceNumber}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Date</label>
-                  <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} className="premium-input" />
+                  <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} className={cn("premium-input", warnings.date && "border-amber-500")} />
+                  {warnings.date && <p className="text-[10px] text-amber-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{warnings.date}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Type</label>

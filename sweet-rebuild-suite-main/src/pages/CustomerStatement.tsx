@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt } from "lucide-react";
+import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt, Download } from "lucide-react";
+import { downloadStatementPDF } from "@/utils/generateStatementPDF";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -56,6 +57,22 @@ export default function CustomerStatement() {
         <div className="flex items-center gap-2">
           <Link to={`/billing/customer/${id}`} className="premium-btn-ghost text-[12px] h-8"><ArrowLeft className="w-3.5 h-3.5" /> Back</Link>
           <button onClick={() => window.print()} className="premium-btn-primary text-[12px] h-8"><Printer className="w-3.5 h-3.5" /> Print</button>
+          <button onClick={() => {
+            let bal = 0;
+            const stmtInvoices = sortedFiltered.map(inv => {
+              bal += inv.type === "OUTWARD" ? inv.total : -inv.total;
+              const biz = businesses.find(b => String(b.id) === String(inv.businessId));
+              return { invoiceNumber: inv.invoiceNumber, date: formatDate(inv.invoice_date || ""), businessName: biz?.name || "", type: inv.type, amount: inv.total, balance: bal };
+            });
+            downloadStatementPDF({
+              customerName: customer.name,
+              customerGST: (customer as any).gst_number || "",
+              customerAddress: (customer as any).address || "",
+              dateRange: { from: formatDate(startDate), to: formatDate(endDate) },
+              invoices: stmtInvoices,
+              totals: { outward: totalOutward, inward: totalInward, net: netAmount },
+            });
+          }} className="premium-btn-outline text-[12px] h-8"><Download className="w-3.5 h-3.5" /> PDF</button>
         </div>
       </div>
 

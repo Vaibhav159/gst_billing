@@ -30,10 +30,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessToken = localStorage.getItem(ACCESS_KEY);
     if (accessToken) {
       try {
-        const decoded = jwtDecode<{ user_id: string }>(accessToken);
-        // We only have the user_id in the token typically, plus expiration.
-        // We'll hydrate a basic AppUser.
-        setUser({ id: decoded.user_id, username: "User" });
+        const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string }>(accessToken);
+        setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || "User" });
       } catch (e) {
         localStorage.removeItem(ACCESS_KEY);
         localStorage.removeItem(REFRESH_KEY);
@@ -50,8 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(ACCESS_KEY, access);
       localStorage.setItem(REFRESH_KEY, refresh);
 
-      const decoded = jwtDecode<{ user_id: string }>(access);
-      setUser({ id: decoded.user_id, username });
+      const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string }>(access);
+      setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || username });
 
       return { success: true };
     } catch (error: any) {

@@ -5,6 +5,7 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenVerifyView,
 )
+from .serializers import CustomTokenObtainPairSerializer
 
 from .views import (
     AIInvoiceCreateView,
@@ -46,7 +47,7 @@ urlpatterns = [
         name="invoice-line-items",
     ),
     # JWT Authentication endpoints
-    path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
 ]

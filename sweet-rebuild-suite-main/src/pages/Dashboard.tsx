@@ -14,6 +14,7 @@ import { motion } from "framer-motion";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 import { stagger, fadeUp, fadeIn } from "@/utils/animations";
 import { useDashboardStats, useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { useAuditLog } from "@/hooks/useAuditLog";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
@@ -62,6 +63,7 @@ export default function Dashboard() {
   const totals = statsData?.totals || { inward: 0, outward: 0, net: 0, tax: 0, inward_tax: 0, count: 0 };
   const monthlyData = useMemo(() => getMonthlyDataFromStats(selectedFY, statsData?.monthly || []), [selectedFY, statsData?.monthly]);
   const recentInvoices = useMemo(() => (statsData?.recent_invoices || []).map(mapDjangoInvoice), [statsData?.recent_invoices]);
+  const { items: auditEntries } = useAuditLog(undefined, true);
 
   const totalOutward = totals.outward;
   const totalInward = totals.inward;
@@ -485,27 +487,46 @@ export default function Dashboard() {
             <Clock className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-0">
-            {recentInvoices.map((inv, i) => (
-              <div key={inv.id} className="flex gap-3 pb-4 relative">
-                {i < 5 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
-                <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5",
-                  inv.type === "OUTWARD" ? "bg-success/15" : "bg-warning/15"
-                )}>
-                  <FileText className={cn("w-3 h-3", inv.type === "OUTWARD" ? "text-success" : "text-warning")} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <Link to={`/billing/invoice/${inv.id}`} className="text-[13px] font-medium text-foreground hover:text-primary transition-colors truncate">
-                      {inv.invoiceNumber}
-                    </Link>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{formatDate(inv.invoice_date || "")}</span>
+            {(auditEntries.length > 0 ? auditEntries.slice(0, 8) : recentInvoices).map((entry: any, i: number) => {
+              const isAudit = !!entry.action;
+              const actionColors: Record<string, { bg: string; text: string }> = {
+                created: { bg: "bg-success/15", text: "text-success" },
+                updated: { bg: "bg-chart-3/15", text: "text-chart-3" },
+                deleted: { bg: "bg-destructive/15", text: "text-destructive" },
+                imported: { bg: "bg-chart-2/15", text: "text-chart-2" },
+                printed: { bg: "bg-chart-4/15", text: "text-chart-4" },
+                exported: { bg: "bg-chart-1/15", text: "text-chart-1" },
+              };
+              const colors = isAudit ? (actionColors[entry.action] || actionColors.updated) : (entry.type === "OUTWARD" ? actionColors.created : { bg: "bg-warning/15", text: "text-warning" });
+              const label = isAudit ? `${entry.action.charAt(0).toUpperCase() + entry.action.slice(1)} ${entry.entity}` : (entry.type === "OUTWARD" ? "Sold to" : "Purchased from");
+              const name = isAudit ? entry.entityName : entry.invoiceNumber;
+              const detail = isAudit ? entry.details : `${entry.customerName} · ${formatCurrency(entry.total)}`;
+              const time = isAudit ? new Date(entry.timestamp).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : formatDate(entry.invoice_date || "");
+              const link = isAudit && entry.entity !== "settings" && entry.action !== "deleted" ? `/billing/${entry.entity}/${entry.entityId}` : (isAudit ? null : `/billing/invoice/${entry.id}`);
+
+              return (
+                <div key={entry.id} className="flex gap-3 pb-3.5 relative">
+                  {i < 7 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
+                  <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5", colors.bg)}>
+                    {isAudit ? <Activity className={cn("w-3 h-3", colors.text)} /> : <FileText className={cn("w-3 h-3", colors.text)} />}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {inv.type === "OUTWARD" ? "Sold to" : "Purchased from"} {inv.customerName} · {formatCurrency(inv.total)}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      {link ? (
+                        <Link to={link} className="text-[13px] font-medium text-foreground hover:text-primary transition-colors truncate">{name}</Link>
+                      ) : (
+                        <span className="text-[13px] font-medium text-foreground truncate">{name}</span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{isAudit ? label : detail}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
+            {auditEntries.length === 0 && recentInvoices.length === 0 && (
+              <p className="text-[12px] text-muted-foreground text-center py-4">No recent activity</p>
+            )}
           </div>
         </motion.div>
 

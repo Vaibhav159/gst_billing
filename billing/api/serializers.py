@@ -2,6 +2,7 @@ import base64
 import mimetypes
 
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from billing.models import Business, Customer, Invoice, LineItem, Product
 
@@ -167,3 +168,12 @@ class AuditLogSerializer(serializers.ModelSerializer):
         if obj.action == "created":
             return True
         return False
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token["username"] = user.username
+        token["full_name"] = user.get_full_name() or user.username
+        return token

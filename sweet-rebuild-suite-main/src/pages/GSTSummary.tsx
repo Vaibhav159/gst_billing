@@ -2,11 +2,10 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { format } from "date-fns";
 import { formatCurrency } from "@/utils/mockData";
-import { useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
-import type { Invoice } from "@/utils/mockData";
+import { useBusinesses } from "@/hooks/useDataStore";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft, BarChart3, Receipt, Loader2 } from "lucide-react";
+import { Download, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft, BarChart3, Receipt, Loader2, Hash } from "lucide-react";
 import DateRangePicker from "@/components/DateRangePicker";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn } from "@/utils/utils";
@@ -18,50 +17,64 @@ interface OutletCtx { selectedFY: string }
 const MONTHS = ["April","May","June","July","August","September","October","November","December","January","February","March"];
 const SHORT = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
-/**
- * Fetch ALL invoices with line items included (needed for GSTR-1 rate-wise breakdown).
- * Uses include_items=true and paginates through all pages.
- */
-function useInvoicesWithItems(selectedFY: string) {
-  const [items, setItems] = useState<Invoice[]>([]);
+/** Fetch server-side GST summary (rate slabs, HSN breakdown, GSTR-3B) */
+function useGSTSummary(selectedFY: string, bizFilter: string) {
+  const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchAll = useCallback(async () => {
+  const fetchSummary = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const allResults: Invoice[] = [];
       const [startYearStr] = selectedFY.split("-");
       const startYear = parseInt(startYearStr);
-      const startDate = `${startYear}-04-01`;
-      const endDate = `${startYear + 1}-03-31`;
+      const params = new URLSearchParams();
+      params.set("start_date", `${startYear}-04-01`);
+      params.set("end_date", `${startYear + 1}-03-31`);
+      if (bizFilter !== "all") params.set("business_id", bizFilter);
 
-      let url: string | null = `invoices/?include_items=true&page_size=100&start_date=${startDate}&end_date=${endDate}`;
-      while (url) {
-        const res = await api.get<any>(url);
-        const data = res.data;
-        const results = (data.results || []).map(mapDjangoInvoice);
-        allResults.push(...results);
-        if (data.next) {
-          try {
-            const u = new URL(data.next);
-            url = u.pathname.replace(/^\/api\//, '') + u.search;
-          } catch { url = null; }
-        } else {
-          url = null;
-        }
-      }
-      setItems(allResults);
+      const res = await api.get<any>(`invoices/gst_summary/?${params.toString()}`);
+      setData(res.data);
     } catch (e) {
-      console.error("Failed to fetch invoices with items", e);
+      console.error("Failed to fetch GST summary", e);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedFY]);
+  }, [selectedFY, bizFilter]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
-  return { items, isLoading };
+  return { data, isLoading };
+}
+
+/** Also fetch stats for monthly chart and totals */
+function useGSTStats(selectedFY: string, bizFilter: string) {
+  const [data, setData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchStats = useCallback(async () => {
+    if (!localStorage.getItem("gst_access_token")) return;
+    setIsLoading(true);
+    try {
+      const [startYearStr] = selectedFY.split("-");
+      const startYear = parseInt(startYearStr);
+      const params = new URLSearchParams();
+      params.set("start_date", `${startYear}-04-01`);
+      params.set("end_date", `${startYear + 1}-03-31`);
+      if (bizFilter !== "all") params.set("business_id", bizFilter);
+
+      const res = await api.get<any>(`invoices/stats/?${params.toString()}`);
+      setData(res.data);
+    } catch (e) {
+      console.error("Failed to fetch stats", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedFY, bizFilter]);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  return { data, isLoading };
 }
 
 export default function GSTSummary() {
@@ -72,63 +85,45 @@ export default function GSTSummary() {
   const [customEnd, setCustomEnd] = useState(new Date(parseInt(selectedFY.split("-")[0]) + 1, 2, 31));
   const [selectedMonth, setSelectedMonth] = useState("All");
   const [bizFilter, setBizFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"gstr1" | "gstr3b">("gstr1");
-  const { items: invoices, isLoading: invoicesLoading } = useInvoicesWithItems(selectedFY);
+  const [activeTab, setActiveTab] = useState<"gstr1" | "gstr3b" | "hsn">("gstr1");
   const { items: businesses } = useBusinesses();
+  const { data: gstData, isLoading: gstLoading } = useGSTSummary(selectedFY, bizFilter);
+  const { data: statsData, isLoading: statsLoading } = useGSTStats(selectedFY, bizFilter);
+
+  const invoicesLoading = gstLoading || statsLoading;
 
   const fyStart = parseInt(selectedFY.split("-")[0]);
   const monthIdx = MONTHS.indexOf(selectedMonth);
-  const isAll = selectedMonth === "All";
-  const year = !isAll && monthIdx < 9 ? fyStart : fyStart + 1;
-  const monthNum = !isAll && monthIdx < 9 ? monthIdx + 4 : monthIdx - 8;
-  const prefix = !isAll ? `${year}-${String(monthNum).padStart(2, "0")}` : "";
 
-  const filtered = useMemo(() => {
-    if (useCustomRange) {
-      const startStr = format(customStart, "yyyy-MM-dd");
-      const endStr = format(customEnd, "yyyy-MM-dd");
-      return invoices.filter(
-        (inv) => inv.financialYear === selectedFY && (bizFilter === "all" || String(inv.businessId) === String(bizFilter)) && inv.invoice_date >= startStr && inv.invoice_date <= endStr
-      );
-    }
-    return invoices.filter(
-      (inv) => (isAll || inv.invoice_date.startsWith(prefix)) && inv.financialYear === selectedFY && (bizFilter === "all" || String(inv.businessId) === String(bizFilter))
-    );
-  }, [prefix, isAll, selectedFY, bizFilter, invoices, useCustomRange, customStart, customEnd]);
+  // Server-side data
+  const gstr1Rows = (gstData?.rate_slabs?.outward || []).filter((r: any) => r.taxable > 0);
+  const gstr1InwardRows = (gstData?.rate_slabs?.inward || []).filter((r: any) => r.taxable > 0);
+  const hsnRows = gstData?.hsn_summary || [];
+  const gstr3b = gstData?.gstr3b || { output_tax: { cgst: 0, sgst: 0, igst: 0, total: 0 }, input_tax_credit: { cgst: 0, sgst: 0, igst: 0, total: 0 }, net_payable: { cgst: 0, sgst: 0, igst: 0, total: 0 } };
 
-  const outward = filtered.filter((i) => i.type === "OUTWARD");
-  const inward = filtered.filter((i) => i.type === "INWARD");
-  const totalOutward = outward.reduce((s, i) => s + i.total, 0);
-  const totalOutwardTax = outward.reduce((s, i) => s + i.totalTax, 0);
-  const totalITC = inward.reduce((s, i) => s + i.totalTax, 0);
-  const netTax = totalOutwardTax - totalITC;
+  const totalOutward = statsData?.totals?.outward || 0;
+  const totalOutwardTax = gstr3b.output_tax.total;
+  const totalITC = gstr3b.input_tax_credit.total;
+  const netTax = gstr3b.net_payable.total;
 
-  const gstRates = [3, 5, 12, 18, 28];
-  const gstr1Rows = gstRates.map((rate) => {
-    const rateInvs = outward.filter((inv) => inv.items.some((it) => it.gstRate === rate));
-    const taxable = rateInvs.reduce((s, inv) => s + inv.items.filter((it) => it.gstRate === rate).reduce((ss, it) => ss + it.amount, 0), 0);
-    const cgst = rateInvs.reduce((s, inv) => s + inv.items.filter((it) => it.gstRate === rate).reduce((ss, it) => ss + it.cgst, 0), 0);
-    const sgst = rateInvs.reduce((s, inv) => s + inv.items.filter((it) => it.gstRate === rate).reduce((ss, it) => ss + it.sgst, 0), 0);
-    const igst = rateInvs.reduce((s, inv) => s + inv.items.filter((it) => it.gstRate === rate).reduce((ss, it) => ss + it.igst, 0), 0);
-    return { rate, taxable, cgst, sgst, igst, total: cgst + sgst + igst, count: rateInvs.length };
-  }).filter((r) => r.taxable > 0);
-
+  // Monthly chart from stats
   const monthlyTax = SHORT.map((m, idx) => {
+    const monthly = statsData?.monthly || [];
     const y = idx < 9 ? fyStart : fyStart + 1;
     const mn = idx < 9 ? idx + 4 : idx - 8;
-    const p = `${y}-${String(mn).padStart(2, "0")}`;
-    const mInvs = invoices.filter((i) => i.invoice_date.startsWith(p) && i.financialYear === selectedFY && (bizFilter === "all" || String(i.businessId) === String(bizFilter)));
-    const out = mInvs.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.totalTax, 0);
-    const inp = mInvs.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.totalTax, 0);
-    return { month: m, output: out / 1000, itc: inp / 1000, isCurrent: m === SHORT[monthIdx] };
+    const found = monthly.find((r: any) => r.month === mn && r.year === y);
+    return { month: m, output: (found?.outward_total || 0) / 1000, itc: (found?.inward_total || 0) / 1000, isCurrent: m === SHORT[monthIdx] };
   });
 
   const handleDownload = () => {
     const rows = [["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Invoices"]];
-    gstr1Rows.forEach((r) => rows.push([`${r.rate}%`, r.taxable.toString(), r.cgst.toString(), r.sgst.toString(), r.igst.toString(), r.total.toString(), r.count.toString()]));
-    const csv = rows.map((r) => r.join(",")).join("\n");
+    gstr1Rows.forEach((r: any) => rows.push([`${r.rate}%`, r.taxable.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.total.toFixed(2), r.invoice_count.toString()]));
+    rows.push([]);
+    rows.push(["HSN Code", "Taxable", "CGST", "SGST", "IGST", "Total", "Qty"]);
+    hsnRows.forEach((h: any) => rows.push([h.hsn_code, h.taxable.toFixed(2), h.cgst.toFixed(2), h.sgst.toFixed(2), h.igst.toFixed(2), h.total.toFixed(2), h.qty.toFixed(3)]));
+    const csv = rows.map((r: any) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `gst-${selectedMonth}-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = `gst-summary-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   return (
@@ -222,9 +217,9 @@ export default function GSTSummary() {
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.5 }}
         className="elevated-card rounded-2xl overflow-hidden">
         <div className="flex border-b border-border/50">
-          {(["gstr1", "gstr3b"] as const).map((tab) => (
+          {(["gstr1", "gstr3b", "hsn"] as const).map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab)} className={cn("px-5 py-3 text-[12px] font-semibold border-b-2 -mb-px transition-all", activeTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground")}>
-              {tab === "gstr1" ? "GSTR-1" : "GSTR-3B"}
+              {tab === "gstr1" ? "GSTR-1" : tab === "gstr3b" ? "GSTR-3B" : "HSN Summary"}
             </button>
           ))}
         </div>
@@ -237,7 +232,7 @@ export default function GSTSummary() {
                   className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span>
-                    <span className="text-[12px] text-muted-foreground">{r.count} inv</span>
+                    <span className="text-[12px] text-muted-foreground">{r.invoice_count} inv</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[12px]">
                     <div><p className="text-[10px] text-muted-foreground">Taxable</p><p className="font-semibold text-foreground">{formatCurrency(r.taxable)}</p></div>
@@ -253,7 +248,7 @@ export default function GSTSummary() {
               <tbody>
                 {gstr1Rows.map((r, i) => (
                   <motion.tr key={r.rate} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
-                    <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.count}</td>
+                    <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.invoice_count}</td>
                   </motion.tr>
                 ))}
                 {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading invoices...</span> : "No data for selected period"}</td></tr>}
@@ -262,26 +257,43 @@ export default function GSTSummary() {
           )
         ) : (
           <div className="p-5 space-y-4">
-            <motion.div variants={stagger} initial="hidden" animate="visible"
-              className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3")}>
-              {[
-                { label: "Outward taxable", value: formatCurrency(totalOutward), color: "text-chart-1" },
-                { label: "Eligible ITC", value: formatCurrency(totalITC), color: "text-success" },
-                { label: "Payment of tax", value: formatCurrency(Math.max(netTax, 0)), color: "text-destructive" },
-              ].map((item) => (
-                <motion.div key={item.label} variants={fadeUp} className="glass-surface rounded-xl p-4">
-                  <p className="text-[11px] text-muted-foreground mb-1">{item.label}</p>
-                  <p className={cn("text-lg font-display font-bold", item.color)}>{item.value}</p>
-                </motion.div>
-              ))}
-            </motion.div>
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-              className="glass-surface rounded-xl p-4 flex items-center justify-between">
+            {/* GSTR-3B Tax Table */}
+            <table className="table-premium text-[12px]">
+              <thead><tr><th></th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th></tr></thead>
+              <tbody>
+                <tr><td className="font-medium">Output Tax (Sales)</td><td className="text-right">{formatCurrency(gstr3b.output_tax.cgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.sgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.igst)}</td><td className="text-right font-semibold">{formatCurrency(gstr3b.output_tax.total)}</td></tr>
+                <tr><td className="font-medium text-success">Input Tax Credit (Purchases)</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.igst)}</td><td className="text-right font-semibold text-success">{formatCurrency(gstr3b.input_tax_credit.total)}</td></tr>
+                <tr className="border-t-2 border-border"><td className="font-bold">Net Tax Payable</td><td className={cn("text-right font-bold", gstr3b.net_payable.cgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.cgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.sgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.sgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.igst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.igst)}</td><td className={cn("text-right font-bold text-lg", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</td></tr>
+              </tbody>
+            </table>
+            <div className="glass-surface rounded-xl p-4 flex items-center justify-between">
               <div><p className="text-[11px] text-muted-foreground">Net Tax</p><p className={cn("text-xl font-display font-bold mt-1", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</p></div>
               <span className={cn("premium-badge", netTax >= 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success")}>{netTax >= 0 ? "Payable" : "Refundable"}</span>
-            </motion.div>
+            </div>
           </div>
-        )}
+        ) : activeTab === "hsn" ? (
+          /* HSN Summary Tab */
+          <div className="overflow-x-auto">
+            <table className="table-premium text-[12px]">
+              <thead><tr><th>HSN Code</th><th className="text-right">Qty</th><th className="text-right">Taxable Value</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th><th className="text-right">Items</th></tr></thead>
+              <tbody>
+                {hsnRows.map((h: any, i: number) => (
+                  <motion.tr key={h.hsn_code} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+                    <td><span className="premium-badge bg-chart-2/12 text-chart-2 font-mono">{h.hsn_code}</span></td>
+                    <td className="text-right tabular-nums">{h.qty.toFixed(3)}</td>
+                    <td className="text-right font-medium">{formatCurrency(h.taxable)}</td>
+                    <td className="text-right">{formatCurrency(h.cgst)}</td>
+                    <td className="text-right">{formatCurrency(h.sgst)}</td>
+                    <td className="text-right">{formatCurrency(h.igst)}</td>
+                    <td className="text-right font-semibold">{formatCurrency(h.total)}</td>
+                    <td className="text-right text-muted-foreground">{h.count}</td>
+                  </motion.tr>
+                ))}
+                {hsnRows.length === 0 && <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</span> : "No data"}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </motion.div>
     </div>
   );

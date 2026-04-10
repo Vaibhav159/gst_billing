@@ -64,12 +64,15 @@ export default function CommandPalette() {
           ))}
         </CommandGroup>
         <CommandGroup heading="Invoices">
-          {invoices.slice(0, 8).map((inv) => (
+          {invoices.slice(0, 10).map((inv) => (
             <CommandItem key={inv.id} onSelect={() => go(`/billing/invoice/${inv.id}`)} className="gap-3">
               <FileText className="w-4 h-4 text-muted-foreground" />
-              <span className="flex-1">{inv.invoiceNumber}</span>
-              <span className="text-xs text-muted-foreground">{inv.customerName}</span>
-              <span className="text-xs font-semibold tabular-nums">{formatCurrency(inv.total)}</span>
+              <div className="flex-1 min-w-0">
+                <span className="font-medium">{inv.invoiceNumber}</span>
+                <span className="text-[10px] text-muted-foreground ml-2">{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : ""}</span>
+              </div>
+              <span className="text-xs text-muted-foreground truncate max-w-[100px]">{inv.customerName}</span>
+              <span className={`text-xs font-semibold tabular-nums ${inv.type === "OUTWARD" ? "text-success" : "text-warning"}`}>{formatCurrency(inv.total)}</span>
             </CommandItem>
           ))}
         </CommandGroup>
@@ -78,6 +81,7 @@ export default function CommandPalette() {
             <CommandItem key={c.id} onSelect={() => go(`/billing/customer/${c.id}`)} className="gap-3">
               <Users className="w-4 h-4 text-muted-foreground" />
               <span className="flex-1">{c.name}</span>
+              {(c as any).total_revenue > 0 && <span className="text-xs font-semibold text-success tabular-nums">{formatCurrency((c as any).total_revenue)}</span>}
               <span className="text-xs text-muted-foreground">{c.state_name}</span>
             </CommandItem>
           ))}
