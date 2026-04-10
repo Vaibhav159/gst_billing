@@ -44,6 +44,7 @@ export default function BusinessForm() {
     address: "",
     mobile_number: "",
     email: "",
+    invoice_prefix: "",
     bank_name: "",
     bank_account_number: "",
     bank_ifsc_code: "",
@@ -62,6 +63,7 @@ export default function BusinessForm() {
         address: existing.address || "",
         mobile_number: existing.mobile_number || "",
         email: existing.email || "",
+        invoice_prefix: (existing as any).invoice_prefix || "",
         bank_name: existing.bank_name || "",
         bank_account_number: existing.bank_account_number || "",
         bank_ifsc_code: existing.bank_ifsc_code || "",
@@ -237,6 +239,11 @@ export default function BusinessForm() {
                 <FormField label="Email Address" icon={Mail} error={errors.email}>
                   <input type="email" value={form.email} onChange={(e) => handleChange("email", e.target.value)}
                     placeholder="info@business.com" className={cn("premium-input", errors.email && "border-destructive/50 focus:ring-destructive/30")} />
+                </FormField>
+
+                <FormField label="Invoice Prefix" icon={FileText} hint={form.invoice_prefix ? `Preview: ${form.invoice_prefix}/2026-27/1` : "Plain numbers (1, 2, 3...)"}>
+                  <input type="text" value={form.invoice_prefix} onChange={(e) => handleChange("invoice_prefix", e.target.value.toUpperCase())}
+                    placeholder="e.g. SGJ, LJ (optional)" className="premium-input font-mono uppercase" maxLength={20} />
                 </FormField>
 
                 <FormField label="State" icon={MapPin}>

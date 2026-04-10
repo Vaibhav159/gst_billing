@@ -117,6 +117,13 @@ class Business(AbstractBaseModel):
         null=True,
         choices=STATE_CHOICES,
     )
+    invoice_prefix = models.CharField(
+        max_length=20,
+        verbose_name="Invoice Prefix",
+        help_text="Prefix for invoice numbers (e.g. SGJ, LJ). Leave blank for plain numbers.",
+        blank=True,
+        default="",
+    )
     primary_color_theme = models.CharField(
         default="#d04e00",
         verbose_name="Primary Color Theme",

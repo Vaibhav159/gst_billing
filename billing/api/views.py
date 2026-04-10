@@ -1266,24 +1266,28 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     next_number = 1
 
         # Build the next invoice number
-        # Detect the FY string for the prefix
         fy_start = start_date.year
         fy_str = f"{fy_start}-{str(fy_start + 1)[2:]}"
 
-        # Check if business uses a prefix pattern (e.g. "SGJ/2024-25/108")
-        # by looking at existing invoices for this business
-        prefix = ""
-        sample = Invoice.objects.filter(business_id=business_id).exclude(
-            invoice_number__regex=r"^\d+$"
-        ).order_by("-id").first()
-        if sample:
-            # Extract prefix before the FY part, e.g. "SGJ/" from "SGJ/2024-25/108"
-            match = re.match(r"^([A-Za-z]+/)\d{4}-\d{2}/", sample.invoice_number)
-            if match:
-                prefix = match.group(1)
+        # Use business's invoice_prefix field first, then fall back to detecting from existing invoices
+        try:
+            biz = Business.objects.get(id=business_id)
+            prefix = biz.invoice_prefix.strip() if biz.invoice_prefix else ""
+        except Business.DoesNotExist:
+            prefix = ""
+
+        if not prefix:
+            # Fall back: detect from existing invoices
+            sample = Invoice.objects.filter(business_id=business_id).exclude(
+                invoice_number__regex=r"^\d+$"
+            ).order_by("-id").first()
+            if sample:
+                match = re.match(r"^([A-Za-z]+)/\d{4}-\d{2}/", sample.invoice_number)
+                if match:
+                    prefix = match.group(1)
 
         if prefix:
-            next_invoice_number_str = f"{prefix}{fy_str}/{next_number}"
+            next_invoice_number_str = f"{prefix}/{fy_str}/{next_number}"
         else:
             next_invoice_number_str = str(next_number)
 
