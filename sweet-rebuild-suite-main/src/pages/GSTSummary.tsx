@@ -139,7 +139,7 @@ export default function GSTSummary() {
           </div>
           <div>
             <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl")}>GST Summary</h1>
-            <p className="text-xs text-muted-foreground">{isAll ? "Full Year" : `${selectedMonth}`} · FY {selectedFY}</p>
+            <p className="text-xs text-muted-foreground">{selectedMonth === "All" ? "Full Year" : `${selectedMonth}`} · FY {selectedFY}</p>
           </div>
         </div>
         <button onClick={handleDownload} className={cn("premium-btn-primary text-[12px]", isMobile ? "h-9" : "")}><Download className="w-4 h-4" /> Download</button>
