@@ -72,6 +72,7 @@ export default function BatchPrint() {
     async function loadAll() {
       setIsLoading(true);
       const results: InvoiceWithMeta[] = [];
+      let skipped = 0;
       for (const id of invoiceIds) {
         try {
           const inv = await fetchFullInvoice(id);
@@ -80,11 +81,29 @@ export default function BatchPrint() {
           if (biz && cust) {
             const qrDataUrl = await generateQR(inv, biz);
             results.push({ invoice: inv, business: biz, customer: cust, qrDataUrl });
+          } else {
+            // Business or customer not in loaded list — fetch directly
+            console.warn(`Invoice ${id}: biz=${inv.businessId} cust=${inv.customerId} not found in loaded lists, fetching...`);
+            try {
+              const [bizRes, custRes] = await Promise.all([
+                biz ? Promise.resolve({ data: biz }) : api.get<any>(`businesses/${inv.businessId}/`),
+                cust ? Promise.resolve({ data: cust }) : api.get<any>(`customers/${inv.customerId}/`),
+              ]);
+              const fetchedBiz = bizRes.data;
+              const fetchedCust = custRes.data;
+              const qrDataUrl = await generateQR(inv, fetchedBiz);
+              results.push({ invoice: inv, business: fetchedBiz, customer: fetchedCust, qrDataUrl });
+            } catch (e2) {
+              console.error(`Failed to fetch business/customer for invoice ${id}`, e2);
+              skipped++;
+            }
           }
         } catch (e) {
           console.error(`Failed to fetch invoice ${id}`, e);
+          skipped++;
         }
       }
+      if (skipped > 0) console.warn(`BatchPrint: ${skipped} invoices skipped due to errors`);
       if (!cancelled) {
         setInvoiceData(results);
         setIsLoading(false);

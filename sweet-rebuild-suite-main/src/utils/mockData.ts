@@ -499,9 +499,22 @@ export const auditLog: AuditLogEntry[] = [
   { id: "al15", action: "created", entity: "customer", entityId: "c7", entityName: "Kavita Reddy", user: "Admin", details: "Retail customer from Telangana", timestamp: "2024-06-10T10:00:00" },
 ];
 
-// ── FINANCIAL YEARS ──────────────────────────────────────
-export const financialYears = ["2025-26", "2024-25", "2023-24", "2022-23"];
-export const currentFY = "2025-26";
+// ── FINANCIAL YEARS (auto-generated from current date) ──
+function _generateFY() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-indexed, Apr=3
+  const fyStart = m >= 3 ? y : y - 1;
+  const current = `${fyStart}-${String(fyStart + 1).slice(2)}`;
+  const years: string[] = [];
+  for (let i = fyStart; i >= fyStart - 4; i--) {
+    years.push(`${i}-${String(i + 1).slice(2)}`);
+  }
+  return { years, current };
+}
+const _fy = _generateFY();
+export const financialYears = _fy.years;
+export const currentFY = _fy.current;
 
 // ── INDIAN STATES ──────────────────────────────────────
 export const indianStates = [

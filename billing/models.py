@@ -563,3 +563,46 @@ class Product(AbstractBaseModel):
         verbose_name="GST Tax Rate",
         help_text="GST Tax Rate of the product.",
     )
+
+
+class AuditLog(models.Model):
+    ACTION_CHOICES = [
+        ("created", "Created"),
+        ("updated", "Updated"),
+        ("deleted", "Deleted"),
+        ("imported", "Imported"),
+        ("printed", "Printed"),
+        ("exported", "Exported"),
+        ("merged", "Merged"),
+    ]
+    ENTITY_CHOICES = [
+        ("invoice", "Invoice"),
+        ("customer", "Customer"),
+        ("product", "Product"),
+        ("business", "Business"),
+    ]
+
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    entity = models.CharField(max_length=20, choices=ENTITY_CHOICES)
+    entity_id = models.IntegerField()
+    entity_name = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    details = models.TextField(blank=True, default="")
+    changes = models.JSONField(null=True, blank=True)
+    snapshot = models.JSONField(null=True, blank=True)  # Full object state before change (for undo)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["entity", "entity_id"]),
+            models.Index(fields=["action"]),
+        ]
+
+    def __str__(self):
+        return f"{self.action} {self.entity} #{self.entity_id}"

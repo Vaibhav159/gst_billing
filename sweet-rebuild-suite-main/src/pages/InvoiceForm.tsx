@@ -34,11 +34,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const [form, setForm] = useState({
     businessId: "",
     customerId: "",
-    invoiceNumber: "SGJ/2024-25/108",
+    invoiceNumber: "",
     date: new Date().toISOString().split("T")[0],
     type: "OUTWARD",
     isIGST: false,
-    financialYear: "2024-25",
+    financialYear: "",
   });
 
   const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]);
@@ -76,7 +76,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             id: String(li.product || li.id || ""),
             name: li.product_name || li.item_name || `Product #${li.product || li.id}`,
             hsn: li.hsn_code || "",
-            gstRate: li.gst_tax_rate ? parseFloat(li.gst_tax_rate) * 100 : 0,
+            gstRate: li.gst_tax_rate ? (parseFloat(li.gst_tax_rate) > 1 ? parseFloat(li.gst_tax_rate) : parseFloat(li.gst_tax_rate) * 100) : 0,
           })),
         });
 
@@ -94,6 +94,18 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       })
       .finally(() => setIsLoadingInvoice(false));
   }, [id, mode]);
+
+  // Auto-fetch next invoice number when business or type changes (create mode only)
+  useEffect(() => {
+    if (mode !== "create" || !form.businessId) return;
+    const typeParam = form.type === "INWARD" ? "inward" : "outward";
+    api.get<any>(`invoices/next_invoice_number/?business_id=${form.businessId}&type_of_invoice=${typeParam}`)
+      .then((res) => {
+        const next = res.data?.next_invoice_number;
+        if (next) setForm((prev) => ({ ...prev, invoiceNumber: next }));
+      })
+      .catch(() => {}); // silently fail
+  }, [form.businessId, form.type, mode]);
 
   const [dirty, setDirty] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);

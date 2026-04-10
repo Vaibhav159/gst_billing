@@ -5,6 +5,15 @@ import { type Invoice, formatCurrency } from "./mockData";
 /**
  * Generates a single invoice PDF using jsPDF directly (no DOM needed).
  */
+function safe(val: any): string {
+  if (val === null || val === undefined) return "";
+  return String(val);
+}
+
+function safeCurrency(val: any): string {
+  try { return formatCurrency(val || 0); } catch { return "₹0"; }
+}
+
 export function generateInvoicePDFDirect(inv: Invoice, biz?: any): Blob {
   const pdf = new jsPDF("p", "mm", "a4");
   const w = 210;
@@ -76,11 +85,11 @@ export function generateInvoicePDFDirect(inv: Invoice, biz?: any): Blob {
     pdf.text(`${i + 1}`, colX[0], y);
     const name = item.productName.length > 30 ? item.productName.slice(0, 30) + "…" : item.productName;
     pdf.text(name, colX[1], y);
-    pdf.text(item.hsn || "", colX[2], y);
-    pdf.text(`${item.gstRate}%`, colX[3], y);
-    pdf.text(`${item.qty}`, colX[5] - 2, y, { align: "right" });
-    pdf.text(formatCurrency(item.rate), colX[6] - 2, y, { align: "right" });
-    pdf.text(formatCurrency(item.amount), colX[7] - 2, y, { align: "right" });
+    pdf.text(safe(item.hsn), colX[2], y);
+    pdf.text(`${item.gstRate || 0}%`, colX[3], y);
+    pdf.text(safe(item.qty), colX[5] - 2, y, { align: "right" });
+    pdf.text(safeCurrency(item.rate), colX[6] - 2, y, { align: "right" });
+    pdf.text(safeCurrency(item.amount), colX[7] - 2, y, { align: "right" });
     y += 5;
   });
 
@@ -92,11 +101,11 @@ export function generateInvoicePDFDirect(inv: Invoice, biz?: any): Blob {
   // --- Totals ---
   pdf.setFontSize(9);
   const totals = [
-    ["Subtotal", formatCurrency(inv.subtotal)],
+    ["Subtotal", safeCurrency(inv.subtotal)],
     ...(inv.isIGST
-      ? [["IGST", formatCurrency(inv.totalIGST)]]
-      : [["CGST", formatCurrency(inv.totalCGST)], ["SGST", formatCurrency(inv.totalSGST)]]),
-    ["Total Tax", formatCurrency(inv.totalTax)],
+      ? [["IGST", safeCurrency(inv.totalIGST)]]
+      : [["CGST", safeCurrency(inv.totalCGST)], ["SGST", safeCurrency(inv.totalSGST)]]),
+    ["Total Tax", safeCurrency(inv.totalTax)],
   ];
 
   totals.forEach(([label, value]) => {
@@ -111,7 +120,7 @@ export function generateInvoicePDFDirect(inv: Invoice, biz?: any): Blob {
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(11);
   pdf.text("Grand Total", w - 70, y);
-  pdf.text(formatCurrency(inv.total), w - 14, y, { align: "right" });
+  pdf.text(safeCurrency(inv.total), w - 14, y, { align: "right" });
   y += 10;
 
   // --- Footer ---
@@ -135,10 +144,14 @@ export async function generateBulkPDFZip(
 
   for (let i = 0; i < invoices.length; i++) {
     const inv = invoices[i];
-    const biz = businesses.find((b) => String(b.id) === String(inv.businessId));
-    const pdfBlob = generateInvoicePDFDirect(inv, biz);
-    const filename = `${inv.invoiceNumber.replace(/\//g, "-")}.pdf`;
-    zip.file(filename, pdfBlob);
+    try {
+      const biz = businesses.find((b) => String(b.id) === String(inv.businessId));
+      const pdfBlob = generateInvoicePDFDirect(inv, biz);
+      const filename = `${(inv.invoiceNumber || `invoice-${i}`).replace(/\//g, "-")}.pdf`;
+      zip.file(filename, pdfBlob);
+    } catch (e) {
+      console.error(`Failed to generate PDF for invoice ${inv.invoiceNumber}`, e);
+    }
     onProgress?.(i + 1, invoices.length);
   }
 

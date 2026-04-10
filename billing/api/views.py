@@ -29,7 +29,7 @@ from billing.constants import (
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
 )
-from billing.models import Business, Customer, Invoice, LineItem, Product
+from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -39,7 +39,9 @@ from billing.utils import (
     process_product_csv,
 )
 
+from .mixins import AuditLogMixin
 from .serializers import (
+    AuditLogSerializer,
     BusinessSerializer,
     CustomerSerializer,
     InvoiceListSerializer,
@@ -68,10 +70,14 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class BusinessViewSet(viewsets.ModelViewSet):
+class BusinessViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "business"
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_entity_name(self, instance):
+        return instance.name
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "gst_number"]
     ordering_fields = ["name", "created_at", "gst_number", "mobile_number", "address"]
@@ -195,10 +201,14 @@ class BusinessViewSet(viewsets.ModelViewSet):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class CustomerViewSet(viewsets.ModelViewSet):
+class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "customer"
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    def get_entity_name(self, instance):
+        return instance.name
     search_fields = ["name", "gst_number", "mobile_number"]
     ordering_fields = ["name", "gst_number", "mobile_number", "pan_number"]
     ordering = ["name"]
@@ -391,6 +401,19 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 ]
             )
 
+        # Log export
+        try:
+            AuditLog.objects.create(
+                action="exported",
+                entity="customer",
+                entity_id=0,
+                entity_name=f"Customer CSV ({customers.count()} records)",
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=f"Exported {customers.count()} customers to CSV",
+            )
+        except Exception:
+            pass
+
         return response
 
     @action(detail=False, methods=["post"])
@@ -436,7 +459,21 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
         # Delete the source customer
         source_name = source.name
+        source_id = source.pk
         source.delete()
+
+        # Log merge
+        try:
+            AuditLog.objects.create(
+                action="merged",
+                entity="customer",
+                entity_id=target.pk,
+                entity_name=target.name,
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=f"Merged '{source_name}' (#{source_id}) into '{target.name}' ({invoices_transferred} invoices transferred)",
+            )
+        except Exception:
+            pass
 
         return Response(
             {
@@ -449,10 +486,14 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ProductViewSet(viewsets.ModelViewSet):
+class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "product"
     queryset = Product.objects.all().order_by("name")
     serializer_class = ProductSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    def get_entity_name(self, instance):
+        return instance.name
     search_fields = ["name", "hsn_code"]
     ordering_fields = ["name", "hsn_code", "gst_tax_rate"]
     ordering = ["name"]
@@ -614,13 +655,18 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class InvoiceViewSet(viewsets.ModelViewSet):
+class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "invoice"
     queryset = (
         Invoice.objects.all()
         .select_related("customer", "business")
         .order_by("-invoice_date")
     )
     serializer_class = InvoiceSerializer
+
+    def get_entity_name(self, instance):
+        cust = getattr(instance, "customer", None)
+        return f"#{instance.invoice_number} - {cust.name if cust else 'Unknown'}"
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -702,6 +748,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         invoice = self.get_object()
         line_items_data = request.data.get("line_items", [])
 
+        old_total = invoice.total_amount
+
         # Delete existing line items
         LineItem.objects.filter(invoice=invoice).delete()
 
@@ -728,6 +776,26 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         # Update invoice total
         invoice.save()  # This triggers the total_amount recalculation
+
+        # Log line items update
+        try:
+            new_total = invoice.total_amount
+            details = f"Updated line items ({len(line_items_data)} items)"
+            changes = None
+            if old_total != new_total:
+                changes = {"total_amount": {"old": str(old_total), "new": str(new_total)}}
+                details += f", total: {old_total} -> {new_total}"
+            AuditLog.objects.create(
+                action="updated",
+                entity="invoice",
+                entity_id=invoice.pk,
+                entity_name=self.get_entity_name(invoice),
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=details,
+                changes=changes,
+            )
+        except Exception:
+            logger.exception("Failed to log line items update")
 
         return Response(InvoiceSerializer(invoice).data)
 
@@ -763,6 +831,19 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "amount_in_words": amount_in_words,
             **summary,
         }
+
+        # Log print action
+        try:
+            AuditLog.objects.create(
+                action="printed",
+                entity="invoice",
+                entity_id=invoice.pk,
+                entity_name=f"#{invoice.invoice_number} - {invoice.customer.name}",
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=f"Printed invoice (total: {invoice.total_amount})",
+            )
+        except Exception:
+            pass
 
         return Response(data)
 
@@ -1017,51 +1098,65 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             else datetime(today.year, 4, 1).date()
         )
 
-        # Get the last invoice number for this business in the current financial year
+        # Get all invoices for this business in current FY
+        fy_invoices = Invoice.objects.filter(
+            business_id=business_id,
+            invoice_date__gte=start_date,
+            type_of_invoice=invoice_type,
+        )
+
+        # Find the one with the highest trailing number
+        import re as _re
         last_invoice = None
-        if invoice_type == INVOICE_TYPE_OUTWARD:
-            # For 'outward' invoices, cast invoice_number to integer for correct numeric sorting.
-            last_invoice = (
-                Invoice.objects.filter(
-                    business_id=business_id,
-                    invoice_date__gte=start_date,
-                    type_of_invoice=invoice_type,
-                )
-                .annotate(
-                    invoice_number_as_int=Cast(
-                        "invoice_number", output_field=IntegerField()
-                    )
-                )
-                .order_by("-invoice_number_as_int")
-                .first()
-            )
-        else:
-            # For other invoice types, maintain the original behavior (lexical sort)
-            last_invoice = (
-                Invoice.objects.filter(
-                    business_id=business_id,
-                    invoice_date__gte=start_date,
-                    type_of_invoice=invoice_type,
-                )
-                .order_by("-invoice_number")
-                .first()
-            )
+        max_num = 0
+        for inv in fy_invoices:
+            m = _re.search(r"(\d+)\s*$", inv.invoice_number)
+            if m:
+                n = int(m.group(1))
+                if n > max_num:
+                    max_num = n
+                    last_invoice = inv
+
+        import re
 
         next_number = 1
         if last_invoice:
+            inv_num = last_invoice.invoice_number
             try:
-                # Attempt to convert the invoice_number string to an integer and increment.
-                next_number = int(last_invoice.invoice_number) + 1
+                next_number = int(inv_num) + 1
             except (ValueError, IndexError):
-                logger.warning(
-                    f"Could not parse invoice_number '{last_invoice.invoice_number}' as int "
-                    f"for business {business_id}, type {invoice_type}. Resetting next number to 1."
-                )
-                next_number = 1  # Reset if parsing fails
+                # Extract trailing number from formats like "SGJ/2024-25/108"
+                match = re.search(r"(\d+)\s*$", inv_num)
+                if match:
+                    next_number = int(match.group(1)) + 1
+                else:
+                    logger.warning(
+                        f"Could not parse invoice_number '{inv_num}' "
+                        f"for business {business_id}, type {invoice_type}."
+                    )
+                    next_number = 1
 
-        # Format the invoice number string
-        # prefix = "OUT" if invoice_type == "outward" else "IN"
-        next_invoice_number_str = f"{next_number!s}"
+        # Build the next invoice number
+        # Detect the FY string for the prefix
+        fy_start = start_date.year
+        fy_str = f"{fy_start}-{str(fy_start + 1)[2:]}"
+
+        # Check if business uses a prefix pattern (e.g. "SGJ/2024-25/108")
+        # by looking at existing invoices for this business
+        prefix = ""
+        sample = Invoice.objects.filter(business_id=business_id).exclude(
+            invoice_number__regex=r"^\d+$"
+        ).order_by("-id").first()
+        if sample:
+            # Extract prefix before the FY part, e.g. "SGJ/" from "SGJ/2024-25/108"
+            match = re.match(r"^([A-Za-z]+/)\d{4}-\d{2}/", sample.invoice_number)
+            if match:
+                prefix = match.group(1)
+
+        if prefix:
+            next_invoice_number_str = f"{prefix}{fy_str}/{next_number}"
+        else:
+            next_invoice_number_str = str(next_number)
 
         return Response({"next_invoice_number": next_invoice_number_str})
 
@@ -1774,6 +1869,19 @@ class BulkInvoiceImportView(APIView):
                 invoice.save()
                 created_count += 1
 
+                # Log import
+                try:
+                    AuditLog.objects.create(
+                        action="imported",
+                        entity="invoice",
+                        entity_id=invoice.pk,
+                        entity_name=f"#{invoice.invoice_number} - {customer.name}",
+                        user=request.user if request.user and request.user.is_authenticated else None,
+                        details=f"Imported from Excel ({len(items)} items, total: {invoice.total_amount})",
+                    )
+                except Exception:
+                    pass
+
             except Exception as e:
                 logger.error(
                     f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {e}",
@@ -1788,7 +1896,7 @@ class BulkInvoiceImportView(APIView):
             {
                 "created": created_count,
                 "skipped": skipped_count,
-                "errors": errors[:20],  # Limit error messages
+                "errors": errors[:20],
                 "message": f"Successfully imported {created_count} invoices. {skipped_count} skipped.",
             },
             status=status.HTTP_201_CREATED,
@@ -1960,3 +2068,160 @@ class AIInvoiceCreateView(APIView):
                 {"error": "An unexpected error occurred while creating the invoice"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only viewset for audit log entries with undo support."""
+
+    queryset = AuditLog.objects.all().select_related("user")
+    serializer_class = AuditLogSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        action_filter = self.request.query_params.get("action")
+        if action_filter and action_filter != "all":
+            queryset = queryset.filter(action=action_filter)
+
+        entity = self.request.query_params.get("entity")
+        if entity and entity != "all":
+            queryset = queryset.filter(entity=entity)
+
+        entity_id = self.request.query_params.get("entity_id")
+        if entity_id:
+            queryset = queryset.filter(entity_id=entity_id)
+
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(entity_name__icontains=search) | Q(details__icontains=search)
+            )
+
+        return queryset
+
+    @action(detail=False, methods=["post"])
+    def log(self, request):
+        """Allow frontend to log actions (print, export, batch operations)."""
+        action_type = request.data.get("action", "")
+        entity = request.data.get("entity", "invoice")
+        entity_id = request.data.get("entity_id", 0)
+        entity_name = request.data.get("entity_name", "")
+        details = request.data.get("details", "")
+
+        ALLOWED_ACTIONS = {"printed", "exported", "imported", "merged"}
+        if action_type not in ALLOWED_ACTIONS:
+            return Response({"error": f"Action must be one of: {ALLOWED_ACTIONS}"}, status=400)
+
+        try:
+            AuditLog.objects.create(
+                action=action_type,
+                entity=entity,
+                entity_id=entity_id,
+                entity_name=entity_name,
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=details,
+            )
+            return Response({"status": "logged"})
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    @action(detail=True, methods=["post"])
+    def undo(self, request, pk=None):
+        """Undo an audit log entry by restoring the previous state."""
+        entry = self.get_object()
+
+        MODEL_MAP = {
+            "invoice": Invoice,
+            "customer": Customer,
+            "product": Product,
+            "business": Business,
+        }
+
+        model = MODEL_MAP.get(entry.entity)
+        if not model:
+            return Response({"error": f"Unknown entity: {entry.entity}"}, status=400)
+
+        try:
+            if entry.action == "deleted" and entry.snapshot:
+                # Recreate the deleted object
+                snap = entry.snapshot
+                field_names = {f.name for f in model._meta.concrete_fields}
+                kwargs = {}
+                for k, v in snap.items():
+                    if k not in field_names or k == "id":
+                        continue
+                    field = model._meta.get_field(k)
+                    if v is None or v == "None":
+                        kwargs[k] = None if field.null else ""
+                    elif hasattr(field, "related_model") and field.related_model:
+                        # FK field — store the raw ID
+                        kwargs[k + "_id"] = int(v) if v else None
+                    else:
+                        kwargs[k] = v
+                obj = model.objects.create(**kwargs)
+                AuditLog.objects.create(
+                    action="created",
+                    entity=entry.entity,
+                    entity_id=obj.pk,
+                    entity_name=str(obj),
+                    user=request.user if request.user.is_authenticated else None,
+                    details=f"Restored via undo (was #{entry.entity_id})",
+                )
+                return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
+
+            elif entry.action == "updated" and entry.snapshot:
+                # Revert to the snapshot state
+                try:
+                    obj = model.objects.get(pk=entry.entity_id)
+                except model.DoesNotExist:
+                    return Response({"error": "Record no longer exists"}, status=404)
+
+                snap = entry.snapshot
+                field_names = {f.name for f in model._meta.concrete_fields}
+                for k, v in snap.items():
+                    if k not in field_names or k == "id":
+                        continue
+                    field = model._meta.get_field(k)
+                    if hasattr(field, "related_model") and field.related_model:
+                        setattr(obj, k + "_id", int(v) if v and v != "None" else None)
+                    else:
+                        if v is None or v == "None":
+                            setattr(obj, k, None if field.null else "")
+                        else:
+                            setattr(obj, k, v)
+                obj.save()
+                AuditLog.objects.create(
+                    action="updated",
+                    entity=entry.entity,
+                    entity_id=obj.pk,
+                    entity_name=str(obj),
+                    user=request.user if request.user.is_authenticated else None,
+                    details=f"Reverted via undo to state before: {entry.details}",
+                )
+                return Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"})
+
+            elif entry.action == "created":
+                # Delete the created object
+                try:
+                    obj = model.objects.get(pk=entry.entity_id)
+                    name = str(obj)
+                    obj.delete()
+                    AuditLog.objects.create(
+                        action="deleted",
+                        entity=entry.entity,
+                        entity_id=entry.entity_id,
+                        entity_name=name,
+                        user=request.user if request.user.is_authenticated else None,
+                        details=f"Deleted via undo (was created at {entry.timestamp})",
+                    )
+                    return Response({"message": f"Deleted {entry.entity}: {name}"})
+                except model.DoesNotExist:
+                    return Response({"error": "Record already deleted"}, status=404)
+
+            else:
+                return Response({"error": "Cannot undo this action (no snapshot available)"}, status=400)
+
+        except Exception as e:
+            logger.exception(f"Undo failed for audit entry {pk}")
+            return Response({"error": str(e)}, status=500)

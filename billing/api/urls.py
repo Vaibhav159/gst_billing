@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import (
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
+    AuditLogViewSet,
     BulkInvoiceImportView,
     BusinessViewSet,
     CSVImportView,
@@ -25,6 +26,7 @@ router.register(r"customers", CustomerViewSet)
 router.register(r"invoices", InvoiceViewSet)
 router.register(r"line-items", LineItemViewSet)
 router.register(r"products", ProductViewSet)
+router.register(r"audit-logs", AuditLogViewSet)
 
 urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them

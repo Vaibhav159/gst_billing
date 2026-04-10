@@ -205,7 +205,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     productId: String(item.product || item.id || ""),
     productName: item.product_name || item.item_name || "",
     hsn: item.hsn_code || "",
-    gstRate: Math.round(parseFloat(item.gst_tax_rate) * 100) || 0,
+    gstRate: (() => { const r = parseFloat(item.gst_tax_rate) || 0; return Math.round(r > 1 ? r : r * 100); })(),
     qty: parseFloat(item.quantity) || 0,
     rate: parseFloat(item.rate) || 0,
     unit: item.unit || "gms",
@@ -277,7 +277,7 @@ export function mapDjangoProduct(prod: any): Product {
     id: String(prod.id),
     name: prod.name || "",
     hsn: prod.hsn_code || "",
-    gstRate: Math.round(parseFloat(prod.gst_tax_rate) * 100) || 0,
+    gstRate: (() => { const r = parseFloat(prod.gst_tax_rate) || 0; return Math.round(r > 1 ? r : r * 100); })(),
     description: prod.description || "",
     createdAt: prod.created_at || "",
     total_revenue: Number(prod.total_revenue) || 0,
@@ -419,18 +419,23 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     if (data.items && data.items.length > 0) {
       try {
         await api.post(`invoices/${createdInvoice.id}/update_line_items/`, {
-          line_items: data.items.map((it: any) => ({
-            product_name: it.productName || it.product_name || "",
-            hsn_code: it.hsn || it.hsn_code || "",
-            gst_tax_rate: it.gstRate || it.gst_tax_rate || 0,
-            quantity: it.qty || it.quantity || 1,
-            rate: it.rate || 0,
-            unit: it.unit || "pcs",
-            cgst: it.cgst || 0,
-            sgst: it.sgst || 0,
-            igst: it.igst || 0,
-            amount: it.amount || 0,
-          })),
+          line_items: data.items.map((it: any) => {
+            // gstRate is percentage (3), gst_tax_rate is decimal (0.03) — normalize to decimal
+            const rawRate = it.gstRate || it.gst_tax_rate || 0;
+            const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+            return {
+              product_name: it.productName || it.product_name || "",
+              hsn_code: it.hsn || it.hsn_code || "",
+              gst_tax_rate: gstDecimal,
+              quantity: it.qty || it.quantity || 1,
+              rate: it.rate || 0,
+              unit: it.unit || "pcs",
+              cgst: it.cgst || 0,
+              sgst: it.sgst || 0,
+              igst: it.igst || 0,
+              amount: it.amount || 0,
+            };
+          }),
         });
       } catch (e) {
         console.warn("Line items creation endpoint not available, skipping", e);
@@ -458,10 +463,13 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     if (updates.items && updates.items.length > 0) {
       try {
         await api.post(`invoices/${id}/update_line_items/`, {
-          line_items: updates.items.map((it: any) => ({
+          line_items: updates.items.map((it: any) => {
+            const rawRate = it.gstRate || it.gst_tax_rate || 0;
+            const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+            return {
             product_name: it.productName || it.product_name || "",
             hsn_code: it.hsn || it.hsn_code || "",
-            gst_tax_rate: it.gstRate || it.gst_tax_rate || 0,
+            gst_tax_rate: gstDecimal,
             quantity: it.qty || it.quantity || 1,
             rate: it.rate || 0,
             unit: it.unit || "pcs",
@@ -469,7 +477,8 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
             sgst: it.sgst || 0,
             igst: it.igst || 0,
             amount: it.amount || 0,
-          })),
+            };
+          }),
         });
       } catch (e) {
         console.warn("Line items update endpoint not available, skipping", e);

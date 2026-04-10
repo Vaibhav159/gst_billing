@@ -155,6 +155,14 @@ export default function Reports() {
     const filename = `GST Report ${selectedFY}.xlsx`;
     downloadReportExcel({ invoices: previewInvoices, businesses, customers }, filename);
     setShowPreview(false);
+    // Log to audit
+    api.post("audit-logs/log/", {
+      action: "exported",
+      entity: "invoice",
+      entity_id: 0,
+      entity_name: `Excel Report FY ${selectedFY}`,
+      details: `Exported ${previewInvoices.length} invoices as Excel report for FY ${selectedFY}`,
+    }).catch(() => {});
   };
 
   const quickLinks = [

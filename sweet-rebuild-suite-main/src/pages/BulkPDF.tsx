@@ -1,18 +1,26 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { formatCurrency, formatDate, financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Download, FileArchive, ArrowLeft, Calendar, Building2, Filter,
-  FileText, CheckSquare, Square, Printer, Package,
+  FileText, CheckSquare, Square, Printer, Package, Search, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useInvoices, useBusinesses } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers, mapDjangoInvoice } from "@/hooks/useDataStore";
+import type { Invoice } from "@/utils/mockData";
+import api from "@/utils/api";
+import { BlobProvider } from "@react-pdf/renderer";
+import TallyInvoicePDF from "@/components/TallyInvoicePDF";
+import { PDFDocument } from "pdf-lib";
+import JSZip from "jszip";
+import QRCode from "qrcode";
 
 export default function BulkPDF() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   // Default to current month and year
   const now = new Date();
   const currentMonthIndex = now.getMonth(); // 0-based (0=Jan)
@@ -21,27 +29,95 @@ export default function BulkPDF() {
   const fyMonthMap: Record<number, string> = { 3: "April", 4: "May", 5: "June", 6: "July", 7: "August", 8: "September", 9: "October", 10: "November", 11: "December", 0: "January", 1: "February", 2: "March" };
   const defaultMonth = fyMonthMap[currentMonthIndex] || "April";
   const [month, setMonth] = useState(defaultMonth);
-  const [year, setYear] = useState(String(now.getFullYear()));
+  const [selectedFY, setSelectedFY] = useState(currentFY);
   const [bizFilter, setBizFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const { items: invoices } = useInvoices();
   const { items: businesses } = useBusinesses();
+  const { items: customers } = useCustomers();
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
+
+  // For Tally PDF generation
+  const [pdfQueue, setPdfQueue] = useState<Invoice[]>([]);
+  const [pdfBlobs, setPdfBlobs] = useState<Map<string, Blob>>(new Map());
+  const [zipMode, setZipMode] = useState(false);
+
+  const handleBlobReady = useCallback((invoiceId: string, blob: Blob | null) => {
+    if (!blob) return;
+    setPdfBlobs(prev => { const next = new Map(prev); next.set(invoiceId, blob); return next; });
+  }, []);
+
+  async function generateQR(inv: Invoice, biz: any): Promise<string> {
+    try {
+      const data = JSON.stringify({ inv: inv.invoiceNumber, biz: biz?.name, total: inv.total });
+      return await QRCode.toDataURL(data, { width: 100, margin: 1 });
+    } catch { return ""; }
+  }
+
+  // Parse FY into date range: "2025-26" → Apr 2025 to Mar 2026
+  const fyStartYear = parseInt(selectedFY.split("-")[0], 10);
+  const fyStartDate = `${fyStartYear}-04-01`;
+  const fyEndDate = `${fyStartYear + 1}-03-31`;
+
+  // Fetch ALL invoices for the selected FY/business/type
+  const fetchAllInvoices = useCallback(async () => {
+    if (!localStorage.getItem("gst_access_token")) return;
+    setLoadingInvoices(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("page_size", "1000");
+      params.set("include_items", "true");
+      params.set("start_date", fyStartDate);
+      params.set("end_date", fyEndDate);
+      if (bizFilter !== "all") params.set("business_id", bizFilter);
+      if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
+
+      const res = await api.get<any>(`invoices/?${params.toString()}`);
+      const data = res.data;
+      const results = Array.isArray(data) ? data : (data.results || []);
+      setInvoices(results.map(mapDjangoInvoice));
+    } catch (e) {
+      console.error("Failed to fetch invoices for bulk PDF", e);
+    } finally {
+      setLoadingInvoices(false);
+    }
+  }, [fyStartDate, fyEndDate, bizFilter, typeFilter]);
+
+  useEffect(() => { fetchAllInvoices(); }, [fetchAllInvoices]);
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
-  // Generate dynamic year options (current year -2 to current year +1)
-  const currentYear = now.getFullYear();
-  const YEAR_OPTIONS = Array.from({ length: 4 }, (_, i) => String(currentYear - 2 + i));
+  const [invoiceFrom, setInvoiceFrom] = useState("");
+  const [invoiceTo, setInvoiceTo] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  /** Extract trailing number from invoice number like "SGJ/2024-25/108" → 108, or "45" → 45 */
+  function extractNum(invNum: string): number {
+    const m = invNum.match(/(\d+)\s*$/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
 
   // Filter invoices based on selections
   const monthIndex = MONTHS.indexOf(month);
   const actualMonth = monthIndex < 9 ? monthIndex + 4 : monthIndex - 8;
   const matchingInvoices = invoices.filter((inv) => {
     const d = new Date(inv.invoice_date || "");
-    const monthMatch = d.getMonth() + 1 === actualMonth;
-    const yearMatch = d.getFullYear().toString() === year;
-    const bizMatch = bizFilter === "all" || String(inv.businessId) === String(bizFilter);
-    const typeMatch = typeFilter === "all" || inv.type === typeFilter;
-    return monthMatch && yearMatch && bizMatch && typeMatch;
-  });
+    const monthMatch = month === "all" || d.getMonth() + 1 === actualMonth;
+    if (!monthMatch) return false;
+
+    // Invoice number range filter
+    if (invoiceFrom || invoiceTo) {
+      const num = extractNum(inv.invoiceNumber);
+      if (invoiceFrom && num < parseInt(invoiceFrom, 10)) return false;
+      if (invoiceTo && num > parseInt(invoiceTo, 10)) return false;
+    }
+    // Search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = inv.invoiceNumber.toLowerCase().includes(q) ||
+        (inv.customerName || "").toLowerCase().includes(q);
+      if (!matchesSearch) return false;
+    }
+    return true;
+  }).sort((a, b) => extractNum(a.invoiceNumber) - extractNum(b.invoiceNumber));
 
   const toggleInvoice = (id: string) => {
     const next = new Set(selectedInvoices);
@@ -57,41 +133,123 @@ export default function BulkPDF() {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
 
-  const handleDownload = async () => {
-    const toDownload = selectedInvoices.size > 0
+  const [downloadMode, setDownloadMode] = useState<"zip" | "print" | null>(null);
+
+  const getTargetInvoices = () => {
+    return selectedInvoices.size > 0
       ? matchingInvoices.filter((inv) => selectedInvoices.has(inv.id))
       : matchingInvoices;
+  };
 
+  const handleDownload = () => {
+    const toDownload = getTargetInvoices();
     if (toDownload.length === 0) return;
-
     setDownloading(true);
     setProgress({ current: 0, total: toDownload.length });
-    toast({ title: "Generating PDFs", description: `Creating ${toDownload.length} invoice PDFs...` });
-
-    try {
-      const { generateBulkPDFZip } = await import("@/utils/generateBulkPDF");
-      const zipBlob = await generateBulkPDFZip(
-        toDownload,
-        businesses,
-        (current, total) => setProgress({ current, total })
-      );
-
-      const url = window.URL.createObjectURL(zipBlob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `invoices_${month}_${year}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-
-      toast({ title: "Download Complete", description: `${toDownload.length} PDFs downloaded as ZIP.` });
-    } catch (err) {
-      console.error("PDF generation failed", err);
-      toast({ title: "Download Failed", description: "Could not generate PDFs. Please try again.", variant: "destructive" });
-    }
-    setDownloading(false);
+    setPdfBlobs(new Map());
+    setPdfQueue(toDownload);
+    setZipMode(true);
+    setDownloadMode("zip");
+    toast({ title: "Generating PDFs", description: `Creating ${toDownload.length} Tally-format invoice PDFs...` });
   };
+
+  const handlePrint = () => {
+    const toPrint = getTargetInvoices();
+    if (toPrint.length === 0) return;
+    setDownloading(true);
+    setProgress({ current: 0, total: toPrint.length });
+    setPdfBlobs(new Map());
+    setPdfQueue(toPrint);
+    setZipMode(true);
+    setDownloadMode("print");
+    toast({ title: "Generating PDFs", description: `Preparing ${toPrint.length} invoices for print...` });
+  };
+
+  const handleBatchPrint = () => {
+    const toPrint = getTargetInvoices();
+    if (toPrint.length === 0) return;
+    sessionStorage.setItem("batch_print_ids", JSON.stringify(toPrint.map(i => i.id)));
+    navigate("/billing/batch-print");
+  };
+
+  // When all blobs are collected, create ZIP or merged PDF for print
+  useEffect(() => {
+    if (!zipMode || pdfQueue.length === 0) return;
+    if (pdfBlobs.size < pdfQueue.length) {
+      setProgress({ current: pdfBlobs.size, total: pdfQueue.length });
+      return;
+    }
+
+    async function finalize() {
+      try {
+        if (downloadMode === "print") {
+          // Merge all PDFs into one and open for printing
+          const merged = await PDFDocument.create();
+          for (const inv of pdfQueue) {
+            const blob = pdfBlobs.get(inv.id);
+            if (!blob) continue;
+            const buf = await blob.arrayBuffer();
+            const donor = await PDFDocument.load(buf);
+            const pages = await merged.copyPages(donor, donor.getPageIndices());
+            pages.forEach(p => merged.addPage(p));
+          }
+          const mergedBytes = await merged.save();
+          const mergedBlob = new Blob([mergedBytes], { type: "application/pdf" });
+          const url = URL.createObjectURL(mergedBlob);
+          const win = window.open(url, "_blank");
+          if (win) {
+            win.addEventListener("load", () => { setTimeout(() => win.print(), 500); });
+          }
+          toast({ title: "Print Ready", description: `${pdfQueue.length} invoices merged and opened for print.` });
+          // Log to audit
+          api.post("audit-logs/log/", {
+            action: "printed",
+            entity: "invoice",
+            entity_id: 0,
+            entity_name: `Bulk Print (${pdfQueue.length} invoices)`,
+            details: `Printed invoices #${pdfQueue[0]?.invoiceNumber} to #${pdfQueue[pdfQueue.length - 1]?.invoiceNumber} for FY ${selectedFY}`,
+          }).catch(() => {});
+        } else {
+          // ZIP download
+          const zip = new JSZip();
+          for (const inv of pdfQueue) {
+            const blob = pdfBlobs.get(inv.id);
+            if (blob) {
+              const filename = `${(inv.invoiceNumber || "invoice").replace(/\//g, "-")}.pdf`;
+              zip.file(filename, blob);
+            }
+          }
+          const zipBlob = await zip.generateAsync({ type: "blob" });
+          const url = window.URL.createObjectURL(zipBlob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `invoices_FY${selectedFY}${month !== "all" ? `_${month}` : ""}.zip`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          a.remove();
+          toast({ title: "Download Complete", description: `${pdfQueue.length} PDFs downloaded as ZIP.` });
+          // Log to audit
+          api.post("audit-logs/log/", {
+            action: "exported",
+            entity: "invoice",
+            entity_id: 0,
+            entity_name: `Bulk PDF Download (${pdfQueue.length} invoices)`,
+            details: `Downloaded ZIP with invoices #${pdfQueue[0]?.invoiceNumber} to #${pdfQueue[pdfQueue.length - 1]?.invoiceNumber} for FY ${selectedFY}`,
+          }).catch(() => {});
+        }
+      } catch (err: any) {
+        console.error("PDF finalization failed", err);
+        toast({ title: "Failed", description: err?.message || "Could not generate PDFs.", variant: "destructive" });
+      }
+      setDownloading(false);
+      setZipMode(false);
+      setPdfQueue([]);
+      setDownloadMode(null);
+    }
+
+    finalize();
+  }, [zipMode, pdfQueue, pdfBlobs.size]);
 
   return (
     <div className="p-6 lg:p-8 space-y-6 animate-fade-in">
@@ -125,13 +283,14 @@ export default function BulkPDF() {
                   <Calendar className="w-3 h-3 text-muted-foreground" /> Month
                 </label>
                 <select value={month} onChange={(e) => setMonth(e.target.value)} className="premium-select w-full">
+                  <option value="all">All Months</option>
                   {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Year</label>
-                <select value={year} onChange={(e) => setYear(e.target.value)} className="premium-select w-full">
-                  {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Financial Year</label>
+                <select value={selectedFY} onChange={(e) => setSelectedFY(e.target.value)} className="premium-select w-full">
+                  {financialYears.map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
@@ -150,6 +309,43 @@ export default function BulkPDF() {
                   <option value="OUTWARD">Outward (Sales)</option>
                   <option value="INWARD">Inward (Purchases)</option>
                 </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText className="w-3 h-3 text-muted-foreground" /> Invoice # Range
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={invoiceFrom}
+                    onChange={(e) => setInvoiceFrom(e.target.value)}
+                    placeholder="From"
+                    className="premium-input w-full text-[12px]"
+                    min="1"
+                  />
+                  <span className="text-muted-foreground text-[11px] shrink-0">to</span>
+                  <input
+                    type="number"
+                    value={invoiceTo}
+                    onChange={(e) => setInvoiceTo(e.target.value)}
+                    placeholder="To"
+                    className="premium-input w-full text-[12px]"
+                    min="1"
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground">e.g. 50 to 75 for invoices #50–#75</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Search className="w-3 h-3 text-muted-foreground" /> Find Invoice
+                </label>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by # or customer..."
+                  className="premium-input w-full text-[12px]"
+                />
               </div>
             </div>
           </div>
@@ -170,11 +366,21 @@ export default function BulkPDF() {
               );
             })()}
             <button onClick={handleDownload} disabled={matchingInvoices.length === 0 || downloading}
-              className={cn("w-full h-12 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 transition-all",
+              className={cn("w-full h-11 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 transition-all",
                 matchingInvoices.length > 0 && !downloading ? "bg-primary text-primary-foreground hover:brightness-110 glow-sm" : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
               )}>
-              <Download className="w-5 h-5" /> {downloading ? `Generating ${progress.current}/${progress.total}...` : selectedInvoices.size > 0 ? `Download ${selectedInvoices.size} PDFs` : "Download All PDFs"}
+              <Download className="w-4 h-4" /> {downloading && downloadMode === "zip" ? `Generating ${progress.current}/${progress.total}...` : selectedInvoices.size > 0 ? `Download ${selectedInvoices.size} PDFs` : "Download All PDFs"}
             </button>
+            <div className="flex gap-2">
+              <button onClick={handlePrint} disabled={matchingInvoices.length === 0 || downloading}
+                className="flex-1 h-10 rounded-xl text-[12px] font-semibold flex items-center justify-center gap-1.5 border border-border/50 text-foreground hover:bg-secondary/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <Printer className="w-3.5 h-3.5" /> {downloading && downloadMode === "print" ? `${progress.current}/${progress.total}...` : "Print All"}
+              </button>
+              <button onClick={handleBatchPrint} disabled={matchingInvoices.length === 0}
+                className="flex-1 h-10 rounded-xl text-[12px] font-semibold flex items-center justify-center gap-1.5 border border-border/50 text-foreground hover:bg-secondary/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <FileText className="w-3.5 h-3.5" /> Batch Print
+              </button>
+            </div>
           </div>
 
           {/* How It Works */}
@@ -210,7 +416,12 @@ export default function BulkPDF() {
                 </button>
               )}
             </div>
-            {matchingInvoices.length > 0 ? (
+            {loadingInvoices ? (
+              <div className="p-16 text-center text-muted-foreground">
+                <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin opacity-30" />
+                <p className="text-[14px] font-medium">Loading invoices...</p>
+              </div>
+            ) : matchingInvoices.length > 0 ? (
               <table className="table-premium">
                 <thead><tr>
                   <th className="w-10"></th><th>Invoice #</th><th>Date</th><th>Customer</th><th>Amount</th><th>Type</th>
@@ -243,6 +454,61 @@ export default function BulkPDF() {
           </div>
         </div>
       </div>
+      {/* Hidden BlobProviders to generate Tally-format PDFs */}
+      {zipMode && pdfQueue.length > 0 && (
+        <div style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
+          {pdfQueue.map((inv) => {
+            const biz = businesses.find(b => String(b.id) === String(inv.businessId));
+            const cust = customers.find(c => String(c.id) === String(inv.customerId));
+            return (
+              <BlobProviderWrapper
+                key={inv.id}
+                invoice={inv}
+                business={biz}
+                customer={cust}
+                onBlob={handleBlobReady}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Wrapper to generate QR and render TallyInvoicePDF via BlobProvider */
+function BlobProviderWrapper({ invoice, business, customer, onBlob }: {
+  invoice: Invoice; business: any; customer: any;
+  onBlob: (id: string, blob: Blob | null) => void;
+}) {
+  const [qr, setQr] = useState("");
+  const called = useRef(false);
+
+  useEffect(() => {
+    const data = JSON.stringify({ inv: invoice.invoiceNumber, biz: business?.name, total: invoice.total });
+    QRCode.toDataURL(data, { width: 100, margin: 1 }).then(setQr).catch(() => setQr(""));
+  }, [invoice, business]);
+
+  if (!qr && !called.current) return null; // wait for QR
+
+  return (
+    <BlobProvider
+      document={
+        <TallyInvoicePDF
+          invoice={invoice}
+          business={business || {}}
+          customer={customer || {}}
+          qrDataUrl={qr}
+        />
+      }
+    >
+      {({ blob }) => {
+        if (blob && !called.current) {
+          called.current = true;
+          setTimeout(() => onBlob(invoice.id, blob), 0);
+        }
+        return null;
+      }}
+    </BlobProvider>
   );
 }

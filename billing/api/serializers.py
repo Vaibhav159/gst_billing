@@ -139,3 +139,31 @@ class InvoiceSummarySerializer(serializers.Serializer):
     )
     round_off = serializers.CharField(required=False)
     total_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    can_undo = serializers.SerializerMethodField()
+
+    class Meta:
+        from billing.models import AuditLog
+
+        model = AuditLog
+        fields = [
+            "id", "action", "entity", "entity_id", "entity_name",
+            "user", "user_name", "details", "changes", "timestamp",
+            "can_undo",
+        ]
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.get_full_name() or obj.user.username
+        return "System"
+
+    def get_can_undo(self, obj):
+        if obj.action in ("deleted", "updated") and obj.snapshot:
+            return True
+        if obj.action == "created":
+            return True
+        return False
