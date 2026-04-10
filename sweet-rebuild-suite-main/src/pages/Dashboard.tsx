@@ -455,7 +455,7 @@ export default function Dashboard() {
                   className="cursor-pointer">
                   {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i]} className="cursor-pointer hover:opacity-80 transition-opacity" />)}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "12px" }} />
+                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "12px", color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
