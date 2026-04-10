@@ -4,11 +4,13 @@ import { useInvoice, useInvoices, useBusiness, useCustomer } from "@/hooks/useDa
 import Breadcrumbs from "@/components/Breadcrumbs";
 // Tally format is the only invoice print format
 
+import { useState } from "react";
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
-  FileText, Share2, Download, MessageCircle,
+  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle,
 } from "lucide-react";
+import EwayBillForm from "@/components/EwayBillForm";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
@@ -22,7 +24,8 @@ export default function InvoiceDetail() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const printUrl = `/billing/invoice/${id}/print`;
-  const { item: inv, isLoading } = useInvoice(id);
+  const [showEway, setShowEway] = useState(false);
+  const { item: inv, isLoading, refetch: refetchInvoice } = useInvoice(id);
   const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
@@ -70,6 +73,7 @@ export default function InvoiceDetail() {
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</button>
             <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
             <button onClick={() => { navigate("/billing/invoice/add", { state: { duplicateFrom: inv } }); toast({ title: "Duplicating", description: `Creating copy of ${inv.invoiceNumber}` }); }} className="premium-btn-ghost text-[13px]"><Copy className="w-4 h-4" /> Duplicate</button>
+            <button onClick={() => setShowEway(!showEway)} className="premium-btn-ghost text-[13px]"><Truck className="w-4 h-4" /> E-way Bill</button>
             <Link to={{printUrl}} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
             <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New</Link>
           </div>
@@ -89,6 +93,23 @@ export default function InvoiceDetail() {
           </motion.div>
         ))}
       </div>
+
+      {/* E-way Bill Prompt */}
+      {inv && inv.total > 50000 && !(inv as any).eway_bill_number && !showEway && (
+        <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-3 px-5 py-3 rounded-xl border border-amber-500/30 bg-amber-500/5">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-[13px] text-foreground flex-1">Invoice total exceeds Rs.50,000 — E-way bill may be required for transport.</span>
+          <button onClick={() => setShowEway(true)} className="premium-btn-outline text-[12px] h-8 border-amber-500/30 text-amber-500">
+            <Truck className="w-3.5 h-3.5" /> Generate
+          </button>
+        </motion.div>
+      )}
+
+      {/* E-way Bill Form */}
+      {showEway && id && (
+        <EwayBillForm invoiceId={id} onClose={() => setShowEway(false)} onSaved={refetchInvoice} />
+      )}
 
       <div className={cn("grid gap-6", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
         {/* Left: Parties + Items */}
