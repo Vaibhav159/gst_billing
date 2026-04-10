@@ -204,45 +204,85 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
 
   // ── Summary Sheet ──
   const ws: any = {};
-  const SC = 8;
+  const SC = 14;
+  const sMerges: any[] = [];
+
+  // Title row
   sc(ws, 0, 0, "GST INVOICE SUMMARY \u2013 ALL FIRMS", titleS(14));
   for (let c = 1; c < SC; c++) sc(ws, 0, c, "", titleS(14));
+  sMerges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: SC - 1 } });
 
-  ["Firm Name", "Outward Invoices", "Outward Total (\u20b9)", "Inward Invoices", "Inward Total (\u20b9)", "Total CGST (\u20b9)", "Total SGST (\u20b9)", "Net Total (\u20b9)"]
-    .forEach((h, c) => sc(ws, 1, c, h, hdrS()));
+  // Group header row (Outward / Inward)
+  const grpS = () => ({ font: { bold: true, sz: 10, name: "Arial", color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK_BLUE } }, alignment: { horizontal: "center" as const, vertical: "center" as const }, border: bdr() });
+  sc(ws, 1, 0, "", grpS());
+  // Outward group header (cols 1-6)
+  sc(ws, 1, 1, "OUTWARD SUPPLY", grpS());
+  for (let c = 2; c <= 6; c++) sc(ws, 1, c, "", grpS());
+  sMerges.push({ s: { r: 1, c: 1 }, e: { r: 1, c: 6 } });
+  // Inward group header (cols 7-12)
+  sc(ws, 1, 7, "INWARD SUPPLY", grpS());
+  for (let c = 8; c <= 12; c++) sc(ws, 1, c, "", grpS());
+  sMerges.push({ s: { r: 1, c: 7 }, e: { r: 1, c: 12 } });
+  sc(ws, 1, 13, "", grpS());
 
-  let row = 2;
+  // Column headers
+  const subHdrs = ["Firm Name", "Invoices", "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Total Invoice Value (\u20b9)", "Invoices", "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Total Invoice Value (\u20b9)", "Net Total (\u20b9)"];
+  subHdrs.forEach((h, c) => sc(ws, 2, c, h, hdrS()));
+
+  let row = 3;
   bizIds.forEach((bizId, idx) => {
     const biz = bizMap[bizId]; const list = byBiz[bizId];
     const out = list.filter((i) => i.type === "OUTWARD");
     const inw = list.filter((i) => i.type === "INWARD");
     const ev = idx % 2 === 0;
+
     sc(ws, row, 0, biz?.name || bizId, dS(ev, "left"));
+    // Outward columns
     sc(ws, row, 1, out.length, dS(ev, "center"));
-    sc(ws, row, 2, r2(out.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 3, inw.length, dS(ev, "center"));
-    sc(ws, row, 4, r2(inw.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 5, r2(list.reduce((s, i) => s + i.totalCGST, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 6, r2(list.reduce((s, i) => s + i.totalSGST, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 7, r2(list.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 2, r2(out.reduce((s, i) => s + i.subtotal, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 3, r2(out.reduce((s, i) => s + i.totalCGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 4, r2(out.reduce((s, i) => s + i.totalSGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 5, r2(out.reduce((s, i) => s + i.totalIGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 6, r2(out.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
+    // Inward columns
+    sc(ws, row, 7, inw.length, dS(ev, "center"));
+    sc(ws, row, 8, r2(inw.reduce((s, i) => s + i.subtotal, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 9, r2(inw.reduce((s, i) => s + i.totalCGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 10, r2(inw.reduce((s, i) => s + i.totalSGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 11, r2(inw.reduce((s, i) => s + i.totalIGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 12, r2(inw.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
+    // Net total
+    sc(ws, row, 13, r2(list.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
     row++;
   });
 
-  const gt = totS(); const gtr = { ...gt, alignment: { horizontal: "right" as const } };
+  // Grand Total row
+  const gt = totS(); const gtr = { ...gt, alignment: { horizontal: "right" as const } }; const gtc = { ...gt, alignment: { horizontal: "center" as const } };
   const outAll = invoices.filter((i) => i.type === "OUTWARD");
   const inwAll = invoices.filter((i) => i.type === "INWARD");
   sc(ws, row, 0, "GRAND TOTAL", gt);
-  sc(ws, row, 1, outAll.length, { ...gt, alignment: { horizontal: "center" as const } });
-  sc(ws, row, 2, r2(outAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
-  sc(ws, row, 3, inwAll.length, { ...gt, alignment: { horizontal: "center" as const } });
-  sc(ws, row, 4, r2(inwAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
-  sc(ws, row, 5, r2(invoices.reduce((s, i) => s + i.totalCGST, 0)), gtr, NF);
-  sc(ws, row, 6, r2(invoices.reduce((s, i) => s + i.totalSGST, 0)), gtr, NF);
-  sc(ws, row, 7, r2(invoices.reduce((s, i) => s + i.total, 0)), gtr, NF);
+  sc(ws, row, 1, outAll.length, gtc);
+  sc(ws, row, 2, r2(outAll.reduce((s, i) => s + i.subtotal, 0)), gtr, NF);
+  sc(ws, row, 3, r2(outAll.reduce((s, i) => s + i.totalCGST, 0)), gtr, NF);
+  sc(ws, row, 4, r2(outAll.reduce((s, i) => s + i.totalSGST, 0)), gtr, NF);
+  sc(ws, row, 5, r2(outAll.reduce((s, i) => s + i.totalIGST, 0)), gtr, NF);
+  sc(ws, row, 6, r2(outAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
+  sc(ws, row, 7, inwAll.length, gtc);
+  sc(ws, row, 8, r2(inwAll.reduce((s, i) => s + i.subtotal, 0)), gtr, NF);
+  sc(ws, row, 9, r2(inwAll.reduce((s, i) => s + i.totalCGST, 0)), gtr, NF);
+  sc(ws, row, 10, r2(inwAll.reduce((s, i) => s + i.totalSGST, 0)), gtr, NF);
+  sc(ws, row, 11, r2(inwAll.reduce((s, i) => s + i.totalIGST, 0)), gtr, NF);
+  sc(ws, row, 12, r2(inwAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
+  sc(ws, row, 13, r2(invoices.reduce((s, i) => s + i.total, 0)), gtr, NF);
 
   ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: row, c: SC - 1 } });
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: SC - 1 } }];
-  ws["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 18 }];
+  ws["!merges"] = sMerges;
+  ws["!cols"] = [
+    { wch: 28 }, // Firm Name
+    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, // Outward
+    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, // Inward
+    { wch: 20 }, // Net Total
+  ];
   XLSX.utils.book_append_sheet(wb, ws, "Summary");
 
   // ── Per-Business Sheets ──
