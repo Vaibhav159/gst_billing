@@ -224,10 +224,10 @@ export default function GSTSummary() {
           ))}
         </div>
 
-        {activeTab === "gstr1" ? (
+        {activeTab === "gstr1" && (
           isMobile ? (
             <div className="divide-y divide-border/30">
-              {gstr1Rows.map((r, i) => (
+              {gstr1Rows.map((r: any, i: number) => (
                 <motion.div key={r.rate} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
                   className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
@@ -240,29 +240,30 @@ export default function GSTSummary() {
                   </div>
                 </motion.div>
               ))}
-              {gstr1Rows.length === 0 && <div className="p-8 text-center text-muted-foreground text-sm">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading invoices...</span> : "No data for selected period"}</div>}
+              {gstr1Rows.length === 0 && <div className="p-8 text-center text-muted-foreground text-sm">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</span> : "No data for selected period"}</div>}
             </div>
           ) : (
             <table className="table-premium">
               <thead><tr>{["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Invoices"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
               <tbody>
-                {gstr1Rows.map((r, i) => (
+                {gstr1Rows.map((r: any, i: number) => (
                   <motion.tr key={r.rate} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
                     <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.invoice_count}</td>
                   </motion.tr>
                 ))}
-                {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading invoices...</span> : "No data for selected period"}</td></tr>}
+                {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">{invoicesLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</span> : "No data for selected period"}</td></tr>}
               </tbody>
             </table>
           )
-        ) : (
+        )}
+
+        {activeTab === "gstr3b" && (
           <div className="p-5 space-y-4">
-            {/* GSTR-3B Tax Table */}
             <table className="table-premium text-[12px]">
               <thead><tr><th></th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th></tr></thead>
               <tbody>
                 <tr><td className="font-medium">Output Tax (Sales)</td><td className="text-right">{formatCurrency(gstr3b.output_tax.cgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.sgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.igst)}</td><td className="text-right font-semibold">{formatCurrency(gstr3b.output_tax.total)}</td></tr>
-                <tr><td className="font-medium text-success">Input Tax Credit (Purchases)</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.igst)}</td><td className="text-right font-semibold text-success">{formatCurrency(gstr3b.input_tax_credit.total)}</td></tr>
+                <tr><td className="font-medium text-success">Input Tax Credit</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.igst)}</td><td className="text-right font-semibold text-success">{formatCurrency(gstr3b.input_tax_credit.total)}</td></tr>
                 <tr className="border-t-2 border-border"><td className="font-bold">Net Tax Payable</td><td className={cn("text-right font-bold", gstr3b.net_payable.cgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.cgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.sgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.sgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.igst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.igst)}</td><td className={cn("text-right font-bold text-lg", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</td></tr>
               </tbody>
             </table>
@@ -271,8 +272,9 @@ export default function GSTSummary() {
               <span className={cn("premium-badge", netTax >= 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success")}>{netTax >= 0 ? "Payable" : "Refundable"}</span>
             </div>
           </div>
-        ) : activeTab === "hsn" ? (
-          /* HSN Summary Tab */
+        )}
+
+        {activeTab === "hsn" && (
           <div className="overflow-x-auto">
             <table className="table-premium text-[12px]">
               <thead><tr><th>HSN Code</th><th className="text-right">Qty</th><th className="text-right">Taxable Value</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th><th className="text-right">Items</th></tr></thead>
@@ -293,7 +295,7 @@ export default function GSTSummary() {
               </tbody>
             </table>
           </div>
-        ) : null}
+        )}
       </motion.div>
     </div>
   );
