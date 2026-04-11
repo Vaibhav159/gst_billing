@@ -125,9 +125,13 @@ class GSTSummaryTestCase(TestCase):
         self.assertIn("gstr3b", res.data)
 
     def test_check_duplicate_endpoint(self):
-        """GET /api/invoices/check_duplicate/ should detect duplicates."""
+        """GET /api/invoices/check_duplicate/ should detect duplicates in current FY."""
+        from datetime import datetime
+        # Use a date in the current FY so the FY-scoped check finds it
+        today = datetime.now().date()
+        fy_date = today.replace(month=max(today.month, 4), day=15) if today.month >= 4 else today.replace(year=today.year - 1, month=4, day=15)
         Invoice.objects.create(
-            invoice_number="DUP1", invoice_date="2025-06-01",
+            invoice_number="DUP1", invoice_date=fy_date,
             customer=self.customer, business=self.business,
             type_of_invoice="outward", total_amount=Decimal("1000"), workspace_id=1,
         )
