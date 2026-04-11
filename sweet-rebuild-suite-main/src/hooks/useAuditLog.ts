@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import api from "@/utils/api";
 import { logger } from "@/utils/logger";
 
@@ -56,7 +56,8 @@ export function useAuditLog(filters?: Filters, enabled = true) {
   const [nextPage, setNextPage] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
 
-  const filterKey = JSON.stringify(filters || {});
+  const stableFilters = useMemo(() => filters || {}, [filters?.search, filters?.action, filters?.entity]);
+  const filterKey = JSON.stringify(stableFilters);
 
   const fetchLogs = useCallback(async () => {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;

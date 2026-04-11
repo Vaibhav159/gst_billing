@@ -34,7 +34,7 @@ export default function EasyBottomNav() {
                 key={tab.href}
                 to={tab.href}
                 className={cn(
-                  "flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all min-w-[60px]",
+                  "flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] min-h-[44px]",
                   active ? "text-primary" : "text-muted-foreground"
                 )}
               >
@@ -51,7 +51,7 @@ export default function EasyBottomNav() {
           <button
             onClick={() => setMoreOpen(true)}
             className={cn(
-              "flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all min-w-[60px]",
+              "flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] min-h-[44px]",
               moreActive ? "text-primary" : "text-muted-foreground"
             )}
           >

@@ -384,11 +384,11 @@ export default function InvoiceList() {
                   <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                   <td>
                     <div className="flex items-center gap-0.5">
-                      <Link to={`/billing/invoice/${inv.id}`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
-                      <Link to={`/billing/invoice/edit/${inv.id}`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
-                      <Link to={`/billing/invoice/${inv.id}/print`} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
-                      <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
-                      <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
+                      <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
+                      <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
+                      <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
+                      <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} aria-label="Delete invoice" className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </td>
                 </motion.tr>
@@ -428,10 +428,10 @@ export default function InvoiceList() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border/20 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Link to={`/billing/invoice/${inv.id}`} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></Link>
-                  <Link to={`/billing/invoice/edit/${inv.id}`} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></Link>
-                  <Link to={`/billing/invoice/${inv.id}/print`} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success"><Printer className="w-3.5 h-3.5" /></Link>
-                  <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
+                  <Link to={`/billing/invoice/${inv.id}`} aria-label="View" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></Link>
+                  <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></Link>
+                  <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success"><Printer className="w-3.5 h-3.5" /></Link>
+                  <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
                   <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive ml-auto"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </motion.div>

@@ -10,6 +10,7 @@ import EasyHeader from "./mobile/easy/EasyHeader";
 import EasyBottomNav from "./mobile/easy/EasyBottomNav";
 import { MobileModeProvider, useMobileMode } from "@/contexts/MobileModeContext";
 import SkipToContent from "./SkipToContent";
+import ErrorBoundary from "./ErrorBoundary";
 
 export const FYContext = { selectedFY: currentFY };
 
@@ -35,9 +36,11 @@ function AppLayoutInner() {
         <TopNavbar selectedFY={selectedFY} onFYChange={setSelectedFY} />
       )}
       <main id="main-content" className={`flex-1 overflow-auto ${isMobile ? "pb-20" : ""}`}>
-        <div className="max-w-[1440px] mx-auto">
-          <AnimatedOutlet context={{ selectedFY, setSelectedFY }} />
-        </div>
+        <ErrorBoundary>
+          <div className="max-w-[1440px] mx-auto">
+            <AnimatedOutlet context={{ selectedFY, setSelectedFY }} />
+          </div>
+        </ErrorBoundary>
       </main>
       {isMobile && (isEasy ? <EasyBottomNav /> : <MobileBottomNav />)}
     </div>
