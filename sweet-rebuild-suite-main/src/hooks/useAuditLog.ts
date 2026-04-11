@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import api from "@/utils/api";
+import { logger } from "@/utils/logger";
 
 export interface AuditLogEntry {
   id: string;
@@ -86,7 +87,7 @@ export function useAuditLog(filters?: Filters, enabled = true) {
         setNextPage(null);
       }
     } catch (e) {
-      console.error("Failed to fetch audit logs", e);
+      logger.error("Failed to fetch audit logs", e);
     } finally {
       setIsLoading(false);
     }
@@ -111,7 +112,7 @@ export function useAuditLog(filters?: Filters, enabled = true) {
         setNextPage(null);
       }
     } catch (e) {
-      console.error("Failed to load more audit logs", e);
+      logger.error("Failed to load more audit logs", e);
     } finally {
       setIsLoadingMore(false);
     }

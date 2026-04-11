@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate, financialYears, currentFY } from "@/utils/mockData";
@@ -77,7 +78,7 @@ export default function BulkPDF() {
       const results = Array.isArray(data) ? data : (data.results || []);
       setInvoices(results.map(mapDjangoInvoice));
     } catch (e) {
-      console.error("Failed to fetch invoices for bulk PDF", e);
+      logger.error("Failed to fetch invoices for bulk PDF", e);
     } finally {
       setLoadingInvoices(false);
     }
@@ -239,7 +240,7 @@ export default function BulkPDF() {
           }).catch(() => {});
         }
       } catch (err: any) {
-        console.error("PDF finalization failed", err);
+        logger.error("PDF finalization failed", err);
         toast({ title: "Failed", description: err?.message || "Could not generate PDFs.", variant: "destructive" });
       }
       setDownloading(false);

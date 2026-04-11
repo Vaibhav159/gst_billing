@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useMemo } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { formatCurrency } from "@/utils/mockData";
@@ -117,7 +118,7 @@ export default function Reports() {
       a.href = url; a.download = `report-${selectedFY}.csv`; a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      console.error("CSV export failed", e);
+      logger.error("CSV export failed", e);
     }
   };
 
@@ -144,7 +145,7 @@ export default function Reports() {
       setPreviewInvoices(fullInvoices);
       setShowPreview(true);
     } catch (e) {
-      console.error("Export failed", e);
+      logger.error("Export failed", e);
     } finally {
       setExporting(false);
     }

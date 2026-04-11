@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import api from "@/utils/api";
+import { logger } from "@/utils/logger";
+import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
 
@@ -26,7 +28,7 @@ async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
   const allResults: T[] = [];
   let url: string | null = endpoint;
   while (url) {
-    const res = await api.get<any>(url);
+    const res = await api.get(url);
     const data = res.data;
     if (data && Array.isArray(data.results)) {
       allResults.push(...data.results);
@@ -363,14 +365,14 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
 
       const qs = params.toString();
       const url = `invoices/${qs ? `?${qs}` : ""}`;
-      const res = await api.get<any>(url);
+      const res = await api.get(url);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoInvoice));
       setNextUrl(parseNextUrl(data.next || null));
       setTotalCount(data.count ?? results.length);
     } catch (e) {
-      console.error("Failed to fetch invoices", e);
+      logger.error("Failed to fetch invoices", e);
     } finally {
       setIsLoading(false);
     }
@@ -381,13 +383,13 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     if (!nextUrl || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const res = await api.get<any>(nextUrl);
+      const res = await api.get(nextUrl);
       const data = res.data;
       const results = (data.results || []).map(mapDjangoInvoice);
       setItems((prev) => [...prev, ...results]);
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
-      console.error("Failed to load more invoices", e);
+      logger.error("Failed to load more invoices", e);
     } finally {
       setIsLoadingMore(false);
     }
@@ -438,7 +440,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
           }),
         });
       } catch (e) {
-        console.warn("Line items creation endpoint not available, skipping", e);
+        logger.warn("Line items creation endpoint not available, skipping", e);
       }
     }
 
@@ -481,7 +483,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
           }),
         });
       } catch (e) {
-        console.warn("Line items update endpoint not available, skipping", e);
+        logger.warn("Line items update endpoint not available, skipping", e);
       }
     }
 
@@ -517,14 +519,14 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
         params.set("business_id", businessId);
       }
       const qs = params.toString();
-      const res = await api.get<any>(`customers/${qs ? `?${qs}&` : "?"}page_size=1000`);
+      const res = await api.get(`customers/${qs ? `?${qs}&` : "?"}page_size=1000`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results);
       setNextUrl(parseNextUrl(data.next || null));
       setTotalCount(data.count ?? results.length);
     } catch (e) {
-      console.error("Failed to fetch", e);
+      logger.error("Failed to fetch", e);
     } finally {
       setIsLoading(false);
     }
@@ -534,12 +536,12 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
     if (!nextUrl || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const res = await api.get<any>(nextUrl);
+      const res = await api.get(nextUrl);
       const data = res.data;
       setItems((prev) => [...prev, ...(data.results || [])]);
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
-      console.error("Failed to load more customers", e);
+      logger.error("Failed to load more customers", e);
     } finally {
       setIsLoadingMore(false);
     }
@@ -593,14 +595,14 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
         params.set("business_id", businessId);
       }
       const qs = params.toString();
-      const res = await api.get<any>(`products/${qs ? `?${qs}&` : "?"}page_size=1000`);
+      const res = await api.get(`products/${qs ? `?${qs}&` : "?"}page_size=1000`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results.map(mapDjangoProduct));
       setNextUrl(parseNextUrl(data.next || null));
       setTotalCount(data.count ?? results.length);
     } catch (e) {
-      console.error("Failed to fetch products", e);
+      logger.error("Failed to fetch products", e);
     } finally {
       setIsLoading(false);
     }
@@ -610,13 +612,13 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
     if (!nextUrl || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const res = await api.get<any>(nextUrl);
+      const res = await api.get(nextUrl);
       const data = res.data;
       const results = (data.results || []).map(mapDjangoProduct);
       setItems((prev) => [...prev, ...results]);
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
-      console.error("Failed to load more products", e);
+      logger.error("Failed to load more products", e);
     } finally {
       setIsLoadingMore(false);
     }
@@ -662,10 +664,10 @@ export function useProduct(id: string | undefined) {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>(`products/${id}/`);
+      const res = await api.get(`products/${id}/`);
       setItem(mapDjangoProduct(res.data));
     } catch (e) {
-      console.error("Failed to fetch product", e);
+      logger.error("Failed to fetch product", e);
     } finally {
       setIsLoading(false);
     }
@@ -686,10 +688,10 @@ export function useCustomer(id: string | undefined) {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>(`customers/${id}/`);
+      const res = await api.get(`customers/${id}/`);
       setItem(res.data);
     } catch (e) {
-      console.error("Failed to fetch customer", e);
+      logger.error("Failed to fetch customer", e);
     } finally {
       setIsLoading(false);
     }
@@ -710,10 +712,10 @@ export function useInvoice(id: string | undefined) {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>(`invoices/${id}/`);
+      const res = await api.get(`invoices/${id}/`);
       setItem(mapDjangoInvoice(res.data));
     } catch (e) {
-      console.error("Failed to fetch invoice", e);
+      logger.error("Failed to fetch invoice", e);
     } finally {
       setIsLoading(false);
     }
@@ -764,7 +766,7 @@ export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
       const res = await api.get<DashboardStats>(`invoices/stats/${qs ? `?${qs}` : ""}`);
       setData(res.data);
     } catch (e) {
-      console.error("Failed to fetch dashboard stats", e);
+      logger.error("Failed to fetch dashboard stats", e);
     } finally {
       setIsLoading(false);
     }
@@ -785,10 +787,10 @@ export function useBusiness(id: string | undefined) {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get<any>(`businesses/${id}/`);
+      const res = await api.get(`businesses/${id}/`);
       setItem(res.data);
     } catch (e) {
-      console.error("Failed to fetch business", e);
+      logger.error("Failed to fetch business", e);
     } finally {
       setIsLoading(false);
     }
@@ -819,14 +821,14 @@ export function useBusinesses(fy?: string, enabled = true) {
         if (end_date) params.set("end_date", end_date);
       }
       const qs = params.toString();
-      const res = await api.get<any>(`businesses/${qs ? `?${qs}` : ""}`);
+      const res = await api.get(`businesses/${qs ? `?${qs}` : ""}`);
       const data = res.data;
       const results = Array.isArray(data) ? data : (data.results || []);
       setItems(results);
       setNextUrl(parseNextUrl(data.next || null));
       setTotalCount(data.count ?? results.length);
     } catch (e) {
-      console.error("Failed to fetch", e);
+      logger.error("Failed to fetch", e);
     } finally {
       setIsLoading(false);
     }
@@ -836,12 +838,12 @@ export function useBusinesses(fy?: string, enabled = true) {
     if (!nextUrl || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const res = await api.get<any>(nextUrl);
+      const res = await api.get(nextUrl);
       const data = res.data;
       setItems((prev) => [...prev, ...(data.results || [])]);
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
-      console.error("Failed to load more businesses", e);
+      logger.error("Failed to load more businesses", e);
     } finally {
       setIsLoadingMore(false);
     }

@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Html5Qrcode } from "html5-qrcode";
@@ -115,7 +116,7 @@ export default function QRScanner() {
         () => { /* ignore errors during scanning */ }
       );
     } catch (err) {
-      console.error("Camera error", err);
+      logger.error("Camera error", err);
       setCameraActive(false);
     }
   };

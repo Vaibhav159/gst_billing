@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { toCSV, downloadCSV } from "@/utils/csv";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Link, useOutletContext, useNavigate } from "react-router-dom";
@@ -71,8 +71,8 @@ export default function InvoiceList() {
   const totalInward = statsInfo.inward;
   const totalTaxCollected = statsInfo.tax;
 
-  const toggleAll = () => selected.size === filtered.length ? setSelected(new Set()) : setSelected(new Set(filtered.map((i) => i.id)));
-  const toggle = (id: string) => { const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next); };
+  const toggleAll = useCallback(() => selected.size === filtered.length ? setSelected(new Set()) : setSelected(new Set(filtered.map((i) => i.id))), [selected.size, filtered]);
+  const toggle = useCallback((id: string) => { setSelected(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
 
   const handleExportCSV = () => {
     const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total", "GST Type"];

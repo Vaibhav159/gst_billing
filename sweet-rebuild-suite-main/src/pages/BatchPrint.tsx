@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Printer, FileText, Check } from "lucide-react";
@@ -83,7 +84,7 @@ export default function BatchPrint() {
             results.push({ invoice: inv, business: biz, customer: cust, qrDataUrl });
           } else {
             // Business or customer not in loaded list — fetch directly
-            console.warn(`Invoice ${id}: biz=${inv.businessId} cust=${inv.customerId} not found in loaded lists, fetching...`);
+            logger.warn(`Invoice ${id}: biz=${inv.businessId} cust=${inv.customerId} not found in loaded lists, fetching...`);
             try {
               const [bizRes, custRes] = await Promise.all([
                 biz ? Promise.resolve({ data: biz }) : api.get<any>(`businesses/${inv.businessId}/`),
@@ -94,16 +95,16 @@ export default function BatchPrint() {
               const qrDataUrl = await generateQR(inv, fetchedBiz);
               results.push({ invoice: inv, business: fetchedBiz, customer: fetchedCust, qrDataUrl });
             } catch (e2) {
-              console.error(`Failed to fetch business/customer for invoice ${id}`, e2);
+              logger.error(`Failed to fetch business/customer for invoice ${id}`, e2);
               skipped++;
             }
           }
         } catch (e) {
-          console.error(`Failed to fetch invoice ${id}`, e);
+          logger.error(`Failed to fetch invoice ${id}`, e);
           skipped++;
         }
       }
-      if (skipped > 0) console.warn(`BatchPrint: ${skipped} invoices skipped due to errors`);
+      if (skipped > 0) logger.warn(`BatchPrint: ${skipped} invoices skipped due to errors`);
       if (!cancelled) {
         setInvoiceData(results);
         setIsLoading(false);
@@ -147,7 +148,7 @@ export default function BatchPrint() {
         const url = URL.createObjectURL(mergedBlobResult);
         setMergedPdfUrl(url);
       } catch (err) {
-        console.error("PDF merge failed", err);
+        logger.error("PDF merge failed", err);
         toast({ title: "Merge Failed", description: "Could not combine PDFs", variant: "destructive" });
       }
       setGenerating(false);

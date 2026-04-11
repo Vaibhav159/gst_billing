@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Pencil, FileText, Trash2, Plus, Phone, Mail, MapPin,
@@ -78,7 +79,7 @@ export default function CustomerDetail() {
       a.remove();
       toast({ title: "Download Complete", description: `${custInvoices.length} PDFs downloaded as ZIP.` });
     } catch (err) {
-      console.error("Bulk PDF failed", err);
+      logger.error("Bulk PDF failed", err);
       toast({ title: "Download Failed", description: "Could not generate PDFs.", variant: "destructive" });
     }
     setDownloading(false);

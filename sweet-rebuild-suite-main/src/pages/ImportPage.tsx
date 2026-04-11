@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Upload, Download, FileText, ArrowLeft, CheckCircle2, AlertTriangle,
@@ -587,7 +588,7 @@ export default function ImportPage({ type }: ImportPageProps) {
             toast({ title: "No Invoices Found", description: "Could not parse invoices from this Excel file.", variant: "destructive" });
           }
         } catch (err) {
-          console.error("Excel parse error:", err);
+          logger.error("Excel parse error:", err);
           toast({ title: "Parse Error", description: "Could not read this Excel file. Check the format.", variant: "destructive" });
         }
       };
@@ -674,7 +675,7 @@ export default function ImportPage({ type }: ImportPageProps) {
       else if (data?.message) msg = data.message;
       else if (typeof data === "string") msg = data;
       else if (err?.message) msg = err.message;
-      console.error("Import error:", err?.response?.status, data);
+      logger.error("Import error:", err?.response?.status, data);
       toast({ title: "Import Failed", description: msg, variant: "destructive" });
     }
     setImporting(false);

@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
@@ -114,7 +115,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         if (lineItems.length > 0) setItems(lineItems);
       })
       .catch((err) => {
-        console.error("Failed to fetch invoice", err);
+        logger.error("Failed to fetch invoice", err);
         toast({ title: "Error", description: "Could not load invoice data.", variant: "destructive" });
       })
       .finally(() => setIsLoadingInvoice(false));
@@ -362,8 +363,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } else {
         navigate("/billing/invoice/list");
       }
-    } else {
-      updateInvoice(id!, {
+    } else if (id) {
+      updateInvoice(id, {
         invoiceNumber: form.invoiceNumber,
         invoice_date: form.date,
         customerId: form.customerId,

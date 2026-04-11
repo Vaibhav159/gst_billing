@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { format } from "date-fns";
@@ -36,7 +37,7 @@ function useGSTSummary(selectedFY: string, bizFilter: string, startDate?: string
       const res = await api.get<any>(`invoices/gst_summary/?${params.toString()}`);
       setData(res.data);
     } catch (e) {
-      console.error("Failed to fetch GST summary", e);
+      logger.error("Failed to fetch GST summary", e);
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +67,7 @@ function useGSTStats(selectedFY: string, bizFilter: string) {
       const res = await api.get<any>(`invoices/stats/?${params.toString()}`);
       setData(res.data);
     } catch (e) {
-      console.error("Failed to fetch stats", e);
+      logger.error("Failed to fetch stats", e);
     } finally {
       setIsLoading(false);
     }

@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Download, FileJson, FileSpreadsheet, Loader2, BarChart3, CheckCircle2, AlertTriangle } from "lucide-react";
@@ -45,7 +46,7 @@ export default function GSTRExport() {
       const res = await api.get(`invoices/gstr_export/?${params.toString()}`);
       setData(res.data);
     } catch (e) {
-      console.error("Failed to fetch GSTR data", e);
+      logger.error("Failed to fetch GSTR data", e);
       toast({ title: "Failed", description: "Could not fetch GSTR data", variant: "destructive" });
     }
     setLoading(false);

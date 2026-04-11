@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { financialYears, currentFY } from "@/utils/mockData";
@@ -108,7 +109,7 @@ export default function Backup() {
 
       toast({ title: "Backup Downloaded", description: `${data.totalRecords} records exported.` });
     } catch (err) {
-      console.error("Export failed", err);
+      logger.error("Export failed", err);
       toast({ title: "Export Failed", description: "Could not export data.", variant: "destructive" });
     }
     setExporting(false);
@@ -126,7 +127,7 @@ export default function Backup() {
       downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${new Date().toISOString().split("T")[0]}.xlsx`);
       toast({ title: "Excel Downloaded", description: `${fullInvoices.length} invoices exported.` });
     } catch (err) {
-      console.error("Excel export failed", err);
+      logger.error("Excel export failed", err);
       toast({ title: "Export Failed", description: "Could not generate Excel.", variant: "destructive" });
     }
     setExporting(false);
