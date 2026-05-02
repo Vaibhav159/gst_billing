@@ -19,13 +19,8 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
-from billing.views import InitialView
-
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # Legacy HTMX routes
-    path("htmx/", InitialView.as_view(), name="initial"),
-    path("htmx/billing/", include("billing.urls")),
     path("explorer/", include("explorer.urls")),
     # API endpoints for React
     path("api/", include("billing.api.urls")),
