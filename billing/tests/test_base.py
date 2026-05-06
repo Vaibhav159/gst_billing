@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Group
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -19,6 +19,10 @@ class BaseAPITestCase(TestCase):
         self.user = User.objects.create_user(
             username="testuser", email="test@example.com", password="testpassword"
         )
+
+        # Assign admin role so all operations are permitted
+        admin_group, _ = Group.objects.get_or_create(name="admin")
+        self.user.groups.add(admin_group)
 
         # Authenticate the client
         self.client.force_authenticate(user=self.user)

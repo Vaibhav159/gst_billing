@@ -5,17 +5,22 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenVerifyView,
 )
+from .serializers import CustomTokenObtainPairSerializer
 
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
+    AuditLogViewSet,
+    BulkInvoiceImportView,
     BusinessViewSet,
     CSVImportView,
     CustomerViewSet,
     InvoiceViewSet,
     LineItemViewSet,
     ProductViewSet,
+    ProfileView,
     ReportView,
+    UserManagementView,
 )
 
 router = DefaultRouter()
@@ -24,11 +29,14 @@ router.register(r"customers", CustomerViewSet)
 router.register(r"invoices", InvoiceViewSet)
 router.register(r"line-items", LineItemViewSet)
 router.register(r"products", ProductViewSet)
+router.register(r"audit-logs", AuditLogViewSet)
 
 urlpatterns = [
-    path("", include(router.urls)),
+    # Explicit paths BEFORE router to avoid router's <pk> catching them
+    path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
     path("csv/import/", CSVImportView.as_view(), name="csv-import"),
+    path("", include(router.urls)),
     path(
         "ai/invoice/process/",
         AIInvoiceProcessingView.as_view(),
@@ -40,8 +48,11 @@ urlpatterns = [
         LineItemViewSet.as_view({"get": "list", "post": "create"}),
         name="invoice-line-items",
     ),
+    # Profile & User Management
+    path("profile/", ProfileView.as_view(), name="profile"),
+    path("users/", UserManagementView.as_view(), name="user-management"),
     # JWT Authentication endpoints
-    path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
 ]

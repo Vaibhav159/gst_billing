@@ -1,91 +1,48 @@
 version: '3.8'
 
+volumes:
+  gst_redis_data: {}
+  gst_static_volume: {}
+  gst_media_volume: {}
+
 services:
-  # PostgreSQL Database
-  db:
-    image: postgres:13
-    restart: always
-    volumes:
-      - postgres_data:/var/lib/postgresql/data/
-    environment:
-      - POSTGRES_DB=${DB_NAME:-gst_billing}
-      - POSTGRES_USER=${DB_USER:-postgres}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Redis for caching
-  redis:
-    image: redis:alpine
-    restart: always
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-
-  # Django web application
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${DOCKER_USERNAME:-yourusername}/gst-billing:latest
-    restart: always
-    ports:
-      - "8000:8000"
+    image: vaibhav198/gst-billing:latest
+    restart: unless-stopped
     volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
-      - ./logs:/app/logs
-    environment:
-      - DJANGO_SETTINGS_MODULE=gst_billing.production_settings
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-insecure-key-for-dev-only}
-      - DEBUG=${DEBUG:-False}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
-      - DB_HOST=db
-      - DB_NAME=${DB_NAME:-gst_billing}
-      - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}
-      - DB_PORT=5432
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
-      - DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
-      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-admin}
+      - gst_static_volume:/app/staticfiles
+      - gst_media_volume:/app/media
     env_file:
-      - ./.env # Load environment variables from .env file
+      - ./.env
+    environment:
+      - DJANGO_ALLOWED_HOSTS=*
+      # Change this to whatever URL your Cosmos dashboard serves this app under
+      - CSRF_TRUSTED_ORIGINS=http://billing.cheq.dpdns.org,https://billing.cheq.dpdns.org,http://localhost:8060
+      - REDIS_HOST=redis
+      # Note: DB_HOST, DB_USER, etc., will be pulled automatically from your .env file
     depends_on:
-      - db
       - redis
     command: >
       bash -c "mkdir -p logs &&
                python manage.py migrate &&
                python manage.py collectstatic --noinput &&
-               python create_superuser.py &&
-               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --log-level debug --access-logfile logs/gunicorn-access.log --error-logfile logs/gunicorn-error.log"
+               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 4 --log-level info"
 
-  # Nginx for serving static files and as a reverse proxy
-  nginx:
-    image: nginx:alpine
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/ssl:/etc/nginx/ssl
-      - static_volume:/var/www/static
-      - media_volume:/var/www/media
+      - gst_redis_data:/data
+
+  nginx:
+    # Uses the image built via Github Actions
+    image: vaibhav198/gst-billing-nginx:latest
+    restart: unless-stopped
+    ports:
+      # Map to a port Cosmos can reverse proxy (e.g. 8060)
+      - "8060:80"
+    volumes:
+      - gst_static_volume:/var/www/static:ro
+      - gst_media_volume:/var/www/media:ro
     depends_on:
       - web
-
-volumes:
-  postgres_data:
-  redis_data:
-  static_volume:
-  media_volume:

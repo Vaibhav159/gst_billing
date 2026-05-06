@@ -4,8 +4,14 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db.models import IntegerField, Q, Sum
-from django.db.models.functions import Cast
+from django.db.models import (
+    Count,
+    F,
+    IntegerField,
+    Q,
+    Sum,
+)
+from django.db.models.functions import Cast, Coalesce, ExtractMonth, ExtractYear
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -14,7 +20,7 @@ from openpyxl import Workbook
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,7 +29,7 @@ from billing.constants import (
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
 )
-from billing.models import Business, Customer, Invoice, LineItem, Product
+from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -33,9 +39,13 @@ from billing.utils import (
     process_product_csv,
 )
 
+from .mixins import AuditLogMixin
+from .permissions import RoleBasedPermission, AdminOnlyPermission, get_user_role
 from .serializers import (
+    AuditLogSerializer,
     BusinessSerializer,
     CustomerSerializer,
+    InvoiceListSerializer,
     InvoiceSerializer,
     InvoiceSummarySerializer,
     LineItemSerializer,
@@ -61,9 +71,15 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class BusinessViewSet(viewsets.ModelViewSet):
+class BusinessViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "business"
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
+    permission_classes = [RoleBasedPermission]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_entity_name(self, instance):
+        return instance.name
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "gst_number"]
     ordering_fields = ["name", "created_at", "gst_number", "mobile_number", "address"]
@@ -72,18 +88,70 @@ class BusinessViewSet(viewsets.ModelViewSet):
 
     # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
-        # Optimize query with select_related if needed
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+
+        # Get business IDs from current page
+        business_ids = [item["id"] for item in response.data.get("results", [])]
+        if not business_ids:
+            return response
+
+        # Bulk fetch metrics to avoid N+1 subqueries
+        # Total revenue (outward) and purchases (inward)
+        invoices = Invoice.objects.filter(business_id__in=business_ids)
+
+        # Apply date filters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            invoices = invoices.filter(invoice_date__gte=start_date)
+        if end_date:
+            invoices = invoices.filter(invoice_date__lte=end_date)
+
+        stats = invoices.values("business_id", "type_of_invoice").annotate(
+            total=Sum("total_amount"), count=Count("id")
+        )
+
+        # Map stats for easy lookup
+        stats_map = {}
+        for s in stats:
+            bid = s["business_id"]
+            if bid not in stats_map:
+                stats_map[bid] = {
+                    "total_revenue": 0,
+                    "total_purchases": 0,
+                    "invoice_count": 0,
+                }
+
+            if s["type_of_invoice"] == INVOICE_TYPE_OUTWARD:
+                stats_map[bid]["total_revenue"] = float(s["total"] or 0)
+            else:
+                stats_map[bid]["total_purchases"] = float(s["total"] or 0)
+
+            stats_map[bid]["invoice_count"] += s["count"]
+
+        # Inject metrics into response
+        for item in response.data.get("results", []):
+            biz_stats = stats_map.get(item["id"], {})
+            item["total_revenue"] = biz_stats.get("total_revenue", 0)
+            item["total_purchases"] = biz_stats.get("total_purchases", 0)
+            item["invoice_count"] = biz_stats.get("invoice_count", 0)
+            # customer_count is already in get_queryset (simple join)
+
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        # Apply search filter manually for more control
+        # Filter by search term
         search_term = self.request.query_params.get("search", "")
         if search_term:
             queryset = queryset.filter(
                 Q(name__icontains=search_term) | Q(gst_number__icontains=search_term)
             )
+
+        # Only annotate customer_count here as it's a simple direct join and doesn't
+        # multiply rows based on invoices
+        queryset = queryset.annotate(customer_count=Count("customer", distinct=True))
 
         return queryset
 
@@ -135,10 +203,15 @@ class BusinessViewSet(viewsets.ModelViewSet):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class CustomerViewSet(viewsets.ModelViewSet):
+class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "customer"
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
+    permission_classes = [RoleBasedPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    def get_entity_name(self, instance):
+        return instance.name
     search_fields = ["name", "gst_number", "mobile_number"]
     ordering_fields = ["name", "gst_number", "mobile_number", "pan_number"]
     ordering = ["name"]
@@ -146,7 +219,47 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
     # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+
+        # Get customer IDs from current page
+        customer_ids = [item["id"] for item in response.data.get("results", [])]
+        if not customer_ids:
+            return response
+
+        # Bulk fetch metrics for all customers on the page
+        invoices = Invoice.objects.filter(customer_id__in=customer_ids)
+
+        # Apply date filters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            invoices = invoices.filter(invoice_date__gte=start_date)
+        if end_date:
+            invoices = invoices.filter(invoice_date__lte=end_date)
+
+        stats = invoices.values("customer_id", "type_of_invoice").annotate(
+            total=Sum("total_amount"), count=Count("id")
+        )
+
+        # Map stats for easy lookup
+        stats_map = {}
+        for s in stats:
+            cid = s["customer_id"]
+            if cid not in stats_map:
+                stats_map[cid] = {"total_revenue": 0, "invoice_count": 0}
+
+            if s["type_of_invoice"] == INVOICE_TYPE_OUTWARD:
+                stats_map[cid]["total_revenue"] = float(s["total"] or 0)
+
+            stats_map[cid]["invoice_count"] += s["count"]
+
+        # Inject metrics into response
+        for item in response.data.get("results", []):
+            cust_stats = stats_map.get(item["id"], {})
+            item["total_revenue"] = cust_stats.get("total_revenue", 0)
+            item["invoice_count"] = cust_stats.get("invoice_count", 0)
+
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -291,21 +404,157 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 ]
             )
 
+        # Log export
+        try:
+            AuditLog.objects.create(
+                action="exported",
+                entity="customer",
+                entity_id=0,
+                entity_name=f"Customer CSV ({customers.count()} records)",
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=f"Exported {customers.count()} customers to CSV",
+            )
+        except Exception:
+            pass
+
         return response
+
+    @action(detail=False, methods=["post"])
+    def merge(self, request):
+        """Merge source customer into target customer.
+        Transfers all invoices and line items from source to target, then deletes source.
+        """
+        source_id = request.data.get("source_id")
+        target_id = request.data.get("target_id")
+
+        if not source_id or not target_id:
+            return Response(
+                {"error": "Both source_id and target_id are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if str(source_id) == str(target_id):
+            return Response(
+                {"error": "Source and target must be different customers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            source = Customer.objects.get(id=source_id)
+            target = Customer.objects.get(id=target_id)
+        except Customer.DoesNotExist:
+            return Response(
+                {"error": "Customer not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Transfer all invoices from source to target
+        invoices_transferred = Invoice.objects.filter(customer=source).update(
+            customer=target
+        )
+
+        # Transfer all line items from source to target
+        LineItem.objects.filter(customer=source).update(customer=target)
+
+        # Merge business associations
+        for business in source.businesses.all():
+            target.businesses.add(business)
+
+        # Delete the source customer
+        source_name = source.name
+        source_id = source.pk
+        source.delete()
+
+        # Log merge
+        try:
+            AuditLog.objects.create(
+                action="merged",
+                entity="customer",
+                entity_id=target.pk,
+                entity_name=target.name,
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=f"Merged '{source_name}' (#{source_id}) into '{target.name}' ({invoices_transferred} invoices transferred)",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                "message": f"Successfully merged '{source_name}' into '{target.name}'.",
+                "invoices_transferred": invoices_transferred,
+                "target_id": target.id,
+            }
+        )
+
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ProductViewSet(viewsets.ModelViewSet):
+class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "product"
     queryset = Product.objects.all().order_by("name")
     serializer_class = ProductSerializer
+    permission_classes = [RoleBasedPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    def get_entity_name(self, instance):
+        return instance.name
     search_fields = ["name", "hsn_code"]
     ordering_fields = ["name", "hsn_code", "gst_tax_rate"]
     ordering = ["name"]
     pagination_class = StandardResultsSetPagination
 
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        response = super().list(request, *args, **kwargs)
+
+        # Get product names from current page
+        product_names = [item["name"] for item in response.data.get("results", [])]
+        if not product_names:
+            return response
+
+        # Bulk fetch metrics from LineItem grouping by product_name
+        # Use case-insensitive matching via Lower() to handle case mismatches
+        from django.db.models.functions import Lower
+
+        product_names_lower = [name.lower() for name in product_names]
+        line_items = LineItem.objects.annotate(
+            product_name_lower=Lower("product_name")
+        ).filter(product_name_lower__in=product_names_lower)
+
+        # Apply date filters via the associated invoice
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            line_items = line_items.filter(invoice__invoice_date__gte=start_date)
+        if end_date:
+            line_items = line_items.filter(invoice__invoice_date__lte=end_date)
+
+        stats = line_items.values("product_name_lower", "invoice__type_of_invoice").annotate(
+            total_rev=Sum("amount"),
+            total_qty=Sum("quantity"),
+            total_usage=Count("id"),
+        )
+
+        # Map stats for easy lookup (keyed by lowercase name)
+        stats_map = {}
+        for s in stats:
+            name = s["product_name_lower"]
+            if name not in stats_map:
+                stats_map[name] = {"total_revenue": 0, "qty_sold": 0, "usage_count": 0}
+
+            if s["invoice__type_of_invoice"] == INVOICE_TYPE_OUTWARD:
+                stats_map[name]["total_revenue"] = float(s["total_rev"] or 0)
+                stats_map[name]["qty_sold"] = float(s["total_qty"] or 0)
+
+            stats_map[name]["usage_count"] += s["total_usage"]
+
+        # Inject metrics into response (lookup by lowercase name)
+        for item in response.data.get("results", []):
+            prod_stats = stats_map.get(item["name"].lower(), {})
+            item["total_revenue"] = prod_stats.get("total_revenue", 0)
+            item["qty_sold"] = prod_stats.get("qty_sold", 0)
+            item["usage_count"] = prod_stats.get("usage_count", 0)
+
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -410,13 +659,28 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class InvoiceViewSet(viewsets.ModelViewSet):
+class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
+    audit_entity = "invoice"
+    permission_classes = [RoleBasedPermission]
     queryset = (
         Invoice.objects.all()
         .select_related("customer", "business")
         .order_by("-invoice_date")
     )
     serializer_class = InvoiceSerializer
+
+    def get_entity_name(self, instance):
+        cust = getattr(instance, "customer", None)
+        return f"#{instance.invoice_number} - {cust.name if cust else 'Unknown'}"
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            # Allow export to request full serializer with line items
+            if self.request.query_params.get("include_items") == "true":
+                return InvoiceSerializer
+            return InvoiceListSerializer
+        return InvoiceSerializer
+
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         "invoice_number",
@@ -441,6 +705,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+
+        # Prefetch line items when full serializer is requested (for export)
+        if self.request.query_params.get("include_items") == "true":
+            queryset = queryset.prefetch_related("lineitem_set")
 
         # Filter by invoice number
         invoice_number = self.request.query_params.get("invoice_number")
@@ -468,7 +736,73 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if invoice_type:
             queryset = queryset.filter(type_of_invoice=invoice_type)
 
+        # Annotate with total tax and item count
+        queryset = queryset.annotate(
+            total_tax=Coalesce(
+                Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")),
+                Decimal("0.00"),
+            ),
+            line_item_count=Count("lineitem"),
+        )
+
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def update_line_items(self, request, pk=None):
+        """Replace all line items for an invoice"""
+        invoice = self.get_object()
+        line_items_data = request.data.get("line_items", [])
+
+        old_total = invoice.total_amount
+
+        # Delete existing line items
+        LineItem.objects.filter(invoice=invoice).delete()
+
+        # Create new line items
+        for item_data in line_items_data:
+            qty = Decimal(str(item_data.get("quantity", 1)))
+            rate = Decimal(str(item_data.get("rate", 0)))
+            amount = Decimal(str(item_data.get("amount", qty * rate)))
+            LineItem.objects.create(
+                invoice=invoice,
+                customer=invoice.customer,
+                product_name=item_data.get("product_name", ""),
+                hsn_code=item_data.get("hsn_code", ""),
+                gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                quantity=qty,
+                rate=rate,
+                cgst=Decimal(str(item_data.get("cgst", 0))),
+                sgst=Decimal(str(item_data.get("sgst", 0))),
+                igst=Decimal(str(item_data.get("igst", 0))),
+                amount=amount,
+                unit=item_data.get("unit", "gms"),
+                workspace_id=1,
+            )
+
+        # Update invoice total
+        invoice.save()  # This triggers the total_amount recalculation
+
+        # Log line items update
+        try:
+            new_total = invoice.total_amount
+            details = f"Updated line items ({len(line_items_data)} items)"
+            changes = None
+            if old_total != new_total:
+                changes = {"total_amount": {"old": str(old_total), "new": str(new_total)}}
+                details += f", total: {old_total} -> {new_total}"
+            AuditLog.objects.create(
+                action="updated",
+                entity="invoice",
+                entity_id=invoice.pk,
+                entity_name=self.get_entity_name(invoice),
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=details,
+                changes=changes,
+            )
+        except Exception:
+            logger.exception("Failed to log line items update")
+
+        return Response(InvoiceSerializer(invoice).data)
 
     @action(detail=True, methods=["get"])
     def summary(self, request, pk=None):
@@ -503,7 +837,60 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             **summary,
         }
 
+        # Log print action
+        try:
+            AuditLog.objects.create(
+                action="printed",
+                entity="invoice",
+                entity_id=invoice.pk,
+                entity_name=f"#{invoice.invoice_number} - {invoice.customer.name}",
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=f"Printed invoice (total: {invoice.total_amount})",
+            )
+        except Exception:
+            pass
+
         return Response(data)
+
+    @action(detail=True, methods=["get", "post"])
+    def eway_bill(self, request, pk=None):
+        """Get or update e-way bill details for an invoice."""
+        invoice = self.get_object()
+
+        if request.method == "GET":
+            return Response({
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "total_amount": float(invoice.total_amount),
+                "eway_bill_number": invoice.eway_bill_number,
+                "transporter_name": invoice.transporter_name,
+                "transporter_gstin": invoice.transporter_gstin,
+                "vehicle_number": invoice.vehicle_number,
+                "vehicle_type": invoice.vehicle_type,
+                "transport_mode": invoice.transport_mode,
+                "distance_km": invoice.distance_km,
+                "requires_eway": float(invoice.total_amount) > 50000,
+            })
+
+        # POST — save e-way bill details
+        fields = ["eway_bill_number", "transporter_name", "transporter_gstin",
+                   "vehicle_number", "vehicle_type", "transport_mode", "distance_km"]
+        for field in fields:
+            if field in request.data:
+                setattr(invoice, field, request.data[field])
+        invoice.save()
+
+        try:
+            AuditLog.objects.create(
+                action="updated", entity="invoice", entity_id=invoice.pk,
+                entity_name=f"#{invoice.invoice_number} - E-way Bill",
+                user=request.user if request.user.is_authenticated else None,
+                details=f"E-way bill updated: {invoice.eway_bill_number or 'pending'}",
+            )
+        except Exception:
+            pass
+
+        return Response({"message": "E-way bill details saved", "eway_bill_number": invoice.eway_bill_number})
 
     @action(detail=False, methods=["get"])
     def totals(self, request):
@@ -606,6 +993,438 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response(distribution)
 
     @action(detail=False, methods=["get"])
+    def stats(self, request):
+        """Get consolidated dashboard stats"""
+        queryset = self.get_queryset()
+
+        results = {}
+        # 1. Totals
+        totals = queryset.aggregate(
+            outward=Coalesce(
+                Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                Decimal("0.00"),
+            ),
+            inward=Coalesce(
+                Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                Decimal("0.00"),
+            ),
+            outward_tax=Coalesce(
+                Sum(
+                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
+                    filter=Q(type_of_invoice="outward"),
+                ),
+                Decimal("0.00"),
+            ),
+            inward_tax=Coalesce(
+                Sum(
+                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
+                    filter=Q(type_of_invoice="inward"),
+                ),
+                Decimal("0.00"),
+            ),
+            count=Count("id"),
+        )
+
+        # 2. Monthly summary
+        monthly_raw = (
+            queryset.annotate(
+                month=ExtractMonth("invoice_date"), year=ExtractYear("invoice_date")
+            )
+            .values("month", "year")
+            .annotate(
+                outward_total=Coalesce(
+                    Sum("total_amount", filter=Q(type_of_invoice="outward")),
+                    Decimal("0.00"),
+                ),
+                inward_total=Coalesce(
+                    Sum("total_amount", filter=Q(type_of_invoice="inward")),
+                    Decimal("0.00"),
+                ),
+                outward_count=Count("id", filter=Q(type_of_invoice="outward")),
+                inward_count=Count("id", filter=Q(type_of_invoice="inward")),
+            )
+            .order_by("-year", "-month")
+        )
+
+        results["totals"] = {
+            "outward": float(totals["outward"]),
+            "inward": float(totals["inward"]),
+            "net": float(totals["outward"] - totals["inward"]),
+            "tax": float(totals["outward_tax"]),
+            "inward_tax": float(totals["inward_tax"]),
+            "count": totals["count"],
+        }
+        results["monthly"] = [
+            {
+                "month": m["month"],
+                "year": m["year"],
+                "outward_total": float(m["outward_total"]),
+                "inward_total": float(m["inward_total"]),
+                "outward_count": m["outward_count"],
+                "inward_count": m["inward_count"],
+            }
+            for m in monthly_raw
+        ]
+
+        # 3. Top Customers
+        top_customers = (
+            queryset.filter(type_of_invoice="outward")
+            .values("customer_id", "customer__name")
+            .annotate(total=Sum("total_amount"))
+            .order_by("-total")[:5]
+        )
+        results["top_customers"] = [
+            {
+                "id": c["customer_id"],
+                "name": c["customer__name"],
+                "total": float(c["total"] or 0),
+            }
+            for c in top_customers
+        ]
+
+        # 4. Top Products (include hsn_code for dashboard display)
+        top_products = (
+            LineItem.objects.filter(
+                invoice__in=queryset, invoice__type_of_invoice="outward"
+            )
+            .values("product_name", "hsn_code")
+            .annotate(total_rev=Sum("amount"), total_qty=Sum("quantity"))
+            .order_by("-total_rev")[:5]
+        )
+        results["top_products"] = [
+            {
+                "name": p["product_name"],
+                "total": float(p["total_rev"] or 0),
+                "qty": float(p["total_qty"] or 0),
+                "hsn": p["hsn_code"] or "",
+            }
+            for p in top_products
+        ]
+
+        # 5. Recent Invoices
+        recent_invoices = InvoiceListSerializer(
+            queryset.order_by("-created_at")[:5], many=True
+        ).data
+        results["recent_invoices"] = recent_invoices
+
+        # 6. Tax Distribution (CGST/SGST/IGST breakdown)
+        tax_agg = LineItem.objects.filter(invoice__in=queryset).aggregate(
+            cgst=Coalesce(Sum("cgst"), Decimal("0.00")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0.00")),
+            igst=Coalesce(Sum("igst"), Decimal("0.00")),
+        )
+        results["tax_distribution"] = {
+            "cgst": float(tax_agg["cgst"]),
+            "sgst": float(tax_agg["sgst"]),
+            "igst": float(tax_agg["igst"]),
+        }
+
+        return Response(results)
+
+    @action(detail=False, methods=["get"])
+    def check_duplicate(self, request):
+        """Check if an invoice number already exists for a business in the current FY."""
+        invoice_number = request.query_params.get("invoice_number", "")
+        business_id = request.query_params.get("business_id", "")
+        exclude_id = request.query_params.get("exclude_id", "")
+
+        if not invoice_number or not business_id:
+            return Response({"exists": False})
+
+        # Only check within current FY (invoice numbers reset per FY)
+        today = datetime.now().date()
+        fy_start = datetime(today.year if today.month >= 4 else today.year - 1, 4, 1).date()
+
+        qs = Invoice.objects.filter(
+            invoice_number=invoice_number, business_id=business_id,
+            invoice_date__gte=fy_start,
+        )
+        if exclude_id:
+            qs = qs.exclude(id=exclude_id)
+
+        exists = qs.exists()
+        return Response({
+            "exists": exists,
+            "message": f"Invoice #{invoice_number} already exists for this business" if exists else "",
+        })
+
+    @action(detail=False, methods=["get"])
+    def gst_summary(self, request):
+        """Server-side GST summary for GSTR-1/3B — grouped by rate slab and HSN."""
+        queryset = self.get_queryset()
+        invoice_ids = list(queryset.values_list("id", flat=True))
+        items = LineItem.objects.filter(invoice_id__in=invoice_ids)
+
+        # 1. Rate-wise breakdown (GSTR-1 style)
+        rate_slabs = {}
+        for inv_type in ["outward", "inward"]:
+            type_items = items.filter(invoice__type_of_invoice=inv_type)
+            slab_data = (
+                type_items
+                .values("gst_tax_rate")
+                .annotate(
+                    taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+                    cgst=Coalesce(Sum("cgst"), Decimal("0")),
+                    sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                    igst=Coalesce(Sum("igst"), Decimal("0")),
+                    total=Coalesce(Sum("amount"), Decimal("0")),
+                    count=Count("invoice", distinct=True),
+                )
+                .order_by("gst_tax_rate")
+            )
+            rate_slabs[inv_type] = [
+                {
+                    "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
+                    "taxable": float(s["taxable"]),
+                    "cgst": float(s["cgst"]),
+                    "sgst": float(s["sgst"]),
+                    "igst": float(s["igst"]),
+                    "total": float(s["total"]),
+                    "invoice_count": s["count"],
+                }
+                for s in slab_data
+            ]
+
+        # 2. HSN-wise breakdown
+        hsn_data = (
+            items
+            .values("hsn_code")
+            .annotate(
+                taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+                cgst=Coalesce(Sum("cgst"), Decimal("0")),
+                sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                igst=Coalesce(Sum("igst"), Decimal("0")),
+                total=Coalesce(Sum("amount"), Decimal("0")),
+                total_qty=Coalesce(Sum("quantity"), Decimal("0")),
+                count=Count("id"),
+            )
+            .order_by("-taxable")
+        )
+        hsn_summary = [
+            {
+                "hsn_code": h["hsn_code"] or "N/A",
+                "taxable": float(h["taxable"]),
+                "cgst": float(h["cgst"]),
+                "sgst": float(h["sgst"]),
+                "igst": float(h["igst"]),
+                "total": float(h["total"]),
+                "qty": float(h["total_qty"]),
+                "count": h["count"],
+            }
+            for h in hsn_data
+        ]
+
+        # 3. GSTR-3B summary (net tax)
+        outward_tax = items.filter(invoice__type_of_invoice="outward").aggregate(
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+        inward_tax = items.filter(invoice__type_of_invoice="inward").aggregate(
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+        gstr3b = {
+            "output_tax": {
+                "cgst": float(outward_tax["cgst"]),
+                "sgst": float(outward_tax["sgst"]),
+                "igst": float(outward_tax["igst"]),
+                "total": float(outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"]),
+            },
+            "input_tax_credit": {
+                "cgst": float(inward_tax["cgst"]),
+                "sgst": float(inward_tax["sgst"]),
+                "igst": float(inward_tax["igst"]),
+                "total": float(inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"]),
+            },
+            "net_payable": {
+                "cgst": float(outward_tax["cgst"] - inward_tax["cgst"]),
+                "sgst": float(outward_tax["sgst"] - inward_tax["sgst"]),
+                "igst": float(outward_tax["igst"] - inward_tax["igst"]),
+                "total": float(
+                    (outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"])
+                    - (inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"])
+                ),
+            },
+        }
+
+        return Response({
+            "rate_slabs": rate_slabs,
+            "hsn_summary": hsn_summary,
+            "gstr3b": gstr3b,
+        })
+
+    @action(detail=False, methods=["get"])
+    def gstr_export(self, request):
+        """Export GSTR-1, GSTR-3B, and 2B matching data in GST portal format."""
+        queryset = self.get_queryset()
+        invoice_ids = list(queryset.values_list("id", flat=True))
+
+        outward_invoices = queryset.filter(type_of_invoice="outward").select_related("customer", "business")
+        inward_invoices = queryset.filter(type_of_invoice="inward").select_related("customer", "business")
+
+        # ── GSTR-1 ──
+
+        # B2B: Invoices to registered dealers (customer has GSTIN)
+        b2b_data = {}
+        for inv in outward_invoices:
+            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
+            if not cust_gst or len(cust_gst) < 15:
+                continue  # Skip unregistered
+            items = LineItem.objects.filter(invoice=inv)
+            inv_items = []
+            for li in items:
+                inv_items.append({
+                    "num": int(li.id),
+                    "itm_det": {
+                        "txval": float(li.quantity * li.rate),
+                        "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                        "camt": float(li.cgst),
+                        "samt": float(li.sgst),
+                        "iamt": float(li.igst),
+                    },
+                })
+            if cust_gst not in b2b_data:
+                b2b_data[cust_gst] = {"ctin": cust_gst, "inv": []}
+            b2b_data[cust_gst]["inv"].append({
+                "inum": inv.invoice_number,
+                "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                "val": float(inv.total_amount),
+                "pos": inv.customer.gst_number[:2] if inv.customer.gst_number else "",
+                "rchrg": "N",
+                "inv_typ": "R",
+                "itms": inv_items,
+            })
+        b2b = list(b2b_data.values())
+
+        # B2CS: Invoices to unregistered (no GSTIN, intra-state, <=2.5L)
+        b2cs = []
+        b2cs_agg = {}
+        for inv in outward_invoices:
+            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
+            if cust_gst and len(cust_gst) >= 15:
+                continue  # Skip registered
+            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
+            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
+            if cust_state != biz_state:
+                continue  # Inter-state goes to B2CL
+            items = LineItem.objects.filter(invoice=inv)
+            for li in items:
+                rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
+                key = f"{biz_state}-{rate}"
+                if key not in b2cs_agg:
+                    b2cs_agg[key] = {"pos": biz_state, "rt": rate, "txval": 0, "camt": 0, "samt": 0, "typ": "OE"}
+                b2cs_agg[key]["txval"] += float(li.quantity * li.rate)
+                b2cs_agg[key]["camt"] += float(li.cgst)
+                b2cs_agg[key]["samt"] += float(li.sgst)
+        b2cs = list(b2cs_agg.values())
+
+        # B2CL: Large invoices to unregistered (>2.5L, inter-state)
+        b2cl = []
+        for inv in outward_invoices:
+            if float(inv.total_amount) <= 250000:
+                continue
+            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
+            if cust_gst and len(cust_gst) >= 15:
+                continue
+            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
+            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
+            if cust_state == biz_state:
+                continue  # Intra-state goes to B2CS
+            items = LineItem.objects.filter(invoice=inv)
+            inv_items = [{
+                "num": int(li.id),
+                "itm_det": {
+                    "txval": float(li.quantity * li.rate),
+                    "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                    "iamt": float(li.igst),
+                },
+            } for li in items]
+            b2cl.append({
+                "pos": cust_state,
+                "inv": [{
+                    "inum": inv.invoice_number,
+                    "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                    "val": float(inv.total_amount),
+                    "itms": inv_items,
+                }],
+            })
+
+        # HSN Summary
+        items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
+        hsn_agg = {}
+        for li in items_all.filter(invoice__type_of_invoice="outward"):
+            hsn = li.hsn_code or "0"
+            if hsn not in hsn_agg:
+                hsn_agg[hsn] = {"hsn_sc": hsn, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0}
+            hsn_agg[hsn]["qty"] += float(li.quantity)
+            hsn_agg[hsn]["txval"] += float(li.quantity * li.rate)
+            hsn_agg[hsn]["camt"] += float(li.cgst)
+            hsn_agg[hsn]["samt"] += float(li.sgst)
+            hsn_agg[hsn]["iamt"] += float(li.igst)
+        hsn = list(hsn_agg.values())
+
+        gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": {"data": hsn}}
+
+        # ── GSTR-3B ──
+        outward_items = items_all.filter(invoice__type_of_invoice="outward")
+        inward_items = items_all.filter(invoice__type_of_invoice="inward")
+
+        ot = outward_items.aggregate(
+            txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+        it = inward_items.aggregate(
+            txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            cgst=Coalesce(Sum("cgst"), Decimal("0")),
+            sgst=Coalesce(Sum("sgst"), Decimal("0")),
+            igst=Coalesce(Sum("igst"), Decimal("0")),
+        )
+
+        gstr3b = {
+            "sup_details": {
+                "osup_det": {"txval": float(ot["txval"]), "camt": float(ot["cgst"]), "samt": float(ot["sgst"]), "iamt": float(ot["igst"])},
+            },
+            "itc_elg": {
+                "itc_avl": [{"ty": "IMPG", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
+            },
+            "intr_ltfee": {
+                "intr_details": {"iamt": 0, "camt": 0, "samt": 0},
+            },
+            "tax_pmt": {
+                "cgst": float(ot["cgst"] - it["cgst"]),
+                "sgst": float(ot["sgst"] - it["sgst"]),
+                "igst": float(ot["igst"] - it["igst"]),
+            },
+        }
+
+        # ── GSTR-2B Matching (basic) ──
+        # Compare inward invoices against expected data
+        inward_list = []
+        for inv in inward_invoices:
+            items = LineItem.objects.filter(invoice=inv)
+            total_tax = sum(float(li.cgst + li.sgst + li.igst) for li in items)
+            total_taxable = sum(float(li.quantity * li.rate) for li in items)
+            inward_list.append({
+                "invoice_number": inv.invoice_number,
+                "invoice_date": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                "supplier_name": inv.customer.name,
+                "supplier_gstin": inv.customer.gst_number or "",
+                "taxable_value": total_taxable,
+                "tax_amount": total_tax,
+                "total": float(inv.total_amount),
+            })
+
+        return Response({
+            "gstr1": gstr1,
+            "gstr3b": gstr3b,
+            "gstr2b": {"inward_invoices": inward_list},
+        })
+
+    @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
         """Get the next invoice number for a business"""
         business_id = request.query_params.get("business_id")
@@ -627,51 +1446,69 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             else datetime(today.year, 4, 1).date()
         )
 
-        # Get the last invoice number for this business in the current financial year
+        # Get all invoices for this business in current FY
+        fy_invoices = Invoice.objects.filter(
+            business_id=business_id,
+            invoice_date__gte=start_date,
+            type_of_invoice=invoice_type,
+        )
+
+        # Find the one with the highest trailing number
+        import re as _re
         last_invoice = None
-        if invoice_type == INVOICE_TYPE_OUTWARD:
-            # For 'outward' invoices, cast invoice_number to integer for correct numeric sorting.
-            last_invoice = (
-                Invoice.objects.filter(
-                    business_id=business_id,
-                    invoice_date__gte=start_date,
-                    type_of_invoice=invoice_type,
-                )
-                .annotate(
-                    invoice_number_as_int=Cast(
-                        "invoice_number", output_field=IntegerField()
-                    )
-                )
-                .order_by("-invoice_number_as_int")
-                .first()
-            )
-        else:
-            # For other invoice types, maintain the original behavior (lexical sort)
-            last_invoice = (
-                Invoice.objects.filter(
-                    business_id=business_id,
-                    invoice_date__gte=start_date,
-                    type_of_invoice=invoice_type,
-                )
-                .order_by("-invoice_number")
-                .first()
-            )
+        max_num = 0
+        for inv in fy_invoices:
+            m = _re.search(r"(\d+)\s*$", inv.invoice_number)
+            if m:
+                n = int(m.group(1))
+                if n > max_num:
+                    max_num = n
+                    last_invoice = inv
+
+        import re
 
         next_number = 1
         if last_invoice:
+            inv_num = last_invoice.invoice_number
             try:
-                # Attempt to convert the invoice_number string to an integer and increment.
-                next_number = int(last_invoice.invoice_number) + 1
+                next_number = int(inv_num) + 1
             except (ValueError, IndexError):
-                logger.warning(
-                    f"Could not parse invoice_number '{last_invoice.invoice_number}' as int "
-                    f"for business {business_id}, type {invoice_type}. Resetting next number to 1."
-                )
-                next_number = 1  # Reset if parsing fails
+                # Extract trailing number from formats like "SGJ/2024-25/108"
+                match = re.search(r"(\d+)\s*$", inv_num)
+                if match:
+                    next_number = int(match.group(1)) + 1
+                else:
+                    logger.warning(
+                        f"Could not parse invoice_number '{inv_num}' "
+                        f"for business {business_id}, type {invoice_type}."
+                    )
+                    next_number = 1
 
-        # Format the invoice number string
-        # prefix = "OUT" if invoice_type == "outward" else "IN"
-        next_invoice_number_str = f"{next_number!s}"
+        # Build the next invoice number
+        fy_start = start_date.year
+        fy_str = f"{fy_start}-{str(fy_start + 1)[2:]}"
+
+        # Use business's invoice_prefix field first, then fall back to detecting from existing invoices
+        try:
+            biz = Business.objects.get(id=business_id)
+            prefix = biz.invoice_prefix.strip() if biz.invoice_prefix else ""
+        except Business.DoesNotExist:
+            prefix = ""
+
+        if not prefix:
+            # Fall back: detect from existing invoices
+            sample = Invoice.objects.filter(business_id=business_id).exclude(
+                invoice_number__regex=r"^\d+$"
+            ).order_by("-id").first()
+            if sample:
+                match = re.match(r"^([A-Za-z]+)/\d{4}-\d{2}/", sample.invoice_number)
+                if match:
+                    prefix = match.group(1)
+
+        if prefix:
+            next_invoice_number_str = f"{prefix}/{fy_str}/{next_number}"
+        else:
+            next_invoice_number_str = str(next_number)
 
         return Response({"next_invoice_number": next_invoice_number_str})
 
@@ -681,6 +1518,7 @@ class LineItemViewSet(viewsets.ModelViewSet):
     queryset = LineItem.objects.all().select_related("invoice")
     serializer_class = LineItemSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [RoleBasedPermission]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -990,7 +1828,29 @@ class ReportView(APIView):
                     totals["inward_total"],
                 ]
             )
-            sheet.append([])  # Add spacing
+
+        # Grand Total (Outward + Inward combined)
+        if invoice_type == "both" and (
+            totals["outward_taxable"] or totals["inward_taxable"]
+        ):
+            sheet.append([])
+            sheet.append(
+                [""] * 5
+                + [
+                    f"GRAND TOTAL ({date_range_str})",
+                    "",
+                    "",
+                    "",
+                    "",
+                    totals["outward_taxable"] + totals["inward_taxable"],
+                    totals["outward_cgst"] + totals["inward_cgst"],
+                    totals["outward_sgst"] + totals["inward_sgst"],
+                    totals["outward_igst"] + totals["inward_igst"],
+                    totals["outward_total"] + totals["inward_total"],
+                ]
+            )
+
+        sheet.append([])  # Add spacing
 
     @classmethod
     def generate_report_for_business(
@@ -1188,6 +2048,214 @@ class CSVImportView(APIView):
             )
 
 
+class BulkInvoiceImportView(APIView):
+    """
+    API endpoint for bulk importing invoices from parsed Excel data.
+    Accepts JSON with invoice data (parsed on the frontend from Excel files).
+    """
+
+    def post(self, request):
+        invoices_data = request.data.get("invoices", [])
+        business_id = request.data.get("business_id")
+
+        if not invoices_data:
+            return Response(
+                {"error": "No invoices provided"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_count = 0
+        skipped_count = 0
+        errors = []
+
+        for inv_data in invoices_data:
+            try:
+                firm_name = inv_data.get("firmName", "")
+                firm_gstin = inv_data.get("firmGSTIN", "")
+
+                # Find business by ID, GSTIN, or name
+                business = None
+                if business_id:
+                    try:
+                        business = Business.objects.get(id=int(business_id))
+                    except (Business.DoesNotExist, ValueError):
+                        pass
+
+                if not business and firm_gstin:
+                    business = Business.objects.filter(
+                        gst_number__iexact=firm_gstin
+                    ).first()
+
+                if not business and firm_name:
+                    business = Business.objects.filter(
+                        name__icontains=firm_name
+                    ).first()
+
+                if not business:
+                    errors.append(
+                        f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
+                    )
+                    skipped_count += 1
+                    continue
+
+                # Find or create customer
+                customer_name = inv_data.get("customerName", "")
+                customer_gst = inv_data.get("customerGST", "")
+
+                if not customer_name:
+                    errors.append(
+                        f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
+                    )
+                    skipped_count += 1
+                    continue
+
+                customer = None
+                if customer_gst and customer_gst not in ("-", ""):
+                    # Try by GST first
+                    is_pan = "(PAN)" in customer_gst
+                    clean_gst = customer_gst.replace("(PAN)", "").strip()
+                    if is_pan:
+                        customer = Customer.objects.filter(
+                            pan_number__iexact=clean_gst
+                        ).first()
+                    else:
+                        customer = Customer.objects.filter(
+                            gst_number__iexact=clean_gst
+                        ).first()
+
+                if not customer:
+                    customer = Customer.objects.filter(
+                        name__iexact=customer_name
+                    ).first()
+
+                if not customer:
+                    # Create customer
+                    clean_gst = ""
+                    clean_pan = ""
+                    if customer_gst and customer_gst not in ("-", ""):
+                        if "(PAN)" in customer_gst:
+                            clean_pan = customer_gst.replace("(PAN)", "").strip()
+                        else:
+                            clean_gst = customer_gst
+                    customer = Customer.objects.create(
+                        name=customer_name,
+                        gst_number=clean_gst,
+                        pan_number=clean_pan,
+                        state_name="RAJASTHAN",
+                        workspace_id=1,
+                    )
+                    customer.save()
+                    # Link customer to business
+                    if business and business.pk:
+                        customer.businesses.add(business)
+
+                # Check for duplicate invoice
+                invoice_number = str(inv_data.get("invoiceNumber", ""))
+                invoice_date = inv_data.get("invoice_date", "")
+                inv_type = inv_data.get("type", "OUTWARD")
+                type_of_invoice = (
+                    INVOICE_TYPE_INWARD
+                    if inv_type == "INWARD"
+                    else INVOICE_TYPE_OUTWARD
+                )
+
+                existing = Invoice.objects.filter(
+                    invoice_number=invoice_number,
+                    business=business,
+                    invoice_date=invoice_date,
+                ).first()
+
+                if existing:
+                    skipped_count += 1
+                    continue
+
+                # Create invoice
+                invoice = Invoice.objects.create(
+                    invoice_number=invoice_number,
+                    invoice_date=invoice_date,
+                    customer=customer,
+                    business=business,
+                    type_of_invoice=type_of_invoice,
+                    total_amount=Decimal(str(inv_data.get("total", 0))),
+                    workspace_id=1,
+                )
+
+                # Create line items
+                items = inv_data.get("items", [])
+                for item in items:
+                    qty = Decimal(str(item.get("qty", 0)))
+                    rate = Decimal(str(item.get("rate", 0)))
+                    gst_rate = Decimal(str(item.get("gstRate", 3))) / Decimal("100")
+                    net_amount = qty * rate
+                    tax_amount = net_amount * gst_rate
+
+                    cgst = Decimal(str(item.get("cgst", 0)))
+                    sgst = Decimal(str(item.get("sgst", 0)))
+                    igst = Decimal(str(item.get("igst", 0)))
+
+                    # If taxes weren't pre-calculated, calculate them
+                    if cgst == 0 and sgst == 0 and igst == 0:
+                        if invoice.is_igst_applicable:
+                            igst = tax_amount
+                        else:
+                            cgst = tax_amount / 2
+                            sgst = tax_amount / 2
+
+                    amount = net_amount + cgst + sgst + igst
+
+                    LineItem.objects.create(
+                        invoice=invoice,
+                        customer=customer,
+                        product_name=item.get("productName", "Item"),
+                        hsn_code=item.get("hsn", "711319"),
+                        gst_tax_rate=gst_rate,
+                        quantity=qty,
+                        rate=rate,
+                        cgst=cgst,
+                        sgst=sgst,
+                        igst=igst,
+                        amount=amount,
+                        workspace_id=1,
+                    )
+
+                # Update invoice total
+                invoice.save()
+                created_count += 1
+
+                # Log import
+                try:
+                    AuditLog.objects.create(
+                        action="imported",
+                        entity="invoice",
+                        entity_id=invoice.pk,
+                        entity_name=f"#{invoice.invoice_number} - {customer.name}",
+                        user=request.user if request.user and request.user.is_authenticated else None,
+                        details=f"Imported from Excel ({len(items)} items, total: {invoice.total_amount})",
+                    )
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.error(
+                    f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {e}",
+                    exc_info=True,
+                )
+                errors.append(
+                    f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {str(e)}"
+                )
+                skipped_count += 1
+
+        return Response(
+            {
+                "created": created_count,
+                "skipped": skipped_count,
+                "errors": errors[:20],
+                "message": f"Successfully imported {created_count} invoices. {skipped_count} skipped.",
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AIInvoiceProcessingView(APIView):
     """
@@ -1353,3 +2421,289 @@ class AIInvoiceCreateView(APIView):
                 {"error": "An unexpected error occurred while creating the invoice"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only viewset for audit log entries with undo support."""
+
+    queryset = AuditLog.objects.all().select_related("user")
+    serializer_class = AuditLogSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        action_filter = self.request.query_params.get("action")
+        if action_filter and action_filter != "all":
+            queryset = queryset.filter(action=action_filter)
+
+        entity = self.request.query_params.get("entity")
+        if entity and entity != "all":
+            queryset = queryset.filter(entity=entity)
+
+        entity_id = self.request.query_params.get("entity_id")
+        if entity_id:
+            queryset = queryset.filter(entity_id=entity_id)
+
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(entity_name__icontains=search) | Q(details__icontains=search)
+            )
+
+        return queryset
+
+    @action(detail=False, methods=["post"])
+    def log(self, request):
+        """Allow frontend to log actions (print, export, batch operations)."""
+        action_type = request.data.get("action", "")
+        entity = request.data.get("entity", "invoice")
+        entity_id = request.data.get("entity_id", 0)
+        entity_name = request.data.get("entity_name", "")
+        details = request.data.get("details", "")
+
+        ALLOWED_ACTIONS = {"printed", "exported", "imported", "merged"}
+        if action_type not in ALLOWED_ACTIONS:
+            return Response({"error": f"Action must be one of: {ALLOWED_ACTIONS}"}, status=400)
+
+        try:
+            AuditLog.objects.create(
+                action=action_type,
+                entity=entity,
+                entity_id=entity_id,
+                entity_name=entity_name,
+                user=request.user if request.user and request.user.is_authenticated else None,
+                details=details,
+            )
+            return Response({"status": "logged"})
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    @action(detail=True, methods=["post"])
+    def undo(self, request, pk=None):
+        """Undo an audit log entry by restoring the previous state."""
+        entry = self.get_object()
+
+        MODEL_MAP = {
+            "invoice": Invoice,
+            "customer": Customer,
+            "product": Product,
+            "business": Business,
+        }
+
+        model = MODEL_MAP.get(entry.entity)
+        if not model:
+            return Response({"error": f"Unknown entity: {entry.entity}"}, status=400)
+
+        try:
+            if entry.action == "deleted" and entry.snapshot:
+                # Recreate the deleted object
+                snap = entry.snapshot
+                field_names = {f.name for f in model._meta.concrete_fields}
+                kwargs = {}
+                for k, v in snap.items():
+                    if k not in field_names or k == "id":
+                        continue
+                    field = model._meta.get_field(k)
+                    if v is None or v == "None":
+                        kwargs[k] = None if field.null else ""
+                    elif hasattr(field, "related_model") and field.related_model:
+                        # FK field — store the raw ID
+                        kwargs[k + "_id"] = int(v) if v else None
+                    else:
+                        kwargs[k] = v
+                obj = model.objects.create(**kwargs)
+                AuditLog.objects.create(
+                    action="created",
+                    entity=entry.entity,
+                    entity_id=obj.pk,
+                    entity_name=str(obj),
+                    user=request.user if request.user.is_authenticated else None,
+                    details=f"Restored via undo (was #{entry.entity_id})",
+                )
+                return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
+
+            elif entry.action == "updated" and entry.snapshot:
+                # Revert to the snapshot state
+                try:
+                    obj = model.objects.get(pk=entry.entity_id)
+                except model.DoesNotExist:
+                    return Response({"error": "Record no longer exists"}, status=404)
+
+                snap = entry.snapshot
+                field_names = {f.name for f in model._meta.concrete_fields}
+                for k, v in snap.items():
+                    if k not in field_names or k == "id":
+                        continue
+                    field = model._meta.get_field(k)
+                    if hasattr(field, "related_model") and field.related_model:
+                        setattr(obj, k + "_id", int(v) if v and v != "None" else None)
+                    else:
+                        if v is None or v == "None":
+                            setattr(obj, k, None if field.null else "")
+                        else:
+                            setattr(obj, k, v)
+                obj.save()
+                AuditLog.objects.create(
+                    action="updated",
+                    entity=entry.entity,
+                    entity_id=obj.pk,
+                    entity_name=str(obj),
+                    user=request.user if request.user.is_authenticated else None,
+                    details=f"Reverted via undo to state before: {entry.details}",
+                )
+                return Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"})
+
+            elif entry.action == "created":
+                # Delete the created object
+                try:
+                    obj = model.objects.get(pk=entry.entity_id)
+                    name = str(obj)
+                    obj.delete()
+                    AuditLog.objects.create(
+                        action="deleted",
+                        entity=entry.entity,
+                        entity_id=entry.entity_id,
+                        entity_name=name,
+                        user=request.user if request.user.is_authenticated else None,
+                        details=f"Deleted via undo (was created at {entry.timestamp})",
+                    )
+                    return Response({"message": f"Deleted {entry.entity}: {name}"})
+                except model.DoesNotExist:
+                    return Response({"error": "Record already deleted"}, status=404)
+
+            else:
+                return Response({"error": "Cannot undo this action (no snapshot available)"}, status=400)
+
+        except Exception as e:
+            logger.exception(f"Undo failed for audit entry {pk}")
+            return Response({"error": str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ProfileView(APIView):
+    """Get/update user profile."""
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.get_full_name() or user.username,
+            "date_joined": user.date_joined.isoformat(),
+        })
+
+    def patch(self, request):
+        user = request.user
+        if "first_name" in request.data:
+            user.first_name = request.data["first_name"]
+        if "last_name" in request.data:
+            user.last_name = request.data["last_name"]
+        if "email" in request.data:
+            user.email = request.data["email"]
+        user.save()
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.get_full_name() or user.username,
+        })
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UserManagementView(APIView):
+    """Admin-only endpoint to list, create, and manage users with roles."""
+    permission_classes = [AdminOnlyPermission]
+
+    def get(self, request):
+        from django.contrib.auth.models import User
+        users = User.objects.all().prefetch_related("groups").order_by("username")
+        return Response([
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "full_name": u.get_full_name() or u.username,
+                "role": get_user_role(u),
+                "is_active": u.is_active,
+                "date_joined": u.date_joined.isoformat(),
+                "last_login": u.last_login.isoformat() if u.last_login else None,
+            }
+            for u in users
+        ])
+
+    def post(self, request):
+        """Create a new user with a role."""
+        from django.contrib.auth.models import User, Group
+        username = request.data.get("username", "").strip()
+        password = request.data.get("password", "")
+        email = request.data.get("email", "")
+        role = request.data.get("role", "editor")
+        first_name = request.data.get("first_name", "")
+        last_name = request.data.get("last_name", "")
+
+        if not username or not password:
+            return Response({"error": "Username and password required"}, status=400)
+
+        if User.objects.filter(username=username).exists():
+            return Response({"error": f"User '{username}' already exists"}, status=400)
+
+        if role not in ("admin", "editor", "viewer"):
+            return Response({"error": "Role must be admin, editor, or viewer"}, status=400)
+
+        user = User.objects.create_user(
+            username=username, password=password, email=email,
+            first_name=first_name, last_name=last_name,
+        )
+        group = Group.objects.get(name=role)
+        user.groups.add(group)
+
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "role": role,
+            "message": f"User '{username}' created with role '{role}'",
+        }, status=201)
+
+    def patch(self, request):
+        """Update a user's role or status."""
+        from django.contrib.auth.models import User, Group
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return Response({"error": "user_id required"}, status=400)
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+
+        # Update role
+        new_role = request.data.get("role")
+        if new_role and new_role in ("admin", "editor", "viewer"):
+            user.groups.clear()
+            user.groups.add(Group.objects.get(name=new_role))
+
+        # Update active status
+        if "is_active" in request.data:
+            user.is_active = request.data["is_active"]
+            user.save(update_fields=["is_active"])
+
+        # Update password
+        if request.data.get("password"):
+            user.set_password(request.data["password"])
+            user.save()
+
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "role": get_user_role(user),
+            "is_active": user.is_active,
+            "message": "User updated",
+        })

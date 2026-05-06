@@ -14,19 +14,23 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
-from billing.views import InitialView
-
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # Legacy HTMX routes
-    path("htmx/", InitialView.as_view(), name="initial"),
-    path("htmx/billing/", include("billing.urls")),
     path("explorer/", include("explorer.urls")),
     # API endpoints for React
     path("api/", include("billing.api.urls")),
-    # React frontend - this should be last as it catches all other routes
+]
+
+# Media files must be before the SPA catch-all
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# React frontend - this should be last as it catches all other routes
+urlpatterns += [
     path("", include("frontend.urls")),
 ]

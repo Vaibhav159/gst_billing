@@ -29,6 +29,7 @@ from billing.constants import (
 class AbstractBaseModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    workspace_id = models.IntegerField(default=1)
 
     class Meta:
         abstract = True
@@ -65,6 +66,13 @@ class Business(AbstractBaseModel):
         max_length=255,
         verbose_name="Mobile Number",
         help_text="Mobile Number of the business.",
+    )
+    email = models.EmailField(
+        max_length=255,
+        verbose_name="Email",
+        help_text="Email address of the business.",
+        blank=True,
+        null=True,
     )
     pan_number = models.CharField(
         max_length=10,
@@ -109,11 +117,25 @@ class Business(AbstractBaseModel):
         null=True,
         choices=STATE_CHOICES,
     )
+    invoice_prefix = models.CharField(
+        max_length=20,
+        verbose_name="Invoice Prefix",
+        help_text="Prefix for invoice numbers (e.g. SGJ, LJ). Leave blank for plain numbers.",
+        blank=True,
+        default="",
+    )
     primary_color_theme = models.CharField(
         default="#d04e00",
         verbose_name="Primary Color Theme",
         help_text="Primary Color Theme of the business.",
         max_length=15,
+    )
+    signature_image = models.ImageField(
+        upload_to="signatures/",
+        verbose_name="Signature Image",
+        help_text="Authorised signatory signature for invoices.",
+        blank=True,
+        null=True,
     )
 
     class Meta:
@@ -180,6 +202,13 @@ class Customer(AbstractBaseModel):
         blank=True,
         null=True,
     )
+    email = models.EmailField(
+        max_length=255,
+        verbose_name="Email",
+        help_text="Email address of the customer.",
+        blank=True,
+        null=True,
+    )
 
     state_name = models.CharField(
         max_length=255,
@@ -236,15 +265,25 @@ class Invoice(AbstractBaseModel):
         default=INVOICE_TYPE_OUTWARD,
     )
 
+    # E-way Bill fields
+    eway_bill_number = models.CharField(max_length=20, blank=True, default="", verbose_name="E-way Bill Number")
+    transporter_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Transporter Name")
+    transporter_gstin = models.CharField(max_length=15, blank=True, default="", verbose_name="Transporter GSTIN")
+    vehicle_number = models.CharField(max_length=20, blank=True, default="", verbose_name="Vehicle Number")
+    vehicle_type = models.CharField(max_length=10, blank=True, default="Regular", choices=[("Regular", "Regular"), ("ODC", "Over Dimensional Cargo")])
+    transport_mode = models.CharField(max_length=10, blank=True, default="Road", choices=[("Road", "Road"), ("Rail", "Rail"), ("Air", "Air"), ("Ship", "Ship")])
+    distance_km = models.IntegerField(blank=True, null=True, verbose_name="Distance (KM)")
+
     history = HistoricalRecords()
 
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
 
     def save(self, *args, **kwargs):
-        self.total_amount = sum(
-            LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
-        )
+        if self.pk:
+            self.total_amount = sum(
+                LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
+            )
         super().save(*args, **kwargs)
 
     @property
@@ -371,6 +410,13 @@ class LineItem(AbstractBaseModel):
         decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
         verbose_name="Amount",
         help_text="Amount of the product.",
+    )
+    unit = models.CharField(
+        max_length=20,
+        default="gms",
+        blank=True,
+        verbose_name="Unit",
+        help_text="Unit of measurement (e.g., gms, pcs, kg, nos, etc.)",
     )
 
     def __str__(self):
@@ -547,3 +593,46 @@ class Product(AbstractBaseModel):
         verbose_name="GST Tax Rate",
         help_text="GST Tax Rate of the product.",
     )
+
+
+class AuditLog(models.Model):
+    ACTION_CHOICES = [
+        ("created", "Created"),
+        ("updated", "Updated"),
+        ("deleted", "Deleted"),
+        ("imported", "Imported"),
+        ("printed", "Printed"),
+        ("exported", "Exported"),
+        ("merged", "Merged"),
+    ]
+    ENTITY_CHOICES = [
+        ("invoice", "Invoice"),
+        ("customer", "Customer"),
+        ("product", "Product"),
+        ("business", "Business"),
+    ]
+
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    entity = models.CharField(max_length=20, choices=ENTITY_CHOICES)
+    entity_id = models.IntegerField()
+    entity_name = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    details = models.TextField(blank=True, default="")
+    changes = models.JSONField(null=True, blank=True)
+    snapshot = models.JSONField(null=True, blank=True)  # Full object state before change (for undo)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["entity", "entity_id"]),
+            models.Index(fields=["action"]),
+        ]
+
+    def __str__(self):
+        return f"{self.action} {self.entity} #{self.entity_id}"

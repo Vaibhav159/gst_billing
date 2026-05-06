@@ -1,0 +1,138 @@
+<!-- Searchable Dropdown Component
+     Usage: {% include "components/searchable_dropdown.html" with dropdown_id="customer" dropdown_name="customer" dropdown_placeholder="Search customer..." dropdown_options=customers dropdown_option_label="name" dropdown_option_value="id" %}
+     
+     Required context variables:
+       dropdown_id          - unique ID for this dropdown instance
+       dropdown_name        - form field name (submitted value)
+       dropdown_placeholder - placeholder text
+       dropdown_options     - queryset/list of option objects
+       dropdown_option_label - attribute name for display text (e.g. "name")
+       dropdown_option_value - attribute name for value (e.g. "id")
+     Optional:
+       dropdown_required    - if "true", field is required
+-->
+
+<div class="relative" id="searchable-dropdown-{{ dropdown_id }}">
+    <!-- Hidden input that holds the actual form value -->
+    <input type="hidden"
+           name="{{ dropdown_name }}"
+           id="{{ dropdown_id }}-value">
+
+    <!-- Visible search input -->
+    <input type="text"
+           id="{{ dropdown_id }}-search"
+           placeholder="{{ dropdown_placeholder|default:'Search...' }}"
+           autocomplete="off"
+           {% if dropdown_required == "true" %}required{% endif %}
+           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400">
+
+    <!-- Dropdown options list -->
+    <div id="{{ dropdown_id }}-options"
+         class="hidden absolute z-50 mt-1 w-full bg-white dark:bg-gray-800 shadow-lg rounded-md py-1 text-sm ring-1 ring-black ring-opacity-5 dark:ring-gray-700 max-h-60 overflow-auto"
+         style="scrollbar-width: thin;">
+        {% for option in dropdown_options %}
+        <div class="searchable-option cursor-pointer select-none py-2 px-3 hover:bg-blue-50 dark:hover:bg-blue-900/30 text-gray-900 dark:text-gray-200 transition-colors"
+             data-value="{{ option|get_attr:dropdown_option_value }}"
+             data-label="{{ option|get_attr:dropdown_option_label }}">
+            {{ option|get_attr:dropdown_option_label }}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+(function() {
+    const container = document.getElementById('searchable-dropdown-{{ dropdown_id }}');
+    const searchInput = container.querySelector('#{{ dropdown_id }}-search');
+    const hiddenInput = container.querySelector('#{{ dropdown_id }}-value');
+    const optionsDiv = container.querySelector('#{{ dropdown_id }}-options');
+    const allOptions = optionsDiv.querySelectorAll('.searchable-option');
+
+    function showDropdown() {
+        optionsDiv.classList.remove('hidden');
+        filterOptions();
+    }
+
+    function hideDropdown() {
+        optionsDiv.classList.add('hidden');
+    }
+
+    function filterOptions() {
+        const query = searchInput.value.toLowerCase().trim();
+        let visibleCount = 0;
+
+        allOptions.forEach(function(opt) {
+            const label = opt.getAttribute('data-label').toLowerCase();
+            if (label.includes(query)) {
+                opt.style.display = '';
+                visibleCount++;
+            } else {
+                opt.style.display = 'none';
+            }
+        });
+    }
+
+    // Show options on focus
+    searchInput.addEventListener('focus', showDropdown);
+
+    // Filter as user types
+    searchInput.addEventListener('input', function() {
+        // Clear the hidden value when user types (they need to re-select)
+        hiddenInput.value = '';
+        showDropdown();
+    });
+
+    // Handle option selection
+    allOptions.forEach(function(opt) {
+        opt.addEventListener('click', function() {
+            const value = this.getAttribute('data-value');
+            const label = this.getAttribute('data-label');
+            searchInput.value = label;
+            hiddenInput.value = value;
+            hideDropdown();
+        });
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('mousedown', function(e) {
+        if (!container.contains(e.target)) {
+            hideDropdown();
+        }
+    });
+
+    // Keyboard navigation
+    searchInput.addEventListener('keydown', function(e) {
+        const visible = Array.from(allOptions).filter(function(opt) {
+            return opt.style.display !== 'none';
+        });
+
+        if (visible.length === 0) return;
+
+        const current = optionsDiv.querySelector('.searchable-option.bg-blue-100, .searchable-option.dark\\:bg-blue-800\\/50');
+        let idx = current ? visible.indexOf(current) : -1;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (current) { current.classList.remove('bg-blue-100', 'dark:bg-blue-800/50'); }
+            idx = (idx + 1) % visible.length;
+            visible[idx].classList.add('bg-blue-100', 'dark:bg-blue-800/50');
+            visible[idx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (current) { current.classList.remove('bg-blue-100', 'dark:bg-blue-800/50'); }
+            idx = idx <= 0 ? visible.length - 1 : idx - 1;
+            visible[idx].classList.add('bg-blue-100', 'dark:bg-blue-800/50');
+            visible[idx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (current) {
+                current.click();
+            } else if (visible.length === 1) {
+                visible[0].click();
+            }
+        } else if (e.key === 'Escape') {
+            hideDropdown();
+        }
+    });
+})();
+</script>
