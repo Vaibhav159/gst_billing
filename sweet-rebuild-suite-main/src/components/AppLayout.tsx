@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import TopNavbar from "./TopNavbar";
 import AnimatedOutlet from "./AnimatedOutlet";
 import { currentFY } from "@/utils/mockData";
@@ -15,7 +15,14 @@ import ErrorBoundary from "./ErrorBoundary";
 export const FYContext = { selectedFY: currentFY };
 
 function AppLayoutInner() {
-  const [selectedFY, setSelectedFY] = useState(currentFY);
+  const [selectedFY, setSelectedFY] = useState(() => {
+    return localStorage.getItem('gst_selected_fy') || currentFY;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('gst_selected_fy', selectedFY);
+  }, [selectedFY]);
+
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
   FYContext.selectedFY = selectedFY;
