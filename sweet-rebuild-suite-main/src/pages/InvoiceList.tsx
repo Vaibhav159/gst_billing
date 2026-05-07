@@ -63,7 +63,7 @@ export default function InvoiceList() {
     const dir = sortDir === "asc" ? 1 : -1;
     if (sortBy === "date") return dir * (new Date(a.invoice_date).getTime() - new Date(b.invoice_date).getTime());
     if (sortBy === "total") return dir * (a.total - b.total);
-    return dir * a.invoiceNumber.localeCompare(b.invoiceNumber);
+    return dir * a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, { numeric: true });
   });
 
   const statsInfo = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, count: 0 };

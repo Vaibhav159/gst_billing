@@ -199,7 +199,17 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
   // Group by business
   const byBiz: Record<string, Invoice[]> = {};
   invoices.forEach((inv) => { if (!byBiz[inv.businessId]) byBiz[inv.businessId] = []; byBiz[inv.businessId].push(inv); });
-  Object.values(byBiz).forEach((l) => l.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date) || a.invoiceNumber.localeCompare(b.invoiceNumber)));
+  // Sort by date, then by invoice number numerically (so "9" comes before "10")
+  const numericInvoiceCompare = (a: string, b: string) => {
+    const na = parseInt(a, 10);
+    const nb = parseInt(b, 10);
+    if (!isNaN(na) && !isNaN(nb) && String(na) === a && String(nb) === b) return na - nb;
+    return a.localeCompare(b, undefined, { numeric: true });
+  };
+  Object.values(byBiz).forEach((l) => l.sort((a, b) =>
+    a.invoice_date.localeCompare(b.invoice_date) ||
+    numericInvoiceCompare(a.invoiceNumber, b.invoiceNumber)
+  ));
   const bizIds = Object.keys(byBiz);
 
   // ── Summary Sheet ──

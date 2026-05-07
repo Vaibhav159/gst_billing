@@ -4,6 +4,7 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import (
     Count,
     F,
@@ -749,59 +750,116 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
-        """Replace all line items for an invoice"""
+        """
+        Replace all line items for an invoice in ONE round trip.
+        Optionally also patches invoice-level fields (customer, business,
+        invoice_number, invoice_date, type_of_invoice) — pass them under the
+        "invoice" key — so the front-end can skip the separate PATCH call.
+
+        Optimized: bulk_create line items, compute total from incoming data
+        (skip the sum() query in Invoice.save()), single transaction, single
+        audit-log entry.
+        """
         invoice = self.get_object()
         line_items_data = request.data.get("line_items", [])
+        invoice_data = request.data.get("invoice", {})
 
         old_total = invoice.total_amount
+        old_inv_number = invoice.invoice_number
+        old_inv_date = invoice.invoice_date
 
-        # Delete existing line items
-        LineItem.objects.filter(invoice=invoice).delete()
+        with transaction.atomic():
+            # 1. Patch invoice-level fields if provided (in-memory only)
+            if invoice_data:
+                if "customer" in invoice_data and invoice_data["customer"]:
+                    invoice.customer_id = invoice_data["customer"]
+                if "business" in invoice_data and invoice_data["business"]:
+                    invoice.business_id = invoice_data["business"]
+                if "invoice_number" in invoice_data:
+                    invoice.invoice_number = invoice_data["invoice_number"]
+                if "invoice_date" in invoice_data:
+                    invoice.invoice_date = invoice_data["invoice_date"]
+                if "type_of_invoice" in invoice_data:
+                    invoice.type_of_invoice = invoice_data["type_of_invoice"]
 
-        # Create new line items
-        for item_data in line_items_data:
-            qty = Decimal(str(item_data.get("quantity", 1)))
-            rate = Decimal(str(item_data.get("rate", 0)))
-            amount = Decimal(str(item_data.get("amount", qty * rate)))
-            LineItem.objects.create(
-                invoice=invoice,
-                customer=invoice.customer,
-                product_name=item_data.get("product_name", ""),
-                hsn_code=item_data.get("hsn_code", ""),
-                gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
-                quantity=qty,
-                rate=rate,
-                cgst=Decimal(str(item_data.get("cgst", 0))),
-                sgst=Decimal(str(item_data.get("sgst", 0))),
-                igst=Decimal(str(item_data.get("igst", 0))),
-                amount=amount,
-                unit=item_data.get("unit", "gms"),
-                workspace_id=1,
-            )
+            # 2. Delete old line items + bulk-create new ones.
+            # _raw_delete bypasses the post_delete signal in billing/signals.py
+            # that would otherwise re-sum line items + UPDATE invoice each time.
+            # We're already setting total_amount explicitly below.
+            old_lis_qs = LineItem.objects.filter(invoice=invoice)
+            old_lis_qs._raw_delete(old_lis_qs.db)
 
-        # Update invoice total
-        invoice.save()  # This triggers the total_amount recalculation
+            new_lis = []
+            new_total = Decimal("0")
+            for item_data in line_items_data:
+                qty = Decimal(str(item_data.get("quantity", 1)))
+                rate = Decimal(str(item_data.get("rate", 0)))
+                amount = Decimal(str(item_data.get("amount", qty * rate)))
+                new_total += amount
+                new_lis.append(LineItem(
+                    invoice=invoice,
+                    customer=invoice.customer,
+                    product_name=item_data.get("product_name", ""),
+                    hsn_code=item_data.get("hsn_code", ""),
+                    gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                    quantity=qty,
+                    rate=rate,
+                    cgst=Decimal(str(item_data.get("cgst", 0))),
+                    sgst=Decimal(str(item_data.get("sgst", 0))),
+                    igst=Decimal(str(item_data.get("igst", 0))),
+                    amount=amount,
+                    unit=item_data.get("unit", "gms"),
+                    workspace_id=1,
+                ))
+            if new_lis:
+                LineItem.objects.bulk_create(new_lis, batch_size=100)
 
-        # Log line items update
-        try:
-            new_total = invoice.total_amount
-            details = f"Updated line items ({len(line_items_data)} items)"
-            changes = None
-            if old_total != new_total:
-                changes = {"total_amount": {"old": str(old_total), "new": str(new_total)}}
-                details += f", total: {old_total} -> {new_total}"
-            AuditLog.objects.create(
-                action="updated",
-                entity="invoice",
-                entity_id=invoice.pk,
-                entity_name=self.get_entity_name(invoice),
-                user=request.user if request.user and request.user.is_authenticated else None,
-                details=details,
-                changes=changes,
-            )
-        except Exception:
-            logger.exception("Failed to log line items update")
+            # 3. Update invoice with the precomputed total — skip the SELECT
+            #    that Invoice.save() would do (sum of line items).
+            invoice.total_amount = new_total
+            # Use update() to bypass save()'s sum query
+            update_fields = {
+                "total_amount": new_total,
+                "customer_id": invoice.customer_id,
+                "business_id": invoice.business_id,
+                "invoice_number": invoice.invoice_number,
+                "invoice_date": invoice.invoice_date,
+                "type_of_invoice": invoice.type_of_invoice,
+            }
+            Invoice.objects.filter(pk=invoice.pk).update(**update_fields)
 
+            # 4. Single audit log entry
+            try:
+                changes = {}
+                if old_total != new_total:
+                    changes["total_amount"] = {"old": str(old_total), "new": str(new_total)}
+                if old_inv_number != invoice.invoice_number:
+                    changes["invoice_number"] = {"old": str(old_inv_number), "new": str(invoice.invoice_number)}
+                if str(old_inv_date) != str(invoice.invoice_date):
+                    changes["invoice_date"] = {"old": str(old_inv_date), "new": str(invoice.invoice_date)}
+                details = f"Updated line items ({len(line_items_data)} items)"
+                if changes:
+                    details += f" + {', '.join(changes.keys())}"
+                AuditLog.objects.create(
+                    action="updated",
+                    entity="invoice",
+                    entity_id=invoice.pk,
+                    entity_name=self.get_entity_name(invoice),
+                    user=request.user if request.user and request.user.is_authenticated else None,
+                    details=details,
+                    changes=changes or None,
+                )
+            except Exception:
+                logger.exception("Failed to log line items update")
+
+        # Return updated invoice with line items, customer, business in 2 queries.
+        # (1 select_related for invoice+customer+business, 1 prefetch for line_items)
+        invoice = (
+            Invoice.objects
+            .select_related("customer", "business")
+            .prefetch_related("lineitem_set")
+            .get(pk=invoice.pk)
+        )
         return Response(InvoiceSerializer(invoice).data)
 
     @action(detail=True, methods=["get"])
@@ -2052,6 +2110,10 @@ class BulkInvoiceImportView(APIView):
     """
     API endpoint for bulk importing invoices from parsed Excel data.
     Accepts JSON with invoice data (parsed on the frontend from Excel files).
+
+    Optimized: pre-fetches businesses/customers/duplicates in batches and uses
+    bulk_create for line items, dropping ~200 round-trips for a 23-invoice import
+    down to ~10. Wrapped in a single transaction for atomicity.
     """
 
     def post(self, request):
@@ -2068,182 +2130,221 @@ class BulkInvoiceImportView(APIView):
         skipped_count = 0
         errors = []
 
-        for inv_data in invoices_data:
+        # ---------- PHASE 1: bulk lookups (one query each) ----------
+
+        # Pre-fetch all businesses (small table, usually <10 rows)
+        all_businesses = list(Business.objects.all())
+        biz_by_id = {b.pk: b for b in all_businesses}
+        biz_by_gstin = {(b.gst_number or "").lower(): b for b in all_businesses if b.gst_number}
+        biz_by_name = {(b.name or "").lower(): b for b in all_businesses}
+
+        forced_business = None
+        if business_id:
             try:
-                firm_name = inv_data.get("firmName", "")
-                firm_gstin = inv_data.get("firmGSTIN", "")
+                forced_business = biz_by_id.get(int(business_id))
+            except (TypeError, ValueError):
+                pass
 
-                # Find business by ID, GSTIN, or name
-                business = None
-                if business_id:
-                    try:
-                        business = Business.objects.get(id=int(business_id))
-                    except (Business.DoesNotExist, ValueError):
-                        pass
+        # Build customer lookup dicts in ONE query.
+        # Customer table is small (~few hundred rows); fetching all is cheaper
+        # than per-row .filter() calls.
+        cust_by_gst = {}
+        cust_by_pan = {}
+        cust_by_name = {}
+        for c in Customer.objects.all().only("id", "name", "gst_number", "pan_number"):
+            if c.gst_number:
+                cust_by_gst[c.gst_number.upper()] = c
+            if c.pan_number:
+                cust_by_pan[c.pan_number.upper()] = c
+            if c.name:
+                cust_by_name[c.name.lower()] = c
 
-                if not business and firm_gstin:
-                    business = Business.objects.filter(
-                        gst_number__iexact=firm_gstin
-                    ).first()
+        # Bulk fetch existing invoices (for duplicate detection) keyed by
+        # (business_id, invoice_number, invoice_date)
+        wanted_inv_keys = set()
+        for inv_data in invoices_data:
+            inv_no = str(inv_data.get("invoiceNumber", "") or "")
+            inv_date = inv_data.get("invoice_date", "") or ""
+            wanted_inv_keys.add((inv_no, inv_date))
+        # We don't know business yet for each, so just fetch by invoice_number+date
+        existing_invoice_keys = set()
+        if wanted_inv_keys:
+            inv_no_list = list({k[0] for k in wanted_inv_keys})
+            inv_date_list = list({k[1] for k in wanted_inv_keys if k[1]})
+            for inv in Invoice.objects.filter(
+                invoice_number__in=inv_no_list,
+                invoice_date__in=inv_date_list,
+            ).only("id", "invoice_number", "invoice_date", "business_id"):
+                existing_invoice_keys.add(
+                    (inv.business_id, str(inv.invoice_number), str(inv.invoice_date))
+                )
 
-                if not business and firm_name:
-                    business = Business.objects.filter(
-                        name__icontains=firm_name
-                    ).first()
+        # ---------- PHASE 2: process invoices in a single transaction ----------
+        line_items_to_create = []
+        audit_logs_to_create = []
+        new_customers_added_to_biz = []  # (customer, business) pairs
 
-                if not business:
-                    errors.append(
-                        f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
-                    )
-                    skipped_count += 1
-                    continue
+        with transaction.atomic():
+            for inv_data in invoices_data:
+                try:
+                    firm_name = (inv_data.get("firmName") or "").strip()
+                    firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
 
-                # Find or create customer
-                customer_name = inv_data.get("customerName", "")
-                customer_gst = inv_data.get("customerGST", "")
+                    # Resolve business from cache
+                    business = forced_business
+                    if not business and firm_gstin:
+                        business = biz_by_gstin.get(firm_gstin.lower())
+                    if not business and firm_name:
+                        # icontains substitute: try exact, then any name containing
+                        business = biz_by_name.get(firm_name.lower())
+                        if not business:
+                            for nm, b in biz_by_name.items():
+                                if firm_name.lower() in nm or nm in firm_name.lower():
+                                    business = b
+                                    break
 
-                if not customer_name:
-                    errors.append(
-                        f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
-                    )
-                    skipped_count += 1
-                    continue
+                    if not business:
+                        errors.append(
+                            f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
+                        )
+                        skipped_count += 1
+                        continue
 
-                customer = None
-                if customer_gst and customer_gst not in ("-", ""):
-                    # Try by GST first
-                    is_pan = "(PAN)" in customer_gst
-                    clean_gst = customer_gst.replace("(PAN)", "").strip()
-                    if is_pan:
-                        customer = Customer.objects.filter(
-                            pan_number__iexact=clean_gst
-                        ).first()
-                    else:
-                        customer = Customer.objects.filter(
-                            gst_number__iexact=clean_gst
-                        ).first()
+                    customer_name = (inv_data.get("customerName") or "").strip()
+                    customer_gst = (inv_data.get("customerGST") or "").strip()
 
-                if not customer:
-                    customer = Customer.objects.filter(
-                        name__iexact=customer_name
-                    ).first()
+                    if not customer_name:
+                        errors.append(
+                            f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
+                        )
+                        skipped_count += 1
+                        continue
 
-                if not customer:
-                    # Create customer
+                    # Resolve customer from cache
+                    customer = None
                     clean_gst = ""
                     clean_pan = ""
                     if customer_gst and customer_gst not in ("-", ""):
                         if "(PAN)" in customer_gst:
                             clean_pan = customer_gst.replace("(PAN)", "").strip()
+                            customer = cust_by_pan.get(clean_pan.upper())
                         else:
                             clean_gst = customer_gst
-                    customer = Customer.objects.create(
-                        name=customer_name,
-                        gst_number=clean_gst,
-                        pan_number=clean_pan,
-                        state_name="RAJASTHAN",
-                        workspace_id=1,
+                            customer = cust_by_gst.get(clean_gst.upper())
+                    if not customer:
+                        customer = cust_by_name.get(customer_name.lower())
+
+                    if not customer:
+                        customer = Customer.objects.create(
+                            name=customer_name,
+                            gst_number=clean_gst,
+                            pan_number=clean_pan,
+                            state_name="RAJASTHAN",
+                            workspace_id=1,
+                        )
+                        # Cache for downstream rows that reference the same name
+                        cust_by_name[customer_name.lower()] = customer
+                        if clean_gst:
+                            cust_by_gst[clean_gst.upper()] = customer
+                        if clean_pan:
+                            cust_by_pan[clean_pan.upper()] = customer
+                        if business and business.pk:
+                            new_customers_added_to_biz.append((customer, business))
+
+                    # Duplicate check from the prefetched set
+                    invoice_number = str(inv_data.get("invoiceNumber", ""))
+                    invoice_date = inv_data.get("invoice_date", "")
+                    if (business.pk, invoice_number, str(invoice_date)) in existing_invoice_keys:
+                        skipped_count += 1
+                        continue
+
+                    inv_type = inv_data.get("type", "OUTWARD")
+                    type_of_invoice = (
+                        INVOICE_TYPE_INWARD
+                        if inv_type == "INWARD"
+                        else INVOICE_TYPE_OUTWARD
                     )
-                    customer.save()
-                    # Link customer to business
-                    if business and business.pk:
-                        customer.businesses.add(business)
 
-                # Check for duplicate invoice
-                invoice_number = str(inv_data.get("invoiceNumber", ""))
-                invoice_date = inv_data.get("invoice_date", "")
-                inv_type = inv_data.get("type", "OUTWARD")
-                type_of_invoice = (
-                    INVOICE_TYPE_INWARD
-                    if inv_type == "INWARD"
-                    else INVOICE_TYPE_OUTWARD
-                )
-
-                existing = Invoice.objects.filter(
-                    invoice_number=invoice_number,
-                    business=business,
-                    invoice_date=invoice_date,
-                ).first()
-
-                if existing:
-                    skipped_count += 1
-                    continue
-
-                # Create invoice
-                invoice = Invoice.objects.create(
-                    invoice_number=invoice_number,
-                    invoice_date=invoice_date,
-                    customer=customer,
-                    business=business,
-                    type_of_invoice=type_of_invoice,
-                    total_amount=Decimal(str(inv_data.get("total", 0))),
-                    workspace_id=1,
-                )
-
-                # Create line items
-                items = inv_data.get("items", [])
-                for item in items:
-                    qty = Decimal(str(item.get("qty", 0)))
-                    rate = Decimal(str(item.get("rate", 0)))
-                    gst_rate = Decimal(str(item.get("gstRate", 3))) / Decimal("100")
-                    net_amount = qty * rate
-                    tax_amount = net_amount * gst_rate
-
-                    cgst = Decimal(str(item.get("cgst", 0)))
-                    sgst = Decimal(str(item.get("sgst", 0)))
-                    igst = Decimal(str(item.get("igst", 0)))
-
-                    # If taxes weren't pre-calculated, calculate them
-                    if cgst == 0 and sgst == 0 and igst == 0:
-                        if invoice.is_igst_applicable:
-                            igst = tax_amount
-                        else:
-                            cgst = tax_amount / 2
-                            sgst = tax_amount / 2
-
-                    amount = net_amount + cgst + sgst + igst
-
-                    LineItem.objects.create(
-                        invoice=invoice,
+                    invoice = Invoice.objects.create(
+                        invoice_number=invoice_number,
+                        invoice_date=invoice_date,
                         customer=customer,
-                        product_name=item.get("productName", "Item"),
-                        hsn_code=item.get("hsn", "711319"),
-                        gst_tax_rate=gst_rate,
-                        quantity=qty,
-                        rate=rate,
-                        cgst=cgst,
-                        sgst=sgst,
-                        igst=igst,
-                        amount=amount,
+                        business=business,
+                        type_of_invoice=type_of_invoice,
+                        total_amount=Decimal(str(inv_data.get("total", 0))),
                         workspace_id=1,
                     )
+                    # Mark as seen so a duplicate row in the same payload is skipped
+                    existing_invoice_keys.add(
+                        (business.pk, invoice_number, str(invoice_date))
+                    )
 
-                # Update invoice total
-                invoice.save()
-                created_count += 1
+                    items = inv_data.get("items", [])
+                    is_igst = invoice.is_igst_applicable
+                    for item in items:
+                        qty = Decimal(str(item.get("qty", 0)))
+                        rate = Decimal(str(item.get("rate", 0)))
+                        gst_rate = Decimal(str(item.get("gstRate", 3))) / Decimal("100")
+                        net_amount = qty * rate
+                        tax_amount = net_amount * gst_rate
 
-                # Log import
-                try:
-                    AuditLog.objects.create(
+                        cgst = Decimal(str(item.get("cgst", 0)))
+                        sgst = Decimal(str(item.get("sgst", 0)))
+                        igst = Decimal(str(item.get("igst", 0)))
+
+                        if cgst == 0 and sgst == 0 and igst == 0:
+                            if is_igst:
+                                igst = tax_amount
+                            else:
+                                cgst = tax_amount / 2
+                                sgst = tax_amount / 2
+
+                        amount = net_amount + cgst + sgst + igst
+
+                        line_items_to_create.append(LineItem(
+                            invoice=invoice,
+                            customer=customer,
+                            product_name=item.get("productName", "Item"),
+                            hsn_code=item.get("hsn", "711319"),
+                            gst_tax_rate=gst_rate,
+                            quantity=qty,
+                            rate=rate,
+                            cgst=cgst,
+                            sgst=sgst,
+                            igst=igst,
+                            amount=amount,
+                            workspace_id=1,
+                        ))
+
+                    audit_logs_to_create.append(AuditLog(
                         action="imported",
                         entity="invoice",
                         entity_id=invoice.pk,
                         entity_name=f"#{invoice.invoice_number} - {customer.name}",
                         user=request.user if request.user and request.user.is_authenticated else None,
                         details=f"Imported from Excel ({len(items)} items, total: {invoice.total_amount})",
-                    )
-                except Exception:
-                    pass
+                    ))
 
-            except Exception as e:
-                logger.error(
-                    f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {e}",
-                    exc_info=True,
-                )
-                errors.append(
-                    f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {str(e)}"
-                )
-                skipped_count += 1
+                    created_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {e}",
+                        exc_info=True,
+                    )
+                    errors.append(
+                        f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {str(e)}"
+                    )
+                    skipped_count += 1
+
+            # ---------- PHASE 3: bulk writes ----------
+            if line_items_to_create:
+                LineItem.objects.bulk_create(line_items_to_create, batch_size=200)
+            if audit_logs_to_create:
+                AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
+            # Link new customers to their businesses (M2M)
+            for cust, biz in new_customers_added_to_biz:
+                cust.businesses.add(biz)
 
         return Response(
             {

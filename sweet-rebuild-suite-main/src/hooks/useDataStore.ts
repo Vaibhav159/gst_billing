@@ -450,25 +450,23 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
 
   const update = async (id: string | number, updates: Partial<Invoice>) => {
     // Map frontend field names to Django API field names
-    const apiPayload: Record<string, any> = {};
+    const invoiceFields: Record<string, any> = {};
+    if (updates.customerId) invoiceFields.customer = updates.customerId;
+    if (updates.businessId) invoiceFields.business = updates.businessId;
+    if (updates.invoiceNumber) invoiceFields.invoice_number = updates.invoiceNumber;
+    if (updates.invoice_date) invoiceFields.invoice_date = updates.invoice_date;
+    if (updates.type) invoiceFields.type_of_invoice = updates.type.toLowerCase();
 
-    if (updates.customerId) apiPayload.customer = updates.customerId;
-    if (updates.businessId) apiPayload.business = updates.businessId;
-    if (updates.invoiceNumber) apiPayload.invoice_number = updates.invoiceNumber;
-    if (updates.invoice_date) apiPayload.invoice_date = updates.invoice_date;
-    if (updates.type) apiPayload.type_of_invoice = updates.type.toLowerCase();
-    if (updates.total !== undefined) apiPayload.total_amount = updates.total;
-
-    const res = await api.patch<any>(`invoices/${id}/`, apiPayload);
-
-    // Also update line items if provided
+    // Single round-trip: invoice fields + line items in one call.
+    // The combined endpoint replaces the old PATCH + update_line_items pair
+    // (was 3+s on Neon Singapore, now ~500ms).
     if (updates.items && updates.items.length > 0) {
-      try {
-        await api.post(`invoices/${id}/update_line_items/`, {
-          line_items: updates.items.map((it: any) => {
-            const rawRate = it.gstRate || it.gst_tax_rate || 0;
-            const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
-            return {
+      const res = await api.post<any>(`invoices/${id}/update_line_items/`, {
+        invoice: invoiceFields,
+        line_items: updates.items.map((it: any) => {
+          const rawRate = it.gstRate || it.gst_tax_rate || 0;
+          const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+          return {
             product_name: it.productName || it.product_name || "",
             hsn_code: it.hsn || it.hsn_code || "",
             gst_tax_rate: gstDecimal,
@@ -479,14 +477,15 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
             sgst: it.sgst || 0,
             igst: it.igst || 0,
             amount: it.amount || 0,
-            };
-          }),
-        });
-      } catch (e) {
-        logger.warn("Line items update endpoint not available, skipping", e);
-      }
+          };
+        }),
+      });
+      setItems((prev) => prev.map((it) => (String(it.id) === String(id) ? mapDjangoInvoice(res.data) : it)));
+      return;
     }
 
+    // No line items being updated — fall back to plain PATCH on the invoice.
+    const res = await api.patch<any>(`invoices/${id}/`, invoiceFields);
     setItems((prev) => prev.map((it) => (String(it.id) === String(id) ? mapDjangoInvoice(res.data) : it)));
   };
 

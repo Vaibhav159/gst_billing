@@ -301,7 +301,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   ];
   const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
     if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
@@ -311,8 +311,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     const selectedCust = localCustomers.find(c => c.id === form.customerId);
     const invoiceItems = items.map(it => {
       const product = localProducts.find(p => p.id === it.productId);
-      const amount = Math.round(it.qty * it.rate * 100) / 100;
-      const tax = product ? Math.round((amount * product.gstRate) / 100 * 100) / 100 : 0;
+      const netAmount = Math.round(it.qty * it.rate * 100) / 100;
+      const tax = product ? Math.round((netAmount * product.gstRate) / 100 * 100) / 100 : 0;
+      const cgst = form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100;
+      const sgst = form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100;
+      const igst = form.isIGST ? Math.round(tax * 100) / 100 : 0;
+      // amount stored on line item is GROSS (net + tax) — Invoice.total_amount
+      // is sum(LineItem.amount), so this MUST include the tax.
+      const amount = Math.round((netAmount + cgst + sgst + igst) * 100) / 100;
       return {
         productId: it.productId,
         productName: product?.name || "",
@@ -322,9 +328,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         rate: it.rate,
         unit: it.unit,
         amount,
-        cgst: form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100,
-        sgst: form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100,
-        igst: form.isIGST ? Math.round(tax * 100) / 100 : 0,
+        cgst,
+        sgst,
+        igst,
       };
     });
 
@@ -355,35 +361,48 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      createInvoice(newInvoice);
-      clearDraft();
-      toast({ title: "Invoice Created", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
-      if (isMobile && mobileMode === "easy") {
-        navigate(`/billing/invoice/${newId}`);
-      } else {
-        navigate("/billing/invoice/list");
+      try {
+        const created = await createInvoice(newInvoice);
+        clearDraft();
+        toast({ title: "Invoice Created", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
+        const navId = created?.id ? String(created.id) : newId;
+        if (isMobile && mobileMode === "easy") {
+          navigate(`/billing/invoice/${navId}`);
+        } else {
+          navigate("/billing/invoice/list");
+        }
+      } catch (err: any) {
+        const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Create failed.";
+        toast({ title: "Create Failed", description: msg, variant: "destructive" });
+        setDirty(true);
       }
     } else if (id) {
-      updateInvoice(id, {
-        invoiceNumber: form.invoiceNumber,
-        invoice_date: form.date,
-        customerId: form.customerId,
-        customerName: selectedCust?.name || "",
-        businessId: form.businessId,
-        businessName: selectedBiz?.name || "",
-        type: form.type as "OUTWARD" | "INWARD",
-        isIGST: form.isIGST,
-        items: invoiceItems,
-        subtotal,
-        totalCGST,
-        totalSGST,
-        totalIGST,
-        totalTax,
-        total,
-        updatedAt: new Date().toISOString(),
-      });
-      toast({ title: "Invoice Updated", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
-      navigate("/billing/invoice/list");
+      try {
+        await updateInvoice(id, {
+          invoiceNumber: form.invoiceNumber,
+          invoice_date: form.date,
+          customerId: form.customerId,
+          customerName: selectedCust?.name || "",
+          businessId: form.businessId,
+          businessName: selectedBiz?.name || "",
+          type: form.type as "OUTWARD" | "INWARD",
+          isIGST: form.isIGST,
+          items: invoiceItems,
+          subtotal,
+          totalCGST,
+          totalSGST,
+          totalIGST,
+          totalTax,
+          total,
+          updatedAt: new Date().toISOString(),
+        });
+        toast({ title: "Invoice Updated", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
+        navigate("/billing/invoice/list");
+      } catch (err: any) {
+        const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Update failed.";
+        toast({ title: "Update Failed", description: msg, variant: "destructive" });
+        setDirty(true);
+      }
     }
   };
 
