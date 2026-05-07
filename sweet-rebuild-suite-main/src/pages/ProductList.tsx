@@ -32,6 +32,9 @@ export default function ProductList() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "revenue" | "usage" | "gst" | "qty">("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 25;
+  const resetPage = () => setCurrentPage(1);
 
   const gstRates = [...new Set(products.map((p) => p.gstRate))].sort((a, b) => a - b);
 
@@ -68,6 +71,9 @@ export default function ProductList() {
     if (sortBy === "gst") return dir * (a.gstRate - b.gstRate);
     return 0;
   });
+
+  const totalFilteredPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const paginatedProducts = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const totalProducts = productTotalCount;
   const totalRevenue = products.reduce((sum, p) => sum + getProductRevenue(p), 0);
@@ -119,7 +125,7 @@ export default function ProductList() {
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+            <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); resetPage(); }}
               placeholder="Search products..." className="premium-input pl-10 h-11" />
           </div>
           <button onClick={() => setFilterOpen(true)}
@@ -132,7 +138,7 @@ export default function ProductList() {
 
         {/* Cards */}
         <div className="space-y-3">
-          {filtered.map((p) => {
+          {paginatedProducts.map((p) => {
             const revenue = getProductRevenue(p);
             const qtySold = getProductQtySold(p);
             return (
@@ -176,6 +182,23 @@ export default function ProductList() {
           )}
         </div>
 
+        {/* Mobile Pagination */}
+        {totalFilteredPages > 1 && (
+          <div className="flex items-center justify-center gap-2 py-2">
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+              Prev
+            </button>
+            <span className="text-[12px] text-muted-foreground">
+              {currentPage} / {totalFilteredPages}
+            </span>
+            <button onClick={() => setCurrentPage(p => Math.min(totalFilteredPages, p + 1))} disabled={currentPage === totalFilteredPages}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+              Next
+            </button>
+          </div>
+        )}
+
         {/* FAB */}
         <Link to="/billing/product/new" className="mobile-fab">
           <Plus className="w-6 h-6" />
@@ -184,12 +207,12 @@ export default function ProductList() {
         <MobileFilterSheet
           open={filterOpen}
           onOpenChange={setFilterOpen}
-          onClear={() => setGstFilter("all")}
+          onClear={() => { setGstFilter("all"); resetPage(); }}
           filters={[{
             label: "GST Rate",
             value: gstFilter,
             options: [{ label: "All GST Rates", value: "all" }, ...gstRates.map((r) => ({ label: `${r}%`, value: r.toString() }))],
-            onChange: setGstFilter,
+            onChange: (v) => { setGstFilter(v); resetPage(); },
           }]}
         />
 
@@ -255,13 +278,13 @@ export default function ProductList() {
         className="flex flex-col lg:flex-row items-start lg:items-center gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); resetPage(); }}
             placeholder="Search name, HSN, description..." className="premium-input pl-11" />
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <select value={gstFilter} onChange={(e) => setGstFilter(e.target.value)} className="premium-select pl-9 pr-8 text-[13px]">
+            <select value={gstFilter} onChange={(e) => { setGstFilter(e.target.value); resetPage(); }} className="premium-select pl-9 pr-8 text-[13px]">
               <option value="all">All GST Rates</option>
               {gstRates.map((r) => <option key={r} value={r}>{r}%</option>)}
             </select>
@@ -279,9 +302,9 @@ export default function ProductList() {
         </div>
       </motion.div>
 
-      {(search || gstFilter !== "all") && (
+      {(search || gstFilter !== "all" || totalFilteredPages > 1) && (
         <p className="text-xs text-muted-foreground">
-          Showing <span className="font-semibold text-foreground">{filtered.length}</span> of {totalProducts} products
+          Showing <span className="font-semibold text-foreground">{(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}</span> of {filtered.length} products
           {search && <> matching "<span className="text-primary">{search}</span>"</>}
         </p>
       )}
@@ -316,13 +339,13 @@ export default function ProductList() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p, i) => {
+              {paginatedProducts.map((p, i) => {
                 const revenue = getProductRevenue(p);
                 const usageCount = getProductUsageCount(p);
                 const qtySold = getProductQtySold(p);
                 return (
                   <motion.tr key={p.id} variants={fadeUp}>
-                    <td className="text-muted-foreground text-[13px] w-12">{i + 1}</td>
+                    <td className="text-muted-foreground text-[13px] w-12">{(currentPage - 1) * ITEMS_PER_PAGE + i + 1}</td>
                     <td className="min-w-[220px]">
                       <Link to={`/billing/product/${p.id}`} className="group">
                         <div className="flex items-center gap-3">
@@ -402,7 +425,7 @@ export default function ProductList() {
 
       {viewMode === "cards" && (
         <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((p) => {
+          {paginatedProducts.map((p) => {
             const revenue = getProductRevenue(p);
             const usageCount = getProductUsageCount(p);
             const qtySold = getProductQtySold(p);
@@ -454,6 +477,34 @@ export default function ProductList() {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* Pagination */}
+      {totalFilteredPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            Previous
+          </button>
+          {Array.from({ length: totalFilteredPages }, (_, i) => i + 1)
+            .filter(page => page === 1 || page === totalFilteredPages || Math.abs(page - currentPage) <= 2)
+            .map((page, idx, arr) => {
+              const showEllipsis = idx > 0 && page - arr[idx - 1] > 1;
+              return (
+                <span key={page} className="flex items-center gap-1">
+                  {showEllipsis && <span className="text-muted-foreground text-[12px] px-1">…</span>}
+                  <button onClick={() => setCurrentPage(page)}
+                    className={cn("w-8 h-8 rounded-lg text-[12px] font-semibold transition-all",
+                      page === currentPage ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/30"
+                    )}>{page}</button>
+                </span>
+              );
+            })}
+          <button onClick={() => setCurrentPage(p => Math.min(totalFilteredPages, p + 1))} disabled={currentPage === totalFilteredPages}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border/50 text-muted-foreground hover:text-foreground hover:bg-secondary/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            Next
+          </button>
+        </div>
       )}
 
       {/* Load More */}
