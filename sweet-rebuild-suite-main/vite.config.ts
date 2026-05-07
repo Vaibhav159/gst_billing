@@ -28,4 +28,10 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Pin PostCSS config path — without this, Vite walks up to the repo root
+  // and finds an orphaned postcss.config.js from the old webpack frontend
+  // that references tailwindcss not installed at the repo root.
+  css: {
+    postcss: path.resolve(__dirname, "./postcss.config.js"),
+  },
 }));
