@@ -1376,8 +1376,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         queryset = self.get_queryset()
         invoice_ids = list(queryset.values_list("id", flat=True))
 
-        outward_invoices = queryset.filter(type_of_invoice="outward").select_related("customer", "business")
-        inward_invoices = queryset.filter(type_of_invoice="inward").select_related("customer", "business")
+        # Prefetch line items so the per-invoice loops below don't fire one
+        # query per invoice (the previous N+1 made this endpoint take ~12s
+        # for ~95 invoices over a remote-DB connection).
+        outward_invoices = list(
+            queryset.filter(type_of_invoice="outward")
+            .select_related("customer", "business")
+            .prefetch_related("lineitem_set")
+        )
+        inward_invoices = list(
+            queryset.filter(type_of_invoice="inward")
+            .select_related("customer", "business")
+            .prefetch_related("lineitem_set")
+        )
 
         # ── GSTR-1 ──
 
@@ -1387,7 +1398,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if not cust_gst or len(cust_gst) < 15:
                 continue  # Skip unregistered
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             inv_items = []
             for li in items:
                 inv_items.append({
@@ -1424,7 +1435,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
             if cust_state != biz_state:
                 continue  # Inter-state goes to B2CL
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             for li in items:
                 rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
                 key = f"{biz_state}-{rate}"
@@ -1447,7 +1458,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
             if cust_state == biz_state:
                 continue  # Intra-state goes to B2CS
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             inv_items = [{
                 "num": int(li.id),
                 "itm_det": {
@@ -1520,7 +1531,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Compare inward invoices against expected data
         inward_list = []
         for inv in inward_invoices:
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             total_tax = sum(float(li.cgst + li.sgst + li.igst) for li in items)
             total_taxable = sum(float(li.quantity * li.rate) for li in items)
             inward_list.append({
