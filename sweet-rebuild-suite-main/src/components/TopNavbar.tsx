@@ -90,7 +90,7 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
         </Link>
 
         {/* Desktop Nav - only show on xl+ */}
-        <div className="hidden xl:flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto scrollbar-none">
+        <div className="hidden xl:flex items-center gap-0.5 flex-1 min-w-0">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
