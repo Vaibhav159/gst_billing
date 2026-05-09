@@ -376,9 +376,14 @@ function buildProductMap(products?: ProductLookup[]) {
   const ci: Record<string, { hsn: string; gstPercent: number }> = {};
   if (!products) return { exact, ci };
 
-  // Sort by name so the case-insensitive "first-seen wins" fallback is
-  // deterministic regardless of the API ordering the caller passes in.
-  const sortedProducts = [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  // Sort by lowercased name with locale-independent comparison so the
+  // case-insensitive "first-seen wins" fallback is deterministic across
+  // user environments (localeCompare() varies by ICU/locale).
+  const sortedProducts = [...products].sort((a, b) => {
+    const an = (a.name || "").toLowerCase();
+    const bn = (b.name || "").toLowerCase();
+    return an < bn ? -1 : an > bn ? 1 : 0;
+  });
 
   for (const p of sortedProducts) {
     if (!p.name) continue;

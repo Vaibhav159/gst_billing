@@ -10,7 +10,12 @@ test.describe('Auth flow', () => {
   test('Login page loads', async ({ page }) => {
     const t0 = Date.now();
     await page.goto('/');
-    await expect(page).toHaveURL(/login|\//);
+    // Anonymous user hitting "/" must end up on /login (ProtectedRoute guard).
+    // Assert pathname explicitly — `/login|\//` matched everything since every
+    // URL contains "/", which would silently pass on a broken redirect.
+    await expect(page).toHaveURL(/\/login$/);
+    // Sanity-check the form actually rendered, not just the route.
+    await expect(page.locator('input[type="password"]')).toBeVisible();
     console.log(`[TIMING] Login page load: ${Date.now() - t0}ms`);
   });
 

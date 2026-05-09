@@ -2249,6 +2249,10 @@ class BulkInvoiceImportView(APIView):
         invoices_to_create = []  # [(Invoice instance, source dict for line items)]
         line_items_to_create = []
         audit_logs_to_create = []
+        # Per-invoice audit metadata (pk, display name, item count). Audit logs
+        # are emitted after total_amount is recomputed from line items so the
+        # message reflects the persisted total, not the stale in-memory value.
+        pending_invoice_audits: list[dict] = []
         new_customers_added_to_biz = []  # (customer, business) pairs
 
         with transaction.atomic():
@@ -2474,13 +2478,14 @@ class BulkInvoiceImportView(APIView):
                             cgst=cgst, sgst=sgst, igst=igst, amount=amount,
                             workspace_id=1,
                         ))
-                    audit_logs_to_create.append(AuditLog(
-                        action="imported", entity="invoice",
-                        entity_id=invoice.pk,
-                        entity_name=f"#{invoice.invoice_number} - {invoice.customer.name}",
-                        user=request.user if request.user and request.user.is_authenticated else None,
-                        details=f"Imported from Excel ({len(items)} items, total: {invoice.total_amount})",
-                    ))
+                    # Stash the metadata we need for the audit log; the actual
+                    # AuditLog row is appended below after total_amount has been
+                    # recomputed from line items, so the logged total isn't stale.
+                    pending_invoice_audits.append({
+                        "pk": invoice.pk,
+                        "name": f"#{invoice.invoice_number} - {invoice.customer.name}",
+                        "item_count": len(items),
+                    })
 
             if line_items_to_create:
                 LineItem.objects.bulk_create(line_items_to_create, batch_size=200)
@@ -2524,6 +2529,29 @@ class BulkInvoiceImportView(APIView):
                             )
                         )
 
+            # Emit the deferred per-invoice audit logs now that total_amount
+            # has been recomputed from line items (and dropped invoices that
+            # were rolled back as empty).
+            if pending_invoice_audits:
+                empty_set = set(empty_inv_ids)
+                surviving_pks = [a["pk"] for a in pending_invoice_audits if a["pk"] not in empty_set]
+                live_totals = dict(
+                    Invoice.objects.filter(pk__in=surviving_pks).values_list("pk", "total_amount")
+                )
+                for meta in pending_invoice_audits:
+                    if meta["pk"] in empty_set:
+                        continue
+                    audit_logs_to_create.append(AuditLog(
+                        action="imported", entity="invoice",
+                        entity_id=meta["pk"],
+                        entity_name=meta["name"],
+                        user=request.user if request.user and request.user.is_authenticated else None,
+                        details=(
+                            f"Imported from Excel ({meta['item_count']} items, "
+                            f"total: {live_totals.get(meta['pk'], 0)})"
+                        ),
+                    ))
+
             # Add per-row error entries to the audit log so failures are
             # visible in the UI's audit log page (not just Django logs).
             if errors:
@@ -2536,17 +2564,7 @@ class BulkInvoiceImportView(APIView):
                     ))
 
             if audit_logs_to_create:
-                # Drop audit logs that reference invoices we just deleted (those
-                # whose line items all errored out) so we don't leave dangling
-                # entity_id references in the audit log.
-                if empty_inv_ids:
-                    empty_set = set(empty_inv_ids)
-                    audit_logs_to_create = [
-                        log for log in audit_logs_to_create
-                        if not (log.entity == "invoice" and log.entity_id in empty_set)
-                    ]
-                if audit_logs_to_create:
-                    AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
+                AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
 
             # Link new customers to businesses via M2M — bulk_create the through-table
             # rows instead of N individual .add() calls (each is its own round-trip).

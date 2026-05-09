@@ -48,10 +48,14 @@ dev = [
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-# Explicit list — repo has several top-level dirs (frontend, nginx, etc.)
-# that aren't Python packages, so flat auto-detection fails.
-packages = ["billing", "gst_billing"]
+# Use setuptools package discovery scoped to our two top-level Python
+# packages. The repo has several non-Python top-level dirs (frontend,
+# nginx, sweet-rebuild-suite-main, etc.) so flat auto-detection fails;
+# `include` keeps it scoped while still picking up subpackages like
+# billing.api, billing.management, billing.management.commands, etc.
+[tool.setuptools.packages.find]
+include = ["billing*", "gst_billing*"]
+exclude = ["billing.tests*", "node_modules*"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "gst_billing.test_settings"

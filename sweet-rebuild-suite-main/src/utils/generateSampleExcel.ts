@@ -364,6 +364,29 @@ export function generateSampleExcelBytes(opts: TemplateOptions = {}): Uint8Array
   // appended BEFORE the firm sheets that reference it.
   addProductListSheet(wb, productNames);
 
+  // Excel sheet names: max 31 chars, can't contain : \ / ? * [ ]. We
+  // sanitize biz names + dedupe across the workbook so two firms whose
+  // names collide after truncation don't make book_append_sheet throw or
+  // overwrite a previous sheet.
+  const usedSheetNames = new Set<string>(["_ProductList", "Instructions"]);
+  const safeSheetName = (raw: string): string => {
+    const clean = raw.replace(/[:\\/?*\[\]]/g, "_").slice(0, 31).trim() || "Sheet";
+    if (!usedSheetNames.has(clean)) {
+      usedSheetNames.add(clean);
+      return clean;
+    }
+    // Suffix with _2, _3, ... while still fitting in 31 chars.
+    for (let i = 2; i < 1000; i++) {
+      const suffix = `_${i}`;
+      const candidate = clean.slice(0, 31 - suffix.length) + suffix;
+      if (!usedSheetNames.has(candidate)) {
+        usedSheetNames.add(candidate);
+        return candidate;
+      }
+    }
+    return clean; // give up and let XLSX throw — extreme degenerate case
+  };
+
   // One sheet per (firm × supply type)
   for (const biz of businesses) {
     const gstin = biz.gst_number || biz.gstin || "";
@@ -377,8 +400,7 @@ export function generateSampleExcelBytes(opts: TemplateOptions = {}): Uint8Array
         productNames,
         withSamples,
       });
-      const sheetName = (biz.name + " - OUT").slice(0, 31);
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      XLSX.utils.book_append_sheet(wb, ws, safeSheetName(biz.name + " - OUT"));
     }
     if (includeInward) {
       const { ws } = buildFirmSheet({
@@ -389,8 +411,7 @@ export function generateSampleExcelBytes(opts: TemplateOptions = {}): Uint8Array
         productNames,
         withSamples,
       });
-      const sheetName = (biz.name + " - IN").slice(0, 31);
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      XLSX.utils.book_append_sheet(wb, ws, safeSheetName(biz.name + " - IN"));
     }
   }
 
