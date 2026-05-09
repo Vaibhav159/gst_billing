@@ -98,11 +98,14 @@ export default function ImportReview() {
         customerMatch = customerNameMap.get(inv.customerGST.toLowerCase().trim()) || null;
       }
 
-      // Duplicate check
+      // Duplicate check — must match on business + bill# + date AND TYPE.
+      // Sales invoice #1 (outward) and purchase bill #1 (inward) are
+      // different documents, even when number/date/firm coincide.
       const isDuplicate = existingInvoices.some(
         ei => ei.invoiceNumber === inv.invoiceNumber &&
           String(ei.businessId) === String(businessMatch?.id) &&
-          ei.invoice_date === inv.invoice_date
+          ei.invoice_date === inv.invoice_date &&
+          (ei.type || "OUTWARD").toUpperCase() === inv.type
       );
 
       let status: ValidationResult["status"] = "ready";

@@ -2218,7 +2218,8 @@ class BulkInvoiceImportView(APIView):
             inv_no = str(inv_data.get("invoiceNumber", "") or "")
             inv_date = inv_data.get("invoice_date", "") or ""
             wanted_inv_keys.add((inv_no, inv_date))
-        # We don't know business yet for each, so just fetch by invoice_number+date
+        # Dedup key includes type_of_invoice — sales bill #1 and purchase bill #1
+        # are different documents, even with the same number/date/firm.
         existing_invoice_keys = set()
         if wanted_inv_keys:
             inv_no_list = list({k[0] for k in wanted_inv_keys})
@@ -2226,9 +2227,10 @@ class BulkInvoiceImportView(APIView):
             for inv in Invoice.objects.filter(
                 invoice_number__in=inv_no_list,
                 invoice_date__in=inv_date_list,
-            ).only("id", "invoice_number", "invoice_date", "business_id"):
+            ).only("id", "invoice_number", "invoice_date", "business_id", "type_of_invoice"):
                 existing_invoice_keys.add(
-                    (inv.business_id, str(inv.invoice_number), str(inv.invoice_date))
+                    (inv.business_id, str(inv.invoice_number), str(inv.invoice_date),
+                     (inv.type_of_invoice or INVOICE_TYPE_OUTWARD).lower())
                 )
 
         # ---------- PHASE 2: process invoices in a single transaction ----------
@@ -2301,19 +2303,21 @@ class BulkInvoiceImportView(APIView):
                         # Track for M2M attach (idempotent — .add() is a no-op if exists)
                         new_customers_added_to_biz.append((customer, business))
 
-                    # Duplicate check from the prefetched set
+                    # Resolve invoice type first so duplicate key includes it.
                     invoice_number = str(inv_data.get("invoiceNumber", ""))
                     invoice_date = inv_data.get("invoice_date", "")
-                    if (business.pk, invoice_number, str(invoice_date)) in existing_invoice_keys:
-                        skipped_count += 1
-                        continue
-
                     inv_type = inv_data.get("type", "OUTWARD")
                     type_of_invoice = (
                         INVOICE_TYPE_INWARD
                         if inv_type == "INWARD"
                         else INVOICE_TYPE_OUTWARD
                     )
+
+                    # Duplicate check — must match on business + bill# + date AND type
+                    dup_key = (business.pk, invoice_number, str(invoice_date), type_of_invoice.lower())
+                    if dup_key in existing_invoice_keys:
+                        skipped_count += 1
+                        continue
 
                     # Build invoice in memory; bulk_create later
                     invoice = Invoice(
@@ -2327,9 +2331,7 @@ class BulkInvoiceImportView(APIView):
                     )
                     invoices_to_create.append((invoice, inv_data))
                     # Mark as seen so a duplicate row in the same payload is skipped
-                    existing_invoice_keys.add(
-                        (business.pk, invoice_number, str(invoice_date))
-                    )
+                    existing_invoice_keys.add(dup_key)
                     created_count += 1
 
                 except Exception as e:
