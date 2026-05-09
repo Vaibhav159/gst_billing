@@ -748,6 +748,63 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create an invoice + its line items in a single round-trip.
+
+        Pass `line_items` in the request body alongside the invoice fields and
+        we'll bulk-create them inside the same transaction as the invoice, then
+        update total_amount. Saves the previous "POST /invoices/ then POST
+        /invoices/{id}/update_line_items/" pair (was 2 round-trips, ~1s; now
+        one ~500ms call).
+        """
+        line_items_data = request.data.get("line_items") or []
+
+        # Strip line_items from the payload that goes into InvoiceSerializer —
+        # the serializer doesn't know about them, and DRF would 400 on extras
+        # if we ever turn on strict validation.
+        payload = {k: v for k, v in request.data.items() if k != "line_items"}
+        serializer = self.get_serializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            self.perform_create(serializer)  # saves invoice + writes audit log
+            invoice = serializer.instance
+
+            if line_items_data:
+                new_total = Decimal("0")
+                new_lis = []
+                for item_data in line_items_data:
+                    qty = Decimal(str(item_data.get("quantity", 1)))
+                    rate = Decimal(str(item_data.get("rate", 0)))
+                    amount = Decimal(str(item_data.get("amount", qty * rate)))
+                    new_total += amount
+                    new_lis.append(LineItem(
+                        invoice=invoice,
+                        customer=invoice.customer,
+                        product_name=item_data.get("product_name", ""),
+                        hsn_code=item_data.get("hsn_code", ""),
+                        gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                        quantity=qty,
+                        rate=rate,
+                        cgst=Decimal(str(item_data.get("cgst", 0))),
+                        sgst=Decimal(str(item_data.get("sgst", 0))),
+                        igst=Decimal(str(item_data.get("igst", 0))),
+                        amount=amount,
+                        unit=item_data.get("unit", "gms"),
+                        workspace_id=1,
+                    ))
+                LineItem.objects.bulk_create(new_lis, batch_size=100)
+                # Bypass save()'s sum() roundtrip — we already know the total.
+                invoice.total_amount = new_total
+                Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
+
+        # Re-serialize so the response includes the persisted total + line items.
+        invoice.refresh_from_db()
+        out = self.get_serializer(invoice)
+        headers = self.get_success_headers(out.data)
+        return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
+
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
         """

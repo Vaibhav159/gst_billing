@@ -59,6 +59,75 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(response.data["type_of_invoice"], INVOICE_TYPE_INWARD)
         # is_igst_applicable is a property that depends on the customer and business GST numbers
 
+    def test_create_invoice_with_line_items(self):
+        """Combined-create endpoint: invoice + line items in a single POST.
+
+        Asserts that bulk-created line items land, total_amount is recomputed
+        from the items' amounts (not whatever the request claimed), and the
+        response includes the persisted line items.
+        """
+        url = reverse("invoice-list")
+        data = {
+            "invoice_number": "INV-COMBINED",
+            "invoice_date": "2023-03-01",
+            "business": self.business.id,
+            "customer": self.customer.id,
+            "type_of_invoice": INVOICE_TYPE_OUTWARD,
+            "total_amount": "0.00",  # backend ignores this and recomputes
+            "line_items": [
+                {
+                    "product_name": "Widget A",
+                    "hsn_code": "100100",
+                    "gst_tax_rate": "0.18",
+                    "quantity": "2",
+                    "rate": "100",
+                    "cgst": "9",
+                    "sgst": "9",
+                    "igst": "0",
+                    "amount": "218",
+                    "unit": "pcs",
+                },
+                {
+                    "product_name": "Widget B",
+                    "hsn_code": "100200",
+                    "gst_tax_rate": "0.18",
+                    "quantity": "1",
+                    "rate": "300",
+                    "cgst": "27",
+                    "sgst": "27",
+                    "igst": "0",
+                    "amount": "354",
+                    "unit": "pcs",
+                },
+            ],
+        }
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        new_invoice = Invoice.objects.get(invoice_number="INV-COMBINED")
+        items = LineItem.objects.filter(invoice=new_invoice).order_by("id")
+        self.assertEqual(items.count(), 2)
+        self.assertEqual(items[0].product_name, "Widget A")
+        self.assertEqual(items[1].product_name, "Widget B")
+        # total_amount should reflect SUM(amounts), not the "0.00" we sent.
+        self.assertEqual(new_invoice.total_amount, Decimal("572"))
+
+    def test_create_invoice_without_line_items_still_works(self):
+        """Backwards-compat: creating without `line_items` behaves like before."""
+        url = reverse("invoice-list")
+        data = {
+            "invoice_number": "INV-NO-ITEMS",
+            "invoice_date": "2023-04-01",
+            "business": self.business.id,
+            "customer": self.customer.id,
+            "type_of_invoice": INVOICE_TYPE_OUTWARD,
+            "total_amount": "100.00",
+        }
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        new_invoice = Invoice.objects.get(invoice_number="INV-NO-ITEMS")
+        self.assertEqual(LineItem.objects.filter(invoice=new_invoice).count(), 0)
+
     def test_update_invoice(self):
         """Test updating an existing invoice."""
         url = reverse("invoice-detail", args=[self.invoice.id])

@@ -404,7 +404,9 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
   }, [items]);
 
   const create = async (data: Partial<Invoice>) => {
-    // Map frontend field names to Django API field names
+    // Single-round-trip create: invoice fields + line items in one POST.
+    // Backend (InvoiceViewSet.create) bulk-creates the items + sets the
+    // total in the same transaction.
     const apiPayload: Record<string, any> = {};
 
     if (data.customerId) apiPayload.customer = data.customerId;
@@ -414,35 +416,28 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     if (data.type) apiPayload.type_of_invoice = data.type.toLowerCase();
     if (data.total !== undefined) apiPayload.total_amount = data.total;
 
+    if (data.items && data.items.length > 0) {
+      apiPayload.line_items = data.items.map((it: any) => {
+        // gstRate is percentage (3), gst_tax_rate is decimal (0.03) — normalize to decimal
+        const rawRate = it.gstRate || it.gst_tax_rate || 0;
+        const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+        return {
+          product_name: it.productName || it.product_name || "",
+          hsn_code: it.hsn || it.hsn_code || "",
+          gst_tax_rate: gstDecimal,
+          quantity: it.qty || it.quantity || 1,
+          rate: it.rate || 0,
+          unit: it.unit || "pcs",
+          cgst: it.cgst || 0,
+          sgst: it.sgst || 0,
+          igst: it.igst || 0,
+          amount: it.amount || 0,
+        };
+      });
+    }
+
     const res = await api.post<any>("invoices/", apiPayload);
     const createdInvoice = res.data;
-
-    // Create line items if provided
-    if (data.items && data.items.length > 0) {
-      try {
-        await api.post(`invoices/${createdInvoice.id}/update_line_items/`, {
-          line_items: data.items.map((it: any) => {
-            // gstRate is percentage (3), gst_tax_rate is decimal (0.03) — normalize to decimal
-            const rawRate = it.gstRate || it.gst_tax_rate || 0;
-            const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
-            return {
-              product_name: it.productName || it.product_name || "",
-              hsn_code: it.hsn || it.hsn_code || "",
-              gst_tax_rate: gstDecimal,
-              quantity: it.qty || it.quantity || 1,
-              rate: it.rate || 0,
-              unit: it.unit || "pcs",
-              cgst: it.cgst || 0,
-              sgst: it.sgst || 0,
-              igst: it.igst || 0,
-              amount: it.amount || 0,
-            };
-          }),
-        });
-      } catch (e) {
-        logger.warn("Line items creation endpoint not available, skipping", e);
-      }
-    }
 
     setItems((prev) => [...prev, mapDjangoInvoice(createdInvoice)]);
     return createdInvoice;
