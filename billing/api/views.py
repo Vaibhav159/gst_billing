@@ -1561,26 +1561,33 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             else datetime(today.year, 4, 1).date()
         )
 
-        # Get all invoices for this business in current FY
+        # Find the highest trailing number, but only among invoice_numbers
+        # whose shape we recognize. Without this filter, an invoice with a
+        # programmatically-generated body like "P1778291284" would extract
+        # the timestamp suffix and become the "max", leaking 1.7-billion as
+        # the suggested next number.
+        # Recognized shapes: pure digits ("100"), or PREFIX/FY/digits
+        # ("SGJ/2024-25/108"). Anything else is skipped.
+        import re
+
         fy_invoices = Invoice.objects.filter(
             business_id=business_id,
             invoice_date__gte=start_date,
             type_of_invoice=invoice_type,
-        )
+        ).only("invoice_number")
 
-        # Find the one with the highest trailing number
-        import re as _re
-        last_invoice = None
+        recognized_pattern = re.compile(r"^(?:\d+|[A-Za-z]+/\d{4}-\d{2}/\d+)\s*$")
         max_num = 0
+        last_invoice = None
         for inv in fy_invoices:
-            m = _re.search(r"(\d+)\s*$", inv.invoice_number)
+            if not recognized_pattern.match(inv.invoice_number or ""):
+                continue
+            m = re.search(r"(\d+)\s*$", inv.invoice_number)
             if m:
                 n = int(m.group(1))
                 if n > max_num:
                     max_num = n
                     last_invoice = inv
-
-        import re
 
         next_number = 1
         if last_invoice:
@@ -1588,7 +1595,6 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             try:
                 next_number = int(inv_num) + 1
             except (ValueError, IndexError):
-                # Extract trailing number from formats like "SGJ/2024-25/108"
                 match = re.search(r"(\d+)\s*$", inv_num)
                 if match:
                     next_number = int(match.group(1)) + 1
