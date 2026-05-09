@@ -49,10 +49,8 @@ jobs:
       - name: Install dependencies
         run: |
           uv venv
-          uv pip install -r requirements.txt 2>/dev/null || \
-            uv pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers \
-              django-crispy-forms django-htmx django-sql-explorer django-simple-history django-cacheops \
-              psycopg2-binary openpyxl num2words pytest pytest-django python-dotenv
+          # Install from pyproject.toml so CI tracks declared deps (incl. google-genai etc.)
+          uv pip install . pytest pytest-django gunicorn
       - name: Run tests
         run: |
           source .venv/bin/activate
@@ -97,9 +95,8 @@ jobs:
         run: |
           pip install uv
           uv venv
-          uv pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers \
-            django-crispy-forms django-htmx django-sql-explorer django-simple-history django-cacheops \
-            psycopg2-binary openpyxl num2words gunicorn python-dotenv
+          # Install from pyproject.toml so CI tracks declared deps automatically
+          uv pip install . gunicorn
       - name: Migrate + seed
         run: |
           source .venv/bin/activate
