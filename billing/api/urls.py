@@ -16,6 +16,7 @@ from .views import (
     CSVImportView,
     CustomerViewSet,
     InvoiceViewSet,
+    ITCReclaimLedgerView,
     LineItemViewSet,
     ProductViewSet,
     ProfileView,
@@ -47,6 +48,12 @@ urlpatterns = [
         "invoices/<int:invoice_id>/line-items/",
         LineItemViewSet.as_view({"get": "list", "post": "create"}),
         name="invoice-line-items",
+    ),
+    # ITC Reclaim Ledger (ECRRS opening balance, per business)
+    path(
+        "itc-ledger/<int:business_id>/",
+        ITCReclaimLedgerView.as_view(),
+        name="itc-reclaim-ledger",
     ),
     # Profile & User Management
     path("profile/", ProfileView.as_view(), name="profile"),

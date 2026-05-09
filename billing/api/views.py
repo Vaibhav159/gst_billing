@@ -14,6 +14,7 @@ from django.db.models import (
 )
 from django.db.models.functions import Cast, Coalesce, ExtractMonth, ExtractYear
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from num2words import num2words
@@ -1212,6 +1213,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         queryset = self.get_queryset()
         invoice_ids = list(queryset.values_list("id", flat=True))
         items = LineItem.objects.filter(invoice_id__in=invoice_ids)
+        # business_id from query string — used for the per-business ECRRS ledger
+        # below. None when querying across all businesses.
+        try:
+            business_id = int(request.query_params.get("business_id") or 0) or None
+        except (TypeError, ValueError):
+            business_id = None
 
         # 1. Rate-wise breakdown (GSTR-1 style)
         rate_slabs = {}
@@ -1307,10 +1314,140 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             },
         }
 
+        # ── GSTR-3B Table 4 (current portal structure as of May 2026) ──
+        # Sub-rows: 4(A)(1) imports, 4(A)(5) all other ITC (= current period
+        # inward tax), 4(B)(1) non-reclaimable reversal, 4(B)(2) reclaimable
+        # reversal, 4(C) Net = 4(A) - 4(B), 4(D)(1) reclaimed, 4(D)(2) ineligible.
+        # The reversal/reclaim rows aren't tracked by line item yet, so they
+        # default to 0 — the frontend lets the user override them per period.
+        # The ECRRS opening balance comes from the ITCReclaimLedger model
+        # (per-business), keyed by business_id; if querying across all
+        # businesses, the closing balance card on the frontend just hides.
+        from billing.models import ITCReclaimLedger
+        opening_balance = None
+        if business_id:
+            ledger = ITCReclaimLedger.objects.filter(business_id=business_id).first()
+            if ledger:
+                opening_balance = {
+                    "cgst": float(ledger.opening_cgst),
+                    "sgst": float(ledger.opening_sgst),
+                    "igst": float(ledger.opening_igst),
+                    "as_of": ledger.opening_as_of.isoformat() if ledger.opening_as_of else None,
+                }
+
+        gstr3b_table4 = {
+            # 4(A) ITC Available
+            "a_1_imports_goods": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "a_2_imports_services": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "a_3_rcm": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "a_4_isd": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "a_5_all_other_itc": {
+                "cgst": float(inward_tax["cgst"]),
+                "sgst": float(inward_tax["sgst"]),
+                "igst": float(inward_tax["igst"]),
+            },
+            "a_total": {
+                "cgst": float(inward_tax["cgst"]),
+                "sgst": float(inward_tax["sgst"]),
+                "igst": float(inward_tax["igst"]),
+            },
+            # 4(B) ITC Reversed — kept at 0 until per-line reversal tracking lands
+            "b_1_non_reclaimable": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "b_2_reclaimable": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "b_total": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            # 4(C) Net ITC available = 4(A) - 4(B)
+            "c_net_itc": {
+                "cgst": float(inward_tax["cgst"]),
+                "sgst": float(inward_tax["sgst"]),
+                "igst": float(inward_tax["igst"]),
+            },
+            # 4(D) Other details
+            "d_1_reclaimed": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            "d_2_ineligible": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
+            # ECRRS reclaim ledger context
+            "ecrrs_opening_balance": opening_balance,
+            "ecrrs_closing_balance": opening_balance,  # opening + 4(B)(2) - 4(D)(1); both 0 for now
+        }
+
+        # ── ITC Aging (Sec 16(4) cut-off) ──
+        # ITC must be claimed by Nov 30 of the FY *following* the invoice date,
+        # else it's forfeit. Bucket inward invoices by days-until-cutoff and
+        # surface anything within 60 days as urgent.
+        from datetime import date as _date, timedelta
+        today = _date.today()
+        inward_with_dates = (
+            queryset.filter(type_of_invoice="inward")
+            .values("id", "invoice_number", "invoice_date", "total_amount")
+            .annotate(
+                tax=Coalesce(
+                    Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")),
+                    Decimal("0"),
+                ),
+            )
+        )
+        aging_buckets = {
+            "fresh": {"label": "≤ 60 days to cutoff", "count": 0, "tax": 0.0},
+            "warning": {"label": "60–180 days", "count": 0, "tax": 0.0},
+            "stale": {"label": "180+ days (still claimable)", "count": 0, "tax": 0.0},
+            "expired": {"label": "Past Sec 16(4) cutoff (forfeit)", "count": 0, "tax": 0.0},
+        }
+        urgent_invoices = []
+        for inv in inward_with_dates:
+            inv_date = inv["invoice_date"]
+            if not inv_date:
+                continue
+            # FY of invoice: Apr-Mar
+            fy_start = inv_date.year if inv_date.month >= 4 else inv_date.year - 1
+            cutoff = _date(fy_start + 1, 11, 30)  # Nov 30 of following FY
+            days_left = (cutoff - today).days
+            tax_amt = float(inv["tax"])
+            if days_left < 0:
+                bucket = "expired"
+            elif days_left <= 60:
+                bucket = "fresh"
+            elif days_left <= 180:
+                bucket = "warning"
+            else:
+                bucket = "stale"
+            aging_buckets[bucket]["count"] += 1
+            aging_buckets[bucket]["tax"] += tax_amt
+            if bucket in ("fresh", "expired") and len(urgent_invoices) < 50:
+                urgent_invoices.append({
+                    "id": inv["id"],
+                    "invoice_number": inv["invoice_number"],
+                    "invoice_date": inv_date.isoformat(),
+                    "total_amount": float(inv["total_amount"]),
+                    "tax": tax_amt,
+                    "cutoff": cutoff.isoformat(),
+                    "days_left": days_left,
+                    "bucket": bucket,
+                })
+        urgent_invoices.sort(key=lambda x: x["days_left"])
+
+        # ── GSTR-1 vs GSTR-3B reconciliation ──
+        # In a clean book, the rate-slab tax (cgst+sgst+igst per rate) should
+        # match GSTR-3B output_tax exactly. Variance != 0 hints at line items
+        # with missing/wrong rate annotations or out-of-band tax adjustments.
+        gstr1_total_tax = sum(
+            r["cgst"] + r["sgst"] + r["igst"]
+            for r in rate_slabs.get("outward", [])
+        )
+        gstr1_3b_recon = {
+            "gstr1_total_tax": gstr1_total_tax,
+            "gstr3b_output_tax": gstr3b["output_tax"]["total"],
+            "variance": gstr3b["output_tax"]["total"] - gstr1_total_tax,
+        }
+
         return Response({
             "rate_slabs": rate_slabs,
             "hsn_summary": hsn_summary,
             "gstr3b": gstr3b,
+            "gstr3b_table4": gstr3b_table4,
+            "itc_aging": {
+                "buckets": aging_buckets,
+                "urgent_invoices": urgent_invoices,
+            },
+            "gstr1_3b_recon": gstr1_3b_recon,
         })
 
     @action(detail=False, methods=["get"])
@@ -2937,6 +3074,62 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             logger.exception(f"Undo failed for audit entry {pk}")
             return Response({"error": str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ITCReclaimLedgerView(APIView):
+    """
+    GET  /api/itc-ledger/<business_id>/  — fetch the ECRRS opening balance for a
+                                            business; auto-creates a zero row on
+                                            first access so the frontend always
+                                            gets a valid object.
+    PATCH /api/itc-ledger/<business_id>/ — update opening_cgst/sgst/igst.
+
+    The closing balance is computed live elsewhere (gst_summary) — this endpoint
+    only owns the *opening* declaration that GSTN expects taxpayers to seed once.
+    """
+
+    permission_classes = [RoleBasedPermission]
+    audit_entity = "itc_ledger"
+
+    def _get_or_create(self, business_id):
+        try:
+            business = Business.objects.get(id=business_id)
+        except Business.DoesNotExist:
+            return None, Response(
+                {"error": f"Business {business_id} not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        from billing.models import ITCReclaimLedger
+        ledger, _ = ITCReclaimLedger.objects.get_or_create(
+            business=business,
+            defaults={"workspace_id": getattr(business, "workspace_id", 1) or 1},
+        )
+        return ledger, None
+
+    def get(self, request, business_id):
+        ledger, err = self._get_or_create(business_id)
+        if err:
+            return err
+        from .serializers import ITCReclaimLedgerSerializer
+        return Response(ITCReclaimLedgerSerializer(ledger).data)
+
+    def patch(self, request, business_id):
+        ledger, err = self._get_or_create(business_id)
+        if err:
+            return err
+        from .serializers import ITCReclaimLedgerSerializer
+        serializer = ITCReclaimLedgerSerializer(ledger, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        # Auto-stamp opening_as_of when the user mutates an opening_* field but
+        # doesn't supply an explicit date — saves them a click on every edit.
+        if "opening_as_of" not in request.data and any(
+            k in request.data for k in ("opening_cgst", "opening_sgst", "opening_igst")
+        ):
+            serializer.save(opening_as_of=timezone.now().date())
+        else:
+            serializer.save()
+        return Response(serializer.data)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

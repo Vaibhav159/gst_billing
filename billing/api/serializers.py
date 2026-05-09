@@ -4,7 +4,7 @@ import mimetypes
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from billing.models import Business, Customer, Invoice, LineItem, Product
+from billing.models import Business, Customer, Invoice, ITCReclaimLedger, LineItem, Product
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -171,6 +171,20 @@ class AuditLogSerializer(serializers.ModelSerializer):
         if obj.action == "created":
             return True
         return False
+
+
+class ITCReclaimLedgerSerializer(serializers.ModelSerializer):
+    """ECRRS opening balance for a business — editable per Table 4 ITC reclaim flow."""
+
+    class Meta:
+        model = ITCReclaimLedger
+        fields = [
+            "id", "business",
+            "opening_cgst", "opening_sgst", "opening_igst",
+            "opening_as_of",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
