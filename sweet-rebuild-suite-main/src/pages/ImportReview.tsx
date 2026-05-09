@@ -363,6 +363,7 @@ export default function ImportReview() {
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">GST</th>
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Firm</th>
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Items</th>
+                <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">GST %</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">SGST</th>
@@ -425,6 +426,13 @@ export default function ImportReview() {
                         <>{inv.items.length}<span className="text-[9px] text-muted-foreground ml-0.5">({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})</span></>
                       )}
                     </td>
+                    <td className="px-3 py-2 text-center font-mono text-muted-foreground text-[11px]">
+                      {(() => {
+                        const rates = Array.from(new Set(inv.items.map(i => i.gstRate))).filter(r => r > 0);
+                        if (rates.length === 0) return <span className="text-destructive/70">?</span>;
+                        return rates.length === 1 ? `${rates[0]}%` : rates.map(r => `${r}%`).join("/");
+                      })()}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.subtotal)}</td>
                     <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalCGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalCGST)}</td>
                     <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalSGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalSGST)}</td>
@@ -446,7 +454,7 @@ export default function ImportReview() {
             </tbody>
             <tfoot className="bg-secondary/40 border-t-2 border-border/40">
               <tr className="font-semibold text-[11px]">
-                <td colSpan={8} className="px-3 py-2.5 text-right text-muted-foreground uppercase">
+                <td colSpan={9} className="px-3 py-2.5 text-right text-muted-foreground uppercase">
                   Selected Total ({selectedInvoices.size} invoices)
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.subtotal, 0))}</td>
