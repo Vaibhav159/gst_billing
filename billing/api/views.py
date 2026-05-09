@@ -2396,6 +2396,28 @@ class BulkInvoiceImportView(APIView):
                                 cgst = tax_amount / 2
                                 sgst = tax_amount / 2
                         amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
+
+                        # Validate per-field DB constraints BEFORE bulk_create so
+                        # a single bad row doesn't 500 the whole batch.
+                        # quantity / cgst / sgst / igst are NUMERIC(10,3) → abs < 10^7
+                        # rate / amount / gst_tax_rate are NUMERIC(12,3) → abs < 10^9
+                        OVERFLOW_10 = Decimal("10000000")
+                        OVERFLOW_12 = Decimal("1000000000")
+                        bad = None
+                        if abs(qty) >= OVERFLOW_10: bad = ("quantity", qty)
+                        elif abs(cgst) >= OVERFLOW_10: bad = ("cgst", cgst)
+                        elif abs(sgst) >= OVERFLOW_10: bad = ("sgst", sgst)
+                        elif abs(igst) >= OVERFLOW_10: bad = ("igst", igst)
+                        elif abs(rate) >= OVERFLOW_12: bad = ("rate", rate)
+                        elif abs(amount) >= OVERFLOW_12: bad = ("amount", amount)
+                        if bad:
+                            errors.append(
+                                f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
+                                f"{bad[0]} value {bad[1]} exceeds DB limit. "
+                                f"Likely qty×rate computation error — check input."
+                            )
+                            continue
+
                         line_items_to_create.append(LineItem(
                             invoice=invoice, customer=invoice.customer,
                             product_name=product_name or "Item",
