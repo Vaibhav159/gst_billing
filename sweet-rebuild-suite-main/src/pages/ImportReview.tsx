@@ -363,6 +363,7 @@ export default function ImportReview() {
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">SGST</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">IGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Total</th>
                 <th className="px-3 py-2.5 w-10"></th>
               </tr>
@@ -422,8 +423,9 @@ export default function ImportReview() {
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.subtotal)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.totalCGST)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.totalSGST)}</td>
+                    <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalCGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalCGST)}</td>
+                    <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalSGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalSGST)}</td>
+                    <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalIGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalIGST)}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{"\u20b9"}{fmt(inv.total)}</td>
                     <td className="px-3 py-2 text-center">
                       {editingIdx === idx ? (
@@ -447,6 +449,7 @@ export default function ImportReview() {
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.subtotal, 0))}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.totalCGST, 0))}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.totalSGST, 0))}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.totalIGST, 0))}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums font-bold">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.total, 0))}</td>
                 <td></td>
               </tr>
