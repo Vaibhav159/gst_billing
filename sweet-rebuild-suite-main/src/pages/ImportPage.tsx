@@ -6,7 +6,7 @@ import {
   UserPlus, X, Plus, AlertCircle, Check, Copy, Pencil, Save,
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers, useInvoices, useProducts } from "@/hooks/useDataStore";
 import type { Business, Customer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion, AnimatePresence } from "framer-motion";
@@ -389,6 +389,8 @@ export default function ImportPage({ type }: ImportPageProps) {
   const { items: businesses } = useBusinesses();
   const { items: customers, refetch: refetchCustomers } = useCustomers();
   const { items: existingInvoices, refetch: refetchInvoices } = useInvoices(undefined, type === "invoice");
+  // Products fetched only when generating the import template (invoice flow)
+  const { items: productsForTemplate } = useProducts(undefined, undefined, type === "invoice");
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [bizFilter, setBizFilter] = useState("all");
@@ -816,16 +818,43 @@ export default function ImportPage({ type }: ImportPageProps) {
               </div>
             )}
 
-            <div className="flex gap-2">
-              <button onClick={handleSampleDownload} className="premium-btn-outline flex-1 text-[12px] h-10">
+            {type === "invoice" ? (
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    downloadSampleExcel({
+                      businesses: businesses.map((b: any) => ({ name: b.name, gst_number: b.gst_number })),
+                      products: (productsForTemplate || []).map((p: any) => ({ name: p.name })),
+                      includeInward: false,
+                      withSamples: true,
+                    });
+                    toast({ title: "Smart Template Downloaded", description: `Pre-filled with your ${businesses.length} business(es) and ${(productsForTemplate || []).length} product(s)` });
+                  }}
+                  className="premium-btn-primary w-full text-[12px] h-10"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> Download Smart Template
+                </button>
+                <button
+                  onClick={() => {
+                    downloadSampleExcel({
+                      businesses: businesses.map((b: any) => ({ name: b.name, gst_number: b.gst_number })),
+                      products: (productsForTemplate || []).map((p: any) => ({ name: p.name })),
+                      includeInward: true,
+                      withSamples: true,
+                    });
+                    toast({ title: "Full Template Downloaded", description: "Includes both Outward + Inward sheets per business" });
+                  }}
+                  className="premium-btn-outline w-full text-[11px] h-9"
+                >
+                  <Download className="w-3.5 h-3.5" /> + Inward sheets too
+                </button>
+                <p className="text-[10px] text-muted-foreground text-center">Pre-filled with your real businesses, GSTINs, and product list dropdowns.</p>
+              </div>
+            ) : (
+              <button onClick={handleSampleDownload} className="premium-btn-outline w-full text-[12px] h-10">
                 <Download className="w-3.5 h-3.5" /> Sample CSV
               </button>
-              {type === "invoice" && (
-                <button onClick={() => { downloadSampleExcel(); toast({ title: "Template Downloaded", description: "invoice-import-template.xlsx" }); }} className="premium-btn-outline flex-1 text-[12px] h-10">
-                  <FileSpreadsheet className="w-3.5 h-3.5" /> Excel Template
-                </button>
-              )}
-            </div>
+            )}
           </div>
 
           {/* Tips */}
