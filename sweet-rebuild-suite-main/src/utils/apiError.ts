@@ -16,7 +16,24 @@ export function formatApiError(err: any, fallback = "Something went wrong"): str
     return err.message || fallback;
   }
   const { status, data } = err.response;
-  if (typeof data === "string") return `[${status}] ${data}`;
+  if (typeof data === "string") {
+    // Detect Django debug HTML / generic HTML and pull out the actual exception
+    if (data.startsWith("<!DOCTYPE") || data.includes("<html") || data.includes("<pre class=\"exception_value\"")) {
+      // Try Django's <pre class="exception_value">...
+      const m = data.match(/<pre[^>]*class="exception_value"[^>]*>([\s\S]*?)<\/pre>/i);
+      if (m) {
+        const text = m[1].replace(/<[^>]+>/g, "").replace(/&[a-z#0-9]+;/gi, " ").trim();
+        return `[${status}] ${text.slice(0, 300)}`;
+      }
+      // Try <title>
+      const t = data.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (t) {
+        return `[${status}] Server error — ${t[1].replace(/\s+/g, " ").trim().slice(0, 200)}`;
+      }
+      return `[${status}] Server returned an HTML error page. Check the server logs.`;
+    }
+    return `[${status}] ${data.slice(0, 400)}`;
+  }
   if (!data || typeof data !== "object") return `[${status}] ${err.message || fallback}`;
 
   // DRF detail
