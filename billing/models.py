@@ -285,7 +285,11 @@ class Invoice(AbstractBaseModel):
         # was redundant and added a SELECT round-trip even on plain PATCHes that
         # didn't touch line items. Callers that need a hard recalculation can
         # pass `recalc_total=True` (e.g. data-fix scripts).
-        if self.pk and kwargs.pop("recalc_total", False):
+        # NOTE: pop the kwarg UNCONDITIONALLY before the if — otherwise on a
+        # fresh-create (self.pk falsy), short-circuit eval skips the pop and
+        # the unknown kwarg leaks into super().save() → TypeError.
+        recalc = kwargs.pop("recalc_total", False)
+        if self.pk and recalc:
             self.total_amount = sum(
                 LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
             )

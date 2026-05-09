@@ -50,7 +50,8 @@ jobs:
         run: |
           uv venv
           # Install from pyproject.toml so CI tracks declared deps (incl. google-genai etc.)
-          uv pip install . pytest pytest-django gunicorn
+          # setuptools needed for pkg_resources used by some transitive deps.
+          uv pip install . pytest pytest-django gunicorn setuptools
       - name: Run tests
         run: |
           source .venv/bin/activate
@@ -95,8 +96,10 @@ jobs:
         run: |
           pip install uv
           uv venv
-          # Install from pyproject.toml so CI tracks declared deps automatically
-          uv pip install . gunicorn
+          # Install from pyproject.toml so CI tracks declared deps automatically.
+          # `setuptools` is needed by some transitive deps that still import
+          # `pkg_resources` at runtime (uv's venv doesn't include it by default).
+          uv pip install . gunicorn setuptools
       - name: Migrate + seed
         run: |
           source .venv/bin/activate
