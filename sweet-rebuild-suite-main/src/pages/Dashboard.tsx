@@ -355,16 +355,12 @@ export default function Dashboard() {
               </div>
               <div className="relative h-8 -mx-1">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={sparkData} margin={{ top: 2, right: 2, bottom: 0, left: 2 }}>
-                    <defs>
-                      <linearGradient id={`spark-${card.label}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={`hsl(var(--${card.color.replace("text-", "")}))`} stopOpacity={0.3} />
-                        <stop offset="100%" stopColor={`hsl(var(--${card.color.replace("text-", "")}))`} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area type="monotone" dataKey="v" stroke={`hsl(var(--${card.color.replace("text-", "")}))`}
-                      strokeWidth={1.5} fill={`url(#spark-${card.label})`} dot={false} />
-                  </AreaChart>
+                  {/* Bar-per-month so a single-month spike reads as "April had
+                      activity, others flat" rather than a line shooting off
+                      the left edge with no x-axis context. */}
+                  <BarChart data={sparkData} margin={{ top: 2, right: 2, bottom: 0, left: 2 }} barCategoryGap={1}>
+                    <Bar dataKey="v" fill={`hsl(var(--${card.color.replace("text-", "")}))`} radius={[2, 2, 0, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </motion.div>
