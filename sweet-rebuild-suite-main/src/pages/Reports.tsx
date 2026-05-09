@@ -52,6 +52,9 @@ export default function Reports() {
   const totalCount = totals.count;
 
   // Monthly data from server stats
+  // Round to 3 decimal places to avoid floating-point noise (e.g. 6107.1684000000005)
+  // showing in chart tooltips.
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
   const monthlyData = useMemo(() => {
     const fyStart = parseInt(selectedFY.split("-")[0]);
     return MONTHS.map((m, idx) => {
@@ -60,8 +63,8 @@ export default function Reports() {
       const match = (statsData?.monthly || []).find((d: any) => d.month === monthNum && d.year === year);
       return {
         month: m,
-        sales: match ? (Number(match.outward_total) || 0) / 1000 : 0,
-        purchases: match ? (Number(match.inward_total) || 0) / 1000 : 0,
+        sales: match ? r3((Number(match.outward_total) || 0) / 1000) : 0,
+        purchases: match ? r3((Number(match.inward_total) || 0) / 1000) : 0,
       };
     });
   }, [selectedFY, statsData?.monthly]);
@@ -256,7 +259,11 @@ export default function Reports() {
                   <BarChart data={monthlyData} barGap={2}>
                     <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                      formatter={(v: number) => Math.round(v * 1000) / 1000}
+                    />
                     <Bar dataKey="sales" name="Sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
                     <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
                   </BarChart>
