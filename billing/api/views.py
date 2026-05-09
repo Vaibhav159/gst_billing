@@ -2346,19 +2346,30 @@ class BulkInvoiceImportView(APIView):
                     for item in items:
                         qty = Decimal(str(item.get("qty", 0)))
                         rate = Decimal(str(item.get("rate", 0)))
-                        gst_rate = Decimal(str(item.get("gstRate", 3))) / Decimal("100")
-                        net_amount = qty * rate
-                        tax_amount = net_amount * gst_rate
+                        gst_rate_raw = Decimal(str(item.get("gstRate", 3)))
+                        # Accept either decimal (0.03) or percentage (3)
+                        gst_rate = gst_rate_raw if gst_rate_raw <= 1 else gst_rate_raw / Decimal("100")
                         cgst = Decimal(str(item.get("cgst", 0)))
                         sgst = Decimal(str(item.get("sgst", 0)))
                         igst = Decimal(str(item.get("igst", 0)))
+                        # User-supplied gross amount takes precedence — they may not have qty/rate
+                        user_amount = Decimal(str(item.get("amount", 0)))
+                        net_amount = qty * rate
+                        if net_amount == 0 and user_amount > 0:
+                            # Back-derive net from gross + taxes
+                            net_amount = user_amount - cgst - sgst - igst
+                            if net_amount < 0:
+                                # Edge case: caller sent amount but no taxes — treat as gross-incl-tax
+                                net_amount = user_amount / (1 + gst_rate)
+                        tax_amount = net_amount * gst_rate
                         if cgst == 0 and sgst == 0 and igst == 0:
                             if is_igst:
                                 igst = tax_amount
                             else:
                                 cgst = tax_amount / 2
                                 sgst = tax_amount / 2
-                        amount = net_amount + cgst + sgst + igst
+                        # Final amount: prefer user-supplied if non-zero, else net + taxes
+                        amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
                         line_items_to_create.append(LineItem(
                             invoice=invoice, customer=invoice.customer,
                             product_name=item.get("productName", "Item"),

@@ -229,20 +229,29 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]);
       const partyName = strVal(row[colMap.partyName ?? (hasSNo ? 3 : 2)]);
       const gstNumber = strVal(row[colMap.gstNumber ?? (hasSNo ? 4 : 3)]);
-      const commodity = strVal(row[colMap.commodity ?? (hasSNo ? 5 : 4)]);
-      const hsnCode = strVal(row[colMap.hsnCode ?? (hasSNo ? 6 : 5)]);
+      // Defaults for jewellery shops if columns missing/empty
+      const commodity = strVal(row[colMap.commodity ?? (hasSNo ? 5 : 4)]) || "Gold Ornaments";
+      const hsnCode = strVal(row[colMap.hsnCode ?? (hasSNo ? 6 : 5)]) || "711319";
       const gstRateStr = strVal(row[colMap.gstRate ?? (hasSNo ? 7 : 6)]).replace("%", "");
-      const gstRate = numVal(gstRateStr);
+      let gstRate = numVal(gstRateStr);
+      if (gstRate === 0) gstRate = 3; // default 3% for jewellery
       const qty = numVal(row[colMap.qty ?? (hasSNo ? 8 : 7)]);
       const rate = numVal(row[colMap.rate ?? (hasSNo ? 9 : 8)]);
 
-      // Taxable value: from column or calculate from qty * rate
+      // Total — read first since we may back-compute from it
+      let totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : (numVal(row[hasSNo ? 14 : 13]) || numVal(row[hasSNo ? 15 : 14]));
+
+      // Taxable: from column → qty*rate → back-calc from total
       let taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : numVal(row[hasSNo ? 10 : 9]);
       if (taxableValue === 0 && qty > 0 && rate > 0) {
         taxableValue = Math.round(qty * rate * 100) / 100;
       }
+      if (taxableValue === 0 && totalInvoiceValue > 0) {
+        // Back-calc from total: taxable = total / (1 + gst%)
+        taxableValue = Math.round((totalInvoiceValue / (1 + gstRate / 100)) * 100) / 100;
+      }
 
-      // Tax values - from columns or calculate
+      // Tax values — from columns or auto-compute from gst rate
       let cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : numVal(row[hasSNo ? 11 : 10]);
       let sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : numVal(row[hasSNo ? 12 : 11]);
       let igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : numVal(row[hasSNo ? 13 : 12]);
@@ -253,14 +262,14 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
         sgst = Math.round(taxableValue * halfRate / 100 * 100) / 100;
       }
 
-      // Total: from column or calculate
-      let totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : (numVal(row[hasSNo ? 14 : 13]) || numVal(row[hasSNo ? 15 : 14]));
+      // Total: if still 0, derive from taxable + tax components
       if (totalInvoiceValue === 0 && taxableValue > 0) {
         totalInvoiceValue = Math.round((taxableValue + cgst + sgst + igst) * 100) / 100;
       }
 
-      // Skip if no meaningful data
-      if (!billNo && !partyName && qty === 0) continue;
+      // Skip if no meaningful data — must have a bill# OR party name AND some price signal
+      if (!billNo && !partyName) continue;
+      if (qty === 0 && rate === 0 && totalInvoiceValue === 0) continue;
 
       invoices.push({
         sNo: sNo || invoices.length + 1,
