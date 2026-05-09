@@ -572,9 +572,17 @@ export default function ImportPage({ type }: ImportPageProps) {
         try {
           const data = e.target?.result as ArrayBuffer;
           const result = parseInvoiceExcel(data);
+          // mapDjangoProduct in useDataStore renames the API fields to
+          // `hsn` (string) and `gstRate` (percentage form, e.g. 3 = 3%).
+          // toImportReadyInvoices accepts either name shape, but passing the
+          // raw camelCase fields here keeps things explicit.
           const invoices = toImportReadyInvoices(
             result,
-            (productsForTemplate || []).map((p: any) => ({ name: p.name, hsn_code: p.hsn_code, gst_tax_rate: p.gst_tax_rate })),
+            (productsForTemplate || []).map((p: any) => ({
+              name: p.name,
+              hsn: p.hsn,
+              gstRate: p.gstRate,
+            })),
           );
           if (invoices.length > 0) {
             toast({ title: "Excel Parsed", description: `Found ${invoices.length} invoices from ${result.firms.length} firm(s)` });
