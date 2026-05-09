@@ -50,8 +50,10 @@ jobs:
         run: |
           uv venv
           # Install from pyproject.toml so CI tracks declared deps (incl. google-genai etc.)
-          # setuptools needed for pkg_resources used by some transitive deps.
-          uv pip install . pytest pytest-django gunicorn setuptools
+          # setuptools needed for pkg_resources used by some transitive deps
+          # (e.g. django-simple-history). Pin <81 because setuptools 81+ removed
+          # the vendored `pkg_resources` module.
+          uv pip install . pytest pytest-django gunicorn 'setuptools<81'
       - name: Run tests
         run: |
           source .venv/bin/activate
@@ -97,7 +99,8 @@ jobs:
           # Install from pyproject.toml so CI tracks declared deps automatically.
           # `setuptools` is needed by some transitive deps that still import
           # `pkg_resources` at runtime (uv's venv doesn't include it by default).
-          uv pip install . gunicorn setuptools
+          # Pin <81 because setuptools 81+ removed the vendored `pkg_resources`.
+          uv pip install . gunicorn 'setuptools<81'
       - name: Migrate + seed
         run: |
           source .venv/bin/activate

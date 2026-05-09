@@ -15,7 +15,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from gst_billing import local
+# `local.py` holds dev secrets and is gitignored. In CI / fresh checkouts it
+# may not exist — fall back to env vars so settings can still load.
+try:
+    from gst_billing import local  # type: ignore[attr-defined]
+except ImportError:
+    class _LocalShim:
+        SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only")
+        DATABASES = None
+    local = _LocalShim()  # type: ignore[assignment]
 
 load_dotenv()
 
