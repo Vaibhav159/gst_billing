@@ -20,7 +20,9 @@ test.describe('Auth flow', () => {
     await page.fill('input[name="username"], input[type="text"]', 'testuser');
     await page.fill('input[name="password"], input[type="password"]', 'testpass2026');
     await page.click('button[type="submit"]');
-    await page.waitForURL(/dashboard|invoice|home|^http:\/\/localhost\/?$/, { timeout: 15000 });
+    // Login.tsx navigates to "/" on success. Match any URL whose path is
+    // "/" (or contains dashboard/invoice/home) regardless of host:port.
+    await page.waitForURL((url) => url.pathname === '/' || /dashboard|invoice|home/.test(url.pathname), { timeout: 15000 });
     console.log(`[TIMING] Login submit + redirect: ${Date.now() - t0}ms`);
   });
 });

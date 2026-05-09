@@ -374,7 +374,11 @@ function buildProductMap(products?: ProductLookup[]) {
   const ci: Record<string, { hsn: string; gstPercent: number }> = {};
   if (!products) return { exact, ci };
 
-  for (const p of products) {
+  // Sort by name so the case-insensitive "first-seen wins" fallback is
+  // deterministic regardless of the API ordering the caller passes in.
+  const sortedProducts = [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  for (const p of sortedProducts) {
     if (!p.name) continue;
     const hsn = p.hsn || p.hsn_code || "";
     const raw = p.gstRate ?? p.gst_tax_rate ?? 0;
