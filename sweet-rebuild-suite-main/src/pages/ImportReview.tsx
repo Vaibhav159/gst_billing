@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface LocationState {
   parsedInvoices: ImportReadyInvoice[];
@@ -238,18 +239,12 @@ export default function ImportReview() {
         state: { invoices: toImport, result, businessName: businesses.find(b => String(b.id) === bizFilter)?.name || "All Businesses" },
       });
     } catch (err: any) {
-      // Surface real backend errors (DRF validation errors, exceptions) instead of generic "Import failed"
-      const data = err?.response?.data;
-      let msg = err?.message || "Import failed.";
-      if (data) {
-        if (typeof data === "string") msg = data;
-        else if (data.error) msg = data.error;
-        else if (data.detail) msg = data.detail;
-        else if (data.message) msg = data.message;
-        else if (Array.isArray(data.errors)) msg = data.errors.slice(0, 3).join("; ");
-        else msg = JSON.stringify(data).slice(0, 300);
-      }
-      toast({ title: `Import Failed (${err?.response?.status || "network"})`, description: msg, variant: "destructive", duration: 15000 });
+      toast({
+        title: `Import Failed ${errorTag(err)}`,
+        description: formatApiError(err, "Import failed."),
+        variant: "destructive",
+        duration: 15000,
+      });
     }
     setImporting(false);
   };

@@ -55,9 +55,7 @@ jobs:
       - name: Run tests
         run: |
           source .venv/bin/activate
-          # Use the project's existing test_settings.py (SQLite in-memory)
-          # rather than the CI postgres for now, since that's what local pytest uses
-          pytest billing/ -x --tb=short || true
+          pytest billing/ -x --tb=short
 
   frontend:
     name: Frontend (vitest + Playwright E2E)
@@ -121,23 +119,30 @@ jobs:
           gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 2 --daemon
           sleep 3
           curl -s -o /dev/null -w "Django: %{http_code}\n" http://localhost:8000/api/profile/ || true
-      - name: Build frontend
+      - name: Install frontend deps
         working-directory: sweet-rebuild-suite-main
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
       - name: Run frontend unit tests
         working-directory: sweet-rebuild-suite-main
-        run: npm run test -- --run || true
-      - name: Serve built frontend
+        run: npm run test -- --run
+      - name: Start Vite dev server (with /api proxy to Django)
         working-directory: sweet-rebuild-suite-main
         run: |
-          npx serve -s dist -l 8080 &
-          sleep 2
-          curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/ || true
+          # Vite dev server proxies /api → http://127.0.0.1:8000 (see vite.config.ts).
+          # Production build + `npx serve` would NOT proxy, so login/API calls would
+          # land back on the frontend host.
+          nohup npx vite --port 8080 --host 0.0.0.0 > /tmp/vite.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:8080/ >/dev/null 2>&1; then
+              echo "Vite ready"; break
+            fi
+            sleep 1
+          done
+          curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/
+          curl -s -o /dev/null -w "API via proxy: %{http_code}\n" http://localhost:8080/api/profile/
       - name: Install Playwright
         run: |
-          cd e2e-tests || mkdir -p e2e-tests && cd e2e-tests
+          cd e2e-tests
           npm init -y >/dev/null 2>&1
           npm install -D @playwright/test
           npx playwright install --with-deps chromium
@@ -145,10 +150,7 @@ jobs:
         working-directory: e2e-tests
         env:
           BASE_URL: http://localhost:8080
-        run: |
-          # Override baseURL in playwright.config.js to point at localhost:8080
-          # The tests are already in e2e-tests/tests/
-          npx playwright test --reporter=list || true
+        run: npx playwright test --reporter=list
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4

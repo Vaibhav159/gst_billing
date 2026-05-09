@@ -3,7 +3,7 @@ module.exports = {
   timeout: 90000,
   reporter: [['list'], ['json', { outputFile: 'results.json' }]],
   use: {
-    baseURL: 'http://localhost',
+    baseURL: process.env.BASE_URL || 'http://localhost:8080',
     headless: true,
     viewport: { width: 1280, height: 720 },
     screenshot: 'only-on-failure',

@@ -224,15 +224,14 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const hasSNo = colMap.sNo !== undefined;
       const offset = hasSNo ? 0 : -1; // If no S.No column, all columns shift left by 1
 
-      // Use named-column detection (colMap) when available; only fall back to
-      // hardcoded positions for the CORE 7 columns (Bill, Date, Party, GST,
-      // Commodity, Qty, Rate) — and only when colMap is empty (no headers were
-      // detected at all). For optional/derivable columns (HSN, GST Rate,
-      // taxable, CGST/SGST/IGST, Total), if colMap doesn't have them, the
-      // file simply doesn't have them — don't guess at positions, otherwise we
-      // misread Rate as GST Rate when columns shifted.
-      const hasNamedHeaders = Object.keys(colMap).length >= 4;
-
+      // CORE columns (Bill, Date, Party, GST, Commodity, Qty, Rate) keep a
+      // positional fallback for files without recognizable headers — those
+      // 7 are required so we have to find them somewhere. OPTIONAL columns
+      // (HSN, GST Rate, Taxable, CGST/SGST/IGST, Total) read ONLY when
+      // colMap explicitly maps them; otherwise they default to "" / 0 and
+      // the backend resolves from Product master. This prevents misreading
+      // the Rate column as GST Rate when the file has fewer columns than
+      // the legacy template.
       const sNo = colMap.sNo !== undefined ? numVal(row[colMap.sNo]) : 0;
       const billNo = strVal(row[colMap.billNo ?? (hasSNo ? 1 : 0)]);
       const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]);
@@ -253,8 +252,6 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : 0;
       const igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : 0;
       const totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : 0;
-      // Suppress lint about hasNamedHeaders if not used (kept for future logic)
-      void hasNamedHeaders;
 
       // Skip blank lines — must have a bill# AND party name AND qty+rate or total
       if (!billNo || !partyName) continue;
@@ -375,8 +372,7 @@ function buildProductMap(products?: ProductLookup[]) {
   // tax rate.
   const exact: Record<string, { hsn: string; gstPercent: number }> = {};
   const ci: Record<string, { hsn: string; gstPercent: number }> = {};
-  const ciConflicts: Record<string, Set<number>> = {};
-  if (!products) return { exact, ci, ciConflicts };
+  if (!products) return { exact, ci };
 
   for (const p of products) {
     if (!p.name) continue;
@@ -388,21 +384,13 @@ function buildProductMap(products?: ProductLookup[]) {
     const exactKey = p.name.trim();
     const ciKey = exactKey.toLowerCase();
     if (!(exactKey in exact)) exact[exactKey] = { hsn, gstPercent };
-
-    if (ciKey in ci) {
-      // Track conflicting GST rates for diagnostics
-      if (Math.abs(ci[ciKey].gstPercent - gstPercent) > 0.001) {
-        if (!ciConflicts[ciKey]) ciConflicts[ciKey] = new Set();
-        ciConflicts[ciKey].add(ci[ciKey].gstPercent);
-        ciConflicts[ciKey].add(gstPercent);
-      }
-      // First-seen wins for case-insensitive — sorted alphabetically by
-      // ProductLookup caller, so uppercase ASCII variants come first
-    } else {
-      ci[ciKey] = { hsn, gstPercent };
-    }
+    // First-seen wins for case-insensitive lookup. Combined with the
+    // exact-case map above, a row with "GOLD COIN" gets the upper-case
+    // entry; "gold coin" gets the lower-case entry; "Gold Coin" falls back
+    // to whichever was declared first in the products[] argument.
+    if (!(ciKey in ci)) ci[ciKey] = { hsn, gstPercent };
   }
-  return { exact, ci, ciConflicts };
+  return { exact, ci };
 }
 
 function lookupProduct(

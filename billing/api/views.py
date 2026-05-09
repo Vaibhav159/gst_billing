@@ -2159,13 +2159,25 @@ class BulkInvoiceImportView(APIView):
             if c.name:
                 cust_by_name[c.name.lower()] = c
 
-        # Product master lookup — by lowercase name. Used to resolve HSN +
-        # GST rate when the import file doesn't supply them, so we never
-        # silently default to magic numbers.
-        product_by_name = {}
-        for p in Product.objects.all().only("id", "name", "hsn_code", "gst_tax_rate"):
-            if p.name:
-                product_by_name[p.name.lower()] = p
+        # Product master lookup. Two-tier so case-only duplicates in the
+        # master (e.g. "GOLD COIN" 3% AND "gold coin" 12%) don't silently
+        # apply the wrong tax rate based on DB iteration order.
+        # exact-case wins → falls back to lowercase first-seen.
+        product_by_exact = {}
+        product_by_ci = {}
+        for p in Product.objects.all().only("id", "name", "hsn_code", "gst_tax_rate").order_by("name"):
+            if not p.name:
+                continue
+            if p.name not in product_by_exact:
+                product_by_exact[p.name] = p
+            ci_key = p.name.lower()
+            if ci_key not in product_by_ci:
+                product_by_ci[ci_key] = p
+
+        def lookup_product(name):
+            if not name:
+                return None
+            return product_by_exact.get(name) or product_by_ci.get(name.lower())
 
         # ---------- PRE-PASS: bulk-create new customers in ONE round-trip ----------
         # Walk all invoices, identify customer names that don't exist yet, dedupe,
@@ -2346,9 +2358,32 @@ class BulkInvoiceImportView(APIView):
 
             # ---------- PHASE 3: bulk writes ----------
             # Bulk-create invoices in ONE round-trip. PostgreSQL fills in PKs.
+            # If bulk_create raises for one bad row (e.g. malformed date), we
+            # don't want the whole batch to 500. Try the bulk path first; on
+            # failure, fall back to per-row create so good rows still land
+            # and bad rows surface as per-row errors.
             if invoices_to_create:
                 invoice_objs = [pair[0] for pair in invoices_to_create]
-                Invoice.objects.bulk_create(invoice_objs, batch_size=200)
+                try:
+                    Invoice.objects.bulk_create(invoice_objs, batch_size=200)
+                except Exception as bulk_err:
+                    logger.warning(
+                        "bulk_create failed (%s); falling back to per-row create", bulk_err
+                    )
+                    surviving = []
+                    for invoice, inv_data in invoices_to_create:
+                        try:
+                            invoice.save()
+                            surviving.append((invoice, inv_data))
+                        except Exception as row_err:
+                            errors.append(
+                                f"Invoice {inv_data.get('invoiceNumber','?')}: "
+                                f"could not create — {row_err}"
+                            )
+                            created_count -= 1
+                            skipped_count += 1
+                    invoices_to_create = surviving
+                    invoice_objs = [pair[0] for pair in surviving]
                 # Now invoice.pk is populated; build line items + audit logs.
                 for invoice, inv_data in invoices_to_create:
                     items = inv_data.get("items", [])
@@ -2358,7 +2393,7 @@ class BulkInvoiceImportView(APIView):
                         # Resolve HSN + GST rate from Product master if not supplied.
                         # Never silently default — if the row has no GST rate AND
                         # no matching product, fail with a clear message.
-                        product = product_by_name.get(product_name.lower())
+                        product = lookup_product(product_name)
                         hsn_code = (item.get("hsn") or "").strip()
                         gst_rate_raw_in = item.get("gstRate")
                         if gst_rate_raw_in in (None, "", 0, "0"):

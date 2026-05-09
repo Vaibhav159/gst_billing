@@ -233,10 +233,15 @@ function buildFirmSheet(opts: {
   // Freeze the meta+header rows
   ws["!freeze"] = { xSplit: 0, ySplit: headerRowIdx + 1, topLeftCell: `A${headerRowIdx + 2}` };
 
-  // Data validation: dropdown for Commodity column from product list
+  // Data validation: dropdown for Commodity column referencing a hidden
+  // products sheet. Inline-string formulae are limited to 255 chars and
+  // can break if a product name contains a comma or quote — using a sheet
+  // reference avoids both issues.
+  // The hidden sheet is built once at the workbook level (see addProductListSheet)
+  // and referenced here by name.
   if (opts.productNames.length > 0) {
     const dvRange = `F${dataStartRow + 1}:F${dataStartRow + 50}`; // column F = index 5
-    const list = opts.productNames.slice(0, 200).join(",");
+    const lastRow = opts.productNames.length;
     (ws as any)["!dataValidation"] = [
       {
         type: "list",
@@ -245,13 +250,29 @@ function buildFirmSheet(opts: {
         showErrorMessage: true,
         promptTitle: "Commodity",
         prompt: "Pick from your Product list. Add new ones via Products page first.",
-        formulae: [`"${list.replace(/"/g, '""').slice(0, 250)}"`],
+        formulae: [`=_ProductList!$A$1:$A$${lastRow}`],
         sqref: dvRange,
       },
     ];
   }
 
   return { ws, merges };
+}
+
+/** Add a hidden _ProductList sheet that data-validation cells reference. */
+function addProductListSheet(wb: XLSX.WorkBook, productNames: string[]) {
+  if (productNames.length === 0) return;
+  const ws: any = {};
+  productNames.forEach((name, i) => {
+    ws[XLSX.utils.encode_cell({ r: i, c: 0 })] = { v: name, t: "s" };
+  });
+  ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: productNames.length - 1, c: 0 } });
+  XLSX.utils.book_append_sheet(wb, ws, "_ProductList");
+  // Hide the sheet (xlsx-js-style supports !sheets metadata; not all readers
+  // honor it, but Excel/Google Sheets do).
+  if (!wb.Workbook) wb.Workbook = { Sheets: [] };
+  if (!wb.Workbook.Sheets) wb.Workbook.Sheets = [];
+  wb.Workbook.Sheets.push({ name: "_ProductList", Hidden: 1 });
 }
 
 /**
@@ -338,6 +359,10 @@ export function generateSampleExcelBytes(opts: TemplateOptions = {}): Uint8Array
     productCount: productNames.length,
   });
   XLSX.utils.book_append_sheet(wb, instructions, "Instructions");
+
+  // Hidden products list backing the data-validation dropdowns. Must be
+  // appended BEFORE the firm sheets that reference it.
+  addProductListSheet(wb, productNames);
 
   // One sheet per (firm × supply type)
   for (const biz of businesses) {
