@@ -42,9 +42,13 @@ function getMonthlyDataFromStats(fy: string, monthlyRaw: any[]) {
 
 interface OutletCtx { selectedFY: string }
 
-function getMiniTrend(data: { outward: number; inward: number }[], type: "outward" | "inward" | "net") {
+function getMiniTrend(
+  data: { month: string; outward: number; inward: number }[],
+  type: "outward" | "inward" | "net",
+) {
   return data.map((d, i) => ({
     i,
+    month: d.month,
     v: type === "net" ? d.outward - d.inward : d[type],
   }));
 }
@@ -362,8 +366,16 @@ export default function Dashboard() {
                         <stop offset="100%" stopColor={`hsl(var(--${card.color.replace("text-", "")}))`} stopOpacity={0} />
                       </linearGradient>
                     </defs>
+                    <Tooltip
+                      cursor={{ stroke: `hsl(var(--${card.color.replace("text-", "")}))`, strokeOpacity: 0.3, strokeWidth: 1 }}
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11, padding: "4px 8px", color: "hsl(var(--foreground))" }}
+                      labelFormatter={() => ""}
+                      formatter={(v: number, _n: any, p: any) => [formatCurrency(v), p?.payload?.month || ""]}
+                    />
                     <Area type="monotone" dataKey="v" stroke={`hsl(var(--${card.color.replace("text-", "")}))`}
-                      strokeWidth={1.5} fill={`url(#spark-${card.label})`} dot={false} />
+                      strokeWidth={1.5} fill={`url(#spark-${card.label})`}
+                      dot={{ r: 1.5, fill: `hsl(var(--${card.color.replace("text-", "")}))`, fillOpacity: 0.4, stroke: "none" }}
+                      activeDot={{ r: 3, fill: `hsl(var(--${card.color.replace("text-", "")}))`, stroke: "hsl(var(--background))", strokeWidth: 1 }} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
