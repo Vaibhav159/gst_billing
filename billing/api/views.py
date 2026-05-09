@@ -2309,7 +2309,14 @@ class BulkInvoiceImportView(APIView):
                             pan_number=clean_pan, state_name="RAJASTHAN",
                             workspace_id=1,
                         )
+                        # Update ALL lookup caches so a later row referencing the
+                        # same GST/PAN under a different name resolves to this
+                        # customer instead of creating a duplicate.
                         cust_by_name[customer_name.lower()] = customer
+                        if clean_gst:
+                            cust_by_gst[clean_gst.upper()] = customer
+                        if clean_pan:
+                            cust_by_pan[clean_pan.upper()] = customer
 
                     if business and business.pk and customer.pk:
                         # Track for M2M attach (idempotent — .add() is a no-op if exists)
@@ -2389,12 +2396,15 @@ class BulkInvoiceImportView(APIView):
                     items = inv_data.get("items", [])
                     is_igst = invoice.is_igst_applicable
                     for item in items:
-                        product_name = (item.get("productName") or "").strip()
+                        # Excel cells can come through as numbers (e.g. HSN "711319"
+                        # parsed as int) — coerce to str before .strip() so one
+                        # numeric cell can't AttributeError the whole batch.
+                        product_name = str(item.get("productName") or "").strip()
                         # Resolve HSN + GST rate from Product master if not supplied.
                         # Never silently default — if the row has no GST rate AND
                         # no matching product, fail with a clear message.
                         product = lookup_product(product_name)
-                        hsn_code = (item.get("hsn") or "").strip()
+                        hsn_code = str(item.get("hsn") or "").strip()
                         gst_rate_raw_in = item.get("gstRate")
                         if gst_rate_raw_in in (None, "", 0, "0"):
                             if not product:

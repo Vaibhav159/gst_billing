@@ -17,27 +17,11 @@ jobs:
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-24.04
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: gst_test
-          POSTGRES_PASSWORD: gst_test_local
-          POSTGRES_DB: gst_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U gst_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
+    # No Postgres service — gst_billing.test_settings forces SQLite (:memory:)
+    # for fast unit tests. The DB_* env vars and Postgres provisioning would be
+    # ignored. The frontend job below still uses Postgres for E2E migrate/seed.
     env:
       DJANGO_SETTINGS_MODULE: gst_billing.test_settings
-      DB_HOST: localhost
-      DB_PORT: 5432
-      DB_NAME: gst_test
-      DB_USER: gst_test
-      DB_PASSWORD: gst_test_local
       DJANGO_SECRET_KEY: ci-test-key-not-secret
     steps:
       - uses: actions/checkout@v4
