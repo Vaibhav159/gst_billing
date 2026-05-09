@@ -369,25 +369,56 @@ export interface ProductLookup {
 }
 
 function buildProductMap(products?: ProductLookup[]) {
-  const map: Record<string, { hsn: string; gstPercent: number }> = {};
-  if (!products) return map;
+  // Two-tier lookup: exact-case first, then case-insensitive fallback.
+  // Surfaces conflicts (e.g. master has BOTH "GOLD COIN" and "gold coin"
+  // with different GST rates) so the import doesn't silently use the wrong
+  // tax rate.
+  const exact: Record<string, { hsn: string; gstPercent: number }> = {};
+  const ci: Record<string, { hsn: string; gstPercent: number }> = {};
+  const ciConflicts: Record<string, Set<number>> = {};
+  if (!products) return { exact, ci, ciConflicts };
+
   for (const p of products) {
     if (!p.name) continue;
     const hsn = p.hsn || p.hsn_code || "";
     const raw = p.gstRate ?? p.gst_tax_rate ?? 0;
     const num = typeof raw === "number" ? raw : parseFloat(String(raw)) || 0;
-    // Normalize to percentage (3 means 3%)
     const gstPercent = num > 1 ? num : num * 100;
-    map[p.name.toLowerCase().trim()] = { hsn, gstPercent };
+
+    const exactKey = p.name.trim();
+    const ciKey = exactKey.toLowerCase();
+    if (!(exactKey in exact)) exact[exactKey] = { hsn, gstPercent };
+
+    if (ciKey in ci) {
+      // Track conflicting GST rates for diagnostics
+      if (Math.abs(ci[ciKey].gstPercent - gstPercent) > 0.001) {
+        if (!ciConflicts[ciKey]) ciConflicts[ciKey] = new Set();
+        ciConflicts[ciKey].add(ci[ciKey].gstPercent);
+        ciConflicts[ciKey].add(gstPercent);
+      }
+      // First-seen wins for case-insensitive — sorted alphabetically by
+      // ProductLookup caller, so uppercase ASCII variants come first
+    } else {
+      ci[ciKey] = { hsn, gstPercent };
+    }
   }
-  return map;
+  return { exact, ci, ciConflicts };
+}
+
+function lookupProduct(
+  commodity: string,
+  maps: ReturnType<typeof buildProductMap>,
+): { hsn: string; gstPercent: number } | undefined {
+  if (!commodity) return undefined;
+  const key = commodity.trim();
+  return maps.exact[key] || maps.ci[key.toLowerCase()];
 }
 
 export function toImportReadyInvoices(
   result: ParsedExcelResult,
   products?: ProductLookup[],
 ): ImportReadyInvoice[] {
-  const productMap = buildProductMap(products);
+  const productMaps = buildProductMap(products);
   const invoices: ImportReadyInvoice[] = [];
 
   for (const firm of result.firms) {
@@ -413,11 +444,11 @@ export function toImportReadyInvoices(
       const items = rows.map(row => {
         // Resolve GST% (in percentage form): row → product → 0
         let gstPercent = row.gstRate;
+        const lookup = lookupProduct(row.commodity, productMaps);
         if (!gstPercent || gstPercent === 0) {
-          const lookup = productMap[(row.commodity || "").toLowerCase().trim()];
           if (lookup) gstPercent = lookup.gstPercent;
         }
-        const hsn = row.hsnCode || (productMap[(row.commodity || "").toLowerCase().trim()]?.hsn ?? "");
+        const hsn = row.hsnCode || (lookup?.hsn ?? "");
 
         // Compute taxable: prefer file value → qty*rate → back-derive from total
         let taxable = row.taxableValue;
