@@ -2159,6 +2159,14 @@ class BulkInvoiceImportView(APIView):
             if c.name:
                 cust_by_name[c.name.lower()] = c
 
+        # Product master lookup — by lowercase name. Used to resolve HSN +
+        # GST rate when the import file doesn't supply them, so we never
+        # silently default to magic numbers.
+        product_by_name = {}
+        for p in Product.objects.all().only("id", "name", "hsn_code", "gst_tax_rate"):
+            if p.name:
+                product_by_name[p.name.lower()] = p
+
         # ---------- PRE-PASS: bulk-create new customers in ONE round-trip ----------
         # Walk all invoices, identify customer names that don't exist yet, dedupe,
         # bulk_create. Avoids N serial INSERTs when many invoices reference new
@@ -2344,11 +2352,32 @@ class BulkInvoiceImportView(APIView):
                     items = inv_data.get("items", [])
                     is_igst = invoice.is_igst_applicable
                     for item in items:
+                        product_name = (item.get("productName") or "").strip()
+                        # Resolve HSN + GST rate from Product master if not supplied.
+                        # Never silently default — if the row has no GST rate AND
+                        # no matching product, fail with a clear message.
+                        product = product_by_name.get(product_name.lower())
+                        hsn_code = (item.get("hsn") or "").strip()
+                        gst_rate_raw_in = item.get("gstRate")
+                        if gst_rate_raw_in in (None, "", 0, "0"):
+                            if not product:
+                                errors.append(
+                                    f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
+                                    f"product not found in Product list and no GST rate supplied. "
+                                    f"Add the product first or include a GST Rate column."
+                                )
+                                continue
+                            gst_rate = Decimal(str(product.gst_tax_rate))
+                            if not hsn_code:
+                                hsn_code = product.hsn_code or ""
+                        else:
+                            gst_rate_raw = Decimal(str(gst_rate_raw_in))
+                            gst_rate = gst_rate_raw if gst_rate_raw <= 1 else gst_rate_raw / Decimal("100")
+                            if not hsn_code and product:
+                                hsn_code = product.hsn_code or ""
+
                         qty = Decimal(str(item.get("qty", 0)))
                         rate = Decimal(str(item.get("rate", 0)))
-                        gst_rate_raw = Decimal(str(item.get("gstRate", 3)))
-                        # Accept either decimal (0.03) or percentage (3)
-                        gst_rate = gst_rate_raw if gst_rate_raw <= 1 else gst_rate_raw / Decimal("100")
                         cgst = Decimal(str(item.get("cgst", 0)))
                         sgst = Decimal(str(item.get("sgst", 0)))
                         igst = Decimal(str(item.get("igst", 0)))
@@ -2356,10 +2385,8 @@ class BulkInvoiceImportView(APIView):
                         user_amount = Decimal(str(item.get("amount", 0)))
                         net_amount = qty * rate
                         if net_amount == 0 and user_amount > 0:
-                            # Back-derive net from gross + taxes
                             net_amount = user_amount - cgst - sgst - igst
                             if net_amount < 0:
-                                # Edge case: caller sent amount but no taxes — treat as gross-incl-tax
                                 net_amount = user_amount / (1 + gst_rate)
                         tax_amount = net_amount * gst_rate
                         if cgst == 0 and sgst == 0 and igst == 0:
@@ -2368,12 +2395,11 @@ class BulkInvoiceImportView(APIView):
                             else:
                                 cgst = tax_amount / 2
                                 sgst = tax_amount / 2
-                        # Final amount: prefer user-supplied if non-zero, else net + taxes
                         amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
                         line_items_to_create.append(LineItem(
                             invoice=invoice, customer=invoice.customer,
-                            product_name=item.get("productName", "Item"),
-                            hsn_code=item.get("hsn", "711319"),
+                            product_name=product_name or "Item",
+                            hsn_code=hsn_code or "",
                             gst_tax_rate=gst_rate,
                             quantity=qty, rate=rate,
                             cgst=cgst, sgst=sgst, igst=igst, amount=amount,
@@ -2390,22 +2416,43 @@ class BulkInvoiceImportView(APIView):
             if line_items_to_create:
                 LineItem.objects.bulk_create(line_items_to_create, batch_size=200)
 
-            # Safety net: recompute Invoice.total_amount from line items.
-            # bulk_create doesn't fire the post_save signal that normally keeps
-            # totals in sync. We trust the front-end-supplied total in inv_data
-            # but also re-sync to be defensive in case the payload was wrong.
+            # If any invoices ended up with NO line items (all their items errored
+            # out during product/GST resolution), they must be removed — otherwise
+            # they'd be created with NULL total_amount, which violates the column
+            # constraint and corrupts the database with stub invoices.
             if invoices_to_create:
-                from django.db.models import OuterRef, Subquery, Sum, DecimalField
+                from django.db.models import OuterRef, Subquery, Sum, DecimalField, Q
+                from django.db.models.functions import Coalesce
                 invoice_ids = [inv.pk for inv, _ in invoices_to_create if inv.pk]
                 if invoice_ids:
-                    sub = (LineItem.objects
-                           .filter(invoice=OuterRef("pk"))
-                           .values("invoice")
-                           .annotate(s=Sum("amount"))
-                           .values("s"))
-                    Invoice.objects.filter(pk__in=invoice_ids).update(
-                        total_amount=Subquery(sub, output_field=DecimalField())
+                    # Find invoices with no line items and decrement counters
+                    empty_inv_ids = list(
+                        Invoice.objects.filter(pk__in=invoice_ids, lineitem__isnull=True)
+                        .values_list("pk", flat=True)
                     )
+                    if empty_inv_ids:
+                        # Roll back stub invoices and adjust counters
+                        Invoice.objects.filter(pk__in=empty_inv_ids).delete()
+                        invoice_ids = [pk for pk in invoice_ids if pk not in empty_inv_ids]
+                        created_count -= len(empty_inv_ids)
+                        skipped_count += len(empty_inv_ids)
+
+                    # Safety net: recompute Invoice.total_amount = SUM(line_items)
+                    # for the surviving invoices. bulk_create skips the post_save
+                    # signal that normally keeps total in sync, so we re-derive.
+                    if invoice_ids:
+                        sub = (LineItem.objects
+                               .filter(invoice=OuterRef("pk"))
+                               .values("invoice")
+                               .annotate(s=Sum("amount"))
+                               .values("s"))
+                        Invoice.objects.filter(pk__in=invoice_ids).update(
+                            total_amount=Coalesce(
+                                Subquery(sub, output_field=DecimalField()),
+                                Decimal("0"),
+                                output_field=DecimalField(),
+                            )
+                        )
 
             # Add per-row error entries to the audit log so failures are
             # visible in the UI's audit log page (not just Django logs).

@@ -59,22 +59,24 @@ const configs = {
     back: "/billing/invoice/list",
     breadcrumb: [{ label: "Invoices", href: "/billing/invoice/list" }, { label: "Import" }],
     columns: [
-      // The 3 truly required fields
+      // 7 required columns \u2014 no silent defaults; HSN + GST rate are resolved
+      // from the Product master via the Commodity name.
       { name: "Bill No.", required: true, example: "100", note: "" },
       { name: "Invoice Date", required: true, example: "06-02-2026", note: "DD-MM-YYYY" },
       { name: "Party Name", required: true, example: "Rajesh Kumar", note: "" },
-      // Plus EITHER (Qty + Rate) OR Total \u2014 at least one path to a price
-      { name: "Qty (gm)", required: true, example: "37.740", note: "+ Rate, OR use Total" },
+      { name: "GST Number", required: true, example: "08AABCK5461H1ZO", note: "blank cell allowed (= unregistered)" },
+      { name: "Commodity", required: true, example: "Gold Ornaments", note: "must match a product in your Product list" },
+      { name: "Qty (gm)", required: true, example: "37.740", note: "" },
       { name: "Rate (\u20b9/gm)", required: true, example: "16397.00", note: "" },
-      // Optional with smart defaults
-      { name: "GST Number", required: false, example: "08AABCK5461H1ZO", note: "blank = unregistered" },
-      { name: "Commodity", required: false, example: "Gold Ornaments", note: "default: Gold Ornaments" },
-      { name: "HSN Code", required: false, example: "711319", note: "default: 711319" },
-      { name: "GST Rate", required: false, example: "3%", note: "default: 3%" },
-      { name: "Total Invoice Value (\u20b9)", required: false, example: "637221.66", note: "auto-computed if blank" },
-      // Hidden / auto-computed \u2014 kept here so the parser still finds them if present
-      // CGST / SGST / IGST / Taxable Value are NOT shown in the UI list anymore;
-      // the parser computes them from the GST rate when they're missing.
+      // Auto-derived (won't be shown as required in UI, but parser reads them
+      // if the file does include them \u2014 useful when re-importing existing exports)
+      { name: "HSN Code", required: false, example: "711319", note: "from Product list" },
+      { name: "GST Rate", required: false, example: "3%", note: "from Product list" },
+      { name: "Taxable Value (\u20b9)", required: false, example: "618661.80", note: "= Qty \u00d7 Rate" },
+      { name: "CGST (\u20b9)", required: false, example: "9279.93", note: "computed" },
+      { name: "SGST (\u20b9)", required: false, example: "9279.93", note: "computed" },
+      { name: "IGST (\u20b9)", required: false, example: "0.00", note: "computed (inter-state)" },
+      { name: "Total Invoice Value (\u20b9)", required: false, example: "637221.66", note: "= Taxable + tax" },
     ],
     showBusiness: true,
     icon: Receipt,
