@@ -173,7 +173,7 @@ export default function ImportPreview() {
                 <th className="px-3 py-2.5 text-left font-semibold">Commodity</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Qty</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Rate</th>
-                <th className="px-3 py-2.5 text-center font-semibold">GST %</th>
+                <th className="px-3 py-2.5 text-center font-semibold whitespace-nowrap">GST&nbsp;%</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold">SGST</th>

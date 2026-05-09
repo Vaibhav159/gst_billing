@@ -363,7 +363,7 @@ export default function ImportReview() {
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">GST</th>
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Firm</th>
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Items</th>
-                <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">GST %</th>
+                <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap">GST&nbsp;%</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">SGST</th>
