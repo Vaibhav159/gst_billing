@@ -57,6 +57,15 @@ export default function Settings() {
   const [settings, setSettings] = useState(() => loadSettings(businesses[0]?.id || ""));
   const [nextInvoiceInfo, setNextInvoiceInfo] = useState<string>("");
 
+  // useState initializer runs before businesses load (async fetch), so
+  // defaultBusinessId starts empty and stays empty even after the dropdown
+  // visually shows the first business. Sync state once businesses arrive.
+  useEffect(() => {
+    if (!settings.defaultBusinessId && businesses.length > 0) {
+      setSettings((p) => ({ ...p, defaultBusinessId: String(businesses[0].id) }));
+    }
+  }, [businesses, settings.defaultBusinessId]);
+
   // Fetch real next invoice number when business changes
   useEffect(() => {
     if (!settings.defaultBusinessId) return;
