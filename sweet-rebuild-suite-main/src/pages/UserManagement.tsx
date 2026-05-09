@@ -143,7 +143,8 @@ export default function UserManagement() {
         {loading ? (
           <div className="p-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" /></div>
         ) : (
-          <table className="table-premium text-[13px]">
+          <div className="overflow-x-auto -mx-px">
+          <table className="table-premium text-[13px] min-w-[640px]">
             <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
             <tbody>
               {users.map((u) => {
@@ -197,6 +198,7 @@ export default function UserManagement() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

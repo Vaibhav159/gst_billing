@@ -154,6 +154,7 @@ e2e-tests/node_modules/
 e2e-tests/test-results/
 e2e-tests/playwright-report/
 e2e-tests/auth-state.json
+audit-results/
 
 # Claude Code runtime artifacts
 .claude/scheduled_tasks.lock
