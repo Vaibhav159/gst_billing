@@ -2486,11 +2486,12 @@ class BulkInvoiceImportView(APIView):
                 LineItem.objects.bulk_create(line_items_to_create, batch_size=200)
 
             # If any invoices ended up with NO line items (all their items errored
-            # out during product/GST resolution), they must be removed — otherwise
-            # they'd be created with NULL total_amount, which violates the column
-            # constraint and corrupts the database with stub invoices.
+            # out during product/GST resolution), they must be removed — leaving
+            # stub invoices behind would corrupt counters and confuse downstream
+            # reports. (total_amount defaults to 0 so NULL isn't the failure mode.)
+            empty_inv_ids: list[int] = []
             if invoices_to_create:
-                from django.db.models import OuterRef, Subquery, Sum, DecimalField, Q
+                from django.db.models import OuterRef, Subquery, Sum, DecimalField
                 from django.db.models.functions import Coalesce
                 invoice_ids = [inv.pk for inv, _ in invoices_to_create if inv.pk]
                 if invoice_ids:
@@ -2535,7 +2536,17 @@ class BulkInvoiceImportView(APIView):
                     ))
 
             if audit_logs_to_create:
-                AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
+                # Drop audit logs that reference invoices we just deleted (those
+                # whose line items all errored out) so we don't leave dangling
+                # entity_id references in the audit log.
+                if empty_inv_ids:
+                    empty_set = set(empty_inv_ids)
+                    audit_logs_to_create = [
+                        log for log in audit_logs_to_create
+                        if not (log.entity == "invoice" and log.entity_id in empty_set)
+                    ]
+                if audit_logs_to_create:
+                    AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
 
             # Link new customers to businesses via M2M — bulk_create the through-table
             # rows instead of N individual .add() calls (each is its own round-trip).

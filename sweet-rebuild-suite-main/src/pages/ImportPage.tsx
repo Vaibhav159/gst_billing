@@ -64,7 +64,7 @@ const configs = {
       { name: "Bill No.", required: true, example: "100", note: "" },
       { name: "Invoice Date", required: true, example: "06-02-2026", note: "DD-MM-YYYY" },
       { name: "Party Name", required: true, example: "Rajesh Kumar", note: "" },
-      { name: "GST Number", required: true, example: "08AABCK5461H1ZO", note: "blank cell allowed (= unregistered)" },
+      { name: "GST Number", required: false, example: "08AABCK5461H1ZO", note: "blank cell allowed (= unregistered)" },
       { name: "Commodity", required: true, example: "Gold Ornaments", note: "must match a product in your Product list" },
       { name: "Qty (gm)", required: true, example: "37.740", note: "" },
       { name: "Rate (\u20b9/gm)", required: true, example: "16397.00", note: "" },

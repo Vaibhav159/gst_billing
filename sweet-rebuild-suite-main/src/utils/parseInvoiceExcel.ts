@@ -253,9 +253,11 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : 0;
       const totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : 0;
 
-      // Skip blank lines — must have a bill# AND party name AND qty+rate or total
+      // Skip blank lines — must have a bill# AND party name AND at least
+      // one signal of monetary content (qty+rate, total, or taxableValue —
+      // some manual exports only fill the taxable column).
       if (!billNo || !partyName) continue;
-      if ((qty === 0 || rate === 0) && totalInvoiceValue === 0) continue;
+      if ((qty === 0 || rate === 0) && totalInvoiceValue === 0 && taxableValue === 0) continue;
 
       invoices.push({
         sNo: sNo || invoices.length + 1,
@@ -391,7 +393,8 @@ function buildProductMap(products?: ProductLookup[]) {
     // First-seen wins for case-insensitive lookup. Combined with the
     // exact-case map above, a row with "GOLD COIN" gets the upper-case
     // entry; "gold coin" gets the lower-case entry; "Gold Coin" falls back
-    // to whichever was declared first in the products[] argument.
+    // to whichever sorted alphabetically first (since products[] is
+    // pre-sorted by name above for determinism).
     if (!(ciKey in ci)) ci[ciKey] = { hsn, gstPercent };
   }
   return { exact, ci };

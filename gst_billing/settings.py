@@ -16,12 +16,24 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # `local.py` holds dev secrets and is gitignored. In CI / fresh checkouts it
-# may not exist — fall back to env vars so settings can still load.
+# may not exist — fall back to env vars so settings can still load. The
+# fallback never picks an insecure default in non-DEBUG environments: if
+# DJANGO_SECRET_KEY is unset and DEBUG isn't truthy, we raise so a misconfigured
+# deploy fails loudly instead of running with a known key.
 try:
     from gst_billing import local  # type: ignore[attr-defined]
 except ImportError:
+    _env_key = os.environ.get("DJANGO_SECRET_KEY")
+    _debug_env = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+    if not _env_key and not _debug_env:
+        raise RuntimeError(
+            "gst_billing/local.py is missing and DJANGO_SECRET_KEY is not set. "
+            "Set DJANGO_SECRET_KEY (or create local.py) before starting Django "
+            "in a non-DEBUG environment."
+        )
+
     class _LocalShim:
-        SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only")
+        SECRET_KEY = _env_key or "django-insecure-dev-only"
         DATABASES = None
     local = _LocalShim()  # type: ignore[assignment]
 

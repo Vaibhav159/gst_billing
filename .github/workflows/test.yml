@@ -128,10 +128,12 @@ jobs:
           curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/
           curl -s -o /dev/null -w "API via proxy: %{http_code}\n" http://localhost:8080/api/profile/
       - name: Install Playwright
+        working-directory: e2e-tests
         run: |
-          cd e2e-tests
-          npm init -y >/dev/null 2>&1
-          npm install -D @playwright/test
+          # e2e-tests/package.json + lockfile are checked in, so npm ci
+          # is reproducible and cache-friendly (vs the previous
+          # `npm init -y && npm install` which had no lockfile).
+          npm ci
           npx playwright install --with-deps chromium
       - name: Run E2E tests
         working-directory: e2e-tests

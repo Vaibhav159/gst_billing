@@ -7,12 +7,10 @@ test.describe('Invoice CRUD', () => {
     await page.waitForLoadState('networkidle');
     console.log(`[TIMING] Invoice form load: ${Date.now() - t0}ms`);
 
-    // Try to find form fields and create
-    const t1 = Date.now();
-    // Look for any invoice creation success indicator
-    const html = await page.content();
-    const hasForm = html.toLowerCase().includes('invoice number') || html.toLowerCase().includes('create invoice');
-    console.log(`[TIMING] Invoice form has fields: ${hasForm} (${Date.now() - t1}ms)`);
+    // Assert the form actually rendered — guards against the route 500ing,
+    // bouncing to /login, or shipping a blank shell.
+    await expect(page).toHaveURL(/\/billing\/invoice\/new/);
+    await expect(page.getByText(/invoice number|create invoice/i).first()).toBeVisible();
   });
 
   test('Customer create flow', async ({ page }) => {
@@ -20,6 +18,9 @@ test.describe('Invoice CRUD', () => {
     await page.goto('/billing/customer/new');
     await page.waitForLoadState('networkidle');
     console.log(`[TIMING] Customer form load: ${Date.now() - t0}ms`);
+
+    await expect(page).toHaveURL(/\/billing\/customer\/new/);
+    await expect(page.getByText(/new customer|customer name|full name/i).first()).toBeVisible();
   });
 
   test('Business create flow', async ({ page }) => {
@@ -27,5 +28,8 @@ test.describe('Invoice CRUD', () => {
     await page.goto('/billing/business/new');
     await page.waitForLoadState('networkidle');
     console.log(`[TIMING] Business form load: ${Date.now() - t0}ms`);
+
+    await expect(page).toHaveURL(/\/billing\/business\/new/);
+    await expect(page.getByText(/new business|business name/i).first()).toBeVisible();
   });
 });

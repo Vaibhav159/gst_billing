@@ -1,0 +1,12 @@
+{
+  "name": "gst-billing-e2e-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright E2E suite for the GST Billing app. Run separately from the frontend.",
+  "scripts": {
+    "test": "playwright test --reporter=list"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}
