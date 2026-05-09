@@ -155,5 +155,8 @@ e2e-tests/test-results/
 e2e-tests/playwright-report/
 e2e-tests/auth-state.json
 
+# Claude Code runtime artifacts
+.claude/scheduled_tasks.lock
+
 # Stray nested duplicate of the React app
 sweet-rebuild-suite-main/sweet-rebuild-suite-main/
