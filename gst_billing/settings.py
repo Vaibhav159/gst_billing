@@ -269,6 +269,10 @@ if REDIS_PASSWORD:
 
 # AI Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Ensure log dir exists — django.utils.log.configure_logging will fail to
+# attach the FileHandler otherwise (fresh checkouts and CI runners).
+os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -296,7 +300,7 @@ LOGGING = {
         "file": {
             "level": "DEBUG",
             "class": "logging.FileHandler",
-            "filename": os.path.join(BASE_DIR, "logs/django.log"),
+            "filename": os.path.join(BASE_DIR, "logs", "django.log"),
             "formatter": "verbose",
         },
     },

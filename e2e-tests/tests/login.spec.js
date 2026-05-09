@@ -1,6 +1,12 @@
 const { test, expect } = require('@playwright/test');
 
 test.describe('Auth flow', () => {
+  // Opt out of the stored auth state from _auth.setup.js so this describe
+  // block exercises the actual login page. Without this, `storageState:
+  // 'auth-state.json'` keeps the user authenticated and `/` redirects past
+  // the login form, causing page.fill('input[name="username"]') to time out.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test('Login page loads', async ({ page }) => {
     const t0 = Date.now();
     await page.goto('/');
