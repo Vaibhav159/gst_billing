@@ -59,7 +59,7 @@ export default function BusinessList() {
   };
 
   return (
-    <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-24" : "p-6 lg:p-10 space-y-6")}>
+    <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-40" : "p-6 lg:p-10 space-y-6")}>
       <Breadcrumbs items={[{ label: "Businesses" }]} />
 
       {/* Header */}

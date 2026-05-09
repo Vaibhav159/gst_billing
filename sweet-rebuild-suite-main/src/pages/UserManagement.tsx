@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Users, Plus, Shield, Pencil, UserCheck, UserX, Loader2 } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion } from "framer-motion";
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import api from "@/utils/api";
@@ -105,7 +105,7 @@ export default function UserManagement() {
           </div>
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">User Management</h1>
-            <p className="text-sm text-muted-foreground">{users.length} users</p>
+            <p className="text-sm text-muted-foreground">{pluralize(users.length, "user")}</p>
           </div>
         </div>
         <button onClick={() => setShowCreate(!showCreate)} className="premium-btn-primary text-[13px]">

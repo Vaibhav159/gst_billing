@@ -6,7 +6,7 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 import { formatCurrency, financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { motion } from "framer-motion";
 import api from "@/utils/api";
 
@@ -124,7 +124,7 @@ export default function GSTRExport() {
 
                 {/* B2B Summary */}
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2B — Registered Dealers ({gstr1.b2b?.length || 0} parties)</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2B — Registered Dealers ({pluralize(gstr1.b2b?.length || 0, "party", "parties")})</h4>
                   {(gstr1.b2b || []).length > 0 ? (
                     <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
                       <thead><tr><th>GSTIN</th><th className="text-right">Invoices</th><th className="text-right">Total Value</th></tr></thead>
@@ -143,7 +143,7 @@ export default function GSTRExport() {
 
                 {/* B2CS Summary */}
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2CS — Unregistered Intra-State ({gstr1.b2cs?.length || 0} entries)</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2CS — Unregistered Intra-State ({pluralize(gstr1.b2cs?.length || 0, "entry", "entries")})</h4>
                   {(gstr1.b2cs || []).length > 0 ? (
                     <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
                       <thead><tr><th>State</th><th>Rate</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th></tr></thead>
@@ -158,7 +158,7 @@ export default function GSTRExport() {
 
                 {/* HSN */}
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({gstr1.hsn?.data?.length || 0} codes)</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({pluralize(gstr1.hsn?.data?.length || 0, "code")})</h4>
                   {(gstr1.hsn?.data || []).length > 0 ? (
                     <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
                       <thead><tr><th>HSN</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>

@@ -896,7 +896,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                 <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Target Business</label>
               </div>
               <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full">
-                <option value="all">Auto-detect from Excel (Match by GSTIN)</option>
+                <option value="all">Auto-detect (match GSTIN)</option>
                 {businesses.map((b) => <option key={b.id} value={b.id}>{b.name} — {b.gst_number}</option>)}
               </select>
             </div>

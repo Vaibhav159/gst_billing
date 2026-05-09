@@ -92,7 +92,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           date: inv.invoice_date || new Date().toISOString().split("T")[0],
           type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
           isIGST: inv.is_igst_applicable || false,
-          financialYear: inv.financial_year || "2024-25",
+          financialYear: inv.financial_year || currentFY,
         });
 
         // Store fallback names for dropdown rendering

@@ -117,22 +117,22 @@ export default function BusinessDetail() {
               { label: "Address", value: biz.address },
             ].map((f) => (
               <div key={f.label} className="flex items-start justify-between">
-                <div><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground">{f.value}</p></div>
-                {f.copyable && <button onClick={() => copyToClipboard(f.value, f.label)} className="mt-2 text-muted-foreground hover:text-foreground">{copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}</button>}
+                <div><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground">{f.value || "—"}</p></div>
+                {f.copyable && f.value && <button onClick={() => copyToClipboard(f.value, f.label)} className="mt-2 text-muted-foreground hover:text-foreground">{copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}</button>}
               </div>
             ))}
           </div>
           {/* Contact */}
           <div className="elevated-card rounded-2xl p-5 space-y-3">
             <h2 className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Contact</h2>
-            <div><p className="text-[10px] text-muted-foreground uppercase">Phone</p><p className="text-[13px] text-foreground tabular-nums">{biz.mobile_number}</p></div>
-            <div><p className="text-[10px] text-muted-foreground uppercase">Email</p><p className="text-[13px] text-foreground">{biz.email}</p></div>
+            <div><p className="text-[10px] text-muted-foreground uppercase">Phone</p><p className="text-[13px] text-foreground tabular-nums">{biz.mobile_number || "—"}</p></div>
+            <div><p className="text-[10px] text-muted-foreground uppercase">Email</p><p className="text-[13px] text-foreground">{biz.email || "—"}</p></div>
           </div>
           {/* Bank */}
           <div className="elevated-card rounded-2xl p-5 space-y-3">
             <h2 className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Bank Details</h2>
             {[{ label: "Bank", value: biz.bank_name }, { label: "Account", value: biz.bank_account_number }, { label: "IFSC", value: biz.bank_ifsc_code }, { label: "Branch", value: biz.bank_branch_name }].map((f) => (
-              <div key={f.label}><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground">{f.value}</p></div>
+              <div key={f.label}><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground">{f.value || "—"}</p></div>
             ))}
           </div>
         </div>

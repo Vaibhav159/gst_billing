@@ -76,7 +76,7 @@ export default function CustomerList() {
   // ─── MOBILE VIEW ───
   if (isMobile) {
     return (
-      <div className="p-4 space-y-4">
+      <div className="p-4 pb-40 space-y-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Customers</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{totalCustomers}</p>

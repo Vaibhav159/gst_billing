@@ -180,12 +180,20 @@ export default function BatchPrint() {
 
   if (invoiceIds.length === 0) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-8 space-y-4">
-        <FileText className="w-12 h-12 text-muted-foreground opacity-30" />
-        <p className="text-sm font-medium text-muted-foreground">No invoices selected for batch print.</p>
-        <Link to="/billing/invoice/list" className="premium-btn-ghost text-sm">
-          <ArrowLeft className="w-4 h-4" /> Back to Invoices
-        </Link>
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className={cn("no-print flex items-center gap-2 border-b border-border bg-card", isMobile ? "px-4 py-3" : "px-8 py-4 gap-3")}>
+          <Link to="/billing/invoice/list" className="text-[12px] text-muted-foreground hover:text-foreground flex items-center gap-1">
+            <ArrowLeft className="w-4 h-4" /> Back
+          </Link>
+          <span className={cn("font-display font-semibold text-foreground", isMobile ? "text-[13px]" : "text-[14px] ml-2")}>Batch Print</span>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-4">
+          <FileText className="w-12 h-12 text-muted-foreground opacity-30" />
+          <p className="text-sm font-medium text-muted-foreground">No invoices selected for batch print.</p>
+          <Link to="/billing/invoice/list" className="premium-btn-ghost text-sm">
+            <ArrowLeft className="w-4 h-4" /> Back to Invoices
+          </Link>
+        </div>
       </div>
     );
   }

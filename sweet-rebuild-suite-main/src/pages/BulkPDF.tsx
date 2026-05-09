@@ -22,14 +22,9 @@ import QRCode from "qrcode";
 export default function BulkPDF() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  // Default to current month and year
-  const now = new Date();
-  const currentMonthIndex = now.getMonth(); // 0-based (0=Jan)
   const MONTHS = ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"];
-  // Map JS month (0-11) to FY month name
-  const fyMonthMap: Record<number, string> = { 3: "April", 4: "May", 5: "June", 6: "July", 7: "August", 8: "September", 9: "October", 10: "November", 11: "December", 0: "January", 1: "February", 2: "March" };
-  const defaultMonth = fyMonthMap[currentMonthIndex] || "April";
-  const [month, setMonth] = useState(defaultMonth);
+  // Default to "all" so the page lands with results visible instead of an empty current month.
+  const [month, setMonth] = useState("all");
   const [selectedFY, setSelectedFY] = useState(currentFY);
   const [bizFilter, setBizFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");

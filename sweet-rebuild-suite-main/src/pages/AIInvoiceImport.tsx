@@ -68,7 +68,7 @@ export default function AIInvoiceImport() {
                 )}>
                   {step > s.n ? <CheckCircle className="w-4 h-4" /> : s.n}
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className={cn("min-w-0 flex-1", step !== s.n && "hidden sm:block")}>
                   <p className={cn("text-[11px] sm:text-[12px] font-semibold truncate", step >= s.n ? "text-foreground" : "text-muted-foreground")}>{s.label}</p>
                 </div>
               </div>

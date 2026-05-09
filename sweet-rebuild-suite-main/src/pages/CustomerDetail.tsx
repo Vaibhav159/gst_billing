@@ -168,7 +168,7 @@ export default function CustomerDetail() {
             ].map((f) => (
               <div key={f.label} className="flex items-center gap-3 p-2 rounded-xl">
                 <f.icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <div className="min-w-0"><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground truncate">{f.value}</p></div>
+                <div className="min-w-0"><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground truncate">{f.value || "—"}</p></div>
               </div>
             ))}
           </div>
@@ -178,10 +178,12 @@ export default function CustomerDetail() {
             <h2 className="text-xs font-display font-semibold text-foreground uppercase tracking-wider">Tax Info</h2>
             {[{ label: "GST", value: customer.gst_number }, { label: "PAN", value: customer.pan_number }].map((f) => (
               <div key={f.label} className="flex items-center justify-between p-2.5 rounded-xl bg-secondary/15 border border-border/30">
-                <div><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><code className="text-[12px] font-mono text-foreground">{f.value}</code></div>
-                <button onClick={() => copyToClipboard(f.value, f.label)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground">
-                  {copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
+                <div><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><code className="text-[12px] font-mono text-foreground">{f.value || "—"}</code></div>
+                {f.value && (
+                  <button onClick={() => copyToClipboard(f.value, f.label)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground">
+                    {copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                )}
               </div>
             ))}
           </div>
