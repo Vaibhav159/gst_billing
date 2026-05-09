@@ -381,6 +381,35 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Business ID is required")
 
+    @freeze_time("2023-06-01")
+    def test_next_invoice_number_ignores_non_numeric_invoice_numbers(self):
+        """Regression: an invoice with embedded digits (e.g. "TEST-1778345121")
+        should not pollute the next-invoice-number sequence. PostgreSQL's CAST
+        used to extract the trailing digits and treat them as the "max" — so
+        a single test invoice could leak a giant timestamp into the suggested
+        next number. Filter to purely numeric invoice_numbers first.
+        """
+        Invoice.objects.create(
+            invoice_number="3",
+            invoice_date="2023-04-15",
+            business=self.business,
+            customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD,
+        )
+        # This non-numeric one used to win the "max" race because its trailing
+        # digits cast to a bigger int.
+        Invoice.objects.create(
+            invoice_number="TEST-1778345121",
+            invoice_date="2023-04-20",
+            business=self.business,
+            customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD,
+        )
+
+        next_n = Invoice.get_next_invoice_number(self.business.id)
+        # Should be 4 (3 + 1), not 1778345122.
+        self.assertEqual(next_n, 4)
+
     def create_another_business(self):
         """Helper method to create another business for testing."""
         return Business.objects.create(
