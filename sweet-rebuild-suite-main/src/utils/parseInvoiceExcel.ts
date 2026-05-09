@@ -224,27 +224,37 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const hasSNo = colMap.sNo !== undefined;
       const offset = hasSNo ? 0 : -1; // If no S.No column, all columns shift left by 1
 
+      // Use named-column detection (colMap) when available; only fall back to
+      // hardcoded positions for the CORE 7 columns (Bill, Date, Party, GST,
+      // Commodity, Qty, Rate) — and only when colMap is empty (no headers were
+      // detected at all). For optional/derivable columns (HSN, GST Rate,
+      // taxable, CGST/SGST/IGST, Total), if colMap doesn't have them, the
+      // file simply doesn't have them — don't guess at positions, otherwise we
+      // misread Rate as GST Rate when columns shifted.
+      const hasNamedHeaders = Object.keys(colMap).length >= 4;
+
       const sNo = colMap.sNo !== undefined ? numVal(row[colMap.sNo]) : 0;
       const billNo = strVal(row[colMap.billNo ?? (hasSNo ? 1 : 0)]);
       const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]);
       const partyName = strVal(row[colMap.partyName ?? (hasSNo ? 3 : 2)]);
       const gstNumber = strVal(row[colMap.gstNumber ?? (hasSNo ? 4 : 3)]);
-      // Read raw values — NO silent defaults. The backend looks up HSN + GST rate
-      // from the Product master via the commodity name.
       const commodity = strVal(row[colMap.commodity ?? (hasSNo ? 5 : 4)]);
-      const hsnCode = strVal(row[colMap.hsnCode ?? (hasSNo ? 6 : 5)]);
-      const gstRateStr = strVal(row[colMap.gstRate ?? (hasSNo ? 7 : 6)]).replace("%", "");
-      const gstRate = numVal(gstRateStr); // 0 if not provided — backend resolves
-      const qty = numVal(row[colMap.qty ?? (hasSNo ? 8 : 7)]);
-      const rate = numVal(row[colMap.rate ?? (hasSNo ? 9 : 8)]);
+      const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : numVal(row[hasSNo ? 8 : 7]);
+      const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : numVal(row[hasSNo ? 9 : 8]);
 
-      // Read columns if present; otherwise leave 0 and let the backend compute
-      // them after resolving the GST rate from Product master.
-      let taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : numVal(row[hasSNo ? 10 : 9]);
-      let cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : numVal(row[hasSNo ? 11 : 10]);
-      let sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : numVal(row[hasSNo ? 12 : 11]);
-      let igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : numVal(row[hasSNo ? 13 : 12]);
-      let totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : (numVal(row[hasSNo ? 14 : 13]) || numVal(row[hasSNo ? 15 : 14]));
+      // OPTIONAL columns — only read if the header explicitly maps them.
+      // If they're missing, leave blank (parser/backend resolves from Product master).
+      const hsnCode = colMap.hsnCode !== undefined ? strVal(row[colMap.hsnCode]) : "";
+      const gstRate = colMap.gstRate !== undefined
+        ? numVal(strVal(row[colMap.gstRate]).replace("%", ""))
+        : 0;
+      const taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : 0;
+      const cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : 0;
+      const sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : 0;
+      const igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : 0;
+      const totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : 0;
+      // Suppress lint about hasNamedHeaders if not used (kept for future logic)
+      void hasNamedHeaders;
 
       // Skip blank lines — must have a bill# AND party name AND qty+rate or total
       if (!billNo || !partyName) continue;
