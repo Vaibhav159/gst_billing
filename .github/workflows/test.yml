@@ -52,7 +52,7 @@ jobs:
           uv pip install -r requirements.txt 2>/dev/null || \
             uv pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers \
               django-crispy-forms django-htmx django-sql-explorer django-simple-history django-cacheops \
-              psycopg2-binary openpyxl xlsx-js-style num2words pytest pytest-django python-dotenv
+              psycopg2-binary openpyxl num2words pytest pytest-django python-dotenv
       - name: Run tests
         run: |
           source .venv/bin/activate
@@ -99,7 +99,7 @@ jobs:
           uv venv
           uv pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers \
             django-crispy-forms django-htmx django-sql-explorer django-simple-history django-cacheops \
-            psycopg2-binary openpyxl xlsx-js-style num2words gunicorn python-dotenv
+            psycopg2-binary openpyxl num2words gunicorn python-dotenv
       - name: Migrate + seed
         run: |
           source .venv/bin/activate
