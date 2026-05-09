@@ -266,10 +266,16 @@ export default function Reports() {
             <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-5">
               <h2 className="text-[13px] font-display font-semibold text-foreground mb-3">Tax Distribution</h2>
               {pieData.length === 0 ? <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">No data</div> : (
-                <div className="h-[180px]"><ResponsiveContainer width="100%" height="100%"><RPieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={4} dataKey="value" label={({ name, value }) => `${name}: ${formatCurrency(value)}`}>{pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(v: number) => formatCurrency(v)} /></RPieChart></ResponsiveContainer></div>
+                <div className="h-[180px]"><ResponsiveContainer width="100%" height="100%"><RPieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value">{pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(v: number) => formatCurrency(v)} /></RPieChart></ResponsiveContainer></div>
               )}
-              <div className="flex items-center justify-center gap-4 mt-2">
-                {pieData.map((d, i) => (<div key={d.name} className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full" style={{ background: PIE_COLORS[i] }} /><span className="text-[11px] text-muted-foreground">{d.name}</span></div>))}
+              <div className="flex items-center justify-center gap-4 mt-2 flex-wrap">
+                {pieData.map((d, i) => (
+                  <div key={d.name} className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i] }} />
+                    <span className="text-[11px] text-muted-foreground">{d.name}</span>
+                    <span className="text-[11px] font-medium text-foreground tabular-nums">{formatCurrency(d.value)}</span>
+                  </div>
+                ))}
               </div>
             </motion.div>
           </motion.div>

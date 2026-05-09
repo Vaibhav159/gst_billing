@@ -280,7 +280,12 @@ class Invoice(AbstractBaseModel):
         return f"{self.invoice_number}_{self.customer.name}"
 
     def save(self, *args, **kwargs):
-        if self.pk:
+        # The post_save / post_delete signals on LineItem keep self.total_amount
+        # in sync (see billing/signals.py). Re-summing on every Invoice.save()
+        # was redundant and added a SELECT round-trip even on plain PATCHes that
+        # didn't touch line items. Callers that need a hard recalculation can
+        # pass `recalc_total=True` (e.g. data-fix scripts).
+        if self.pk and kwargs.pop("recalc_total", False):
             self.total_amount = sum(
                 LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
             )

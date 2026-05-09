@@ -15,6 +15,7 @@ import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
 import { stagger, fadeUp } from "@/utils/animations";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 export default function CustomerList() {
   const { toast } = useToast();
@@ -570,9 +571,10 @@ export default function CustomerList() {
               navigate(`/billing/customer/${mergeTarget}`);
             } catch (err: any) {
               toast({
-                title: "Merge Failed",
-                description: err?.response?.data?.error || "Could not merge customers.",
+                title: `Merge Failed ${errorTag(err)}`,
+                description: formatApiError(err, "Could not merge customers."),
                 variant: "destructive",
+                duration: 12000,
               });
             }
           };

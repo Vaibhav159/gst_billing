@@ -6,6 +6,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import api from "@/utils/api";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface UserData {
   id: number;
@@ -69,7 +70,7 @@ export default function UserManagement() {
       setCreateForm({ username: "", password: "", email: "", first_name: "", last_name: "", role: "editor" });
       fetchUsers();
     } catch (err: any) {
-      toast({ title: "Failed", description: err?.response?.data?.error || "Could not create user.", variant: "destructive" });
+      toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not create user."), variant: "destructive", duration: 12000 });
     }
     setCreating(false);
   };
@@ -81,7 +82,7 @@ export default function UserManagement() {
       fetchUsers();
       setEditingId(null);
     } catch (err: any) {
-      toast({ title: "Failed", description: err?.response?.data?.error || "Could not update role.", variant: "destructive" });
+      toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not update role."), variant: "destructive", duration: 12000 });
     }
   };
 

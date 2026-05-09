@@ -3,6 +3,7 @@ import { Truck, Save, X, Loader2, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface Props {
   invoiceId: string;
@@ -50,7 +51,7 @@ export default function EwayBillForm({ invoiceId, onClose, onSaved }: Props) {
       onSaved?.();
       onClose();
     } catch (err: any) {
-      toast({ title: "Save Failed", description: err?.response?.data?.error || "Could not save", variant: "destructive" });
+      toast({ title: `Save Failed ${errorTag(err)}`, description: formatApiError(err, "Could not save"), variant: "destructive", duration: 12000 });
     }
     setSaving(false);
   };

@@ -10,6 +10,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 16 },
@@ -162,14 +163,7 @@ export default function BusinessForm() {
       setDirty(false);
       navigate("/billing/business/list");
     } catch (err: any) {
-      const detail = err?.response?.data;
-      let errorMsg = "Something went wrong. Please try again.";
-      if (detail && typeof detail === "object") {
-        errorMsg = Object.entries(detail)
-          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
-          .join("\n");
-      }
-      toast({ title: "Save Failed", description: errorMsg, variant: "destructive" });
+      toast({ title: `Save Failed ${errorTag(err)}`, description: formatApiError(err, "Could not save business."), variant: "destructive", duration: 12000 });
     }
   };
 

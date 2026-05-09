@@ -16,6 +16,7 @@ import { parseInvoiceExcel, toImportReadyInvoices } from "@/utils/parseInvoiceEx
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { indianStates } from "@/utils/mockData";
 import { downloadSampleExcel } from "@/utils/generateSampleExcel";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface ImportPageProps { type: "customer" | "product" | "invoice" | "business" }
 
@@ -186,14 +187,7 @@ function InlineQuickAddCustomer({
       toast({ title: "Customer Created", description: form.name });
       onCreated(created as Customer);
     } catch (err: any) {
-      const detail = err?.response?.data;
-      let errorMsg = "Could not create customer.";
-      if (detail && typeof detail === "object") {
-        errorMsg = Object.entries(detail)
-          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
-          .join("; ");
-      }
-      toast({ title: "Creation Failed", description: errorMsg, variant: "destructive" });
+      toast({ title: `Creation Failed ${errorTag(err)}`, description: formatApiError(err, "Could not create customer."), variant: "destructive", duration: 12000 });
     }
     setSubmitting(false);
   };
@@ -668,15 +662,8 @@ export default function ImportPage({ type }: ImportPageProps) {
         toast({ title: "Import Successful", description: `Records from ${file.name} imported successfully.` });
       }
     } catch (err: any) {
-      const data = err?.response?.data;
-      let msg = "Import failed. Check your file format.";
-      if (data?.error) msg = data.error;
-      else if (data?.detail) msg = data.detail;
-      else if (data?.message) msg = data.message;
-      else if (typeof data === "string") msg = data;
-      else if (err?.message) msg = err.message;
-      logger.error("Import error:", err?.response?.status, data);
-      toast({ title: "Import Failed", description: msg, variant: "destructive" });
+      logger.error("Import error:", err?.response?.status, err?.response?.data);
+      toast({ title: `Import Failed ${errorTag(err)}`, description: formatApiError(err, "Import failed. Check your file format."), variant: "destructive", duration: 15000 });
     }
     setImporting(false);
   };

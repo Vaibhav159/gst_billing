@@ -5,6 +5,7 @@ import { indianStates } from "@/utils/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
 import { useCustomers, useBusinesses } from "@/hooks/useDataStore";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface QuickCustomerModalProps {
   open: boolean;
@@ -84,14 +85,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
       setForm({ name: "", gst: "", pan: "", mobile: "", email: "", state: "", address: "" });
       setErrors({});
     } catch (err: any) {
-      const detail = err?.response?.data;
-      let errorMsg = "Could not create customer. Please try again.";
-      if (detail && typeof detail === "object") {
-        errorMsg = Object.entries(detail)
-          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
-          .join("\n");
-      }
-      toast({ title: "Creation Failed", description: errorMsg, variant: "destructive" });
+      toast({ title: `Creation Failed ${errorTag(err)}`, description: formatApiError(err, "Could not create customer."), variant: "destructive", duration: 12000 });
     }
     setSubmitting(false);
   };

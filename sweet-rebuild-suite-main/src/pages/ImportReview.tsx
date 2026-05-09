@@ -211,21 +211,42 @@ export default function ImportReview() {
       }
 
       const { default: api } = await import("@/utils/api");
-      const res = await api.post("invoices/bulk-import/", {
+      const res = await api.post<{ created: number; skipped: number; errors?: string[]; message?: string }>("invoices/bulk-import/", {
         invoices: toImport,
         business_id: bizFilter !== "all" ? bizFilter : undefined,
       });
       const result = res.data;
-      toast({ title: "Import Complete", description: `${result.created} imported, ${result.skipped} skipped.` });
+      const errCount = result.errors?.length || 0;
+      // Show actual outcomes — successes AND failures, with details
+      if (errCount > 0) {
+        const sample = result.errors!.slice(0, 3).join("\n• ");
+        toast({
+          title: `Imported ${result.created}, ${errCount} failed`,
+          description: `• ${sample}${errCount > 3 ? `\n... and ${errCount - 3} more (see Audit Log)` : ""}`,
+          variant: errCount === toImport.length ? "destructive" : "default",
+          duration: 12000,
+        });
+      } else {
+        toast({ title: "Import Complete", description: `${result.created} imported, ${result.skipped} skipped.` });
+      }
       refetchInvoices();
       refetchCustomers();
-      // Navigate to post-import summary
       navigate("/billing/import/preview", {
         state: { invoices: toImport, result, businessName: businesses.find(b => String(b.id) === bizFilter)?.name || "All Businesses" },
       });
     } catch (err: any) {
-      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || "Import failed.";
-      toast({ title: "Import Failed", description: msg, variant: "destructive" });
+      // Surface real backend errors (DRF validation errors, exceptions) instead of generic "Import failed"
+      const data = err?.response?.data;
+      let msg = err?.message || "Import failed.";
+      if (data) {
+        if (typeof data === "string") msg = data;
+        else if (data.error) msg = data.error;
+        else if (data.detail) msg = data.detail;
+        else if (data.message) msg = data.message;
+        else if (Array.isArray(data.errors)) msg = data.errors.slice(0, 3).join("; ");
+        else msg = JSON.stringify(data).slice(0, 300);
+      }
+      toast({ title: `Import Failed (${err?.response?.status || "network"})`, description: msg, variant: "destructive", duration: 15000 });
     }
     setImporting(false);
   };

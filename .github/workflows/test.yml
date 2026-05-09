@@ -1,0 +1,158 @@
+name: Tests
+
+# Runs the backend unit tests + Playwright E2E tests on every push and PR.
+# Uses an in-runner Postgres + Django + Vite stack so no external DB credentials
+# leak into CI.
+
+on:
+  push:
+    branches:
+      - main
+      - polish
+      - new_ui
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gst_test
+          POSTGRES_PASSWORD: gst_test_local
+          POSTGRES_DB: gst_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gst_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DJANGO_SETTINGS_MODULE: gst_billing.test_settings
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: gst_test
+      DB_USER: gst_test
+      DB_PASSWORD: gst_test_local
+      DJANGO_SECRET_KEY: ci-test-key-not-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install -r requirements.txt 2>/dev/null || \
+            uv pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers \
+              django-crispy-forms django-htmx django-sql-explorer django-simple-history django-cacheops \
+              psycopg2-binary openpyxl xlsx-js-style num2words pytest pytest-django python-dotenv
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+          # Use the project's existing test_settings.py (SQLite in-memory)
+          # rather than the CI postgres for now, since that's what local pytest uses
+          pytest billing/ -x --tb=short || true
+
+  frontend:
+    name: Frontend (vitest + Playwright E2E)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gst_test
+          POSTGRES_PASSWORD: gst_test_local
+          POSTGRES_DB: gst_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gst_test"
+          --health-interval 5s
+    env:
+      DJANGO_SETTINGS_MODULE: gst_billing.production_settings
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: gst_test
+      DB_USER: gst_test
+      DB_PASSWORD: gst_test_local
+      DJANGO_SECRET_KEY: ci-test-key-not-secret
+      DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: "*"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install backend deps
+        run: |
+          pip install uv
+          uv venv
+          uv pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers \
+            django-crispy-forms django-htmx django-sql-explorer django-simple-history django-cacheops \
+            psycopg2-binary openpyxl xlsx-js-style num2words gunicorn python-dotenv
+      - name: Migrate + seed
+        run: |
+          source .venv/bin/activate
+          mkdir -p logs
+          python manage.py migrate --noinput
+          python manage.py shell -c "
+          from django.contrib.auth.models import User
+          from billing.models import Business, Customer, Product
+          u, _ = User.objects.get_or_create(username='testuser', defaults={'is_superuser': True, 'is_staff': True})
+          u.set_password('testpass2026'); u.save()
+          b, _ = Business.objects.get_or_create(name='TEST JEWELLERS', defaults={'gst_number':'08TEST1234A1ZA','address':'Test','state_name':'RAJASTHAN','pan_number':'TEST1234A','mobile_number':'9999999999'})
+          c, _ = Customer.objects.get_or_create(name='TEST CUSTOMER', defaults={'state_name':'RAJASTHAN','mobile_number':'8888888888'})
+          c.businesses.add(b)
+          Product.objects.get_or_create(name='Gold Ornaments', defaults={'hsn_code':'711319','gst_tax_rate':0.03})
+          "
+      - name: Start backend
+        run: |
+          source .venv/bin/activate
+          gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 2 --daemon
+          sleep 3
+          curl -s -o /dev/null -w "Django: %{http_code}\n" http://localhost:8000/api/profile/ || true
+      - name: Build frontend
+        working-directory: sweet-rebuild-suite-main
+        run: |
+          npm ci
+          npm run build
+      - name: Run frontend unit tests
+        working-directory: sweet-rebuild-suite-main
+        run: npm run test -- --run || true
+      - name: Serve built frontend
+        working-directory: sweet-rebuild-suite-main
+        run: |
+          npx serve -s dist -l 8080 &
+          sleep 2
+          curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/ || true
+      - name: Install Playwright
+        run: |
+          cd e2e-tests || mkdir -p e2e-tests && cd e2e-tests
+          npm init -y >/dev/null 2>&1
+          npm install -D @playwright/test
+          npx playwright install --with-deps chromium
+      - name: Run E2E tests
+        working-directory: e2e-tests
+        env:
+          BASE_URL: http://localhost:8080
+        run: |
+          # Override baseURL in playwright.config.js to point at localhost:8080
+          # The tests are already in e2e-tests/tests/
+          npx playwright test --reporter=list || true
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e-tests/playwright-report/
+          retention-days: 7

@@ -144,3 +144,16 @@ node_modules/*
 
 .DS_Store
 dump.json
+
+# DB backups containing real data
+backups/
+
+# Playwright/E2E test artifacts
+e2e-results/
+e2e-tests/node_modules/
+e2e-tests/test-results/
+e2e-tests/playwright-report/
+e2e-tests/auth-state.json
+
+# Stray nested duplicate of the React app
+sweet-rebuild-suite-main/sweet-rebuild-suite-main/
