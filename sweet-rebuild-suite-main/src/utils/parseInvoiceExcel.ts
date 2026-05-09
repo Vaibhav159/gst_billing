@@ -347,11 +347,42 @@ export interface ImportReadyInvoice {
   total: number;
 }
 
-export function toImportReadyInvoices(result: ParsedExcelResult): ImportReadyInvoice[] {
+/** Optional Product master used to resolve HSN + GST rate from Commodity name. */
+export interface ProductLookup {
+  /** Product name (case is preserved; lookup is case-insensitive) */
+  name: string;
+  hsn?: string;
+  hsn_code?: string;
+  /** GST rate as decimal (0.03) or percentage (3) — both accepted */
+  gstRate?: number;
+  gst_tax_rate?: number | string;
+}
+
+function buildProductMap(products?: ProductLookup[]) {
+  const map: Record<string, { hsn: string; gstPercent: number }> = {};
+  if (!products) return map;
+  for (const p of products) {
+    if (!p.name) continue;
+    const hsn = p.hsn || p.hsn_code || "";
+    const raw = p.gstRate ?? p.gst_tax_rate ?? 0;
+    const num = typeof raw === "number" ? raw : parseFloat(String(raw)) || 0;
+    // Normalize to percentage (3 means 3%)
+    const gstPercent = num > 1 ? num : num * 100;
+    map[p.name.toLowerCase().trim()] = { hsn, gstPercent };
+  }
+  return map;
+}
+
+export function toImportReadyInvoices(
+  result: ParsedExcelResult,
+  products?: ProductLookup[],
+): ImportReadyInvoice[] {
+  const productMap = buildProductMap(products);
   const invoices: ImportReadyInvoice[] = [];
 
   for (const firm of result.firms) {
     const type: "OUTWARD" | "INWARD" = firm.supplyType.toLowerCase().includes("inward") ? "INWARD" : "OUTWARD";
+    const isInterState = !!firm.gstin && !!firm.gstin.slice(0, 2);
 
     // Group by bill number to handle multi-item invoices
     const byBill = new Map<string, ParsedInvoiceRow[]>();
@@ -363,24 +394,62 @@ export function toImportReadyInvoices(result: ParsedExcelResult): ImportReadyInv
 
     for (const [billNo, rows] of byBill) {
       const firstRow = rows[0];
-      const items = rows.map(row => ({
-        productName: row.commodity || "Item",
-        hsn: row.hsnCode,
-        gstRate: row.gstRate,
-        qty: row.qty,
-        rate: row.rate,
-        unit: "gms", // default for jewellery
-        amount: row.taxableValue,
-        cgst: row.cgst,
-        sgst: row.sgst,
-        igst: row.igst,
-      }));
+      // Inter-state when first 2 chars of customer GSTIN differ from firm GSTIN.
+      // Used to decide CGST+SGST split vs IGST. Defaults to intra-state.
+      const custStateCode = (firstRow.gstNumber || "").slice(0, 2);
+      const firmStateCode = (firm.gstin || "").slice(0, 2);
+      const useIGST = isInterState && custStateCode && firmStateCode && custStateCode !== firmStateCode;
 
-      const subtotal = items.reduce((s, i) => s + i.amount, 0);
-      const totalCGST = items.reduce((s, i) => s + i.cgst, 0);
-      const totalSGST = items.reduce((s, i) => s + i.sgst, 0);
-      const totalIGST = items.reduce((s, i) => s + i.igst, 0);
-      // Use the total from the first row if available (handles round-off), else calculate
+      const items = rows.map(row => {
+        // Resolve GST% (in percentage form): row → product → 0
+        let gstPercent = row.gstRate;
+        if (!gstPercent || gstPercent === 0) {
+          const lookup = productMap[(row.commodity || "").toLowerCase().trim()];
+          if (lookup) gstPercent = lookup.gstPercent;
+        }
+        const hsn = row.hsnCode || (productMap[(row.commodity || "").toLowerCase().trim()]?.hsn ?? "");
+
+        // Compute taxable: prefer file value → qty*rate → back-derive from total
+        let taxable = row.taxableValue;
+        if (taxable === 0 && row.qty > 0 && row.rate > 0) {
+          taxable = Math.round(row.qty * row.rate * 100) / 100;
+        }
+        if (taxable === 0 && row.totalInvoiceValue > 0 && gstPercent > 0) {
+          taxable = Math.round((row.totalInvoiceValue / (1 + gstPercent / 100)) * 100) / 100;
+        }
+
+        // Compute taxes if not in file
+        let cgst = row.cgst, sgst = row.sgst, igst = row.igst;
+        if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent > 0) {
+          if (useIGST) {
+            igst = Math.round(taxable * gstPercent / 100 * 100) / 100;
+          } else {
+            cgst = Math.round(taxable * gstPercent / 200 * 100) / 100; // half rate
+            sgst = cgst;
+          }
+        }
+
+        return {
+          productName: row.commodity || "Item",
+          hsn,
+          gstRate: gstPercent,
+          qty: row.qty,
+          rate: row.rate,
+          unit: "gms",
+          amount: Math.round((taxable + cgst + sgst + igst) * 100) / 100, // GROSS
+          cgst,
+          sgst,
+          igst,
+          // We expose taxable separately via subtotal below — keep amount = gross
+          // so backend's safety net stays consistent.
+          taxable: Math.round(taxable * 100) / 100,
+        } as any;
+      });
+
+      const subtotal = items.reduce((s: number, i: any) => s + (i.taxable ?? 0), 0);
+      const totalCGST = items.reduce((s: number, i: any) => s + i.cgst, 0);
+      const totalSGST = items.reduce((s: number, i: any) => s + i.sgst, 0);
+      const totalIGST = items.reduce((s: number, i: any) => s + i.igst, 0);
       const total = firstRow.totalInvoiceValue > 0
         ? firstRow.totalInvoiceValue
         : Math.round((subtotal + totalCGST + totalSGST + totalIGST) * 100) / 100;
@@ -393,7 +462,11 @@ export function toImportReadyInvoices(result: ParsedExcelResult): ImportReadyInv
         type,
         firmName: firm.firmName,
         firmGSTIN: firm.gstin,
-        items,
+        items: items.map((i: any) => ({
+          productName: i.productName, hsn: i.hsn, gstRate: i.gstRate,
+          qty: i.qty, rate: i.rate, unit: i.unit,
+          amount: i.amount, cgst: i.cgst, sgst: i.sgst, igst: i.igst,
+        })),
         subtotal: Math.round(subtotal * 100) / 100,
         totalCGST: Math.round(totalCGST * 100) / 100,
         totalSGST: Math.round(totalSGST * 100) / 100,

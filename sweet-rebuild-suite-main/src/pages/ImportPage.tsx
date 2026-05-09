@@ -572,7 +572,10 @@ export default function ImportPage({ type }: ImportPageProps) {
         try {
           const data = e.target?.result as ArrayBuffer;
           const result = parseInvoiceExcel(data);
-          const invoices = toImportReadyInvoices(result);
+          const invoices = toImportReadyInvoices(
+            result,
+            (productsForTemplate || []).map((p: any) => ({ name: p.name, hsn_code: p.hsn_code, gst_tax_rate: p.gst_tax_rate })),
+          );
           if (invoices.length > 0) {
             toast({ title: "Excel Parsed", description: `Found ${invoices.length} invoices from ${result.firms.length} firm(s)` });
             // Navigate to full-screen review page
