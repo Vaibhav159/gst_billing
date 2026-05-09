@@ -44,6 +44,15 @@ dev = [
     "flake8",
 ]
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Explicit list — repo has several top-level dirs (frontend, nginx, etc.)
+# that aren't Python packages, so flat auto-detection fails.
+packages = ["billing", "gst_billing"]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "gst_billing.test_settings"
 python_files = "test_*.py"
