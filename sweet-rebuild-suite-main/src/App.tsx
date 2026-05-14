@@ -25,7 +25,6 @@ import InvoicePrintTally from "@/pages/InvoicePrintTally";
 import InvoiceForm from "@/pages/InvoiceForm";
 import AIInvoiceImport from "@/pages/AIInvoiceImport";
 import UserManagement from "@/pages/UserManagement";
-import GSTRExport from "@/pages/GSTRExport";
 import ImportPreview from "@/pages/ImportPreview";
 import ImportReview from "@/pages/ImportReview";
 import BulkPDF from "@/pages/BulkPDF";
@@ -116,7 +115,8 @@ const App = () => (
                   <Route path="/billing/settings" element={<Settings />} />
                   <Route path="/billing/audit-log" element={<AuditLog />} />
                   <Route path="/billing/users" element={<UserManagement />} />
-                  <Route path="/billing/gstr-export" element={<GSTRExport />} />
+                  {/* Old gstr-export route — merged into /gst-summary as a tab */}
+                  <Route path="/billing/gstr-export" element={<Navigate to="/billing/gst-summary?tab=gstr1" replace />} />
                   <Route path="/billing/profile" element={<Profile />} />
                 </Route>
 

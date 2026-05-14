@@ -20,7 +20,6 @@ const navItems = [
   { label: "Invoices", href: "/billing/invoice/list", icon: FileText },
   { label: "Reports", href: "/billing/reports", icon: BarChart3 },
   { label: "GST", href: "/billing/gst-summary", icon: Calculator },
-  { label: "GSTR Filing", href: "/billing/gstr-export", icon: FileText },
 ];
 
 const settingsItems = [
@@ -91,7 +90,7 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
         </Link>
 
         {/* Desktop Nav - only show on xl+ */}
-        <div className="hidden xl:flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto scrollbar-none">
+        <div className="hidden xl:flex items-center gap-0.5 flex-1 min-w-0">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
