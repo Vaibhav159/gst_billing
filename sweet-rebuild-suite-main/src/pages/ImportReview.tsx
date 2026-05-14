@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface LocationState {
   parsedInvoices: ImportReadyInvoice[];
@@ -98,11 +99,14 @@ export default function ImportReview() {
         customerMatch = customerNameMap.get(inv.customerGST.toLowerCase().trim()) || null;
       }
 
-      // Duplicate check
+      // Duplicate check — must match on business + bill# + date AND TYPE.
+      // Sales invoice #1 (outward) and purchase bill #1 (inward) are
+      // different documents, even when number/date/firm coincide.
       const isDuplicate = existingInvoices.some(
         ei => ei.invoiceNumber === inv.invoiceNumber &&
           String(ei.businessId) === String(businessMatch?.id) &&
-          ei.invoice_date === inv.invoice_date
+          ei.invoice_date === inv.invoice_date &&
+          (ei.type || "OUTWARD").toUpperCase() === inv.type
       );
 
       let status: ValidationResult["status"] = "ready";
@@ -211,21 +215,36 @@ export default function ImportReview() {
       }
 
       const { default: api } = await import("@/utils/api");
-      const res = await api.post("invoices/bulk-import/", {
+      const res = await api.post<{ created: number; skipped: number; errors?: string[]; message?: string }>("invoices/bulk-import/", {
         invoices: toImport,
         business_id: bizFilter !== "all" ? bizFilter : undefined,
       });
       const result = res.data;
-      toast({ title: "Import Complete", description: `${result.created} imported, ${result.skipped} skipped.` });
+      const errCount = result.errors?.length || 0;
+      // Show actual outcomes — successes AND failures, with details
+      if (errCount > 0) {
+        const sample = result.errors!.slice(0, 3).join("\n• ");
+        toast({
+          title: `Imported ${result.created}, ${errCount} failed`,
+          description: `• ${sample}${errCount > 3 ? `\n... and ${errCount - 3} more (see Audit Log)` : ""}`,
+          variant: errCount === toImport.length ? "destructive" : "default",
+          duration: 12000,
+        });
+      } else {
+        toast({ title: "Import Complete", description: `${result.created} imported, ${result.skipped} skipped.` });
+      }
       refetchInvoices();
       refetchCustomers();
-      // Navigate to post-import summary
       navigate("/billing/import/preview", {
         state: { invoices: toImport, result, businessName: businesses.find(b => String(b.id) === bizFilter)?.name || "All Businesses" },
       });
     } catch (err: any) {
-      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || "Import failed.";
-      toast({ title: "Import Failed", description: msg, variant: "destructive" });
+      toast({
+        title: `Import Failed ${errorTag(err)}`,
+        description: formatApiError(err, "Import failed."),
+        variant: "destructive",
+        duration: 15000,
+      });
     }
     setImporting(false);
   };
@@ -339,9 +358,11 @@ export default function ImportReview() {
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">GST</th>
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Firm</th>
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Items</th>
+                <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap">GST&nbsp;%</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">SGST</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">IGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Total</th>
                 <th className="px-3 py-2.5 w-10"></th>
               </tr>
@@ -400,9 +421,17 @@ export default function ImportReview() {
                         <>{inv.items.length}<span className="text-[9px] text-muted-foreground ml-0.5">({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})</span></>
                       )}
                     </td>
+                    <td className="px-3 py-2 text-center font-mono text-muted-foreground text-[11px]">
+                      {(() => {
+                        const rates = Array.from(new Set(inv.items.map(i => i.gstRate))).filter(r => r > 0);
+                        if (rates.length === 0) return <span className="text-destructive/70">?</span>;
+                        return rates.length === 1 ? `${rates[0]}%` : rates.map(r => `${r}%`).join("/");
+                      })()}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.subtotal)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.totalCGST)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{"\u20b9"}{fmt(inv.totalSGST)}</td>
+                    <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalCGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalCGST)}</td>
+                    <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalSGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalSGST)}</td>
+                    <td className={cn("px-3 py-2 text-right tabular-nums", inv.totalIGST === 0 && "text-muted-foreground/50")}>{"\u20b9"}{fmt(inv.totalIGST)}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{"\u20b9"}{fmt(inv.total)}</td>
                     <td className="px-3 py-2 text-center">
                       {editingIdx === idx ? (
@@ -420,12 +449,13 @@ export default function ImportReview() {
             </tbody>
             <tfoot className="bg-secondary/40 border-t-2 border-border/40">
               <tr className="font-semibold text-[11px]">
-                <td colSpan={8} className="px-3 py-2.5 text-right text-muted-foreground uppercase">
+                <td colSpan={9} className="px-3 py-2.5 text-right text-muted-foreground uppercase">
                   Selected Total ({selectedInvoices.size} invoices)
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.subtotal, 0))}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.totalCGST, 0))}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.totalSGST, 0))}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.totalIGST, 0))}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums font-bold">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.total, 0))}</td>
                 <td></td>
               </tr>

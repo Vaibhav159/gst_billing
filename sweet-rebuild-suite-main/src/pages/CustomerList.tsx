@@ -15,6 +15,7 @@ import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
 import { stagger, fadeUp } from "@/utils/animations";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 export default function CustomerList() {
   const { toast } = useToast();
@@ -75,7 +76,7 @@ export default function CustomerList() {
   // ─── MOBILE VIEW ───
   if (isMobile) {
     return (
-      <div className="p-4 space-y-4">
+      <div className="p-4 pb-40 space-y-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Customers</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{totalCustomers}</p>
@@ -570,9 +571,10 @@ export default function CustomerList() {
               navigate(`/billing/customer/${mergeTarget}`);
             } catch (err: any) {
               toast({
-                title: "Merge Failed",
-                description: err?.response?.data?.error || "Could not merge customers.",
+                title: `Merge Failed ${errorTag(err)}`,
+                description: formatApiError(err, "Could not merge customers."),
                 variant: "destructive",
+                duration: 12000,
               });
             }
           };

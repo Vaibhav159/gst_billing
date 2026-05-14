@@ -56,23 +56,23 @@ export default function AIInvoiceImport() {
       </div>
 
       {/* Steps Indicator */}
-      <div className="elevated-card rounded-2xl p-4">
-        <div className="flex items-center gap-3">
+      <div className="elevated-card rounded-2xl p-3 sm:p-4">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           {[{ n: 1, label: "Upload Image", icon: Upload }, { n: 2, label: "AI Processing", icon: Sparkles }, { n: 3, label: "Review & Create", icon: CheckCircle }].map((s, i) => (
-            <div key={s.n} className="flex items-center gap-2.5 flex-1">
-              <div className={cn("flex items-center gap-2.5 flex-1 p-3 rounded-xl transition-all",
+            <div key={s.n} className="flex items-center gap-1.5 sm:gap-2.5 flex-1 min-w-0">
+              <div className={cn("flex items-center gap-1.5 sm:gap-2.5 flex-1 min-w-0 p-2 sm:p-3 rounded-xl transition-all",
                 step === s.n ? "bg-primary/10 border border-primary/20" : step > s.n ? "bg-success/5 border border-success/20" : "border border-transparent"
               )}>
-                <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center text-[13px] font-bold transition-all shrink-0",
+                <div className={cn("w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-[12px] sm:text-[13px] font-bold transition-all shrink-0",
                   step > s.n ? "bg-success text-success-foreground" : step === s.n ? "bg-primary text-primary-foreground glow-sm" : "bg-secondary/50 text-muted-foreground"
                 )}>
                   {step > s.n ? <CheckCircle className="w-4 h-4" /> : s.n}
                 </div>
-                <div className="min-w-0">
-                  <p className={cn("text-[12px] font-semibold", step >= s.n ? "text-foreground" : "text-muted-foreground")}>{s.label}</p>
+                <div className={cn("min-w-0 flex-1", step !== s.n && "hidden sm:block")}>
+                  <p className={cn("text-[11px] sm:text-[12px] font-semibold truncate", step >= s.n ? "text-foreground" : "text-muted-foreground")}>{s.label}</p>
                 </div>
               </div>
-              {i < 2 && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+              {i < 2 && <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground shrink-0" />}
             </div>
           ))}
         </div>

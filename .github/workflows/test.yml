@@ -1,0 +1,149 @@
+name: Tests
+
+# Runs the backend unit tests + Playwright E2E tests on every push and PR.
+# Uses an in-runner Postgres + Django + Vite stack so no external DB credentials
+# leak into CI.
+
+on:
+  push:
+    branches:
+      - main
+      - polish
+      - new_ui
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-24.04
+    # No Postgres service — gst_billing.test_settings forces SQLite (:memory:)
+    # for fast unit tests. The DB_* env vars and Postgres provisioning would be
+    # ignored. The frontend job below still uses Postgres for E2E migrate/seed.
+    env:
+      DJANGO_SETTINGS_MODULE: gst_billing.test_settings
+      DJANGO_SECRET_KEY: ci-test-key-not-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: |
+          uv venv
+          # Install from pyproject.toml so CI tracks declared deps (incl. google-genai etc.)
+          # setuptools needed for pkg_resources used by some transitive deps
+          # (e.g. django-simple-history). Pin <81 because setuptools 81+ removed
+          # the vendored `pkg_resources` module.
+          uv pip install . pytest pytest-django gunicorn 'setuptools<81'
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+          pytest billing/ -x --tb=short
+
+  frontend:
+    name: Frontend (vitest + Playwright E2E)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gst_test
+          POSTGRES_PASSWORD: gst_test_local
+          POSTGRES_DB: gst_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gst_test"
+          --health-interval 5s
+    env:
+      DJANGO_SETTINGS_MODULE: gst_billing.production_settings
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: gst_test
+      DB_USER: gst_test
+      DB_PASSWORD: gst_test_local
+      DJANGO_SECRET_KEY: ci-test-key-not-secret
+      DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: "*"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install backend deps
+        run: |
+          pip install uv
+          uv venv
+          # Install from pyproject.toml so CI tracks declared deps automatically.
+          # `setuptools` is needed by some transitive deps that still import
+          # `pkg_resources` at runtime (uv's venv doesn't include it by default).
+          # Pin <81 because setuptools 81+ removed the vendored `pkg_resources`.
+          uv pip install . gunicorn 'setuptools<81'
+      - name: Migrate + seed
+        run: |
+          source .venv/bin/activate
+          mkdir -p logs
+          python manage.py migrate --noinput
+          python manage.py shell -c "
+          from django.contrib.auth.models import User
+          from billing.models import Business, Customer, Product
+          u, _ = User.objects.get_or_create(username='testuser', defaults={'is_superuser': True, 'is_staff': True})
+          u.set_password('testpass2026'); u.save()
+          b, _ = Business.objects.get_or_create(name='TEST JEWELLERS', defaults={'gst_number':'08TEST1234A1ZA','address':'Test','state_name':'RAJASTHAN','pan_number':'TEST1234A','mobile_number':'9999999999'})
+          c, _ = Customer.objects.get_or_create(name='TEST CUSTOMER', defaults={'state_name':'RAJASTHAN','mobile_number':'8888888888'})
+          c.businesses.add(b)
+          Product.objects.get_or_create(name='Gold Ornaments', defaults={'hsn_code':'711319','gst_tax_rate':0.03})
+          "
+      - name: Start backend
+        run: |
+          source .venv/bin/activate
+          gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 2 --daemon
+          sleep 3
+          curl -s -o /dev/null -w "Django: %{http_code}\n" http://localhost:8000/api/profile/ || true
+      - name: Install frontend deps
+        working-directory: sweet-rebuild-suite-main
+        run: npm ci
+      - name: Run frontend unit tests
+        working-directory: sweet-rebuild-suite-main
+        run: npm run test -- --run
+      - name: Start Vite dev server (with /api proxy to Django)
+        working-directory: sweet-rebuild-suite-main
+        run: |
+          # Vite dev server proxies /api → http://127.0.0.1:8000 (see vite.config.ts).
+          # Production build + `npx serve` would NOT proxy, so login/API calls would
+          # land back on the frontend host.
+          nohup npx vite --port 8080 --host 0.0.0.0 > /tmp/vite.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:8080/ >/dev/null 2>&1; then
+              echo "Vite ready"; break
+            fi
+            sleep 1
+          done
+          curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/
+          curl -s -o /dev/null -w "API via proxy: %{http_code}\n" http://localhost:8080/api/profile/
+      - name: Install Playwright
+        working-directory: e2e-tests
+        run: |
+          # e2e-tests/package.json + lockfile are checked in, so npm ci
+          # is reproducible and cache-friendly (vs the previous
+          # `npm init -y && npm install` which had no lockfile).
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run E2E tests
+        working-directory: e2e-tests
+        env:
+          BASE_URL: http://localhost:8080
+        run: npx playwright test --reporter=list
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e-tests/playwright-report/
+          retention-days: 7

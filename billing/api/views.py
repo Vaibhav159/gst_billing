@@ -2159,6 +2159,70 @@ class BulkInvoiceImportView(APIView):
             if c.name:
                 cust_by_name[c.name.lower()] = c
 
+        # Product master lookup. Two-tier so case-only duplicates in the
+        # master (e.g. "GOLD COIN" 3% AND "gold coin" 12%) don't silently
+        # apply the wrong tax rate based on DB iteration order.
+        # exact-case wins → falls back to lowercase first-seen.
+        product_by_exact = {}
+        product_by_ci = {}
+        for p in Product.objects.all().only("id", "name", "hsn_code", "gst_tax_rate").order_by("name"):
+            if not p.name:
+                continue
+            if p.name not in product_by_exact:
+                product_by_exact[p.name] = p
+            ci_key = p.name.lower()
+            if ci_key not in product_by_ci:
+                product_by_ci[ci_key] = p
+
+        def lookup_product(name):
+            if not name:
+                return None
+            return product_by_exact.get(name) or product_by_ci.get(name.lower())
+
+        # ---------- PRE-PASS: bulk-create new customers in ONE round-trip ----------
+        # Walk all invoices, identify customer names that don't exist yet, dedupe,
+        # bulk_create. Avoids N serial INSERTs when many invoices reference new
+        # customers (saves ~700ms on a 10-new-customer import on Neon Singapore).
+        needed_new = {}  # name_lower -> {name, gst, pan}
+        for inv_data in invoices_data:
+            cn = (inv_data.get("customerName") or "").strip()
+            cg = (inv_data.get("customerGST") or "").strip()
+            if not cn:
+                continue
+            key = cn.lower()
+            # Already in cache (pre-existing)? skip
+            if key in cust_by_name:
+                continue
+            clean_gst = ""
+            clean_pan = ""
+            if cg and cg not in ("-", ""):
+                if "(PAN)" in cg:
+                    clean_pan = cg.replace("(PAN)", "").strip()
+                    if clean_pan.upper() in cust_by_pan:
+                        continue
+                else:
+                    clean_gst = cg
+                    if clean_gst.upper() in cust_by_gst:
+                        continue
+            needed_new[key] = {"name": cn, "gst": clean_gst, "pan": clean_pan}
+
+        if needed_new:
+            new_objs = [
+                Customer(
+                    name=info["name"], gst_number=info["gst"],
+                    pan_number=info["pan"], state_name="RAJASTHAN",
+                    workspace_id=1,
+                ) for info in needed_new.values()
+            ]
+            Customer.objects.bulk_create(new_objs, batch_size=200)
+            # Update caches with the freshly-created customers
+            for c in new_objs:
+                cust_by_name[c.name.lower()] = c
+                if c.gst_number:
+                    cust_by_gst[c.gst_number.upper()] = c
+                if c.pan_number:
+                    cust_by_pan[c.pan_number.upper()] = c
+
         # Bulk fetch existing invoices (for duplicate detection) keyed by
         # (business_id, invoice_number, invoice_date)
         wanted_inv_keys = set()
@@ -2166,7 +2230,8 @@ class BulkInvoiceImportView(APIView):
             inv_no = str(inv_data.get("invoiceNumber", "") or "")
             inv_date = inv_data.get("invoice_date", "") or ""
             wanted_inv_keys.add((inv_no, inv_date))
-        # We don't know business yet for each, so just fetch by invoice_number+date
+        # Dedup key includes type_of_invoice — sales bill #1 and purchase bill #1
+        # are different documents, even with the same number/date/firm.
         existing_invoice_keys = set()
         if wanted_inv_keys:
             inv_no_list = list({k[0] for k in wanted_inv_keys})
@@ -2174,14 +2239,20 @@ class BulkInvoiceImportView(APIView):
             for inv in Invoice.objects.filter(
                 invoice_number__in=inv_no_list,
                 invoice_date__in=inv_date_list,
-            ).only("id", "invoice_number", "invoice_date", "business_id"):
+            ).only("id", "invoice_number", "invoice_date", "business_id", "type_of_invoice"):
                 existing_invoice_keys.add(
-                    (inv.business_id, str(inv.invoice_number), str(inv.invoice_date))
+                    (inv.business_id, str(inv.invoice_number), str(inv.invoice_date),
+                     (inv.type_of_invoice or INVOICE_TYPE_OUTWARD).lower())
                 )
 
         # ---------- PHASE 2: process invoices in a single transaction ----------
+        invoices_to_create = []  # [(Invoice instance, source dict for line items)]
         line_items_to_create = []
         audit_logs_to_create = []
+        # Per-invoice audit metadata (pk, display name, item count). Audit logs
+        # are emitted after total_amount is recomputed from line items so the
+        # message reflects the persisted total, not the stale in-memory value.
+        pending_invoice_audits: list[dict] = []
         new_customers_added_to_biz = []  # (customer, business) pairs
 
         with transaction.atomic():
@@ -2235,29 +2306,29 @@ class BulkInvoiceImportView(APIView):
                         customer = cust_by_name.get(customer_name.lower())
 
                     if not customer:
+                        # Should not happen — pre-pass should have bulk-created
+                        # everything. Defensive fallback.
                         customer = Customer.objects.create(
-                            name=customer_name,
-                            gst_number=clean_gst,
-                            pan_number=clean_pan,
-                            state_name="RAJASTHAN",
+                            name=customer_name, gst_number=clean_gst,
+                            pan_number=clean_pan, state_name="RAJASTHAN",
                             workspace_id=1,
                         )
-                        # Cache for downstream rows that reference the same name
+                        # Update ALL lookup caches so a later row referencing the
+                        # same GST/PAN under a different name resolves to this
+                        # customer instead of creating a duplicate.
                         cust_by_name[customer_name.lower()] = customer
                         if clean_gst:
                             cust_by_gst[clean_gst.upper()] = customer
                         if clean_pan:
                             cust_by_pan[clean_pan.upper()] = customer
-                        if business and business.pk:
-                            new_customers_added_to_biz.append((customer, business))
 
-                    # Duplicate check from the prefetched set
+                    if business and business.pk and customer.pk:
+                        # Track for M2M attach (idempotent — .add() is a no-op if exists)
+                        new_customers_added_to_biz.append((customer, business))
+
+                    # Resolve invoice type first so duplicate key includes it.
                     invoice_number = str(inv_data.get("invoiceNumber", ""))
                     invoice_date = inv_data.get("invoice_date", "")
-                    if (business.pk, invoice_number, str(invoice_date)) in existing_invoice_keys:
-                        skipped_count += 1
-                        continue
-
                     inv_type = inv_data.get("type", "OUTWARD")
                     type_of_invoice = (
                         INVOICE_TYPE_INWARD
@@ -2265,7 +2336,14 @@ class BulkInvoiceImportView(APIView):
                         else INVOICE_TYPE_OUTWARD
                     )
 
-                    invoice = Invoice.objects.create(
+                    # Duplicate check — must match on business + bill# + date AND type
+                    dup_key = (business.pk, invoice_number, str(invoice_date), type_of_invoice.lower())
+                    if dup_key in existing_invoice_keys:
+                        skipped_count += 1
+                        continue
+
+                    # Build invoice in memory; bulk_create later
+                    invoice = Invoice(
                         invoice_number=invoice_number,
                         invoice_date=invoice_date,
                         customer=customer,
@@ -2274,57 +2352,9 @@ class BulkInvoiceImportView(APIView):
                         total_amount=Decimal(str(inv_data.get("total", 0))),
                         workspace_id=1,
                     )
+                    invoices_to_create.append((invoice, inv_data))
                     # Mark as seen so a duplicate row in the same payload is skipped
-                    existing_invoice_keys.add(
-                        (business.pk, invoice_number, str(invoice_date))
-                    )
-
-                    items = inv_data.get("items", [])
-                    is_igst = invoice.is_igst_applicable
-                    for item in items:
-                        qty = Decimal(str(item.get("qty", 0)))
-                        rate = Decimal(str(item.get("rate", 0)))
-                        gst_rate = Decimal(str(item.get("gstRate", 3))) / Decimal("100")
-                        net_amount = qty * rate
-                        tax_amount = net_amount * gst_rate
-
-                        cgst = Decimal(str(item.get("cgst", 0)))
-                        sgst = Decimal(str(item.get("sgst", 0)))
-                        igst = Decimal(str(item.get("igst", 0)))
-
-                        if cgst == 0 and sgst == 0 and igst == 0:
-                            if is_igst:
-                                igst = tax_amount
-                            else:
-                                cgst = tax_amount / 2
-                                sgst = tax_amount / 2
-
-                        amount = net_amount + cgst + sgst + igst
-
-                        line_items_to_create.append(LineItem(
-                            invoice=invoice,
-                            customer=customer,
-                            product_name=item.get("productName", "Item"),
-                            hsn_code=item.get("hsn", "711319"),
-                            gst_tax_rate=gst_rate,
-                            quantity=qty,
-                            rate=rate,
-                            cgst=cgst,
-                            sgst=sgst,
-                            igst=igst,
-                            amount=amount,
-                            workspace_id=1,
-                        ))
-
-                    audit_logs_to_create.append(AuditLog(
-                        action="imported",
-                        entity="invoice",
-                        entity_id=invoice.pk,
-                        entity_name=f"#{invoice.invoice_number} - {customer.name}",
-                        user=request.user if request.user and request.user.is_authenticated else None,
-                        details=f"Imported from Excel ({len(items)} items, total: {invoice.total_amount})",
-                    ))
-
+                    existing_invoice_keys.add(dup_key)
                     created_count += 1
 
                 except Exception as e:
@@ -2338,13 +2368,222 @@ class BulkInvoiceImportView(APIView):
                     skipped_count += 1
 
             # ---------- PHASE 3: bulk writes ----------
+            # Bulk-create invoices in ONE round-trip. PostgreSQL fills in PKs.
+            # If bulk_create raises for one bad row (e.g. malformed date), we
+            # don't want the whole batch to 500. Try the bulk path first; on
+            # failure, fall back to per-row create so good rows still land
+            # and bad rows surface as per-row errors.
+            if invoices_to_create:
+                invoice_objs = [pair[0] for pair in invoices_to_create]
+                try:
+                    Invoice.objects.bulk_create(invoice_objs, batch_size=200)
+                except Exception as bulk_err:
+                    logger.warning(
+                        "bulk_create failed (%s); falling back to per-row create", bulk_err
+                    )
+                    surviving = []
+                    for invoice, inv_data in invoices_to_create:
+                        try:
+                            invoice.save()
+                            surviving.append((invoice, inv_data))
+                        except Exception as row_err:
+                            errors.append(
+                                f"Invoice {inv_data.get('invoiceNumber','?')}: "
+                                f"could not create — {row_err}"
+                            )
+                            created_count -= 1
+                            skipped_count += 1
+                    invoices_to_create = surviving
+                    invoice_objs = [pair[0] for pair in surviving]
+                # Now invoice.pk is populated; build line items + audit logs.
+                for invoice, inv_data in invoices_to_create:
+                    items = inv_data.get("items", [])
+                    is_igst = invoice.is_igst_applicable
+                    for item in items:
+                        # Excel cells can come through as numbers (e.g. HSN "711319"
+                        # parsed as int) — coerce to str before .strip() so one
+                        # numeric cell can't AttributeError the whole batch.
+                        product_name = str(item.get("productName") or "").strip()
+                        # Resolve HSN + GST rate from Product master if not supplied.
+                        # Never silently default — if the row has no GST rate AND
+                        # no matching product, fail with a clear message.
+                        product = lookup_product(product_name)
+                        hsn_code = str(item.get("hsn") or "").strip()
+                        gst_rate_raw_in = item.get("gstRate")
+                        if gst_rate_raw_in in (None, "", 0, "0"):
+                            if not product:
+                                errors.append(
+                                    f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
+                                    f"product not found in Product list and no GST rate supplied. "
+                                    f"Add the product first or include a GST Rate column."
+                                )
+                                continue
+                            gst_rate = Decimal(str(product.gst_tax_rate))
+                            if not hsn_code:
+                                hsn_code = product.hsn_code or ""
+                        else:
+                            gst_rate_raw = Decimal(str(gst_rate_raw_in))
+                            gst_rate = gst_rate_raw if gst_rate_raw <= 1 else gst_rate_raw / Decimal("100")
+                            if not hsn_code and product:
+                                hsn_code = product.hsn_code or ""
+
+                        qty = Decimal(str(item.get("qty", 0)))
+                        rate = Decimal(str(item.get("rate", 0)))
+                        cgst = Decimal(str(item.get("cgst", 0)))
+                        sgst = Decimal(str(item.get("sgst", 0)))
+                        igst = Decimal(str(item.get("igst", 0)))
+                        # User-supplied gross amount takes precedence — they may not have qty/rate
+                        user_amount = Decimal(str(item.get("amount", 0)))
+                        net_amount = qty * rate
+                        if net_amount == 0 and user_amount > 0:
+                            net_amount = user_amount - cgst - sgst - igst
+                            if net_amount < 0:
+                                net_amount = user_amount / (1 + gst_rate)
+                        tax_amount = net_amount * gst_rate
+                        if cgst == 0 and sgst == 0 and igst == 0:
+                            if is_igst:
+                                igst = tax_amount
+                            else:
+                                cgst = tax_amount / 2
+                                sgst = tax_amount / 2
+                        amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
+
+                        # Validate per-field DB constraints BEFORE bulk_create so
+                        # a single bad row doesn't 500 the whole batch.
+                        # quantity / cgst / sgst / igst are NUMERIC(10,3) → abs < 10^7
+                        # rate / amount / gst_tax_rate are NUMERIC(12,3) → abs < 10^9
+                        OVERFLOW_10 = Decimal("10000000")
+                        OVERFLOW_12 = Decimal("1000000000")
+                        bad = None
+                        if abs(qty) >= OVERFLOW_10: bad = ("quantity", qty)
+                        elif abs(cgst) >= OVERFLOW_10: bad = ("cgst", cgst)
+                        elif abs(sgst) >= OVERFLOW_10: bad = ("sgst", sgst)
+                        elif abs(igst) >= OVERFLOW_10: bad = ("igst", igst)
+                        elif abs(rate) >= OVERFLOW_12: bad = ("rate", rate)
+                        elif abs(amount) >= OVERFLOW_12: bad = ("amount", amount)
+                        if bad:
+                            errors.append(
+                                f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
+                                f"{bad[0]} value {bad[1]} exceeds DB limit. "
+                                f"Likely qty×rate computation error — check input."
+                            )
+                            continue
+
+                        line_items_to_create.append(LineItem(
+                            invoice=invoice, customer=invoice.customer,
+                            product_name=product_name or "Item",
+                            hsn_code=hsn_code or "",
+                            gst_tax_rate=gst_rate,
+                            quantity=qty, rate=rate,
+                            cgst=cgst, sgst=sgst, igst=igst, amount=amount,
+                            workspace_id=1,
+                        ))
+                    # Stash the metadata we need for the audit log; the actual
+                    # AuditLog row is appended below after total_amount has been
+                    # recomputed from line items, so the logged total isn't stale.
+                    pending_invoice_audits.append({
+                        "pk": invoice.pk,
+                        "name": f"#{invoice.invoice_number} - {invoice.customer.name}",
+                        "item_count": len(items),
+                    })
+
             if line_items_to_create:
                 LineItem.objects.bulk_create(line_items_to_create, batch_size=200)
+
+            # If any invoices ended up with NO line items (all their items errored
+            # out during product/GST resolution), they must be removed — leaving
+            # stub invoices behind would corrupt counters and confuse downstream
+            # reports. (total_amount defaults to 0 so NULL isn't the failure mode.)
+            empty_inv_ids: list[int] = []
+            if invoices_to_create:
+                from django.db.models import OuterRef, Subquery, Sum, DecimalField
+                from django.db.models.functions import Coalesce
+                invoice_ids = [inv.pk for inv, _ in invoices_to_create if inv.pk]
+                if invoice_ids:
+                    # Find invoices with no line items and decrement counters
+                    empty_inv_ids = list(
+                        Invoice.objects.filter(pk__in=invoice_ids, lineitem__isnull=True)
+                        .values_list("pk", flat=True)
+                    )
+                    if empty_inv_ids:
+                        # Roll back stub invoices and adjust counters
+                        Invoice.objects.filter(pk__in=empty_inv_ids).delete()
+                        invoice_ids = [pk for pk in invoice_ids if pk not in empty_inv_ids]
+                        created_count -= len(empty_inv_ids)
+                        skipped_count += len(empty_inv_ids)
+
+                    # Safety net: recompute Invoice.total_amount = SUM(line_items)
+                    # for the surviving invoices. bulk_create skips the post_save
+                    # signal that normally keeps total in sync, so we re-derive.
+                    if invoice_ids:
+                        sub = (LineItem.objects
+                               .filter(invoice=OuterRef("pk"))
+                               .values("invoice")
+                               .annotate(s=Sum("amount"))
+                               .values("s"))
+                        Invoice.objects.filter(pk__in=invoice_ids).update(
+                            total_amount=Coalesce(
+                                Subquery(sub, output_field=DecimalField()),
+                                Decimal("0"),
+                                output_field=DecimalField(),
+                            )
+                        )
+
+            # Emit the deferred per-invoice audit logs now that total_amount
+            # has been recomputed from line items (and dropped invoices that
+            # were rolled back as empty).
+            if pending_invoice_audits:
+                empty_set = set(empty_inv_ids)
+                surviving_pks = [a["pk"] for a in pending_invoice_audits if a["pk"] not in empty_set]
+                live_totals = dict(
+                    Invoice.objects.filter(pk__in=surviving_pks).values_list("pk", "total_amount")
+                )
+                for meta in pending_invoice_audits:
+                    if meta["pk"] in empty_set:
+                        continue
+                    audit_logs_to_create.append(AuditLog(
+                        action="imported", entity="invoice",
+                        entity_id=meta["pk"],
+                        entity_name=meta["name"],
+                        user=request.user if request.user and request.user.is_authenticated else None,
+                        details=(
+                            f"Imported from Excel ({meta['item_count']} items, "
+                            f"total: {live_totals.get(meta['pk'], 0)})"
+                        ),
+                    ))
+
+            # Add per-row error entries to the audit log so failures are
+            # visible in the UI's audit log page (not just Django logs).
+            if errors:
+                for err_msg in errors[:50]:  # cap to avoid runaway
+                    audit_logs_to_create.append(AuditLog(
+                        action="imported", entity="invoice",
+                        entity_id=0, entity_name="(failed row)",
+                        user=request.user if request.user and request.user.is_authenticated else None,
+                        details=f"Import error: {err_msg[:500]}",
+                    ))
+
             if audit_logs_to_create:
                 AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
-            # Link new customers to their businesses (M2M)
-            for cust, biz in new_customers_added_to_biz:
-                cust.businesses.add(biz)
+
+            # Link new customers to businesses via M2M — bulk_create the through-table
+            # rows instead of N individual .add() calls (each is its own round-trip).
+            if new_customers_added_to_biz:
+                Through = Customer.businesses.through
+                # Dedupe pairs (customer_id, business_id) — a customer might appear
+                # in multiple invoices for the same business.
+                seen_pairs = set()
+                m2m_rows = []
+                for cust, biz in new_customers_added_to_biz:
+                    if not cust.pk or not biz.pk:
+                        continue
+                    key = (cust.pk, biz.pk)
+                    if key in seen_pairs:
+                        continue
+                    seen_pairs.add(key)
+                    m2m_rows.append(Through(customer_id=cust.pk, business_id=biz.pk))
+                if m2m_rows:
+                    Through.objects.bulk_create(m2m_rows, ignore_conflicts=True, batch_size=200)
 
         return Response(
             {
@@ -2596,6 +2835,25 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         if not model:
             return Response({"error": f"Unknown entity: {entry.entity}"}, status=400)
 
+        def _resolve_fk(field, raw_value):
+            """Resolve an FK snapshot value to an integer PK, even if older
+            audit entries stored the related object's __str__ (a name) rather
+            than the ID."""
+            if raw_value is None or raw_value == "None" or raw_value == "":
+                return None
+            try:
+                return int(raw_value)
+            except (TypeError, ValueError):
+                pass
+            # Older snapshots may have stored the __str__ — try a name lookup
+            related = field.related_model
+            for cand in ("name", "invoice_number", "username"):
+                if hasattr(related, cand):
+                    obj = related.objects.filter(**{cand: raw_value}).first()
+                    if obj:
+                        return obj.pk
+            return None
+
         try:
             if entry.action == "deleted" and entry.snapshot:
                 # Recreate the deleted object
@@ -2609,8 +2867,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     if v is None or v == "None":
                         kwargs[k] = None if field.null else ""
                     elif hasattr(field, "related_model") and field.related_model:
-                        # FK field — store the raw ID
-                        kwargs[k + "_id"] = int(v) if v else None
+                        # FK field — resolve to integer PK (handles new + legacy snapshots)
+                        kwargs[k + "_id"] = _resolve_fk(field, v)
                     else:
                         kwargs[k] = v
                 obj = model.objects.create(**kwargs)
@@ -2638,7 +2896,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         continue
                     field = model._meta.get_field(k)
                     if hasattr(field, "related_model") and field.related_model:
-                        setattr(obj, k + "_id", int(v) if v and v != "None" else None)
+                        setattr(obj, k + "_id", _resolve_fk(field, v))
                     else:
                         if v is None or v == "None":
                             setattr(obj, k, None if field.null else "")

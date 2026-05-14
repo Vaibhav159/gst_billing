@@ -224,43 +224,40 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const hasSNo = colMap.sNo !== undefined;
       const offset = hasSNo ? 0 : -1; // If no S.No column, all columns shift left by 1
 
+      // CORE columns (Bill, Date, Party, GST, Commodity, Qty, Rate) keep a
+      // positional fallback for files without recognizable headers — those
+      // 7 are required so we have to find them somewhere. OPTIONAL columns
+      // (HSN, GST Rate, Taxable, CGST/SGST/IGST, Total) read ONLY when
+      // colMap explicitly maps them; otherwise they default to "" / 0 and
+      // the backend resolves from Product master. This prevents misreading
+      // the Rate column as GST Rate when the file has fewer columns than
+      // the legacy template.
       const sNo = colMap.sNo !== undefined ? numVal(row[colMap.sNo]) : 0;
       const billNo = strVal(row[colMap.billNo ?? (hasSNo ? 1 : 0)]);
       const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]);
       const partyName = strVal(row[colMap.partyName ?? (hasSNo ? 3 : 2)]);
       const gstNumber = strVal(row[colMap.gstNumber ?? (hasSNo ? 4 : 3)]);
       const commodity = strVal(row[colMap.commodity ?? (hasSNo ? 5 : 4)]);
-      const hsnCode = strVal(row[colMap.hsnCode ?? (hasSNo ? 6 : 5)]);
-      const gstRateStr = strVal(row[colMap.gstRate ?? (hasSNo ? 7 : 6)]).replace("%", "");
-      const gstRate = numVal(gstRateStr);
-      const qty = numVal(row[colMap.qty ?? (hasSNo ? 8 : 7)]);
-      const rate = numVal(row[colMap.rate ?? (hasSNo ? 9 : 8)]);
+      const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : numVal(row[hasSNo ? 8 : 7]);
+      const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : numVal(row[hasSNo ? 9 : 8]);
 
-      // Taxable value: from column or calculate from qty * rate
-      let taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : numVal(row[hasSNo ? 10 : 9]);
-      if (taxableValue === 0 && qty > 0 && rate > 0) {
-        taxableValue = Math.round(qty * rate * 100) / 100;
-      }
+      // OPTIONAL columns — only read if the header explicitly maps them.
+      // If they're missing, leave blank (parser/backend resolves from Product master).
+      const hsnCode = colMap.hsnCode !== undefined ? strVal(row[colMap.hsnCode]) : "";
+      const gstRate = colMap.gstRate !== undefined
+        ? numVal(strVal(row[colMap.gstRate]).replace("%", ""))
+        : 0;
+      const taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : 0;
+      const cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : 0;
+      const sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : 0;
+      const igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : 0;
+      const totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : 0;
 
-      // Tax values - from columns or calculate
-      let cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : numVal(row[hasSNo ? 11 : 10]);
-      let sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : numVal(row[hasSNo ? 12 : 11]);
-      let igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : numVal(row[hasSNo ? 13 : 12]);
-
-      if (cgst === 0 && sgst === 0 && igst === 0 && taxableValue > 0 && gstRate > 0) {
-        const halfRate = gstRate / 2;
-        cgst = Math.round(taxableValue * halfRate / 100 * 100) / 100;
-        sgst = Math.round(taxableValue * halfRate / 100 * 100) / 100;
-      }
-
-      // Total: from column or calculate
-      let totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : (numVal(row[hasSNo ? 14 : 13]) || numVal(row[hasSNo ? 15 : 14]));
-      if (totalInvoiceValue === 0 && taxableValue > 0) {
-        totalInvoiceValue = Math.round((taxableValue + cgst + sgst + igst) * 100) / 100;
-      }
-
-      // Skip if no meaningful data
-      if (!billNo && !partyName && qty === 0) continue;
+      // Skip blank lines — must have a bill# AND party name AND at least
+      // one signal of monetary content (qty+rate, total, or taxableValue —
+      // some manual exports only fill the taxable column).
+      if (!billNo || !partyName) continue;
+      if ((qty === 0 || rate === 0) && totalInvoiceValue === 0 && taxableValue === 0) continue;
 
       invoices.push({
         sNo: sNo || invoices.length + 1,
@@ -359,11 +356,74 @@ export interface ImportReadyInvoice {
   total: number;
 }
 
-export function toImportReadyInvoices(result: ParsedExcelResult): ImportReadyInvoice[] {
+/** Optional Product master used to resolve HSN + GST rate from Commodity name. */
+export interface ProductLookup {
+  /** Product name (case is preserved; lookup is case-insensitive) */
+  name: string;
+  hsn?: string;
+  hsn_code?: string;
+  /** GST rate as decimal (0.03) or percentage (3) — both accepted */
+  gstRate?: number;
+  gst_tax_rate?: number | string;
+}
+
+function buildProductMap(products?: ProductLookup[]) {
+  // Two-tier lookup: exact-case first, then case-insensitive fallback.
+  // Surfaces conflicts (e.g. master has BOTH "GOLD COIN" and "gold coin"
+  // with different GST rates) so the import doesn't silently use the wrong
+  // tax rate.
+  const exact: Record<string, { hsn: string; gstPercent: number }> = {};
+  const ci: Record<string, { hsn: string; gstPercent: number }> = {};
+  if (!products) return { exact, ci };
+
+  // Sort by lowercased name with locale-independent comparison so the
+  // case-insensitive "first-seen wins" fallback is deterministic across
+  // user environments (localeCompare() varies by ICU/locale).
+  const sortedProducts = [...products].sort((a, b) => {
+    const an = (a.name || "").toLowerCase();
+    const bn = (b.name || "").toLowerCase();
+    return an < bn ? -1 : an > bn ? 1 : 0;
+  });
+
+  for (const p of sortedProducts) {
+    if (!p.name) continue;
+    const hsn = p.hsn || p.hsn_code || "";
+    const raw = p.gstRate ?? p.gst_tax_rate ?? 0;
+    const num = typeof raw === "number" ? raw : parseFloat(String(raw)) || 0;
+    const gstPercent = num > 1 ? num : num * 100;
+
+    const exactKey = p.name.trim();
+    const ciKey = exactKey.toLowerCase();
+    if (!(exactKey in exact)) exact[exactKey] = { hsn, gstPercent };
+    // First-seen wins for case-insensitive lookup. Combined with the
+    // exact-case map above, a row with "GOLD COIN" gets the upper-case
+    // entry; "gold coin" gets the lower-case entry; "Gold Coin" falls back
+    // to whichever sorted alphabetically first (since products[] is
+    // pre-sorted by name above for determinism).
+    if (!(ciKey in ci)) ci[ciKey] = { hsn, gstPercent };
+  }
+  return { exact, ci };
+}
+
+function lookupProduct(
+  commodity: string,
+  maps: ReturnType<typeof buildProductMap>,
+): { hsn: string; gstPercent: number } | undefined {
+  if (!commodity) return undefined;
+  const key = commodity.trim();
+  return maps.exact[key] || maps.ci[key.toLowerCase()];
+}
+
+export function toImportReadyInvoices(
+  result: ParsedExcelResult,
+  products?: ProductLookup[],
+): ImportReadyInvoice[] {
+  const productMaps = buildProductMap(products);
   const invoices: ImportReadyInvoice[] = [];
 
   for (const firm of result.firms) {
     const type: "OUTWARD" | "INWARD" = firm.supplyType.toLowerCase().includes("inward") ? "INWARD" : "OUTWARD";
+    const isInterState = !!firm.gstin && !!firm.gstin.slice(0, 2);
 
     // Group by bill number to handle multi-item invoices
     const byBill = new Map<string, ParsedInvoiceRow[]>();
@@ -375,24 +435,62 @@ export function toImportReadyInvoices(result: ParsedExcelResult): ImportReadyInv
 
     for (const [billNo, rows] of byBill) {
       const firstRow = rows[0];
-      const items = rows.map(row => ({
-        productName: row.commodity || "Item",
-        hsn: row.hsnCode,
-        gstRate: row.gstRate,
-        qty: row.qty,
-        rate: row.rate,
-        unit: "gms", // default for jewellery
-        amount: row.taxableValue,
-        cgst: row.cgst,
-        sgst: row.sgst,
-        igst: row.igst,
-      }));
+      // Inter-state when first 2 chars of customer GSTIN differ from firm GSTIN.
+      // Used to decide CGST+SGST split vs IGST. Defaults to intra-state.
+      const custStateCode = (firstRow.gstNumber || "").slice(0, 2);
+      const firmStateCode = (firm.gstin || "").slice(0, 2);
+      const useIGST = isInterState && custStateCode && firmStateCode && custStateCode !== firmStateCode;
 
-      const subtotal = items.reduce((s, i) => s + i.amount, 0);
-      const totalCGST = items.reduce((s, i) => s + i.cgst, 0);
-      const totalSGST = items.reduce((s, i) => s + i.sgst, 0);
-      const totalIGST = items.reduce((s, i) => s + i.igst, 0);
-      // Use the total from the first row if available (handles round-off), else calculate
+      const items = rows.map(row => {
+        // Resolve GST% (in percentage form): row → product → 0
+        let gstPercent = row.gstRate;
+        const lookup = lookupProduct(row.commodity, productMaps);
+        if (!gstPercent || gstPercent === 0) {
+          if (lookup) gstPercent = lookup.gstPercent;
+        }
+        const hsn = row.hsnCode || (lookup?.hsn ?? "");
+
+        // Compute taxable: prefer file value → qty*rate → back-derive from total
+        let taxable = row.taxableValue;
+        if (taxable === 0 && row.qty > 0 && row.rate > 0) {
+          taxable = Math.round(row.qty * row.rate * 100) / 100;
+        }
+        if (taxable === 0 && row.totalInvoiceValue > 0 && gstPercent > 0) {
+          taxable = Math.round((row.totalInvoiceValue / (1 + gstPercent / 100)) * 100) / 100;
+        }
+
+        // Compute taxes if not in file
+        let cgst = row.cgst, sgst = row.sgst, igst = row.igst;
+        if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent > 0) {
+          if (useIGST) {
+            igst = Math.round(taxable * gstPercent / 100 * 100) / 100;
+          } else {
+            cgst = Math.round(taxable * gstPercent / 200 * 100) / 100; // half rate
+            sgst = cgst;
+          }
+        }
+
+        return {
+          productName: row.commodity || "Item",
+          hsn,
+          gstRate: gstPercent,
+          qty: row.qty,
+          rate: row.rate,
+          unit: "gms",
+          amount: Math.round((taxable + cgst + sgst + igst) * 100) / 100, // GROSS
+          cgst,
+          sgst,
+          igst,
+          // We expose taxable separately via subtotal below — keep amount = gross
+          // so backend's safety net stays consistent.
+          taxable: Math.round(taxable * 100) / 100,
+        } as any;
+      });
+
+      const subtotal = items.reduce((s: number, i: any) => s + (i.taxable ?? 0), 0);
+      const totalCGST = items.reduce((s: number, i: any) => s + i.cgst, 0);
+      const totalSGST = items.reduce((s: number, i: any) => s + i.sgst, 0);
+      const totalIGST = items.reduce((s: number, i: any) => s + i.igst, 0);
       const total = firstRow.totalInvoiceValue > 0
         ? firstRow.totalInvoiceValue
         : Math.round((subtotal + totalCGST + totalSGST + totalIGST) * 100) / 100;
@@ -405,7 +503,11 @@ export function toImportReadyInvoices(result: ParsedExcelResult): ImportReadyInv
         type,
         firmName: firm.firmName,
         firmGSTIN: firm.gstin,
-        items,
+        items: items.map((i: any) => ({
+          productName: i.productName, hsn: i.hsn, gstRate: i.gstRate,
+          qty: i.qty, rate: i.rate, unit: i.unit,
+          amount: i.amount, cgst: i.cgst, sgst: i.sgst, igst: i.igst,
+        })),
         subtotal: Math.round(subtotal * 100) / 100,
         totalCGST: Math.round(totalCGST * 100) / 100,
         totalSGST: Math.round(totalSGST * 100) / 100,

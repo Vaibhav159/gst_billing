@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatDate, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt, Download } from "lucide-react";
 import { downloadStatementPDF } from "@/utils/generateStatementPDF";
@@ -19,8 +19,9 @@ export default function CustomerStatement() {
   const { items: businesses } = useBusinesses();
   const isMobile = useIsMobile();
   const customer = customers.find((c) => String(c.id) === String(id));
-  const [startDate, setStartDate] = useState("2024-04-01");
-  const [endDate, setEndDate] = useState("2025-03-31");
+  const _fyStartYear = parseInt(currentFY.split("-")[0], 10);
+  const [startDate, setStartDate] = useState(`${_fyStartYear}-04-01`);
+  const [endDate, setEndDate] = useState(`${_fyStartYear + 1}-03-31`);
   const [bizFilter, setBizFilter] = useState("all");
 
   if (!customer) return <div className="p-8 text-muted-foreground">Customer not found.</div>;

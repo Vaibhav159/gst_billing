@@ -6,7 +6,7 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 import { formatCurrency, financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { motion } from "framer-motion";
 import api from "@/utils/api";
 
@@ -124,9 +124,9 @@ export default function GSTRExport() {
 
                 {/* B2B Summary */}
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2B — Registered Dealers ({gstr1.b2b?.length || 0} parties)</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2B — Registered Dealers ({pluralize(gstr1.b2b?.length || 0, "party", "parties")})</h4>
                   {(gstr1.b2b || []).length > 0 ? (
-                    <table className="table-premium text-[12px]">
+                    <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
                       <thead><tr><th>GSTIN</th><th className="text-right">Invoices</th><th className="text-right">Total Value</th></tr></thead>
                       <tbody>
                         {gstr1.b2b.map((party: any) => (
@@ -137,37 +137,37 @@ export default function GSTRExport() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   ) : <p className="text-[12px] text-muted-foreground">No B2B invoices</p>}
                 </div>
 
                 {/* B2CS Summary */}
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2CS — Unregistered Intra-State ({gstr1.b2cs?.length || 0} entries)</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2CS — Unregistered Intra-State ({pluralize(gstr1.b2cs?.length || 0, "entry", "entries")})</h4>
                   {(gstr1.b2cs || []).length > 0 ? (
-                    <table className="table-premium text-[12px]">
+                    <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
                       <thead><tr><th>State</th><th>Rate</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th></tr></thead>
                       <tbody>
                         {gstr1.b2cs.map((row: any, i: number) => (
                           <tr key={i}><td>{row.pos}</td><td>{row.rt}%</td><td className="text-right">{formatCurrency(row.txval)}</td><td className="text-right">{formatCurrency(row.camt)}</td><td className="text-right">{formatCurrency(row.samt)}</td></tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   ) : <p className="text-[12px] text-muted-foreground">No B2CS invoices</p>}
                 </div>
 
                 {/* HSN */}
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({gstr1.hsn?.data?.length || 0} codes)</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({pluralize(gstr1.hsn?.data?.length || 0, "code")})</h4>
                   {(gstr1.hsn?.data || []).length > 0 ? (
-                    <table className="table-premium text-[12px]">
+                    <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
                       <thead><tr><th>HSN</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
                       <tbody>
                         {gstr1.hsn.data.map((h: any) => (
                           <tr key={h.hsn_sc}><td className="font-mono">{h.hsn_sc}</td><td className="text-right">{h.qty.toFixed(3)}</td><td className="text-right">{formatCurrency(h.txval)}</td><td className="text-right">{formatCurrency(h.camt)}</td><td className="text-right">{formatCurrency(h.samt)}</td><td className="text-right">{formatCurrency(h.iamt)}</td></tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   ) : <p className="text-[12px] text-muted-foreground">No HSN data</p>}
                 </div>
               </div>
@@ -182,7 +182,7 @@ export default function GSTRExport() {
                     <FileJson className="w-3.5 h-3.5" /> Download JSON
                   </button>
                 </div>
-                <table className="table-premium text-[13px]">
+                <div className="overflow-x-auto"><table className="table-premium text-[13px] min-w-[420px]">
                   <thead><tr><th></th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
                   <tbody>
                     <tr>
@@ -204,7 +204,7 @@ export default function GSTRExport() {
                       <td className={cn("text-right", (gstr3b.tax_pmt?.igst || 0) >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(gstr3b.tax_pmt?.igst || 0))}</td>
                     </tr>
                   </tbody>
-                </table>
+                </table></div>
               </div>
             )}
 
@@ -219,7 +219,7 @@ export default function GSTRExport() {
                 </div>
                 <p className="text-[12px] text-muted-foreground">{gstr2b.inward_invoices?.length || 0} inward invoices for matching</p>
                 {(gstr2b.inward_invoices || []).length > 0 ? (
-                  <table className="table-premium text-[12px]">
+                  <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[640px]">
                     <thead><tr><th>Invoice #</th><th>Date</th><th>Supplier</th><th>GSTIN</th><th className="text-right">Taxable</th><th className="text-right">Tax</th><th className="text-right">Total</th></tr></thead>
                     <tbody>
                       {gstr2b.inward_invoices.map((inv: any, i: number) => (
@@ -234,7 +234,7 @@ export default function GSTRExport() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 ) : <p className="text-[12px] text-muted-foreground">No inward invoices</p>}
               </div>
             )}

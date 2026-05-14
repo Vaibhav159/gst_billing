@@ -11,6 +11,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 16 },
@@ -177,14 +178,7 @@ export default function CustomerForm() {
       setDirty(false);
       navigate("/billing/customer/list");
     } catch (err: any) {
-      const detail = err?.response?.data;
-      let errorMsg = "Something went wrong. Please try again.";
-      if (detail && typeof detail === "object") {
-        errorMsg = Object.entries(detail)
-          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
-          .join("\n");
-      }
-      toast({ title: "Save Failed", description: errorMsg, variant: "destructive" });
+      toast({ title: `Save Failed ${errorTag(err)}`, description: formatApiError(err, "Could not save customer."), variant: "destructive", duration: 12000 });
     }
   };
 
@@ -218,9 +212,10 @@ export default function CustomerForm() {
       navigate(`/billing/customer/${mergeTarget}`);
     } catch (err: any) {
       toast({
-        title: "Merge Failed",
-        description: err?.response?.data?.error || "Could not merge customers.",
+        title: `Merge Failed ${errorTag(err)}`,
+        description: formatApiError(err, "Could not merge customers."),
         variant: "destructive",
+        duration: 12000,
       });
     }
   };

@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { Users, Plus, Shield, Pencil, UserCheck, UserX, Loader2 } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion } from "framer-motion";
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import api from "@/utils/api";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface UserData {
   id: number;
@@ -69,7 +70,7 @@ export default function UserManagement() {
       setCreateForm({ username: "", password: "", email: "", first_name: "", last_name: "", role: "editor" });
       fetchUsers();
     } catch (err: any) {
-      toast({ title: "Failed", description: err?.response?.data?.error || "Could not create user.", variant: "destructive" });
+      toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not create user."), variant: "destructive", duration: 12000 });
     }
     setCreating(false);
   };
@@ -81,7 +82,7 @@ export default function UserManagement() {
       fetchUsers();
       setEditingId(null);
     } catch (err: any) {
-      toast({ title: "Failed", description: err?.response?.data?.error || "Could not update role.", variant: "destructive" });
+      toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not update role."), variant: "destructive", duration: 12000 });
     }
   };
 
@@ -104,7 +105,7 @@ export default function UserManagement() {
           </div>
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">User Management</h1>
-            <p className="text-sm text-muted-foreground">{users.length} users</p>
+            <p className="text-sm text-muted-foreground">{pluralize(users.length, "user")}</p>
           </div>
         </div>
         <button onClick={() => setShowCreate(!showCreate)} className="premium-btn-primary text-[13px]">
@@ -142,7 +143,8 @@ export default function UserManagement() {
         {loading ? (
           <div className="p-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" /></div>
         ) : (
-          <table className="table-premium text-[13px]">
+          <div className="overflow-x-auto -mx-px">
+          <table className="table-premium text-[13px] min-w-[640px]">
             <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
             <tbody>
               {users.map((u) => {
@@ -196,6 +198,7 @@ export default function UserManagement() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

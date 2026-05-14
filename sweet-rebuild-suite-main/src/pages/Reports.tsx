@@ -52,6 +52,9 @@ export default function Reports() {
   const totalCount = totals.count;
 
   // Monthly data from server stats
+  // Round to 3 decimal places to avoid floating-point noise (e.g. 6107.1684000000005)
+  // showing in chart tooltips.
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
   const monthlyData = useMemo(() => {
     const fyStart = parseInt(selectedFY.split("-")[0]);
     return MONTHS.map((m, idx) => {
@@ -60,8 +63,8 @@ export default function Reports() {
       const match = (statsData?.monthly || []).find((d: any) => d.month === monthNum && d.year === year);
       return {
         month: m,
-        sales: match ? (Number(match.outward_total) || 0) / 1000 : 0,
-        purchases: match ? (Number(match.inward_total) || 0) / 1000 : 0,
+        sales: match ? r3((Number(match.outward_total) || 0) / 1000) : 0,
+        purchases: match ? r3((Number(match.inward_total) || 0) / 1000) : 0,
       };
     });
   }, [selectedFY, statsData?.monthly]);
@@ -254,9 +257,13 @@ export default function Reports() {
               <div className={cn(isMobile ? "h-[180px]" : "h-[260px]")}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={monthlyData} barGap={2}>
-                    <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} tickFormatter={isMobile ? (v: string) => v.slice(0, 1) : undefined} />
                     <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                      formatter={(v: number) => Math.round(v * 1000) / 1000}
+                    />
                     <Bar dataKey="sales" name="Sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
                     <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
                   </BarChart>
@@ -266,10 +273,16 @@ export default function Reports() {
             <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-5">
               <h2 className="text-[13px] font-display font-semibold text-foreground mb-3">Tax Distribution</h2>
               {pieData.length === 0 ? <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">No data</div> : (
-                <div className="h-[180px]"><ResponsiveContainer width="100%" height="100%"><RPieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={4} dataKey="value" label={({ name, value }) => `${name}: ${formatCurrency(value)}`}>{pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(v: number) => formatCurrency(v)} /></RPieChart></ResponsiveContainer></div>
+                <div className="h-[180px]"><ResponsiveContainer width="100%" height="100%"><RPieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value">{pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(v: number) => formatCurrency(v)} /></RPieChart></ResponsiveContainer></div>
               )}
-              <div className="flex items-center justify-center gap-4 mt-2">
-                {pieData.map((d, i) => (<div key={d.name} className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full" style={{ background: PIE_COLORS[i] }} /><span className="text-[11px] text-muted-foreground">{d.name}</span></div>))}
+              <div className="flex items-center justify-center gap-4 mt-2 flex-wrap">
+                {pieData.map((d, i) => (
+                  <div key={d.name} className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i] }} />
+                    <span className="text-[11px] text-muted-foreground">{d.name}</span>
+                    <span className="text-[11px] font-medium text-foreground tabular-nums">{formatCurrency(d.value)}</span>
+                  </div>
+                ))}
               </div>
             </motion.div>
           </motion.div>

@@ -173,6 +173,7 @@ export default function ImportPreview() {
                 <th className="px-3 py-2.5 text-left font-semibold">Commodity</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Qty</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Rate</th>
+                <th className="px-3 py-2.5 text-center font-semibold whitespace-nowrap">GST&nbsp;%</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold">CGST</th>
                 <th className="px-3 py-2.5 text-right font-semibold">SGST</th>
@@ -195,6 +196,7 @@ export default function ImportPreview() {
                   <td className="px-3 py-2 text-muted-foreground">{inv.items[0]?.productName || "-"}</td>
                   <td className="px-3 py-2 text-right font-mono">{inv.items.reduce((s, i) => s + i.qty, 0).toFixed(3)}</td>
                   <td className="px-3 py-2 text-right font-mono">{inv.items[0]?.rate?.toFixed(2) || "-"}</td>
+                  <td className="px-3 py-2 text-center font-mono text-muted-foreground">{(inv.items[0]?.gstRate ?? 0)}%</td>
                   <td className="px-3 py-2 text-right font-mono">{fmt(inv.subtotal)}</td>
                   <td className="px-3 py-2 text-right font-mono">{fmt(inv.totalCGST)}</td>
                   <td className="px-3 py-2 text-right font-mono">{fmt(inv.totalSGST)}</td>
@@ -205,7 +207,7 @@ export default function ImportPreview() {
             </tbody>
             <tfoot>
               <tr className="bg-primary/5 border-t-2 border-primary/20 font-semibold">
-                <td colSpan={8} className="px-3 py-2.5 text-right">TOTAL</td>
+                <td colSpan={9} className="px-3 py-2.5 text-right">TOTAL</td>
                 <td className="px-3 py-2.5 text-right font-mono">{fmt(grandTotals.taxable)}</td>
                 <td className="px-3 py-2.5 text-right font-mono">{fmt(grandTotals.cgst)}</td>
                 <td className="px-3 py-2.5 text-right font-mono">{fmt(grandTotals.sgst)}</td>

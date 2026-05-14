@@ -19,6 +19,7 @@ import SearchableSelect from "@/components/SearchableSelect";
 import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -91,7 +92,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           date: inv.invoice_date || new Date().toISOString().split("T")[0],
           type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
           isIGST: inv.is_igst_applicable || false,
-          financialYear: inv.financial_year || "2024-25",
+          financialYear: inv.financial_year || currentFY,
         });
 
         // Store fallback names for dropdown rendering
@@ -372,8 +373,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           navigate("/billing/invoice/list");
         }
       } catch (err: any) {
-        const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Create failed.";
-        toast({ title: "Create Failed", description: msg, variant: "destructive" });
+        toast({ title: `Create Failed ${errorTag(err)}`, description: formatApiError(err, "Create failed."), variant: "destructive", duration: 12000 });
         setDirty(true);
       }
     } else if (id) {
@@ -399,8 +399,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         toast({ title: "Invoice Updated", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
         navigate("/billing/invoice/list");
       } catch (err: any) {
-        const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || "Update failed.";
-        toast({ title: "Update Failed", description: msg, variant: "destructive" });
+        toast({ title: `Update Failed ${errorTag(err)}`, description: formatApiError(err, "Update failed."), variant: "destructive", duration: 12000 });
         setDirty(true);
       }
     }

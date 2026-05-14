@@ -11,7 +11,7 @@ import { motion } from "framer-motion";
 import { formatCurrency } from "@/utils/mockData";
 import { useProducts, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -94,10 +94,10 @@ export default function ProductList() {
   // ─── MOBILE VIEW ───
   if (isMobile) {
     return (
-      <div className="p-4 space-y-4">
+      <div className="p-4 pb-40 space-y-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Products</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">{totalProducts} items in catalog</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{pluralize(totalProducts, "item")} in catalog</p>
         </div>
 
         {/* Stats scroll */}
@@ -217,7 +217,7 @@ export default function ProductList() {
           </div>
           <div>
             <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">Products</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">{totalProducts} items in catalog</p>
+            <p className="text-sm text-muted-foreground mt-0.5">{pluralize(totalProducts, "item")} in catalog</p>
           </div>
         </div>
         <div className="flex items-center gap-2.5">

@@ -6,7 +6,7 @@ import {
   UserPlus, X, Plus, AlertCircle, Check, Copy, Pencil, Save,
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers, useInvoices, useProducts } from "@/hooks/useDataStore";
 import type { Business, Customer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion, AnimatePresence } from "framer-motion";
@@ -16,6 +16,7 @@ import { parseInvoiceExcel, toImportReadyInvoices } from "@/utils/parseInvoiceEx
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { indianStates } from "@/utils/mockData";
 import { downloadSampleExcel } from "@/utils/generateSampleExcel";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 interface ImportPageProps { type: "customer" | "product" | "invoice" | "business" }
 
@@ -58,21 +59,24 @@ const configs = {
     back: "/billing/invoice/list",
     breadcrumb: [{ label: "Invoices", href: "/billing/invoice/list" }, { label: "Import" }],
     columns: [
-      { name: "S.No.", required: false, example: "1" },
-      { name: "Bill No.", required: true, example: "100" },
-      { name: "Invoice Date", required: true, example: "06-02-2026" },
-      { name: "Party Name", required: true, example: "Rajesh Kumar" },
-      { name: "GST Number", required: false, example: "08AABCK5461H1ZO" },
-      { name: "Commodity", required: true, example: "Gold Ornaments" },
-      { name: "HSN Code", required: true, example: "711319" },
-      { name: "GST Rate", required: true, example: "3%" },
-      { name: "Qty (gm)", required: true, example: "37.740" },
-      { name: "Rate (\u20b9/gm)", required: true, example: "16397.00" },
-      { name: "Taxable Value (\u20b9)", required: false, example: "618661.80" },
-      { name: "CGST (\u20b9)", required: false, example: "9279.93" },
-      { name: "SGST (\u20b9)", required: false, example: "9279.93" },
-      { name: "IGST (\u20b9)", required: false, example: "0.00" },
-      { name: "Total Invoice Value (\u20b9)", required: false, example: "637221.66" },
+      // 7 required columns \u2014 no silent defaults; HSN + GST rate are resolved
+      // from the Product master via the Commodity name.
+      { name: "Bill No.", required: true, example: "100", note: "" },
+      { name: "Invoice Date", required: true, example: "06-02-2026", note: "DD-MM-YYYY" },
+      { name: "Party Name", required: true, example: "Rajesh Kumar", note: "" },
+      { name: "GST Number", required: false, example: "08AABCK5461H1ZO", note: "blank cell allowed (= unregistered)" },
+      { name: "Commodity", required: true, example: "Gold Ornaments", note: "must match a product in your Product list" },
+      { name: "Qty (gm)", required: true, example: "37.740", note: "" },
+      { name: "Rate (\u20b9/gm)", required: true, example: "16397.00", note: "" },
+      // Auto-derived (won't be shown as required in UI, but parser reads them
+      // if the file does include them \u2014 useful when re-importing existing exports)
+      { name: "HSN Code", required: false, example: "711319", note: "from Product list" },
+      { name: "GST Rate", required: false, example: "3%", note: "from Product list" },
+      { name: "Taxable Value (\u20b9)", required: false, example: "618661.80", note: "= Qty \u00d7 Rate" },
+      { name: "CGST (\u20b9)", required: false, example: "9279.93", note: "computed" },
+      { name: "SGST (\u20b9)", required: false, example: "9279.93", note: "computed" },
+      { name: "IGST (\u20b9)", required: false, example: "0.00", note: "computed (inter-state)" },
+      { name: "Total Invoice Value (\u20b9)", required: false, example: "637221.66", note: "= Taxable + tax" },
     ],
     showBusiness: true,
     icon: Receipt,
@@ -186,14 +190,7 @@ function InlineQuickAddCustomer({
       toast({ title: "Customer Created", description: form.name });
       onCreated(created as Customer);
     } catch (err: any) {
-      const detail = err?.response?.data;
-      let errorMsg = "Could not create customer.";
-      if (detail && typeof detail === "object") {
-        errorMsg = Object.entries(detail)
-          .map(([key, val]) => `${key}: ${Array.isArray(val) ? val.join(", ") : val}`)
-          .join("; ");
-      }
-      toast({ title: "Creation Failed", description: errorMsg, variant: "destructive" });
+      toast({ title: `Creation Failed ${errorTag(err)}`, description: formatApiError(err, "Could not create customer."), variant: "destructive", duration: 12000 });
     }
     setSubmitting(false);
   };
@@ -392,6 +389,8 @@ export default function ImportPage({ type }: ImportPageProps) {
   const { items: businesses } = useBusinesses();
   const { items: customers, refetch: refetchCustomers } = useCustomers();
   const { items: existingInvoices, refetch: refetchInvoices } = useInvoices(undefined, type === "invoice");
+  // Products fetched only when generating the import template (invoice flow)
+  const { items: productsForTemplate } = useProducts(undefined, undefined, type === "invoice");
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [bizFilter, setBizFilter] = useState("all");
@@ -573,7 +572,18 @@ export default function ImportPage({ type }: ImportPageProps) {
         try {
           const data = e.target?.result as ArrayBuffer;
           const result = parseInvoiceExcel(data);
-          const invoices = toImportReadyInvoices(result);
+          // mapDjangoProduct in useDataStore renames the API fields to
+          // `hsn` (string) and `gstRate` (percentage form, e.g. 3 = 3%).
+          // toImportReadyInvoices accepts either name shape, but passing the
+          // raw camelCase fields here keeps things explicit.
+          const invoices = toImportReadyInvoices(
+            result,
+            (productsForTemplate || []).map((p: any) => ({
+              name: p.name,
+              hsn: p.hsn,
+              gstRate: p.gstRate,
+            })),
+          );
           if (invoices.length > 0) {
             toast({ title: "Excel Parsed", description: `Found ${invoices.length} invoices from ${result.firms.length} firm(s)` });
             // Navigate to full-screen review page
@@ -668,15 +678,8 @@ export default function ImportPage({ type }: ImportPageProps) {
         toast({ title: "Import Successful", description: `Records from ${file.name} imported successfully.` });
       }
     } catch (err: any) {
-      const data = err?.response?.data;
-      let msg = "Import failed. Check your file format.";
-      if (data?.error) msg = data.error;
-      else if (data?.detail) msg = data.detail;
-      else if (data?.message) msg = data.message;
-      else if (typeof data === "string") msg = data;
-      else if (err?.message) msg = err.message;
-      logger.error("Import error:", err?.response?.status, data);
-      toast({ title: "Import Failed", description: msg, variant: "destructive" });
+      logger.error("Import error:", err?.response?.status, err?.response?.data);
+      toast({ title: `Import Failed ${errorTag(err)}`, description: formatApiError(err, "Import failed. Check your file format."), variant: "destructive", duration: 15000 });
     }
     setImporting(false);
   };
@@ -788,33 +791,81 @@ export default function ImportPage({ type }: ImportPageProps) {
               <h2 className="text-[11px] font-display font-semibold text-muted-foreground uppercase tracking-wider">CSV Format</h2>
             </div>
 
+            {/* Required fields */}
             <div className="space-y-2">
-              {config.columns.map((col, i) => (
-                <div key={col.name} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/30 hover:bg-secondary/10 transition-colors">
-                  <span className="w-6 h-6 rounded-lg bg-secondary/50 flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/80 mb-1">Required</p>
+              {config.columns.filter((c) => c.required).map((col, i) => (
+                <div key={col.name} className="flex items-center gap-3 p-2.5 rounded-lg border border-primary/20 bg-primary/5">
+                  <span className="w-6 h-6 rounded-lg bg-primary/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className={cn("text-[12px] font-semibold", col.required ? "text-foreground" : "text-muted-foreground")}>
-                      {col.name}
-                      {col.required && <span className="text-destructive ml-0.5">*</span>}
+                    <p className="text-[12px] font-semibold text-foreground">
+                      {col.name}<span className="text-destructive ml-0.5">*</span>
                     </p>
-                    <p className="text-[10px] text-muted-foreground font-mono truncate">{col.example}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono truncate">
+                      {col.example}{(col as any).note ? ` · ${(col as any).note}` : ""}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="flex gap-2">
-              <button onClick={handleSampleDownload} className="premium-btn-outline flex-1 text-[12px] h-10">
+            {/* Optional fields with defaults */}
+            {config.columns.some((c) => !c.required) && (
+              <div className="space-y-2 mt-3 pt-3 border-t border-border/30">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Optional · sensible defaults applied</p>
+                {config.columns.filter((c) => !c.required).map((col) => (
+                  <div key={col.name} className="flex items-start gap-2 px-2.5 py-1.5">
+                    <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground/80">{col.name}</span>
+                        {(col as any).note ? <span className="font-mono"> · {(col as any).note}</span> : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {type === "invoice" ? (
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    downloadSampleExcel({
+                      businesses: businesses.map((b: any) => ({ name: b.name, gst_number: b.gst_number })),
+                      products: (productsForTemplate || []).map((p: any) => ({ name: p.name })),
+                      includeInward: false,
+                      withSamples: true,
+                    });
+                    toast({ title: "Smart Template Downloaded", description: `Pre-filled with your ${businesses.length} business(es) and ${(productsForTemplate || []).length} product(s)` });
+                  }}
+                  className="premium-btn-primary w-full text-[12px] h-10"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> Download Smart Template
+                </button>
+                <button
+                  onClick={() => {
+                    downloadSampleExcel({
+                      businesses: businesses.map((b: any) => ({ name: b.name, gst_number: b.gst_number })),
+                      products: (productsForTemplate || []).map((p: any) => ({ name: p.name })),
+                      includeInward: true,
+                      withSamples: true,
+                    });
+                    toast({ title: "Full Template Downloaded", description: "Includes both Outward + Inward sheets per business" });
+                  }}
+                  className="premium-btn-outline w-full text-[11px] h-9"
+                >
+                  <Download className="w-3.5 h-3.5" /> + Inward sheets too
+                </button>
+                <p className="text-[10px] text-muted-foreground text-center">Pre-filled with your real businesses, GSTINs, and product list dropdowns.</p>
+              </div>
+            ) : (
+              <button onClick={handleSampleDownload} className="premium-btn-outline w-full text-[12px] h-10">
                 <Download className="w-3.5 h-3.5" /> Sample CSV
               </button>
-              {type === "invoice" && (
-                <button onClick={() => { downloadSampleExcel(); toast({ title: "Template Downloaded", description: "invoice-import-template.xlsx" }); }} className="premium-btn-outline flex-1 text-[12px] h-10">
-                  <FileSpreadsheet className="w-3.5 h-3.5" /> Excel Template
-                </button>
-              )}
-            </div>
+            )}
           </div>
 
           {/* Tips */}
@@ -845,7 +896,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                 <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Target Business</label>
               </div>
               <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full">
-                <option value="all">Auto-detect from Excel (Match by GSTIN)</option>
+                <option value="all">Auto-detect (match GSTIN)</option>
                 {businesses.map((b) => <option key={b.id} value={b.id}>{b.name} — {b.gst_number}</option>)}
               </select>
             </div>

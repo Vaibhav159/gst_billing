@@ -17,11 +17,23 @@ class AuditLogMixin:
     def get_entity_name(self, instance) -> str:
         return str(instance)
 
+    def _field_value(self, instance, field):
+        """
+        Return the snapshot value for one model field.
+
+        For FK fields, return the FK column value (the ID), not the related
+        instance's __str__ — otherwise undo can't restore the relation. e.g.
+        for `business`, we want `business_id`'s integer, not "LODHA JEWELLERS".
+        """
+        if field.is_relation and field.many_to_one:
+            return getattr(instance, field.attname, None)  # e.g. business_id
+        return getattr(instance, field.name, None)
+
     def _snapshot(self, instance) -> dict:
         data = {}
         for field in instance._meta.concrete_fields:
             if field.name not in EXCLUDED_FIELDS:
-                value = getattr(instance, field.name)
+                value = self._field_value(instance, field)
                 data[field.name] = str(value) if value is not None else None
         return data
 
@@ -29,11 +41,8 @@ class AuditLogMixin:
         """Full snapshot including all fields for undo."""
         data = {}
         for field in instance._meta.concrete_fields:
-            value = getattr(instance, field.name)
-            if value is not None:
-                data[field.name] = str(value)
-            else:
-                data[field.name] = None
+            value = self._field_value(instance, field)
+            data[field.name] = str(value) if value is not None else None
         return data
 
     def _compute_changes(self, old_snapshot: dict, new_snapshot: dict) -> dict:
@@ -67,18 +76,22 @@ class AuditLogMixin:
                   snapshot=self._full_snapshot(instance))
 
     def perform_update(self, serializer):
-        instance = self.get_object()
+        # serializer.instance is already loaded by the viewset (one DB hit).
+        # Snapshot it BEFORE save (still has old values), then save, then snapshot
+        # again (serializer.save() updates instance in-place).
+        # Saves: 1 redundant get_object() + 1 refresh_from_db() vs the old impl.
+        instance = serializer.instance
         old_snapshot = self._snapshot(instance)
         full_old = self._full_snapshot(instance)
         super().perform_update(serializer)
-        instance.refresh_from_db()
-        new_snapshot = self._snapshot(instance)
+        # serializer.instance is mutated in place by save() — read fresh values directly
+        new_snapshot = self._snapshot(serializer.instance)
         changes = self._compute_changes(old_snapshot, new_snapshot)
         if changes:
             changed_fields = ", ".join(changes.keys())
             details = f"Updated {changed_fields}"
             self._log(
-                "updated", instance, self.request.user,
+                "updated", serializer.instance, self.request.user,
                 changes=changes, details=details, snapshot=full_old,
             )
 

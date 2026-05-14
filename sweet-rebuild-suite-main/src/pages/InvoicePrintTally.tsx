@@ -166,14 +166,14 @@ export default function InvoicePrintTally() {
             if (!url) {
               return (
                 <div className="flex flex-col items-center justify-center py-16 px-6 text-center gap-4">
-                  <p className="text-sm text-muted-foreground">Could not generate preview. Use the Download button above.</p>
+                  <p className="text-sm text-muted-foreground">Could not generate preview. Use the PDF button above.</p>
                 </div>
               );
             }
             if (isMobile) {
               return (
                 <div className="flex flex-col items-center justify-center py-16 px-6 text-center gap-4">
-                  <p className="text-sm text-muted-foreground">PDF preview is not available on mobile. Use the Download button above to get the PDF.</p>
+                  <p className="text-sm text-muted-foreground">PDF preview is not available on mobile. Tap the PDF button above to download it.</p>
                 </div>
               );
             }

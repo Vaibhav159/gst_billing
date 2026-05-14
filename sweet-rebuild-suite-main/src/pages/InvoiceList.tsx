@@ -13,7 +13,7 @@ import { useInvoices, useBusinesses, useCustomers, useDashboardStats } from "@/h
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -95,7 +95,7 @@ export default function InvoiceList() {
   // ─── MOBILE VIEW ───
   if (isMobile) {
     return (
-      <div className="p-4 space-y-4">
+      <div className="p-4 pb-40 space-y-4">
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Invoices</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{totalCount} invoices · FY {fyFilter === "all" ? "All" : fyFilter}</p>
@@ -156,7 +156,7 @@ export default function InvoiceList() {
                 </div>
               </div>
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-border/30">
-                <span className="text-[11px] text-muted-foreground">{inv.lineItemCount} items · Tax {formatCurrency(inv.totalTax)}</span>
+                <span className="text-[11px] text-muted-foreground">{pluralize(inv.lineItemCount, "item")} · Tax {formatCurrency(inv.totalTax)}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); shareInvoice(inv); }}

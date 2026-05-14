@@ -11,7 +11,7 @@ import {
   FileText, Share2, Download, MessageCircle, Truck, AlertTriangle,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
-import { cn } from "@/utils/utils";
+import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
@@ -46,7 +46,7 @@ export default function InvoiceDetail() {
     { label: "Subtotal", value: formatCurrency(inv.subtotal), icon: Package, color: "text-foreground" },
     { label: "Total Tax", value: formatCurrency(inv.totalTax), icon: Receipt, color: "text-chart-3" },
     { label: "Grand Total", value: formatCurrency(inv.total), icon: IndianRupee, color: "text-primary" },
-    { label: "Items", value: `${inv.items.length} products`, icon: TrendingUp, color: "text-success" },
+    { label: "Items", value: pluralize(inv.items.length, "product"), icon: TrendingUp, color: "text-success" },
   ];
 
   return (
@@ -122,10 +122,10 @@ export default function InvoiceDetail() {
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">From</p>
               </div>
               <p className="text-[14px] font-display font-bold text-foreground">{inv.businessName}</p>
-              {biz && (
+              {biz && (biz.gst_number || biz.address) && (
                 <div className="space-y-1 text-[12px] text-muted-foreground">
-                  <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{biz.gst_number}</span></p>
-                  <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{biz.address}</p>
+                  {biz.gst_number && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{biz.gst_number}</span></p>}
+                  {biz.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{biz.address}</p>}
                 </div>
               )}
             </div>
@@ -135,10 +135,10 @@ export default function InvoiceDetail() {
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">To</p>
               </div>
               <Link to={`/billing/customer/${inv.customerId}`} className="text-[14px] font-display font-bold text-primary hover:underline">{inv.customerName}</Link>
-              {customer && (
+              {customer && (customer.gst_number || customer.address) && (
                 <div className="space-y-1 text-[12px] text-muted-foreground">
-                  <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{customer.gst_number}</span></p>
-                  <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{customer.address}</p>
+                  {customer.gst_number && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{customer.gst_number}</span></p>}
+                  {customer.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{customer.address}</p>}
                 </div>
               )}
             </div>
@@ -248,7 +248,7 @@ export default function InvoiceDetail() {
                   { label: "Financial Year", value: inv.financialYear },
                   { label: "Type", value: inv.type },
                   { label: "GST Type", value: inv.isIGST ? "IGST (Interstate)" : "CGST/SGST (Intrastate)" },
-                  { label: "Items", value: `${inv.items.length} line items` },
+                  { label: "Items", value: pluralize(inv.items.length, "line item") },
                   { label: "Created", value: formatDate(inv.createdAt) },
                 ].map((d) => (
                   <div key={d.label} className="flex justify-between"><span className="text-muted-foreground">{d.label}</span><span className="text-foreground font-medium">{d.value}</span></div>

@@ -51,6 +51,9 @@ class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer
         fields = "__all__"
+        # M2M to Business is optional on create — many customers are added
+        # without immediately linking to a business
+        extra_kwargs = {"businesses": {"required": False}}
 
 
 class ProductSerializer(serializers.ModelSerializer):
