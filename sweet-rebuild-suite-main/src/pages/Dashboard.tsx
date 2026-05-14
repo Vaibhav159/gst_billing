@@ -42,9 +42,13 @@ function getMonthlyDataFromStats(fy: string, monthlyRaw: any[]) {
 
 interface OutletCtx { selectedFY: string }
 
-function getMiniTrend(data: { outward: number; inward: number }[], type: "outward" | "inward" | "net") {
+function getMiniTrend(
+  data: { month: string; outward: number; inward: number }[],
+  type: "outward" | "inward" | "net",
+) {
   return data.map((d, i) => ({
     i,
+    month: d.month,
     v: type === "net" ? d.outward - d.inward : d[type],
   }));
 }
@@ -62,6 +66,20 @@ export default function Dashboard() {
 
   const totals = statsData?.totals || { inward: 0, outward: 0, net: 0, tax: 0, inward_tax: 0, count: 0 };
   const monthlyData = useMemo(() => getMonthlyDataFromStats(selectedFY, statsData?.monthly || []), [selectedFY, statsData?.monthly]);
+  // Sparklines only show months that have actually started, otherwise the
+  // not-yet-happened months render as "0" and a single early-month spike
+  // looks like a broken chart with a flat tail. The big Revenue Overview
+  // chart below still shows the full 12-month FY for context.
+  const elapsedMonthlyData = useMemo(() => {
+    const fyStart = parseInt(selectedFY.split("-")[0]);
+    const fyEnd = new Date(fyStart + 1, 2, 31);  // 31 Mar of next year
+    const now = new Date();
+    if (now > fyEnd) return monthlyData;  // past FY → all 12 months
+    if (now < new Date(fyStart, 3, 1)) return [];  // future FY → none
+    const m = now.getMonth();  // 0-11 calendar month
+    const fyMonthIdx = m >= 3 ? m - 3 : m + 9;  // 0=Apr ... 11=Mar
+    return monthlyData.slice(0, fyMonthIdx + 1);
+  }, [selectedFY, monthlyData]);
   const recentInvoices = useMemo(() => (statsData?.recent_invoices || []).map(mapDjangoInvoice), [statsData?.recent_invoices]);
   const { items: auditEntries } = useAuditLog(undefined, true);
 
@@ -328,7 +346,7 @@ export default function Dashboard() {
       <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card) => {
           const Icon = card.icon;
-          const sparkData = getMiniTrend(monthlyData, card.sparkType);
+          const sparkData = getMiniTrend(elapsedMonthlyData, card.sparkType);
           return (
             <motion.div key={card.label} variants={fadeUp}
               className={cn("group relative overflow-hidden stat-card rounded-2xl p-5 space-y-3 border-l-[3px]",
@@ -362,8 +380,16 @@ export default function Dashboard() {
                         <stop offset="100%" stopColor={`hsl(var(--${card.color.replace("text-", "")}))`} stopOpacity={0} />
                       </linearGradient>
                     </defs>
+                    <Tooltip
+                      cursor={{ stroke: `hsl(var(--${card.color.replace("text-", "")}))`, strokeOpacity: 0.3, strokeWidth: 1 }}
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11, padding: "4px 8px", color: "hsl(var(--foreground))" }}
+                      labelFormatter={() => ""}
+                      formatter={(v: number, _n: any, p: any) => [formatCurrency(v), p?.payload?.month || ""]}
+                    />
                     <Area type="monotone" dataKey="v" stroke={`hsl(var(--${card.color.replace("text-", "")}))`}
-                      strokeWidth={1.5} fill={`url(#spark-${card.label})`} dot={false} />
+                      strokeWidth={1.5} fill={`url(#spark-${card.label})`}
+                      dot={{ r: 1.5, fill: `hsl(var(--${card.color.replace("text-", "")}))`, fillOpacity: 0.4, stroke: "none" }}
+                      activeDot={{ r: 3, fill: `hsl(var(--${card.color.replace("text-", "")}))`, stroke: "hsl(var(--background))", strokeWidth: 1 }} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

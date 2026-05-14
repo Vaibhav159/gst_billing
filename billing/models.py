@@ -315,11 +315,17 @@ class Invoice(AbstractBaseModel):
             else datetime(today.year, 4, 1).date()
         )
 
+        # Only consider invoices whose invoice_number is *purely* numeric.
+        # Without this filter, an invoice like "COMBINED-TEST-1778345121" or
+        # "INV/2024-25/100" gets cast as an int by PostgreSQL (which extracts
+        # the trailing digits) and becomes the "max" — leaking a giant or
+        # nonsensical number into the next-invoice-number suggestion.
         last_invoice = (
             cls.objects.filter(
                 business_id=business_id,
                 invoice_date__gte=start_date,
                 type_of_invoice=INVOICE_TYPE_OUTWARD,
+                invoice_number__regex=r"^\d+$",
             )
             .annotate(invoice_number_int=Cast("invoice_number", IntegerField()))
             .order_by("-invoice_number_int")
@@ -328,11 +334,10 @@ class Invoice(AbstractBaseModel):
 
         if last_invoice:
             try:
-                next_number = int(last_invoice.invoice_number) + 1
+                return int(last_invoice.invoice_number) + 1
             except ValueError:
-                # If invoice_number is not an integer, return 1
-                next_number = 1
-            return next_number
+                # Defensive: regex above should make this unreachable.
+                return 1
         return 1
 
     @classmethod

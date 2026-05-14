@@ -130,7 +130,7 @@ export default function Settings() {
       title: "Invoice Config", icon: FileText,
       fields: (
         <div className={cn("grid gap-4", isMobile ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
-          <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Next Invoice Number</label><div className="premium-input bg-secondary/20 cursor-default">{nextInvoiceInfo || "Select a business above"}</div><p className="text-[10px] text-muted-foreground">Invoice prefix is set per business (edit business to change)</p></div>
+          <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Next Invoice Number</label><div className="premium-input bg-secondary/20 cursor-default flex items-center">{nextInvoiceInfo || "Select a business above"}</div><p className="text-[10px] text-muted-foreground">Invoice prefix is set per business (edit business to change)</p></div>
           <div className="space-y-1.5"><label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Currency</label><select value={settings.currency} onChange={(e) => set("currency", e.target.value)} className="premium-select w-full"><option value="INR">₹ INR</option><option value="USD">$ USD</option></select></div>
         </div>
       ),

@@ -748,6 +748,63 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create an invoice + its line items in a single round-trip.
+
+        Pass `line_items` in the request body alongside the invoice fields and
+        we'll bulk-create them inside the same transaction as the invoice, then
+        update total_amount. Saves the previous "POST /invoices/ then POST
+        /invoices/{id}/update_line_items/" pair (was 2 round-trips, ~1s; now
+        one ~500ms call).
+        """
+        line_items_data = request.data.get("line_items") or []
+
+        # Strip line_items from the payload that goes into InvoiceSerializer —
+        # the serializer doesn't know about them, and DRF would 400 on extras
+        # if we ever turn on strict validation.
+        payload = {k: v for k, v in request.data.items() if k != "line_items"}
+        serializer = self.get_serializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            self.perform_create(serializer)  # saves invoice + writes audit log
+            invoice = serializer.instance
+
+            if line_items_data:
+                new_total = Decimal("0")
+                new_lis = []
+                for item_data in line_items_data:
+                    qty = Decimal(str(item_data.get("quantity", 1)))
+                    rate = Decimal(str(item_data.get("rate", 0)))
+                    amount = Decimal(str(item_data.get("amount", qty * rate)))
+                    new_total += amount
+                    new_lis.append(LineItem(
+                        invoice=invoice,
+                        customer=invoice.customer,
+                        product_name=item_data.get("product_name", ""),
+                        hsn_code=item_data.get("hsn_code", ""),
+                        gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                        quantity=qty,
+                        rate=rate,
+                        cgst=Decimal(str(item_data.get("cgst", 0))),
+                        sgst=Decimal(str(item_data.get("sgst", 0))),
+                        igst=Decimal(str(item_data.get("igst", 0))),
+                        amount=amount,
+                        unit=item_data.get("unit", "gms"),
+                        workspace_id=1,
+                    ))
+                LineItem.objects.bulk_create(new_lis, batch_size=100)
+                # Bypass save()'s sum() roundtrip — we already know the total.
+                invoice.total_amount = new_total
+                Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
+
+        # Re-serialize so the response includes the persisted total + line items.
+        invoice.refresh_from_db()
+        out = self.get_serializer(invoice)
+        headers = self.get_success_headers(out.data)
+        return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
+
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
         """
@@ -1319,8 +1376,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         queryset = self.get_queryset()
         invoice_ids = list(queryset.values_list("id", flat=True))
 
-        outward_invoices = queryset.filter(type_of_invoice="outward").select_related("customer", "business")
-        inward_invoices = queryset.filter(type_of_invoice="inward").select_related("customer", "business")
+        # Prefetch line items so the per-invoice loops below don't fire one
+        # query per invoice (the previous N+1 made this endpoint take ~12s
+        # for ~95 invoices over a remote-DB connection).
+        outward_invoices = list(
+            queryset.filter(type_of_invoice="outward")
+            .select_related("customer", "business")
+            .prefetch_related("lineitem_set")
+        )
+        inward_invoices = list(
+            queryset.filter(type_of_invoice="inward")
+            .select_related("customer", "business")
+            .prefetch_related("lineitem_set")
+        )
 
         # ── GSTR-1 ──
 
@@ -1330,7 +1398,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if not cust_gst or len(cust_gst) < 15:
                 continue  # Skip unregistered
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             inv_items = []
             for li in items:
                 inv_items.append({
@@ -1367,7 +1435,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
             if cust_state != biz_state:
                 continue  # Inter-state goes to B2CL
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             for li in items:
                 rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
                 key = f"{biz_state}-{rate}"
@@ -1390,7 +1458,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
             if cust_state == biz_state:
                 continue  # Intra-state goes to B2CS
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             inv_items = [{
                 "num": int(li.id),
                 "itm_det": {
@@ -1463,7 +1531,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Compare inward invoices against expected data
         inward_list = []
         for inv in inward_invoices:
-            items = LineItem.objects.filter(invoice=inv)
+            items = inv.lineitem_set.all()
             total_tax = sum(float(li.cgst + li.sgst + li.igst) for li in items)
             total_taxable = sum(float(li.quantity * li.rate) for li in items)
             inward_list.append({
@@ -1504,26 +1572,33 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             else datetime(today.year, 4, 1).date()
         )
 
-        # Get all invoices for this business in current FY
+        # Find the highest trailing number, but only among invoice_numbers
+        # whose shape we recognize. Without this filter, an invoice with a
+        # programmatically-generated body like "P1778291284" would extract
+        # the timestamp suffix and become the "max", leaking 1.7-billion as
+        # the suggested next number.
+        # Recognized shapes: pure digits ("100"), or PREFIX/FY/digits
+        # ("SGJ/2024-25/108"). Anything else is skipped.
+        import re
+
         fy_invoices = Invoice.objects.filter(
             business_id=business_id,
             invoice_date__gte=start_date,
             type_of_invoice=invoice_type,
-        )
+        ).only("invoice_number")
 
-        # Find the one with the highest trailing number
-        import re as _re
-        last_invoice = None
+        recognized_pattern = re.compile(r"^(?:\d+|[A-Za-z]+/\d{4}-\d{2}/\d+)\s*$")
         max_num = 0
+        last_invoice = None
         for inv in fy_invoices:
-            m = _re.search(r"(\d+)\s*$", inv.invoice_number)
+            if not recognized_pattern.match(inv.invoice_number or ""):
+                continue
+            m = re.search(r"(\d+)\s*$", inv.invoice_number)
             if m:
                 n = int(m.group(1))
                 if n > max_num:
                     max_num = n
                     last_invoice = inv
-
-        import re
 
         next_number = 1
         if last_invoice:
@@ -1531,7 +1606,6 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             try:
                 next_number = int(inv_num) + 1
             except (ValueError, IndexError):
-                # Extract trailing number from formats like "SGJ/2024-25/108"
                 match = re.search(r"(\d+)\s*$", inv_num)
                 if match:
                     next_number = int(match.group(1)) + 1
