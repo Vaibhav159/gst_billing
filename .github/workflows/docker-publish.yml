@@ -5,10 +5,26 @@ on:
     branches:
       - main
       - new_ui
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: Django Backend
+            image: gst-billing
+            file: ./Dockerfile
+          - name: Nginx
+            image: gst-billing-nginx
+            file: ./nginx/Dockerfile
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,24 +41,15 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push Django Backend
+      - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
+          file: ${{ matrix.file }}
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ secrets.DOCKER_USERNAME }}/gst-billing:latest
-          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gst-billing:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gst-billing:buildcache,mode=max
-
-      - name: Build and push Nginx
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./nginx/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ secrets.DOCKER_USERNAME }}/gst-billing-nginx:latest
-          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gst-billing-nginx:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/gst-billing-nginx:buildcache,mode=max
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:latest
+            ${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache,mode=max
