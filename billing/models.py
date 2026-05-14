@@ -650,3 +650,42 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.entity} #{self.entity_id}"
+
+
+class ITCReclaimLedger(AbstractBaseModel):
+    """
+    Tracks the Electronic Credit Reversal & Reclaimed Statement (ECRRS)
+    opening balance per business — i.e., cumulative ITC reversed under
+    GSTR-3B Table 4(B)(2) in earlier periods that has not yet been reclaimed
+    via 4(D)(1).
+
+    The closing balance is computed live from current-period reversals/reclaims;
+    only the *opening* balance lives in the DB (per GSTN portal convention —
+    each taxpayer declares their opening once, then the running ledger is
+    derived).
+    """
+    business = models.OneToOneField(
+        Business,
+        on_delete=models.CASCADE,
+        related_name="itc_reclaim_ledger",
+        help_text="Business this ledger belongs to.",
+    )
+    opening_cgst = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0.00"),
+        help_text="Opening reclaimable CGST balance (cumulative 4(B)(2) reversals not yet reclaimed).",
+    )
+    opening_sgst = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0.00"),
+        help_text="Opening reclaimable SGST balance.",
+    )
+    opening_igst = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0.00"),
+        help_text="Opening reclaimable IGST balance.",
+    )
+    opening_as_of = models.DateField(
+        null=True, blank=True,
+        help_text="Date the opening balance was last set / amended (for audit trail).",
+    )
+
+    def __str__(self):
+        return f"ITC Ledger — {self.business.name}"

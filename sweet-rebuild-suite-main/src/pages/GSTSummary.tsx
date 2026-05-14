@@ -7,7 +7,7 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, FileJson, BarChart3, Loader2 } from "lucide-react";
+import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2 } from "lucide-react";
 import DateRangePicker from "@/components/DateRangePicker";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn, pluralize } from "@/utils/utils";
@@ -19,7 +19,56 @@ interface OutletCtx { selectedFY: string }
 const MONTHS = ["April","May","June","July","August","September","October","November","December","January","February","March"];
 const SHORT = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
-type TabKey = "summary" | "gstr1" | "gstr3b" | "gstr2b";
+type TabKey = "summary" | "gstr1" | "gstr3b" | "gstr2b" | "itc-ledger" | "aging";
+
+interface ITCLedger {
+  id?: number;
+  business: number;
+  opening_cgst: string;
+  opening_sgst: string;
+  opening_igst: string;
+  opening_as_of: string | null;
+}
+
+/** Fetch + update the ECRRS opening balance ledger for a single business. */
+function useITCLedger(businessId: string) {
+  const [data, setData] = useState<ITCLedger | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const valid = businessId && businessId !== "all";
+
+  const fetchLedger = useCallback(async () => {
+    if (!valid || !localStorage.getItem("gst_access_token")) return;
+    setLoading(true);
+    try {
+      const res = await api.get<ITCLedger>(`itc-ledger/${businessId}/`);
+      setData(res.data);
+    } catch (e) {
+      logger.error("Failed to fetch ITC ledger", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [businessId, valid]);
+
+  useEffect(() => { fetchLedger(); }, [fetchLedger]);
+
+  const save = useCallback(async (patch: Partial<ITCLedger>) => {
+    if (!valid) return null;
+    setSaving(true);
+    try {
+      const res = await api.patch<ITCLedger>(`itc-ledger/${businessId}/`, patch);
+      setData(res.data);
+      return res.data;
+    } catch (e) {
+      logger.error("Failed to update ITC ledger", e);
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  }, [businessId, valid]);
+
+  return { data, loading, saving, save, refetch: fetchLedger };
+}
 
 /** Fetch server-side GST summary (rate slabs, HSN breakdown, GSTR-3B totals) */
 function useGSTSummary(bizFilter: string, startDate: string, endDate: string) {
@@ -201,7 +250,45 @@ export default function GSTSummary() {
     { key: "gstr1", label: "GSTR-1 (Outward)" },
     { key: "gstr3b", label: "GSTR-3B (Tax)" },
     { key: "gstr2b", label: "GSTR-2B (Inward)" },
+    { key: "itc-ledger", label: "ITC Ledger" },
+    { key: "aging", label: "ITC Aging" },
   ];
+
+  // ITC reclaim ledger (per-business) — only meaningful when one business is
+  // selected. The All-Businesses view shows a hint instead of a form.
+  const itcLedger = useITCLedger(bizFilter);
+  const [ledgerDraft, setLedgerDraft] = useState<{ cgst: string; sgst: string; igst: string }>({ cgst: "0", sgst: "0", igst: "0" });
+  const [ledgerSaved, setLedgerSaved] = useState(false);
+  useEffect(() => {
+    if (itcLedger.data) {
+      setLedgerDraft({
+        cgst: String(itcLedger.data.opening_cgst ?? "0"),
+        sgst: String(itcLedger.data.opening_sgst ?? "0"),
+        igst: String(itcLedger.data.opening_igst ?? "0"),
+      });
+    }
+  }, [itcLedger.data]);
+
+  const saveLedger = async () => {
+    const updated = await itcLedger.save({
+      opening_cgst: ledgerDraft.cgst,
+      opening_sgst: ledgerDraft.sgst,
+      opening_igst: ledgerDraft.igst,
+    } as any);
+    if (updated) {
+      setLedgerSaved(true);
+      setTimeout(() => setLedgerSaved(false), 2000);
+      toast({ title: "Saved", description: "Opening ITC balance updated" });
+    } else {
+      toast({ title: "Save failed", description: "Could not update ledger", variant: "destructive" });
+    }
+  };
+
+  // GSTR-3B Table 4 + reconciliation + aging from gstData (server-side)
+  const table4 = gstData?.gstr3b_table4;
+  const aging = gstData?.itc_aging;
+  const recon = gstData?.gstr1_3b_recon;
+  const reconHasIssue = recon && Math.abs(recon.variance || 0) > 0.5;
 
   return (
     <div className={cn("space-y-4", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-5")}>
@@ -260,6 +347,21 @@ export default function GSTSummary() {
           </motion.div>
         ))}
       </motion.div>
+
+      {/* GSTR-1 vs GSTR-3B reconciliation banner — only shown when there's a real variance */}
+      {reconHasIssue && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="elevated-card rounded-2xl p-4 border-l-4 border-l-warning">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-semibold text-foreground">GSTR-1 vs 3B Mismatch</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">
+                GSTR-1 rate-slab tax sums to <span className="font-semibold text-foreground">{formatCurrency(recon.gstr1_total_tax || 0)}</span> but GSTR-3B Output Tax shows <span className="font-semibold text-foreground">{formatCurrency(recon.gstr3b_output_tax || 0)}</span> (variance <span className={cn("font-semibold", (recon.variance || 0) > 0 ? "text-destructive" : "text-warning")}>{formatCurrency(Math.abs(recon.variance || 0))}</span>). Per Rule 88C / DRC-01B, persistent variance &gt; ₹25L can block your next-period filing.
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Monthly tax trend chart (always visible) */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}
@@ -447,6 +549,42 @@ export default function GSTSummary() {
                     </tr>
                   </tbody>
                 </table></div>
+
+                {/* GSTR-3B Table 4 — full ITC sub-row breakdown (current portal structure, May 2026) */}
+                {table4 && (
+                  <div className="space-y-2">
+                    <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Table 4 — ITC Details</h4>
+                    <div className="overflow-x-auto rounded-lg border border-border/40">
+                      <table className="table-premium text-[12px] min-w-[520px]">
+                        <thead><tr><th>Row</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
+                        <tbody>
+                          <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(A) ITC Available</td></tr>
+                          <tr><td className="pl-6">4(A)(1) Import of goods</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.cgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.sgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.igst)}</td></tr>
+                          <tr><td className="pl-6">4(A)(2) Import of services</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.cgst)}</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.sgst)}</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.igst)}</td></tr>
+                          <tr><td className="pl-6">4(A)(3) Inward supplies (RCM)</td><td className="text-right">{formatCurrency(table4.a_3_rcm.cgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.sgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.igst)}</td></tr>
+                          <tr><td className="pl-6">4(A)(4) Inward from ISD</td><td className="text-right">{formatCurrency(table4.a_4_isd.cgst)}</td><td className="text-right">{formatCurrency(table4.a_4_isd.sgst)}</td><td className="text-right">{formatCurrency(table4.a_4_isd.igst)}</td></tr>
+                          <tr><td className="pl-6">4(A)(5) All other ITC</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.cgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.sgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.igst)}</td></tr>
+                          <tr className="font-semibold bg-secondary/10"><td className="pl-6">Total 4(A)</td><td className="text-right">{formatCurrency(table4.a_total.cgst)}</td><td className="text-right">{formatCurrency(table4.a_total.sgst)}</td><td className="text-right">{formatCurrency(table4.a_total.igst)}</td></tr>
+
+                          <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(B) ITC Reversed</td></tr>
+                          <tr><td className="pl-6">4(B)(1) Non-reclaimable (Rules 38, 42, 43, 17(5))</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.igst)}</td></tr>
+                          <tr><td className="pl-6">4(B)(2) Reclaimable (Rule 37, Sec 16(2))</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.igst)}</td></tr>
+
+                          <tr className="font-bold border-t-2 border-border"><td>4(C) Net ITC available</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.cgst)}</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.sgst)}</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.igst)}</td></tr>
+
+                          <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(D) Other Details</td></tr>
+                          <tr><td className="pl-6">4(D)(1) ITC reclaimed</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.cgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.sgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.igst)}</td></tr>
+                          <tr><td className="pl-6">4(D)(2) Ineligible ITC</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.cgst)}</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.sgst)}</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.igst)}</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    {table4.ecrrs_opening_balance ? (
+                      <p className="text-[11px] text-muted-foreground flex items-start gap-1.5"><Clock className="w-3 h-3 mt-0.5 shrink-0" />ECRRS opening balance — CGST {formatCurrency(table4.ecrrs_opening_balance.cgst)}, SGST {formatCurrency(table4.ecrrs_opening_balance.sgst)}, IGST {formatCurrency(table4.ecrrs_opening_balance.igst)}{table4.ecrrs_opening_balance.as_of ? ` (as of ${table4.ecrrs_opening_balance.as_of})` : ""}. Edit on the <button onClick={() => setTab("itc-ledger")} className="text-primary underline underline-offset-2">ITC Ledger</button> tab.</p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">Select a single business above to see + edit the ECRRS opening balance for Table 4(B)(2)/(D)(1) reclaim tracking.</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -483,6 +621,159 @@ export default function GSTSummary() {
                   </table></div>
                 ) : <p className="text-[12px] text-muted-foreground">No inward invoices</p>}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ITC Ledger tab — ECRRS opening balance editor (per business) */}
+        {activeTab === "itc-ledger" && (
+          <div className="p-5 space-y-5">
+            <div>
+              <h3 className="text-[14px] font-semibold mb-1">ITC Reclaim Ledger</h3>
+              <p className="text-[12px] text-muted-foreground">
+                The Electronic Credit Reversal &amp; Reclaimed Statement (ECRRS) tracks cumulative ITC reversed under <span className="font-mono">4(B)(2)</span> in earlier periods that has not yet been reclaimed via <span className="font-mono">4(D)(1)</span>. Set your opening balance once — the closing balance is computed live from current-period reversals and reclaims.
+              </p>
+            </div>
+
+            {bizFilter === "all" ? (
+              <div className="elevated-card rounded-2xl p-6 border-l-4 border-l-warning">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[13px] font-semibold text-foreground">Select a single business</p>
+                    <p className="text-[12px] text-muted-foreground mt-0.5">The ECRRS opening balance is per-GSTIN. Pick one business in the filter above to view or edit its ledger.</p>
+                  </div>
+                </div>
+              </div>
+            ) : itcLedger.loading ? (
+              <div className="p-8 text-center text-muted-foreground text-sm flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading ledger…</div>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {/* Opening balance editor */}
+                <div className="elevated-card rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Opening Balance</h4>
+                    {itcLedger.data?.opening_as_of && (
+                      <span className="text-[10px] text-muted-foreground">As of {itcLedger.data.opening_as_of}</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {(["cgst", "sgst", "igst"] as const).map((k) => (
+                      <div key={k}>
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{k}</label>
+                        <input
+                          type="number" step="0.01" min="0"
+                          className="premium-input mt-1 tabular-nums"
+                          value={ledgerDraft[k]}
+                          onChange={(e) => setLedgerDraft((d) => ({ ...d, [k]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={saveLedger} disabled={itcLedger.saving} className="premium-btn-primary text-[12px] h-9 disabled:opacity-50">
+                      {itcLedger.saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save Opening Balance
+                    </button>
+                    {ledgerSaved && <span className="text-[11px] text-success flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Saved</span>}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    GSTN portal hard-validates this — Table 4(D)(1) reclaim cannot exceed the closing ledger balance + current-period 4(B)(2). Set this once after migrating.
+                  </p>
+                </div>
+
+                {/* Closing balance display */}
+                <div className="elevated-card rounded-2xl p-5 space-y-4">
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Closing Balance (period)</h4>
+                  <div className="space-y-2 text-[13px]">
+                    {(["cgst", "sgst", "igst"] as const).map((k) => {
+                      const opening = parseFloat(itcLedger.data?.[`opening_${k}` as const] || "0") || 0;
+                      const reversed = (table4?.b_2_reclaimable?.[k] || 0);
+                      const reclaimed = (table4?.d_1_reclaimed?.[k] || 0);
+                      const closing = opening + reversed - reclaimed;
+                      return (
+                        <div key={k} className="flex items-center justify-between border-b border-border/30 pb-2 last:border-0">
+                          <span className="font-mono text-[11px] uppercase text-muted-foreground">{k}</span>
+                          <div className="text-right tabular-nums text-[12px]">
+                            <span className="text-muted-foreground">{formatCurrency(opening)}</span>
+                            <span className="text-muted-foreground mx-1">+</span>
+                            <span className="text-warning">{formatCurrency(reversed)}</span>
+                            <span className="text-muted-foreground mx-1">−</span>
+                            <span className="text-success">{formatCurrency(reclaimed)}</span>
+                            <span className="text-muted-foreground mx-1">=</span>
+                            <span className="font-bold text-foreground">{formatCurrency(closing)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Formula: <span className="font-mono">opening + 4(B)(2) reversal − 4(D)(1) reclaim</span>. Reversal/reclaim figures come from the period selected in the filter row above.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ITC Aging tab — Sec 16(4) cutoff countdown */}
+        {activeTab === "aging" && (
+          <div className="p-5 space-y-5">
+            <div>
+              <h3 className="text-[14px] font-semibold mb-1">ITC Aging — Sec 16(4) Cutoff</h3>
+              <p className="text-[12px] text-muted-foreground">
+                Under Sec 16(4) of CGST Act, ITC on an invoice can only be claimed up to <span className="font-semibold text-foreground">Nov 30 of the financial year following the invoice date</span>. After that the credit is forfeit. Buckets below count <em>inward</em> invoices in the selected period; click "Past cutoff" rows to find anything already lost.
+              </p>
+            </div>
+
+            {summaryLoading ? (
+              <div className="p-8 text-center text-muted-foreground text-sm flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading aging…</div>
+            ) : aging ? (
+              <>
+                <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+                  {(["fresh", "warning", "stale", "expired"] as const).map((k) => {
+                    const b = aging.buckets[k];
+                    const tone = k === "expired" ? "text-destructive" : k === "fresh" ? "text-warning" : k === "warning" ? "text-chart-3" : "text-success";
+                    return (
+                      <div key={k} className={cn("stat-card rounded-2xl p-4 border-l-4", k === "expired" ? "border-l-destructive" : k === "fresh" ? "border-l-warning" : "border-l-border")}>
+                        <p className="text-[10px] text-muted-foreground font-medium">{b.label}</p>
+                        <p className={cn("font-display font-bold mt-1 text-xl", tone)}>{b.count}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">tax {formatCurrency(b.tax)}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {aging.urgent_invoices.length > 0 ? (
+                  <div className="space-y-2">
+                    <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Action needed ({aging.urgent_invoices.length})</h4>
+                    <div className="overflow-x-auto rounded-lg border border-border/40">
+                      <table className="table-premium text-[12px] min-w-[640px]">
+                        <thead><tr><th>Invoice #</th><th>Date</th><th>Tax</th><th>Cutoff</th><th>Days left</th><th>Status</th></tr></thead>
+                        <tbody>
+                          {aging.urgent_invoices.map((inv: any) => (
+                            <tr key={inv.id}>
+                              <td className="font-medium">{inv.invoice_number}</td>
+                              <td>{inv.invoice_date}</td>
+                              <td>{formatCurrency(inv.tax)}</td>
+                              <td className="text-muted-foreground">{inv.cutoff}</td>
+                              <td className={cn("font-semibold tabular-nums", inv.days_left < 0 ? "text-destructive" : inv.days_left <= 30 ? "text-destructive" : "text-warning")}>{inv.days_left < 0 ? `${Math.abs(inv.days_left)} days past` : `${inv.days_left}`}</td>
+                              <td>
+                                {inv.bucket === "expired"
+                                  ? <span className="premium-badge bg-destructive/15 text-destructive">Forfeit</span>
+                                  : <span className="premium-badge bg-warning/15 text-warning">Claim soon</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">No urgent invoices in the selected period.</p>
+                )}
+              </>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">No data</p>
             )}
           </div>
         )}
