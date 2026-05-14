@@ -11,6 +11,7 @@ import EasyBottomNav from "./mobile/easy/EasyBottomNav";
 import { MobileModeProvider, useMobileMode } from "@/contexts/MobileModeContext";
 import SkipToContent from "./SkipToContent";
 import ErrorBoundary from "./ErrorBoundary";
+import { useComplianceScanner } from "@/hooks/useComplianceScanner";
 
 export const FYContext = { selectedFY: currentFY };
 
@@ -26,6 +27,11 @@ function AppLayoutInner() {
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
   FYContext.selectedFY = selectedFY;
+
+  // Scan for actionable GST compliance signals once per day and surface them
+  // through the existing notification bell. Skips silently when offline /
+  // logged out / already ran today.
+  useComplianceScanner();
 
   const isEasy = isMobile && mobileMode === "easy";
 

@@ -24,14 +24,25 @@ function saveNotifications(notifications: AppNotification[]) {
 export function useNotifications() {
   const [notifications, setNotifications] = useState<AppNotification[]>(loadNotifications);
 
-  const add = useCallback((n: Omit<AppNotification, "id" | "timestamp" | "read">) => {
-    const newNotification: AppNotification = {
-      ...n,
-      id: crypto.randomUUID().slice(0, 8),
-      timestamp: Date.now(),
-      read: false,
-    };
+  /**
+   * Add a notification. If `stableId` is supplied (e.g. "itc-aging-2026-05-10"),
+   * we skip when a notification with that ID already exists — letting compliance
+   * scanners run on every load without spamming the user. Random UUID is used
+   * when no stableId is provided.
+   */
+  const add = useCallback((n: Omit<AppNotification, "id" | "timestamp" | "read"> & { stableId?: string }) => {
     setNotifications((prev) => {
+      if (n.stableId && prev.some((existing) => existing.id === n.stableId)) {
+        return prev;  // dedup
+      }
+      const newNotification: AppNotification = {
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        id: n.stableId || crypto.randomUUID().slice(0, 8),
+        timestamp: Date.now(),
+        read: false,
+      };
       const updated = [newNotification, ...prev].slice(0, 50);
       saveNotifications(updated);
       return updated;
@@ -75,6 +86,6 @@ export function useNotifications() {
 }
 
 // Helper to dispatch notification from anywhere
-export function pushNotification(n: Omit<AppNotification, "id" | "timestamp" | "read">) {
+export function pushNotification(n: Omit<AppNotification, "id" | "timestamp" | "read"> & { stableId?: string }) {
   window.dispatchEvent(new CustomEvent("app-notification", { detail: n }));
 }
