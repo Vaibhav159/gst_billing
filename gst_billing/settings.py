@@ -74,6 +74,13 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # GZip first so it compresses everything below. Per Django docs the
+    # gzip middleware is safe even with auth — modern browsers + JWT
+    # don't expose the BREACH attack surface that originally made gzip
+    # over auth'd HTML risky. JSON responses from this app are the
+    # heaviest items on the wire (gst_summary can be ~80 KB raw, 12 KB
+    # gzipped). Single-line config, ~80% payload reduction.
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",  # CORS middleware should be placed before CommonMiddleware

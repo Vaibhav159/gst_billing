@@ -1429,35 +1429,41 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         except (TypeError, ValueError):
             business_id = None
 
-        # 1. Rate-wise breakdown (GSTR-1 style)
-        rate_slabs = {}
-        for inv_type in ["outward", "inward"]:
-            type_items = items.filter(invoice__type_of_invoice=inv_type)
-            slab_data = (
-                type_items
-                .values("gst_tax_rate")
-                .annotate(
-                    taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
-                    cgst=Coalesce(Sum("cgst"), Decimal("0")),
-                    sgst=Coalesce(Sum("sgst"), Decimal("0")),
-                    igst=Coalesce(Sum("igst"), Decimal("0")),
-                    total=Coalesce(Sum("amount"), Decimal("0")),
-                    count=Count("invoice", distinct=True),
-                )
-                .order_by("gst_tax_rate")
+        # 1. Rate-wise breakdown (GSTR-1 style).
+        #
+        # Was: a for-loop over ["outward","inward"] firing two separate
+        # GROUP-BY queries against LineItem. With ~100ms remote-DB round
+        # trip latency that's ~200ms baseline.
+        #
+        # Now: a single GROUP-BY on (type_of_invoice, gst_tax_rate). One
+        # query, bucketed into outward/inward in Python.
+        rate_slabs = {"outward": [], "inward": []}
+        slab_data = (
+            items
+            .values("invoice__type_of_invoice", "gst_tax_rate")
+            .annotate(
+                taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+                cgst=Coalesce(Sum("cgst"), Decimal("0")),
+                sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                igst=Coalesce(Sum("igst"), Decimal("0")),
+                total=Coalesce(Sum("amount"), Decimal("0")),
+                count=Count("invoice", distinct=True),
             )
-            rate_slabs[inv_type] = [
-                {
-                    "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
-                    "taxable": float(s["taxable"]),
-                    "cgst": float(s["cgst"]),
-                    "sgst": float(s["sgst"]),
-                    "igst": float(s["igst"]),
-                    "total": float(s["total"]),
-                    "invoice_count": s["count"],
-                }
-                for s in slab_data
-            ]
+            .order_by("invoice__type_of_invoice", "gst_tax_rate")
+        )
+        for s in slab_data:
+            inv_type = s["invoice__type_of_invoice"]
+            if inv_type not in rate_slabs:
+                continue
+            rate_slabs[inv_type].append({
+                "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
+                "taxable": float(s["taxable"]),
+                "cgst": float(s["cgst"]),
+                "sgst": float(s["sgst"]),
+                "igst": float(s["igst"]),
+                "total": float(s["total"]),
+                "invoice_count": s["count"],
+            })
 
         # 2. HSN-wise breakdown
         hsn_data = (
@@ -1488,17 +1494,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             for h in hsn_data
         ]
 
-        # 3. GSTR-3B summary (net tax)
-        outward_tax = items.filter(invoice__type_of_invoice="outward").aggregate(
-            cgst=Coalesce(Sum("cgst"), Decimal("0")),
-            sgst=Coalesce(Sum("sgst"), Decimal("0")),
-            igst=Coalesce(Sum("igst"), Decimal("0")),
+        # 3. GSTR-3B summary (net tax) — one aggregate with Q-filter
+        #    pairs instead of two .filter().aggregate() round-trips.
+        from django.db.models import Q as _Q
+        combined = items.aggregate(
+            outward_cgst=Coalesce(Sum("cgst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
+            outward_sgst=Coalesce(Sum("sgst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
+            outward_igst=Coalesce(Sum("igst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
+            inward_cgst=Coalesce(Sum("cgst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
+            inward_sgst=Coalesce(Sum("sgst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
+            inward_igst=Coalesce(Sum("igst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
         )
-        inward_tax = items.filter(invoice__type_of_invoice="inward").aggregate(
-            cgst=Coalesce(Sum("cgst"), Decimal("0")),
-            sgst=Coalesce(Sum("sgst"), Decimal("0")),
-            igst=Coalesce(Sum("igst"), Decimal("0")),
-        )
+        outward_tax = {"cgst": combined["outward_cgst"], "sgst": combined["outward_sgst"], "igst": combined["outward_igst"]}
+        inward_tax = {"cgst": combined["inward_cgst"], "sgst": combined["inward_sgst"], "igst": combined["inward_igst"]}
         gstr3b = {
             "output_tax": {
                 "cgst": float(outward_tax["cgst"]),

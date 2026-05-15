@@ -12,14 +12,23 @@ import { cn } from "@/utils/utils";
 import NotificationCenter from "@/components/NotificationCenter";
 import { financialYears } from "@/utils/mockData";
 
+// Hover/focus-prefetch: kick off the lazy-loaded route chunk's network
+// request before the user clicks. By the time they release the
+// mouse button the chunk is usually already in the browser cache,
+// turning a 200-400ms cold lazy-load into an instant transition.
+// React.lazy doesn't expose a preload API directly, so we invoke
+// the underlying dynamic import explicitly. The browser dedupes
+// concurrent identical imports, so hovering twice doesn't fetch twice.
+const prefetch = (loader: () => Promise<unknown>) => () => { void loader(); };
+
 const navItems = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
-  { label: "Customers", href: "/billing/customer/list", icon: Users },
-  { label: "Businesses", href: "/billing/business/list", icon: Building2 },
-  { label: "Products", href: "/billing/product/list", icon: Package },
-  { label: "Invoices", href: "/billing/invoice/list", icon: FileText },
-  { label: "Reports", href: "/billing/reports", icon: BarChart3 },
-  { label: "GST", href: "/billing/gst-summary", icon: Calculator },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, preload: prefetch(() => import("@/pages/Dashboard")) },
+  { label: "Customers", href: "/billing/customer/list", icon: Users, preload: prefetch(() => import("@/pages/CustomerList")) },
+  { label: "Businesses", href: "/billing/business/list", icon: Building2, preload: prefetch(() => import("@/pages/BusinessList")) },
+  { label: "Products", href: "/billing/product/list", icon: Package, preload: prefetch(() => import("@/pages/ProductList")) },
+  { label: "Invoices", href: "/billing/invoice/list", icon: FileText, preload: prefetch(() => import("@/pages/InvoiceList")) },
+  { label: "Reports", href: "/billing/reports", icon: BarChart3, preload: prefetch(() => import("@/pages/Reports")) },
+  { label: "GST", href: "/billing/gst-summary", icon: Calculator, preload: prefetch(() => import("@/pages/GSTSummary")) },
 ];
 
 const settingsItems = [
@@ -98,6 +107,8 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
               <Link
                 key={item.href}
                 to={item.href}
+                onMouseEnter={item.preload}
+                onFocus={item.preload}
                 className={cn(
                   "flex items-center gap-2 px-3 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 relative whitespace-nowrap shrink-0",
                   active
@@ -296,6 +307,8 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
                 key={item.href}
                 to={item.href}
                 onClick={() => setMobileOpen(false)}
+                onMouseEnter={(item as any).preload}
+                onFocus={(item as any).preload}
                 className={cn(
                   "flex items-center gap-2.5 px-3.5 py-3 rounded-xl text-[13px] font-medium transition-all",
                   active
