@@ -542,6 +542,21 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+/**
+ * Compact Indian-currency formatter for stat cards: ₹2.86L instead of
+ * ₹2,86,252. Uses Cr / L / k thresholds matching how Indian businesses talk
+ * about money. Returns "₹0" for falsy/NaN input.
+ */
+export function formatCompactCurrency(amount: number): string {
+  const n = Number(amount) || 0;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_00_00_000) return `${sign}₹${(abs / 1_00_00_000).toFixed(2)}Cr`;
+  if (abs >= 1_00_000) return `${sign}₹${(abs / 1_00_000).toFixed(2)}L`;
+  if (abs >= 1_000) return `${sign}₹${(abs / 1_000).toFixed(1)}k`;
+  return `${sign}₹${abs.toFixed(0)}`;
+}
+
 export function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-IN", {
     day: "2-digit",

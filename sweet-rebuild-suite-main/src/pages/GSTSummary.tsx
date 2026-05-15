@@ -2,7 +2,7 @@ import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
@@ -204,9 +204,19 @@ export default function GSTSummary() {
   // Server-side data for Summary tab
   // Sort rate slabs ascending (3% before 5% before 12% before 18% before 28%)
   // so the rate-wise table reads "low to high" — the natural mental model.
+  // We also derive `tax_total` per row: the backend's `total` field is
+  // taxable + tax (i.e. the gross invoice value), which is NOT what users
+  // expect when they read a column labeled "Total Tax". Compute the actual
+  // tax sum here so the rate-wise table can show both: per-slab tax sum AND
+  // gross invoice total.
   const gstr1Rows = (gstData?.rate_slabs?.outward || [])
     .filter((r: any) => r.taxable > 0)
     .slice()
+    .map((r: any) => ({
+      ...r,
+      tax_total: Number(r.cgst || 0) + Number(r.sgst || 0) + Number(r.igst || 0),
+      gross_total: Number(r.total || 0),  // taxable + tax (per backend)
+    }))
     .sort((a: any, b: any) => Number(a.rate) - Number(b.rate));
   const hsnRows = gstData?.hsn_summary || [];
   const gstr3b = gstData?.gstr3b || { output_tax: { cgst: 0, sgst: 0, igst: 0, total: 0 }, input_tax_credit: { cgst: 0, sgst: 0, igst: 0, total: 0 }, net_payable: { cgst: 0, sgst: 0, igst: 0, total: 0 } };
@@ -214,6 +224,10 @@ export default function GSTSummary() {
   const totalOutwardTax = gstr3b.output_tax.total;
   const totalITC = gstr3b.input_tax_credit.total;
   const netTax = gstr3b.net_payable.total;
+  // True while gstData is still in flight — used to gate stat cards and the
+  // readiness card so they don't flash "₹0" / "No data" before the API
+  // resolves.
+  const isHydrating = gstLoading || statsLoading;
 
   // Filing-export data
   const exGstr1 = exportData?.gstr1;
@@ -230,11 +244,36 @@ export default function GSTSummary() {
   });
 
   const handleDownloadCSV = () => {
-    const rows = [["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Invoices"]];
-    gstr1Rows.forEach((r: any) => rows.push([`${r.rate}%`, r.taxable.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.total.toFixed(2), r.invoice_count.toString()]));
+    // Header layout matches what a CA expects when reconciling against the
+    // GST portal: taxable + tax components + the actual tax sum + the gross
+    // invoice total. Previously this exported `r.total` under "Total Tax"
+    // which was misleading — `r.total` is taxable+tax, not just tax.
+    const rows = [["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Inv. Total", "Invoices"]];
+    gstr1Rows.forEach((r: any) => rows.push([
+      `${r.rate}%`,
+      r.taxable.toFixed(2),
+      Number(r.cgst).toFixed(2),
+      Number(r.sgst).toFixed(2),
+      Number(r.igst).toFixed(2),
+      r.tax_total.toFixed(2),
+      r.gross_total.toFixed(2),
+      r.invoice_count.toString(),
+    ]));
     rows.push([]);
-    rows.push(["HSN Code", "Taxable", "CGST", "SGST", "IGST", "Total", "Qty"]);
-    hsnRows.forEach((h: any) => rows.push([h.hsn_code, h.taxable.toFixed(2), h.cgst.toFixed(2), h.sgst.toFixed(2), h.igst.toFixed(2), h.total.toFixed(2), h.qty.toFixed(3)]));
+    rows.push(["HSN Code", "Qty", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Inv. Total"]);
+    hsnRows.forEach((h: any) => {
+      const taxSum = Number(h.cgst || 0) + Number(h.sgst || 0) + Number(h.igst || 0);
+      rows.push([
+        h.hsn_code,
+        Number(h.qty).toFixed(3),
+        Number(h.taxable).toFixed(2),
+        Number(h.cgst).toFixed(2),
+        Number(h.sgst).toFixed(2),
+        Number(h.igst).toFixed(2),
+        taxSum.toFixed(2),
+        Number(h.total).toFixed(2),
+      ]);
+    });
     const csv = rows.map((r: any) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `gst-summary-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -302,6 +341,10 @@ export default function GSTSummary() {
   // "am I safe to file this period?" at a glance without reading every
   // table. Deliberately conservative: ANY warn drops the score; expiring ITC
   // counts as a hard fail because it costs real money.
+  //
+  // While `isHydrating` is true we render a neutral "Checking…" state on each
+  // check instead of false-negatives ("No data in period" when the request
+  // is just slow). The card stays the same shape so layout doesn't jump.
   const readiness = useMemo(() => {
     const hasData = gstr1Rows.length > 0 || (gstr3b.output_tax.total || 0) > 0 || (gstr3b.input_tax_credit.total || 0) > 0;
     const reconOk = !recon || Math.abs(recon.variance || 0) <= 0.5;
@@ -309,6 +352,19 @@ export default function GSTSummary() {
     const warningCount = aging?.buckets?.warning?.count || 0;
     const itcSafe = expiredCount === 0 && warningCount === 0;
     const itcWarn = expiredCount === 0 && warningCount > 0;
+
+    if (isHydrating) {
+      const placeholder = (key: string, label: string) => ({
+        key, ok: false, pending: true, label, detail: "Checking…",
+      });
+      const checks = [
+        placeholder("data", "Filing data"),
+        placeholder("recon", "GSTR-1 ↔ 3B sync"),
+        placeholder("itc", "ITC cutoff"),
+        placeholder("balance", "Tax ledger"),
+      ];
+      return { checks, passed: 0, total: checks.length, ready: false, hydrating: true };
+    }
 
     const checks = [
       {
@@ -344,8 +400,8 @@ export default function GSTSummary() {
     ];
     const passed = checks.filter((c) => c.ok).length;
     const total = checks.length;
-    return { checks, passed, total, ready: passed === total };
-  }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, recon, aging]);
+    return { checks, passed, total, ready: passed === total, hydrating: false };
+  }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, recon, aging, isHydrating]);
 
   return (
     <div className={cn("space-y-4", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-5")}>
@@ -390,57 +446,79 @@ export default function GSTSummary() {
         )}
       </motion.div>
 
-      {/* Stats (always visible) — match the InvoiceList stat-card pattern:
-          uppercase tracking-wider label, tabular-nums value, and a one-line
-          sub-context so the user can tell what the figure means without a
-          tooltip. Keeps the visual language consistent across Dashboard /
-          Invoices / GST. */}
+      {/* Stats — compact, dense, and importantly: don't render "₹0" while
+          the API is in flight. Show a skeleton dash instead so users don't
+          think the period has zero data when it just hasn't loaded yet.
+          Uses compact-currency (₹2.86L) so a 4-column grid doesn't have to
+          cram ₹1,39,363.59 into a stat card on a 1280px screen. The full
+          amount is in the title attribute for accessibility. */}
       <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-chart-1", sub: "Sales in period" },
-          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-chart-3", sub: "GSTR-1 tax" },
-          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-success", sub: "Input credit" },
-          { label: "Net Tax", value: formatCurrency(Math.abs(netTax)), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable" : "Refund/Carry-fwd" },
+          { label: "Outward Supply", raw: totalOutward, color: "text-chart-1", sub: "Sales + tax" },
+          { label: "Output Tax", raw: totalOutwardTax, color: "text-chart-3", sub: "CGST + SGST + IGST" },
+          { label: "ITC Available", raw: totalITC, color: "text-success", sub: "Input credit" },
+          { label: "Net Tax", raw: Math.abs(netTax), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable" : "Refund/Carry-fwd" },
         ].map((s) => (
-          <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
+          <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={isHydrating ? "Loading" : formatCurrency(s.raw)}>
             <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
-            <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>{s.value}</p>
+            {isHydrating ? (
+              <div className="mt-1.5 h-6 w-16 rounded bg-muted/40 animate-pulse" />
+            ) : (
+              <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>
+                {formatCompactCurrency(s.raw)}
+              </p>
+            )}
             <p className="text-[10px] text-muted-foreground/80 mt-0.5">{s.sub}</p>
           </motion.div>
         ))}
       </motion.div>
 
-      {/* Filing-readiness scoreboard — at-a-glance "am I safe to file?" */}
+      {/* Filing-readiness scoreboard — at-a-glance "am I safe to file?".
+          While loading, every check shows a neutral "Checking…" rather than
+          falsely claiming "no data" before the API resolves. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-        className={cn("elevated-card rounded-2xl p-4 border-l-4", readiness.ready ? "border-l-success" : readiness.passed >= readiness.total - 1 ? "border-l-warning" : "border-l-destructive")}>
+        className={cn("elevated-card rounded-2xl p-4 border-l-4",
+          readiness.hydrating ? "border-l-muted-foreground/30" :
+          readiness.ready ? "border-l-success" :
+          readiness.passed >= readiness.total - 1 ? "border-l-warning" : "border-l-destructive"
+        )}>
         <div className="flex items-start gap-3 flex-wrap">
           <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+            readiness.hydrating ? "bg-muted/30 text-muted-foreground" :
             readiness.ready ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
           )}>
-            {readiness.ready ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+            {readiness.hydrating ? <Loader2 className="w-5 h-5 animate-spin" /> :
+              readiness.ready ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
               <p className="text-[13px] font-semibold text-foreground">Filing readiness</p>
               <span className="text-[11px] text-muted-foreground">
-                <span className={cn("font-bold tabular-nums", readiness.ready ? "text-success" : readiness.passed >= readiness.total - 1 ? "text-warning" : "text-destructive")}>{readiness.passed}</span>
-                <span className="text-muted-foreground">/{readiness.total} checks passing</span>
+                {readiness.hydrating ? (
+                  <span>Checking the four signals…</span>
+                ) : (
+                  <>
+                    <span className={cn("font-bold tabular-nums", readiness.ready ? "text-success" : readiness.passed >= readiness.total - 1 ? "text-warning" : "text-destructive")}>{readiness.passed}</span>
+                    <span className="text-muted-foreground">/{readiness.total} checks passing</span>
+                  </>
+                )}
               </span>
             </div>
             <div className="mt-2 grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
               {readiness.checks.map((c) => {
-                const cls = c.ok ? "text-success" : (c as any).warn ? "text-warning" : "text-destructive";
-                const Icon = c.ok ? CheckCircle2 : (c as any).warn ? AlertTriangle : XCircle;
+                const pending = (c as any).pending;
+                const cls = pending ? "text-muted-foreground" : c.ok ? "text-success" : (c as any).warn ? "text-warning" : "text-destructive";
+                const Icon = pending ? Loader2 : c.ok ? CheckCircle2 : (c as any).warn ? AlertTriangle : XCircle;
                 const inner = (
                   <div className="flex items-start gap-2 p-2 rounded-lg bg-secondary/20 border border-border/30 hover:bg-secondary/30 transition-colors">
-                    <Icon className={cn("w-3.5 h-3.5 shrink-0 mt-0.5", cls)} />
+                    <Icon className={cn("w-3.5 h-3.5 shrink-0 mt-0.5", cls, pending && "animate-spin")} />
                     <div className="min-w-0">
                       <p className={cn("text-[11px] font-semibold", cls)}>{c.label}</p>
                       <p className="text-[10px] text-muted-foreground truncate">{c.detail}</p>
                     </div>
                   </div>
                 );
-                return c.href ? (
+                return (c as any).href && !pending ? (
                   <button key={c.key} onClick={() => setTab("aging")} className="text-left">{inner}</button>
                 ) : (
                   <div key={c.key}>{inner}</div>
@@ -466,15 +544,32 @@ export default function GSTSummary() {
         </motion.div>
       )}
 
-      {/* Monthly tax trend chart (always visible) */}
+      {/* Monthly tax trend — compact header with YTD totals so a flat chart
+          (e.g. early in the FY when only Apr has data) still conveys useful
+          info at a glance. Shrunk vertical footprint by ~30% so it doesn't
+          dominate the page. */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}
-        className="elevated-card rounded-2xl p-5">
-        <h2 className="text-[13px] font-display font-semibold text-foreground mb-3">Tax Trend (₹k)</h2>
-        <div className={cn(isMobile ? "h-[160px]" : "h-[220px]")}>
+        className="elevated-card rounded-2xl p-4">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+          <h2 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider">Monthly tax trend</h2>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-1))]" />
+              <span className="text-muted-foreground">Output</span>
+              <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(monthlyTax.reduce((s, m) => s + (m.output * 1000), 0))}</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-2))]" />
+              <span className="text-muted-foreground">ITC</span>
+              <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(monthlyTax.reduce((s, m) => s + (m.itc * 1000), 0))}</span>
+            </span>
+          </div>
+        </div>
+        <div className={cn(isMobile ? "h-[140px]" : "h-[160px]")}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyTax} barGap={2}>
+            <BarChart data={monthlyTax} barGap={2} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
               <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} tickFormatter={isMobile ? (v: string) => v.slice(0, 1) : undefined} />
-              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={35} />
+              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => `${v >= 1000 ? (v/1000).toFixed(1) + "L" : v}k`} />
               <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(value: number) => [`₹${value.toFixed(1)}k`, undefined]} />
               <Bar dataKey="output" name="Output" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]}>
                 {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--chart-1))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
@@ -499,19 +594,30 @@ export default function GSTSummary() {
         {/* Summary tab — rate slab + GSTR-3B + HSN */}
         {activeTab === "summary" && (
           <div className="p-5 space-y-5">
-            {/* Rate slab breakdown */}
+            {/* Rate slab breakdown — split "Total Tax" (CGST+SGST+IGST) from
+                "Inv. Total" (taxable + tax). Previously a single "Total Tax"
+                column showed the gross invoice total, which made a 3% slab
+                look like it taxed at 100% (₹37L taxable → ₹38L "Total Tax").
+                Now the math is unambiguous and matches GSTR-1 conventions. */}
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Rate-wise Breakdown (Outward)</h3>
               <div className="overflow-x-auto rounded-lg border border-border/40">
                 <table className="table-premium text-[12px]">
-                  <thead><tr>{["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Invoices"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                  <thead><tr>{["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Inv. Total", "Invoices"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                   <tbody>
                     {gstr1Rows.map((r: any, i: number) => (
                       <motion.tr key={r.rate} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
-                        <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.invoice_count}</td>
+                        <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td>
+                        <td className="font-medium text-foreground tabular-nums">{formatCurrency(r.taxable)}</td>
+                        <td className="tabular-nums">{formatCurrency(r.cgst)}</td>
+                        <td className="tabular-nums">{formatCurrency(r.sgst)}</td>
+                        <td className="tabular-nums">{formatCurrency(r.igst)}</td>
+                        <td className="font-semibold text-foreground tabular-nums">{formatCurrency(r.tax_total)}</td>
+                        <td className="tabular-nums text-muted-foreground">{formatCurrency(r.gross_total)}</td>
+                        <td className="text-muted-foreground">{r.invoice_count}</td>
                       </motion.tr>
                     ))}
-                    {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">{summaryLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</span> : "No data for selected period"}</td></tr>}
+                    {gstr1Rows.length === 0 && <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">{summaryLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</span> : "No data for selected period"}</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -532,22 +638,25 @@ export default function GSTSummary() {
               </div>
             </div>
 
-            {/* HSN summary */}
+            {/* HSN summary — "Total Value" (gross = taxable + tax) is the
+                column the GST portal asks for in GSTR-1's HSN section. The
+                old single-word "Total" header was ambiguous (Total of what?
+                Tax? Items?) — clarified here. */}
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary</h3>
               <div className="overflow-x-auto rounded-lg border border-border/40">
                 <table className="table-premium text-[12px]">
-                  <thead><tr><th>HSN Code</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th><th className="text-right">Items</th></tr></thead>
+                  <thead><tr><th>HSN Code</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total Value</th><th className="text-right">Items</th></tr></thead>
                   <tbody>
                     {hsnRows.map((h: any, i: number) => (
                       <motion.tr key={h.hsn_code} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                        <td><span className="premium-badge bg-chart-2/12 text-chart-2 font-mono">{h.hsn_code}</span></td>
-                        <td className="text-right tabular-nums">{h.qty.toFixed(3)}</td>
-                        <td className="text-right font-medium">{formatCurrency(h.taxable)}</td>
-                        <td className="text-right">{formatCurrency(h.cgst)}</td>
-                        <td className="text-right">{formatCurrency(h.sgst)}</td>
-                        <td className="text-right">{formatCurrency(h.igst)}</td>
-                        <td className="text-right font-semibold">{formatCurrency(h.total)}</td>
+                        <td><span className="premium-badge bg-chart-2/12 text-chart-2 font-mono">{h.hsn_code || "N/A"}</span></td>
+                        <td className="text-right tabular-nums">{Number(h.qty || 0).toFixed(3)}</td>
+                        <td className="text-right font-medium tabular-nums">{formatCurrency(h.taxable)}</td>
+                        <td className="text-right tabular-nums">{formatCurrency(h.cgst)}</td>
+                        <td className="text-right tabular-nums">{formatCurrency(h.sgst)}</td>
+                        <td className="text-right tabular-nums">{formatCurrency(h.igst)}</td>
+                        <td className="text-right font-semibold tabular-nums">{formatCurrency(h.total)}</td>
                         <td className="text-right text-muted-foreground">{h.count}</td>
                       </motion.tr>
                     ))}
