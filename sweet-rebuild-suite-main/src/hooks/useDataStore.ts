@@ -297,6 +297,10 @@ export interface InvoiceFilters {
   monthFilter?: string; // "all" | "1"-"12"
   startDate?: string;   // "YYYY-MM-DD" explicit date range override
   endDate?: string;     // "YYYY-MM-DD" explicit date range override
+  // Data-quality drill-downs from DataQualityBanner:
+  dups?: boolean;       // only invoices with collision in (biz, no, FY, type)
+  empty?: boolean;      // only invoices with zero line items
+  noHsn?: boolean;      // only invoices with at least one HSN-less line item
 }
 
 /**
@@ -359,6 +363,11 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
       if (dateRange.start_date) params.set("start_date", dateRange.start_date);
       if (dateRange.end_date) params.set("end_date", dateRange.end_date);
+
+      // Data-hygiene drill-downs (DataQualityBanner)
+      if (f.dups) params.set("dups", "1");
+      if (f.empty) params.set("empty", "1");
+      if (f.noHsn) params.set("no_hsn", "1");
 
       // Increase page size to get more results
       params.set("page_size", "50");

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { toCSV, downloadCSV } from "@/utils/csv";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { Link, useOutletContext, useNavigate } from "react-router-dom";
+import { Link, useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
   Trash2, Copy, CheckSquare, Square, LayoutGrid, LayoutList, TrendingUp,
@@ -53,6 +53,16 @@ export default function InvoiceList() {
   const [monthFilter, setMonthFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
 
+  // Drill-down URL params from DataQualityBanner.
+  // `?dups=1` → only colliding invoice numbers, `?empty=1` → no-item invoices,
+  // `?no_hsn=1` → invoices with line items missing HSN. The user lands here
+  // already filtered; clearing happens via the existing Clear button below.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const dupsFilter = searchParams.get("dups") === "1";
+  const emptyFilter = searchParams.get("empty") === "1";
+  const noHsnFilter = searchParams.get("no_hsn") === "1";
+  const hasHygieneFilter = dupsFilter || emptyFilter || noHsnFilter;
+
   // Build filters object for the API-driven hook
   const apiFilters: InvoiceFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
@@ -61,7 +71,10 @@ export default function InvoiceList() {
     typeFilter,
     fyFilter,
     monthFilter,
-  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter]);
+    dups: dupsFilter || undefined,
+    empty: emptyFilter || undefined,
+    noHsn: noHsnFilter || undefined,
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
@@ -120,7 +133,21 @@ export default function InvoiceList() {
 
   const clearFilters = () => {
     setBizFilter("all"); setCustFilter("all"); setTypeFilter("all"); setFyFilter(selectedFY); setMonthFilter("all"); setSearch("");
+    // Also drop hygiene URL params so "Clear" really does clear everything.
+    if (hasHygieneFilter) {
+      searchParams.delete("dups"); searchParams.delete("empty"); searchParams.delete("no_hsn");
+      setSearchParams(searchParams, { replace: true });
+    }
   };
+
+  // Human-readable label for the hygiene filter, used by the chip-style banner
+  const hygieneFilterLabel = dupsFilter
+    ? "Duplicate invoice numbers"
+    : emptyFilter
+      ? "Invoices with zero line items"
+      : noHsnFilter
+        ? "Invoices with HSN-less line items"
+        : null;
 
   // ─── MOBILE VIEW ───
   if (isMobile) {
@@ -347,6 +374,22 @@ export default function InvoiceList() {
           <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New Invoice</Link>
         </div>
       </div>
+
+      {/* Hygiene-filter banner — when the user arrives via a DataQualityBanner
+          drill-down, make it explicit *why* the list looks short, and give a
+          one-click escape hatch back to the unfiltered view. */}
+      {hygieneFilterLabel && (
+        <div className="elevated-card rounded-2xl p-3.5 border-l-4 border-l-warning flex items-center gap-3">
+          <SlidersHorizontal className="w-4 h-4 text-warning shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-semibold text-foreground">Filtered: {hygieneFilterLabel}</p>
+            <p className="text-[11px] text-muted-foreground">Showing only invoices flagged by data-quality scan.</p>
+          </div>
+          <button onClick={clearFilters} className="text-[12px] font-semibold text-primary hover:underline shrink-0">
+            Clear filter
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (

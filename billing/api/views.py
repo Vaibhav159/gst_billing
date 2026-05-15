@@ -738,6 +738,42 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if invoice_type:
             queryset = queryset.filter(type_of_invoice=invoice_type)
 
+        # Data-hygiene filters used by DataQualityBanner drill-down URLs:
+        #   ?empty=1      → invoices with zero line items
+        #   ?no_hsn=1     → invoices with at least one HSN-less line item
+        #   ?dups=1       → invoices whose (business, number, FY, type)
+        #                   collides with another row
+        if self.request.query_params.get("empty") == "1":
+            queryset = queryset.filter(lineitem__isnull=True)
+
+        if self.request.query_params.get("no_hsn") == "1":
+            # An invoice qualifies if it has at least one line item whose
+            # hsn_code is empty/null. The lineitem__isnull=False guard is
+            # critical: without it, the LEFT JOIN makes invoices with ZERO
+            # line items match `lineitem__hsn_code__isnull=True` and they'd
+            # bleed in. distinct() collapses any row duplication.
+            queryset = queryset.filter(
+                lineitem__isnull=False,
+            ).filter(
+                Q(lineitem__hsn_code__isnull=True) | Q(lineitem__hsn_code="")
+            ).distinct()
+
+        if self.request.query_params.get("dups") == "1":
+            # Bucket by (business, number, FY, type) and keep only invoices in
+            # buckets of size > 1. Done in Python because the FY needs Apr-Mar
+            # math we can't easily express in SQL without a CASE expression.
+            from collections import defaultdict
+            buckets = defaultdict(list)
+            for inv in queryset.values("id", "business_id", "invoice_number", "invoice_date", "type_of_invoice"):
+                d = inv["invoice_date"]
+                if not d or not inv["invoice_number"]:
+                    continue
+                fy = d.year if d.month >= 4 else d.year - 1
+                key = (inv["business_id"], inv["invoice_number"], fy, inv["type_of_invoice"])
+                buckets[key].append(inv["id"])
+            dup_ids = [i for ids in buckets.values() if len(ids) > 1 for i in ids]
+            queryset = queryset.filter(id__in=dup_ids)
+
         # Annotate with total tax and item count
         queryset = queryset.annotate(
             total_tax=Coalesce(
