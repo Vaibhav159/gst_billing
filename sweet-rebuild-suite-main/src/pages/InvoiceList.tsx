@@ -351,18 +351,23 @@ export default function InvoiceList() {
               </button>
             </>
           )}
-          {/* Primary: AI Import is the "smart" entry-point; New Invoice is the
-              main action. Secondary actions (export/import/bulk/qr) tucked
-              under More so the action bar stays readable on narrower screens. */}
+          {/* AI Import + the three workflow buttons (Import, Bulk PDF, QR
+              Verify) stay inline because the user reaches for them often.
+              Only the two Export options collapse under "More ▾" — they're
+              the rarely-used "send a snapshot to the CA" actions. New
+              Invoice keeps the primary spot. */}
           <Link to="/billing/invoice/ai-import" className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Bot className="w-4 h-4" /> AI Import</Link>
+          <Link to="/billing/invoice/import" className="premium-btn-ghost text-[13px]"><Upload className="w-4 h-4" /> Import</Link>
+          <Link to="/billing/bulk-pdf" className="premium-btn-ghost text-[13px]"><FileText className="w-4 h-4" /> Bulk PDF</Link>
+          <Link to="/billing/qr-scanner" className="premium-btn-ghost text-[13px]"><QrCode className="w-4 h-4" /> QR Verify</Link>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="premium-btn-ghost text-[13px]">
-                <MoreHorizontal className="w-4 h-4" /> More
+              <button className="premium-btn-ghost text-[13px]" title="Export the filtered list">
+                <MoreHorizontal className="w-4 h-4" /> Export
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Export</DropdownMenuLabel>
+              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Export ({filtered.length} {filtered.length === 1 ? "invoice" : "invoices"})</DropdownMenuLabel>
               <DropdownMenuItem onClick={handleExportCSV}>
                 <Download className="w-4 h-4 mr-2" /> Export to CSV
               </DropdownMenuItem>
@@ -371,19 +376,6 @@ export default function InvoiceList() {
                 toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
               }}>
                 <FileSpreadsheet className="w-4 h-4 mr-2" /> Export to Excel
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Import</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => navigate("/billing/invoice/import")}>
-                <Upload className="w-4 h-4 mr-2" /> Import from CSV
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Tools</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => navigate("/billing/bulk-pdf")}>
-                <FileText className="w-4 h-4 mr-2" /> Bulk PDF download
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/billing/qr-scanner")}>
-                <QrCode className="w-4 h-4 mr-2" /> Verify by QR code
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
