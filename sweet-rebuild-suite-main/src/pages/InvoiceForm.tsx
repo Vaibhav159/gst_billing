@@ -20,6 +20,7 @@ import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { formatApiError, errorTag } from "@/utils/apiError";
+import { pushNotification } from "@/hooks/useNotifications";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -122,17 +123,24 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       .finally(() => setIsLoadingInvoice(false));
   }, [id, mode]);
 
-  // Auto-fetch next invoice number when business or type changes (create mode only)
+  // Auto-fetch next invoice number when business, type, or date changes
+  // (create mode only). Passing invoice_date means a back-dated entry gets
+  // the correct per-FY prefix (e.g. SGJ/2024-25/108 not SGJ/2025-26/1).
   useEffect(() => {
     if (mode !== "create" || !form.businessId) return;
     const typeParam = form.type === "INWARD" ? "inward" : "outward";
-    api.get<any>(`invoices/next_invoice_number/?business_id=${form.businessId}&type_of_invoice=${typeParam}`)
+    const params = new URLSearchParams({
+      business_id: form.businessId,
+      type_of_invoice: typeParam,
+    });
+    if (form.date) params.set("invoice_date", form.date);
+    api.get<any>(`invoices/next_invoice_number/?${params.toString()}`)
       .then((res) => {
         const next = res.data?.next_invoice_number;
         if (next) setForm((prev) => ({ ...prev, invoiceNumber: next }));
       })
       .catch(() => {}); // silently fail
-  }, [form.businessId, form.type, mode]);
+  }, [form.businessId, form.type, form.date, mode]);
 
   // ─── Validation state ───
   const [warnings, setWarnings] = useState<Record<string, string>>({});
@@ -376,6 +384,13 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         const created = await createInvoice(newInvoice);
         clearDraft();
         toast({ title: "Invoice Created", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
+        // Persist a notification so it's discoverable from the bell after the
+        // toast dismisses — handy for audit ("did I save invoice 108 today?").
+        pushNotification({
+          type: "success",
+          title: "Invoice created",
+          message: `${form.invoiceNumber} · ${selectedCust?.name || "Customer"} · ${formatCurrency(total)}`,
+        });
         const navId = created?.id ? String(created.id) : newId;
         if (isMobile && mobileMode === "easy") {
           navigate(`/billing/invoice/${navId}`);

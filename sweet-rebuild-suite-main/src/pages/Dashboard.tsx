@@ -21,6 +21,7 @@ import { useMobileMode } from "@/contexts/MobileModeContext";
 import EasyDashboard from "@/components/mobile/easy/EasyDashboard";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import OnboardingWizard, { shouldShowOnboarding } from "@/components/OnboardingWizard";
+import DataQualityBanner from "@/components/DataQualityBanner";
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
@@ -105,19 +106,44 @@ export default function Dashboard() {
     };
   }, [monthlyData]);
 
-  // This month at a glance
+  // At-a-glance window: use the current calendar month when it has meaningful
+  // activity, otherwise fall back to the trailing 30 days so an early-month
+  // landing isn't "0 invoices · ₹0 sales" until day 5.
   const thisMonthData = useMemo(() => {
     const now = new Date();
     const m = now.getMonth() + 1;
     const y = now.getFullYear();
-    const match = (statsData?.monthly || []).find((d: any) => d.month === m && d.year === y);
+    const monthMatch = (statsData?.monthly || []).find((d: any) => d.month === m && d.year === y);
+    const monthCount = monthMatch ? (Number(monthMatch.outward_count) || 0) + (Number(monthMatch.inward_count) || 0) : 0;
+
+    // If the current month is dry, use trailing-30-days from recent_invoices.
+    if (monthCount === 0) {
+      const cutoff = new Date(now);
+      cutoff.setDate(cutoff.getDate() - 30);
+      const recent = (statsData?.recent_invoices || []).filter((r: any) => {
+        const d = r.invoice_date ? new Date(r.invoice_date) : null;
+        return d && d >= cutoff && d <= now;
+      });
+      const outward30 = recent.filter((r: any) => (r.type_of_invoice || "").toLowerCase() === "outward")
+        .reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      const inward30 = recent.filter((r: any) => (r.type_of_invoice || "").toLowerCase() === "inward")
+        .reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      return {
+        count: recent.length,
+        outward: outward30,
+        inward: inward30,
+        monthName: "Last 30 days",
+        isTrailing: true,
+      };
+    }
     return {
-      count: match ? (Number(match.outward_count) || 0) + (Number(match.inward_count) || 0) : 0,
-      outward: match ? Number(match.outward_total) || 0 : 0,
-      inward: match ? Number(match.inward_total) || 0 : 0,
+      count: monthCount,
+      outward: monthMatch ? Number(monthMatch.outward_total) || 0 : 0,
+      inward: monthMatch ? Number(monthMatch.inward_total) || 0 : 0,
       monthName: now.toLocaleString("en", { month: "long", year: "numeric" }),
+      isTrailing: false,
     };
-  }, [statsData?.monthly]);
+  }, [statsData?.monthly, statsData?.recent_invoices]);
 
   const customerTotals = (statsData?.top_customers || []).map(c => ({
     id: String(c.id),
@@ -320,6 +346,9 @@ export default function Dashboard() {
       {shouldShowOnboarding(businesses.length) && !showOnboarding && (
         <OnboardingWizard onDismiss={() => setShowOnboarding(true)} />
       )}
+
+      {/* ── Data-quality banner (filing-blocking issues) ── */}
+      <DataQualityBanner />
 
       {/* ── Header ── */}
       <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}

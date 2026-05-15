@@ -7,7 +7,8 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2 } from "lucide-react";
+import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2, XCircle, Pencil } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
 import DateRangePicker from "@/components/DateRangePicker";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn, pluralize } from "@/utils/utils";
@@ -201,7 +202,12 @@ export default function GSTSummary() {
   const summaryLoading = gstLoading || statsLoading;
 
   // Server-side data for Summary tab
-  const gstr1Rows = (gstData?.rate_slabs?.outward || []).filter((r: any) => r.taxable > 0);
+  // Sort rate slabs ascending (3% before 5% before 12% before 18% before 28%)
+  // so the rate-wise table reads "low to high" — the natural mental model.
+  const gstr1Rows = (gstData?.rate_slabs?.outward || [])
+    .filter((r: any) => r.taxable > 0)
+    .slice()
+    .sort((a: any, b: any) => Number(a.rate) - Number(b.rate));
   const hsnRows = gstData?.hsn_summary || [];
   const gstr3b = gstData?.gstr3b || { output_tax: { cgst: 0, sgst: 0, igst: 0, total: 0 }, input_tax_credit: { cgst: 0, sgst: 0, igst: 0, total: 0 }, net_payable: { cgst: 0, sgst: 0, igst: 0, total: 0 } };
   const totalOutward = statsData?.totals?.outward || 0;
@@ -290,6 +296,57 @@ export default function GSTSummary() {
   const recon = gstData?.gstr1_3b_recon;
   const reconHasIssue = recon && Math.abs(recon.variance || 0) > 0.5;
 
+  // Filing-readiness scoreboard. Four signals derived from data already on
+  // the page — no extra round-trip. Each check is either pass / warn / fail,
+  // and the headline number is a rolled-up 0–4 score so users can answer
+  // "am I safe to file this period?" at a glance without reading every
+  // table. Deliberately conservative: ANY warn drops the score; expiring ITC
+  // counts as a hard fail because it costs real money.
+  const readiness = useMemo(() => {
+    const hasData = gstr1Rows.length > 0 || (gstr3b.output_tax.total || 0) > 0 || (gstr3b.input_tax_credit.total || 0) > 0;
+    const reconOk = !recon || Math.abs(recon.variance || 0) <= 0.5;
+    const expiredCount = aging?.buckets?.expired?.count || 0;
+    const warningCount = aging?.buckets?.warning?.count || 0;
+    const itcSafe = expiredCount === 0 && warningCount === 0;
+    const itcWarn = expiredCount === 0 && warningCount > 0;
+
+    const checks = [
+      {
+        key: "data",
+        ok: hasData,
+        label: hasData ? "Has filing data" : "No data in period",
+        detail: hasData ? `${gstr1Rows.length} rate slab${gstr1Rows.length === 1 ? "" : "s"}` : "Select a period with activity",
+      },
+      {
+        key: "recon",
+        ok: reconOk,
+        label: reconOk ? "GSTR-1 ↔ 3B in sync" : "GSTR-1 ↔ 3B mismatch",
+        detail: reconOk ? "Variance < ₹0.50" : `Off by ${formatCurrency(Math.abs(recon?.variance || 0))}`,
+      },
+      {
+        key: "itc",
+        ok: itcSafe,
+        warn: itcWarn,
+        label: expiredCount > 0 ? "ITC past cutoff" : warningCount > 0 ? "ITC nearing cutoff" : "ITC inside cutoff",
+        detail: expiredCount > 0
+          ? `${expiredCount} invoice${expiredCount === 1 ? "" : "s"} forfeit`
+          : warningCount > 0
+            ? `${warningCount} due within 90 days`
+            : "No urgent ITC",
+        href: (expiredCount > 0 || warningCount > 0) ? "?tab=aging" : undefined,
+      },
+      {
+        key: "balance",
+        ok: gstr3b.input_tax_credit.total > 0 || gstr3b.output_tax.total > 0,
+        label: "Tax ledger populated",
+        detail: gstr3b.input_tax_credit.total === 0 && gstr3b.output_tax.total === 0 ? "Awaiting invoices" : "Output + ITC computed",
+      },
+    ];
+    const passed = checks.filter((c) => c.ok).length;
+    const total = checks.length;
+    return { checks, passed, total, ready: passed === total };
+  }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, recon, aging]);
+
   return (
     <div className={cn("space-y-4", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-5")}>
       <Breadcrumbs items={[{ label: "Reports", href: "/billing/reports" }, { label: "GST" }]} />
@@ -333,19 +390,65 @@ export default function GSTSummary() {
         )}
       </motion.div>
 
-      {/* Stats (always visible) */}
+      {/* Stats (always visible) — match the InvoiceList stat-card pattern:
+          uppercase tracking-wider label, tabular-nums value, and a one-line
+          sub-context so the user can tell what the figure means without a
+          tooltip. Keeps the visual language consistent across Dashboard /
+          Invoices / GST. */}
       <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-chart-1" },
-          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-chart-3" },
-          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-success" },
-          { label: "Net Tax", value: formatCurrency(Math.abs(netTax)), color: netTax >= 0 ? "text-destructive" : "text-success" },
+          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-chart-1", sub: "Sales in period" },
+          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-chart-3", sub: "GSTR-1 tax" },
+          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-success", sub: "Input credit" },
+          { label: "Net Tax", value: formatCurrency(Math.abs(netTax)), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable" : "Refund/Carry-fwd" },
         ].map((s) => (
           <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
-            <p className="text-[10px] text-muted-foreground font-medium">{s.label}</p>
-            <p className={cn("font-display font-bold mt-1", s.color, isMobile ? "text-sm" : "text-xl")}>{s.value}</p>
+            <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
+            <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>{s.value}</p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5">{s.sub}</p>
           </motion.div>
         ))}
+      </motion.div>
+
+      {/* Filing-readiness scoreboard — at-a-glance "am I safe to file?" */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+        className={cn("elevated-card rounded-2xl p-4 border-l-4", readiness.ready ? "border-l-success" : readiness.passed >= readiness.total - 1 ? "border-l-warning" : "border-l-destructive")}>
+        <div className="flex items-start gap-3 flex-wrap">
+          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+            readiness.ready ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
+          )}>
+            {readiness.ready ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <p className="text-[13px] font-semibold text-foreground">Filing readiness</p>
+              <span className="text-[11px] text-muted-foreground">
+                <span className={cn("font-bold tabular-nums", readiness.ready ? "text-success" : readiness.passed >= readiness.total - 1 ? "text-warning" : "text-destructive")}>{readiness.passed}</span>
+                <span className="text-muted-foreground">/{readiness.total} checks passing</span>
+              </span>
+            </div>
+            <div className="mt-2 grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+              {readiness.checks.map((c) => {
+                const cls = c.ok ? "text-success" : (c as any).warn ? "text-warning" : "text-destructive";
+                const Icon = c.ok ? CheckCircle2 : (c as any).warn ? AlertTriangle : XCircle;
+                const inner = (
+                  <div className="flex items-start gap-2 p-2 rounded-lg bg-secondary/20 border border-border/30 hover:bg-secondary/30 transition-colors">
+                    <Icon className={cn("w-3.5 h-3.5 shrink-0 mt-0.5", cls)} />
+                    <div className="min-w-0">
+                      <p className={cn("text-[11px] font-semibold", cls)}>{c.label}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{c.detail}</p>
+                    </div>
+                  </div>
+                );
+                return c.href ? (
+                  <button key={c.key} onClick={() => setTab("aging")} className="text-left">{inner}</button>
+                ) : (
+                  <div key={c.key}>{inner}</div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </motion.div>
 
       {/* GSTR-1 vs GSTR-3B reconciliation banner — only shown when there's a real variance */}
@@ -559,21 +662,21 @@ export default function GSTSummary() {
                         <thead><tr><th>Row</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
                         <tbody>
                           <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(A) ITC Available</td></tr>
-                          <tr><td className="pl-6">4(A)(1) Import of goods</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.cgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.sgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(A)(1) Import of goods</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.cgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.sgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.igst)}</td></tr>
                           <tr><td className="pl-6">4(A)(2) Import of services</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.cgst)}</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.sgst)}</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.igst)}</td></tr>
-                          <tr><td className="pl-6">4(A)(3) Inward supplies (RCM)</td><td className="text-right">{formatCurrency(table4.a_3_rcm.cgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.sgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(A)(3) Inward supplies (RCM)</td><td className="text-right">{formatCurrency(table4.a_3_rcm.cgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.sgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.igst)}</td></tr>
                           <tr><td className="pl-6">4(A)(4) Inward from ISD</td><td className="text-right">{formatCurrency(table4.a_4_isd.cgst)}</td><td className="text-right">{formatCurrency(table4.a_4_isd.sgst)}</td><td className="text-right">{formatCurrency(table4.a_4_isd.igst)}</td></tr>
-                          <tr><td className="pl-6">4(A)(5) All other ITC</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.cgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.sgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(A)(5) All other ITC</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.cgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.sgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.igst)}</td></tr>
                           <tr className="font-semibold bg-secondary/10"><td className="pl-6">Total 4(A)</td><td className="text-right">{formatCurrency(table4.a_total.cgst)}</td><td className="text-right">{formatCurrency(table4.a_total.sgst)}</td><td className="text-right">{formatCurrency(table4.a_total.igst)}</td></tr>
 
                           <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(B) ITC Reversed</td></tr>
-                          <tr><td className="pl-6">4(B)(1) Non-reclaimable (Rules 38, 42, 43, 17(5))</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(B)(1) Non-reclaimable (Rules 38, 42, 43, 17(5))</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.igst)}</td></tr>
                           <tr><td className="pl-6">4(B)(2) Reclaimable (Rule 37, Sec 16(2))</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.igst)}</td></tr>
 
                           <tr className="font-bold border-t-2 border-border"><td>4(C) Net ITC available</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.cgst)}</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.sgst)}</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.igst)}</td></tr>
 
                           <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(D) Other Details</td></tr>
-                          <tr><td className="pl-6">4(D)(1) ITC reclaimed</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.cgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.sgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(D)(1) ITC reclaimed</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.cgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.sgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.igst)}</td></tr>
                           <tr><td className="pl-6">4(D)(2) Ineligible ITC</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.cgst)}</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.sgst)}</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.igst)}</td></tr>
                         </tbody>
                       </table>
@@ -691,15 +794,17 @@ export default function GSTSummary() {
                       const reclaimed = (table4?.d_1_reclaimed?.[k] || 0);
                       const closing = opening + reversed - reclaimed;
                       return (
-                        <div key={k} className="flex items-center justify-between border-b border-border/30 pb-2 last:border-0">
+                        <div key={k} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-border/30 pb-2 last:border-0 gap-1">
                           <span className="font-mono text-[11px] uppercase text-muted-foreground">{k}</span>
-                          <div className="text-right tabular-nums text-[12px]">
+                          {/* Stack vertically below sm so the +/-/= chain doesn't wrap awkwardly on
+                              narrow viewports. On sm+ keep the single-line equation. */}
+                          <div className="text-right tabular-nums text-[12px] flex flex-wrap items-baseline justify-end gap-x-1">
                             <span className="text-muted-foreground">{formatCurrency(opening)}</span>
-                            <span className="text-muted-foreground mx-1">+</span>
+                            <span className="text-muted-foreground">+</span>
                             <span className="text-warning">{formatCurrency(reversed)}</span>
-                            <span className="text-muted-foreground mx-1">−</span>
+                            <span className="text-muted-foreground">−</span>
                             <span className="text-success">{formatCurrency(reclaimed)}</span>
-                            <span className="text-muted-foreground mx-1">=</span>
+                            <span className="text-muted-foreground">=</span>
                             <span className="font-bold text-foreground">{formatCurrency(closing)}</span>
                           </div>
                         </div>
@@ -747,8 +852,8 @@ export default function GSTSummary() {
                   <div className="space-y-2">
                     <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Action needed ({aging.urgent_invoices.length})</h4>
                     <div className="overflow-x-auto rounded-lg border border-border/40">
-                      <table className="table-premium text-[12px] min-w-[640px]">
-                        <thead><tr><th>Invoice #</th><th>Date</th><th>Tax</th><th>Cutoff</th><th>Days left</th><th>Status</th></tr></thead>
+                      <table className="table-premium text-[12px] min-w-[720px]">
+                        <thead><tr><th>Invoice #</th><th>Date</th><th>Tax</th><th>Cutoff</th><th>Days left</th><th>Status</th><th className="text-right">Fix</th></tr></thead>
                         <tbody>
                           {aging.urgent_invoices.map((inv: any) => (
                             <tr key={inv.id}>
@@ -761,6 +866,21 @@ export default function GSTSummary() {
                                 {inv.bucket === "expired"
                                   ? <span className="premium-badge bg-destructive/15 text-destructive">Forfeit</span>
                                   : <span className="premium-badge bg-warning/15 text-warning">Claim soon</span>}
+                              </td>
+                              <td className="text-right">
+                                {/* One-tap path to the editable invoice. Expired
+                                    rows still get a "View" link because you
+                                    might need to look at the document for
+                                    audit purposes, even if you can't reclaim
+                                    the ITC. */}
+                                <RouterLink
+                                  to={inv.bucket === "expired" ? `/billing/invoice/${inv.id}` : `/billing/invoice/edit/${inv.id}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                                  title={inv.bucket === "expired" ? "Open invoice (ITC already forfeit)" : "Edit invoice to fix and reclaim ITC"}
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  {inv.bucket === "expired" ? "View" : "Fix"}
+                                </RouterLink>
                               </td>
                             </tr>
                           ))}

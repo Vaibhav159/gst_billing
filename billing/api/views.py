@@ -1302,6 +1302,46 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         })
 
     @action(detail=False, methods=["get"])
+    def data_quality(self, request):
+        """Snapshot of common data-hygiene issues that will bite at filing time.
+
+        Surfaces:
+          - invoices_no_line_items   : invoices with zero LineItems (won't
+                                       appear on GSTR-1 rate-slab tables)
+          - line_items_missing_hsn   : line items with empty hsn_code
+                                       (unfilable in GSTR-1 HSN summary)
+          - duplicate_invoice_groups : same (business, number, FY, type)
+                                       collisions — GST portal rejects these
+                                       on filing.
+
+        Counts only — drill-downs come from existing list APIs (filterable).
+        """
+        from collections import defaultdict
+        empty_inv = Invoice.objects.filter(lineitem__isnull=True).count()
+        no_hsn = LineItem.objects.filter(
+            Q(hsn_code__isnull=True) | Q(hsn_code="")
+        ).count()
+
+        # Same-FY + same-type collisions
+        buckets = defaultdict(int)
+        for inv in Invoice.objects.values(
+            "business_id", "invoice_number", "invoice_date", "type_of_invoice"
+        ):
+            d = inv["invoice_date"]
+            if not d or not inv["invoice_number"]:
+                continue
+            fy = d.year if d.month >= 4 else d.year - 1
+            buckets[(inv["business_id"], inv["invoice_number"], fy, inv["type_of_invoice"])] += 1
+        dup_groups = sum(1 for c in buckets.values() if c > 1)
+
+        return Response({
+            "invoices_no_line_items": empty_inv,
+            "line_items_missing_hsn": no_hsn,
+            "duplicate_invoice_groups": dup_groups,
+            "has_issues": (empty_inv + no_hsn + dup_groups) > 0,
+        })
+
+    @action(detail=False, methods=["get"])
     def gst_summary(self, request):
         """Server-side GST summary for GSTR-1/3B — grouped by rate slab and HSN."""
         queryset = self.get_queryset()
@@ -1726,9 +1766,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
-        """Get the next invoice number for a business"""
+        """Get the next invoice number for a business.
+
+        Accepts optional `invoice_date` (YYYY-MM-DD) so back-dated entries get
+        the next number for the *date's* FY, not today's FY. Without it,
+        defaults to today (legacy behaviour).
+        """
         business_id = request.query_params.get("business_id")
         invoice_type = request.query_params.get("type_of_invoice", INVOICE_TYPE_OUTWARD)
+        invoice_date_str = request.query_params.get("invoice_date")
 
         if not business_id:
             return Response(
@@ -1738,12 +1784,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Get the financial year
         from datetime import datetime
 
-        today = datetime.now().date()
+        ref_date = None
+        if invoice_date_str:
+            try:
+                ref_date = datetime.strptime(invoice_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                ref_date = None
+        if not ref_date:
+            ref_date = datetime.now().date()
         # Get financial year start date (April 1st)
         start_date = (
-            datetime(today.year - 1, 4, 1).date()
-            if today.month < 4
-            else datetime(today.year, 4, 1).date()
+            datetime(ref_date.year - 1, 4, 1).date()
+            if ref_date.month < 4
+            else datetime(ref_date.year, 4, 1).date()
         )
 
         # Find the highest trailing number, but only among invoice_numbers
@@ -1755,9 +1808,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # ("SGJ/2024-25/108"). Anything else is skipped.
         import re
 
+        # Scope to the chosen FY (start_date .. start_date + 1 year - 1 day),
+        # so a back-dated entry in FY 2024-25 doesn't get its next-number
+        # inferred from FY 2025-26 invoices.
+        from datetime import timedelta
+        fy_end = datetime(start_date.year + 1, 3, 31).date()
         fy_invoices = Invoice.objects.filter(
             business_id=business_id,
             invoice_date__gte=start_date,
+            invoice_date__lte=fy_end,
             type_of_invoice=invoice_type,
         ).only("invoice_number")
 

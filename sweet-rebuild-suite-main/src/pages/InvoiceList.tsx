@@ -1,12 +1,20 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { toCSV, downloadCSV } from "@/utils/csv";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Link, useOutletContext, useNavigate } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
   Trash2, Copy, CheckSquare, Square, LayoutGrid, LayoutList, TrendingUp,
-  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet, QrCode,
+  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet, QrCode, MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
 import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useDashboardStats } from "@/hooks/useDataStore";
@@ -65,6 +73,28 @@ export default function InvoiceList() {
     if (sortBy === "total") return dir * (a.total - b.total);
     return dir * a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, { numeric: true });
   });
+
+  // Per-day rollups so we can inject "Mon, 12 May 2026 · 4 invoices · ₹X"
+  // separator rows when the table is sorted by date. Lets the eye spot
+  // busy / quiet days at a glance without leaving the list view.
+  const dayHeaderInfo = useMemo(() => {
+    const info = new Map<string, { dateLabel: string; count: number; total: number }>();
+    for (const inv of filtered) {
+      const key = inv.invoice_date;
+      if (!key) continue;
+      const cur = info.get(key);
+      if (cur) {
+        cur.count += 1;
+        cur.total += Number(inv.total) || 0;
+      } else {
+        const d = new Date(key);
+        const weekday = d.toLocaleDateString("en-IN", { weekday: "short" });
+        const day = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+        info.set(key, { dateLabel: `${weekday}, ${day}`, count: 1, total: Number(inv.total) || 0 });
+      }
+    }
+    return info;
+  }, [filtered]);
 
   const statsInfo = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, count: 0 };
   const totalOutward = statsInfo.outward;
@@ -278,15 +308,42 @@ export default function InvoiceList() {
               </button>
             </>
           )}
-          <button onClick={handleExportCSV} className="premium-btn-ghost text-[13px]"><Download className="w-4 h-4" /> CSV</button>
-          <button onClick={() => {
-            downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`);
-            toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
-          }} className="premium-btn-ghost text-[13px]"><FileSpreadsheet className="w-4 h-4" /> Excel</button>
-          <Link to="/billing/invoice/import" className="premium-btn-ghost text-[13px]"><Upload className="w-4 h-4" /> Import</Link>
+          {/* Primary: AI Import is the "smart" entry-point; New Invoice is the
+              main action. Secondary actions (export/import/bulk/qr) tucked
+              under More so the action bar stays readable on narrower screens. */}
           <Link to="/billing/invoice/ai-import" className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Bot className="w-4 h-4" /> AI Import</Link>
-          <Link to="/billing/bulk-pdf" className="premium-btn-ghost text-[13px]"><FileText className="w-4 h-4" /> Bulk PDF</Link>
-          <Link to="/billing/qr-scanner" className="premium-btn-ghost text-[13px]"><QrCode className="w-4 h-4" /> QR Verify</Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="premium-btn-ghost text-[13px]">
+                <MoreHorizontal className="w-4 h-4" /> More
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Export</DropdownMenuLabel>
+              <DropdownMenuItem onClick={handleExportCSV}>
+                <Download className="w-4 h-4 mr-2" /> Export to CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`);
+                toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
+              }}>
+                <FileSpreadsheet className="w-4 h-4 mr-2" /> Export to Excel
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Import</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => navigate("/billing/invoice/import")}>
+                <Upload className="w-4 h-4 mr-2" /> Import from CSV
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Tools</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => navigate("/billing/bulk-pdf")}>
+                <FileText className="w-4 h-4 mr-2" /> Bulk PDF download
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/billing/qr-scanner")}>
+                <QrCode className="w-4 h-4 mr-2" /> Verify by QR code
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New Invoice</Link>
         </div>
       </div>
@@ -372,27 +429,52 @@ export default function InvoiceList() {
               <th>Tax</th><th>Type</th><th>Actions</th>
             </tr></thead>
             <tbody>
-              {filtered.map((inv, i) => (
-                <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
-                  <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
-                  <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
-                  <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
-                  <td className="text-foreground font-medium">{inv.customerName}</td>
-                  <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
-                  <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
-                  <td className="text-muted-foreground text-[12px]">{formatCurrency(inv.totalTax)}</td>
-                  <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
-                  <td>
-                    <div className="flex items-center gap-0.5">
-                      <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
-                      <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
-                      <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
-                      <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
-                      <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} aria-label="Delete invoice" className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </td>
-                </motion.tr>
-              ))}
+              {filtered.map((inv, i) => {
+                // When sorted by date, prepend a slim header row whenever the
+                // date changes. Skip when sort != date — the headers don't
+                // make sense if rows aren't date-ordered.
+                const prev = i > 0 ? filtered[i - 1] : null;
+                const showDayHeader = sortBy === "date" && (!prev || prev.invoice_date !== inv.invoice_date);
+                const dayInfo = showDayHeader ? dayHeaderInfo.get(inv.invoice_date) : null;
+                return (
+                  <React.Fragment key={inv.id}>
+                    {showDayHeader && dayInfo && (
+                      <tr className="bg-secondary/20 border-t border-border/40">
+                        <td colSpan={9} className="!py-2 !px-4">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Calendar className="w-3.5 h-3.5 opacity-70" />
+                              <span className="font-semibold text-foreground/80">{dayInfo.dateLabel}</span>
+                              <span className="text-muted-foreground/70">·</span>
+                              <span>{pluralize(dayInfo.count, "invoice")}</span>
+                            </div>
+                            <span className="font-semibold tabular-nums text-foreground/80">{formatCurrency(dayInfo.total)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    <motion.tr initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
+                      <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
+                      <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
+                      <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
+                      <td className="text-foreground font-medium">{inv.customerName}</td>
+                      <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
+                      <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
+                      <td className="text-muted-foreground text-[12px]">{formatCurrency(inv.totalTax)}</td>
+                      <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
+                      <td>
+                        <div className="flex items-center gap-0.5">
+                          <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
+                          <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
+                          <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
+                          <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
+                          <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} aria-label="Delete invoice" className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  </React.Fragment>
+                );
+              })}
               {filtered.length === 0 && !isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found</td></tr>}
               {isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...</td></tr>}
             </tbody>
