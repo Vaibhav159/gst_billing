@@ -47,7 +47,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     financialYear: "",
   });
 
-  const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]);
+  // Line items carry a `_key` for React's reconciler so removing /
+  // reordering rows doesn't shuffle DOM nodes (which previously caused
+  // input values to ghost into the wrong row after a delete). The _key
+  // is client-only — stripped before send-to-server.
+  type LineItemDraft = { _key: string; productId: string; qty: number; rate: number; unit: ItemUnit };
+  const newItemKey = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  const blankItem = (): LineItemDraft => ({ _key: newItemKey(), productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit });
+  const [items, setItems] = useState<LineItemDraft[]>([blankItem()]);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
 
   // Pre-fill from duplicate source
@@ -64,6 +71,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     });
     if (duplicateFrom.items?.length > 0) {
       setItems(duplicateFrom.items.map((it: any) => ({
+        _key: newItemKey(),
         productId: String(it.productId || it.product || ""),
         qty: it.qty || it.quantity || 1,
         rate: it.rate || 0,
@@ -109,6 +117,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         });
 
         const lineItems = (inv.line_items || []).map((li: any) => ({
+          _key: newItemKey(),
           productId: String(li.product || li.id || ""),
           qty: parseFloat(li.quantity) || 1,
           rate: parseFloat(li.rate) || 0,
@@ -230,7 +239,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       if (saved) {
         const draft = JSON.parse(saved);
         if (draft.form) setForm(draft.form);
-        if (draft.items?.length > 0) setItems(draft.items);
+        if (draft.items?.length > 0) {
+          // Re-key restored items — drafts saved before _key existed
+          // won't have the field, and re-generating is harmless either
+          // way since it's client-only.
+          setItems(draft.items.map((it: any) => ({ ...it, _key: it._key || newItemKey() })));
+        }
         setDirty(true);
         toast({ title: "Draft Restored", description: "Your unsaved invoice has been restored." });
       }
@@ -276,7 +290,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const safeNavigate = (to: string) => { if (dirty) { setPendingNav(to); setShowUnsavedModal(true); } else navigate(to); };
   const set = (field: string, val: any) => { setForm((p) => ({ ...p, [field]: val })); setDirty(true); };
-  const addItem = () => { setItems((p) => [...p, { productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]); setDirty(true); };
+  const addItem = () => { setItems((p) => [...p, blankItem()]); setDirty(true); };
   const removeItem = (i: number) => { if (items.length === 1) return; setItems((p) => p.filter((_, idx) => idx !== i)); setDirty(true); };
   const updateItem = (i: number, field: string, val: any) => { setItems((p) => p.map((it, idx) => idx === i ? { ...it, [field]: val } : it)); setDirty(true); };
 
@@ -567,7 +581,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   {items.map((item, i) => {
                     const { amount, tax, gstRate } = calcItem(item);
                     return (
-                      <div key={i} className="p-4 space-y-3">
+                      <div key={item._key} className="p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-muted-foreground font-mono">#{i + 1}</span>
                           <button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1 rounded text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -610,7 +624,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                       {items.map((item, i) => {
                         const { amount, tax, gstRate } = calcItem(item);
                         return (
-                          <motion.tr key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
+                          <motion.tr key={item._key} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
                             <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
@@ -656,7 +670,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   const product = localProducts.find(p => p.id === item.productId);
                   if (item.qty === 0 && item.rate === 0 && !product) return null;
                   return (
-                    <div key={i} className="space-y-1.5 pb-2 border-b border-border/30">
+                    <div key={item._key} className="space-y-1.5 pb-2 border-b border-border/30">
                       {product && <div className="text-[12px] font-medium text-foreground truncate">{product.name}</div>}
                       <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{item.qty} {item.unit}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(item.rate)}/{item.unit}</span></div>

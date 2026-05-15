@@ -157,6 +157,15 @@ export default function BatchPrint() {
     mergePDFs();
   }, [pdfBlobs, invoiceData, mergedPdfUrl, toast]);
 
+  // Revoke the merged-PDF object URL when the component unmounts or when
+  // a new merge replaces the current one. Without this, every visit to
+  // this page leaked one PDF-sized blob into browser memory until tab
+  // close. The iframe and the print/download paths share the same URL.
+  useEffect(() => {
+    if (!mergedPdfUrl) return;
+    return () => { URL.revokeObjectURL(mergedPdfUrl); };
+  }, [mergedPdfUrl]);
+
   const handlePrint = () => {
     if (!mergedPdfUrl) return;
     const printWindow = window.open(mergedPdfUrl);
@@ -168,13 +177,19 @@ export default function BatchPrint() {
   };
 
   const handleDownload = () => {
-    if (!mergedBlob) return;
-    const url = URL.createObjectURL(mergedBlob);
+    // Reuse the existing mergedPdfUrl rather than minting a new one
+    // each click — the iframe is already holding a reference, and the
+    // unmount-time revoke covers cleanup. Falls back to the raw blob if
+    // for some reason the URL isn't set yet.
+    if (!mergedPdfUrl && !mergedBlob) return;
+    const href = mergedPdfUrl || URL.createObjectURL(mergedBlob!);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = href;
     a.download = `invoices_batch_${invoiceData.length}.pdf`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Only revoke the *fallback* URL we just created; the long-lived
+    // mergedPdfUrl is owned by the component lifecycle.
+    if (href !== mergedPdfUrl) URL.revokeObjectURL(href);
     toast({ title: "Downloaded", description: `${invoiceData.length} invoices combined PDF` });
   };
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { formatCurrency, formatDate, currentFY } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatDate, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt, Download } from "lucide-react";
 import { downloadStatementPDF } from "@/utils/generateStatementPDF";
@@ -77,26 +77,50 @@ export default function CustomerStatement() {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters — business select is now visible on mobile too. The
+          previous `!isMobile && …` guard meant phone users had no way to
+          filter by business at all on a multi-business workspace.
+          Date inputs gain min/max guards so an inverted range can't
+          silently empty the table. */}
       <div className="elevated-card rounded-2xl p-4">
-        <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-3")}>
-          <div className="space-y-1"><label className="text-[10px] text-muted-foreground uppercase font-semibold">From</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="premium-input w-full text-[12px]" /></div>
-          <div className="space-y-1"><label className="text-[10px] text-muted-foreground uppercase font-semibold">To</label><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="premium-input w-full text-[12px]" /></div>
-          {!isMobile && <div className="space-y-1"><label className="text-[10px] text-muted-foreground uppercase font-semibold">Business</label><select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full text-[12px]"><option value="all">All</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>}
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">From</label>
+            <input type="date" value={startDate} max={endDate} onChange={(e) => setStartDate(e.target.value)} className="premium-input w-full text-[12px]" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">To</label>
+            <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className="premium-input w-full text-[12px]" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground uppercase font-semibold">Business</label>
+            <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full text-[12px]">
+              <option value="all">All</option>
+              {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Stats — compact currency to match the rest of the app; the Net
+          tile gets a Dr/Cr suffix to mirror the per-row running balance
+          below (was always rendered as a signed number, which contradicted
+          the abs+Dr/Cr convention on each line). */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Invoices", value: filtered.length.toString(), color: "text-chart-1" },
-          { label: "Outward", value: formatCurrency(totalOutward), color: "text-success" },
-          { label: "Inward", value: formatCurrency(totalInward), color: "text-warning" },
-          { label: "Net", value: formatCurrency(netAmount), color: netAmount >= 0 ? "text-success" : "text-destructive" },
+          { label: "Invoices", value: filtered.length.toLocaleString("en-IN"), full: `${filtered.length} invoices`, color: "text-chart-1" },
+          { label: "Outward", value: formatCompactCurrency(totalOutward), full: formatCurrency(totalOutward), color: "text-success" },
+          { label: "Inward", value: formatCompactCurrency(totalInward), full: formatCurrency(totalInward), color: "text-warning" },
+          {
+            label: "Net",
+            value: `${formatCompactCurrency(Math.abs(netAmount))} ${netAmount >= 0 ? "Dr" : "Cr"}`,
+            full: `${formatCurrency(Math.abs(netAmount))} ${netAmount >= 0 ? "(receivable)" : "(payable)"}`,
+            color: netAmount >= 0 ? "text-success" : "text-destructive",
+          },
         ].map((s) => (
-          <div key={s.label} className="elevated-card rounded-2xl p-4">
+          <div key={s.label} className="elevated-card rounded-2xl p-4" title={s.full}>
             <p className="text-[10px] text-muted-foreground font-semibold uppercase">{s.label}</p>
-            <p className={cn("font-display font-bold tabular-nums mt-1", s.color, isMobile ? "text-sm" : "text-2xl")}>{s.value}</p>
+            <p className={cn("font-display font-bold tabular-nums mt-1", s.color, isMobile ? "text-base" : "text-xl")}>{s.value}</p>
           </div>
         ))}
       </div>
@@ -108,22 +132,38 @@ export default function CustomerStatement() {
         </div>
         {isMobile ? (
           <div className="divide-y divide-border/30">
-            {sortedFiltered.map((inv, idx) => {
+            {sortedFiltered.map((inv) => {
               runningBalance += inv.type === "OUTWARD" ? inv.total : -inv.total;
               return (
-                <Link key={inv.id} to={`/billing/invoice/${inv.id}`} className="flex items-center gap-3 p-4 hover:bg-secondary/20">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
-                    <p className="text-[11px] text-muted-foreground">{formatDate(inv.invoice_date || "")}</p>
+                <Link key={inv.id} to={`/billing/invoice/${inv.id}`} className="block p-4 hover:bg-secondary/20">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-primary">{inv.invoiceNumber}</p>
+                      <p className="text-[11px] text-muted-foreground">{formatDate(inv.invoice_date || "")}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
+                      <span className={cn("text-[10px] font-bold", inv.type === "OUTWARD" ? "text-success" : "text-warning")}>{inv.type}</span>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
-                    <span className={cn("text-[10px] font-bold", inv.type === "OUTWARD" ? "text-success" : "text-warning")}>{inv.type}</span>
+                  {/* Running balance — the entire point of a statement.
+                      Was hidden on mobile before. */}
+                  <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">Balance after</span>
+                    <span className={cn("font-semibold tabular-nums", runningBalance >= 0 ? "text-success" : "text-destructive")}>
+                      {formatCurrency(Math.abs(runningBalance))} <span className="text-[10px] font-normal text-muted-foreground">{runningBalance >= 0 ? "Dr" : "Cr"}</span>
+                    </span>
                   </div>
                 </Link>
               );
             })}
-            {filtered.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">No invoices in this period</div>}
+            {filtered.length === 0 && (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="font-medium text-foreground/70">No invoices in this period</p>
+                <button onClick={() => { setStartDate(`${_fyStartYear}-04-01`); setEndDate(`${_fyStartYear + 1}-03-31`); setBizFilter("all"); }} className="mt-2 text-[12px] text-primary hover:underline font-medium">Reset filters</button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -144,7 +184,13 @@ export default function CustomerStatement() {
                     </tr>
                   );
                 }); })()}
-                {filtered.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">No invoices</td></tr>}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm font-medium text-foreground/70">No invoices in this period</p>
+                    <button onClick={() => { setStartDate(`${_fyStartYear}-04-01`); setEndDate(`${_fyStartYear + 1}-03-31`); setBizFilter("all"); }} className="mt-2 text-[12px] text-primary hover:underline font-medium">Reset filters</button>
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>
