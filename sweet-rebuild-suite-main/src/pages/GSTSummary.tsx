@@ -2,7 +2,7 @@ import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatChartK } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
@@ -633,8 +633,11 @@ export default function GSTSummary() {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyTax} barGap={2} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
               <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} tickFormatter={isMobile ? (v: string) => v.slice(0, 1) : undefined} />
-              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => `${v >= 1000 ? (v/1000).toFixed(1) + "L" : v}k`} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(value: number) => [`₹${value.toFixed(1)}k`, undefined]} />
+              {/* Tick + tooltip both go through formatChartK so we don't
+                  render "8.0Lk" / "₹6107.2k" — the chart datum is already in
+                  thousands, so values ≥ 100 are lakhs (1L = 100k). */}
+              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => formatChartK(v, false)} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(value: number) => [formatChartK(value), undefined]} />
               <Bar dataKey="output" name="Output" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]}>
                 {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--chart-1))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
               </Bar>

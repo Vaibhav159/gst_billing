@@ -1,7 +1,7 @@
 import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatChartK } from "@/utils/mockData";
 import { useBusinesses, useCustomers, useDashboardStats, mapDjangoInvoice } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -345,11 +345,13 @@ export default function Reports() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={monthlyData} barGap={2} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                     <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} tickFormatter={isMobile ? (v: string) => v.slice(0, 1) : undefined} />
-                    <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => `${v >= 1000 ? (v/1000).toFixed(1) + "L" : v}k`} />
+                    {/* See formatChartK — values are in thousands so the
+                        unit switches to lakh at 100, not 1000. */}
+                    <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => formatChartK(v, false)} />
                     <Tooltip
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }}
                       itemStyle={{ color: "hsl(var(--foreground))" }}
-                      formatter={(v: number) => `₹${(Math.round(v * 1000) / 1000).toFixed(1)}k`}
+                      formatter={(v: number) => formatChartK(v)}
                     />
                     <Bar dataKey="sales" name="Sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
                     <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
