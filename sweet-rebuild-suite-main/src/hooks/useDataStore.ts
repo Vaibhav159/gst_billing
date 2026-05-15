@@ -707,52 +707,107 @@ export function useCustomer(id: string | undefined) {
   return { item, isLoading, refetch: fetchCustomer };
 }
 
+export interface InvoiceCandidate {
+  id: string;
+  invoice_number: string;
+  invoice_date: string;
+  business_id: string;
+  business_name: string;
+  customer_name: string;
+  total: number;
+  type_of_invoice: string;
+}
+
 /**
- * Fetch a single invoice by either internal id OR invoice_number.
+ * Fetch a single invoice by either internal id OR invoice_number, with
+ * disambiguation when a number is shared across multiple businesses.
  *
- * - Numeric slugs (`/billing/invoice/764`) hit the `retrieve` endpoint directly.
- * - Non-numeric slugs (`/billing/invoice/040`, or URL-decoded
- *   `SGJ/2024-25/108`) fall back to a list-endpoint lookup by
- *   `invoice_number`. If multiple invoices share a number across businesses
- *   we pick the first match (the URL is ambiguous; for a strict canonical
- *   resolution callers should keep the id-based URL).
+ * - Numeric slugs (`/billing/invoice/764`) hit the `retrieve` endpoint and
+ *   additionally fetch the list of other invoices sharing the same
+ *   invoice_number so the caller can detect collision and decide whether
+ *   to rewrite the URL to the pretty `/invoice/{number}` form.
+ * - Non-numeric slugs (`/billing/invoice/040`) list-lookup by
+ *   `invoice_number`. Backend uses `__icontains` so we filter to exact
+ *   match client-side. An optional `?b={businessId}` query param scopes
+ *   the lookup so the pretty URL can encode "I meant the 040 from
+ *   PYARCHAND, not the 040 from LODHA".
  *
- * Lets us swap the internal id for a human-readable number in the URL bar
- * without breaking refresh / share / bookmark.
+ * Returns `candidates` — when length > 1 the caller should render a
+ * disambiguation list rather than silently pick one.
  */
 export function useInvoice(slug: string | undefined) {
   const [item, setItem] = useState<Invoice | null>(null);
+  const [candidates, setCandidates] = useState<InvoiceCandidate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Read ?b={businessId} from the current URL — small enough that a
+  // single-use parse beats threading a hook prop down from the page.
+  const bizHint = (() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("b") || "";
+  })();
 
   const fetchInvoice = useCallback(async () => {
     if (!slug || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setCandidates([]);
     try {
       if (/^\d+$/.test(slug)) {
-        // All-digit slug → internal pk path. Keeps the old behaviour intact.
+        // All-digit slug → internal pk path. After loading, fan out to
+        // count sibling invoices sharing this number so the page knows
+        // whether to drop the `?b=` hint when rewriting the URL.
         const res = await api.get(`invoices/${slug}/`);
-        setItem(mapDjangoInvoice(res.data));
+        const loaded = mapDjangoInvoice(res.data);
+        setItem(loaded);
+
+        if (loaded.invoiceNumber) {
+          try {
+            const sibs = await api.get<any>(`invoices/?invoice_number=${encodeURIComponent(loaded.invoiceNumber)}&page_size=20`);
+            const all = (sibs.data?.results || (Array.isArray(sibs.data) ? sibs.data : []))
+              .filter((r: any) => r.invoice_number === loaded.invoiceNumber);
+            setCandidates(all.map((r: any) => ({
+              id: String(r.id),
+              invoice_number: r.invoice_number,
+              invoice_date: r.invoice_date,
+              business_id: String(r.business),
+              business_name: r.business_name || "—",
+              customer_name: r.customer_name || "—",
+              total: Number(r.total_amount) || 0,
+              type_of_invoice: r.type_of_invoice,
+            })));
+          } catch { /* sibling lookup is best-effort */ }
+        }
       } else {
-        // Anything else → treat as invoice_number and look up via list.
-        // Backend uses `__icontains` so "040" would also surface "0401" —
-        // filter to exact match client-side before picking.
+        // Number-based slug. Optionally constrained by `?b={businessId}`.
         const target = decodeURIComponent(slug);
         const params = new URLSearchParams();
         params.set("invoice_number", target);
-        params.set("page_size", "10");
+        if (bizHint) params.set("business_id", bizHint);
+        params.set("page_size", "20");
         const list = await api.get<any>(`invoices/?${params.toString()}`);
         const results = (list.data?.results || (Array.isArray(list.data) ? list.data : []))
           .filter((r: any) => r.invoice_number === target);
-        if (results.length === 0) {
+        const mapped: InvoiceCandidate[] = results.map((r: any) => ({
+          id: String(r.id),
+          invoice_number: r.invoice_number,
+          invoice_date: r.invoice_date,
+          business_id: String(r.business),
+          business_name: r.business_name || "—",
+          customer_name: r.customer_name || "—",
+          total: Number(r.total_amount) || 0,
+          type_of_invoice: r.type_of_invoice,
+        }));
+        setCandidates(mapped);
+
+        if (mapped.length === 0) {
           setItem(null);
-        } else {
-          // Hydrate the full record via /invoices/{pk}/ since list responses
-          // often elide line items. If multiple invoices share the number
-          // across businesses (common — "1" is everyone's first invoice),
-          // we pick the first; for unambiguous deep-links callers should
-          // use the id-based URL.
-          const full = await api.get(`invoices/${results[0].id}/`);
+        } else if (mapped.length === 1) {
+          // Hydrate the full record — list responses elide line items.
+          const full = await api.get(`invoices/${mapped[0].id}/`);
           setItem(mapDjangoInvoice(full.data));
+        } else {
+          // Multiple matches — defer to the page to render a picker.
+          setItem(null);
         }
       }
     } catch (e) {
@@ -760,13 +815,13 @@ export function useInvoice(slug: string | undefined) {
     } finally {
       setIsLoading(false);
     }
-  }, [slug]);
+  }, [slug, bizHint]);
 
   useEffect(() => {
     fetchInvoice();
   }, [fetchInvoice]);
 
-  return { item, isLoading, refetch: fetchInvoice };
+  return { item, isLoading, candidates, refetch: fetchInvoice };
 }
 
 export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {

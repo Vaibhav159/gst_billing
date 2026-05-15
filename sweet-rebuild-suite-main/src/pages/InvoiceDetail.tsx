@@ -25,7 +25,7 @@ export default function InvoiceDetail() {
   const isMobile = useIsMobile();
   const [showEway, setShowEway] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const { item: inv, isLoading, refetch: refetchInvoice } = useInvoice(slug);
+  const { item: inv, isLoading, candidates, refetch: refetchInvoice } = useInvoice(slug);
   const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
@@ -39,6 +39,12 @@ export default function InvoiceDetail() {
   // Once the record is loaded, rewrite the URL bar to use the invoice
   // number when it's a clean URL-safe slug (no slashes, no spaces). Skips
   // numbers like "SGJ/2024-25/108" which would encode to ugly "%2F"s.
+  //
+  // When the same number exists in multiple businesses (e.g. "12" appears
+  // in all three of the user's businesses), we append `?b={businessId}`
+  // so the link unambiguously resolves back to THIS invoice. When the
+  // number is globally unique, we keep the URL clean.
+  //
   // Uses history.replaceState so we don't push a new history entry —
   // refresh / share still resolves via the useInvoice lookup branch.
   useEffect(() => {
@@ -46,10 +52,20 @@ export default function InvoiceDetail() {
     const num = inv.invoiceNumber;
     const isUrlSafe = /^[A-Za-z0-9._-]+$/.test(num);
     if (!isUrlSafe) return;
-    if (slug !== num) {
-      window.history.replaceState(null, "", `/billing/invoice/${num}`);
+    const otherBizCount = candidates
+      .filter((c) => c.id !== String(inv.id))
+      .map((c) => c.business_id)
+      .filter((b, i, arr) => arr.indexOf(b) === i)
+      .length;
+    const ambiguous = otherBizCount > 0;
+    const target = ambiguous
+      ? `/billing/invoice/${num}?b=${inv.businessId}`
+      : `/billing/invoice/${num}`;
+    const current = window.location.pathname + window.location.search;
+    if (current !== target) {
+      window.history.replaceState(null, "", target);
     }
-  }, [inv?.invoiceNumber, slug]);
+  }, [inv?.invoiceNumber, inv?.id, inv?.businessId, candidates, slug]);
 
   // Tab title — easier to recognise "Invoice 040" in a stack of open tabs
   // than the same generic app title repeated 8 times.
@@ -73,6 +89,54 @@ export default function InvoiceDetail() {
   };
 
   if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
+
+  // Number-slug lookup found multiple matches — render a picker so the
+  // user can pick which business they meant. Only happens when the URL
+  // path is a number AND no `?b=` query param was supplied; once they
+  // click into one, the canonical URL becomes `.../{number}?b={id}`.
+  if (!inv && candidates.length > 1) {
+    return (
+      <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 max-w-3xl mx-auto")}>
+        <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: slug || "Invoice" }]} />
+        <div className="elevated-card rounded-2xl p-5 border-l-4 border-l-warning flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-[14px] font-semibold text-foreground">Multiple invoices share number "{slug}"</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5">
+              Found {candidates.length} matches across {new Set(candidates.map((c) => c.business_id)).size} businesses. Pick the one you meant.
+            </p>
+          </div>
+        </div>
+        <div className="elevated-card rounded-2xl divide-y divide-border/30 overflow-hidden">
+          {candidates.map((c) => (
+            <Link
+              key={c.id}
+              to={`/billing/invoice/${c.id}`}
+              className="flex items-center gap-3 p-4 hover:bg-secondary/30 transition-colors group"
+            >
+              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                <FileText className="w-4 h-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <p className="text-[14px] font-semibold text-foreground">{c.business_name}</p>
+                  <span className={cn("premium-badge text-[9px]", c.type_of_invoice === "outward" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{(c.type_of_invoice || "").toUpperCase()}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                  {c.customer_name} · {formatDate(c.invoice_date)} · {formatCurrency(c.total)}
+                </p>
+              </div>
+              <ArrowLeft className="w-4 h-4 text-muted-foreground rotate-180 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
+          ))}
+        </div>
+        <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+      </div>
+    );
+  }
+
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
 
 
