@@ -493,7 +493,14 @@
     @apply border-b border-border/60;
   }
   .table-premium th {
-    @apply px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider;
+    /* Intentionally NOT setting text-align here. The default <th> alignment
+       is `left` per HTML user-agent stylesheet, so the visual is unchanged
+       — but a class like `text-right` on a specific <th> can now actually
+       override it. Previously the @apply rule had higher specificity than
+       a Tailwind utility, silently keeping headers left-aligned even when
+       the developer asked for right-aligned (which made data values not
+       line up with their column headers in GSTR-3B / HSN / Table 4 / etc). */
+    @apply px-5 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider;
   }
   .table-premium td {
     @apply px-5 py-4;
