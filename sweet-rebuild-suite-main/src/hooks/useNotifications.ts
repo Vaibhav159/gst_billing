@@ -39,7 +39,11 @@ export function useNotifications() {
         type: n.type,
         title: n.title,
         message: n.message,
-        id: n.stableId || crypto.randomUUID().slice(0, 8),
+        // 8 hex chars (= 32 bits of entropy) collided when two
+        // notifications were dispatched in the same render frame and
+        // broke per-ID mark-read. Use the full UUID; it's tiny on the
+        // wire (≤50 bytes), and we still respect explicit stableIds.
+        id: n.stableId || crypto.randomUUID(),
         timestamp: Date.now(),
         read: false,
       };

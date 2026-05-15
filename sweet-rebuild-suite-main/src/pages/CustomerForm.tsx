@@ -132,9 +132,19 @@ export default function CustomerForm() {
 
   const duplicate = !isEdit && form.gst_number.length > 5 && customers.find((c) => c.gst_number === form.gst_number);
 
+  // Complete 36-state GST code → state name map (previously only 7 states
+  // were mapped, so users in West Bengal / Bihar / Odisha etc. got no
+  // autofill from GSTIN). Mirrored from BusinessForm so the two forms
+  // stay in sync — if a new union territory gets a code, update both.
   const gstStateMap: Record<string, string> = {
-    "27": "Maharashtra", "24": "Gujarat", "29": "Karnataka",
-    "07": "Delhi", "08": "Rajasthan", "36": "Telangana", "33": "Tamil Nadu",
+    "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+    "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
+    "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+    "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+    "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
+    "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+    "27": "Maharashtra", "29": "Karnataka", "32": "Kerala", "33": "Tamil Nadu",
+    "36": "Telangana", "37": "Andhra Pradesh",
   };
 
   const handleGSTChange = (val: string) => {
@@ -617,7 +627,7 @@ export default function CustomerForm() {
                 {mergeFilteredCustomers.length === 0 && (
                   <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
                     <Users className="w-8 h-8 opacity-30" />
-                    <p className="text-sm">No found</p>
+                    <p className="text-sm">No customers found</p>
                   </div>
                 )}
               </div>

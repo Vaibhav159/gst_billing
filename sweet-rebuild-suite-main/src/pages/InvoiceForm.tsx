@@ -320,10 +320,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   ];
   const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Guard against rapid double-clicks creating duplicate invoices.
+    // setIsSaving is reset only inside the create/update branches below
+    // (since they each navigate or set their own error state).
+    if (isSaving) return;
     if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
     if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
+    setIsSaving(true);
     setDirty(false);
 
     const selectedBiz = effectiveBusinesses.find(b => b.id === form.businessId);
@@ -400,6 +407,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } catch (err: any) {
         toast({ title: `Create Failed ${errorTag(err)}`, description: formatApiError(err, "Create failed."), variant: "destructive", duration: 12000 });
         setDirty(true);
+        setIsSaving(false); // let user retry the submit after a failure
       }
     } else if (id) {
       try {
@@ -426,6 +434,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } catch (err: any) {
         toast({ title: `Update Failed ${errorTag(err)}`, description: formatApiError(err, "Update failed."), variant: "destructive", duration: 12000 });
         setDirty(true);
+        setIsSaving(false);
       }
     }
   };
@@ -670,8 +679,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             {/* Actions - desktop only */}
             {!isMobile && (
               <div className="elevated-card rounded-2xl p-5 space-y-3">
-                <button type="submit" className="premium-btn-primary w-full"><Save className="w-4 h-4" />{mode === "create" ? "Create Invoice" : "Update Invoice"}</button>
-                <button type="button" onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost w-full"><X className="w-4 h-4" /> Cancel</button>
+                <button type="submit" disabled={isSaving} className="premium-btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
+                  <Save className="w-4 h-4" />
+                  {isSaving ? (mode === "create" ? "Creating…" : "Updating…") : (mode === "create" ? "Create Invoice" : "Update Invoice")}
+                </button>
+                <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost w-full disabled:opacity-50"><X className="w-4 h-4" /> Cancel</button>
               </div>
             )}
           </div>
@@ -681,8 +693,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         {isMobile && (
           <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost flex-1 h-10 text-[13px]"><X className="w-4 h-4" /> Cancel</button>
-              <button type="submit" className="premium-btn-primary flex-1 h-10 text-[13px]"><Save className="w-4 h-4" /> {mode === "create" ? "Create" : "Update"}</button>
+              <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost flex-1 h-10 text-[13px] disabled:opacity-50"><X className="w-4 h-4" /> Cancel</button>
+              <button type="submit" disabled={isSaving} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed">
+                <Save className="w-4 h-4" /> {isSaving ? (mode === "create" ? "Creating…" : "Updating…") : (mode === "create" ? "Create" : "Update")}
+              </button>
             </div>
           </div>
         )}

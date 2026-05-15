@@ -9,6 +9,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
+import { formatApiError, errorTag } from "@/utils/apiError";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 16 },
@@ -116,24 +117,42 @@ export default function ProductForm() {
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return; // Block double-clicks on the Save button.
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       toast({ title: "Validation Error", description: "Please fix the highlighted fields.", variant: "destructive" });
       return;
     }
-    setDirty(false);
-    if (isEdit) {
-      updateProduct(id!, { name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description });
-      toast({ title: "Product Updated", description: form.name });
-    } else {
-      const newId = generateId("p-");
-      createProduct({ id: newId, name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description, createdAt: new Date().toISOString() });
-      toast({ title: "Product Created", description: form.name });
+    setIsSaving(true);
+    try {
+      if (isEdit) {
+        await updateProduct(id!, { name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description });
+        toast({ title: "Product Updated", description: form.name });
+      } else {
+        const newId = generateId("p-");
+        await createProduct({ id: newId, name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description, createdAt: new Date().toISOString() });
+        toast({ title: "Product Created", description: form.name });
+      }
+      setDirty(false);
+      navigate("/billing/product/list");
+    } catch (err: any) {
+      // Previously create/update returned a promise but the function wasn't
+      // async, so failures (network blip, unique-name conflict) toasted
+      // success and then silently navigated away without saving.
+      toast({
+        title: `${isEdit ? "Update" : "Create"} Failed ${errorTag(err)}`,
+        description: formatApiError(err, "Could not save product."),
+        variant: "destructive",
+        duration: 12000,
+      });
+    } finally {
+      setIsSaving(false);
     }
-    navigate("/billing/product/list");
   };
 
   // Completion
@@ -268,10 +287,10 @@ export default function ProductForm() {
           {/* ── Sidebar ── */}
           <motion.div variants={fadeUp} className="lg:col-span-4 space-y-5">
             <div className="elevated-card rounded-2xl p-6 space-y-3 lg:sticky lg:top-24">
-              <button type="submit" className="premium-btn-primary w-full h-11 text-[14px] font-semibold">
-                <Save className="w-4 h-4" /> {isEdit ? "Update Product" : "Create Product"}
+              <button type="submit" disabled={isSaving} className="premium-btn-primary w-full h-11 text-[14px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                <Save className="w-4 h-4" /> {isSaving ? (isEdit ? "Updating…" : "Creating…") : (isEdit ? "Update Product" : "Create Product")}
               </button>
-              <button type="button" onClick={() => safeNavigate("/billing/product/list")} className="premium-btn-ghost w-full h-11 text-[14px]">
+              <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/product/list")} className="premium-btn-ghost w-full h-11 text-[14px] disabled:opacity-50">
                 <X className="w-4 h-4" /> Cancel
               </button>
 
@@ -324,7 +343,7 @@ export default function ProductForm() {
               <ul className="space-y-2 text-[11px] text-muted-foreground">
                 <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Start typing HSN code to see smart suggestions with auto-fill.</li>
                 <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Selecting an HSN suggestion auto-sets the GST rate.</li>
-                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Products are used across all invoices and.</li>
+                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Products are shared across all invoices and businesses.</li>
                 <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Duplicate names trigger a warning to prevent confusion.</li>
               </ul>
             </div>

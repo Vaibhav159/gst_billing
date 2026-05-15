@@ -47,12 +47,30 @@ export default function AIInvoiceImport() {
           <div>
             <div className="flex items-center gap-2.5">
               <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">AI Invoice Import</h1>
-              <span className="premium-badge bg-primary/12 text-primary glow-sm">Beta</span>
+              <span className="premium-badge bg-warning/15 text-warning">Preview only</span>
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">Upload an invoice image — AI extracts all the data</p>
           </div>
         </div>
         <Link to="/billing/invoice/list" className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back to Invoices</Link>
+      </div>
+
+      {/* Honesty notice — this page currently doesn't call a real OCR API.
+          Steps 2 + 3 use hard-coded mock data. Until the backend
+          ai/invoice/process endpoint is wired through, surface this so
+          users don't think their actual upload was parsed. */}
+      <div className="elevated-card rounded-2xl p-4 border-l-4 border-l-warning flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-warning/10 text-warning flex items-center justify-center shrink-0">
+          <Bot className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-foreground">This is a UI preview, not the live AI parser</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Step 3 shows a sample extraction regardless of which file you upload. For real invoice imports, use{" "}
+            <Link to="/billing/invoice/import" className="text-primary hover:underline font-medium">CSV / Excel Import</Link>
+            {" "}— that path is fully wired.
+          </p>
+        </div>
       </div>
 
       {/* Steps Indicator */}

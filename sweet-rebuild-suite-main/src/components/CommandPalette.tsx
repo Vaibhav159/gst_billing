@@ -27,10 +27,16 @@ const pages = [
 export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  // Hook signatures: useCustomers/useProducts(fy?, businessId?, enabled?),
+  // useBusinesses(fy?, enabled?). Previous version passed `open` (boolean)
+  // as the FY positional arg, which the hooks tried to use as an FY
+  // string — and the actual `enabled` defaulted to true, so all three
+  // lists were re-fetched on every mount instead of only when the palette
+  // opens. Lazy + cheap now.
   const { items: invoices } = useInvoices(undefined, open);
-  const { items: customers } = useCustomers(open);
-  const { items: products } = useProducts(open);
-  const { items: businesses } = useBusinesses(open);
+  const { items: customers } = useCustomers(undefined, undefined, open);
+  const { items: products } = useProducts(undefined, undefined, open);
+  const { items: businesses } = useBusinesses(undefined, open);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {

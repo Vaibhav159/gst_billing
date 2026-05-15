@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatChartK, formatDate } from "@/utils/mockData";
 import { useBusiness, useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
@@ -92,15 +92,15 @@ export default function BusinessDetail() {
       {/* Stats */}
       <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-5")}>
         {[
-          { label: "Outward", value: formatCurrency(totalOutward), color: "text-success" },
-          { label: "Inward", value: formatCurrency(totalInward), color: "text-warning" },
-          { label: "Net", value: formatCurrency(netAmount), color: netAmount >= 0 ? "text-success" : "text-destructive" },
-          { label: "Invoices", value: bizInvoices.length.toString(), color: "text-chart-1" },
-          { label: "Customers", value: bizCustomers.length.toString(), color: "text-chart-4" },
+          { label: "Outward", value: formatCompactCurrency(totalOutward), full: formatCurrency(totalOutward), color: "text-success" },
+          { label: "Inward", value: formatCompactCurrency(totalInward), full: formatCurrency(totalInward), color: "text-warning" },
+          { label: "Net", value: formatCompactCurrency(netAmount), full: formatCurrency(netAmount), color: netAmount >= 0 ? "text-success" : "text-destructive" },
+          { label: "Invoices", value: bizInvoices.length.toLocaleString("en-IN"), full: `${bizInvoices.length} invoices`, color: "text-chart-1" },
+          { label: "Customers", value: bizCustomers.length.toLocaleString("en-IN"), full: `${bizCustomers.length} unique customers`, color: "text-chart-4" },
         ].map((s) => (
-          <div key={s.label} className="elevated-card rounded-2xl p-4">
+          <div key={s.label} className="elevated-card rounded-2xl p-4" title={s.full}>
             <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{s.label}</p>
-            <p className={cn("font-display font-bold tabular-nums mt-1", s.color, isMobile ? "text-base" : "text-2xl")}>{s.value}</p>
+            <p className={cn("font-display font-bold tabular-nums mt-1", s.color, isMobile ? "text-base" : "text-xl")}>{s.value}</p>
           </div>
         ))}
       </div>
@@ -147,8 +147,11 @@ export default function BusinessDetail() {
                   <linearGradient id="bizOutGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.2} /><stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0} /></linearGradient>
                 </defs>
                 <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "12px", fontSize: "12px" }} formatter={(value: number) => [formatCurrency(value)]} />
+                {/* Y-axis values are full rupees here (not pre-divided by
+                    1000), so use formatCompactCurrency directly to get
+                    "₹5.11L" instead of the previous "511k" bug. */}
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={48} tickFormatter={(v) => formatCompactCurrency(v)} />
+                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "12px", fontSize: "12px" }} formatter={(value: number) => [formatCompactCurrency(value)]} />
                 <Area type="monotone" dataKey="outward" stroke="hsl(var(--success))" strokeWidth={2} fill="url(#bizOutGrad)" />
                 <Area type="monotone" dataKey="inward" stroke="hsl(var(--warning))" strokeWidth={1.5} fill="transparent" />
               </AreaChart>
