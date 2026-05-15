@@ -707,22 +707,60 @@ export function useCustomer(id: string | undefined) {
   return { item, isLoading, refetch: fetchCustomer };
 }
 
-export function useInvoice(id: string | undefined) {
+/**
+ * Fetch a single invoice by either internal id OR invoice_number.
+ *
+ * - Numeric slugs (`/billing/invoice/764`) hit the `retrieve` endpoint directly.
+ * - Non-numeric slugs (`/billing/invoice/040`, or URL-decoded
+ *   `SGJ/2024-25/108`) fall back to a list-endpoint lookup by
+ *   `invoice_number`. If multiple invoices share a number across businesses
+ *   we pick the first match (the URL is ambiguous; for a strict canonical
+ *   resolution callers should keep the id-based URL).
+ *
+ * Lets us swap the internal id for a human-readable number in the URL bar
+ * without breaking refresh / share / bookmark.
+ */
+export function useInvoice(slug: string | undefined) {
   const [item, setItem] = useState<Invoice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchInvoice = useCallback(async () => {
-    if (!id || !localStorage.getItem("gst_access_token")) return;
+    if (!slug || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
     try {
-      const res = await api.get(`invoices/${id}/`);
-      setItem(mapDjangoInvoice(res.data));
+      if (/^\d+$/.test(slug)) {
+        // All-digit slug → internal pk path. Keeps the old behaviour intact.
+        const res = await api.get(`invoices/${slug}/`);
+        setItem(mapDjangoInvoice(res.data));
+      } else {
+        // Anything else → treat as invoice_number and look up via list.
+        // Backend uses `__icontains` so "040" would also surface "0401" —
+        // filter to exact match client-side before picking.
+        const target = decodeURIComponent(slug);
+        const params = new URLSearchParams();
+        params.set("invoice_number", target);
+        params.set("page_size", "10");
+        const list = await api.get<any>(`invoices/?${params.toString()}`);
+        const results = (list.data?.results || (Array.isArray(list.data) ? list.data : []))
+          .filter((r: any) => r.invoice_number === target);
+        if (results.length === 0) {
+          setItem(null);
+        } else {
+          // Hydrate the full record via /invoices/{pk}/ since list responses
+          // often elide line items. If multiple invoices share the number
+          // across businesses (common — "1" is everyone's first invoice),
+          // we pick the first; for unambiguous deep-links callers should
+          // use the id-based URL.
+          const full = await api.get(`invoices/${results[0].id}/`);
+          setItem(mapDjangoInvoice(full.data));
+        }
+      }
     } catch (e) {
       logger.error("Failed to fetch invoice", e);
     } finally {
       setIsLoading(false);
     }
-  }, [id]);
+  }, [slug]);
 
   useEffect(() => {
     fetchInvoice();

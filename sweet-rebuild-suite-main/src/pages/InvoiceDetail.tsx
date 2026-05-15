@@ -4,11 +4,11 @@ import { useInvoice, useInvoices, useBusiness, useCustomer } from "@/hooks/useDa
 import Breadcrumbs from "@/components/Breadcrumbs";
 // Tally format is the only invoice print format
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
-  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle,
+  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
 import { cn, pluralize } from "@/utils/utils";
@@ -19,16 +19,58 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { shareInvoice, shareViaWhatsApp } from "@/utils/shareInvoice";
 
 export default function InvoiceDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { id: slug } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const printUrl = `/billing/invoice/${id}/print`;
   const [showEway, setShowEway] = useState(false);
-  const { item: inv, isLoading, refetch: refetchInvoice } = useInvoice(id);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const { item: inv, isLoading, refetch: refetchInvoice } = useInvoice(slug);
   const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
+
+  // Print / edit / share routes must hit the database id (the print path
+  // doesn't go through useInvoice's slug-lookup branch). When the URL slug
+  // is the invoice_number, fall back to the loaded record's id.
+  const dbId = slug && /^\d+$/.test(slug) ? slug : (inv ? String(inv.id) : "");
+  const printUrl = `/billing/invoice/${dbId}/print`;
+
+  // Once the record is loaded, rewrite the URL bar to use the invoice
+  // number when it's a clean URL-safe slug (no slashes, no spaces). Skips
+  // numbers like "SGJ/2024-25/108" which would encode to ugly "%2F"s.
+  // Uses history.replaceState so we don't push a new history entry —
+  // refresh / share still resolves via the useInvoice lookup branch.
+  useEffect(() => {
+    if (!inv || !inv.invoiceNumber) return;
+    const num = inv.invoiceNumber;
+    const isUrlSafe = /^[A-Za-z0-9._-]+$/.test(num);
+    if (!isUrlSafe) return;
+    if (slug !== num) {
+      window.history.replaceState(null, "", `/billing/invoice/${num}`);
+    }
+  }, [inv?.invoiceNumber, slug]);
+
+  // Tab title — easier to recognise "Invoice 040" in a stack of open tabs
+  // than the same generic app title repeated 8 times.
+  useEffect(() => {
+    if (inv?.invoiceNumber) {
+      const prev = document.title;
+      document.title = `Invoice ${inv.invoiceNumber} · ${formatCurrency(inv.total)} — GST Billing`;
+      return () => { document.title = prev; };
+    }
+  }, [inv?.invoiceNumber, inv?.total]);
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1500);
+      toast({ title: "Link copied", description: window.location.href });
+    } catch {
+      toast({ title: "Couldn't copy", description: "Select the URL bar and copy manually.", variant: "destructive" });
+    }
+  };
 
   if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
@@ -71,7 +113,10 @@ export default function InvoiceDetail() {
         {!isMobile && (
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</button>
-            <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
+            <button onClick={handleCopyLink} className="premium-btn-ghost text-[13px]" title="Copy a shareable link to this invoice">
+              {linkCopied ? <Check className="w-4 h-4 text-success" /> : <LinkIcon className="w-4 h-4" />} {linkCopied ? "Copied" : "Copy link"}
+            </button>
+            <Link to={`/billing/invoice/edit/${dbId}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
             <button onClick={() => { navigate("/billing/invoice/add", { state: { duplicateFrom: inv } }); toast({ title: "Duplicating", description: `Creating copy of ${inv.invoiceNumber}` }); }} className="premium-btn-ghost text-[13px]"><Copy className="w-4 h-4" /> Duplicate</button>
             <button onClick={() => setShowEway(!showEway)} className="premium-btn-ghost text-[13px]"><Truck className="w-4 h-4" /> E-way Bill</button>
             <Link to={printUrl} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
@@ -280,7 +325,7 @@ export default function InvoiceDetail() {
       {isMobile && (
         <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
           <div className="flex items-center gap-2">
-            <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
+            <Link to={`/billing/invoice/edit/${dbId}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
             <Link to={printUrl} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
             <button onClick={() => setShowEway(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-chart-2/30 text-chart-2" title="E-way Bill"><Truck className="w-3.5 h-3.5" /></button>
             <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>
