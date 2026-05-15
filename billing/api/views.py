@@ -774,13 +774,42 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             dup_ids = [i for ids in buckets.values() if len(ids) > 1 for i in ids]
             queryset = queryset.filter(id__in=dup_ids)
 
-        # Annotate with total tax and item count
+        # Annotate via correlated Subqueries instead of a JOIN+GROUP BY.
+        #
+        # The previous version chained
+        #     .annotate(total_tax=Sum(F("lineitem__cgst")+...),
+        #               line_item_count=Count("lineitem"))
+        # which:
+        #   (a) returned WRONG numbers — joining lineitem once and then
+        #       both Sum-ing and Count-ing across that same join causes
+        #       row-multiplication: total_tax = real_tax × line_item_count.
+        #   (b) baked the join into every consumer of get_queryset()
+        #       (stats / gst_summary / gstr_export / etc.), so even
+        #       endpoints that don't need these annotations paid for the
+        #       join. With dev DB at ~900 invoices that's tolerable; at
+        #       prod scale it gets noticeable.
+        #
+        # Subqueries are independent per-row, no row inflation, and
+        # downstream actions that don't reference total_tax / line_item_count
+        # don't pay for them at all (Postgres skips uncorrelated
+        # subqueries that aren't selected).
+        from django.db.models import OuterRef, Subquery, DecimalField, IntegerField
+        line_items_per_invoice = LineItem.objects.filter(invoice=OuterRef("pk"))
+        tax_sum = (
+            line_items_per_invoice
+            .values("invoice")
+            .annotate(t=Sum(F("cgst") + F("sgst") + F("igst")))
+            .values("t")
+        )
+        item_count = (
+            line_items_per_invoice
+            .values("invoice")
+            .annotate(c=Count("id"))
+            .values("c")
+        )
         queryset = queryset.annotate(
-            total_tax=Coalesce(
-                Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")),
-                Decimal("0.00"),
-            ),
-            line_item_count=Count("lineitem"),
+            total_tax=Coalesce(Subquery(tax_sum, output_field=DecimalField()), Decimal("0.00")),
+            line_item_count=Coalesce(Subquery(item_count, output_field=IntegerField()), 0),
         )
 
         return queryset
@@ -1352,23 +1381,33 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         Counts only — drill-downs come from existing list APIs (filterable).
         """
-        from collections import defaultdict
+        from django.db.models import Case, When
+        from django.db.models.functions import ExtractYear
         empty_inv = Invoice.objects.filter(lineitem__isnull=True).count()
         no_hsn = LineItem.objects.filter(
             Q(hsn_code__isnull=True) | Q(hsn_code="")
         ).count()
 
-        # Same-FY + same-type collisions
-        buckets = defaultdict(int)
-        for inv in Invoice.objects.values(
-            "business_id", "invoice_number", "invoice_date", "type_of_invoice"
-        ):
-            d = inv["invoice_date"]
-            if not d or not inv["invoice_number"]:
-                continue
-            fy = d.year if d.month >= 4 else d.year - 1
-            buckets[(inv["business_id"], inv["invoice_number"], fy, inv["type_of_invoice"])] += 1
-        dup_groups = sum(1 for c in buckets.values() if c > 1)
+        # Same-(business, number, FY, type) collisions.
+        # FY math (Apr-Mar) used to be done in a Python loop streaming
+        # every Invoice row to the application — ~1000 rows = ~50ms over
+        # a remote DB. Push it to SQL: derive `fy` as a CASE expression
+        # on the year of invoice_date, then GROUP BY in the database.
+        fy_year = Case(
+            When(invoice_date__month__gte=4, then=ExtractYear("invoice_date")),
+            default=ExtractYear("invoice_date") - 1,
+        )
+        dup_groups = (
+            Invoice.objects
+            .exclude(invoice_date__isnull=True)
+            .exclude(invoice_number__isnull=True)
+            .exclude(invoice_number="")
+            .annotate(_fy=fy_year)
+            .values("business_id", "invoice_number", "_fy", "type_of_invoice")
+            .annotate(c=Count("id"))
+            .filter(c__gt=1)
+            .count()
+        )
 
         return Response({
             "invoices_no_line_items": empty_inv,
