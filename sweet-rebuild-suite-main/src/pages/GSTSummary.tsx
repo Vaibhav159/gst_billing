@@ -687,19 +687,81 @@ export default function GSTSummary() {
               </div>
             </div>
 
-            {/* GSTR-3B summary table */}
+            {/* GSTR-3B summary table — now five rows:
+                  Output Tax · Period ITC · Carry-fwd ITC · Effective ITC ·
+                  Net Tax Payable (after carry-fwd).
+                The Net Tax row uses the effective figure that the user
+                actually pays — silent carry-forward was making this number
+                look wrong on FY views where the period had ₹0 ITC but the
+                user had a real opening balance from the previous FY. */}
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">GSTR-3B Summary</h3>
               <div className="overflow-x-auto rounded-lg border border-border/40">
                 <table className="table-premium text-[12px]">
                   <thead><tr><th></th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th></tr></thead>
                   <tbody>
-                    <tr><td className="font-medium">Output Tax (Sales)</td><td className="text-right">{formatCurrency(gstr3b.output_tax.cgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.sgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.igst)}</td><td className="text-right font-semibold">{formatCurrency(gstr3b.output_tax.total)}</td></tr>
-                    <tr><td className="font-medium text-success">Input Tax Credit</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.igst)}</td><td className="text-right font-semibold text-success">{formatCurrency(gstr3b.input_tax_credit.total)}</td></tr>
-                    <tr className="border-t-2 border-border"><td className="font-bold">Net Tax Payable</td><td className={cn("text-right font-bold", gstr3b.net_payable.cgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.cgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.sgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.sgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.igst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.igst)}</td><td className={cn("text-right font-bold text-lg", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</td></tr>
+                    <tr>
+                      <td className="font-medium">Output Tax (Sales)</td>
+                      <td className="text-right tabular-nums">{formatCurrency(gstr3b.output_tax.cgst)}</td>
+                      <td className="text-right tabular-nums">{formatCurrency(gstr3b.output_tax.sgst)}</td>
+                      <td className="text-right tabular-nums">{formatCurrency(gstr3b.output_tax.igst)}</td>
+                      <td className="text-right font-semibold tabular-nums">{formatCurrency(gstr3b.output_tax.total)}</td>
+                    </tr>
+                    <tr>
+                      <td className="font-medium text-success">Period ITC</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.igst)}</td>
+                      <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.total)}</td>
+                    </tr>
+                    <tr className={cn(!carryFwd.configured && "opacity-70")}>
+                      <td className="font-medium text-success">
+                        <div className="flex items-center gap-2">
+                          <span>+ Carry-fwd ITC</span>
+                          {!carryFwd.configured && (
+                            <button onClick={() => setTab("itc-ledger")} className="text-[10px] text-primary hover:underline" title="Set opening balance in ITC Ledger">
+                              set →
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(carryFwd.cgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(carryFwd.sgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(carryFwd.igst)}</td>
+                      <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(carryFwdTotal)}</td>
+                    </tr>
+                    <tr className="border-t border-border/40 bg-foreground/[0.02]">
+                      <td className="font-medium text-success">= Effective ITC</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.cgst + Number(carryFwd.cgst || 0))}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.sgst + Number(carryFwd.sgst || 0))}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.igst + Number(carryFwd.igst || 0))}</td>
+                      <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(effective.effective_itc)}</td>
+                    </tr>
+                    <tr className="border-t-2 border-border">
+                      <td className="font-bold">Net Tax Payable</td>
+                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.cgst - gstr3b.input_tax_credit.cgst - Number(carryFwd.cgst || 0)) >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(gstr3b.output_tax.cgst - gstr3b.input_tax_credit.cgst - Number(carryFwd.cgst || 0))}
+                      </td>
+                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.sgst - gstr3b.input_tax_credit.sgst - Number(carryFwd.sgst || 0)) >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(gstr3b.output_tax.sgst - gstr3b.input_tax_credit.sgst - Number(carryFwd.sgst || 0))}
+                      </td>
+                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.igst - gstr3b.input_tax_credit.igst - Number(carryFwd.igst || 0)) >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(gstr3b.output_tax.igst - gstr3b.input_tax_credit.igst - Number(carryFwd.igst || 0))}
+                      </td>
+                      <td className={cn("text-right font-bold text-lg tabular-nums", netTax >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(Math.abs(netTax))}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+              {/* When carry-fwd is non-zero, an inline footnote spelling out
+                  the math so the user can sanity-check against their books. */}
+              {carryFwdTotal > 0 && (
+                <p className="text-[11px] text-muted-foreground px-1">
+                  Net Tax = Output Tax {formatCurrency(gstr3b.output_tax.total)} − Period ITC {formatCurrency(gstr3b.input_tax_credit.total)} − Carry-fwd {formatCurrency(carryFwdTotal)} = <span className={cn("font-semibold", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</span> {netTax < 0 && "carry-fwd to next period"}
+                </p>
+              )}
             </div>
 
             {/* HSN summary — "Total Value" (gross = taxable + tax) is the
