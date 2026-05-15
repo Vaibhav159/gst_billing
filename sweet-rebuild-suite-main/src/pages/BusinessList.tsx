@@ -6,7 +6,7 @@ import {
   LayoutGrid, List, Copy, CheckCircle2, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
 import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
@@ -86,19 +86,25 @@ export default function BusinessList() {
         </div>
       </motion.div>
 
-      {/* Stats */}
-      <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-4")}>
+      {/* Stats — matches the 5-tile pattern from InvoiceList / Reports.
+          Added a Net tile (revenue − purchases) since the gross numbers
+          alone don't tell you which business is actually profitable. */}
+      <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
         {[
-          { label: "Businesses", value: businesses.length.toString(), icon: Building2, color: "text-chart-4" },
-          { label: "Revenue", value: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-success" },
-          { label: "Purchases", value: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-destructive" },
-          { label: "Customers", value: totalCustomers.toString(), icon: MapPin, color: "text-chart-3" },
+          { label: "Businesses", value: businesses.length.toLocaleString("en-IN"), full: `${businesses.length} registered`, icon: Building2, color: "text-chart-4" },
+          { label: "Revenue", value: formatCompactCurrency(totalRevenue), full: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-success" },
+          { label: "Purchases", value: formatCompactCurrency(totalPurchases), full: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-destructive" },
+          { label: "Net", value: formatCompactCurrency(totalRevenue - totalPurchases), full: formatCurrency(totalRevenue - totalPurchases) + " (Revenue − Purchases)", icon: TrendingUp, color: (totalRevenue - totalPurchases) >= 0 ? "text-success" : "text-destructive" },
+          { label: "Customers", value: totalCustomers.toLocaleString("en-IN"), full: `${totalCustomers} unique customers`, icon: MapPin, color: "text-chart-3" },
         ].map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.label} className="stat-card rounded-2xl p-4">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</p>
-              <p className={cn("font-display font-bold mt-1 tabular-nums", stat.color, isMobile ? "text-lg" : "text-2xl")}>{stat.value}</p>
+            <div key={stat.label} className="stat-card rounded-2xl p-4" title={stat.full}>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</p>
+                <Icon className={cn("w-3.5 h-3.5", stat.color)} />
+              </div>
+              <p className={cn("font-display font-bold tabular-nums", stat.color, isMobile ? "text-lg" : "text-xl")}>{stat.value}</p>
             </div>
           );
         })}
@@ -194,7 +200,17 @@ export default function BusinessList() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-16"><Building2 className="w-10 h-10 opacity-30 mx-auto mb-2" /><p className="text-sm text-muted-foreground">No businesses found</p></td></tr>
+                <tr><td colSpan={8} className="text-center py-16">
+                  <Building2 className="w-10 h-10 opacity-30 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-foreground/70">No businesses found</p>
+                  {(search || stateFilter !== "all") ? (
+                    <button onClick={() => { setSearch(""); setStateFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium mt-2 inline-block">Clear filters</button>
+                  ) : (
+                    <Link to="/billing/business/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium mt-2">
+                      <Plus className="w-3 h-3" /> Add your first business
+                    </Link>
+                  )}
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -235,9 +251,16 @@ export default function BusinessList() {
             );
           })}
           {filtered.length === 0 && (
-            <div className="col-span-full flex flex-col items-center gap-3 py-16 text-muted-foreground">
+            <div className="col-span-full flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Building2 className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No businesses found</p>
+              <p className="text-sm font-medium text-foreground/70">No businesses found</p>
+              {(search || stateFilter !== "all") ? (
+                <button onClick={() => { setSearch(""); setStateFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+              ) : (
+                <Link to="/billing/business/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                  <Plus className="w-3 h-3" /> Add your first business
+                </Link>
+              )}
             </div>
           )}
         </motion.div>

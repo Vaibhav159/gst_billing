@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, ArrowDownLeft, Database } from "lucide-react";
 import { financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
@@ -191,19 +191,30 @@ export default function Backup() {
         )}
       </motion.div>
 
-      {/* Data Overview */}
-      <motion.div variants={stagger} initial="hidden" animate="visible" className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-4 gap-4")}>
-        {dataItems.map((d) => (
-          <motion.div key={d.label} variants={fadeUp} className="stat-card rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[12px] text-muted-foreground font-medium">{d.label}</p>
-              <d.icon className={cn("w-4 h-4", d.color)} />
+      {/* Data Overview — 5 tiles with thousand-separator on counts (12,345
+          beats 12345 for scannability) and a "Total Records" rollup so the
+          user has the same number that ends up on the disk after export.
+          Last-Backup chip surfaces here on mobile too (was hidden <lg). */}
+      <motion.div variants={stagger} initial="hidden" animate="visible" className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
+        {[
+          ...dataItems,
+          { label: "Total", count: totalRecords, icon: Database, color: "text-primary" },
+        ].map((d) => (
+          <motion.div key={d.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={`${d.count.toLocaleString("en-IN")} ${d.label.toLowerCase()} records`}>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{d.label}</p>
+              <d.icon className={cn("w-3.5 h-3.5", d.color)} />
             </div>
-            <p className={cn("text-xl font-display font-bold", d.color)}>{d.count}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">records</p>
+            <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", d.color)}>{d.count.toLocaleString("en-IN")}</p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5">records</p>
           </motion.div>
         ))}
       </motion.div>
+      {lastBackup && (
+        <div className="lg:hidden text-[11px] text-muted-foreground">
+          Last backup: <span className="text-foreground font-medium">{lastBackup}</span>
+        </div>
+      )}
 
       {/* Filters */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, Plus, Shield, Pencil, UserCheck, UserX, Loader2 } from "lucide-react";
+import { Users, Plus, Shield, Pencil, UserCheck, UserX, Loader2, X } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion } from "framer-motion";
 import { cn, pluralize } from "@/utils/utils";
@@ -41,7 +41,12 @@ export default function UserManagement() {
     try {
       const res = await api.get("users/");
       setUsers(res.data);
-    } catch { /* ignore */ }
+    } catch (err: any) {
+      // Previously swallowed silently — the user saw an infinite skeleton
+      // when the API errored (e.g. 403 due to JWT expiry). Surface the
+      // failure so they can refresh or re-login.
+      toast({ title: `Failed to load users ${errorTag(err)}`, description: formatApiError(err, "Could not fetch user list."), variant: "destructive", duration: 12000 });
+    }
     setLoading(false);
   };
 
@@ -49,10 +54,16 @@ export default function UserManagement() {
 
   if (!canManageUsers) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
-        <Shield className="w-12 h-12 text-muted-foreground/30" />
-        <p className="text-lg font-semibold text-foreground">Access Denied</p>
-        <p className="text-sm text-muted-foreground">Only admins can manage users.</p>
+      <div className="p-6 lg:p-8">
+        <div className="elevated-card rounded-2xl p-12 flex flex-col items-center gap-4 text-center max-w-md mx-auto">
+          <div className="w-16 h-16 rounded-2xl bg-destructive/10 border border-destructive/20 flex items-center justify-center">
+            <Shield className="w-8 h-8 text-destructive/60" />
+          </div>
+          <div>
+            <p className="text-[15px] font-semibold text-foreground">Access Denied</p>
+            <p className="text-[12px] text-muted-foreground mt-1">Only admins can manage users. Contact your workspace owner if you need access.</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -86,12 +97,21 @@ export default function UserManagement() {
     }
   };
 
-  const handleToggleActive = async (userId: number, isActive: boolean) => {
+  const handleToggleActive = async (userId: number, isActive: boolean, username: string) => {
+    // Soft guard against the admin deactivating themselves and losing access
+    // to this page. The backend should enforce this too, but a confirm here
+    // keeps the user from a foot-gun click.
+    if (isActive) {
+      const ok = confirm(`Deactivate "${username}"? They won't be able to sign in until you reactivate.`);
+      if (!ok) return;
+    }
     try {
       await api.patch("users/", { user_id: userId, is_active: !isActive });
-      toast({ title: isActive ? "User Deactivated" : "User Activated" });
+      toast({ title: isActive ? "User Deactivated" : "User Activated", description: username });
       fetchUsers();
-    } catch { /* ignore */ }
+    } catch (err: any) {
+      toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not toggle user state."), variant: "destructive", duration: 12000 });
+    }
   };
 
   return (
@@ -108,8 +128,8 @@ export default function UserManagement() {
             <p className="text-sm text-muted-foreground">{pluralize(users.length, "user")}</p>
           </div>
         </div>
-        <button onClick={() => setShowCreate(!showCreate)} className="premium-btn-primary text-[13px]">
-          <Plus className="w-4 h-4" /> Add User
+        <button onClick={() => setShowCreate(!showCreate)} className={cn("text-[13px]", showCreate ? "premium-btn-ghost" : "premium-btn-primary")}>
+          {showCreate ? <><X className="w-4 h-4" /> Cancel</> : <><Plus className="w-4 h-4" /> Add User</>}
         </button>
       </div>
 
@@ -117,7 +137,7 @@ export default function UserManagement() {
       {showCreate && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="elevated-card rounded-2xl p-5 space-y-4">
           <h3 className="text-[13px] font-display font-semibold">Create New User</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input value={createForm.username} onChange={(e) => setCreateForm(p => ({ ...p, username: e.target.value }))} placeholder="Username *" className="premium-input text-[13px]" />
             <input value={createForm.password} onChange={(e) => setCreateForm(p => ({ ...p, password: e.target.value }))} placeholder="Password *" type="password" className="premium-input text-[13px]" />
             <input value={createForm.first_name} onChange={(e) => setCreateForm(p => ({ ...p, first_name: e.target.value }))} placeholder="First Name" className="premium-input text-[13px]" />
@@ -188,7 +208,7 @@ export default function UserManagement() {
                         <button onClick={() => setEditingId(u.id)} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors" title="Change role">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleToggleActive(u.id, u.is_active)} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground transition-colors" title={u.is_active ? "Deactivate" : "Activate"}>
+                        <button onClick={() => handleToggleActive(u.id, u.is_active, u.username)} className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground transition-colors" title={u.is_active ? "Deactivate" : "Activate"}>
                           {u.is_active ? <UserX className="w-3.5 h-3.5 hover:text-destructive" /> : <UserCheck className="w-3.5 h-3.5 hover:text-success" />}
                         </button>
                       </div>
@@ -205,7 +225,7 @@ export default function UserManagement() {
       {/* Role Legend */}
       <div className="elevated-card rounded-2xl p-5">
         <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Role Permissions</h3>
-        <div className="grid grid-cols-3 gap-4 text-[12px]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-[12px]">
           {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
             <div key={key} className="space-y-1">
               <span className={cn("premium-badge text-[10px]", cfg.bg, cfg.color)}>{cfg.label}</span>

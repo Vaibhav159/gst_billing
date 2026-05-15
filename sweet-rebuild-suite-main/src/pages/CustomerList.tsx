@@ -6,7 +6,7 @@ import {
   GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal, Loader2, ArrowUpDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
 import { useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
@@ -87,7 +87,7 @@ export default function CustomerList() {
           {[
             { label: "Total", value: totalCustomers.toString(), color: "text-chart-1" },
             { label: "VIP", value: vipCustomers.toString(), color: "text-chart-4" },
-            { label: "Revenue", value: formatCurrency(totalRevenue), color: "text-success" },
+            { label: "Revenue", value: formatCompactCurrency(totalRevenue), color: "text-success" },
             { label: "States", value: statesCount.toString(), color: "text-chart-3" },
           ].map((s) => (
             <div key={s.label} className="min-w-[110px] snap-center stat-card rounded-xl p-3 shrink-0">
@@ -157,9 +157,16 @@ export default function CustomerList() {
             );
           })}
           {filtered.length === 0 && (
-            <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+            <div className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Users className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No customers found</p>
+              <p className="text-sm font-medium text-foreground/70">No customers found</p>
+              {(search || bizFilter !== "all") ? (
+                <button onClick={() => { setSearch(""); setBizFilter("all"); resetPage(); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+              ) : (
+                <Link to="/billing/customer/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                  <Plus className="w-3 h-3" /> Add your first customer
+                </Link>
+              )}
             </div>
           )}
         </div>
@@ -241,26 +248,27 @@ export default function CustomerList() {
         </div>
       </motion.div>
 
-      {/* Stats Row */}
-      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stats Row — 5-col compact-currency layout, matches InvoiceList /
+          ProductList. Added "Avg Revenue/Customer" tile since the bare
+          customer count + total don't tell you whether you're high-volume-
+          low-ticket or vice versa. Title attr holds the full ₹ value for
+          screen readers / hover. */}
+      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: "Total Customers", value: totalCustomers.toString(), icon: Users, color: "text-chart-1" },
-          { label: "VIP Customers", value: vipCustomers.toString(), icon: Star, color: "text-chart-4" },
-          { label: "Total Revenue", value: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-success" },
-          { label: "States Covered", value: statesCount.toString(), icon: MapPin, color: "text-chart-3" },
+          { label: "Total Customers", value: totalCustomers.toLocaleString("en-IN"), full: `${totalCustomers} customers`, icon: Users, color: "text-chart-1" },
+          { label: "VIP Customers", value: vipCustomers.toLocaleString("en-IN"), full: `${vipCustomers} VIP-tagged customers`, icon: Star, color: "text-chart-4" },
+          { label: "Total Revenue", value: formatCompactCurrency(totalRevenue), full: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-success" },
+          { label: "Avg Revenue", value: formatCompactCurrency(totalCustomers > 0 ? totalRevenue / totalCustomers : 0), full: formatCurrency(totalCustomers > 0 ? totalRevenue / totalCustomers : 0) + " per customer", icon: TrendingUp, color: "text-chart-2" },
+          { label: "States Covered", value: statesCount.toLocaleString("en-IN"), full: `${statesCount} unique states`, icon: MapPin, color: "text-chart-3" },
         ].map((stat) => {
           const Icon = stat.icon;
           return (
-            <motion.div key={stat.label} variants={fadeUp} className="stat-card rounded-2xl p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</p>
-                  <p className={cn("text-2xl font-display font-bold mt-1.5 tracking-tight", stat.color)}>{stat.value}</p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-secondary/60 flex items-center justify-center">
-                  <Icon className={cn("w-[18px] h-[18px]", stat.color)} />
-                </div>
+            <motion.div key={stat.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={stat.full}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{stat.label}</p>
+                <Icon className={cn("w-3.5 h-3.5", stat.color)} />
               </div>
+              <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", stat.color)}>{stat.value}</p>
             </motion.div>
           );
         })}
@@ -282,13 +290,12 @@ export default function CustomerList() {
               {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <select value={tagFilter} onChange={(e) => { setTagFilter(e.target.value); resetPage(); }} className="premium-select pl-9 pr-8 text-[13px]">
-              <option value="all">All Tags</option>
-              {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
+          {/* Tag filter removed — the previous version hardcoded ["VIP",
+              "Wholesale", "Retail"] while customer.tags actually comes from
+              c.tags, which has been removed from the DRF response. The
+              filter could never match anything. If/when tags come back to
+              the API, derive the option list from `customers.flatMap(c => c.tags || [])`
+              instead of hardcoding. */}
           {/* View toggle */}
           <div className="flex rounded-xl overflow-hidden border border-border/60 text-[13px] ml-auto lg:ml-0">
             {(["table", "cards"] as const).map((m) => (
@@ -408,10 +415,16 @@ export default function CustomerList() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-center py-16">
-                    <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Users className="w-10 h-10 opacity-30" />
-                      <p className="text-sm font-medium">No customers found</p>
-                      <p className="text-xs">Try adjusting your search or filters</p>
+                      <p className="text-sm font-medium text-foreground/70">No customers found</p>
+                      {(search || bizFilter !== "all") ? (
+                        <button onClick={() => { setSearch(""); setBizFilter("all"); resetPage(); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+                      ) : (
+                        <Link to="/billing/customer/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                          <Plus className="w-3 h-3" /> Add your first customer
+                        </Link>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -483,9 +496,16 @@ export default function CustomerList() {
             );
           })}
           {filtered.length === 0 && (
-            <div className="col-span-full flex flex-col items-center gap-3 py-16 text-muted-foreground">
+            <div className="col-span-full flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Users className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No customers found</p>
+              <p className="text-sm font-medium text-foreground/70">No customers found</p>
+              {(search || bizFilter !== "all") ? (
+                <button onClick={() => { setSearch(""); setBizFilter("all"); resetPage(); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+              ) : (
+                <Link to="/billing/customer/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                  <Plus className="w-3 h-3" /> Add your first customer
+                </Link>
+              )}
             </div>
           )}
         </motion.div>

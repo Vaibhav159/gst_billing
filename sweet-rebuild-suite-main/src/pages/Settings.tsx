@@ -234,7 +234,10 @@ export default function Settings() {
       <Breadcrumbs items={[{ label: "Settings" }]} />
       <div className="flex items-center gap-3">
         <div className={cn("rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}><SettingsIcon className="w-5 h-5 text-primary" /></div>
-        <div><h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>Settings</h1></div>
+        <div>
+          <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>Settings</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">App preferences and defaults · saved locally to your browser</p>
+        </div>
       </div>
       <div className="space-y-4">
         {sections.map((section, i) => {

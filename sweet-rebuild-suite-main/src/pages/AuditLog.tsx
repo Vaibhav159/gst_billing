@@ -119,7 +119,9 @@ export default function AuditLog() {
         </div>
         <div>
           <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>Audit Log</h1>
-          <p className="text-xs text-muted-foreground">{totalCount} entries</p>
+          <p className="text-xs text-muted-foreground">
+            {isLoading ? "Loading…" : `${totalCount.toLocaleString("en-IN")} ${totalCount === 1 ? "entry" : "entries"}`}
+          </p>
         </div>
       </div>
 
@@ -128,7 +130,7 @@ export default function AuditLog() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-[150px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="premium-input pl-9 w-full" />
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by entity, user, or details…" className="premium-input pl-9 w-full" />
           </div>
           <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} className="premium-select text-[12px]">
             <option value="all">All Actions</option>
@@ -139,6 +141,14 @@ export default function AuditLog() {
               <option value="all">All Types</option>
               {Object.entries(entityConfig).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
             </select>
+          )}
+          {(search || actionFilter !== "all" || entityFilter !== "all") && (
+            <button
+              onClick={() => { setSearch(""); setActionFilter("all"); setEntityFilter("all"); }}
+              className="text-[12px] text-destructive hover:underline font-medium px-2"
+            >
+              Clear
+            </button>
           )}
         </div>
       </div>
@@ -251,11 +261,21 @@ export default function AuditLog() {
                 <History className="w-8 h-8 text-chart-4/40" />
               </div>
               <div>
-                <p className="text-[15px] font-semibold text-foreground">No audit entries yet</p>
-                <p className="text-[12px] text-muted-foreground mt-1 max-w-sm">
-                  Audit logging tracks all changes to invoices, customers, products, and businesses.
-                  Create, edit, or delete a record to see entries appear here.
+                <p className="text-[15px] font-semibold text-foreground">
+                  {(search || actionFilter !== "all" || entityFilter !== "all") ? "No entries match these filters" : "No audit entries yet"}
                 </p>
+                <p className="text-[12px] text-muted-foreground mt-1 max-w-sm">
+                  {(search || actionFilter !== "all" || entityFilter !== "all")
+                    ? "Try a different action / entity type or clear the search."
+                    : "Audit logging tracks all changes to invoices, customers, products, and businesses. Create, edit, or delete a record to see entries appear here."}
+                </p>
+                {(search || actionFilter !== "all" || entityFilter !== "all") ? (
+                  <button onClick={() => { setSearch(""); setActionFilter("all"); setEntityFilter("all"); }} className="mt-3 text-[12px] text-primary hover:underline font-medium">Clear all filters</button>
+                ) : (
+                  <Link to="/billing/invoice/add" className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                    Create your first invoice →
+                  </Link>
+                )}
               </div>
             </div>
           )}
