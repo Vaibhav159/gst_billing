@@ -169,7 +169,7 @@ export default function GSTSummary() {
   // Tab is URL-driven so /billing/gstr-export?tab=gstr1 (etc.) deep-links work.
   const initialTab = (searchParams.get("tab") as TabKey) || "summary";
   const [activeTab, setActiveTab] = useState<TabKey>(
-    ["summary", "gstr1", "gstr3b", "gstr2b"].includes(initialTab) ? initialTab : "summary"
+    (["summary", "gstr1", "gstr3b", "gstr2b", "itc-ledger", "aging"] as const).includes(initialTab as any) ? initialTab : "summary"
   );
   const setTab = (t: TabKey) => {
     setActiveTab(t);

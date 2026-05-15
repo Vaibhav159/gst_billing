@@ -137,7 +137,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   // ─── Validation state ───
   const [warnings, setWarnings] = useState<Record<string, string>>({});
 
-  // Duplicate invoice check
+  // Duplicate invoice check — now scoped to (business, number, FY of
+  // invoice_date, type) instead of just (business, number, today's-FY).
+  // Re-runs when type or date changes, so back-dated entries get checked
+  // against the *correct* FY and outward/inward can legitimately share a
+  // number.
   useEffect(() => {
     if (mode !== "create" || !form.invoiceNumber || !form.businessId) {
       setWarnings(w => { const n = { ...w }; delete n.invoiceNumber; return n; });
@@ -145,7 +149,13 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     }
     const t = setTimeout(async () => {
       try {
-        const res = await api.get<any>(`invoices/check_duplicate/?invoice_number=${encodeURIComponent(form.invoiceNumber)}&business_id=${form.businessId}`);
+        const params = new URLSearchParams({
+          invoice_number: form.invoiceNumber,
+          business_id: form.businessId,
+          type_of_invoice: (form.type || "OUTWARD").toLowerCase(),
+        });
+        if (form.date) params.set("invoice_date", form.date);
+        const res = await api.get<any>(`invoices/check_duplicate/?${params.toString()}`);
         if (res.data?.exists) {
           setWarnings(w => ({ ...w, invoiceNumber: res.data.message }));
         } else {
@@ -154,7 +164,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } catch {}
     }, 500);
     return () => clearTimeout(t);
-  }, [form.invoiceNumber, form.businessId, mode]);
+  }, [form.invoiceNumber, form.businessId, form.type, form.date, mode]);
 
   // Date validation
   useEffect(() => {

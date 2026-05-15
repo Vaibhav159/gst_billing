@@ -1239,29 +1239,66 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def check_duplicate(self, request):
-        """Check if an invoice number already exists for a business in the current FY."""
+        """Check if an invoice number already exists for a business in a given
+        financial year + invoice type.
+
+        Previously only checked (business, invoice_number, current-FY-by-today).
+        That missed:
+          - duplicates on the SAME number in the SAME FY but a *different type*
+            (an outward "12" can legitimately coexist with an inward "12")
+          - back-dated entry into a *past* FY — the today-based check would
+            misreport "no duplicate" because the past FY wasn't even in scope.
+        A real audit of the prod DB found 6 same-(business, number, FY, type)
+        collisions that slipped through the old check.
+
+        Now the FY is derived from the supplied invoice_date when provided
+        (falls back to today's FY), and type_of_invoice gates the lookup.
+        """
         invoice_number = request.query_params.get("invoice_number", "")
         business_id = request.query_params.get("business_id", "")
         exclude_id = request.query_params.get("exclude_id", "")
+        type_of_invoice = (request.query_params.get("type_of_invoice") or "").lower()
+        invoice_date_str = request.query_params.get("invoice_date", "")
 
         if not invoice_number or not business_id:
             return Response({"exists": False})
 
-        # Only check within current FY (invoice numbers reset per FY)
-        today = datetime.now().date()
-        fy_start = datetime(today.year if today.month >= 4 else today.year - 1, 4, 1).date()
+        # Resolve the FY from the supplied invoice_date when present; fall
+        # back to "this FY by wall-clock today" for backward compat.
+        target_date = None
+        if invoice_date_str:
+            try:
+                target_date = datetime.strptime(invoice_date_str, "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                target_date = None
+        if target_date is None:
+            target_date = datetime.now().date()
+        fy_start = datetime(
+            target_date.year if target_date.month >= 4 else target_date.year - 1,
+            4, 1,
+        ).date()
+        fy_end = datetime(fy_start.year + 1, 3, 31).date()
 
         qs = Invoice.objects.filter(
-            invoice_number=invoice_number, business_id=business_id,
+            invoice_number=invoice_number,
+            business_id=business_id,
             invoice_date__gte=fy_start,
+            invoice_date__lte=fy_end,
         )
+        if type_of_invoice in ("outward", "inward"):
+            qs = qs.filter(type_of_invoice=type_of_invoice)
         if exclude_id:
             qs = qs.exclude(id=exclude_id)
 
         exists = qs.exists()
         return Response({
             "exists": exists,
-            "message": f"Invoice #{invoice_number} already exists for this business" if exists else "",
+            "message": (
+                f"Invoice #{invoice_number} already exists for this business "
+                f"in FY {fy_start.year}-{str(fy_start.year + 1)[2:]}"
+                + (f" ({type_of_invoice})" if type_of_invoice in ("outward", "inward") else "")
+                if exists else ""
+            ),
         })
 
     @action(detail=False, methods=["get"])

@@ -410,6 +410,62 @@ class InvoiceAPITestCase(BaseAPITestCase):
         # Should be 4 (3 + 1), not 1778345122.
         self.assertEqual(next_n, 4)
 
+    @freeze_time("2026-05-15")
+    def test_check_duplicate_scopes_by_fy_and_type(self):
+        """
+        Regression: the duplicate-check used to scope only by (business,
+        invoice_number, today's-FY). That had two failure modes:
+
+          1. Outward "12" and inward "12" in the same FY+business would
+             collide on first lookup, even though they're legitimately
+             distinct documents on the GST portal.
+          2. A back-dated invoice (date in a previous FY) would be checked
+             against today's FY, never against its own — so a true
+             duplicate in the past FY would slip through.
+
+        New endpoint accepts `invoice_date` (drives the FY) and
+        `type_of_invoice` (gates the lookup).
+        """
+        biz = self.business
+        cust = self.customer
+        # Existing outward "100" in FY 2026-27 — created without freeze so
+        # use a clear date inside that FY:
+        Invoice.objects.create(
+            invoice_number="100", invoice_date="2026-05-01",
+            business=biz, customer=cust,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="100",
+        )
+        url = reverse("invoice-check-duplicate")
+
+        # (a) Same number + same FY + same type → duplicate
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+            "type_of_invoice": "outward", "invoice_date": "2026-06-01",
+        })
+        self.assertTrue(r.data["exists"], "same-FY same-type should be a dup")
+
+        # (b) Same number + same FY but inward → NOT a duplicate (legit)
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+            "type_of_invoice": "inward", "invoice_date": "2026-06-01",
+        })
+        self.assertFalse(r.data["exists"], "outward + inward can share a number")
+
+        # (c) Same number + outward but back-dated to FY 2024-25 → NOT a
+        # duplicate (different FY than the existing one).
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+            "type_of_invoice": "outward", "invoice_date": "2024-09-15",
+        })
+        self.assertFalse(r.data["exists"], "different FY shouldn't collide")
+
+        # (d) Backward compat: caller that omits type+date still works (uses
+        # today's FY, no type filter) — should detect the existing dup.
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+        })
+        self.assertTrue(r.data["exists"], "legacy callers still work")
+
     def create_another_business(self):
         """Helper method to create another business for testing."""
         return Business.objects.create(
