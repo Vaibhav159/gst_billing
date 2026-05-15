@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/utils/mockData";
-import { useInvoice, useInvoices, useBusiness, useCustomer } from "@/hooks/useDataStore";
+import { useInvoice, useInvoices, useBusiness, useCustomer, businessSlug } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 // Tally format is the only invoice print format
 
@@ -19,13 +19,17 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { shareInvoice, shareViaWhatsApp } from "@/utils/shareInvoice";
 
 export default function InvoiceDetail() {
-  const { id: slug } = useParams<{ id: string }>();
+  // Route can be either /billing/invoice/:id  OR  /billing/invoice/:bizSlug/:fy/:slug
+  const params = useParams<{ id?: string; slug?: string; bizSlug?: string; fy?: string }>();
+  const slug = params.slug ?? params.id; // trailing identifier
+  const bizSlug = params.bizSlug;
+  const fy = params.fy;
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const [showEway, setShowEway] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const { item: inv, isLoading, candidates, refetch: refetchInvoice } = useInvoice(slug);
+  const { item: inv, isLoading, candidates, refetch: refetchInvoice } = useInvoice(slug, bizSlug, fy);
   const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
@@ -36,36 +40,52 @@ export default function InvoiceDetail() {
   const dbId = slug && /^\d+$/.test(slug) ? slug : (inv ? String(inv.id) : "");
   const printUrl = `/billing/invoice/${dbId}/print`;
 
-  // Once the record is loaded, rewrite the URL bar to use the invoice
-  // number when it's a clean URL-safe slug (no slashes, no spaces). Skips
-  // numbers like "SGJ/2024-25/108" which would encode to ugly "%2F"s.
+  // Rewrite the URL bar to the most readable canonical form. We prefer
+  // the fully-disambiguated path when the loaded record + its business +
+  // FY are all known, so a copied link round-trips cleanly even when the
+  // invoice number is shared across businesses or financial years.
   //
-  // When the same number exists in multiple businesses (e.g. "12" appears
-  // in all three of the user's businesses), we append `?b={businessId}`
-  // so the link unambiguously resolves back to THIS invoice. When the
-  // number is globally unique, we keep the URL clean.
+  //   Globally unique number → /billing/invoice/{number}
+  //   Otherwise              → /billing/invoice/{bizSlug}/{fy}/{number}
   //
-  // Uses history.replaceState so we don't push a new history entry —
-  // refresh / share still resolves via the useInvoice lookup branch.
+  // Skips invoice numbers that contain unsafe URL chars (slashes etc.)
+  // — those keep the id-based URL we landed on.
   useEffect(() => {
     if (!inv || !inv.invoiceNumber) return;
     const num = inv.invoiceNumber;
     const isUrlSafe = /^[A-Za-z0-9._-]+$/.test(num);
     if (!isUrlSafe) return;
-    const otherBizCount = candidates
-      .filter((c) => c.id !== String(inv.id))
-      .map((c) => c.business_id)
-      .filter((b, i, arr) => arr.indexOf(b) === i)
-      .length;
-    const ambiguous = otherBizCount > 0;
-    const target = ambiguous
-      ? `/billing/invoice/${num}?b=${inv.businessId}`
-      : `/billing/invoice/${num}`;
+
+    const distinctBusinesses = new Set(candidates.map((c) => c.business_id));
+    const distinctFysWithinBiz = new Set(
+      candidates
+        .filter((c) => c.business_id === String(inv.businessId))
+        .map((c) => {
+          const d = new Date(c.invoice_date);
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          return m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+        })
+    );
+    const isUnique = candidates.length <= 1 || (distinctBusinesses.size === 1 && distinctFysWithinBiz.size === 1);
+
+    let target: string;
+    if (isUnique) {
+      target = `/billing/invoice/${num}`;
+    } else {
+      const bSlug = businessSlug(biz?.name || "") || String(inv.businessId);
+      const d = new Date(inv.invoice_date || "");
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const fyStr = m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+      target = `/billing/invoice/${bSlug}/${fyStr}/${num}`;
+    }
+
     const current = window.location.pathname + window.location.search;
     if (current !== target) {
       window.history.replaceState(null, "", target);
     }
-  }, [inv?.invoiceNumber, inv?.id, inv?.businessId, candidates, slug]);
+  }, [inv?.invoiceNumber, inv?.id, inv?.businessId, inv?.invoice_date, candidates, biz?.name]);
 
   // Tab title — easier to recognise "Invoice 040" in a stack of open tabs
   // than the same generic app title repeated 8 times.
@@ -108,10 +128,19 @@ export default function InvoiceDetail() {
           </div>
         </div>
         <div className="elevated-card rounded-2xl divide-y divide-border/30 overflow-hidden">
-          {candidates.map((c) => (
+          {candidates.map((c) => {
+            // Link directly to the fully-disambiguated URL so the picker
+            // → detail navigation skips the history.replaceState rewrite.
+            const d = new Date(c.invoice_date);
+            const y = d.getFullYear();
+            const mo = d.getMonth() + 1;
+            const fyStr = mo >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+            const bSlug = businessSlug(c.business_name) || c.business_id;
+            const targetUrl = `/billing/invoice/${bSlug}/${fyStr}/${encodeURIComponent(c.invoice_number)}`;
+            return (
             <Link
               key={c.id}
-              to={`/billing/invoice/${c.id}`}
+              to={targetUrl}
               className="flex items-center gap-3 p-4 hover:bg-secondary/30 transition-colors group"
             >
               <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
@@ -128,7 +157,8 @@ export default function InvoiceDetail() {
               </div>
               <ArrowLeft className="w-4 h-4 text-muted-foreground rotate-180 opacity-0 group-hover:opacity-100 transition-opacity" />
             </Link>
-          ))}
+            );
+          })}
         </div>
         <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]">
           <ArrowLeft className="w-4 h-4" /> Back

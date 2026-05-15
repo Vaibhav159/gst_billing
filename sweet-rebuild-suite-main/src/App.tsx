@@ -97,6 +97,12 @@ const App = () => (
                   <Route path="/billing/invoice/ai-import" element={<AIInvoiceImport />} />
                   <Route path="/billing/import/review" element={<ImportReview />} />
                   <Route path="/billing/import/preview" element={<ImportPreview />} />
+                  {/* Multi-segment pretty URL:
+                        /billing/invoice/{bizSlug}/{fy}/{number}
+                      e.g. /billing/invoice/pyarchand-ratanlal/2025-26/040
+                      Falls through to the single-segment route below for
+                      legacy id-based or number-only links. */}
+                  <Route path="/billing/invoice/:bizSlug/:fy/:slug" element={<InvoiceDetail />} />
                   <Route path="/billing/invoice/:id" element={<InvoiceDetail />} />
                   <Route path="/billing/bulk-pdf" element={<BulkPDF />} />
                   <Route path="/billing/qr-scanner" element={<QRScanner />} />

@@ -719,23 +719,47 @@ export interface InvoiceCandidate {
 }
 
 /**
- * Fetch a single invoice by either internal id OR invoice_number, with
- * disambiguation when a number is shared across multiple businesses.
- *
- * - Numeric slugs (`/billing/invoice/764`) hit the `retrieve` endpoint and
- *   additionally fetch the list of other invoices sharing the same
- *   invoice_number so the caller can detect collision and decide whether
- *   to rewrite the URL to the pretty `/invoice/{number}` form.
- * - Non-numeric slugs (`/billing/invoice/040`) list-lookup by
- *   `invoice_number`. Backend uses `__icontains` so we filter to exact
- *   match client-side. An optional `?b={businessId}` query param scopes
- *   the lookup so the pretty URL can encode "I meant the 040 from
- *   PYARCHAND, not the 040 from LODHA".
- *
- * Returns `candidates` — when length > 1 the caller should render a
- * disambiguation list rather than silently pick one.
+ * Build a stable URL-safe slug from a business name. Lower-cases, replaces
+ * runs of non-alphanumeric with single dashes, trims edge dashes. Stable
+ * round-trip with `matchesBizSlug` below.
  */
-export function useInvoice(slug: string | undefined) {
+export function businessSlug(name: string): string {
+  return (name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/** Match a slug like "pyarchand-ratanlal" against a candidate row's business name OR id. */
+function matchesBizSlug(slug: string, row: { business_id: string; business_name: string }): boolean {
+  if (!slug) return true;
+  return slug === String(row.business_id) || slug === businessSlug(row.business_name);
+}
+
+/** FY string ("2024-25") from an ISO invoice_date — Apr-Mar boundary. */
+function fyFromDate(isoDate: string): string {
+  if (!isoDate) return "";
+  const d = new Date(isoDate);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1; // 1-12
+  const start = m >= 4 ? y : y - 1;
+  return `${start}-${String(start + 1).slice(2)}`;
+}
+
+/**
+ * Fetch a single invoice by either internal id OR invoice_number, with
+ * progressive disambiguation:
+ *
+ *  /billing/invoice/{id}                                   — exact, always works
+ *  /billing/invoice/{number}                               — may collide
+ *  /billing/invoice/{number}?b={businessId}                — biz hint
+ *  /billing/invoice/{biz-slug}/{fy}/{number}               — fully unique
+ *
+ * `slug` is the trailing identifier (id or invoice_number). `bizSlug` and
+ * `fy` are the optional preceding URL segments. Returns `candidates` —
+ * when length > 1 after all filters, render a picker rather than guess.
+ */
+export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: string) {
   const [item, setItem] = useState<Invoice | null>(null);
   const [candidates, setCandidates] = useState<InvoiceCandidate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -752,10 +776,9 @@ export function useInvoice(slug: string | undefined) {
     setIsLoading(true);
     setCandidates([]);
     try {
-      if (/^\d+$/.test(slug)) {
-        // All-digit slug → internal pk path. After loading, fan out to
-        // count sibling invoices sharing this number so the page knows
-        // whether to drop the `?b=` hint when rewriting the URL.
+      if (/^\d+$/.test(slug) && !bizSlug && !fy) {
+        // All-digit slug AND no preceding path segments → internal pk
+        // path. Keeps the legacy /billing/invoice/{id} URLs intact.
         const res = await api.get(`invoices/${slug}/`);
         const loaded = mapDjangoInvoice(res.data);
         setItem(loaded);
@@ -778,15 +801,28 @@ export function useInvoice(slug: string | undefined) {
           } catch { /* sibling lookup is best-effort */ }
         }
       } else {
-        // Number-based slug. Optionally constrained by `?b={businessId}`.
+        // Number-based slug. Filter by bizSlug + fy + bizHint as available.
         const target = decodeURIComponent(slug);
         const params = new URLSearchParams();
         params.set("invoice_number", target);
-        if (bizHint) params.set("business_id", bizHint);
-        params.set("page_size", "20");
+        if (bizHint && /^\d+$/.test(bizHint)) params.set("business_id", bizHint);
+        // If bizSlug is purely numeric we can also tell the backend.
+        if (bizSlug && /^\d+$/.test(bizSlug)) params.set("business_id", bizSlug);
+        params.set("page_size", "30");
         const list = await api.get<any>(`invoices/?${params.toString()}`);
-        const results = (list.data?.results || (Array.isArray(list.data) ? list.data : []))
+        let results: any[] = (list.data?.results || (Array.isArray(list.data) ? list.data : []))
           .filter((r: any) => r.invoice_number === target);
+        // Narrow by bizSlug (name OR id).
+        if (bizSlug) {
+          results = results.filter((r) => matchesBizSlug(bizSlug, {
+            business_id: String(r.business),
+            business_name: r.business_name || "",
+          }));
+        }
+        // Narrow by FY (Apr-Mar window on invoice_date).
+        if (fy) {
+          results = results.filter((r) => fyFromDate(r.invoice_date) === fy);
+        }
         const mapped: InvoiceCandidate[] = results.map((r: any) => ({
           id: String(r.id),
           invoice_number: r.invoice_number,
@@ -815,7 +851,7 @@ export function useInvoice(slug: string | undefined) {
     } finally {
       setIsLoading(false);
     }
-  }, [slug, bizHint]);
+  }, [slug, bizSlug, fy, bizHint]);
 
   useEffect(() => {
     fetchInvoice();
