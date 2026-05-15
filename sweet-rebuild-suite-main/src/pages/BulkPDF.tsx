@@ -1,7 +1,7 @@
 import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate, financialYears, currentFY } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatDate, financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Download, FileArchive, ArrowLeft, Calendar, Building2, Filter,
@@ -247,208 +247,195 @@ export default function BulkPDF() {
     finalize();
   }, [zipMode, pdfQueue, pdfBlobs.size]);
 
+  const selectedTotal = useMemo(
+    () => matchingInvoices.filter((inv) => selectedInvoices.has(inv.id)).reduce((s, inv) => s + inv.total, 0),
+    [matchingInvoices, selectedInvoices]
+  );
+  const matchingTotal = useMemo(
+    () => matchingInvoices.reduce((s, inv) => s + inv.total, 0),
+    [matchingInvoices]
+  );
+  const hasInvoiceRange = invoiceFrom !== "" || invoiceTo !== "";
+  const clearAllFilters = () => {
+    setMonth("all"); setBizFilter("all"); setTypeFilter("all");
+    setInvoiceFrom(""); setInvoiceTo(""); setSearchQuery("");
+  };
+
   return (
-    <div className="p-6 lg:p-8 space-y-6 animate-fade-in">
+    <div className="p-6 lg:p-8 space-y-5 animate-fade-in">
       <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: "Bulk PDF" }]} />
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      {/* Header — title + count chip + action buttons on a single row so
+          the page reads "what I have · what I'll do" without a separate
+          sidebar. Previous layout stacked 3 cards (Filters / Action /
+          How-It-Works) in a 4-column-wide sidebar; that pushed the actual
+          invoice list off-screen on a 13" laptop. */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
             <FileArchive className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">Bulk PDF Download</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Download multiple invoices as a ZIP file</p>
+            <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">Bulk PDF</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {loadingInvoices ? "Loading invoices…" : (
+                <>
+                  <span className="font-semibold text-foreground tabular-nums">{matchingInvoices.length}</span> invoice{matchingInvoices.length === 1 ? "" : "s"} match · total <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(matchingTotal)}</span>
+                  {selectedInvoices.size > 0 && (
+                    <> · <span className="text-primary font-medium">{selectedInvoices.size} selected</span> ({formatCompactCurrency(selectedTotal)})</>
+                  )}
+                </>
+              )}
+            </p>
           </div>
         </div>
-        <Link to="/billing/invoice/list" className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</Link>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link to="/billing/invoice/list" className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</Link>
+          <button
+            onClick={handleBatchPrint}
+            disabled={matchingInvoices.length === 0}
+            className="premium-btn-ghost text-[13px] disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Open all matching invoices in print-preview mode"
+          >
+            <FileText className="w-4 h-4" /> Batch Print
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={matchingInvoices.length === 0 || downloading}
+            className="premium-btn-outline text-[13px] disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Printer className="w-4 h-4" /> {downloading && downloadMode === "print" ? `${progress.current}/${progress.total}` : "Print"}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={matchingInvoices.length === 0 || downloading}
+            className={cn("premium-btn-primary text-[13px]",
+              (matchingInvoices.length === 0 || downloading) && "opacity-40 cursor-not-allowed"
+            )}
+          >
+            <Download className="w-4 h-4" /> {downloading && downloadMode === "zip"
+              ? `Generating ${progress.current}/${progress.total}…`
+              : selectedInvoices.size > 0
+                ? `Download ${selectedInvoices.size} PDFs`
+                : matchingInvoices.length > 0
+                  ? `Download ${matchingInvoices.length} PDFs`
+                  : "Download PDFs"}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Filters */}
-        <div className="space-y-5">
-          <div className="elevated-card rounded-2xl p-6 space-y-4">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-primary" />
-              <h2 className="text-[14px] font-display font-semibold text-foreground">Filters</h2>
-            </div>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <Calendar className="w-3 h-3 text-muted-foreground" /> Month
-                </label>
-                <select value={month} onChange={(e) => setMonth(e.target.value)} className="premium-select w-full">
-                  <option value="all">All Months</option>
-                  {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Financial Year</label>
-                <select value={selectedFY} onChange={(e) => setSelectedFY(e.target.value)} className="premium-select w-full">
-                  {financialYears.map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <Building2 className="w-3 h-3 text-muted-foreground" /> Business
-                </label>
-                <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full">
-                  <option value="all">All Businesses</option>
-                  {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Type</label>
-                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="premium-select w-full">
-                  <option value="all">All Types</option>
-                  <option value="OUTWARD">Outward (Sales)</option>
-                  <option value="INWARD">Inward (Purchases)</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <FileText className="w-3 h-3 text-muted-foreground" /> Invoice # Range
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={invoiceFrom}
-                    onChange={(e) => setInvoiceFrom(e.target.value)}
-                    placeholder="From"
-                    className="premium-input w-full text-[12px]"
-                    min="1"
-                  />
-                  <span className="text-muted-foreground text-[11px] shrink-0">to</span>
-                  <input
-                    type="number"
-                    value={invoiceTo}
-                    onChange={(e) => setInvoiceTo(e.target.value)}
-                    placeholder="To"
-                    className="premium-input w-full text-[12px]"
-                    min="1"
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground">e.g. 50 to 75 for invoices #50–#75</p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <Search className="w-3 h-3 text-muted-foreground" /> Find Invoice
-                </label>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by # or customer..."
-                  className="premium-input w-full text-[12px]"
-                />
-              </div>
+      {/* Filter row — horizontal grid that wraps. Previously 6 stacked
+          form rows in a sidebar card; now ~2 rows on desktop, all
+          one-click access. */}
+      <div className="elevated-card rounded-2xl p-4">
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1 mb-1"><Calendar className="w-3 h-3" /> Month</label>
+            <select value={month} onChange={(e) => setMonth(e.target.value)} className="premium-select w-full text-[12px]">
+              <option value="all">All months</option>
+              {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">FY</label>
+            <select value={selectedFY} onChange={(e) => setSelectedFY(e.target.value)} className="premium-select w-full text-[12px]">
+              {financialYears.map((fy) => <option key={fy} value={fy}>FY {fy}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1 mb-1"><Building2 className="w-3 h-3" /> Business</label>
+            <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full text-[12px]">
+              <option value="all">All businesses</option>
+              {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Type</label>
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="premium-select w-full text-[12px]">
+              <option value="all">All types</option>
+              <option value="OUTWARD">Outward (Sales)</option>
+              <option value="INWARD">Inward (Purchases)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1 mb-1"><FileText className="w-3 h-3" /> Invoice # range</label>
+            <div className="flex items-center gap-1.5">
+              <input type="number" value={invoiceFrom} onChange={(e) => setInvoiceFrom(e.target.value)} placeholder="From" className="premium-input w-full text-[12px]" min="1" />
+              <span className="text-muted-foreground text-[10px]">→</span>
+              <input type="number" value={invoiceTo} onChange={(e) => setInvoiceTo(e.target.value)} placeholder="To" className="premium-input w-full text-[12px]" min="1" />
             </div>
           </div>
-
-          {/* Download Action */}
-          <div className="elevated-card rounded-2xl p-6 space-y-4">
-            <div className="text-center space-y-2">
-              <p className="text-3xl font-display font-bold text-primary">{matchingInvoices.length}</p>
-              <p className="text-[12px] text-muted-foreground">invoices match your filters</p>
-            </div>
-            {selectedInvoices.size > 0 && (() => {
-              const selectedTotal = matchingInvoices.filter(inv => selectedInvoices.has(inv.id)).reduce((s, inv) => s + inv.total, 0);
-              return (
-                <div className="text-center space-y-1">
-                  <p className="text-[12px] text-chart-3 font-medium">{selectedInvoices.size} selected for download</p>
-                  <p className="text-[11px] text-muted-foreground">Total: <span className="font-semibold text-foreground">{formatCurrency(selectedTotal)}</span></p>
-                </div>
-              );
-            })()}
-            <button onClick={handleDownload} disabled={matchingInvoices.length === 0 || downloading}
-              className={cn("w-full h-11 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 transition-all",
-                matchingInvoices.length > 0 && !downloading ? "bg-primary text-primary-foreground hover:brightness-110 glow-sm" : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
-              )}>
-              <Download className="w-4 h-4" /> {downloading && downloadMode === "zip" ? `Generating ${progress.current}/${progress.total}...` : selectedInvoices.size > 0 ? `Download ${selectedInvoices.size} PDFs` : "Download All PDFs"}
-            </button>
-            <div className="flex gap-2">
-              <button onClick={handlePrint} disabled={matchingInvoices.length === 0 || downloading}
-                className="flex-1 h-10 rounded-xl text-[12px] font-semibold flex items-center justify-center gap-1.5 border border-border/50 text-foreground hover:bg-secondary/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-                <Printer className="w-3.5 h-3.5" /> {downloading && downloadMode === "print" ? `${progress.current}/${progress.total}...` : "Print All"}
-              </button>
-              <button onClick={handleBatchPrint} disabled={matchingInvoices.length === 0}
-                className="flex-1 h-10 rounded-xl text-[12px] font-semibold flex items-center justify-center gap-1.5 border border-border/50 text-foreground hover:bg-secondary/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-                <FileText className="w-3.5 h-3.5" /> Batch Print
-              </button>
-            </div>
-          </div>
-
-          {/* How It Works */}
-          <div className="elevated-card rounded-2xl p-5 space-y-3">
-            <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">How it works</h3>
-            <ol className="space-y-2.5 text-[12px] text-muted-foreground">
-              {[
-                "Select month, year, and optional filters",
-                "Preview matching invoices in the table",
-                "Optionally select specific invoices",
-                "Click download to get a ZIP file",
-              ].map((step, i) => (
-                <li key={i} className="flex items-start gap-2.5">
-                  <span className="w-5 h-5 rounded-lg bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0 mt-0.5">{i + 1}</span>
-                  {step}
-                </li>
-              ))}
-            </ol>
+          <div>
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1 mb-1"><Search className="w-3 h-3" /> Find</label>
+            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="# or customer…" className="premium-input w-full text-[12px]" />
           </div>
         </div>
+        {(month !== "all" || bizFilter !== "all" || typeFilter !== "all" || hasInvoiceRange || searchQuery) && (
+          <div className="flex items-center justify-end mt-2">
+            <button onClick={clearAllFilters} className="text-[11px] text-destructive hover:underline font-medium">
+              Clear all filters
+            </button>
+          </div>
+        )}
+      </div>
 
-        {/* Invoice Preview Table */}
-        <div className="lg:col-span-2">
-          <div className="elevated-card rounded-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Package className="w-4 h-4 text-chart-3" />
-                <h2 className="text-[14px] font-display font-semibold text-foreground">Matching Invoices ({matchingInvoices.length})</h2>
-              </div>
-              {matchingInvoices.length > 0 && (
-                <button onClick={toggleAll} className="text-[12px] text-primary hover:underline font-medium">
-                  {selectedInvoices.size === matchingInvoices.length ? "Deselect All" : "Select All"}
-                </button>
-              )}
-            </div>
-            {loadingInvoices ? (
-              <div className="p-16 text-center text-muted-foreground">
-                <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin opacity-30" />
-                <p className="text-[14px] font-medium">Loading invoices...</p>
-              </div>
-            ) : matchingInvoices.length > 0 ? (
-              <table className="table-premium">
-                <thead><tr>
-                  <th className="w-10"></th><th>Invoice #</th><th>Date</th><th>Customer</th><th>Amount</th><th>Type</th>
-                </tr></thead>
-                <tbody>
-                  {matchingInvoices.map((inv, i) => (
-                    <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
-                      className={cn(selectedInvoices.has(inv.id) && "!bg-primary/5 ")}>
-                      <td>
-                        <button onClick={() => toggleInvoice(inv.id)} className="text-muted-foreground hover:text-primary">
-                          {selectedInvoices.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
-                        </button>
-                      </td>
-                      <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold text-[13px]">{inv.invoiceNumber}</Link></td>
-                      <td className="text-muted-foreground text-[12px]">{formatDate(inv.invoice_date || "")}</td>
-                      <td className="text-foreground text-[13px]">{inv.customerName}</td>
-                      <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
-                      <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-16 text-center text-muted-foreground">
-                <FileText className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="text-[14px] font-medium">No invoices found</p>
-                <p className="text-[12px] mt-1">Try changing the month, year, or filters</p>
-              </div>
+      {/* Invoice table — full width, the page's main content. */}
+      <div className="elevated-card rounded-2xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-border/50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4 text-chart-3" />
+            <h2 className="text-[13px] font-display font-semibold text-foreground">Matching invoices</h2>
+            <span className="text-[11px] text-muted-foreground tabular-nums">({matchingInvoices.length})</span>
+          </div>
+          {matchingInvoices.length > 0 && (
+            <button onClick={toggleAll} className="text-[12px] text-primary hover:underline font-medium">
+              {selectedInvoices.size === matchingInvoices.length ? "Deselect all" : "Select all"}
+            </button>
+          )}
+        </div>
+        {loadingInvoices ? (
+          <div className="p-16 text-center text-muted-foreground">
+            <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin opacity-30" />
+            <p className="text-[14px] font-medium">Loading invoices…</p>
+          </div>
+        ) : matchingInvoices.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="table-premium">
+              <thead><tr>
+                <th className="w-10"></th><th>Invoice #</th><th>Date</th><th>Customer</th><th>Business</th><th className="text-right">Amount</th><th>Type</th>
+              </tr></thead>
+              <tbody>
+                {matchingInvoices.map((inv, i) => (
+                  <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.02, 0.4) }}
+                    className={cn(selectedInvoices.has(inv.id) && "!bg-primary/5")}>
+                    <td>
+                      <button onClick={() => toggleInvoice(inv.id)} className="text-muted-foreground hover:text-primary">
+                        {selectedInvoices.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
+                      </button>
+                    </td>
+                    <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold text-[13px]">{inv.invoiceNumber}</Link></td>
+                    <td className="text-muted-foreground text-[12px]">{formatDate(inv.invoice_date || "")}</td>
+                    <td className="text-foreground text-[13px]">{inv.customerName}</td>
+                    <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
+                    <td className="font-bold text-foreground tabular-nums text-right">{formatCurrency(inv.total)}</td>
+                    <td><span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-16 text-center text-muted-foreground">
+            <FileText className="w-10 h-10 mx-auto mb-3 opacity-20" />
+            <p className="text-[14px] font-medium">No invoices match these filters</p>
+            <p className="text-[12px] mt-1">Try a different month, FY, or clear the search.</p>
+            {(month !== "all" || bizFilter !== "all" || typeFilter !== "all" || hasInvoiceRange || searchQuery) && (
+              <button onClick={clearAllFilters} className="mt-3 text-[12px] text-primary hover:underline font-medium">
+                Clear all filters
+              </button>
             )}
           </div>
-        </div>
+        )}
       </div>
       {/* Hidden BlobProviders to generate Tally-format PDFs */}
       {zipMode && pdfQueue.length > 0 && (
