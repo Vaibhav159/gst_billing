@@ -1491,19 +1491,51 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # The reversal/reclaim rows aren't tracked by line item yet, so they
         # default to 0 — the frontend lets the user override them per period.
         # The ECRRS opening balance comes from the ITCReclaimLedger model
-        # (per-business), keyed by business_id; if querying across all
-        # businesses, the closing balance card on the frontend just hides.
+        # (per-business). When the user is viewing "All Businesses" we
+        # aggregate the opening balances across every ledger so the
+        # carry-forward card on the frontend stays accurate — previously this
+        # was just None for the All-Businesses view, which silently hid the
+        # number the user came here looking for.
         from billing.models import ITCReclaimLedger
         opening_balance = None
         if business_id:
             ledger = ITCReclaimLedger.objects.filter(business_id=business_id).first()
             if ledger:
+                cgst = float(ledger.opening_cgst or 0)
+                sgst = float(ledger.opening_sgst or 0)
+                igst = float(ledger.opening_igst or 0)
                 opening_balance = {
-                    "cgst": float(ledger.opening_cgst),
-                    "sgst": float(ledger.opening_sgst),
-                    "igst": float(ledger.opening_igst),
+                    "cgst": cgst,
+                    "sgst": sgst,
+                    "igst": igst,
+                    "total": cgst + sgst + igst,
                     "as_of": ledger.opening_as_of.isoformat() if ledger.opening_as_of else None,
+                    "business_count": 1,
+                    "configured": True,
                 }
+        else:
+            agg = ITCReclaimLedger.objects.aggregate(
+                c=Sum("opening_cgst"),
+                s=Sum("opening_sgst"),
+                i=Sum("opening_igst"),
+            )
+            c = float(agg["c"] or 0)
+            s = float(agg["s"] or 0)
+            i = float(agg["i"] or 0)
+            biz_count = ITCReclaimLedger.objects.exclude(
+                Q(opening_cgst=0) & Q(opening_sgst=0) & Q(opening_igst=0)
+            ).count()
+            # Surface even a 0-total response so the frontend can distinguish
+            # "no business has a ledger" from "ledger exists but is zero".
+            opening_balance = {
+                "cgst": c,
+                "sgst": s,
+                "igst": i,
+                "total": c + s + i,
+                "as_of": None,
+                "business_count": biz_count,
+                "configured": biz_count > 0,
+            }
 
         gstr3b_table4 = {
             # 4(A) ITC Available
@@ -1608,6 +1640,25 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "variance": gstr3b["output_tax"]["total"] - gstr1_total_tax,
         }
 
+        # ── Effective ITC + Net Tax including carry-forward ──
+        # The user came looking for "last year's carry-forward GST" on the
+        # main summary, not buried inside Table 4. We compute effective
+        # numbers here so the frontend can show:
+        #     Output Tax            = period output
+        #     Current-period ITC    = period inward tax
+        # +   Carry-forward ITC     = opening balance from ledger
+        # =   Effective ITC         = sum of the two
+        # =   Effective Net Tax     = Output - Effective ITC
+        carry_total = opening_balance["total"] if opening_balance else 0.0
+        current_itc_total = gstr3b["input_tax_credit"]["total"]
+        output_total = gstr3b["output_tax"]["total"]
+        effective = {
+            "carry_forward_itc": carry_total,
+            "current_itc": current_itc_total,
+            "effective_itc": current_itc_total + carry_total,
+            "effective_net_tax": output_total - (current_itc_total + carry_total),
+        }
+
         return Response({
             "rate_slabs": rate_slabs,
             "hsn_summary": hsn_summary,
@@ -1618,6 +1669,11 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "urgent_invoices": urgent_invoices,
             },
             "gstr1_3b_recon": gstr1_3b_recon,
+            # Promoted to top-level so the Summary view doesn't have to
+            # reach into gstr3b_table4.ecrrs_opening_balance. Keeps the old
+            # nested copy for backwards compat with the GSTR-3B tab.
+            "carry_forward_itc": opening_balance,
+            "effective": effective,
         })
 
     @action(detail=False, methods=["get"])

@@ -223,7 +223,17 @@ export default function GSTSummary() {
   const totalOutward = statsData?.totals?.outward || 0;
   const totalOutwardTax = gstr3b.output_tax.total;
   const totalITC = gstr3b.input_tax_credit.total;
-  const netTax = gstr3b.net_payable.total;
+  // Carry-forward (opening) ITC from previous FY, surfaced at top-level on
+  // the gst_summary response. When business is "All", the backend aggregates
+  // across all ledgers. `configured` distinguishes "no ledger exists" from
+  // "ledger exists but is zero" so we can show a helpful CTA in the first
+  // case rather than implying the user is up-to-date.
+  const carryFwd = gstData?.carry_forward_itc || { cgst: 0, sgst: 0, igst: 0, total: 0, as_of: null, configured: false };
+  const effective = gstData?.effective || { carry_forward_itc: 0, current_itc: totalITC, effective_itc: totalITC, effective_net_tax: gstr3b.net_payable.total };
+  const carryFwdTotal = Number(carryFwd.total || 0);
+  // Net Tax now reflects carry-forward: Output - (current ITC + carry-fwd).
+  // This is what the user actually owes / can carry forward further.
+  const netTax = effective.effective_net_tax;
   // True while gstData is still in flight — used to gate stat cards and the
   // readiness card so they don't flash "₹0" / "No data" before the API
   // resolves.
@@ -451,27 +461,81 @@ export default function GSTSummary() {
           think the period has zero data when it just hasn't loaded yet.
           Uses compact-currency (₹2.86L) so a 4-column grid doesn't have to
           cram ₹1,39,363.59 into a stat card on a 1280px screen. The full
-          amount is in the title attribute for accessibility. */}
-      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          amount is in the title attribute for accessibility.
+
+          5-card layout: Outward · Output Tax · Period ITC · Carry-fwd ·
+          Net Tax. The Carry-fwd tile surfaces the previous-year opening
+          ITC (from the ECRRS ledger) which used to be buried inside the
+          GSTR-3B tab's Table 4. Click-through into the ITC Ledger tab. */}
+      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
-          { label: "Outward Supply", raw: totalOutward, color: "text-chart-1", sub: "Sales + tax" },
-          { label: "Output Tax", raw: totalOutwardTax, color: "text-chart-3", sub: "CGST + SGST + IGST" },
-          { label: "ITC Available", raw: totalITC, color: "text-success", sub: "Input credit" },
-          { label: "Net Tax", raw: Math.abs(netTax), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable" : "Refund/Carry-fwd" },
-        ].map((s) => (
-          <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={isHydrating ? "Loading" : formatCurrency(s.raw)}>
-            <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
-            {isHydrating ? (
-              <div className="mt-1.5 h-6 w-16 rounded bg-muted/40 animate-pulse" />
-            ) : (
-              <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>
-                {formatCompactCurrency(s.raw)}
-              </p>
-            )}
-            <p className="text-[10px] text-muted-foreground/80 mt-0.5">{s.sub}</p>
-          </motion.div>
-        ))}
+          { key: "outward", label: "Outward Supply", raw: totalOutward, color: "text-chart-1", sub: "Sales + tax" },
+          { key: "output", label: "Output Tax", raw: totalOutwardTax, color: "text-chart-3", sub: "CGST + SGST + IGST" },
+          { key: "itc", label: "Period ITC", raw: totalITC, color: "text-success", sub: "Current period only" },
+          {
+            key: "carry",
+            label: "Carry-fwd ITC",
+            raw: carryFwdTotal,
+            color: carryFwdTotal > 0 ? "text-success" : "text-muted-foreground",
+            sub: carryFwd.configured
+              ? (carryFwd.as_of ? `As of ${new Date(carryFwd.as_of).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : "From previous FY")
+              : "Set in ITC Ledger →",
+            interactive: true,
+          },
+          { key: "net", label: "Net Tax", raw: Math.abs(netTax), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable (incl. carry-fwd)" : "Refund / Carry to next FY" },
+        ].map((s) => {
+          const Cmp: any = s.interactive ? "button" : "div";
+          return (
+            <motion.div key={s.key} variants={fadeUp}>
+              <Cmp
+                {...(s.interactive ? { onClick: () => setTab("itc-ledger"), type: "button" } : {})}
+                className={cn(
+                  "stat-card rounded-2xl p-4 w-full text-left transition-all",
+                  s.interactive && "hover:bg-secondary/30 hover:border-primary/30 cursor-pointer"
+                )}
+                title={isHydrating ? "Loading" : formatCurrency(s.raw)}
+              >
+                <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
+                {isHydrating ? (
+                  <div className="mt-1.5 h-6 w-16 rounded bg-muted/40 animate-pulse" />
+                ) : (
+                  <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>
+                    {formatCompactCurrency(s.raw)}
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">{s.sub}</p>
+              </Cmp>
+            </motion.div>
+          );
+        })}
       </motion.div>
+
+      {/* Carry-forward detail strip — visible when there's a non-zero
+          opening balance. Lets the user see exactly what comes from where
+          before clicking into the ledger. Hidden while loading and when
+          everything is zero (so the page isn't loud about a feature the
+          user hasn't set up yet). */}
+      {!isHydrating && carryFwdTotal > 0 && (
+        <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+          className="elevated-card rounded-2xl p-3 border-l-4 border-l-success/50 flex items-center gap-3 flex-wrap">
+          <div className="w-8 h-8 rounded-lg bg-success/10 text-success flex items-center justify-center shrink-0">
+            <Clock className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-semibold text-foreground">Previous-year carry-forward ITC</p>
+            <p className="text-[11px] text-muted-foreground tabular-nums">
+              CGST <span className="text-foreground font-medium">{formatCurrency(carryFwd.cgst)}</span> ·{" "}
+              SGST <span className="text-foreground font-medium">{formatCurrency(carryFwd.sgst)}</span> ·{" "}
+              IGST <span className="text-foreground font-medium">{formatCurrency(carryFwd.igst)}</span> ·{" "}
+              <span className="text-foreground font-semibold">Total {formatCurrency(carryFwdTotal)}</span>
+              {carryFwd.business_count > 1 && <span className="text-muted-foreground/70"> · across {carryFwd.business_count} businesses</span>}
+            </p>
+          </div>
+          <button onClick={() => setTab("itc-ledger")} className="text-[11px] font-semibold text-primary hover:underline shrink-0">
+            Edit ledger →
+          </button>
+        </motion.div>
+      )}
 
       {/* Filing-readiness scoreboard — at-a-glance "am I safe to file?".
           While loading, every check shows a neutral "Checking…" rather than
