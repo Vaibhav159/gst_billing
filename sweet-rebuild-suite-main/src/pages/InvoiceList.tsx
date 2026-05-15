@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
-import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
+import { financialYears, formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useDashboardStats } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -124,11 +124,27 @@ export default function InvoiceList() {
     toast({ title: "Exported", description: `${filtered.length} invoices exported to CSV` });
   };
 
+  // Stat cards — match the GST/Reports visual idiom: compact currency on
+  // the value (₹61.07L beats ₹61,07,168 for fit + scannability), full value
+  // in the title attr for screen readers / hover, and a sub-line that
+  // pulls double duty as context AND as an extra figure (count or average).
+  // 5 cards: Sales · Purchases · Net Revenue · Tax · Avg Invoice. Avg gives
+  // a quick read on whether the period skews toward small or large invoices.
+  const outwardInvCount = useMemo(
+    () => filtered.filter((i) => i.type === "OUTWARD").length,
+    [filtered]
+  );
+  const inwardInvCount = useMemo(
+    () => filtered.filter((i) => i.type === "INWARD").length,
+    [filtered]
+  );
+  const avgInvoice = totalCount > 0 ? (totalOutward + totalInward) / totalCount : 0;
   const stats = [
-    { label: "Sales", value: formatCurrency(totalOutward), sub: "Total revenue", icon: TrendingUp, color: "text-success" },
-    { label: "Purchases", value: formatCurrency(totalInward), sub: "Total spend", icon: TrendingDown, color: "text-warning" },
-    { label: "Net Revenue", value: formatCurrency(totalOutward - totalInward), sub: "Sales-Purchases", icon: IndianRupee, color: "text-success" },
-    { label: "Tax", value: formatCurrency(totalTaxCollected), sub: "GST total", icon: Receipt, color: "text-chart-3" },
+    { label: "Sales", value: formatCompactCurrency(totalOutward), full: formatCurrency(totalOutward), sub: outwardInvCount > 0 ? `${outwardInvCount} outward inv.` : "—", icon: TrendingUp, color: "text-success" },
+    { label: "Purchases", value: formatCompactCurrency(totalInward), full: formatCurrency(totalInward), sub: inwardInvCount > 0 ? `${inwardInvCount} inward inv.` : "—", icon: TrendingDown, color: "text-warning" },
+    { label: "Net Revenue", value: formatCompactCurrency(totalOutward - totalInward), full: formatCurrency(totalOutward - totalInward), sub: "Sales − Purchases", icon: IndianRupee, color: "text-success" },
+    { label: "Tax", value: formatCompactCurrency(totalTaxCollected), full: formatCurrency(totalTaxCollected), sub: "GST collected", icon: Receipt, color: "text-chart-3" },
+    { label: "Avg Invoice", value: formatCompactCurrency(avgInvoice), full: formatCurrency(avgInvoice), sub: totalCount > 0 ? `Across ${totalCount} inv.` : "No invoices", icon: Calendar, color: "text-chart-2" },
   ];
 
   const clearFilters = () => {
@@ -391,15 +407,22 @@ export default function InvoiceList() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {stats.map((s, i) => (
-          <motion.div key={s.label} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07, duration: 0.4 }} className="stat-card rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
-              <s.icon className={cn("w-4 h-4", s.color)} />
+          <motion.div
+            key={s.label}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.4 }}
+            className="stat-card rounded-2xl p-4"
+            title={s.full}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
+              <s.icon className={cn("w-3.5 h-3.5", s.color)} />
             </div>
-            <p className={cn("text-xl font-display font-bold", s.color)}>{s.value}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">{s.sub}</p>
+            <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", s.color)}>{s.value}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.sub}</p>
           </motion.div>
         ))}
       </div>
@@ -469,7 +492,7 @@ export default function InvoiceList() {
               <th><button onClick={() => { setSortBy("date"); setSortDir(d => sortBy === "date" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Date {sortBy === "date" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
               <th>Customer</th><th>Business</th>
               <th><button onClick={() => { setSortBy("total"); setSortDir(d => sortBy === "total" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Amount {sortBy === "total" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
-              <th>Tax</th><th>Type</th><th>Actions</th>
+              <th>Tax</th><th title="Effective tax rate inferred from tax÷subtotal — handy for spotting wrong rate slabs at a glance.">Rate</th><th>Type</th><th>Actions</th>
             </tr></thead>
             <tbody>
               {filtered.map((inv, i) => {
@@ -483,7 +506,7 @@ export default function InvoiceList() {
                   <React.Fragment key={inv.id}>
                     {showDayHeader && dayInfo && (
                       <tr className="bg-secondary/20 border-t border-border/40">
-                        <td colSpan={9} className="!py-2 !px-4">
+                        <td colSpan={10} className="!py-2 !px-4">
                           <div className="flex items-center justify-between text-[11px]">
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <Calendar className="w-3.5 h-3.5 opacity-70" />
@@ -491,20 +514,36 @@ export default function InvoiceList() {
                               <span className="text-muted-foreground/70">·</span>
                               <span>{pluralize(dayInfo.count, "invoice")}</span>
                             </div>
-                            <span className="font-semibold tabular-nums text-foreground/80">{formatCurrency(dayInfo.total)}</span>
+                            <span className="font-semibold tabular-nums text-foreground/80">{formatCompactCurrency(dayInfo.total)}</span>
                           </div>
                         </td>
                       </tr>
                     )}
-                    <motion.tr initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
-                      <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
-                      <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
-                      <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
-                      <td className="text-foreground font-medium">{inv.customerName}</td>
-                      <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
-                      <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
-                      <td className="text-muted-foreground text-[12px]">{formatCurrency(inv.totalTax)}</td>
-                      <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
+                    {(() => {
+                      // Effective tax rate: tax ÷ subtotal × 100. Useful for spotting
+                      // an invoice that should be 3% but somehow rolled out at 5%.
+                      // We snap to the nearest GST slab when within 0.3% so 2.997
+                      // doesn't display as "3.0%" while 5.4 (a real anomaly) does.
+                      const sub = Number(inv.subtotal) || 0;
+                      const tax = Number(inv.totalTax) || 0;
+                      const ratePct = sub > 0 ? (tax / sub) * 100 : 0;
+                      const slabs = [0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28];
+                      const nearestSlab = slabs.find((s) => Math.abs(ratePct - s) < 0.3);
+                      const rateLabel = nearestSlab !== undefined ? `${nearestSlab}%` : `${ratePct.toFixed(1)}%`;
+                      const rateAnomalous = nearestSlab === undefined && ratePct > 0;
+                      return (
+                        <motion.tr initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
+                          <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
+                          <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
+                          <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
+                          <td className="text-foreground font-medium">{inv.customerName}</td>
+                          <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
+                          <td className="font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</td>
+                          <td className="text-muted-foreground text-[12px] tabular-nums">{formatCurrency(inv.totalTax)}</td>
+                          <td className={cn("text-[12px] tabular-nums", rateAnomalous ? "text-warning font-semibold" : "text-muted-foreground")} title={rateAnomalous ? "Not a standard GST slab — open the invoice to verify" : "Tax ÷ subtotal"}>
+                            {ratePct > 0 ? rateLabel : "—"}
+                          </td>
+                          <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
                       <td>
                         <div className="flex items-center gap-0.5">
                           <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
@@ -515,11 +554,25 @@ export default function InvoiceList() {
                         </div>
                       </td>
                     </motion.tr>
+                      );
+                    })()}
                   </React.Fragment>
                 );
               })}
-              {filtered.length === 0 && !isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found</td></tr>}
-              {isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...</td></tr>}
+              {filtered.length === 0 && !isLoading && (
+                <tr><td colSpan={10} className="text-center text-muted-foreground py-16">
+                  <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-[13px] font-medium text-foreground/70">No invoices found</p>
+                  {(search || bizFilter !== "all" || custFilter !== "all" || typeFilter !== "all" || monthFilter !== "all" || hasHygieneFilter) ? (
+                    <button onClick={clearFilters} className="text-[12px] text-primary hover:underline mt-2 font-medium">Clear filters</button>
+                  ) : (
+                    <Link to="/billing/invoice/add" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline mt-2 font-medium">
+                      <Plus className="w-3 h-3" /> Create your first invoice
+                    </Link>
+                  )}
+                </td></tr>
+              )}
+              {isLoading && <tr><td colSpan={10} className="text-center text-muted-foreground py-16"><Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...</td></tr>}
             </tbody>
           </table>
         </div>
