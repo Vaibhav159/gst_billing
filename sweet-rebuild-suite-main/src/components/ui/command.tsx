@@ -106,6 +106,14 @@ const CommandItem = React.forwardRef<
     ref={ref}
     className={cn(
       "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected='true']:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50",
+      // Selected-state contrast cascade. CommandPalette items contain icons,
+      // a `kbd` shortcut chip, and various sub-labels (date, customer, state,
+      // amount) — most use `text-muted-foreground` which becomes unreadable
+      // on the yellow accent background. Force descendant text to inherit
+      // the accent-foreground tone when the item is highlighted; the `kbd`
+      // chip also flips to a darker translucent bg so it stays visible.
+      "data-[selected=true]:[&_.text-muted-foreground]:text-accent-foreground/80",
+      "data-[selected=true]:[&_kbd]:bg-accent-foreground/15 data-[selected=true]:[&_kbd]:text-accent-foreground data-[selected=true]:[&_kbd]:border-accent-foreground/20",
       className,
     )}
     {...props}
