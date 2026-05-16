@@ -104,20 +104,12 @@ const CommandItem = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive.Item
     ref={ref}
+    // `group` enables `group-data-[selected=true]:*` modifiers on
+    // descendants in CommandPalette.tsx. Cleaner than chained arbitrary
+    // variants and the JIT reliably generates the classes since each
+    // descendant declares them on its own className.
     className={cn(
-      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected='true']:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50",
-      // Selected-state contrast cascade. CommandPalette items contain icons,
-      // a `kbd` shortcut chip, and various sub-labels — most use
-      // `text-muted-foreground` which becomes unreadable on the yellow
-      // accent background. We force descendants to inherit a darker tone
-      // when the row is highlighted, AND invert the kbd chip to a solid
-      // dark pill so it stands out clearly against the yellow row.
-      //
-      // The `!` important modifier wins over the chip's own utility
-      // classes (`bg-secondary/50 text-muted-foreground border-border/40`)
-      // without us needing to touch every callsite.
-      "data-[selected=true]:[&_.text-muted-foreground]:!text-accent-foreground/80",
-      "data-[selected=true]:[&_kbd]:!bg-accent-foreground data-[selected=true]:[&_kbd]:!text-accent data-[selected=true]:[&_kbd]:!border-accent-foreground/30",
+      "group relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected='true']:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50",
       className,
     )}
     {...props}

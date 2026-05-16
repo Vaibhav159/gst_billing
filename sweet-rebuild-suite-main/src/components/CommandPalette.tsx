@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Search, FileText, Users, Package, Building2, BarChart3, Calculator, Settings, HardDrive, History, LayoutDashboard } from "lucide-react";
 import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { formatCurrency } from "@/utils/mockData";
+import { cn } from "@/utils/utils";
 import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
 
 const pages = [
@@ -63,53 +64,61 @@ export default function CommandPalette() {
       <CommandInput placeholder="Search invoices products, pages..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
+        {/* `group-data-[selected=true]:*` lets every sub-element flip its
+            color when the parent CommandItem is highlighted. Without this
+            the yellow row swallows muted-gray icons / kbd / sub-text. The
+            `group` class lives on CommandItem (in components/ui/command.tsx). */}
         <CommandGroup heading="Pages">
           {pages.map((p) => (
             <CommandItem key={p.href} onSelect={() => go(p.href)} className="gap-3">
-              <p.icon className="w-4 h-4 text-muted-foreground" />
+              <p.icon className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
               <span className="flex-1">{p.label}</span>
-              {p.shortcut && <kbd className="ml-auto text-[10px] font-mono bg-secondary/50 border border-border/40 px-1.5 py-0.5 rounded text-muted-foreground">{p.shortcut}</kbd>}
+              {p.shortcut && (
+                <kbd className="ml-auto text-[10px] font-mono bg-secondary/50 border border-border/40 px-1.5 py-0.5 rounded text-muted-foreground group-data-[selected=true]:bg-accent-foreground group-data-[selected=true]:text-accent group-data-[selected=true]:border-accent-foreground">
+                  {p.shortcut}
+                </kbd>
+              )}
             </CommandItem>
           ))}
         </CommandGroup>
         <CommandGroup heading="Invoices">
           {invoices.slice(0, 10).map((inv) => (
             <CommandItem key={inv.id} onSelect={() => go(`/billing/invoice/${inv.id}`)} className="gap-3">
-              <FileText className="w-4 h-4 text-muted-foreground" />
+              <FileText className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
               <div className="flex-1 min-w-0">
                 <span className="font-medium">{inv.invoiceNumber}</span>
-                <span className="text-[10px] text-muted-foreground ml-2">{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : ""}</span>
+                <span className="text-[10px] text-muted-foreground ml-2 group-data-[selected=true]:text-accent-foreground/80">{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : ""}</span>
               </div>
-              <span className="text-xs text-muted-foreground truncate max-w-[100px]">{inv.customerName}</span>
-              <span className={`text-xs font-semibold tabular-nums ${inv.type === "OUTWARD" ? "text-success" : "text-warning"}`}>{formatCurrency(inv.total)}</span>
+              <span className="text-xs text-muted-foreground truncate max-w-[100px] group-data-[selected=true]:text-accent-foreground/80">{inv.customerName}</span>
+              <span className={cn("text-xs font-semibold tabular-nums", inv.type === "OUTWARD" ? "text-success" : "text-warning", "group-data-[selected=true]:text-accent-foreground")}>{formatCurrency(inv.total)}</span>
             </CommandItem>
           ))}
         </CommandGroup>
         <CommandGroup heading="Customers">
           {customers.map((c) => (
             <CommandItem key={c.id} onSelect={() => go(`/billing/customer/${c.id}`)} className="gap-3">
-              <Users className="w-4 h-4 text-muted-foreground" />
+              <Users className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
               <span className="flex-1">{c.name}</span>
-              {(c as any).total_revenue > 0 && <span className="text-xs font-semibold text-success tabular-nums">{formatCurrency((c as any).total_revenue)}</span>}
-              <span className="text-xs text-muted-foreground">{c.state_name}</span>
+              {(c as any).total_revenue > 0 && <span className="text-xs font-semibold text-success tabular-nums group-data-[selected=true]:text-accent-foreground">{formatCurrency((c as any).total_revenue)}</span>}
+              <span className="text-xs text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">{c.state_name}</span>
             </CommandItem>
           ))}
         </CommandGroup>
         <CommandGroup heading="Products">
           {products.map((p) => (
             <CommandItem key={p.id} onSelect={() => go(`/billing/product/${p.id}`)} className="gap-3">
-              <Package className="w-4 h-4 text-muted-foreground" />
+              <Package className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
               <span className="flex-1">{p.name}</span>
-              <span className="text-xs text-muted-foreground font-mono">HSN: {p.hsn}</span>
+              <span className="text-xs text-muted-foreground font-mono group-data-[selected=true]:text-accent-foreground/80">HSN: {p.hsn}</span>
             </CommandItem>
           ))}
         </CommandGroup>
         <CommandGroup heading="Businesses">
           {businesses.map((b) => (
             <CommandItem key={b.id} onSelect={() => go(`/billing/business/${b.id}`)} className="gap-3">
-              <Building2 className="w-4 h-4 text-muted-foreground" />
+              <Building2 className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
               <span className="flex-1">{b.name}</span>
-              <span className="text-xs text-muted-foreground">{b.state_name}</span>
+              <span className="text-xs text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">{b.state_name}</span>
             </CommandItem>
           ))}
         </CommandGroup>
