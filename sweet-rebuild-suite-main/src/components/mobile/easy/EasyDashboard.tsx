@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
-import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3 } from "lucide-react";
+import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3, FileBarChart2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatDate, currentFY } from "@/utils/mockData";
 import { useDashboardStats, useInvoices, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { cn } from "@/utils/utils";
 import { useMemo } from "react";
@@ -12,7 +12,12 @@ interface Props {
 
 export default function EasyDashboard({ selectedFY }: Props) {
   const { data: statsData, isLoading } = useDashboardStats({ fyFilter: selectedFY });
-  const totals = statsData?.totals || { outward: 0, inward: 0, count: 0 };
+  const totals = statsData?.totals || { outward: 0, inward: 0, count: 0, tax: 0 };
+  // Show the current month on the GST tile so the user knows which return
+  // period they're about to look at — Easy Mode is for users who don't think
+  // in "GSTR-3B due on the 20th" terms.
+  const now = new Date();
+  const monthLabel = now.toLocaleString("en-IN", { month: "long" });
 
   const recentInvoices = useMemo(
     () => (statsData?.recent_invoices || []).map(mapDjangoInvoice),
@@ -41,6 +46,32 @@ export default function EasyDashboard({ selectedFY }: Props) {
               <p className="text-lg font-display font-bold text-primary-foreground">Create Invoice</p>
               <p className="text-sm text-primary-foreground/70">Tap to generate a new bill</p>
             </div>
+          </div>
+        </Link>
+      </motion.div>
+
+      {/* GST tile — Easy Mode users still need a one-tap path to the filing
+          numbers (sales, purchases, net tax). Putting it just under the
+          create-invoice hero keeps it discoverable without crowding the grid. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+        <Link
+          to="/billing/gst-summary"
+          className="block w-full rounded-2xl elevated-card border-primary/20 p-4 transition-all active:scale-[0.98]"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center shrink-0">
+              <FileBarChart2 className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-[14px] font-display font-semibold text-foreground">GST Summary</p>
+                <span className="premium-badge text-[9px] bg-primary/12 text-primary">{monthLabel}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
+                Tax {formatCurrency(Number(totals.tax) || 0)} · {totals.count} invoice{totals.count === 1 ? "" : "s"}
+              </p>
+            </div>
+            <ArrowRight className="w-4 h-4 text-muted-foreground" />
           </div>
         </Link>
       </motion.div>

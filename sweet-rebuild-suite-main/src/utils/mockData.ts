@@ -542,6 +542,43 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+/**
+ * Compact Indian-currency formatter for stat cards: ₹2.86L instead of
+ * ₹2,86,252. Uses Cr / L / k thresholds matching how Indian businesses talk
+ * about money. Returns "₹0" for falsy/NaN input.
+ */
+export function formatCompactCurrency(amount: number): string {
+  const n = Number(amount) || 0;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_00_00_000) return `${sign}₹${(abs / 1_00_00_000).toFixed(2)}Cr`;
+  if (abs >= 1_00_000) return `${sign}₹${(abs / 1_00_000).toFixed(2)}L`;
+  if (abs >= 1_000) return `${sign}₹${(abs / 1_000).toFixed(1)}k`;
+  return `${sign}₹${abs.toFixed(0)}`;
+}
+
+/**
+ * Chart-axis / tooltip formatter when the underlying datum is already in
+ * thousands (e.g. tax-trend charts dividing by 1000 for display). Picks
+ * the right Indian unit:
+ *
+ *   v = 6107.2  (₹61,07,200)  → "₹61.07L"
+ *   v = 759.6   (₹7,59,600)   → "₹7.60L"
+ *   v = 50      (₹50,000)     → "₹50.0k"
+ *   v = 1.5     (₹1,500)      → "₹1.5k"
+ *
+ * Pass `withSymbol = false` (default true) to drop the ₹ for Y-axis ticks
+ * where the legend already says ₹.
+ */
+export function formatChartK(v: number, withSymbol = true): string {
+  const n = Number(v) || 0;
+  const symbol = withSymbol ? "₹" : "";
+  // 100 thousands = 1 lakh, 10000 thousands = 1 crore.
+  if (n >= 10_000) return `${symbol}${(n / 100).toFixed(0)}L`;
+  if (n >= 100) return `${symbol}${(n / 100).toFixed(2)}L`;
+  return `${symbol}${n.toFixed(1)}k`;
+}
+
 export function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-IN", {
     day: "2-digit",

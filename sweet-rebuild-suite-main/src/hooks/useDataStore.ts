@@ -297,6 +297,10 @@ export interface InvoiceFilters {
   monthFilter?: string; // "all" | "1"-"12"
   startDate?: string;   // "YYYY-MM-DD" explicit date range override
   endDate?: string;     // "YYYY-MM-DD" explicit date range override
+  // Data-quality drill-downs from DataQualityBanner:
+  dups?: boolean;       // only invoices with collision in (biz, no, FY, type)
+  empty?: boolean;      // only invoices with zero line items
+  noHsn?: boolean;      // only invoices with at least one HSN-less line item
 }
 
 /**
@@ -359,6 +363,11 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
       if (dateRange.start_date) params.set("start_date", dateRange.start_date);
       if (dateRange.end_date) params.set("end_date", dateRange.end_date);
+
+      // Data-hygiene drill-downs (DataQualityBanner)
+      if (f.dups) params.set("dups", "1");
+      if (f.empty) params.set("empty", "1");
+      if (f.noHsn) params.set("no_hsn", "1");
 
       // Increase page size to get more results
       params.set("page_size", "50");
@@ -698,28 +707,157 @@ export function useCustomer(id: string | undefined) {
   return { item, isLoading, refetch: fetchCustomer };
 }
 
-export function useInvoice(id: string | undefined) {
+export interface InvoiceCandidate {
+  id: string;
+  invoice_number: string;
+  invoice_date: string;
+  business_id: string;
+  business_name: string;
+  customer_name: string;
+  total: number;
+  type_of_invoice: string;
+}
+
+/**
+ * Build a stable URL-safe slug from a business name. Lower-cases, replaces
+ * runs of non-alphanumeric with single dashes, trims edge dashes. Stable
+ * round-trip with `matchesBizSlug` below.
+ */
+export function businessSlug(name: string): string {
+  return (name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/** Match a slug like "pyarchand-ratanlal" against a candidate row's business name OR id. */
+function matchesBizSlug(slug: string, row: { business_id: string; business_name: string }): boolean {
+  if (!slug) return true;
+  return slug === String(row.business_id) || slug === businessSlug(row.business_name);
+}
+
+/** FY string ("2024-25") from an ISO invoice_date — Apr-Mar boundary. */
+function fyFromDate(isoDate: string): string {
+  if (!isoDate) return "";
+  const d = new Date(isoDate);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1; // 1-12
+  const start = m >= 4 ? y : y - 1;
+  return `${start}-${String(start + 1).slice(2)}`;
+}
+
+/**
+ * Fetch a single invoice by either internal id OR invoice_number, with
+ * progressive disambiguation:
+ *
+ *  /billing/invoice/{id}                                   — exact, always works
+ *  /billing/invoice/{number}                               — may collide
+ *  /billing/invoice/{number}?b={businessId}                — biz hint
+ *  /billing/invoice/{biz-slug}/{fy}/{number}               — fully unique
+ *
+ * `slug` is the trailing identifier (id or invoice_number). `bizSlug` and
+ * `fy` are the optional preceding URL segments. Returns `candidates` —
+ * when length > 1 after all filters, render a picker rather than guess.
+ */
+export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: string) {
   const [item, setItem] = useState<Invoice | null>(null);
+  const [candidates, setCandidates] = useState<InvoiceCandidate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Read ?b={businessId} from the current URL — small enough that a
+  // single-use parse beats threading a hook prop down from the page.
+  const bizHint = (() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("b") || "";
+  })();
+
   const fetchInvoice = useCallback(async () => {
-    if (!id || !localStorage.getItem("gst_access_token")) return;
+    if (!slug || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setCandidates([]);
     try {
-      const res = await api.get(`invoices/${id}/`);
-      setItem(mapDjangoInvoice(res.data));
+      if (/^\d+$/.test(slug) && !bizSlug && !fy) {
+        // All-digit slug AND no preceding path segments → internal pk
+        // path. Keeps the legacy /billing/invoice/{id} URLs intact.
+        const res = await api.get(`invoices/${slug}/`);
+        const loaded = mapDjangoInvoice(res.data);
+        setItem(loaded);
+
+        if (loaded.invoiceNumber) {
+          try {
+            const sibs = await api.get<any>(`invoices/?invoice_number=${encodeURIComponent(loaded.invoiceNumber)}&page_size=20`);
+            const all = (sibs.data?.results || (Array.isArray(sibs.data) ? sibs.data : []))
+              .filter((r: any) => r.invoice_number === loaded.invoiceNumber);
+            setCandidates(all.map((r: any) => ({
+              id: String(r.id),
+              invoice_number: r.invoice_number,
+              invoice_date: r.invoice_date,
+              business_id: String(r.business),
+              business_name: r.business_name || "—",
+              customer_name: r.customer_name || "—",
+              total: Number(r.total_amount) || 0,
+              type_of_invoice: r.type_of_invoice,
+            })));
+          } catch { /* sibling lookup is best-effort */ }
+        }
+      } else {
+        // Number-based slug. Filter by bizSlug + fy + bizHint as available.
+        const target = decodeURIComponent(slug);
+        const params = new URLSearchParams();
+        params.set("invoice_number", target);
+        if (bizHint && /^\d+$/.test(bizHint)) params.set("business_id", bizHint);
+        // If bizSlug is purely numeric we can also tell the backend.
+        if (bizSlug && /^\d+$/.test(bizSlug)) params.set("business_id", bizSlug);
+        params.set("page_size", "30");
+        const list = await api.get<any>(`invoices/?${params.toString()}`);
+        let results: any[] = (list.data?.results || (Array.isArray(list.data) ? list.data : []))
+          .filter((r: any) => r.invoice_number === target);
+        // Narrow by bizSlug (name OR id).
+        if (bizSlug) {
+          results = results.filter((r) => matchesBizSlug(bizSlug, {
+            business_id: String(r.business),
+            business_name: r.business_name || "",
+          }));
+        }
+        // Narrow by FY (Apr-Mar window on invoice_date).
+        if (fy) {
+          results = results.filter((r) => fyFromDate(r.invoice_date) === fy);
+        }
+        const mapped: InvoiceCandidate[] = results.map((r: any) => ({
+          id: String(r.id),
+          invoice_number: r.invoice_number,
+          invoice_date: r.invoice_date,
+          business_id: String(r.business),
+          business_name: r.business_name || "—",
+          customer_name: r.customer_name || "—",
+          total: Number(r.total_amount) || 0,
+          type_of_invoice: r.type_of_invoice,
+        }));
+        setCandidates(mapped);
+
+        if (mapped.length === 0) {
+          setItem(null);
+        } else if (mapped.length === 1) {
+          // Hydrate the full record — list responses elide line items.
+          const full = await api.get(`invoices/${mapped[0].id}/`);
+          setItem(mapDjangoInvoice(full.data));
+        } else {
+          // Multiple matches — defer to the page to render a picker.
+          setItem(null);
+        }
+      }
     } catch (e) {
       logger.error("Failed to fetch invoice", e);
     } finally {
       setIsLoading(false);
     }
-  }, [id]);
+  }, [slug, bizSlug, fy, bizHint]);
 
   useEffect(() => {
     fetchInvoice();
   }, [fetchInvoice]);
 
-  return { item, isLoading, refetch: fetchInvoice };
+  return { item, isLoading, candidates, refetch: fetchInvoice };
 }
 
 export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {

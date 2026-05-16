@@ -2,12 +2,13 @@ import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatChartK } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2 } from "lucide-react";
+import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2, XCircle, Pencil } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
 import DateRangePicker from "@/components/DateRangePicker";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { cn, pluralize } from "@/utils/utils";
@@ -169,7 +170,7 @@ export default function GSTSummary() {
   // Tab is URL-driven so /billing/gstr-export?tab=gstr1 (etc.) deep-links work.
   const initialTab = (searchParams.get("tab") as TabKey) || "summary";
   const [activeTab, setActiveTab] = useState<TabKey>(
-    ["summary", "gstr1", "gstr3b", "gstr2b"].includes(initialTab) ? initialTab : "summary"
+    (["summary", "gstr1", "gstr3b", "gstr2b", "itc-ledger", "aging"] as const).includes(initialTab as any) ? initialTab : "summary"
   );
   const setTab = (t: TabKey) => {
     setActiveTab(t);
@@ -201,13 +202,42 @@ export default function GSTSummary() {
   const summaryLoading = gstLoading || statsLoading;
 
   // Server-side data for Summary tab
-  const gstr1Rows = (gstData?.rate_slabs?.outward || []).filter((r: any) => r.taxable > 0);
+  // Sort rate slabs ascending (3% before 5% before 12% before 18% before 28%)
+  // so the rate-wise table reads "low to high" — the natural mental model.
+  // We also derive `tax_total` per row: the backend's `total` field is
+  // taxable + tax (i.e. the gross invoice value), which is NOT what users
+  // expect when they read a column labeled "Total Tax". Compute the actual
+  // tax sum here so the rate-wise table can show both: per-slab tax sum AND
+  // gross invoice total.
+  const gstr1Rows = (gstData?.rate_slabs?.outward || [])
+    .filter((r: any) => r.taxable > 0)
+    .slice()
+    .map((r: any) => ({
+      ...r,
+      tax_total: Number(r.cgst || 0) + Number(r.sgst || 0) + Number(r.igst || 0),
+      gross_total: Number(r.total || 0),  // taxable + tax (per backend)
+    }))
+    .sort((a: any, b: any) => Number(a.rate) - Number(b.rate));
   const hsnRows = gstData?.hsn_summary || [];
   const gstr3b = gstData?.gstr3b || { output_tax: { cgst: 0, sgst: 0, igst: 0, total: 0 }, input_tax_credit: { cgst: 0, sgst: 0, igst: 0, total: 0 }, net_payable: { cgst: 0, sgst: 0, igst: 0, total: 0 } };
   const totalOutward = statsData?.totals?.outward || 0;
   const totalOutwardTax = gstr3b.output_tax.total;
   const totalITC = gstr3b.input_tax_credit.total;
-  const netTax = gstr3b.net_payable.total;
+  // Carry-forward (opening) ITC from previous FY, surfaced at top-level on
+  // the gst_summary response. When business is "All", the backend aggregates
+  // across all ledgers. `configured` distinguishes "no ledger exists" from
+  // "ledger exists but is zero" so we can show a helpful CTA in the first
+  // case rather than implying the user is up-to-date.
+  const carryFwd = gstData?.carry_forward_itc || { cgst: 0, sgst: 0, igst: 0, total: 0, as_of: null, configured: false };
+  const effective = gstData?.effective || { carry_forward_itc: 0, current_itc: totalITC, effective_itc: totalITC, effective_net_tax: gstr3b.net_payable.total };
+  const carryFwdTotal = Number(carryFwd.total || 0);
+  // Net Tax now reflects carry-forward: Output - (current ITC + carry-fwd).
+  // This is what the user actually owes / can carry forward further.
+  const netTax = effective.effective_net_tax;
+  // True while gstData is still in flight — used to gate stat cards and the
+  // readiness card so they don't flash "₹0" / "No data" before the API
+  // resolves.
+  const isHydrating = gstLoading || statsLoading;
 
   // Filing-export data
   const exGstr1 = exportData?.gstr1;
@@ -224,11 +254,36 @@ export default function GSTSummary() {
   });
 
   const handleDownloadCSV = () => {
-    const rows = [["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Invoices"]];
-    gstr1Rows.forEach((r: any) => rows.push([`${r.rate}%`, r.taxable.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.total.toFixed(2), r.invoice_count.toString()]));
+    // Header layout matches what a CA expects when reconciling against the
+    // GST portal: taxable + tax components + the actual tax sum + the gross
+    // invoice total. Previously this exported `r.total` under "Total Tax"
+    // which was misleading — `r.total` is taxable+tax, not just tax.
+    const rows = [["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Inv. Total", "Invoices"]];
+    gstr1Rows.forEach((r: any) => rows.push([
+      `${r.rate}%`,
+      r.taxable.toFixed(2),
+      Number(r.cgst).toFixed(2),
+      Number(r.sgst).toFixed(2),
+      Number(r.igst).toFixed(2),
+      r.tax_total.toFixed(2),
+      r.gross_total.toFixed(2),
+      r.invoice_count.toString(),
+    ]));
     rows.push([]);
-    rows.push(["HSN Code", "Taxable", "CGST", "SGST", "IGST", "Total", "Qty"]);
-    hsnRows.forEach((h: any) => rows.push([h.hsn_code, h.taxable.toFixed(2), h.cgst.toFixed(2), h.sgst.toFixed(2), h.igst.toFixed(2), h.total.toFixed(2), h.qty.toFixed(3)]));
+    rows.push(["HSN Code", "Qty", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Inv. Total"]);
+    hsnRows.forEach((h: any) => {
+      const taxSum = Number(h.cgst || 0) + Number(h.sgst || 0) + Number(h.igst || 0);
+      rows.push([
+        h.hsn_code,
+        Number(h.qty).toFixed(3),
+        Number(h.taxable).toFixed(2),
+        Number(h.cgst).toFixed(2),
+        Number(h.sgst).toFixed(2),
+        Number(h.igst).toFixed(2),
+        taxSum.toFixed(2),
+        Number(h.total).toFixed(2),
+      ]);
+    });
     const csv = rows.map((r: any) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `gst-summary-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -290,6 +345,74 @@ export default function GSTSummary() {
   const recon = gstData?.gstr1_3b_recon;
   const reconHasIssue = recon && Math.abs(recon.variance || 0) > 0.5;
 
+  // Filing-readiness scoreboard. Four signals derived from data already on
+  // the page — no extra round-trip. Each check is either pass / warn / fail,
+  // and the headline number is a rolled-up 0–4 score so users can answer
+  // "am I safe to file this period?" at a glance without reading every
+  // table. Deliberately conservative: ANY warn drops the score; expiring ITC
+  // counts as a hard fail because it costs real money.
+  //
+  // While `isHydrating` is true we render a neutral "Checking…" state on each
+  // check instead of false-negatives ("No data in period" when the request
+  // is just slow). The card stays the same shape so layout doesn't jump.
+  const readiness = useMemo(() => {
+    const hasData = gstr1Rows.length > 0 || (gstr3b.output_tax.total || 0) > 0 || (gstr3b.input_tax_credit.total || 0) > 0;
+    const reconOk = !recon || Math.abs(recon.variance || 0) <= 0.5;
+    const expiredCount = aging?.buckets?.expired?.count || 0;
+    const warningCount = aging?.buckets?.warning?.count || 0;
+    const itcSafe = expiredCount === 0 && warningCount === 0;
+    const itcWarn = expiredCount === 0 && warningCount > 0;
+
+    if (isHydrating) {
+      const placeholder = (key: string, label: string) => ({
+        key, ok: false, pending: true, label, detail: "Checking…",
+      });
+      const checks = [
+        placeholder("data", "Filing data"),
+        placeholder("recon", "GSTR-1 ↔ 3B sync"),
+        placeholder("itc", "ITC cutoff"),
+        placeholder("balance", "Tax ledger"),
+      ];
+      return { checks, passed: 0, total: checks.length, ready: false, hydrating: true };
+    }
+
+    const checks = [
+      {
+        key: "data",
+        ok: hasData,
+        label: hasData ? "Has filing data" : "No data in period",
+        detail: hasData ? `${gstr1Rows.length} rate slab${gstr1Rows.length === 1 ? "" : "s"}` : "Select a period with activity",
+      },
+      {
+        key: "recon",
+        ok: reconOk,
+        label: reconOk ? "GSTR-1 ↔ 3B in sync" : "GSTR-1 ↔ 3B mismatch",
+        detail: reconOk ? "Variance < ₹0.50" : `Off by ${formatCurrency(Math.abs(recon?.variance || 0))}`,
+      },
+      {
+        key: "itc",
+        ok: itcSafe,
+        warn: itcWarn,
+        label: expiredCount > 0 ? "ITC past cutoff" : warningCount > 0 ? "ITC nearing cutoff" : "ITC inside cutoff",
+        detail: expiredCount > 0
+          ? `${expiredCount} invoice${expiredCount === 1 ? "" : "s"} forfeit`
+          : warningCount > 0
+            ? `${warningCount} due within 90 days`
+            : "No urgent ITC",
+        href: (expiredCount > 0 || warningCount > 0) ? "?tab=aging" : undefined,
+      },
+      {
+        key: "balance",
+        ok: gstr3b.input_tax_credit.total > 0 || gstr3b.output_tax.total > 0,
+        label: "Tax ledger populated",
+        detail: gstr3b.input_tax_credit.total === 0 && gstr3b.output_tax.total === 0 ? "Awaiting invoices" : "Output + ITC computed",
+      },
+    ];
+    const passed = checks.filter((c) => c.ok).length;
+    const total = checks.length;
+    return { checks, passed, total, ready: passed === total, hydrating: false };
+  }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, recon, aging, isHydrating]);
+
   return (
     <div className={cn("space-y-4", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-5")}>
       <Breadcrumbs items={[{ label: "Reports", href: "/billing/reports" }, { label: "GST" }]} />
@@ -333,19 +456,141 @@ export default function GSTSummary() {
         )}
       </motion.div>
 
-      {/* Stats (always visible) */}
-      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Stats — compact, dense, and importantly: don't render "₹0" while
+          the API is in flight. Show a skeleton dash instead so users don't
+          think the period has zero data when it just hasn't loaded yet.
+          Uses compact-currency (₹2.86L) so a 4-column grid doesn't have to
+          cram ₹1,39,363.59 into a stat card on a 1280px screen. The full
+          amount is in the title attribute for accessibility.
+
+          5-card layout: Outward · Output Tax · Period ITC · Carry-fwd ·
+          Net Tax. The Carry-fwd tile surfaces the previous-year opening
+          ITC (from the ECRRS ledger) which used to be buried inside the
+          GSTR-3B tab's Table 4. Click-through into the ITC Ledger tab. */}
+      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
-          { label: "Outward Supply", value: formatCurrency(totalOutward), color: "text-chart-1" },
-          { label: "Output Tax", value: formatCurrency(totalOutwardTax), color: "text-chart-3" },
-          { label: "ITC Available", value: formatCurrency(totalITC), color: "text-success" },
-          { label: "Net Tax", value: formatCurrency(Math.abs(netTax)), color: netTax >= 0 ? "text-destructive" : "text-success" },
-        ].map((s) => (
-          <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
-            <p className="text-[10px] text-muted-foreground font-medium">{s.label}</p>
-            <p className={cn("font-display font-bold mt-1", s.color, isMobile ? "text-sm" : "text-xl")}>{s.value}</p>
-          </motion.div>
-        ))}
+          { key: "outward", label: "Outward Supply", raw: totalOutward, color: "text-chart-1", sub: "Sales + tax" },
+          { key: "output", label: "Output Tax", raw: totalOutwardTax, color: "text-chart-3", sub: "CGST + SGST + IGST" },
+          { key: "itc", label: "Period ITC", raw: totalITC, color: "text-success", sub: "Current period only" },
+          {
+            key: "carry",
+            label: "Carry-fwd ITC",
+            raw: carryFwdTotal,
+            color: carryFwdTotal > 0 ? "text-success" : "text-muted-foreground",
+            sub: carryFwd.configured
+              ? (carryFwd.as_of ? `As of ${new Date(carryFwd.as_of).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : "From previous FY")
+              : "Set in ITC Ledger →",
+            interactive: true,
+          },
+          { key: "net", label: "Net Tax", raw: Math.abs(netTax), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable (incl. carry-fwd)" : "Refund / Carry to next FY" },
+        ].map((s) => {
+          const Cmp: any = s.interactive ? "button" : "div";
+          return (
+            <motion.div key={s.key} variants={fadeUp}>
+              <Cmp
+                {...(s.interactive ? { onClick: () => setTab("itc-ledger"), type: "button" } : {})}
+                className={cn(
+                  "stat-card rounded-2xl p-4 w-full text-left transition-all",
+                  s.interactive && "hover:bg-secondary/30 hover:border-primary/30 cursor-pointer"
+                )}
+                title={isHydrating ? "Loading" : formatCurrency(s.raw)}
+              >
+                <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
+                {isHydrating ? (
+                  <div className="mt-1.5 h-6 w-16 rounded bg-muted/40 animate-pulse" />
+                ) : (
+                  <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>
+                    {formatCompactCurrency(s.raw)}
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">{s.sub}</p>
+              </Cmp>
+            </motion.div>
+          );
+        })}
+      </motion.div>
+
+      {/* Carry-forward detail strip — visible when there's a non-zero
+          opening balance. Lets the user see exactly what comes from where
+          before clicking into the ledger. Hidden while loading and when
+          everything is zero (so the page isn't loud about a feature the
+          user hasn't set up yet). */}
+      {!isHydrating && carryFwdTotal > 0 && (
+        <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+          className="elevated-card rounded-2xl p-3 border-l-4 border-l-success/50 flex items-center gap-3 flex-wrap">
+          <div className="w-8 h-8 rounded-lg bg-success/10 text-success flex items-center justify-center shrink-0">
+            <Clock className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-semibold text-foreground">Previous-year carry-forward ITC</p>
+            <p className="text-[11px] text-muted-foreground tabular-nums">
+              CGST <span className="text-foreground font-medium">{formatCurrency(carryFwd.cgst)}</span> ·{" "}
+              SGST <span className="text-foreground font-medium">{formatCurrency(carryFwd.sgst)}</span> ·{" "}
+              IGST <span className="text-foreground font-medium">{formatCurrency(carryFwd.igst)}</span> ·{" "}
+              <span className="text-foreground font-semibold">Total {formatCurrency(carryFwdTotal)}</span>
+              {carryFwd.business_count > 1 && <span className="text-muted-foreground/70"> · across {carryFwd.business_count} businesses</span>}
+            </p>
+          </div>
+          <button onClick={() => setTab("itc-ledger")} className="text-[11px] font-semibold text-primary hover:underline shrink-0">
+            Edit ledger →
+          </button>
+        </motion.div>
+      )}
+
+      {/* Filing-readiness scoreboard — at-a-glance "am I safe to file?".
+          While loading, every check shows a neutral "Checking…" rather than
+          falsely claiming "no data" before the API resolves. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+        className={cn("elevated-card rounded-2xl p-4 border-l-4",
+          readiness.hydrating ? "border-l-muted-foreground/30" :
+          readiness.ready ? "border-l-success" :
+          readiness.passed >= readiness.total - 1 ? "border-l-warning" : "border-l-destructive"
+        )}>
+        <div className="flex items-start gap-3 flex-wrap">
+          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+            readiness.hydrating ? "bg-muted/30 text-muted-foreground" :
+            readiness.ready ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
+          )}>
+            {readiness.hydrating ? <Loader2 className="w-5 h-5 animate-spin" /> :
+              readiness.ready ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <p className="text-[13px] font-semibold text-foreground">Filing readiness</p>
+              <span className="text-[11px] text-muted-foreground">
+                {readiness.hydrating ? (
+                  <span>Checking the four signals…</span>
+                ) : (
+                  <>
+                    <span className={cn("font-bold tabular-nums", readiness.ready ? "text-success" : readiness.passed >= readiness.total - 1 ? "text-warning" : "text-destructive")}>{readiness.passed}</span>
+                    <span className="text-muted-foreground">/{readiness.total} checks passing</span>
+                  </>
+                )}
+              </span>
+            </div>
+            <div className="mt-2 grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+              {readiness.checks.map((c) => {
+                const pending = (c as any).pending;
+                const cls = pending ? "text-muted-foreground" : c.ok ? "text-success" : (c as any).warn ? "text-warning" : "text-destructive";
+                const Icon = pending ? Loader2 : c.ok ? CheckCircle2 : (c as any).warn ? AlertTriangle : XCircle;
+                const inner = (
+                  <div className="flex items-start gap-2 p-2 rounded-lg bg-secondary/20 border border-border/30 hover:bg-secondary/30 transition-colors">
+                    <Icon className={cn("w-3.5 h-3.5 shrink-0 mt-0.5", cls, pending && "animate-spin")} />
+                    <div className="min-w-0">
+                      <p className={cn("text-[11px] font-semibold", cls)}>{c.label}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{c.detail}</p>
+                    </div>
+                  </div>
+                );
+                return (c as any).href && !pending ? (
+                  <button key={c.key} onClick={() => setTab("aging")} className="text-left">{inner}</button>
+                ) : (
+                  <div key={c.key}>{inner}</div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </motion.div>
 
       {/* GSTR-1 vs GSTR-3B reconciliation banner — only shown when there's a real variance */}
@@ -363,16 +608,36 @@ export default function GSTSummary() {
         </motion.div>
       )}
 
-      {/* Monthly tax trend chart (always visible) */}
+      {/* Monthly tax trend — compact header with YTD totals so a flat chart
+          (e.g. early in the FY when only Apr has data) still conveys useful
+          info at a glance. Shrunk vertical footprint by ~30% so it doesn't
+          dominate the page. */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}
-        className="elevated-card rounded-2xl p-5">
-        <h2 className="text-[13px] font-display font-semibold text-foreground mb-3">Tax Trend (₹k)</h2>
-        <div className={cn(isMobile ? "h-[160px]" : "h-[220px]")}>
+        className="elevated-card rounded-2xl p-4">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+          <h2 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider">Monthly tax trend</h2>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-1))]" />
+              <span className="text-muted-foreground">Output</span>
+              <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(monthlyTax.reduce((s, m) => s + (m.output * 1000), 0))}</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-2))]" />
+              <span className="text-muted-foreground">ITC</span>
+              <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(monthlyTax.reduce((s, m) => s + (m.itc * 1000), 0))}</span>
+            </span>
+          </div>
+        </div>
+        <div className={cn(isMobile ? "h-[140px]" : "h-[160px]")}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyTax} barGap={2}>
+            <BarChart data={monthlyTax} barGap={2} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
               <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} tickFormatter={isMobile ? (v: string) => v.slice(0, 1) : undefined} />
-              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={35} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(value: number) => [`₹${value.toFixed(1)}k`, undefined]} />
+              {/* Tick + tooltip both go through formatChartK so we don't
+                  render "8.0Lk" / "₹6107.2k" — the chart datum is already in
+                  thousands, so values ≥ 100 are lakhs (1L = 100k). */}
+              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => formatChartK(v, false)} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(value: number) => [formatChartK(value), undefined]} />
               <Bar dataKey="output" name="Output" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]}>
                 {monthlyTax.map((entry, i) => <Cell key={i} fill={entry.isCurrent ? "hsl(var(--primary))" : "hsl(var(--chart-1))"} opacity={entry.isCurrent ? 1 : 0.6} />)}
               </Bar>
@@ -396,55 +661,131 @@ export default function GSTSummary() {
         {/* Summary tab — rate slab + GSTR-3B + HSN */}
         {activeTab === "summary" && (
           <div className="p-5 space-y-5">
-            {/* Rate slab breakdown */}
+            {/* Rate slab breakdown — split "Total Tax" (CGST+SGST+IGST) from
+                "Inv. Total" (taxable + tax). Previously a single "Total Tax"
+                column showed the gross invoice total, which made a 3% slab
+                look like it taxed at 100% (₹37L taxable → ₹38L "Total Tax").
+                Now the math is unambiguous and matches GSTR-1 conventions. */}
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Rate-wise Breakdown (Outward)</h3>
               <div className="overflow-x-auto rounded-lg border border-border/40">
                 <table className="table-premium text-[12px]">
-                  <thead><tr>{["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Invoices"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                  <thead><tr>{["Rate", "Taxable", "CGST", "SGST", "IGST", "Total Tax", "Inv. Total", "Invoices"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                   <tbody>
                     {gstr1Rows.map((r: any, i: number) => (
                       <motion.tr key={r.rate} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
-                        <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td><td className="font-medium text-foreground">{formatCurrency(r.taxable)}</td><td>{formatCurrency(r.cgst)}</td><td>{formatCurrency(r.sgst)}</td><td>{formatCurrency(r.igst)}</td><td className="font-semibold text-foreground">{formatCurrency(r.total)}</td><td className="text-muted-foreground">{r.invoice_count}</td>
+                        <td><span className="premium-badge bg-primary/12 text-primary">{r.rate}%</span></td>
+                        <td className="font-medium text-foreground tabular-nums">{formatCurrency(r.taxable)}</td>
+                        <td className="tabular-nums">{formatCurrency(r.cgst)}</td>
+                        <td className="tabular-nums">{formatCurrency(r.sgst)}</td>
+                        <td className="tabular-nums">{formatCurrency(r.igst)}</td>
+                        <td className="font-semibold text-foreground tabular-nums">{formatCurrency(r.tax_total)}</td>
+                        <td className="tabular-nums text-muted-foreground">{formatCurrency(r.gross_total)}</td>
+                        <td className="text-muted-foreground">{r.invoice_count}</td>
                       </motion.tr>
                     ))}
-                    {gstr1Rows.length === 0 && <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">{summaryLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</span> : "No data for selected period"}</td></tr>}
+                    {gstr1Rows.length === 0 && <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">{summaryLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</span> : "No data for selected period"}</td></tr>}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* GSTR-3B summary table */}
+            {/* GSTR-3B summary table — now five rows:
+                  Output Tax · Period ITC · Carry-fwd ITC · Effective ITC ·
+                  Net Tax Payable (after carry-fwd).
+                The Net Tax row uses the effective figure that the user
+                actually pays — silent carry-forward was making this number
+                look wrong on FY views where the period had ₹0 ITC but the
+                user had a real opening balance from the previous FY. */}
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">GSTR-3B Summary</h3>
               <div className="overflow-x-auto rounded-lg border border-border/40">
                 <table className="table-premium text-[12px]">
                   <thead><tr><th></th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th></tr></thead>
                   <tbody>
-                    <tr><td className="font-medium">Output Tax (Sales)</td><td className="text-right">{formatCurrency(gstr3b.output_tax.cgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.sgst)}</td><td className="text-right">{formatCurrency(gstr3b.output_tax.igst)}</td><td className="text-right font-semibold">{formatCurrency(gstr3b.output_tax.total)}</td></tr>
-                    <tr><td className="font-medium text-success">Input Tax Credit</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td><td className="text-right text-success">{formatCurrency(gstr3b.input_tax_credit.igst)}</td><td className="text-right font-semibold text-success">{formatCurrency(gstr3b.input_tax_credit.total)}</td></tr>
-                    <tr className="border-t-2 border-border"><td className="font-bold">Net Tax Payable</td><td className={cn("text-right font-bold", gstr3b.net_payable.cgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.cgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.sgst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.sgst)}</td><td className={cn("text-right font-bold", gstr3b.net_payable.igst >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(gstr3b.net_payable.igst)}</td><td className={cn("text-right font-bold text-lg", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</td></tr>
+                    <tr>
+                      <td className="font-medium">Output Tax (Sales)</td>
+                      <td className="text-right tabular-nums">{formatCurrency(gstr3b.output_tax.cgst)}</td>
+                      <td className="text-right tabular-nums">{formatCurrency(gstr3b.output_tax.sgst)}</td>
+                      <td className="text-right tabular-nums">{formatCurrency(gstr3b.output_tax.igst)}</td>
+                      <td className="text-right font-semibold tabular-nums">{formatCurrency(gstr3b.output_tax.total)}</td>
+                    </tr>
+                    <tr>
+                      <td className="font-medium text-success">Period ITC</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.cgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.sgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.igst)}</td>
+                      <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.total)}</td>
+                    </tr>
+                    <tr className={cn(!carryFwd.configured && "opacity-70")}>
+                      <td className="font-medium text-success">
+                        <div className="flex items-center gap-2">
+                          <span>+ Carry-fwd ITC</span>
+                          {!carryFwd.configured && (
+                            <button onClick={() => setTab("itc-ledger")} className="text-[10px] text-primary hover:underline" title="Set opening balance in ITC Ledger">
+                              set →
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(carryFwd.cgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(carryFwd.sgst)}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(carryFwd.igst)}</td>
+                      <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(carryFwdTotal)}</td>
+                    </tr>
+                    <tr className="border-t border-border/40 bg-foreground/[0.02]">
+                      <td className="font-medium text-success">= Effective ITC</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.cgst + Number(carryFwd.cgst || 0))}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.sgst + Number(carryFwd.sgst || 0))}</td>
+                      <td className="text-right text-success tabular-nums">{formatCurrency(gstr3b.input_tax_credit.igst + Number(carryFwd.igst || 0))}</td>
+                      <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(effective.effective_itc)}</td>
+                    </tr>
+                    <tr className="border-t-2 border-border">
+                      <td className="font-bold">Net Tax Payable</td>
+                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.cgst - gstr3b.input_tax_credit.cgst - Number(carryFwd.cgst || 0)) >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(gstr3b.output_tax.cgst - gstr3b.input_tax_credit.cgst - Number(carryFwd.cgst || 0))}
+                      </td>
+                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.sgst - gstr3b.input_tax_credit.sgst - Number(carryFwd.sgst || 0)) >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(gstr3b.output_tax.sgst - gstr3b.input_tax_credit.sgst - Number(carryFwd.sgst || 0))}
+                      </td>
+                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.igst - gstr3b.input_tax_credit.igst - Number(carryFwd.igst || 0)) >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(gstr3b.output_tax.igst - gstr3b.input_tax_credit.igst - Number(carryFwd.igst || 0))}
+                      </td>
+                      <td className={cn("text-right font-bold text-lg tabular-nums", netTax >= 0 ? "text-destructive" : "text-success")}>
+                        {formatCurrency(Math.abs(netTax))}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+              {/* When carry-fwd is non-zero, an inline footnote spelling out
+                  the math so the user can sanity-check against their books. */}
+              {carryFwdTotal > 0 && (
+                <p className="text-[11px] text-muted-foreground px-1">
+                  Net Tax = Output Tax {formatCurrency(gstr3b.output_tax.total)} − Period ITC {formatCurrency(gstr3b.input_tax_credit.total)} − Carry-fwd {formatCurrency(carryFwdTotal)} = <span className={cn("font-semibold", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</span> {netTax < 0 && "carry-fwd to next period"}
+                </p>
+              )}
             </div>
 
-            {/* HSN summary */}
+            {/* HSN summary — "Total Value" (gross = taxable + tax) is the
+                column the GST portal asks for in GSTR-1's HSN section. The
+                old single-word "Total" header was ambiguous (Total of what?
+                Tax? Items?) — clarified here. */}
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary</h3>
               <div className="overflow-x-auto rounded-lg border border-border/40">
                 <table className="table-premium text-[12px]">
-                  <thead><tr><th>HSN Code</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total</th><th className="text-right">Items</th></tr></thead>
+                  <thead><tr><th>HSN Code</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th><th className="text-right">Total Value</th><th className="text-right">Items</th></tr></thead>
                   <tbody>
                     {hsnRows.map((h: any, i: number) => (
                       <motion.tr key={h.hsn_code} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                        <td><span className="premium-badge bg-chart-2/12 text-chart-2 font-mono">{h.hsn_code}</span></td>
-                        <td className="text-right tabular-nums">{h.qty.toFixed(3)}</td>
-                        <td className="text-right font-medium">{formatCurrency(h.taxable)}</td>
-                        <td className="text-right">{formatCurrency(h.cgst)}</td>
-                        <td className="text-right">{formatCurrency(h.sgst)}</td>
-                        <td className="text-right">{formatCurrency(h.igst)}</td>
-                        <td className="text-right font-semibold">{formatCurrency(h.total)}</td>
+                        <td><span className="premium-badge bg-chart-2/12 text-chart-2 font-mono">{h.hsn_code || "N/A"}</span></td>
+                        <td className="text-right tabular-nums">{Number(h.qty || 0).toFixed(3)}</td>
+                        <td className="text-right font-medium tabular-nums">{formatCurrency(h.taxable)}</td>
+                        <td className="text-right tabular-nums">{formatCurrency(h.cgst)}</td>
+                        <td className="text-right tabular-nums">{formatCurrency(h.sgst)}</td>
+                        <td className="text-right tabular-nums">{formatCurrency(h.igst)}</td>
+                        <td className="text-right font-semibold tabular-nums">{formatCurrency(h.total)}</td>
                         <td className="text-right text-muted-foreground">{h.count}</td>
                       </motion.tr>
                     ))}
@@ -559,21 +900,21 @@ export default function GSTSummary() {
                         <thead><tr><th>Row</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
                         <tbody>
                           <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(A) ITC Available</td></tr>
-                          <tr><td className="pl-6">4(A)(1) Import of goods</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.cgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.sgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(A)(1) Import of goods</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.cgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.sgst)}</td><td className="text-right">{formatCurrency(table4.a_1_imports_goods.igst)}</td></tr>
                           <tr><td className="pl-6">4(A)(2) Import of services</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.cgst)}</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.sgst)}</td><td className="text-right">{formatCurrency(table4.a_2_imports_services.igst)}</td></tr>
-                          <tr><td className="pl-6">4(A)(3) Inward supplies (RCM)</td><td className="text-right">{formatCurrency(table4.a_3_rcm.cgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.sgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(A)(3) Inward supplies (RCM)</td><td className="text-right">{formatCurrency(table4.a_3_rcm.cgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.sgst)}</td><td className="text-right">{formatCurrency(table4.a_3_rcm.igst)}</td></tr>
                           <tr><td className="pl-6">4(A)(4) Inward from ISD</td><td className="text-right">{formatCurrency(table4.a_4_isd.cgst)}</td><td className="text-right">{formatCurrency(table4.a_4_isd.sgst)}</td><td className="text-right">{formatCurrency(table4.a_4_isd.igst)}</td></tr>
-                          <tr><td className="pl-6">4(A)(5) All other ITC</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.cgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.sgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(A)(5) All other ITC</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.cgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.sgst)}</td><td className="text-right">{formatCurrency(table4.a_5_all_other_itc.igst)}</td></tr>
                           <tr className="font-semibold bg-secondary/10"><td className="pl-6">Total 4(A)</td><td className="text-right">{formatCurrency(table4.a_total.cgst)}</td><td className="text-right">{formatCurrency(table4.a_total.sgst)}</td><td className="text-right">{formatCurrency(table4.a_total.igst)}</td></tr>
 
                           <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(B) ITC Reversed</td></tr>
-                          <tr><td className="pl-6">4(B)(1) Non-reclaimable (Rules 38, 42, 43, 17(5))</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(B)(1) Non-reclaimable (Rules 38, 42, 43, 17(5))</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_1_non_reclaimable.igst)}</td></tr>
                           <tr><td className="pl-6">4(B)(2) Reclaimable (Rule 37, Sec 16(2))</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.cgst)}</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.sgst)}</td><td className="text-right">{formatCurrency(table4.b_2_reclaimable.igst)}</td></tr>
 
                           <tr className="font-bold border-t-2 border-border"><td>4(C) Net ITC available</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.cgst)}</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.sgst)}</td><td className="text-right text-success">{formatCurrency(table4.c_net_itc.igst)}</td></tr>
 
                           <tr><td colSpan={4} className="bg-secondary/20 font-semibold text-[11px] uppercase tracking-wider">4(D) Other Details</td></tr>
-                          <tr><td className="pl-6">4(D)(1) ITC reclaimed</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.cgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.sgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.igst)}</td></tr>
+                          <tr className="bg-foreground/[0.02]"><td className="pl-6">4(D)(1) ITC reclaimed</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.cgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.sgst)}</td><td className="text-right">{formatCurrency(table4.d_1_reclaimed.igst)}</td></tr>
                           <tr><td className="pl-6">4(D)(2) Ineligible ITC</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.cgst)}</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.sgst)}</td><td className="text-right">{formatCurrency(table4.d_2_ineligible.igst)}</td></tr>
                         </tbody>
                       </table>
@@ -691,15 +1032,17 @@ export default function GSTSummary() {
                       const reclaimed = (table4?.d_1_reclaimed?.[k] || 0);
                       const closing = opening + reversed - reclaimed;
                       return (
-                        <div key={k} className="flex items-center justify-between border-b border-border/30 pb-2 last:border-0">
+                        <div key={k} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-border/30 pb-2 last:border-0 gap-1">
                           <span className="font-mono text-[11px] uppercase text-muted-foreground">{k}</span>
-                          <div className="text-right tabular-nums text-[12px]">
+                          {/* Stack vertically below sm so the +/-/= chain doesn't wrap awkwardly on
+                              narrow viewports. On sm+ keep the single-line equation. */}
+                          <div className="text-right tabular-nums text-[12px] flex flex-wrap items-baseline justify-end gap-x-1">
                             <span className="text-muted-foreground">{formatCurrency(opening)}</span>
-                            <span className="text-muted-foreground mx-1">+</span>
+                            <span className="text-muted-foreground">+</span>
                             <span className="text-warning">{formatCurrency(reversed)}</span>
-                            <span className="text-muted-foreground mx-1">−</span>
+                            <span className="text-muted-foreground">−</span>
                             <span className="text-success">{formatCurrency(reclaimed)}</span>
-                            <span className="text-muted-foreground mx-1">=</span>
+                            <span className="text-muted-foreground">=</span>
                             <span className="font-bold text-foreground">{formatCurrency(closing)}</span>
                           </div>
                         </div>
@@ -747,8 +1090,8 @@ export default function GSTSummary() {
                   <div className="space-y-2">
                     <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Action needed ({aging.urgent_invoices.length})</h4>
                     <div className="overflow-x-auto rounded-lg border border-border/40">
-                      <table className="table-premium text-[12px] min-w-[640px]">
-                        <thead><tr><th>Invoice #</th><th>Date</th><th>Tax</th><th>Cutoff</th><th>Days left</th><th>Status</th></tr></thead>
+                      <table className="table-premium text-[12px] min-w-[720px]">
+                        <thead><tr><th>Invoice #</th><th>Date</th><th>Tax</th><th>Cutoff</th><th>Days left</th><th>Status</th><th className="text-right">Fix</th></tr></thead>
                         <tbody>
                           {aging.urgent_invoices.map((inv: any) => (
                             <tr key={inv.id}>
@@ -761,6 +1104,21 @@ export default function GSTSummary() {
                                 {inv.bucket === "expired"
                                   ? <span className="premium-badge bg-destructive/15 text-destructive">Forfeit</span>
                                   : <span className="premium-badge bg-warning/15 text-warning">Claim soon</span>}
+                              </td>
+                              <td className="text-right">
+                                {/* One-tap path to the editable invoice. Expired
+                                    rows still get a "View" link because you
+                                    might need to look at the document for
+                                    audit purposes, even if you can't reclaim
+                                    the ITC. */}
+                                <RouterLink
+                                  to={inv.bucket === "expired" ? `/billing/invoice/${inv.id}` : `/billing/invoice/edit/${inv.id}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                                  title={inv.bucket === "expired" ? "Open invoice (ITC already forfeit)" : "Edit invoice to fix and reclaim ITC"}
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  {inv.bucket === "expired" ? "View" : "Fix"}
+                                </RouterLink>
                               </td>
                             </tr>
                           ))}

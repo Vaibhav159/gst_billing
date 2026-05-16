@@ -1,14 +1,22 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { toCSV, downloadCSV } from "@/utils/csv";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { Link, useOutletContext, useNavigate } from "react-router-dom";
+import { Link, useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Bot, Printer, ArrowUpDown, Eye, Pencil,
   Trash2, Copy, CheckSquare, Square, LayoutGrid, LayoutList, TrendingUp,
-  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet, QrCode,
+  TrendingDown, Receipt, IndianRupee, Calendar, FileText, SlidersHorizontal, Share2, Loader2, FileSpreadsheet, QrCode, MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
-import { financialYears, formatCurrency, formatDate } from "@/utils/mockData";
+import { financialYears, formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useDashboardStats } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -45,6 +53,16 @@ export default function InvoiceList() {
   const [monthFilter, setMonthFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
 
+  // Drill-down URL params from DataQualityBanner.
+  // `?dups=1` → only colliding invoice numbers, `?empty=1` → no-item invoices,
+  // `?no_hsn=1` → invoices with line items missing HSN. The user lands here
+  // already filtered; clearing happens via the existing Clear button below.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const dupsFilter = searchParams.get("dups") === "1";
+  const emptyFilter = searchParams.get("empty") === "1";
+  const noHsnFilter = searchParams.get("no_hsn") === "1";
+  const hasHygieneFilter = dupsFilter || emptyFilter || noHsnFilter;
+
   // Build filters object for the API-driven hook
   const apiFilters: InvoiceFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
@@ -53,7 +71,10 @@ export default function InvoiceList() {
     typeFilter,
     fyFilter,
     monthFilter,
-  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter]);
+    dups: dupsFilter || undefined,
+    empty: emptyFilter || undefined,
+    noHsn: noHsnFilter || undefined,
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
@@ -65,6 +86,28 @@ export default function InvoiceList() {
     if (sortBy === "total") return dir * (a.total - b.total);
     return dir * a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, { numeric: true });
   });
+
+  // Per-day rollups so we can inject "Mon, 12 May 2026 · 4 invoices · ₹X"
+  // separator rows when the table is sorted by date. Lets the eye spot
+  // busy / quiet days at a glance without leaving the list view.
+  const dayHeaderInfo = useMemo(() => {
+    const info = new Map<string, { dateLabel: string; count: number; total: number }>();
+    for (const inv of filtered) {
+      const key = inv.invoice_date;
+      if (!key) continue;
+      const cur = info.get(key);
+      if (cur) {
+        cur.count += 1;
+        cur.total += Number(inv.total) || 0;
+      } else {
+        const d = new Date(key);
+        const weekday = d.toLocaleDateString("en-IN", { weekday: "short" });
+        const day = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+        info.set(key, { dateLabel: `${weekday}, ${day}`, count: 1, total: Number(inv.total) || 0 });
+      }
+    }
+    return info;
+  }, [filtered]);
 
   const statsInfo = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, count: 0 };
   const totalOutward = statsInfo.outward;
@@ -81,16 +124,46 @@ export default function InvoiceList() {
     toast({ title: "Exported", description: `${filtered.length} invoices exported to CSV` });
   };
 
+  // Stat cards — match the GST/Reports visual idiom: compact currency on
+  // the value (₹61.07L beats ₹61,07,168 for fit + scannability), full value
+  // in the title attr for screen readers / hover, and a sub-line that
+  // pulls double duty as context AND as an extra figure (count or average).
+  // 5 cards: Sales · Purchases · Net Revenue · Tax · Avg Invoice. Avg gives
+  // a quick read on whether the period skews toward small or large invoices.
+  const outwardInvCount = useMemo(
+    () => filtered.filter((i) => i.type === "OUTWARD").length,
+    [filtered]
+  );
+  const inwardInvCount = useMemo(
+    () => filtered.filter((i) => i.type === "INWARD").length,
+    [filtered]
+  );
+  const avgInvoice = totalCount > 0 ? (totalOutward + totalInward) / totalCount : 0;
   const stats = [
-    { label: "Sales", value: formatCurrency(totalOutward), sub: "Total revenue", icon: TrendingUp, color: "text-success" },
-    { label: "Purchases", value: formatCurrency(totalInward), sub: "Total spend", icon: TrendingDown, color: "text-warning" },
-    { label: "Net Revenue", value: formatCurrency(totalOutward - totalInward), sub: "Sales-Purchases", icon: IndianRupee, color: "text-success" },
-    { label: "Tax", value: formatCurrency(totalTaxCollected), sub: "GST total", icon: Receipt, color: "text-chart-3" },
+    { label: "Sales", value: formatCompactCurrency(totalOutward), full: formatCurrency(totalOutward), sub: outwardInvCount > 0 ? `${outwardInvCount} outward inv.` : "—", icon: TrendingUp, color: "text-success" },
+    { label: "Purchases", value: formatCompactCurrency(totalInward), full: formatCurrency(totalInward), sub: inwardInvCount > 0 ? `${inwardInvCount} inward inv.` : "—", icon: TrendingDown, color: "text-warning" },
+    { label: "Net Revenue", value: formatCompactCurrency(totalOutward - totalInward), full: formatCurrency(totalOutward - totalInward), sub: "Sales − Purchases", icon: IndianRupee, color: "text-success" },
+    { label: "Tax", value: formatCompactCurrency(totalTaxCollected), full: formatCurrency(totalTaxCollected), sub: "GST collected", icon: Receipt, color: "text-chart-3" },
+    { label: "Avg Invoice", value: formatCompactCurrency(avgInvoice), full: formatCurrency(avgInvoice), sub: totalCount > 0 ? `Across ${totalCount} inv.` : "No invoices", icon: Calendar, color: "text-chart-2" },
   ];
 
   const clearFilters = () => {
     setBizFilter("all"); setCustFilter("all"); setTypeFilter("all"); setFyFilter(selectedFY); setMonthFilter("all"); setSearch("");
+    // Also drop hygiene URL params so "Clear" really does clear everything.
+    if (hasHygieneFilter) {
+      searchParams.delete("dups"); searchParams.delete("empty"); searchParams.delete("no_hsn");
+      setSearchParams(searchParams, { replace: true });
+    }
   };
+
+  // Human-readable label for the hygiene filter, used by the chip-style banner
+  const hygieneFilterLabel = dupsFilter
+    ? "Duplicate invoice numbers"
+    : emptyFilter
+      ? "Invoices with zero line items"
+      : noHsnFilter
+        ? "Invoices with HSN-less line items"
+        : null;
 
   // ─── MOBILE VIEW ───
   if (isMobile) {
@@ -278,28 +351,70 @@ export default function InvoiceList() {
               </button>
             </>
           )}
-          <button onClick={handleExportCSV} className="premium-btn-ghost text-[13px]"><Download className="w-4 h-4" /> CSV</button>
-          <button onClick={() => {
-            downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`);
-            toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
-          }} className="premium-btn-ghost text-[13px]"><FileSpreadsheet className="w-4 h-4" /> Excel</button>
-          <Link to="/billing/invoice/import" className="premium-btn-ghost text-[13px]"><Upload className="w-4 h-4" /> Import</Link>
+          {/* AI Import + the three workflow buttons (Import, Bulk PDF, QR
+              Verify) stay inline because the user reaches for them often.
+              Only the two Export options collapse under "More ▾" — they're
+              the rarely-used "send a snapshot to the CA" actions. New
+              Invoice keeps the primary spot. */}
           <Link to="/billing/invoice/ai-import" className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Bot className="w-4 h-4" /> AI Import</Link>
+          <Link to="/billing/invoice/import" className="premium-btn-ghost text-[13px]"><Upload className="w-4 h-4" /> Import</Link>
           <Link to="/billing/bulk-pdf" className="premium-btn-ghost text-[13px]"><FileText className="w-4 h-4" /> Bulk PDF</Link>
           <Link to="/billing/qr-scanner" className="premium-btn-ghost text-[13px]"><QrCode className="w-4 h-4" /> QR Verify</Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="premium-btn-ghost text-[13px]" title="Export the filtered list">
+                <MoreHorizontal className="w-4 h-4" /> Export
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Export ({filtered.length} {filtered.length === 1 ? "invoice" : "invoices"})</DropdownMenuLabel>
+              <DropdownMenuItem onClick={handleExportCSV}>
+                <Download className="w-4 h-4 mr-2" /> Export to CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`);
+                toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
+              }}>
+                <FileSpreadsheet className="w-4 h-4 mr-2" /> Export to Excel
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New Invoice</Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Hygiene-filter banner — when the user arrives via a DataQualityBanner
+          drill-down, make it explicit *why* the list looks short, and give a
+          one-click escape hatch back to the unfiltered view. */}
+      {hygieneFilterLabel && (
+        <div className="elevated-card rounded-2xl p-3.5 border-l-4 border-l-warning flex items-center gap-3">
+          <SlidersHorizontal className="w-4 h-4 text-warning shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-semibold text-foreground">Filtered: {hygieneFilterLabel}</p>
+            <p className="text-[11px] text-muted-foreground">Showing only invoices flagged by data-quality scan.</p>
+          </div>
+          <button onClick={clearFilters} className="text-[12px] font-semibold text-primary hover:underline shrink-0">
+            Clear filter
+          </button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {stats.map((s, i) => (
-          <motion.div key={s.label} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07, duration: 0.4 }} className="stat-card rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
-              <s.icon className={cn("w-4 h-4", s.color)} />
+          <motion.div
+            key={s.label}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.4 }}
+            className="stat-card rounded-2xl p-4"
+            title={s.full}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
+              <s.icon className={cn("w-3.5 h-3.5", s.color)} />
             </div>
-            <p className={cn("text-xl font-display font-bold", s.color)}>{s.value}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">{s.sub}</p>
+            <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", s.color)}>{s.value}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.sub}</p>
           </motion.div>
         ))}
       </div>
@@ -369,32 +484,87 @@ export default function InvoiceList() {
               <th><button onClick={() => { setSortBy("date"); setSortDir(d => sortBy === "date" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Date {sortBy === "date" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
               <th>Customer</th><th>Business</th>
               <th><button onClick={() => { setSortBy("total"); setSortDir(d => sortBy === "total" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Amount {sortBy === "total" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
-              <th>Tax</th><th>Type</th><th>Actions</th>
+              <th>Tax</th><th title="Effective tax rate inferred from tax÷subtotal — handy for spotting wrong rate slabs at a glance.">Rate</th><th>Type</th><th>Actions</th>
             </tr></thead>
             <tbody>
-              {filtered.map((inv, i) => (
-                <motion.tr key={inv.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
-                  <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
-                  <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
-                  <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
-                  <td className="text-foreground font-medium">{inv.customerName}</td>
-                  <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
-                  <td className="font-bold text-foreground">{formatCurrency(inv.total)}</td>
-                  <td className="text-muted-foreground text-[12px]">{formatCurrency(inv.totalTax)}</td>
-                  <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
-                  <td>
-                    <div className="flex items-center gap-0.5">
-                      <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
-                      <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
-                      <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
-                      <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
-                      <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} aria-label="Delete invoice" className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </td>
-                </motion.tr>
-              ))}
-              {filtered.length === 0 && !isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />No invoices found</td></tr>}
-              {isLoading && <tr><td colSpan={9} className="text-center text-muted-foreground py-16"><Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...</td></tr>}
+              {filtered.map((inv, i) => {
+                // When sorted by date, prepend a slim header row whenever the
+                // date changes. Skip when sort != date — the headers don't
+                // make sense if rows aren't date-ordered.
+                const prev = i > 0 ? filtered[i - 1] : null;
+                const showDayHeader = sortBy === "date" && (!prev || prev.invoice_date !== inv.invoice_date);
+                const dayInfo = showDayHeader ? dayHeaderInfo.get(inv.invoice_date) : null;
+                return (
+                  <React.Fragment key={inv.id}>
+                    {showDayHeader && dayInfo && (
+                      <tr className="bg-secondary/20 border-t border-border/40">
+                        <td colSpan={10} className="!py-2 !px-4">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Calendar className="w-3.5 h-3.5 opacity-70" />
+                              <span className="font-semibold text-foreground/80">{dayInfo.dateLabel}</span>
+                              <span className="text-muted-foreground/70">·</span>
+                              <span>{pluralize(dayInfo.count, "invoice")}</span>
+                            </div>
+                            <span className="font-semibold tabular-nums text-foreground/80">{formatCompactCurrency(dayInfo.total)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {(() => {
+                      // Effective tax rate: tax ÷ subtotal × 100. Useful for spotting
+                      // an invoice that should be 3% but somehow rolled out at 5%.
+                      // We snap to the nearest GST slab when within 0.3% so 2.997
+                      // doesn't display as "3.0%" while 5.4 (a real anomaly) does.
+                      const sub = Number(inv.subtotal) || 0;
+                      const tax = Number(inv.totalTax) || 0;
+                      const ratePct = sub > 0 ? (tax / sub) * 100 : 0;
+                      const slabs = [0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28];
+                      const nearestSlab = slabs.find((s) => Math.abs(ratePct - s) < 0.3);
+                      const rateLabel = nearestSlab !== undefined ? `${nearestSlab}%` : `${ratePct.toFixed(1)}%`;
+                      const rateAnomalous = nearestSlab === undefined && ratePct > 0;
+                      return (
+                        <motion.tr initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
+                          <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
+                          <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
+                          <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
+                          <td className="text-foreground font-medium">{inv.customerName}</td>
+                          <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
+                          <td className="font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</td>
+                          <td className="text-muted-foreground text-[12px] tabular-nums">{formatCurrency(inv.totalTax)}</td>
+                          <td className={cn("text-[12px] tabular-nums", rateAnomalous ? "text-warning font-semibold" : "text-muted-foreground")} title={rateAnomalous ? "Not a standard GST slab — open the invoice to verify" : "Tax ÷ subtotal"}>
+                            {ratePct > 0 ? rateLabel : "—"}
+                          </td>
+                          <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
+                      <td>
+                        <div className="flex items-center gap-0.5">
+                          <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
+                          <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
+                          <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
+                          <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
+                          <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} aria-label="Delete invoice" className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                      );
+                    })()}
+                  </React.Fragment>
+                );
+              })}
+              {filtered.length === 0 && !isLoading && (
+                <tr><td colSpan={10} className="text-center text-muted-foreground py-16">
+                  <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-[13px] font-medium text-foreground/70">No invoices found</p>
+                  {(search || bizFilter !== "all" || custFilter !== "all" || typeFilter !== "all" || monthFilter !== "all" || hasHygieneFilter) ? (
+                    <button onClick={clearFilters} className="text-[12px] text-primary hover:underline mt-2 font-medium">Clear filters</button>
+                  ) : (
+                    <Link to="/billing/invoice/add" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline mt-2 font-medium">
+                      <Plus className="w-3 h-3" /> Create your first invoice
+                    </Link>
+                  )}
+                </td></tr>
+              )}
+              {isLoading && <tr><td colSpan={10} className="text-center text-muted-foreground py-16"><Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-primary" />Loading invoices...</td></tr>}
             </tbody>
           </table>
         </div>

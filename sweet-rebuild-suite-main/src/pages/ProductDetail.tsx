@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { useInvoices, useCustomers, useProduct } from "@/hooks/useDataStore";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -51,8 +51,10 @@ export default function ProductDetail() {
     setTimeout(() => setCopiedField(null), 1500);
   };
 
-  // Build monthly data based on FY (Apr-Mar)
-  const fyStartYear = product ? parseInt((product as any).financialYear?.split("-")[0] || new Date().getFullYear().toString()) : new Date().getFullYear();
+  // Build monthly data based on FY (Apr-Mar). Product has no `financialYear`
+  // field on the model — fall back to current FY based on today's date.
+  const today = new Date();
+  const fyStartYear = today.getMonth() + 1 >= 4 ? today.getFullYear() : today.getFullYear() - 1;
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
     const calMonth = i < 9 ? i + 3 : i - 9; // Apr=3, May=4, ..., Mar=2
     const calYear = i < 9 ? fyStartYear : fyStartYear + 1;
@@ -104,17 +106,17 @@ export default function ProductDetail() {
       </motion.div>
 
       {/* Stats */}
-      <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-5")}>
+      <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
         {[
-          { label: "Revenue", value: formatCurrency(totalRevenue), color: "text-success" },
-          { label: "Qty Sold", value: totalQty.toString(), color: "text-chart-3" },
-          { label: "Times Used", value: usageCount.toString(), color: "text-chart-1" },
-          { label: "Tax Collected", value: formatCurrency(totalTax), color: "text-chart-4" },
-          { label: "Avg Rate", value: formatCurrency(avgRate), color: "text-primary" },
+          { label: "Revenue", value: formatCompactCurrency(totalRevenue), full: formatCurrency(totalRevenue), color: "text-success" },
+          { label: "Qty Sold", value: totalQty.toLocaleString("en-IN"), full: `${totalQty} units across all invoices`, color: "text-chart-3" },
+          { label: "Times Used", value: usageCount.toLocaleString("en-IN"), full: `${usageCount} line items reference this product`, color: "text-chart-1" },
+          { label: "Tax Collected", value: formatCompactCurrency(totalTax), full: formatCurrency(totalTax), color: "text-chart-4" },
+          { label: "Avg Rate", value: formatCompactCurrency(avgRate), full: formatCurrency(avgRate) + " per unit", color: "text-primary" },
         ].map((s) => (
-          <div key={s.label} className="elevated-card rounded-2xl p-4">
+          <div key={s.label} className="elevated-card rounded-2xl p-4" title={s.full}>
             <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{s.label}</p>
-            <p className={cn("font-display font-bold tabular-nums mt-1", s.color, isMobile ? "text-base" : "text-2xl")}>{s.value}</p>
+            <p className={cn("font-display font-bold tabular-nums mt-1", s.color, isMobile ? "text-base" : "text-xl")}>{s.value}</p>
           </div>
         ))}
       </div>

@@ -1,11 +1,11 @@
 import { logger } from "@/utils/logger";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatChartK } from "@/utils/mockData";
 import { useBusinesses, useCustomers, useDashboardStats, mapDjangoInvoice } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, FileSpreadsheet, ExternalLink, TrendingUp, Receipt, ArrowUpRight, ArrowDownLeft, BarChart3, PieChart, FileText, Database, FileDown, Loader2 } from "lucide-react";
+import { Download, FileSpreadsheet, ExternalLink, TrendingUp, Receipt, ArrowUpRight, ArrowDownLeft, BarChart3, PieChart, FileText, Database, FileDown, Loader2, Package, Clock, Users } from "lucide-react";
 import { downloadReportExcel, generateReportExcel } from "@/utils/generateReportExcel";
 import ReportPreviewModal from "@/components/ReportPreviewModal";
 import type { Invoice } from "@/hooks/useDataStore";
@@ -43,12 +43,38 @@ export default function Reports() {
 
   const { data: statsData, isLoading: statsLoading } = useDashboardStats(statsFilters);
 
+  // Pull carry-forward ITC from gst_summary so the Reports page matches the
+  // GST page's effective-net calculation (we want a single source of truth
+  // for what the user actually pays). One extra GET; cached at the API
+  // layer so it doesn't add round-trips on repeat renders.
+  const [carryFwd, setCarryFwd] = useState<{ cgst: number; sgst: number; igst: number; total: number; configured: boolean; business_count: number; as_of: string | null }>({
+    cgst: 0, sgst: 0, igst: 0, total: 0, configured: false, business_count: 0, as_of: null,
+  });
+  useEffect(() => {
+    if (!localStorage.getItem("gst_access_token")) return;
+    const params = new URLSearchParams();
+    params.set("start_date", format(startDate, "yyyy-MM-dd"));
+    params.set("end_date", format(endDate, "yyyy-MM-dd"));
+    if (bizFilter !== "all") params.set("business_id", bizFilter);
+    api.get<any>(`invoices/gst_summary/?${params.toString()}`)
+      .then((r) => {
+        if (r.data?.carry_forward_itc) {
+          setCarryFwd(r.data.carry_forward_itc);
+        }
+      })
+      .catch(() => {});
+  }, [startDate, endDate, bizFilter]);
+
   const totals = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, inward_tax: 0, count: 0 };
   const totalSales = totals.outward;
   const totalPurchases = totals.inward;
   const totalTaxCollected = totals.tax;
   const totalITC = totals.inward_tax || 0;
-  const netTax = totalTaxCollected - totalITC;
+  const carryFwdTotal = Number(carryFwd.total || 0);
+  // Effective net tax mirrors the GST page: Output - (Period ITC + Carry-fwd).
+  // Without including the carry-forward, a user with previous-FY credit saw
+  // a Net Tax overstated by exactly the ledger amount — confusing.
+  const netTax = totalTaxCollected - totalITC - carryFwdTotal;
   const totalCount = totals.count;
 
   // Monthly data from server stats
@@ -81,14 +107,30 @@ export default function Reports() {
   }, [statsData?.tax_distribution]);
   const PIE_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))"];
 
-  // Top customers from server stats
+  // Top customers from server stats. Compute % of period sales so a single
+  // glance answers "is one customer ~30% of revenue?" — a real risk signal
+  // for the business owner.
   const topCustomers = useMemo(() => {
-    return (statsData?.top_customers || []).map(c => ({
+    const list = (statsData?.top_customers || []).slice(0, 5).map((c: any) => ({
       name: c.name,
       total: Number(c.total),
       count: (c as any).count || 0,
-    })).slice(0, 5);
-  }, [statsData?.top_customers]);
+    }));
+    const denom = totalSales || list.reduce((s, c) => s + c.total, 0) || 1;
+    return list.map((c) => ({ ...c, pct: (c.total / denom) * 100 }));
+  }, [statsData?.top_customers, totalSales]);
+
+  // Top products (sales by line-item product_name). Same % treatment.
+  const topProducts = useMemo(() => {
+    const list = (statsData?.top_products || []).slice(0, 5).map((p: any) => ({
+      name: p.name,
+      total: Number(p.total),
+      qty: Number(p.qty || 0),
+      hsn: p.hsn || "",
+    }));
+    const denom = list.reduce((s, p) => s + p.total, 0) || 1;
+    return list.map((p) => ({ ...p, pct: (p.total / denom) * 100 }));
+  }, [statsData?.top_products]);
 
   // Outward/inward counts from monthly data
   const outwardCount = useMemo(() => {
@@ -226,43 +268,90 @@ export default function Reports() {
         </div>
       ) : (
         <>
+          {/* Stat row — compact currency (₹2.86L) keeps the 6-card layout
+              readable on 1280px screens. Naming matches the GST page:
+              "Output Tax" (was "Tax Collected"), separate "Period ITC" and
+              "Carry-fwd ITC" tiles so the user can see what's current vs
+              brought forward at a glance. Net Tax is the effective figure
+              (Output − Period ITC − Carry-fwd) — same math as the GSTR-3B
+              Summary table on /gst-summary. */}
           <motion.div variants={stagger} initial="hidden" animate="visible"
-            className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-5")}>
+            className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-6")}>
             {[
-              { label: "Sales", value: formatCurrency(totalSales), icon: ArrowUpRight, color: "text-chart-1", count: outwardCount },
-              { label: "Purchases", value: formatCurrency(totalPurchases), icon: ArrowDownLeft, color: "text-chart-2", count: inwardCount },
-              { label: "Tax Collected", value: formatCurrency(totalTaxCollected), icon: Receipt, color: "text-chart-3", count: null },
-              { label: "ITC", value: formatCurrency(totalITC), icon: TrendingUp, color: "text-success", count: null },
-              { label: "Net Tax", value: formatCurrency(netTax), icon: BarChart3, color: netTax >= 0 ? "text-destructive" : "text-success", count: null },
+              { key: "sales", label: "Sales", raw: totalSales, icon: ArrowUpRight, color: "text-chart-1", sub: outwardCount > 0 ? `${outwardCount} invoice${outwardCount === 1 ? "" : "s"}` : "—" },
+              { key: "purchases", label: "Purchases", raw: totalPurchases, icon: ArrowDownLeft, color: "text-chart-2", sub: inwardCount > 0 ? `${inwardCount} invoice${inwardCount === 1 ? "" : "s"}` : "—" },
+              { key: "output", label: "Output Tax", raw: totalTaxCollected, icon: Receipt, color: "text-chart-3", sub: "CGST + SGST + IGST" },
+              { key: "period_itc", label: "Period ITC", raw: totalITC, icon: TrendingUp, color: "text-success", sub: "Current period only" },
+              {
+                key: "carry",
+                label: "Carry-fwd ITC",
+                raw: carryFwdTotal,
+                icon: Clock,
+                color: carryFwdTotal > 0 ? "text-success" : "text-muted-foreground",
+                sub: carryFwd.configured
+                  ? (carryFwd.as_of ? `As of ${new Date(carryFwd.as_of).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : "From previous FY")
+                  : "Set in ITC Ledger →",
+                href: "/billing/gst-summary?tab=itc-ledger",
+              },
+              { key: "net", label: "Net Tax", raw: Math.abs(netTax), icon: BarChart3, color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable (incl. carry-fwd)" : "Carry to next period" },
             ].map((s) => {
-              const Icon = s.icon;
-              return (
-                <motion.div key={s.label} variants={fadeUp} className="stat-card rounded-2xl p-4">
+              const Icon = s.icon as any;
+              const inner = (
+                <div className="stat-card rounded-2xl p-4 h-full" title={statsLoading ? "Loading" : formatCurrency(s.raw)}>
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] text-muted-foreground font-medium">{s.label}</p>
                     <Icon className={cn("w-3.5 h-3.5", s.color)} />
                   </div>
-                  <p className={cn("font-display font-bold mt-1", s.color, isMobile ? "text-sm" : "text-lg")}>{s.value}</p>
-                  {s.count !== null && <p className="text-[10px] text-muted-foreground mt-0.5">{s.count} invoices</p>}
+                  {statsLoading ? (
+                    <div className="mt-1.5 h-6 w-16 rounded bg-muted/40 animate-pulse" />
+                  ) : (
+                    <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-sm" : "text-lg")}>{formatCompactCurrency(s.raw)}</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.sub}</p>
+                </div>
+              );
+              return (
+                <motion.div key={s.key} variants={fadeUp}>
+                  {s.href ? (
+                    <Link to={s.href} className="block hover:opacity-90 transition-opacity">{inner}</Link>
+                  ) : inner}
                 </motion.div>
               );
             })}
           </motion.div>
 
-          {/* Charts */}
+          {/* Charts — Monthly Trend gets a YTD legend (matches the GST
+              page's pattern) so a flat chart (e.g. early FY with one tall
+              bar) still conveys useful info at a glance. */}
           <motion.div variants={stagger} initial="hidden" animate="visible"
             className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
-            <motion.div variants={fadeUp} className={cn(isMobile ? "" : "lg:col-span-2", "elevated-card rounded-2xl p-5")}>
-              <h2 className="text-[13px] font-display font-semibold text-foreground mb-3">Monthly Trend (₹k)</h2>
-              <div className={cn(isMobile ? "h-[180px]" : "h-[260px]")}>
+            <motion.div variants={fadeUp} className={cn(isMobile ? "" : "lg:col-span-2", "elevated-card rounded-2xl p-4")}>
+              <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+                <h2 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider">Monthly Trend</h2>
+                <div className="flex items-center gap-4 text-[11px]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-1))]" />
+                    <span className="text-muted-foreground">Sales</span>
+                    <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(totalSales)}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(var(--chart-2))]" />
+                    <span className="text-muted-foreground">Purchases</span>
+                    <span className="font-semibold text-foreground tabular-nums">{formatCompactCurrency(totalPurchases)}</span>
+                  </span>
+                </div>
+              </div>
+              <div className={cn(isMobile ? "h-[160px]" : "h-[200px]")}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyData} barGap={2}>
+                  <BarChart data={monthlyData} barGap={2} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                     <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} tickFormatter={isMobile ? (v: string) => v.slice(0, 1) : undefined} />
-                    <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} />
+                    {/* See formatChartK — values are in thousands so the
+                        unit switches to lakh at 100, not 1000. */}
+                    <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => formatChartK(v, false)} />
                     <Tooltip
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }}
                       itemStyle={{ color: "hsl(var(--foreground))" }}
-                      formatter={(v: number) => Math.round(v * 1000) / 1000}
+                      formatter={(v: number) => formatChartK(v)}
                     />
                     <Bar dataKey="sales" name="Sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
                     <Bar dataKey="purchases" name="Purchases" fill="hsl(var(--chart-2))" radius={[6, 6, 0, 0]} />
@@ -270,54 +359,106 @@ export default function Reports() {
                 </ResponsiveContainer>
               </div>
             </motion.div>
-            <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-5">
-              <h2 className="text-[13px] font-display font-semibold text-foreground mb-3">Tax Distribution</h2>
-              {pieData.length === 0 ? <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">No data</div> : (
-                <div className="h-[180px]"><ResponsiveContainer width="100%" height="100%"><RPieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value">{pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(v: number) => formatCurrency(v)} /></RPieChart></ResponsiveContainer></div>
+            <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-4">
+              <h2 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider mb-2">Tax Distribution</h2>
+              {pieData.length === 0 ? <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">No data</div> : (
+                <div className="h-[160px]"><ResponsiveContainer width="100%" height="100%"><RPieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={42} outerRadius={68} paddingAngle={3} dataKey="value">{pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12, color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} formatter={(v: number) => formatCurrency(v)} /></RPieChart></ResponsiveContainer></div>
               )}
-              <div className="flex items-center justify-center gap-4 mt-2 flex-wrap">
+              <div className="flex items-center justify-center gap-3 mt-1 flex-wrap">
                 {pieData.map((d, i) => (
                   <div key={d.name} className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i] }} />
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i] }} />
                     <span className="text-[11px] text-muted-foreground">{d.name}</span>
-                    <span className="text-[11px] font-medium text-foreground tabular-nums">{formatCurrency(d.value)}</span>
+                    <span className="text-[11px] font-medium text-foreground tabular-nums">{formatCompactCurrency(d.value)}</span>
                   </div>
                 ))}
               </div>
             </motion.div>
           </motion.div>
 
-          {/* Top Customers + Quick Links */}
+          {/* Top Customers + Top Products row — two side-by-side panels.
+              Each row gets a thin progress bar so concentration risk pops
+              out at a glance (e.g. one customer is 40% of revenue). */}
           <motion.div variants={stagger} initial="hidden" animate="visible"
-            className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
-            <motion.div variants={fadeUp} className={cn(isMobile ? "" : "lg:col-span-2", "elevated-card rounded-2xl overflow-hidden")}>
-              <div className="px-5 py-4 border-b border-border/50"><h2 className="text-[13px] font-display font-semibold text-foreground">Top Customers</h2></div>
+            className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2")}>
+            <motion.div variants={fadeUp} className="elevated-card rounded-2xl overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-border/50 flex items-center gap-2">
+                <Users className="w-3.5 h-3.5 text-chart-1" />
+                <h2 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider">Top Customers</h2>
+              </div>
               {topCustomers.length === 0 ? <div className="p-8 text-center text-muted-foreground text-sm">No data</div> : (
                 <div className="divide-y divide-border/30">
                   {topCustomers.map((c, i) => (
                     <motion.div key={c.name} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.05 }}
-                      className="flex items-center gap-3 px-5 py-3">
-                      <span className="text-[12px] font-mono text-muted-foreground w-5">#{i + 1}</span>
-                      <div className="flex-1 min-w-0"><p className="text-[13px] font-medium text-foreground truncate">{c.name}</p>{c.count > 0 && <p className="text-[10px] text-muted-foreground">{c.count} inv</p>}</div>
-                      <span className="text-[13px] font-semibold text-foreground tabular-nums">{formatCurrency(c.total)}</span>
+                      className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] font-mono text-muted-foreground w-5 shrink-0">#{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium text-foreground truncate">{c.name}</p>
+                          <p className="text-[10px] text-muted-foreground">{c.count > 0 ? `${c.count} invoice${c.count === 1 ? "" : "s"} · ` : ""}{c.pct.toFixed(1)}% of sales</p>
+                        </div>
+                        <span className="text-[13px] font-semibold text-foreground tabular-nums shrink-0">{formatCompactCurrency(c.total)}</span>
+                      </div>
+                      <div className="mt-1.5 h-1 rounded-full bg-secondary/30 overflow-hidden">
+                        <div className="h-full bg-chart-1/70 rounded-full" style={{ width: `${Math.min(c.pct, 100)}%` }} />
+                      </div>
                     </motion.div>
                   ))}
                 </div>
               )}
             </motion.div>
-            <motion.div variants={fadeUp} className="space-y-3">
-              {quickLinks.map((l, i) => (
-                <motion.div key={l.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.08 }}>
-                  <Link to={l.href} className="stat-card rounded-2xl p-4 block group">
-                    <div className="flex items-center gap-3">
-                      <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center", l.bg)}><l.icon className={cn("w-4 h-4", l.color)} /></div>
-                      <div className="flex-1"><p className={cn("text-[13px] font-display font-semibold", l.color)}>{l.label}</p><p className="text-[11px] text-muted-foreground">{l.desc}</p></div>
-                      <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
-                    </div>
-                  </Link>
-                </motion.div>
-              ))}
+            <motion.div variants={fadeUp} className="elevated-card rounded-2xl overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-border/50 flex items-center gap-2">
+                <Package className="w-3.5 h-3.5 text-chart-2" />
+                <h2 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider">Top Products</h2>
+              </div>
+              {topProducts.length === 0 ? <div className="p-8 text-center text-muted-foreground text-sm">No data</div> : (
+                <div className="divide-y divide-border/30">
+                  {topProducts.map((p, i) => (
+                    <motion.div key={p.name} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.05 }}
+                      className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] font-mono text-muted-foreground w-5 shrink-0">#{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium text-foreground truncate">{p.name}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {p.qty > 0 && <>{p.qty.toFixed(p.qty < 10 ? 2 : 0)} units · </>}
+                            {p.hsn && <>HSN {p.hsn} · </>}
+                            {p.pct.toFixed(1)}% of top-5
+                          </p>
+                        </div>
+                        <span className="text-[13px] font-semibold text-foreground tabular-nums shrink-0">{formatCompactCurrency(p.total)}</span>
+                      </div>
+                      <div className="mt-1.5 h-1 rounded-full bg-secondary/30 overflow-hidden">
+                        <div className="h-full bg-chart-2/70 rounded-full" style={{ width: `${Math.min(p.pct, 100)}%` }} />
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </motion.div>
+          </motion.div>
+
+          {/* Quick-link row — horizontal pills, more compact than the
+              previous vertical sidebar, and consistent across screen sizes. */}
+          <motion.div variants={stagger} initial="hidden" animate="visible"
+            className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
+            {quickLinks.map((l, i) => (
+              <motion.div key={l.label} variants={fadeUp}>
+                <Link to={l.href} className="stat-card rounded-2xl p-3.5 block hover:border-primary/30 transition-all">
+                  <div className="flex items-center gap-2.5">
+                    <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center shrink-0", l.bg)}>
+                      <l.icon className={cn("w-3.5 h-3.5", l.color)} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={cn("text-[12px] font-display font-semibold truncate", l.color)}>{l.label}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{l.desc}</p>
+                    </div>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/60 shrink-0" />
+                  </div>
+                </Link>
+              </motion.div>
+            ))}
           </motion.div>
         </>
       )}

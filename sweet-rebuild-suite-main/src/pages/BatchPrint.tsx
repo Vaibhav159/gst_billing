@@ -72,41 +72,50 @@ export default function BatchPrint() {
 
     async function loadAll() {
       setIsLoading(true);
-      const results: InvoiceWithMeta[] = [];
+      // Previously this was a `for (const id of invoiceIds)` await loop
+      // — N sequential round-trips to /invoices/{id}/. With 20 invoices
+      // and a 200ms per-request floor that's a 4-second wait before
+      // anything renders. Now we fan out all `fetchFullInvoice` calls
+      // in parallel; the limiting factor becomes the slowest single
+      // request rather than their sum.
+      const fetched = await Promise.allSettled(invoiceIds.map((id) => fetchFullInvoice(id)));
       let skipped = 0;
-      for (const id of invoiceIds) {
+      const invoices: Invoice[] = [];
+      fetched.forEach((r, i) => {
+        if (r.status === "fulfilled") invoices.push(r.value);
+        else { logger.error(`Failed to fetch invoice ${invoiceIds[i]}`, r.reason); skipped++; }
+      });
+
+      // Per-invoice biz/customer lookup. Most invoices hit the local
+      // `businesses` / `customers` caches; only the few that miss
+      // round-trip — parallelized per-invoice via Promise.all just
+      // like the original code.
+      const results = await Promise.all(invoices.map(async (inv) => {
+        const biz = businesses.find((b) => String(b.id) === String(inv.businessId));
+        const cust = customers.find((c) => String(c.id) === String(inv.customerId));
         try {
-          const inv = await fetchFullInvoice(id);
-          const biz = businesses.find((b) => String(b.id) === String(inv.businessId));
-          const cust = customers.find((c) => String(c.id) === String(inv.customerId));
           if (biz && cust) {
             const qrDataUrl = await generateQR(inv, biz);
-            results.push({ invoice: inv, business: biz, customer: cust, qrDataUrl });
-          } else {
-            // Business or customer not in loaded list — fetch directly
-            logger.warn(`Invoice ${id}: biz=${inv.businessId} cust=${inv.customerId} not found in loaded lists, fetching...`);
-            try {
-              const [bizRes, custRes] = await Promise.all([
-                biz ? Promise.resolve({ data: biz }) : api.get<any>(`businesses/${inv.businessId}/`),
-                cust ? Promise.resolve({ data: cust }) : api.get<any>(`customers/${inv.customerId}/`),
-              ]);
-              const fetchedBiz = bizRes.data;
-              const fetchedCust = custRes.data;
-              const qrDataUrl = await generateQR(inv, fetchedBiz);
-              results.push({ invoice: inv, business: fetchedBiz, customer: fetchedCust, qrDataUrl });
-            } catch (e2) {
-              logger.error(`Failed to fetch business/customer for invoice ${id}`, e2);
-              skipped++;
-            }
+            return { invoice: inv, business: biz, customer: cust, qrDataUrl };
           }
+          logger.warn(`Invoice ${inv.id}: biz=${inv.businessId} cust=${inv.customerId} not found in loaded lists, fetching...`);
+          const [bizRes, custRes] = await Promise.all([
+            biz ? Promise.resolve({ data: biz }) : api.get<any>(`businesses/${inv.businessId}/`),
+            cust ? Promise.resolve({ data: cust }) : api.get<any>(`customers/${inv.customerId}/`),
+          ]);
+          const qrDataUrl = await generateQR(inv, bizRes.data);
+          return { invoice: inv, business: bizRes.data, customer: custRes.data, qrDataUrl };
         } catch (e) {
-          logger.error(`Failed to fetch invoice ${id}`, e);
+          logger.error(`Failed to fetch biz/customer for invoice ${inv.id}`, e);
           skipped++;
+          return null;
         }
-      }
+      }));
+      const filtered = results.filter((r): r is InvoiceWithMeta => r !== null);
+
       if (skipped > 0) logger.warn(`BatchPrint: ${skipped} invoices skipped due to errors`);
       if (!cancelled) {
-        setInvoiceData(results);
+        setInvoiceData(filtered);
         setIsLoading(false);
       }
     }
@@ -157,6 +166,15 @@ export default function BatchPrint() {
     mergePDFs();
   }, [pdfBlobs, invoiceData, mergedPdfUrl, toast]);
 
+  // Revoke the merged-PDF object URL when the component unmounts or when
+  // a new merge replaces the current one. Without this, every visit to
+  // this page leaked one PDF-sized blob into browser memory until tab
+  // close. The iframe and the print/download paths share the same URL.
+  useEffect(() => {
+    if (!mergedPdfUrl) return;
+    return () => { URL.revokeObjectURL(mergedPdfUrl); };
+  }, [mergedPdfUrl]);
+
   const handlePrint = () => {
     if (!mergedPdfUrl) return;
     const printWindow = window.open(mergedPdfUrl);
@@ -168,13 +186,19 @@ export default function BatchPrint() {
   };
 
   const handleDownload = () => {
-    if (!mergedBlob) return;
-    const url = URL.createObjectURL(mergedBlob);
+    // Reuse the existing mergedPdfUrl rather than minting a new one
+    // each click — the iframe is already holding a reference, and the
+    // unmount-time revoke covers cleanup. Falls back to the raw blob if
+    // for some reason the URL isn't set yet.
+    if (!mergedPdfUrl && !mergedBlob) return;
+    const href = mergedPdfUrl || URL.createObjectURL(mergedBlob!);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = href;
     a.download = `invoices_batch_${invoiceData.length}.pdf`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Only revoke the *fallback* URL we just created; the long-lived
+    // mergedPdfUrl is owned by the component lifecycle.
+    if (href !== mergedPdfUrl) URL.revokeObjectURL(href);
     toast({ title: "Downloaded", description: `${invoiceData.length} invoices combined PDF` });
   };
 

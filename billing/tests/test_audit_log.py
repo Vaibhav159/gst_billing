@@ -123,6 +123,46 @@ class GSTSummaryTestCase(TestCase):
         self.assertIn("rate_slabs", res.data)
         self.assertIn("hsn_summary", res.data)
         self.assertIn("gstr3b", res.data)
+        # carry_forward_itc + effective top-level fields drive the
+        # "previous-year carry-forward" tile on the Summary page.
+        self.assertIn("carry_forward_itc", res.data)
+        self.assertIn("effective", res.data)
+        for key in ("carry_forward_itc", "current_itc", "effective_itc", "effective_net_tax"):
+            self.assertIn(key, res.data["effective"])
+
+    def test_gst_summary_carry_forward_aggregates_across_businesses(self):
+        """When no business_id is passed, opening balances should sum across
+        all ledgers — previously the field was None in the All-Businesses
+        view, which silently hid the carry-forward card."""
+        from billing.models import ITCReclaimLedger
+        biz2 = Business.objects.create(
+            name="Biz Two", address="addr", gst_number="08AAAAA0000A1Z6",
+            state_name="RAJASTHAN", workspace_id=1,
+        )
+        ITCReclaimLedger.objects.create(
+            business=self.business, opening_cgst="100.00", opening_sgst="200.00", opening_igst="50.00",
+            workspace_id=1,
+        )
+        ITCReclaimLedger.objects.create(
+            business=biz2, opening_cgst="10.00", opening_sgst="20.00", opening_igst="5.00",
+            workspace_id=1,
+        )
+
+        # All-businesses view — should aggregate
+        res = self.client.get("/api/invoices/gst_summary/?start_date=2025-04-01&end_date=2026-03-31")
+        self.assertEqual(res.status_code, 200)
+        cf = res.data["carry_forward_itc"]
+        self.assertAlmostEqual(cf["cgst"], 110.0, places=2)
+        self.assertAlmostEqual(cf["sgst"], 220.0, places=2)
+        self.assertAlmostEqual(cf["igst"], 55.0, places=2)
+        self.assertAlmostEqual(cf["total"], 385.0, places=2)
+        self.assertTrue(cf["configured"])
+        self.assertEqual(cf["business_count"], 2)
+
+        # Scoped to biz2 — should return that ledger only
+        res = self.client.get(f"/api/invoices/gst_summary/?start_date=2025-04-01&end_date=2026-03-31&business_id={biz2.id}")
+        cf = res.data["carry_forward_itc"]
+        self.assertAlmostEqual(cf["total"], 35.0, places=2)
 
     def test_check_duplicate_endpoint(self):
         """GET /api/invoices/check_duplicate/ should detect duplicates in current FY."""

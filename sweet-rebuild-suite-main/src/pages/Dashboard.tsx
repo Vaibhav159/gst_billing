@@ -11,7 +11,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { stagger, fadeUp, fadeIn } from "@/utils/animations";
 import { useDashboardStats, useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { useAuditLog } from "@/hooks/useAuditLog";
@@ -21,6 +21,7 @@ import { useMobileMode } from "@/contexts/MobileModeContext";
 import EasyDashboard from "@/components/mobile/easy/EasyDashboard";
 import AnimatedCounter from "@/components/AnimatedCounter";
 import OnboardingWizard, { shouldShowOnboarding } from "@/components/OnboardingWizard";
+import DataQualityBanner from "@/components/DataQualityBanner";
 
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
@@ -105,19 +106,44 @@ export default function Dashboard() {
     };
   }, [monthlyData]);
 
-  // This month at a glance
+  // At-a-glance window: use the current calendar month when it has meaningful
+  // activity, otherwise fall back to the trailing 30 days so an early-month
+  // landing isn't "0 invoices · ₹0 sales" until day 5.
   const thisMonthData = useMemo(() => {
     const now = new Date();
     const m = now.getMonth() + 1;
     const y = now.getFullYear();
-    const match = (statsData?.monthly || []).find((d: any) => d.month === m && d.year === y);
+    const monthMatch = (statsData?.monthly || []).find((d: any) => d.month === m && d.year === y);
+    const monthCount = monthMatch ? (Number(monthMatch.outward_count) || 0) + (Number(monthMatch.inward_count) || 0) : 0;
+
+    // If the current month is dry, use trailing-30-days from recent_invoices.
+    if (monthCount === 0) {
+      const cutoff = new Date(now);
+      cutoff.setDate(cutoff.getDate() - 30);
+      const recent = (statsData?.recent_invoices || []).filter((r: any) => {
+        const d = r.invoice_date ? new Date(r.invoice_date) : null;
+        return d && d >= cutoff && d <= now;
+      });
+      const outward30 = recent.filter((r: any) => (r.type_of_invoice || "").toLowerCase() === "outward")
+        .reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      const inward30 = recent.filter((r: any) => (r.type_of_invoice || "").toLowerCase() === "inward")
+        .reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      return {
+        count: recent.length,
+        outward: outward30,
+        inward: inward30,
+        monthName: "Last 30 days",
+        isTrailing: true,
+      };
+    }
     return {
-      count: match ? (Number(match.outward_count) || 0) + (Number(match.inward_count) || 0) : 0,
-      outward: match ? Number(match.outward_total) || 0 : 0,
-      inward: match ? Number(match.inward_total) || 0 : 0,
+      count: monthCount,
+      outward: monthMatch ? Number(monthMatch.outward_total) || 0 : 0,
+      inward: monthMatch ? Number(monthMatch.inward_total) || 0 : 0,
       monthName: now.toLocaleString("en", { month: "long", year: "numeric" }),
+      isTrailing: false,
     };
-  }, [statsData?.monthly]);
+  }, [statsData?.monthly, statsData?.recent_invoices]);
 
   const customerTotals = (statsData?.top_customers || []).map(c => ({
     id: String(c.id),
@@ -158,11 +184,14 @@ export default function Dashboard() {
     ) : null
   );
 
+  // Compact currency + title attr matches the InvoiceList / Reports /
+  // GST page idiom — ₹61.07L instead of ₹61,07,168 keeps stat cards
+  // legible at 1280px and ensures cross-page visual consistency.
   const statCards = [
-    { label: "Total Outward", value: formatCurrency(totalOutward), sub: `${outwardCount} invoices`, icon: TrendingUp, color: "text-success", bgGlow: "from-success/10 to-transparent", sparkType: "outward" as const, trend: trendPercent.outward },
-    { label: "Total Inward", value: formatCurrency(totalInward), sub: `${inwardCount} invoices`, icon: TrendingDown, color: "text-warning", bgGlow: "from-warning/10 to-transparent", sparkType: "inward" as const, trend: trendPercent.inward },
-    { label: "Net Amount", value: formatCurrency(netAmount), sub: "Outward − Inward", icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive", bgGlow: netAmount >= 0 ? "from-success/10 to-transparent" : "from-destructive/10 to-transparent", sparkType: "net" as const, trend: trendPercent.net },
-    { label: "Total Invoices", value: totalCount.toString(), sub: `FY ${selectedFY}`, icon: FileText, color: "text-chart-4", bgGlow: "from-chart-4/10 to-transparent", sparkType: "outward" as const, trend: 0 },
+    { label: "Total Outward", value: formatCompactCurrency(totalOutward), full: formatCurrency(totalOutward), sub: `${outwardCount} invoices`, icon: TrendingUp, color: "text-success", bgGlow: "from-success/10 to-transparent", sparkType: "outward" as const, trend: trendPercent.outward },
+    { label: "Total Inward", value: formatCompactCurrency(totalInward), full: formatCurrency(totalInward), sub: `${inwardCount} invoices`, icon: TrendingDown, color: "text-warning", bgGlow: "from-warning/10 to-transparent", sparkType: "inward" as const, trend: trendPercent.inward },
+    { label: "Net Amount", value: formatCompactCurrency(netAmount), full: formatCurrency(netAmount), sub: "Outward − Inward", icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive", bgGlow: netAmount >= 0 ? "from-success/10 to-transparent" : "from-destructive/10 to-transparent", sparkType: "net" as const, trend: trendPercent.net },
+    { label: "Total Invoices", value: totalCount.toLocaleString("en-IN"), full: `${totalCount} invoices in FY ${selectedFY}`, sub: `FY ${selectedFY}`, icon: FileText, color: "text-chart-4", bgGlow: "from-chart-4/10 to-transparent", sparkType: "outward" as const, trend: 0 },
   ];
 
   if (isStatsLoading) {
@@ -201,12 +230,13 @@ export default function Dashboard() {
             const Icon = card.icon;
             return (
               <motion.div key={card.label} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                className="min-w-[160px] snap-center stat-card rounded-2xl p-4 space-y-2 shrink-0">
+                className="min-w-[160px] snap-center stat-card rounded-2xl p-4 space-y-2 shrink-0"
+                title={card.full}>
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{card.label}</p>
                   <Icon className={cn("w-4 h-4", card.color)} />
                 </div>
-                <p className={cn("text-xl font-display font-bold tracking-tight", card.color)}>{card.value}</p>
+                <p className={cn("text-xl font-display font-bold tracking-tight tabular-nums", card.color)}>{card.value}</p>
                 <p className="text-[10px] text-muted-foreground/70">{card.sub}</p>
               </motion.div>
             );
@@ -250,10 +280,10 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} opacity={0.4} />
               <XAxis dataKey="month" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false}
-                tickFormatter={(v) => chartMode === "amount" ? `₹${(v / 100000).toFixed(0)}L` : String(v)} width={40} />
+                tickFormatter={(v) => chartMode === "amount" ? formatCompactCurrency(v) : String(v)} width={42} />
               <Tooltip cursor={{ fill: "hsl(var(--secondary) / 0.3)" }}
                 contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "11px" }}
-                formatter={(v: number, name: string) => [chartMode === "amount" ? formatCurrency(v) : v, name]} />
+                formatter={(v: number, name: string) => [chartMode === "amount" ? formatCompactCurrency(v) : v, name]} />
               <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--success))" radius={[4, 4, 0, 0]} name="Outward" />
               <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} name="Inward" />
             </BarChart>
@@ -321,6 +351,9 @@ export default function Dashboard() {
         <OnboardingWizard onDismiss={() => setShowOnboarding(true)} />
       )}
 
+      {/* ── Data-quality banner (filing-blocking issues) ── */}
+      <DataQualityBanner />
+
       {/* ── Header ── */}
       <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -349,6 +382,7 @@ export default function Dashboard() {
           const sparkData = getMiniTrend(elapsedMonthlyData, card.sparkType);
           return (
             <motion.div key={card.label} variants={fadeUp}
+              title={card.full}
               className={cn("group relative overflow-hidden stat-card rounded-2xl p-5 space-y-3 border-l-[3px]",
                 card.color === "text-success" ? "border-l-success" :
                 card.color === "text-warning" ? "border-l-warning" :
@@ -384,7 +418,7 @@ export default function Dashboard() {
                       cursor={{ stroke: `hsl(var(--${card.color.replace("text-", "")}))`, strokeOpacity: 0.3, strokeWidth: 1 }}
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11, padding: "4px 8px", color: "hsl(var(--foreground))" }}
                       labelFormatter={() => ""}
-                      formatter={(v: number, _n: any, p: any) => [formatCurrency(v), p?.payload?.month || ""]}
+                      formatter={(v: number, _n: any, p: any) => [formatCompactCurrency(v), p?.payload?.month || ""]}
                     />
                     <Area type="monotone" dataKey="v" stroke={`hsl(var(--${card.color.replace("text-", "")}))`}
                       strokeWidth={1.5} fill={`url(#spark-${card.label})`}
@@ -414,13 +448,13 @@ export default function Dashboard() {
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Invoices</p>
             <p className="text-xl font-display font-bold text-foreground"><AnimatedCounter value={thisMonthData.count.toString()} /></p>
           </div>
-          <div className="text-center p-3 rounded-xl bg-success/5 border border-success/10">
+          <div className="text-center p-3 rounded-xl bg-success/5 border border-success/10" title={formatCurrency(thisMonthData.outward)}>
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Sales</p>
-            <p className="text-xl font-display font-bold text-success"><AnimatedCounter value={formatCurrency(thisMonthData.outward)} /></p>
+            <p className="text-xl font-display font-bold text-success tabular-nums"><AnimatedCounter value={formatCompactCurrency(thisMonthData.outward)} /></p>
           </div>
-          <div className="text-center p-3 rounded-xl bg-warning/5 border border-warning/10">
+          <div className="text-center p-3 rounded-xl bg-warning/5 border border-warning/10" title={formatCurrency(thisMonthData.inward)}>
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Purchases</p>
-            <p className="text-xl font-display font-bold text-warning"><AnimatedCounter value={formatCurrency(thisMonthData.inward)} /></p>
+            <p className="text-xl font-display font-bold text-warning tabular-nums"><AnimatedCounter value={formatCompactCurrency(thisMonthData.inward)} /></p>
           </div>
         </div>
       </motion.div>
@@ -455,10 +489,10 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} opacity={0.4} />
               <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false}
-                tickFormatter={(v) => chartMode === "amount" ? `₹${(v / 100000).toFixed(0)}L` : String(v)} width={50} />
+                tickFormatter={(v) => chartMode === "amount" ? formatCompactCurrency(v) : String(v)} width={52} />
               <Tooltip cursor={{ fill: "hsl(var(--secondary) / 0.3)" }}
                 contentStyle={{ backgroundColor: "hsl(var(--elevated-bg))", border: "1px solid hsl(var(--elevated-border))", borderRadius: "12px", fontSize: "12px", boxShadow: "0 8px 32px -4px rgba(0,0,0,0.3)" }}
-                formatter={(v: number, name: string) => [chartMode === "amount" ? formatCurrency(v) : v, name]} />
+                formatter={(v: number, name: string) => [chartMode === "amount" ? formatCompactCurrency(v) : v, name]} />
               <Bar dataKey={chartMode === "amount" ? "outward" : "outwardCount"} fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Outward" className="cursor-pointer" />
               <Bar dataKey={chartMode === "amount" ? "inward" : "inwardCount"} fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} name="Inward" className="cursor-pointer" />
             </BarChart>
@@ -502,8 +536,12 @@ export default function Dashboard() {
         </motion.div>
       </motion.div>
 
-      {/* ── Outstanding / Activity Row ── */}
-      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* ── Activity Row — full-width Recent Activity. Previously this row
+          held a duplicate "Revenue by Customer" panel next to it, but it
+          rendered the same customerTotals list as the "Top Customers"
+          panel further below — confusing to the user, and a wasted slot
+          on the page. Removed; activity gets the full width. */}
+      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-1 gap-5">
         <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -513,7 +551,9 @@ export default function Dashboard() {
             <Clock className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-0">
-            {(auditEntries.length > 0 ? auditEntries.slice(0, 8) : recentInvoices).map((entry: any, i: number) => {
+            {(() => {
+              const activityList = auditEntries.length > 0 ? auditEntries.slice(0, 8) : recentInvoices;
+              return activityList.map((entry: any, i: number) => {
               const isAudit = !!entry.action;
               const actionColors: Record<string, { bg: string; text: string }> = {
                 created: { bg: "bg-success/15", text: "text-success" },
@@ -532,7 +572,10 @@ export default function Dashboard() {
 
               return (
                 <div key={entry.id} className="flex gap-3 pb-3.5 relative">
-                  {i < 7 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
+                  {/* Connector line — only drawn between rows, not after the
+                      last one. Previously hardcoded `i < 7` which dangled
+                      when the activity list had fewer items. */}
+                  {i < activityList.length - 1 && <div className="absolute left-[11px] top-7 bottom-0 w-px bg-border/40" />}
                   <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5", colors.bg)}>
                     {isAudit ? <Activity className={cn("w-3 h-3", colors.text)} /> : <FileText className={cn("w-3 h-3", colors.text)} />}
                   </div>
@@ -549,42 +592,10 @@ export default function Dashboard() {
                   </div>
                 </div>
               );
-            })}
+            });
+            })()}
             {auditEntries.length === 0 && recentInvoices.length === 0 && (
               <p className="text-[12px] text-muted-foreground text-center py-4">No recent activity</p>
-            )}
-          </div>
-        </motion.div>
-
-        <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-base font-display font-semibold text-foreground">Revenue by Customer</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Top revenue contributors</p>
-            </div>
-            <AlertCircle className="w-4 h-4 text-muted-foreground" />
-          </div>
-          <div className="space-y-3">
-            {customerTotals.filter(c => c.total > 0).map((c, i) => (
-              <Link key={c.id} to={`/billing/customer/${c.id}`} className="flex items-center gap-3 group p-2 -mx-2 rounded-xl hover:bg-secondary/20 transition-colors">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/15 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">
-                  {c.name.split(" ").map(w => w[0]).join("").slice(0, 2)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center mb-1">
-                    <p className="text-[13px] font-medium text-foreground group-hover:text-primary truncate transition-colors">{c.name}</p>
-                    <span className="text-[12px] font-bold text-foreground tabular-nums ml-2">{formatCurrency(c.total)}</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-secondary/40 rounded-full overflow-hidden">
-                    <motion.div initial={{ width: 0 }} animate={{ width: `${(c.total / maxCustomerTotal) * 100}%` }}
-                      transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}
-                      className="h-full bg-gradient-to-r from-success/70 to-success rounded-full" />
-                  </div>
-                </div>
-              </Link>
-            ))}
-            {customerTotals.filter(c => c.total > 0).length === 0 && (
-              <p className="text-[13px] text-muted-foreground text-center py-8">No revenue data for this period</p>
             )}
           </div>
         </motion.div>

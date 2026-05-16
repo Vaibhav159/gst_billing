@@ -410,6 +410,162 @@ class InvoiceAPITestCase(BaseAPITestCase):
         # Should be 4 (3 + 1), not 1778345122.
         self.assertEqual(next_n, 4)
 
+    @freeze_time("2026-05-15")
+    def test_check_duplicate_scopes_by_fy_and_type(self):
+        """
+        Regression: the duplicate-check used to scope only by (business,
+        invoice_number, today's-FY). That had two failure modes:
+
+          1. Outward "12" and inward "12" in the same FY+business would
+             collide on first lookup, even though they're legitimately
+             distinct documents on the GST portal.
+          2. A back-dated invoice (date in a previous FY) would be checked
+             against today's FY, never against its own — so a true
+             duplicate in the past FY would slip through.
+
+        New endpoint accepts `invoice_date` (drives the FY) and
+        `type_of_invoice` (gates the lookup).
+        """
+        biz = self.business
+        cust = self.customer
+        # Existing outward "100" in FY 2026-27 — created without freeze so
+        # use a clear date inside that FY:
+        Invoice.objects.create(
+            invoice_number="100", invoice_date="2026-05-01",
+            business=biz, customer=cust,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="100",
+        )
+        url = reverse("invoice-check-duplicate")
+
+        # (a) Same number + same FY + same type → duplicate
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+            "type_of_invoice": "outward", "invoice_date": "2026-06-01",
+        })
+        self.assertTrue(r.data["exists"], "same-FY same-type should be a dup")
+
+        # (b) Same number + same FY but inward → NOT a duplicate (legit)
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+            "type_of_invoice": "inward", "invoice_date": "2026-06-01",
+        })
+        self.assertFalse(r.data["exists"], "outward + inward can share a number")
+
+        # (c) Same number + outward but back-dated to FY 2024-25 → NOT a
+        # duplicate (different FY than the existing one).
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+            "type_of_invoice": "outward", "invoice_date": "2024-09-15",
+        })
+        self.assertFalse(r.data["exists"], "different FY shouldn't collide")
+
+        # (d) Backward compat: caller that omits type+date still works (uses
+        # today's FY, no type filter) — should detect the existing dup.
+        r = self.client.get(url, {
+            "invoice_number": "100", "business_id": biz.id,
+        })
+        self.assertTrue(r.data["exists"], "legacy callers still work")
+
+    def test_data_quality_endpoint(self):
+        """data_quality should report counts of empty / no-HSN / dup invoices."""
+        # The base test fixture has 1 invoice (`self.invoice`) with 1 line item
+        # that has hsn_code = "1234". Starting state should be clean.
+        url = reverse("invoice-data-quality")
+        r = self.client.get(url)
+        self.assertEqual(r.status_code, 200)
+        baseline_empty = r.data["invoices_no_line_items"]
+        baseline_no_hsn = r.data["line_items_missing_hsn"]
+        baseline_dups = r.data["duplicate_invoice_groups"]
+
+        # Add an empty-item invoice
+        Invoice.objects.create(
+            invoice_number="EMPTY1", invoice_date="2026-05-01",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="0",
+        )
+        # Add a HSN-less line item on a separate invoice
+        inv2 = Invoice.objects.create(
+            invoice_number="NOHSN1", invoice_date="2026-05-01",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="100",
+        )
+        LineItem.objects.create(
+            invoice=inv2, customer=self.customer, product_name="X",
+            hsn_code="", gst_tax_rate="0.030", quantity="1", rate="100",
+            cgst="1.5", sgst="1.5", igst="0", amount="100",
+            unit="gms", workspace_id=1,
+        )
+        # Add two invoices with the same number/date/type → 1 dup group
+        Invoice.objects.create(
+            invoice_number="DUP1", invoice_date="2026-05-01",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="50",
+        )
+        Invoice.objects.create(
+            invoice_number="DUP1", invoice_date="2026-05-15",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="60",
+        )
+
+        r = self.client.get(url)
+        # 3 new empty invoices: EMPTY1, DUP1×2. NOHSN1 has a line item.
+        self.assertEqual(r.data["invoices_no_line_items"], baseline_empty + 3)
+        self.assertEqual(r.data["line_items_missing_hsn"], baseline_no_hsn + 1)
+        # 1 new dup group: (business, DUP1, FY 2026-27, outward)
+        self.assertEqual(r.data["duplicate_invoice_groups"], baseline_dups + 1)
+        self.assertTrue(r.data["has_issues"])
+
+    def test_invoice_list_hygiene_filters(self):
+        """?dups=1, ?empty=1, ?no_hsn=1 narrow the list correctly."""
+        # Setup: 1 dup pair, 1 empty invoice, 1 no-hsn invoice
+        Invoice.objects.create(
+            invoice_number="DUPA", invoice_date="2026-05-01",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="10",
+        )
+        Invoice.objects.create(
+            invoice_number="DUPA", invoice_date="2026-05-02",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="20",
+        )
+        Invoice.objects.create(
+            invoice_number="EMPTYA", invoice_date="2026-05-01",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="0",
+        )
+        inv = Invoice.objects.create(
+            invoice_number="NOHSNA", invoice_date="2026-05-01",
+            business=self.business, customer=self.customer,
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="50",
+        )
+        LineItem.objects.create(
+            invoice=inv, customer=self.customer, product_name="Y",
+            hsn_code="", gst_tax_rate="0.030", quantity="1", rate="50",
+            cgst="0.75", sgst="0.75", igst="0", amount="50",
+            unit="gms", workspace_id=1,
+        )
+
+        url = reverse("invoice-list")
+        # dups → both DUPA rows
+        r = self.client.get(url, {"dups": "1"})
+        nums = [x["invoice_number"] for x in r.data["results"]]
+        self.assertEqual(sum(1 for n in nums if n == "DUPA"), 2,
+                         f"dups filter should include both DUPA rows, got {nums}")
+
+        # empty → EMPTYA (and DUPA×2 which also have no items, and original
+        # bare invoices). Just assert EMPTYA is in there.
+        r = self.client.get(url, {"empty": "1"})
+        nums = {x["invoice_number"] for x in r.data["results"]}
+        self.assertIn("EMPTYA", nums)
+        self.assertIn("DUPA", nums)  # those are also empty
+
+        # no_hsn → NOHSNA but NOT EMPTYA (no line items at all)
+        r = self.client.get(url, {"no_hsn": "1"})
+        nums = {x["invoice_number"] for x in r.data["results"]}
+        self.assertIn("NOHSNA", nums)
+        self.assertNotIn("EMPTYA", nums,
+                         "empty-item invoices must not match no_hsn (LEFT JOIN guard)")
+
     def create_another_business(self):
         """Helper method to create another business for testing."""
         return Business.objects.create(

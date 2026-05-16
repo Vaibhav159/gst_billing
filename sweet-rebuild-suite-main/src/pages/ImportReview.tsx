@@ -12,6 +12,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { formatApiError, errorTag } from "@/utils/apiError";
+import { pushNotification } from "@/hooks/useNotifications";
 
 interface LocationState {
   parsedInvoices: ImportReadyInvoice[];
@@ -230,8 +231,20 @@ export default function ImportReview() {
           variant: errCount === toImport.length ? "destructive" : "default",
           duration: 12000,
         });
+        // Persist a partial-failure breadcrumb so the user can revisit the
+        // problem from the bell after dismissing the toast.
+        pushNotification({
+          type: errCount === toImport.length ? "error" : "warning",
+          title: `Import: ${result.created} ok · ${errCount} failed`,
+          message: `Open Audit Log for the full error list. Skipped: ${result.skipped || 0}.`,
+        });
       } else {
         toast({ title: "Import Complete", description: `${result.created} imported, ${result.skipped} skipped.` });
+        pushNotification({
+          type: "success",
+          title: "Import complete",
+          message: `${result.created} invoice${result.created === 1 ? "" : "s"} imported${result.skipped ? `, ${result.skipped} skipped` : ""}.`,
+        });
       }
       refetchInvoices();
       refetchCustomers();

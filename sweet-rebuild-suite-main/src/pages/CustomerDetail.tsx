@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { useCustomer, useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
@@ -138,18 +138,21 @@ export default function CustomerDetail() {
       </motion.div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Sales", value: formatCurrency(totalSales), icon: TrendingUp, color: "text-success" },
-          { label: "Purchases", value: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-warning" },
-          { label: "Net", value: formatCurrency(netAmount), icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive" },
-          { label: "Invoices", value: custInvoices.length.toString(), icon: FileText, color: "text-chart-4" },
+          { label: "Sales", value: formatCompactCurrency(totalSales), full: formatCurrency(totalSales), icon: TrendingUp, color: "text-success" },
+          { label: "Purchases", value: formatCompactCurrency(totalPurchases), full: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-warning" },
+          { label: "Net", value: formatCompactCurrency(netAmount), full: formatCurrency(netAmount), icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive" },
+          { label: "Invoices", value: custInvoices.length.toLocaleString("en-IN"), full: `${custInvoices.length} invoices`, icon: FileText, color: "text-chart-4" },
         ].map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.label} className="stat-card rounded-2xl p-4">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</p>
-              <p className={cn("font-display font-bold mt-1 tabular-nums", stat.color, isMobile ? "text-base" : "text-xl lg:text-2xl")}>{stat.value}</p>
+            <div key={stat.label} className="stat-card rounded-2xl p-4" title={stat.full}>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</p>
+                <Icon className={cn("w-3.5 h-3.5", stat.color)} />
+              </div>
+              <p className={cn("font-display font-bold tabular-nums", stat.color, isMobile ? "text-base" : "text-xl")}>{stat.value}</p>
             </div>
           );
         })}

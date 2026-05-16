@@ -1,14 +1,14 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatDate } from "@/utils/mockData";
-import { useInvoice, useInvoices, useBusiness, useCustomer } from "@/hooks/useDataStore";
+import { useInvoice, useInvoices, useBusiness, useCustomer, businessSlug } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 // Tally format is the only invoice print format
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
-  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle,
+  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
 import { cn, pluralize } from "@/utils/utils";
@@ -19,18 +19,154 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { shareInvoice, shareViaWhatsApp } from "@/utils/shareInvoice";
 
 export default function InvoiceDetail() {
-  const { id } = useParams<{ id: string }>();
+  // Route can be either /billing/invoice/:id  OR  /billing/invoice/:bizSlug/:fy/:slug
+  const params = useParams<{ id?: string; slug?: string; bizSlug?: string; fy?: string }>();
+  const slug = params.slug ?? params.id; // trailing identifier
+  const bizSlug = params.bizSlug;
+  const fy = params.fy;
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const printUrl = `/billing/invoice/${id}/print`;
   const [showEway, setShowEway] = useState(false);
-  const { item: inv, isLoading, refetch: refetchInvoice } = useInvoice(id);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const { item: inv, isLoading, candidates, refetch: refetchInvoice } = useInvoice(slug, bizSlug, fy);
   const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
 
+  // Print / edit / share routes must hit the database id (the print path
+  // doesn't go through useInvoice's slug-lookup branch). When the URL slug
+  // is the invoice_number, fall back to the loaded record's id.
+  const dbId = slug && /^\d+$/.test(slug) ? slug : (inv ? String(inv.id) : "");
+  const printUrl = `/billing/invoice/${dbId}/print`;
+
+  // Rewrite the URL bar to the most readable canonical form. We prefer
+  // the fully-disambiguated path when the loaded record + its business +
+  // FY are all known, so a copied link round-trips cleanly even when the
+  // invoice number is shared across businesses or financial years.
+  //
+  //   Globally unique number → /billing/invoice/{number}
+  //   Otherwise              → /billing/invoice/{bizSlug}/{fy}/{number}
+  //
+  // Skips invoice numbers that contain unsafe URL chars (slashes etc.)
+  // — those keep the id-based URL we landed on.
+  useEffect(() => {
+    if (!inv || !inv.invoiceNumber) return;
+    const num = inv.invoiceNumber;
+    const isUrlSafe = /^[A-Za-z0-9._-]+$/.test(num);
+    if (!isUrlSafe) return;
+
+    const distinctBusinesses = new Set(candidates.map((c) => c.business_id));
+    const distinctFysWithinBiz = new Set(
+      candidates
+        .filter((c) => c.business_id === String(inv.businessId))
+        .map((c) => {
+          const d = new Date(c.invoice_date);
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          return m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+        })
+    );
+    const isUnique = candidates.length <= 1 || (distinctBusinesses.size === 1 && distinctFysWithinBiz.size === 1);
+
+    let target: string;
+    if (isUnique) {
+      target = `/billing/invoice/${num}`;
+    } else {
+      const bSlug = businessSlug(biz?.name || "") || String(inv.businessId);
+      const d = new Date(inv.invoice_date || "");
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const fyStr = m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+      target = `/billing/invoice/${bSlug}/${fyStr}/${num}`;
+    }
+
+    const current = window.location.pathname + window.location.search;
+    if (current !== target) {
+      window.history.replaceState(null, "", target);
+    }
+  }, [inv?.invoiceNumber, inv?.id, inv?.businessId, inv?.invoice_date, candidates, biz?.name]);
+
+  // Tab title — easier to recognise "Invoice 040" in a stack of open tabs
+  // than the same generic app title repeated 8 times.
+  useEffect(() => {
+    if (inv?.invoiceNumber) {
+      const prev = document.title;
+      document.title = `Invoice ${inv.invoiceNumber} · ${formatCurrency(inv.total)} — GST Billing`;
+      return () => { document.title = prev; };
+    }
+  }, [inv?.invoiceNumber, inv?.total]);
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1500);
+      toast({ title: "Link copied", description: window.location.href });
+    } catch {
+      toast({ title: "Couldn't copy", description: "Select the URL bar and copy manually.", variant: "destructive" });
+    }
+  };
+
   if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
+
+  // Number-slug lookup found multiple matches — render a picker so the
+  // user can pick which business they meant. Only happens when the URL
+  // path is a number AND no `?b=` query param was supplied; once they
+  // click into one, the canonical URL becomes `.../{number}?b={id}`.
+  if (!inv && candidates.length > 1) {
+    return (
+      <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 max-w-3xl mx-auto")}>
+        <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: slug || "Invoice" }]} />
+        <div className="elevated-card rounded-2xl p-5 border-l-4 border-l-warning flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-[14px] font-semibold text-foreground">Multiple invoices share number "{slug}"</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5">
+              Found {candidates.length} matches across {new Set(candidates.map((c) => c.business_id)).size} businesses. Pick the one you meant.
+            </p>
+          </div>
+        </div>
+        <div className="elevated-card rounded-2xl divide-y divide-border/30 overflow-hidden">
+          {candidates.map((c) => {
+            // Link directly to the fully-disambiguated URL so the picker
+            // → detail navigation skips the history.replaceState rewrite.
+            const d = new Date(c.invoice_date);
+            const y = d.getFullYear();
+            const mo = d.getMonth() + 1;
+            const fyStr = mo >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+            const bSlug = businessSlug(c.business_name) || c.business_id;
+            const targetUrl = `/billing/invoice/${bSlug}/${fyStr}/${encodeURIComponent(c.invoice_number)}`;
+            return (
+            <Link
+              key={c.id}
+              to={targetUrl}
+              className="flex items-center gap-3 p-4 hover:bg-secondary/30 transition-colors group"
+            >
+              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                <FileText className="w-4 h-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <p className="text-[14px] font-semibold text-foreground">{c.business_name}</p>
+                  <span className={cn("premium-badge text-[9px]", c.type_of_invoice === "outward" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{(c.type_of_invoice || "").toUpperCase()}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                  {c.customer_name} · {formatDate(c.invoice_date)} · {formatCurrency(c.total)}
+                </p>
+              </div>
+              <ArrowLeft className="w-4 h-4 text-muted-foreground rotate-180 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
+            );
+          })}
+        </div>
+        <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+      </div>
+    );
+  }
+
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
 
 
@@ -71,7 +207,10 @@ export default function InvoiceDetail() {
         {!isMobile && (
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back</button>
-            <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
+            <button onClick={handleCopyLink} className="premium-btn-ghost text-[13px]" title="Copy a shareable link to this invoice">
+              {linkCopied ? <Check className="w-4 h-4 text-success" /> : <LinkIcon className="w-4 h-4" />} {linkCopied ? "Copied" : "Copy link"}
+            </button>
+            <Link to={`/billing/invoice/edit/${dbId}`} className="premium-btn-outline text-[13px] border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
             <button onClick={() => { navigate("/billing/invoice/add", { state: { duplicateFrom: inv } }); toast({ title: "Duplicating", description: `Creating copy of ${inv.invoiceNumber}` }); }} className="premium-btn-ghost text-[13px]"><Copy className="w-4 h-4" /> Duplicate</button>
             <button onClick={() => setShowEway(!showEway)} className="premium-btn-ghost text-[13px]"><Truck className="w-4 h-4" /> E-way Bill</button>
             <Link to={printUrl} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
@@ -280,7 +419,7 @@ export default function InvoiceDetail() {
       {isMobile && (
         <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
           <div className="flex items-center gap-2">
-            <Link to={`/billing/invoice/edit/${id}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
+            <Link to={`/billing/invoice/edit/${dbId}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
             <Link to={printUrl} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
             <button onClick={() => setShowEway(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-chart-2/30 text-chart-2" title="E-way Bill"><Truck className="w-3.5 h-3.5" /></button>
             <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>

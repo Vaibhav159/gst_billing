@@ -781,53 +781,48 @@ export default function ImportPage({ type }: ImportPageProps) {
       <motion.div variants={stagger} initial="hidden" animate="visible"
         className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        {/* CSV Format Reference */}
-        <motion.div variants={fadeUp} className="lg:col-span-4 space-y-5">
-          <div className="elevated-card rounded-2xl p-6 space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center", config.bg)}>
-                <FileSpreadsheet className={cn("w-3.5 h-3.5", config.color)} />
-              </div>
-              <h2 className="text-[11px] font-display font-semibold text-muted-foreground uppercase tracking-wider">CSV Format</h2>
-            </div>
-
-            {/* Required fields */}
-            <div className="space-y-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/80 mb-1">Required</p>
-              {config.columns.filter((c) => c.required).map((col, i) => (
-                <div key={col.name} className="flex items-center gap-3 p-2.5 rounded-lg border border-primary/20 bg-primary/5">
-                  <span className="w-6 h-6 rounded-lg bg-primary/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[12px] font-semibold text-foreground">
-                      {col.name}<span className="text-destructive ml-0.5">*</span>
-                    </p>
-                    <p className="text-[10px] text-muted-foreground font-mono truncate">
-                      {col.example}{(col as any).note ? ` · ${(col as any).note}` : ""}
-                    </p>
-                  </div>
+        {/* CSV Format Reference — compact two-column table + a single
+            collapsible tips block instead of two stacked cards. Used to be
+            15+ vertical rows that dwarfed the upload area; now fits in
+            roughly the same height as the drop zone itself. */}
+        <motion.div variants={fadeUp} className="lg:col-span-4 space-y-4">
+          <div className="elevated-card rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center", config.bg)}>
+                  <FileSpreadsheet className={cn("w-3.5 h-3.5", config.color)} />
                 </div>
-              ))}
+                <h2 className="text-[11px] font-display font-semibold text-muted-foreground uppercase tracking-wider">Column Reference</h2>
+              </div>
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                {config.columns.filter((c) => c.required).length} required · {config.columns.length} total
+              </span>
             </div>
 
-            {/* Optional fields with defaults */}
-            {config.columns.some((c) => !c.required) && (
-              <div className="space-y-2 mt-3 pt-3 border-t border-border/30">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Optional · sensible defaults applied</p>
-                {config.columns.filter((c) => !c.required).map((col) => (
-                  <div key={col.name} className="flex items-start gap-2 px-2.5 py-1.5">
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] text-muted-foreground">
-                        <span className="font-medium text-foreground/80">{col.name}</span>
-                        {(col as any).note ? <span className="font-mono"> · {(col as any).note}</span> : ""}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Single compact table: field · example.  required rows pinned
+                first and tinted; optional rows follow with a muted tone. */}
+            <div className="rounded-lg border border-border/40 overflow-hidden">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="bg-secondary/30 text-muted-foreground">
+                    <th className="px-3 py-1.5 text-left font-semibold uppercase tracking-wider text-[10px]">Field</th>
+                    <th className="px-3 py-1.5 text-left font-semibold uppercase tracking-wider text-[10px]">Example</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...config.columns.filter((c) => c.required), ...config.columns.filter((c) => !c.required)].map((col) => (
+                    <tr key={col.name} className={cn("border-t border-border/20", col.required ? "bg-primary/[0.03]" : "")}>
+                      <td className="px-3 py-1.5 text-foreground/90 font-medium">
+                        {col.name}{col.required && <span className="text-destructive ml-0.5">*</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground font-mono truncate max-w-[160px]">
+                        {col.example || (col as any).note || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {type === "invoice" ? (
               <div className="space-y-2">
@@ -866,49 +861,67 @@ export default function ImportPage({ type }: ImportPageProps) {
                 <Download className="w-3.5 h-3.5" /> Sample CSV
               </button>
             )}
-          </div>
 
-          {/* Tips */}
-          <div className="elevated-card rounded-2xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-chart-3" />
-              <h3 className="text-[12px] font-display font-semibold text-foreground uppercase tracking-wider">Tips</h3>
-            </div>
-            <ul className="space-y-2 text-[11px] text-muted-foreground">
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Fields marked with * are required.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Supports both CSV and Excel (.xlsx) files.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Excel: One sheet per firm or all firms at once.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Duplicate invoices (same Bill No. + Business) are detected.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Missing customers can be added inline before import.</li>
-              <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Preview all data before importing.</li>
-            </ul>
+            {/* Tips fold inline so they're visible without scroll, but a
+                two-column grid keeps them tight. */}
+            <details className="rounded-lg border border-border/30 bg-secondary/10 group">
+              <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <Info className="w-3.5 h-3.5 text-chart-3" />
+                <span className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider">Tips</span>
+                <span className="ml-auto text-[10px] text-muted-foreground group-open:rotate-90 transition-transform">›</span>
+              </summary>
+              <ul className="px-3 pb-3 grid grid-cols-1 gap-1.5 text-[11px] text-muted-foreground">
+                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />* fields are required; the rest get sensible defaults.</li>
+                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />CSV and Excel (.xlsx) both work — one sheet per firm or all-in-one.</li>
+                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Duplicates (same Bill No. + Business + FY) are detected automatically.</li>
+                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Missing customers can be added inline on the review screen.</li>
+                <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-chart-3 mt-1.5 shrink-0" />Nothing is committed until you confirm on the preview.</li>
+              </ul>
+            </details>
           </div>
         </motion.div>
 
-        {/* Upload Area */}
+        {/* Upload Area — numbered step pattern so the workflow is obvious
+            even to first-time users. Step 1 (Target Business) is tighter
+            and sits as a compact card; Step 2 (Drop Zone) is the visual
+            hero. The previous version put the business filter in its own
+            full-width card stacked above the drop zone, which doubled the
+            vertical space without communicating sequence. */}
         <motion.div variants={fadeUp} className="lg:col-span-8 space-y-5">
 
-          {/* Business filter */}
+          {/* Step 1 · Business filter */}
           {config.showBusiness && (
-            <div className="elevated-card rounded-2xl p-5">
-              <div className="flex items-center gap-2.5 mb-3">
-                <Hash className="w-4 h-4 text-muted-foreground" />
-                <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Target Business</label>
+            <div className="elevated-card rounded-2xl p-4">
+              <div className="flex items-center gap-3">
+                <span className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[12px] font-bold shrink-0">1</span>
+                <div className="flex-1 min-w-0">
+                  <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider block">Target Business</label>
+                  <p className="text-[10px] text-muted-foreground">Auto-detect matches by GSTIN in the file; override to force one business.</p>
+                </div>
+                <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-auto min-w-[260px] text-[12px]">
+                  <option value="all">Auto-detect (match GSTIN)</option>
+                  {businesses.map((b) => <option key={b.id} value={b.id}>{b.name} — {b.gst_number}</option>)}
+                </select>
               </div>
-              <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-full">
-                <option value="all">Auto-detect (match GSTIN)</option>
-                {businesses.map((b) => <option key={b.id} value={b.id}>{b.name} — {b.gst_number}</option>)}
-              </select>
             </div>
           )}
 
-          {/* Drop Zone */}
-          <div className="elevated-card rounded-2xl p-6 space-y-5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Upload className="w-3.5 h-3.5 text-primary" />
+          {/* Step 2 · Drop Zone */}
+          <div className="elevated-card rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[12px] font-bold shrink-0">2</span>
+              <div className="flex-1">
+                <h2 className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Upload File</h2>
+                <p className="text-[10px] text-muted-foreground">CSV or Excel · Max 5MB · We'll preview before anything is saved.</p>
               </div>
-              <h2 className="text-[11px] font-display font-semibold text-muted-foreground uppercase tracking-wider">Upload File</h2>
+              {file && !importDone && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                  className="text-[11px] text-muted-foreground hover:text-destructive font-medium"
+                >
+                  Remove file
+                </button>
+              )}
             </div>
 
             <div
@@ -917,7 +930,7 @@ export default function ImportPage({ type }: ImportPageProps) {
               onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
               onClick={() => document.getElementById("file-input")?.click()}
               className={cn(
-                "border-2 border-dashed rounded-2xl p-14 text-center cursor-pointer transition-all duration-300",
+                "border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300",
                 dragOver ? "border-primary bg-primary/5 scale-[1.01]" :
                 file ? "border-success/40 bg-success/3" :
                 "border-border/60 hover:border-primary/40 hover:bg-secondary/10"
@@ -926,7 +939,7 @@ export default function ImportPage({ type }: ImportPageProps) {
               <AnimatePresence mode="wait">
                 {importDone ? (
                   <motion.div key="done" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-2">
-                    <CheckCircle2 className="w-12 h-12 text-success mx-auto" />
+                    <CheckCircle2 className="w-10 h-10 text-success mx-auto" />
                     <p className="text-[14px] font-semibold text-success">Import Complete!</p>
                     {importResult && (
                       <p className="text-[12px] text-muted-foreground">
@@ -936,16 +949,16 @@ export default function ImportPage({ type }: ImportPageProps) {
                     <p className="text-[11px] text-muted-foreground">Click to upload another file</p>
                   </motion.div>
                 ) : file ? (
-                  <motion.div key="file" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-2">
-                    <FileText className="w-12 h-12 text-success/70 mx-auto" />
+                  <motion.div key="file" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-1.5">
+                    <FileText className="w-10 h-10 text-success/70 mx-auto" />
                     <p className="text-[14px] font-semibold text-foreground">{file.name}</p>
-                    <p className="text-[12px] text-muted-foreground">{(file.size / 1024).toFixed(1)} KB · Click to change</p>
+                    <p className="text-[12px] text-muted-foreground">{(file.size / 1024).toFixed(1)} KB · Click to swap</p>
                   </motion.div>
                 ) : (
-                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
-                    <Upload className="w-12 h-12 text-muted-foreground/40 mx-auto" />
+                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5">
+                    <Upload className="w-10 h-10 text-muted-foreground/40 mx-auto" />
                     <p className="text-[14px] font-semibold text-foreground">Drag & drop your file</p>
-                    <p className="text-[12px] text-muted-foreground">or click to browse · CSV or Excel (.xlsx) · Max 5MB</p>
+                    <p className="text-[12px] text-muted-foreground">or click to browse · CSV or Excel (.xlsx)</p>
                   </motion.div>
                 )}
               </AnimatePresence>

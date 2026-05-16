@@ -738,13 +738,78 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if invoice_type:
             queryset = queryset.filter(type_of_invoice=invoice_type)
 
-        # Annotate with total tax and item count
+        # Data-hygiene filters used by DataQualityBanner drill-down URLs:
+        #   ?empty=1      → invoices with zero line items
+        #   ?no_hsn=1     → invoices with at least one HSN-less line item
+        #   ?dups=1       → invoices whose (business, number, FY, type)
+        #                   collides with another row
+        if self.request.query_params.get("empty") == "1":
+            queryset = queryset.filter(lineitem__isnull=True)
+
+        if self.request.query_params.get("no_hsn") == "1":
+            # An invoice qualifies if it has at least one line item whose
+            # hsn_code is empty/null. The lineitem__isnull=False guard is
+            # critical: without it, the LEFT JOIN makes invoices with ZERO
+            # line items match `lineitem__hsn_code__isnull=True` and they'd
+            # bleed in. distinct() collapses any row duplication.
+            queryset = queryset.filter(
+                lineitem__isnull=False,
+            ).filter(
+                Q(lineitem__hsn_code__isnull=True) | Q(lineitem__hsn_code="")
+            ).distinct()
+
+        if self.request.query_params.get("dups") == "1":
+            # Bucket by (business, number, FY, type) and keep only invoices in
+            # buckets of size > 1. Done in Python because the FY needs Apr-Mar
+            # math we can't easily express in SQL without a CASE expression.
+            from collections import defaultdict
+            buckets = defaultdict(list)
+            for inv in queryset.values("id", "business_id", "invoice_number", "invoice_date", "type_of_invoice"):
+                d = inv["invoice_date"]
+                if not d or not inv["invoice_number"]:
+                    continue
+                fy = d.year if d.month >= 4 else d.year - 1
+                key = (inv["business_id"], inv["invoice_number"], fy, inv["type_of_invoice"])
+                buckets[key].append(inv["id"])
+            dup_ids = [i for ids in buckets.values() if len(ids) > 1 for i in ids]
+            queryset = queryset.filter(id__in=dup_ids)
+
+        # Annotate via correlated Subqueries instead of a JOIN+GROUP BY.
+        #
+        # The previous version chained
+        #     .annotate(total_tax=Sum(F("lineitem__cgst")+...),
+        #               line_item_count=Count("lineitem"))
+        # which:
+        #   (a) returned WRONG numbers — joining lineitem once and then
+        #       both Sum-ing and Count-ing across that same join causes
+        #       row-multiplication: total_tax = real_tax × line_item_count.
+        #   (b) baked the join into every consumer of get_queryset()
+        #       (stats / gst_summary / gstr_export / etc.), so even
+        #       endpoints that don't need these annotations paid for the
+        #       join. With dev DB at ~900 invoices that's tolerable; at
+        #       prod scale it gets noticeable.
+        #
+        # Subqueries are independent per-row, no row inflation, and
+        # downstream actions that don't reference total_tax / line_item_count
+        # don't pay for them at all (Postgres skips uncorrelated
+        # subqueries that aren't selected).
+        from django.db.models import OuterRef, Subquery, DecimalField, IntegerField
+        line_items_per_invoice = LineItem.objects.filter(invoice=OuterRef("pk"))
+        tax_sum = (
+            line_items_per_invoice
+            .values("invoice")
+            .annotate(t=Sum(F("cgst") + F("sgst") + F("igst")))
+            .values("t")
+        )
+        item_count = (
+            line_items_per_invoice
+            .values("invoice")
+            .annotate(c=Count("id"))
+            .values("c")
+        )
         queryset = queryset.annotate(
-            total_tax=Coalesce(
-                Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")),
-                Decimal("0.00"),
-            ),
-            line_item_count=Count("lineitem"),
+            total_tax=Coalesce(Subquery(tax_sum, output_field=DecimalField()), Decimal("0.00")),
+            line_item_count=Coalesce(Subquery(item_count, output_field=IntegerField()), 0),
         )
 
         return queryset
@@ -1239,29 +1304,116 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def check_duplicate(self, request):
-        """Check if an invoice number already exists for a business in the current FY."""
+        """Check if an invoice number already exists for a business in a given
+        financial year + invoice type.
+
+        Previously only checked (business, invoice_number, current-FY-by-today).
+        That missed:
+          - duplicates on the SAME number in the SAME FY but a *different type*
+            (an outward "12" can legitimately coexist with an inward "12")
+          - back-dated entry into a *past* FY — the today-based check would
+            misreport "no duplicate" because the past FY wasn't even in scope.
+        A real audit of the prod DB found 6 same-(business, number, FY, type)
+        collisions that slipped through the old check.
+
+        Now the FY is derived from the supplied invoice_date when provided
+        (falls back to today's FY), and type_of_invoice gates the lookup.
+        """
         invoice_number = request.query_params.get("invoice_number", "")
         business_id = request.query_params.get("business_id", "")
         exclude_id = request.query_params.get("exclude_id", "")
+        type_of_invoice = (request.query_params.get("type_of_invoice") or "").lower()
+        invoice_date_str = request.query_params.get("invoice_date", "")
 
         if not invoice_number or not business_id:
             return Response({"exists": False})
 
-        # Only check within current FY (invoice numbers reset per FY)
-        today = datetime.now().date()
-        fy_start = datetime(today.year if today.month >= 4 else today.year - 1, 4, 1).date()
+        # Resolve the FY from the supplied invoice_date when present; fall
+        # back to "this FY by wall-clock today" for backward compat.
+        target_date = None
+        if invoice_date_str:
+            try:
+                target_date = datetime.strptime(invoice_date_str, "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                target_date = None
+        if target_date is None:
+            target_date = datetime.now().date()
+        fy_start = datetime(
+            target_date.year if target_date.month >= 4 else target_date.year - 1,
+            4, 1,
+        ).date()
+        fy_end = datetime(fy_start.year + 1, 3, 31).date()
 
         qs = Invoice.objects.filter(
-            invoice_number=invoice_number, business_id=business_id,
+            invoice_number=invoice_number,
+            business_id=business_id,
             invoice_date__gte=fy_start,
+            invoice_date__lte=fy_end,
         )
+        if type_of_invoice in ("outward", "inward"):
+            qs = qs.filter(type_of_invoice=type_of_invoice)
         if exclude_id:
             qs = qs.exclude(id=exclude_id)
 
         exists = qs.exists()
         return Response({
             "exists": exists,
-            "message": f"Invoice #{invoice_number} already exists for this business" if exists else "",
+            "message": (
+                f"Invoice #{invoice_number} already exists for this business "
+                f"in FY {fy_start.year}-{str(fy_start.year + 1)[2:]}"
+                + (f" ({type_of_invoice})" if type_of_invoice in ("outward", "inward") else "")
+                if exists else ""
+            ),
+        })
+
+    @action(detail=False, methods=["get"])
+    def data_quality(self, request):
+        """Snapshot of common data-hygiene issues that will bite at filing time.
+
+        Surfaces:
+          - invoices_no_line_items   : invoices with zero LineItems (won't
+                                       appear on GSTR-1 rate-slab tables)
+          - line_items_missing_hsn   : line items with empty hsn_code
+                                       (unfilable in GSTR-1 HSN summary)
+          - duplicate_invoice_groups : same (business, number, FY, type)
+                                       collisions — GST portal rejects these
+                                       on filing.
+
+        Counts only — drill-downs come from existing list APIs (filterable).
+        """
+        from django.db.models import Case, When
+        from django.db.models.functions import ExtractYear
+        empty_inv = Invoice.objects.filter(lineitem__isnull=True).count()
+        no_hsn = LineItem.objects.filter(
+            Q(hsn_code__isnull=True) | Q(hsn_code="")
+        ).count()
+
+        # Same-(business, number, FY, type) collisions.
+        # FY math (Apr-Mar) used to be done in a Python loop streaming
+        # every Invoice row to the application — ~1000 rows = ~50ms over
+        # a remote DB. Push it to SQL: derive `fy` as a CASE expression
+        # on the year of invoice_date, then GROUP BY in the database.
+        fy_year = Case(
+            When(invoice_date__month__gte=4, then=ExtractYear("invoice_date")),
+            default=ExtractYear("invoice_date") - 1,
+        )
+        dup_groups = (
+            Invoice.objects
+            .exclude(invoice_date__isnull=True)
+            .exclude(invoice_number__isnull=True)
+            .exclude(invoice_number="")
+            .annotate(_fy=fy_year)
+            .values("business_id", "invoice_number", "_fy", "type_of_invoice")
+            .annotate(c=Count("id"))
+            .filter(c__gt=1)
+            .count()
+        )
+
+        return Response({
+            "invoices_no_line_items": empty_inv,
+            "line_items_missing_hsn": no_hsn,
+            "duplicate_invoice_groups": dup_groups,
+            "has_issues": (empty_inv + no_hsn + dup_groups) > 0,
         })
 
     @action(detail=False, methods=["get"])
@@ -1277,35 +1429,41 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         except (TypeError, ValueError):
             business_id = None
 
-        # 1. Rate-wise breakdown (GSTR-1 style)
-        rate_slabs = {}
-        for inv_type in ["outward", "inward"]:
-            type_items = items.filter(invoice__type_of_invoice=inv_type)
-            slab_data = (
-                type_items
-                .values("gst_tax_rate")
-                .annotate(
-                    taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
-                    cgst=Coalesce(Sum("cgst"), Decimal("0")),
-                    sgst=Coalesce(Sum("sgst"), Decimal("0")),
-                    igst=Coalesce(Sum("igst"), Decimal("0")),
-                    total=Coalesce(Sum("amount"), Decimal("0")),
-                    count=Count("invoice", distinct=True),
-                )
-                .order_by("gst_tax_rate")
+        # 1. Rate-wise breakdown (GSTR-1 style).
+        #
+        # Was: a for-loop over ["outward","inward"] firing two separate
+        # GROUP-BY queries against LineItem. With ~100ms remote-DB round
+        # trip latency that's ~200ms baseline.
+        #
+        # Now: a single GROUP-BY on (type_of_invoice, gst_tax_rate). One
+        # query, bucketed into outward/inward in Python.
+        rate_slabs = {"outward": [], "inward": []}
+        slab_data = (
+            items
+            .values("invoice__type_of_invoice", "gst_tax_rate")
+            .annotate(
+                taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+                cgst=Coalesce(Sum("cgst"), Decimal("0")),
+                sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                igst=Coalesce(Sum("igst"), Decimal("0")),
+                total=Coalesce(Sum("amount"), Decimal("0")),
+                count=Count("invoice", distinct=True),
             )
-            rate_slabs[inv_type] = [
-                {
-                    "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
-                    "taxable": float(s["taxable"]),
-                    "cgst": float(s["cgst"]),
-                    "sgst": float(s["sgst"]),
-                    "igst": float(s["igst"]),
-                    "total": float(s["total"]),
-                    "invoice_count": s["count"],
-                }
-                for s in slab_data
-            ]
+            .order_by("invoice__type_of_invoice", "gst_tax_rate")
+        )
+        for s in slab_data:
+            inv_type = s["invoice__type_of_invoice"]
+            if inv_type not in rate_slabs:
+                continue
+            rate_slabs[inv_type].append({
+                "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
+                "taxable": float(s["taxable"]),
+                "cgst": float(s["cgst"]),
+                "sgst": float(s["sgst"]),
+                "igst": float(s["igst"]),
+                "total": float(s["total"]),
+                "invoice_count": s["count"],
+            })
 
         # 2. HSN-wise breakdown
         hsn_data = (
@@ -1336,17 +1494,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             for h in hsn_data
         ]
 
-        # 3. GSTR-3B summary (net tax)
-        outward_tax = items.filter(invoice__type_of_invoice="outward").aggregate(
-            cgst=Coalesce(Sum("cgst"), Decimal("0")),
-            sgst=Coalesce(Sum("sgst"), Decimal("0")),
-            igst=Coalesce(Sum("igst"), Decimal("0")),
+        # 3. GSTR-3B summary (net tax) — one aggregate with Q-filter
+        #    pairs instead of two .filter().aggregate() round-trips.
+        from django.db.models import Q as _Q
+        combined = items.aggregate(
+            outward_cgst=Coalesce(Sum("cgst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
+            outward_sgst=Coalesce(Sum("sgst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
+            outward_igst=Coalesce(Sum("igst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
+            inward_cgst=Coalesce(Sum("cgst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
+            inward_sgst=Coalesce(Sum("sgst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
+            inward_igst=Coalesce(Sum("igst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
         )
-        inward_tax = items.filter(invoice__type_of_invoice="inward").aggregate(
-            cgst=Coalesce(Sum("cgst"), Decimal("0")),
-            sgst=Coalesce(Sum("sgst"), Decimal("0")),
-            igst=Coalesce(Sum("igst"), Decimal("0")),
-        )
+        outward_tax = {"cgst": combined["outward_cgst"], "sgst": combined["outward_sgst"], "igst": combined["outward_igst"]}
+        inward_tax = {"cgst": combined["inward_cgst"], "sgst": combined["inward_sgst"], "igst": combined["inward_igst"]}
         gstr3b = {
             "output_tax": {
                 "cgst": float(outward_tax["cgst"]),
@@ -1378,19 +1538,51 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # The reversal/reclaim rows aren't tracked by line item yet, so they
         # default to 0 — the frontend lets the user override them per period.
         # The ECRRS opening balance comes from the ITCReclaimLedger model
-        # (per-business), keyed by business_id; if querying across all
-        # businesses, the closing balance card on the frontend just hides.
+        # (per-business). When the user is viewing "All Businesses" we
+        # aggregate the opening balances across every ledger so the
+        # carry-forward card on the frontend stays accurate — previously this
+        # was just None for the All-Businesses view, which silently hid the
+        # number the user came here looking for.
         from billing.models import ITCReclaimLedger
         opening_balance = None
         if business_id:
             ledger = ITCReclaimLedger.objects.filter(business_id=business_id).first()
             if ledger:
+                cgst = float(ledger.opening_cgst or 0)
+                sgst = float(ledger.opening_sgst or 0)
+                igst = float(ledger.opening_igst or 0)
                 opening_balance = {
-                    "cgst": float(ledger.opening_cgst),
-                    "sgst": float(ledger.opening_sgst),
-                    "igst": float(ledger.opening_igst),
+                    "cgst": cgst,
+                    "sgst": sgst,
+                    "igst": igst,
+                    "total": cgst + sgst + igst,
                     "as_of": ledger.opening_as_of.isoformat() if ledger.opening_as_of else None,
+                    "business_count": 1,
+                    "configured": True,
                 }
+        else:
+            agg = ITCReclaimLedger.objects.aggregate(
+                c=Sum("opening_cgst"),
+                s=Sum("opening_sgst"),
+                i=Sum("opening_igst"),
+            )
+            c = float(agg["c"] or 0)
+            s = float(agg["s"] or 0)
+            i = float(agg["i"] or 0)
+            biz_count = ITCReclaimLedger.objects.exclude(
+                Q(opening_cgst=0) & Q(opening_sgst=0) & Q(opening_igst=0)
+            ).count()
+            # Surface even a 0-total response so the frontend can distinguish
+            # "no business has a ledger" from "ledger exists but is zero".
+            opening_balance = {
+                "cgst": c,
+                "sgst": s,
+                "igst": i,
+                "total": c + s + i,
+                "as_of": None,
+                "business_count": biz_count,
+                "configured": biz_count > 0,
+            }
 
         gstr3b_table4 = {
             # 4(A) ITC Available
@@ -1495,6 +1687,25 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "variance": gstr3b["output_tax"]["total"] - gstr1_total_tax,
         }
 
+        # ── Effective ITC + Net Tax including carry-forward ──
+        # The user came looking for "last year's carry-forward GST" on the
+        # main summary, not buried inside Table 4. We compute effective
+        # numbers here so the frontend can show:
+        #     Output Tax            = period output
+        #     Current-period ITC    = period inward tax
+        # +   Carry-forward ITC     = opening balance from ledger
+        # =   Effective ITC         = sum of the two
+        # =   Effective Net Tax     = Output - Effective ITC
+        carry_total = opening_balance["total"] if opening_balance else 0.0
+        current_itc_total = gstr3b["input_tax_credit"]["total"]
+        output_total = gstr3b["output_tax"]["total"]
+        effective = {
+            "carry_forward_itc": carry_total,
+            "current_itc": current_itc_total,
+            "effective_itc": current_itc_total + carry_total,
+            "effective_net_tax": output_total - (current_itc_total + carry_total),
+        }
+
         return Response({
             "rate_slabs": rate_slabs,
             "hsn_summary": hsn_summary,
@@ -1505,6 +1716,11 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "urgent_invoices": urgent_invoices,
             },
             "gstr1_3b_recon": gstr1_3b_recon,
+            # Promoted to top-level so the Summary view doesn't have to
+            # reach into gstr3b_table4.ecrrs_opening_balance. Keeps the old
+            # nested copy for backwards compat with the GSTR-3B tab.
+            "carry_forward_itc": opening_balance,
+            "effective": effective,
         })
 
     @action(detail=False, methods=["get"])
@@ -1689,9 +1905,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
-        """Get the next invoice number for a business"""
+        """Get the next invoice number for a business.
+
+        Accepts optional `invoice_date` (YYYY-MM-DD) so back-dated entries get
+        the next number for the *date's* FY, not today's FY. Without it,
+        defaults to today (legacy behaviour).
+        """
         business_id = request.query_params.get("business_id")
         invoice_type = request.query_params.get("type_of_invoice", INVOICE_TYPE_OUTWARD)
+        invoice_date_str = request.query_params.get("invoice_date")
 
         if not business_id:
             return Response(
@@ -1701,12 +1923,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Get the financial year
         from datetime import datetime
 
-        today = datetime.now().date()
+        ref_date = None
+        if invoice_date_str:
+            try:
+                ref_date = datetime.strptime(invoice_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                ref_date = None
+        if not ref_date:
+            ref_date = datetime.now().date()
         # Get financial year start date (April 1st)
         start_date = (
-            datetime(today.year - 1, 4, 1).date()
-            if today.month < 4
-            else datetime(today.year, 4, 1).date()
+            datetime(ref_date.year - 1, 4, 1).date()
+            if ref_date.month < 4
+            else datetime(ref_date.year, 4, 1).date()
         )
 
         # Find the highest trailing number, but only among invoice_numbers
@@ -1718,9 +1947,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # ("SGJ/2024-25/108"). Anything else is skipped.
         import re
 
+        # Scope to the chosen FY (start_date .. start_date + 1 year - 1 day),
+        # so a back-dated entry in FY 2024-25 doesn't get its next-number
+        # inferred from FY 2025-26 invoices.
+        from datetime import timedelta
+        fy_end = datetime(start_date.year + 1, 3, 31).date()
         fy_invoices = Invoice.objects.filter(
             business_id=business_id,
             invoice_date__gte=start_date,
+            invoice_date__lte=fy_end,
             type_of_invoice=invoice_type,
         ).only("invoice_number")
 

@@ -3,12 +3,12 @@ import { toCSV, downloadCSV } from "@/utils/csv";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
-  Package, TrendingUp, Hash, Filter, LayoutGrid, List,
+  Package, TrendingUp, Hash, Filter, LayoutGrid, List, Receipt,
   Copy, CheckCircle2, BarChart3, SlidersHorizontal, Loader2,
   ArrowUpDown, AlertTriangle,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatCurrency } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
 import { useProducts, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn, pluralize } from "@/utils/utils";
@@ -35,8 +35,12 @@ export default function ProductList() {
 
   const gstRates = [...new Set(products.map((p) => p.gstRate))].sort((a, b) => a - b);
 
-  // Detect duplicate product names (case-insensitive)
-  const duplicateNames = useMemo(() => {
+  // Detect duplicate product names (case-insensitive). Returns both the set
+  // of names involved (for display) and a count of distinct collision groups
+  // (so "3 names colliding on one casing" = 1 duplicate, not 3 halves of
+  // anything — the previous Math.floor(size / 2) miscounted 3-way collisions
+  // as 1.5 → 1).
+  const { duplicateNames, duplicateGroupCount } = useMemo(() => {
     const nameMap = new Map<string, string[]>();
     products.forEach((p) => {
       const lower = p.name.toLowerCase();
@@ -44,10 +48,14 @@ export default function ProductList() {
       nameMap.get(lower)!.push(p.name);
     });
     const dupes = new Set<string>();
+    let groups = 0;
     nameMap.forEach((names) => {
-      if (names.length > 1) names.forEach((n) => dupes.add(n));
+      if (names.length > 1) {
+        groups += 1;
+        names.forEach((n) => dupes.add(n));
+      }
     });
-    return dupes;
+    return { duplicateNames: dupes, duplicateGroupCount: groups };
   }, [products]);
 
   const getProductRevenue = (p: any) => Number(p.total_revenue) || 0;
@@ -86,8 +94,10 @@ export default function ProductList() {
       p.name, p.hsn, p.gstRate, p.description,
       getProductRevenue(p), getProductUsageCount(p),
     ]);
+    // downloadCSV creates + cleans up its own blob URL — the previous
+    // URL.revokeObjectURL(url) line referenced an undefined `url` and threw
+    // ReferenceError on Export click.
     downloadCSV(toCSV([headers, ...rows]), "products-export.csv");
-    URL.revokeObjectURL(url);
     toast({ title: "CSV Exported", description: `${filtered.length} products exported.` });
   };
 
@@ -227,25 +237,22 @@ export default function ProductList() {
         </div>
       </motion.div>
 
-      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <motion.div variants={stagger} initial="hidden" animate="visible" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: "Total Products", value: totalProducts.toString(), icon: Package, color: "text-chart-3", bg: "bg-chart-3/10" },
-          { label: "Total Revenue", value: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-success", bg: "bg-success/10" },
-          { label: "Times Used", value: totalUsage.toString(), icon: BarChart3, color: "text-chart-1", bg: "bg-chart-1/10" },
-          { label: "Avg GST Rate", value: `${avgGSTRate}%`, icon: Hash, color: "text-chart-4", bg: "bg-chart-4/10" },
+          { label: "Total Products", value: totalProducts.toLocaleString("en-IN"), full: `${totalProducts} products`, icon: Package, color: "text-chart-3", bg: "bg-chart-3/10" },
+          { label: "Total Revenue", value: formatCompactCurrency(totalRevenue), full: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-success", bg: "bg-success/10" },
+          { label: "Times Used", value: totalUsage.toLocaleString("en-IN"), full: `${totalUsage} line items across all invoices`, icon: BarChart3, color: "text-chart-1", bg: "bg-chart-1/10" },
+          { label: "Avg Revenue/Product", value: formatCompactCurrency(totalProducts > 0 ? totalRevenue / totalProducts : 0), full: formatCurrency(totalProducts > 0 ? totalRevenue / totalProducts : 0), icon: Receipt, color: "text-chart-2", bg: "bg-chart-2/10" },
+          { label: "Avg GST Rate", value: `${avgGSTRate}%`, full: `Across ${products.length} catalogued products`, icon: Hash, color: "text-chart-4", bg: "bg-chart-4/10" },
         ].map((stat) => {
           const Icon = stat.icon;
           return (
-            <motion.div key={stat.label} variants={fadeUp} className="stat-card rounded-2xl p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</p>
-                  <p className={cn("text-2xl font-display font-bold mt-1.5 tracking-tight tabular-nums", stat.color)}>{stat.value}</p>
-                </div>
-                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", stat.bg)}>
-                  <Icon className={cn("w-[18px] h-[18px]", stat.color)} />
-                </div>
+            <motion.div key={stat.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={stat.full}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{stat.label}</p>
+                <Icon className={cn("w-3.5 h-3.5", stat.color)} />
               </div>
+              <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", stat.color)}>{stat.value}</p>
             </motion.div>
           );
         })}
@@ -294,7 +301,7 @@ export default function ProductList() {
           <div>
             <p className="text-[13px] font-semibold text-foreground">Possible duplicate products detected</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              {Math.floor(duplicateNames.size / 2)} product(s) may be duplicated with different casing: {[...duplicateNames].slice(0, 4).join(", ")}{duplicateNames.size > 4 ? "…" : ""}
+              {duplicateGroupCount} product name{duplicateGroupCount === 1 ? "" : "s"} may be duplicated with different casing: {[...duplicateNames].slice(0, 4).join(", ")}{duplicateNames.size > 4 ? "…" : ""}
             </p>
           </div>
         </motion.div>
@@ -387,10 +394,16 @@ export default function ProductList() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-center py-16">
-                    <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Package className="w-10 h-10 opacity-30" />
-                      <p className="text-sm font-medium">No products found</p>
-                      <p className="text-xs">Try adjusting your search or filters</p>
+                      <p className="text-sm font-medium text-foreground/70">No products found</p>
+                      {(search || gstFilter !== "all") ? (
+                        <button onClick={() => { setSearch(""); setGstFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+                      ) : (
+                        <Link to="/billing/product/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                          <Plus className="w-3 h-3" /> Add your first product
+                        </Link>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -448,9 +461,16 @@ export default function ProductList() {
             );
           })}
           {filtered.length === 0 && (
-            <div className="col-span-full flex flex-col items-center gap-3 py-16 text-muted-foreground">
+            <div className="col-span-full flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Package className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No products found</p>
+              <p className="text-sm font-medium text-foreground/70">No products found</p>
+              {(search || gstFilter !== "all") ? (
+                <button onClick={() => { setSearch(""); setGstFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+              ) : (
+                <Link to="/billing/product/new" className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                  <Plus className="w-3 h-3" /> Add your first product
+                </Link>
+              )}
             </div>
           )}
         </motion.div>

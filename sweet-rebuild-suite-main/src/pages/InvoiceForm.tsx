@@ -20,6 +20,7 @@ import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { formatApiError, errorTag } from "@/utils/apiError";
+import { pushNotification } from "@/hooks/useNotifications";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -46,7 +47,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     financialYear: "",
   });
 
-  const [items, setItems] = useState([{ productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]);
+  // Line items carry a `_key` for React's reconciler so removing /
+  // reordering rows doesn't shuffle DOM nodes (which previously caused
+  // input values to ghost into the wrong row after a delete). The _key
+  // is client-only — stripped before send-to-server.
+  type LineItemDraft = { _key: string; productId: string; qty: number; rate: number; unit: ItemUnit };
+  const newItemKey = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  const blankItem = (): LineItemDraft => ({ _key: newItemKey(), productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit });
+  const [items, setItems] = useState<LineItemDraft[]>([blankItem()]);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
 
   // Pre-fill from duplicate source
@@ -63,6 +71,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     });
     if (duplicateFrom.items?.length > 0) {
       setItems(duplicateFrom.items.map((it: any) => ({
+        _key: newItemKey(),
         productId: String(it.productId || it.product || ""),
         qty: it.qty || it.quantity || 1,
         rate: it.rate || 0,
@@ -108,6 +117,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         });
 
         const lineItems = (inv.line_items || []).map((li: any) => ({
+          _key: newItemKey(),
           productId: String(li.product || li.id || ""),
           qty: parseFloat(li.quantity) || 1,
           rate: parseFloat(li.rate) || 0,
@@ -122,22 +132,33 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       .finally(() => setIsLoadingInvoice(false));
   }, [id, mode]);
 
-  // Auto-fetch next invoice number when business or type changes (create mode only)
+  // Auto-fetch next invoice number when business, type, or date changes
+  // (create mode only). Passing invoice_date means a back-dated entry gets
+  // the correct per-FY prefix (e.g. SGJ/2024-25/108 not SGJ/2025-26/1).
   useEffect(() => {
     if (mode !== "create" || !form.businessId) return;
     const typeParam = form.type === "INWARD" ? "inward" : "outward";
-    api.get<any>(`invoices/next_invoice_number/?business_id=${form.businessId}&type_of_invoice=${typeParam}`)
+    const params = new URLSearchParams({
+      business_id: form.businessId,
+      type_of_invoice: typeParam,
+    });
+    if (form.date) params.set("invoice_date", form.date);
+    api.get<any>(`invoices/next_invoice_number/?${params.toString()}`)
       .then((res) => {
         const next = res.data?.next_invoice_number;
         if (next) setForm((prev) => ({ ...prev, invoiceNumber: next }));
       })
       .catch(() => {}); // silently fail
-  }, [form.businessId, form.type, mode]);
+  }, [form.businessId, form.type, form.date, mode]);
 
   // ─── Validation state ───
   const [warnings, setWarnings] = useState<Record<string, string>>({});
 
-  // Duplicate invoice check
+  // Duplicate invoice check — now scoped to (business, number, FY of
+  // invoice_date, type) instead of just (business, number, today's-FY).
+  // Re-runs when type or date changes, so back-dated entries get checked
+  // against the *correct* FY and outward/inward can legitimately share a
+  // number.
   useEffect(() => {
     if (mode !== "create" || !form.invoiceNumber || !form.businessId) {
       setWarnings(w => { const n = { ...w }; delete n.invoiceNumber; return n; });
@@ -145,7 +166,13 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     }
     const t = setTimeout(async () => {
       try {
-        const res = await api.get<any>(`invoices/check_duplicate/?invoice_number=${encodeURIComponent(form.invoiceNumber)}&business_id=${form.businessId}`);
+        const params = new URLSearchParams({
+          invoice_number: form.invoiceNumber,
+          business_id: form.businessId,
+          type_of_invoice: (form.type || "OUTWARD").toLowerCase(),
+        });
+        if (form.date) params.set("invoice_date", form.date);
+        const res = await api.get<any>(`invoices/check_duplicate/?${params.toString()}`);
         if (res.data?.exists) {
           setWarnings(w => ({ ...w, invoiceNumber: res.data.message }));
         } else {
@@ -154,7 +181,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } catch {}
     }, 500);
     return () => clearTimeout(t);
-  }, [form.invoiceNumber, form.businessId, mode]);
+  }, [form.invoiceNumber, form.businessId, form.type, form.date, mode]);
 
   // Date validation
   useEffect(() => {
@@ -212,7 +239,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       if (saved) {
         const draft = JSON.parse(saved);
         if (draft.form) setForm(draft.form);
-        if (draft.items?.length > 0) setItems(draft.items);
+        if (draft.items?.length > 0) {
+          // Re-key restored items — drafts saved before _key existed
+          // won't have the field, and re-generating is harmless either
+          // way since it's client-only.
+          setItems(draft.items.map((it: any) => ({ ...it, _key: it._key || newItemKey() })));
+        }
         setDirty(true);
         toast({ title: "Draft Restored", description: "Your unsaved invoice has been restored." });
       }
@@ -258,7 +290,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const safeNavigate = (to: string) => { if (dirty) { setPendingNav(to); setShowUnsavedModal(true); } else navigate(to); };
   const set = (field: string, val: any) => { setForm((p) => ({ ...p, [field]: val })); setDirty(true); };
-  const addItem = () => { setItems((p) => [...p, { productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit }]); setDirty(true); };
+  const addItem = () => { setItems((p) => [...p, blankItem()]); setDirty(true); };
   const removeItem = (i: number) => { if (items.length === 1) return; setItems((p) => p.filter((_, idx) => idx !== i)); setDirty(true); };
   const updateItem = (i: number, field: string, val: any) => { setItems((p) => p.map((it, idx) => idx === i ? { ...it, [field]: val } : it)); setDirty(true); };
 
@@ -302,10 +334,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   ];
   const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Guard against rapid double-clicks creating duplicate invoices.
+    // setIsSaving is reset only inside the create/update branches below
+    // (since they each navigate or set their own error state).
+    if (isSaving) return;
     if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
     if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
+    setIsSaving(true);
     setDirty(false);
 
     const selectedBiz = effectiveBusinesses.find(b => b.id === form.businessId);
@@ -366,6 +405,13 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         const created = await createInvoice(newInvoice);
         clearDraft();
         toast({ title: "Invoice Created", description: `${form.invoiceNumber} — ${formatCurrency(total)}` });
+        // Persist a notification so it's discoverable from the bell after the
+        // toast dismisses — handy for audit ("did I save invoice 108 today?").
+        pushNotification({
+          type: "success",
+          title: "Invoice created",
+          message: `${form.invoiceNumber} · ${selectedCust?.name || "Customer"} · ${formatCurrency(total)}`,
+        });
         const navId = created?.id ? String(created.id) : newId;
         if (isMobile && mobileMode === "easy") {
           navigate(`/billing/invoice/${navId}`);
@@ -375,6 +421,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } catch (err: any) {
         toast({ title: `Create Failed ${errorTag(err)}`, description: formatApiError(err, "Create failed."), variant: "destructive", duration: 12000 });
         setDirty(true);
+        setIsSaving(false); // let user retry the submit after a failure
       }
     } else if (id) {
       try {
@@ -401,6 +448,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       } catch (err: any) {
         toast({ title: `Update Failed ${errorTag(err)}`, description: formatApiError(err, "Update failed."), variant: "destructive", duration: 12000 });
         setDirty(true);
+        setIsSaving(false);
       }
     }
   };
@@ -533,7 +581,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   {items.map((item, i) => {
                     const { amount, tax, gstRate } = calcItem(item);
                     return (
-                      <div key={i} className="p-4 space-y-3">
+                      <div key={item._key} className="p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-muted-foreground font-mono">#{i + 1}</span>
                           <button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1 rounded text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -576,7 +624,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                       {items.map((item, i) => {
                         const { amount, tax, gstRate } = calcItem(item);
                         return (
-                          <motion.tr key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
+                          <motion.tr key={item._key} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
                             <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
@@ -622,7 +670,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   const product = localProducts.find(p => p.id === item.productId);
                   if (item.qty === 0 && item.rate === 0 && !product) return null;
                   return (
-                    <div key={i} className="space-y-1.5 pb-2 border-b border-border/30">
+                    <div key={item._key} className="space-y-1.5 pb-2 border-b border-border/30">
                       {product && <div className="text-[12px] font-medium text-foreground truncate">{product.name}</div>}
                       <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{item.qty} {item.unit}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(item.rate)}/{item.unit}</span></div>
@@ -645,8 +693,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             {/* Actions - desktop only */}
             {!isMobile && (
               <div className="elevated-card rounded-2xl p-5 space-y-3">
-                <button type="submit" className="premium-btn-primary w-full"><Save className="w-4 h-4" />{mode === "create" ? "Create Invoice" : "Update Invoice"}</button>
-                <button type="button" onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost w-full"><X className="w-4 h-4" /> Cancel</button>
+                <button type="submit" disabled={isSaving} className="premium-btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
+                  <Save className="w-4 h-4" />
+                  {isSaving ? (mode === "create" ? "Creating…" : "Updating…") : (mode === "create" ? "Create Invoice" : "Update Invoice")}
+                </button>
+                <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost w-full disabled:opacity-50"><X className="w-4 h-4" /> Cancel</button>
               </div>
             )}
           </div>
@@ -656,8 +707,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         {isMobile && (
           <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost flex-1 h-10 text-[13px]"><X className="w-4 h-4" /> Cancel</button>
-              <button type="submit" className="premium-btn-primary flex-1 h-10 text-[13px]"><Save className="w-4 h-4" /> {mode === "create" ? "Create" : "Update"}</button>
+              <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost flex-1 h-10 text-[13px] disabled:opacity-50"><X className="w-4 h-4" /> Cancel</button>
+              <button type="submit" disabled={isSaving} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed">
+                <Save className="w-4 h-4" /> {isSaving ? (mode === "create" ? "Creating…" : "Updating…") : (mode === "create" ? "Create" : "Update")}
+              </button>
             </div>
           </div>
         )}
