@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
-  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check,
+  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check, Loader2,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
 import { cn, pluralize } from "@/utils/utils";
@@ -108,7 +108,16 @@ export default function InvoiceDetail() {
     }
   };
 
-  if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
+  if (isLoading) {
+    return (
+      <div className={cn("animate-fade-in", isMobile ? "p-4" : "p-6 lg:p-8")}>
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          <span className="text-[13px]">Loading invoice…</span>
+        </div>
+      </div>
+    );
+  }
 
   // Number-slug lookup found multiple matches — render a picker so the
   // user can pick which business they meant. Only happens when the URL
@@ -167,7 +176,49 @@ export default function InvoiceDetail() {
     );
   }
 
-  if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
+  if (!inv) {
+    // Dead-end "Invoice not found" cases:
+    //   - User followed a stale Audit Log link (action on a deleted
+    //     invoice). The audit entry stays even after the invoice is
+    //     gone, so any "Updated" / "Printed" link on a since-deleted
+    //     row lands here.
+    //   - User typed an id-based URL that doesn't exist.
+    //   - User opened a number-based URL whose number was renamed.
+    //
+    // The previous state was a flat single line of grey text — no way to
+    // get back into the app. This branch tries to surface what we DO
+    // know (the slug or candidate matches if the lookup found any),
+    // and gives the user CTAs that lead somewhere useful.
+    return (
+      <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 max-w-3xl mx-auto")}>
+        <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: slug || "Not found" }]} />
+        <div className="elevated-card rounded-2xl p-8 flex flex-col items-center text-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7 text-warning" />
+          </div>
+          <div>
+            <h2 className="text-[16px] font-display font-semibold text-foreground">Invoice not found</h2>
+            <p className="text-[12px] text-muted-foreground mt-1 max-w-md">
+              {/^\d+$/.test(slug || "")
+                ? <>Internal id <span className="font-mono text-foreground">{slug}</span> doesn't exist. It may have been deleted, or the link is from an older database.</>
+                : <>No invoice matches <span className="font-mono text-foreground">{slug}</span>. Check the number or use the list / search.</>}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <Link to="/billing/invoice/list" className="premium-btn-outline text-[13px] border-primary/30 text-primary">
+              <FileText className="w-4 h-4" /> All Invoices
+            </Link>
+            <Link to="/billing/audit-log" className="premium-btn-ghost text-[13px]">
+              <Clock className="w-4 h-4" /> View Audit Log
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
 
   const itemChartData = inv.items.map((item) => ({
