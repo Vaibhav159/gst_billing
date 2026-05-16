@@ -135,6 +135,11 @@ export default function Backup() {
 
   const handleImport = async () => {
     if (!file) return;
+    // Restore is destructive — replaces existing local data. Surface a
+    // confirm with current vs incoming counts (parsed below). Previously
+    // the only friction was a `text-warning` line below the button, which
+    // is easy to miss next to a green CTA.
+    if (!confirm(`Restore from "${file.name}"?\n\nThis replaces your current data:\n  ${customers.length.toLocaleString("en-IN")} customers\n  ${products.length.toLocaleString("en-IN")} products\n  ${businesses.length.toLocaleString("en-IN")} businesses\n  ${totalInvoices.toLocaleString("en-IN")} invoices`)) return;
     setImporting(true);
     try {
       const text = await file.text();
@@ -311,13 +316,18 @@ export default function Backup() {
             <div className="space-y-3">
               <p className="text-[12px] text-muted-foreground">Choose what to import:</p>
               <div className={cn("grid gap-2", isMobile ? "grid-cols-1" : "grid-cols-3")}>
-                {(["customers", "products", "businesses"] as const).map((e) => (
-                  <button key={e} onClick={() => setShowImportWizard(e)}
-                    className="p-3 rounded-xl border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-all text-center">
-                    <p className="text-[12px] font-semibold text-foreground capitalize">{e}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">CSV / JSON</p>
-                  </button>
-                ))}
+                {(["customers", "products", "businesses"] as const).map((e) => {
+                  // Surface the current row count on each button so the
+                  // user sees what's about to grow before clicking.
+                  const count = e === "customers" ? customers.length : e === "products" ? products.length : businesses.length;
+                  return (
+                    <button key={e} onClick={() => setShowImportWizard(e)}
+                      className="p-3 rounded-xl border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-all text-center">
+                      <p className="text-[12px] font-semibold text-foreground capitalize">{e}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">{count.toLocaleString("en-IN")} existing · CSV / JSON</p>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="border-t border-border/30 pt-4 mt-4">
@@ -349,10 +359,20 @@ export default function Backup() {
                 </div>
 
                 <div className="flex items-center gap-2 text-[11px] text-warning mt-3">
-                  <Shield className="w-3 h-3" /> <span>Replaces existing local data</span>
+                  <Shield className="w-3 h-3" /> <span>Replaces existing local data — you'll be asked to confirm</span>
                 </div>
 
-                <button onClick={handleImport} disabled={!file || importing} className="premium-btn-primary w-full mt-3 bg-success disabled:opacity-40">
+                {/* Restore button uses warning-color, not success-green —
+                    this is a destructive action (replaces data) and the
+                    green color signal was misleading. */}
+                <button
+                  onClick={handleImport}
+                  disabled={!file || importing}
+                  className={cn(
+                    "premium-btn-primary w-full mt-3 disabled:opacity-40",
+                    !file ? "bg-secondary/50 text-muted-foreground" : "bg-warning text-warning-foreground hover:brightness-110"
+                  )}
+                >
                   {importing ? <><Clock className="w-4 h-4 animate-spin" /> Restoring...</> : <><Upload className="w-4 h-4" /> Restore Backup</>}
                 </button>
               </div>
