@@ -3063,12 +3063,18 @@ class AIInvoiceProcessingView(APIView):
 
             image_file = request.FILES["image"]
 
-            # Validate file type
-            allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+            # NIM's chat-completions endpoint officially supports PNG/JPG
+            # only. WebP was in the allowed list previously but NVIDIA's
+            # docs don't confirm it; rather than gamble on undocumented
+            # behavior, reject up-front with a clear message.
+            allowed_types = ["image/jpeg", "image/jpg", "image/png"]
             if image_file.content_type not in allowed_types:
                 return Response(
                     {
-                        "error": "Invalid file type. Please upload a JPEG, PNG, or WebP image."
+                        "error": (
+                            f"Unsupported image type '{image_file.content_type}'. "
+                            "Upload a JPEG or PNG."
+                        )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -3123,11 +3129,25 @@ class AIInvoiceCreateView(APIView):
     """
 
     def post(self, request):
-        """Create invoice from AI-extracted data"""
+        """Create an invoice from AI-extracted data.
+
+        Three latent bugs in the previous version were fixed here:
+          1. `Customer.objects.get(name=...)` raised DoesNotExist (→ 500)
+             when the AI returned a name that wasn't an exact match.
+             Case-insensitive lookup scoped to the chosen business now,
+             with a clear 400 + customer_name in the response so the
+             frontend can prompt the user to create them first.
+          2. `type_of_invoice` was hardcoded OUTWARD. Now respects the
+             `type_of_invoice` field in the request body (defaulting to
+             OUTWARD), so purchase invoices can be imported too.
+          3. The `customer_data` dict was built but never used — the
+             extracted address/GST/PAN/mobile from OCR was silently
+             dropped. Now we backfill empty customer fields from
+             extracted data (never overwrite curated values; OCR can
+             misread a GSTIN).
+        """
         try:
-            # Validate required fields
-            required_fields = ["business_id", "invoice_data"]
-            for field in required_fields:
+            for field in ("business_id", "invoice_data"):
                 if field not in request.data:
                     return Response(
                         {"error": f"Missing required field: {field}"},
@@ -3136,52 +3156,95 @@ class AIInvoiceCreateView(APIView):
 
             business_id = request.data["business_id"]
             invoice_data = request.data["invoice_data"]
+            type_of_invoice = (
+                request.data.get("type_of_invoice") or INVOICE_TYPE_OUTWARD
+            )
+            if type_of_invoice not in (INVOICE_TYPE_OUTWARD, INVOICE_TYPE_INWARD):
+                return Response(
+                    {"error": "type_of_invoice must be 'outward' or 'inward'"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            # Validate business exists
             try:
                 business = Business.objects.get(id=business_id)
             except Business.DoesNotExist:
                 return Response(
-                    {"error": "Business not found"}, status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Business not found"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Create or get customer
-            customer_data = {
-                "name": invoice_data.get("customer_name", ""),
-                "address": invoice_data.get("customer_address", ""),
-                "gst_number": invoice_data.get("customer_gst_number", ""),
-                "pan_number": invoice_data.get("customer_pan_number", ""),
-                "mobile_number": invoice_data.get("customer_mobile_number", ""),
-            }
+            extracted_name = (invoice_data.get("customer_name") or "").strip()
+            if not extracted_name:
+                return Response(
+                    {"error": "Customer name missing in extracted data."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            customer = Customer.objects.get(name=customer_data["name"])
+            # Case-insensitive match scoped to this business. The AI
+            # prompt restricts answers to existing customer names but
+            # small variations (whitespace, casing) slip through.
+            customer = (
+                Customer.objects.filter(
+                    businesses__id=business_id, name__iexact=extracted_name
+                ).first()
+            )
+            if not customer:
+                return Response(
+                    {
+                        "error": (
+                            f"Customer '{extracted_name}' not found for this "
+                            "business. Create the customer first, then re-run "
+                            "AI import."
+                        ),
+                        "customer_name": extracted_name,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            # Create invoice
+            # Backfill empty customer fields — never overwrite curated
+            # data because OCR can misread a GSTIN/PAN by a digit.
+            dirty = False
+            for db_field, extracted_key in (
+                ("address", "customer_address"),
+                ("gst_number", "customer_gst_number"),
+                ("pan_number", "customer_pan_number"),
+                ("mobile_number", "customer_mobile_number"),
+            ):
+                val = (invoice_data.get(extracted_key) or "").strip()
+                if val and not getattr(customer, db_field, ""):
+                    setattr(customer, db_field, val)
+                    dirty = True
+            if dirty:
+                customer.save()
+
             invoice = Invoice.objects.create(
                 customer=customer,
                 business=business,
                 invoice_number=invoice_data.get("invoice_number", ""),
-                invoice_date=invoice_data.get("invoice_date", datetime.now().date()),
-                type_of_invoice=INVOICE_TYPE_OUTWARD,
-                total_amount=invoice_data.get("total_amount", 0),
+                invoice_date=invoice_data.get("invoice_date")
+                or datetime.now().date(),
+                type_of_invoice=type_of_invoice,
+                total_amount=invoice_data.get("total_amount", 0) or 0,
             )
 
-            # Create line items
             line_items_created = 0
-            for item_data in invoice_data.get("line_items", []):
+            for item_data in invoice_data.get("line_items", []) or []:
                 LineItem.objects.create(
                     customer=customer,
                     invoice=invoice,
-                    product_name=item_data.get("product_name", ""),
-                    hsn_code=item_data.get("hsn_code", ""),
-                    gst_tax_rate=item_data.get("gst_tax_rate", 0.03),
-                    quantity=item_data.get("quantity", 0),
-                    rate=item_data.get("rate", 0),
-                    amount=item_data.get("amount", 0),
+                    product_name=item_data.get("product_name", "") or "",
+                    hsn_code=item_data.get("hsn_code", "") or "",
+                    gst_tax_rate=item_data.get("gst_tax_rate", 0.03) or 0.03,
+                    quantity=item_data.get("quantity", 0) or 0,
+                    rate=item_data.get("rate", 0) or 0,
+                    amount=item_data.get("amount", 0) or 0,
                 )
                 line_items_created += 1
 
-            # Update invoice total
+            # Recompute invoice total from line items — `amount` is the
+            # tax-inclusive line subtotal (matches InvoiceForm's contract),
+            # so summing gives the true total even if the AI's
+            # `total_amount` was off.
             invoice.total_amount = sum(
                 LineItem.objects.filter(invoice=invoice).values_list(
                     "amount", flat=True
@@ -3202,9 +3265,11 @@ class AIInvoiceCreateView(APIView):
             )
 
         except Exception as e:
-            logger.error(f"Error creating invoice from AI data: {e}", exc_info=True)
+            logger.error(
+                f"Error creating invoice from AI data: {e}", exc_info=True
+            )
             return Response(
-                {"error": "An unexpected error occurred while creating the invoice"},
+                {"error": f"Could not create invoice: {e!s}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

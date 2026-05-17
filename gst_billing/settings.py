@@ -287,7 +287,19 @@ if REDIS_PASSWORD:
     }
 
 # AI Configuration
+# Legacy Gemini key — kept so older deployments don't break on upgrade;
+# the active extractor is NIM-based (see below). Drop this once nothing
+# reads it.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# NVIDIA NIM — primary AI invoice extractor (billing.utils.AIInvoiceProcessor).
+# Get a free key at https://build.nvidia.com. NVIDIA_VISION_MODEL is
+# overridable so we can swap to nemotron-nano-12b-v2-vl, gemma-4-31b-it,
+# etc. without code changes.
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_VISION_MODEL = os.getenv(
+    "NVIDIA_VISION_MODEL", "meta/llama-4-maverick-17b-128e-instruct"
+)
 # Ensure log dir exists — django.utils.log.configure_logging will fail to
 # attach the FileHandler otherwise (fresh checkouts and CI runners).
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)

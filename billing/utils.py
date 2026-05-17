@@ -2,15 +2,20 @@ import base64
 import io
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-import google.genai as genai
 import pandas as pd
+import requests
 from django.conf import settings
 from django.db import transaction
-from google.genai import types
+# google.genai was the previous AI backend. The AIInvoiceProcessor below
+# now uses NVIDIA NIM (OpenAI-compatible REST) so we no longer need the
+# Gemini SDK at runtime. The dependency stays in pyproject.toml for now
+# in case we want to A/B test extractors later, but the import is gone
+# to keep cold start fast and avoid a hard requirement.
 
 logger = logging.getLogger(__name__)
 
@@ -591,248 +596,301 @@ def process_invoice_csv(
 
 
 class AIInvoiceProcessor:
-    """AI-powered invoice processing using Google Gemini with structured output"""
+    """AI-powered invoice extraction via NVIDIA NIM (Llama 4 Maverick).
+
+    Why NIM over Gemini (previous backend):
+      - The NIM catalog lets us swap models without changing code — set
+        NVIDIA_VISION_MODEL in settings to try a different VLM.
+      - One free-tier account gives access to Llama 4, Nemotron VL,
+        Gemma 4, Phi-4 multimodal, etc. — useful for A/B-ing accuracy
+        on edge-case invoices.
+      - Probed empirically (May 2026): Llama 4 Maverick gave the
+        cleanest JSON in JSON mode; Nemotron Nano 12B v2 VL hallucinated
+        extra envelope fields (`error`, `code`, `headers`) even when
+        asked for `{"ok": true}`. So Maverick is the default.
+
+    Tradeoff vs Gemini: no native response_schema, so we lean on
+    OpenAI-style `response_format: json_object` plus a defensive parser
+    (markdown fence stripping, outermost-brace extraction).
+
+    Image size: NIM's chat-completions endpoint has a ~180KB payload
+    limit for direct base64 image data. We downscale + recompress before
+    upload so a 5MB camera shot still works.
+    """
+
+    NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+    DEFAULT_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
+    # Target raw bytes before base64 encoding (b64 adds ~33%).
+    # NIM rejects payloads > ~180KB; we leave a safety margin.
+    MAX_IMAGE_BYTES = 130_000
+    REQUEST_TIMEOUT = 90  # seconds — vision LLMs can take 30-60s
 
     def __init__(self):
-        # Configure Gemini API
-        if not settings.GEMINI_API_KEY:
-            raise AIInvoiceProcessingError("GEMINI_API_KEY not configured in settings")
-
-        # Initialize the client
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
-        # Define structured output schema for response
-        self._line_item_schema = types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "product_name": types.Schema(type=types.Type.STRING),
-                "quantity": types.Schema(type=types.Type.NUMBER),
-                "rate": types.Schema(type=types.Type.NUMBER),
-                "hsn_code": types.Schema(type=types.Type.STRING, nullable=True),
-                "gst_tax_rate": types.Schema(type=types.Type.NUMBER),
-                "amount": types.Schema(type=types.Type.NUMBER, nullable=True),
-            },
-            required=["product_name", "quantity", "rate", "gst_tax_rate"],
+        self.api_key = getattr(settings, "NVIDIA_API_KEY", "") or ""
+        if not self.api_key:
+            # The view catches this and 400s with a clear message so the
+            # user sees "configure your key" instead of a 500.
+            raise AIInvoiceProcessingError(
+                "NVIDIA_API_KEY not configured. Add it to your .env "
+                "(free key at https://build.nvidia.com)."
+            )
+        self.model = getattr(
+            settings, "NVIDIA_VISION_MODEL", self.DEFAULT_MODEL
         )
 
-        self._invoice_schema = types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "invoice_number": types.Schema(type=types.Type.STRING),
-                "invoice_date": types.Schema(type=types.Type.STRING),
-                "customer_name": types.Schema(type=types.Type.STRING),
-                "customer_address": types.Schema(type=types.Type.STRING, nullable=True),
-                "customer_gst_number": types.Schema(
-                    type=types.Type.STRING, nullable=True
-                ),
-                "customer_pan_number": types.Schema(
-                    type=types.Type.STRING, nullable=True
-                ),
-                "customer_mobile_number": types.Schema(
-                    type=types.Type.STRING, nullable=True
-                ),
-                "line_items": types.Schema(
-                    type=types.Type.ARRAY,
-                    items=self._line_item_schema,
-                ),
-                "total_amount": types.Schema(type=types.Type.NUMBER, nullable=True),
-                "cgst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
-                "sgst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
-                "igst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
-            },
-            required=["invoice_number", "invoice_date", "customer_name", "line_items"],
-        )
+    # ── public API ──────────────────────────────────────────────────
 
     def process_invoice_image(self, image_file, business_id: int) -> dict:
-        """
-        Process an invoice image using Google Gemini and extract structured data
-
-        Args:
-            image_file: Uploaded image file
-            business_id: ID of the business to associate with
-
-        Returns:
-            dict: Extracted invoice data
-        """
+        """Send an invoice image to NIM and return the parsed dict."""
         from billing.models import Customer
 
+        customer_names = list(
+            Customer.objects.filter(businesses__id=business_id).values_list(
+                "name", flat=True
+            )
+        )
+
         try:
-            # Get customer names for the business
-            customer_names = list(
-                Customer.objects.filter(businesses__id=business_id).values_list(
-                    "name", flat=True
-                )
-            )
-            customer_names_str = ", ".join(customer_names)
-
-            # Read and encode the image
-            image_data = image_file.read()
-            image_base64 = base64.b64encode(image_data).decode("utf-8")
-
-            # Create the prompt for invoice extraction
-            prompt = f"""
-            Analyze this invoice image and extract the following information:
-            
-            Important instructions:
-            1. Extract all line items from the invoice
-            2. Convert all monetary values to decimal numbers
-            3. If GST tax rate is shown as percentage (e.g., 3%), convert to decimal (0.03)
-            4. If date is in DD/MM/YYYY format, convert to YYYY-MM-DD
-            5. If any field is not available, use null or empty string
-            6. Ensure all monetary values are accurate
-            7. Be precise with decimal calculations
-            8. Extract all visible line items, don't miss any
-            9. Convert any hindi text to english like customer name, product name, address, etc. eg: "अमरकान्त दार्शन मुस्काना" to "Amarakant Dashana Muskana"
-            10. DONT EXTRACT total_amount should be the sum of all line items amount + cgst_total + sgst_total + igst_total, eg: 100 + 10 + 10 + 10 = 130
-            11. The customer name must be one of the following: {customer_names_str}
-            """
-
-            # Generate content using Gemini with improved prompt for structured output
-            enhanced_prompt = f"""
-            {prompt}
-            
-            Please return the data in the following exact JSON format:
-            {{
-                "invoice_number": "string",
-                "invoice_date": "YYYY-MM-DD",
-                "customer_name": "string",
-                "customer_address": "string or null",
-                "customer_gst_number": "string or null",
-                "customer_pan_number": "string or null", 
-                "customer_mobile_number": "string or null",
-                "line_items": [
-                    {{
-                        "product_name": "string",
-                        "quantity": number,
-                        "rate": number,
-                        "hsn_code": "string or null",
-                        "gst_tax_rate": number,
-                        "amount": number
-                    }}
-                ],
-                "total_amount": number,
-                "cgst_total": number or null,
-                "sgst_total": number or null,
-                "igst_total": number or null
-            }}
-            
-            Return ONLY the JSON object, no additional text or formatting.
-            Exisiting customer names in system - 
-            """
-
-            # Use google-genai API
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": enhanced_prompt},
-                            {
-                                "inline_data": {
-                                    "mime_type": image_file.content_type,
-                                    "data": image_base64,
-                                }
-                            },
-                        ],
-                    }
-                ],
-                config=types.GenerateContentConfig(
-                    candidate_count=1,
-                    max_output_tokens=8192,
-                    temperature=0.1,
-                    top_p=0.8,
-                    top_k=40,
-                    response_mime_type="application/json",
-                    response_schema=self._invoice_schema,
-                ),
-            )
-
-            # Parse the structured JSON response
-            response_text = response.text.strip()
-
-            # Log the response for debugging
-            print(f"AI Response: {response_text}")
-
-            # Clean up the response to extract JSON
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-
-            # Remove any leading/trailing whitespace
-            response_text = response_text.strip()
-
-            # Try to find JSON object in the response
-            if response_text.startswith("{") and response_text.endswith("}"):
-                extracted_data = json.loads(response_text)
-            else:
-                # Try to extract JSON from the response
-                import re
-
-                json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-                if json_match:
-                    extracted_data = json.loads(json_match.group())
-                else:
-                    raise AIInvoiceProcessingError("No valid JSON found in AI response")
-
-            # Convert to dict format for compatibility
-            return self._convert_to_dict(extracted_data)
-
-        except json.JSONDecodeError as e:
-            raise AIInvoiceProcessingError(
-                f"Failed to parse AI response as JSON: {e!s}"
-            )
+            image_bytes = image_file.read()
         except Exception as e:
-            raise AIInvoiceProcessingError(f"Error processing invoice image: {e!s}")
+            raise AIInvoiceProcessingError(f"Could not read uploaded image: {e!s}")
 
-    def _convert_to_dict(self, data: dict) -> dict:
-        """Convert structured data to dict format for frontend compatibility"""
-        # Convert line items to dict format
-        line_items = []
-        for item in data.get("line_items", []):
-            line_item_dict = {
-                "product_name": item.get("product_name", ""),
-                "quantity": self._safe_decimal(item.get("quantity", 0)),
-                "rate": self._safe_decimal(item.get("rate", 0)),
-                "hsn_code": item.get("hsn_code", ""),
-                "gst_tax_rate": self._safe_decimal(item.get("gst_tax_rate", 0.03)),
-                "amount": self._safe_decimal(item.get("amount", 0)),
-            }
+        mime = getattr(image_file, "content_type", "") or "image/jpeg"
+        # Downscale up-front so we never exhaust NIM's payload budget on
+        # large camera shots. Re-encodes to JPEG so the mime is normalised.
+        if len(image_bytes) > self.MAX_IMAGE_BYTES:
+            image_bytes, mime = self._downscale(image_bytes, self.MAX_IMAGE_BYTES)
 
-            # Calculate amount if not provided
-            if line_item_dict["amount"] == 0:
-                line_item_dict["amount"] = (
-                    line_item_dict["quantity"] * line_item_dict["rate"]
-                )
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
 
-            line_items.append(line_item_dict)
-
-        return {
-            "invoice_number": data.get("invoice_number", ""),
-            "invoice_date": data.get("invoice_date", ""),
-            "customer_name": data.get("customer_name", ""),
-            "customer_address": data.get("customer_address", ""),
-            "customer_gst_number": data.get("customer_gst_number", ""),
-            "customer_pan_number": data.get("customer_pan_number", ""),
-            "customer_mobile_number": data.get("customer_mobile_number", ""),
-            "line_items": line_items,
-            "total_amount": self._safe_decimal(data.get("total_amount", 0)),
-            "cgst_total": self._safe_decimal(data.get("cgst_total", 0)),
-            "sgst_total": self._safe_decimal(data.get("sgst_total", 0)),
-            "igst_total": self._safe_decimal(data.get("igst_total", 0)),
+        prompt = self._build_prompt(customer_names)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{image_b64}"},
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0.0,  # extraction, not creative writing
+            "top_p": 0.8,
+            "max_tokens": 4096,
+            "response_format": {"type": "json_object"},
         }
 
-    def _safe_decimal(self, value) -> Decimal:
-        """Safely convert value to Decimal"""
-        if value is None or value == "":
-            return Decimal("0")
         try:
-            return Decimal(str(value))
-        except (ValueError, TypeError):
-            return Decimal("0")
+            response = requests.post(
+                self.NIM_URL,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self.REQUEST_TIMEOUT,
+            )
+        except requests.Timeout:
+            raise AIInvoiceProcessingError(
+                f"NIM request timed out after {self.REQUEST_TIMEOUT}s. "
+                "Try a smaller image or retry."
+            )
+        except requests.RequestException as e:
+            raise AIInvoiceProcessingError(f"NIM request failed: {e!s}")
+
+        if response.status_code != 200:
+            # NIM error shapes vary: {"detail": "..."} | {"error": {...}}
+            # | {"message": "..."}. Pass through whatever we got, truncated.
+            body_preview = response.text[:300] if response.text else "(empty body)"
+            raise AIInvoiceProcessingError(
+                f"NIM returned HTTP {response.status_code}: {body_preview}"
+            )
+
+        try:
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError) as e:
+            raise AIInvoiceProcessingError(
+                f"Unexpected NIM response shape ({e!s}): {response.text[:300]}"
+            )
+
+        extracted = self._parse_json_response(content)
+        return self._convert_to_dict(extracted)
+
+    # ── helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_prompt(customer_names: list) -> str:
+        """Single prompt with schema + rules. Kept terse — Maverick follows
+        instructions well and a 1000-token prompt eats free-tier credits.
+        """
+        if customer_names:
+            names_block = ", ".join(f'"{n}"' for n in customer_names)
+        else:
+            names_block = "(none yet — pick the name as written on invoice)"
+        return f"""You extract structured data from Indian GST invoice images.
+
+Return ONLY a JSON object with this exact shape:
+{{
+  "invoice_number": string,
+  "invoice_date": "YYYY-MM-DD",
+  "customer_name": string,
+  "customer_address": string | null,
+  "customer_gst_number": string | null,
+  "customer_pan_number": string | null,
+  "customer_mobile_number": string | null,
+  "line_items": [
+    {{
+      "product_name": string,
+      "quantity": number,
+      "rate": number,
+      "hsn_code": string | null,
+      "gst_tax_rate": number,
+      "amount": number
+    }}
+  ],
+  "total_amount": number | null,
+  "cgst_total": number | null,
+  "sgst_total": number | null,
+  "igst_total": number | null
+}}
+
+Rules:
+1. Extract EVERY visible line item — do not summarise or skip.
+2. Convert tax percentages to decimals: 3% → 0.03, 18% → 0.18.
+3. Convert dates from DD/MM/YYYY (or DD-MM-YYYY) to YYYY-MM-DD.
+4. Transliterate Devanagari/Hindi names to English Roman script
+   (e.g. "अमरकान्त दार्शन मुस्काना" → "Amarakant Darshan Muskana").
+5. `customer_name` must match one of the existing customers when a
+   reasonable match exists (case-insensitive). Allowed names:
+   {names_block}.
+6. `amount` for each line is the tax-inclusive line subtotal as shown
+   on the invoice. If only rate × quantity is given, compute it.
+7. `total_amount` = sum(line_items.amount) + cgst_total + sgst_total
+   + igst_total. Set null if unsure.
+8. Use null for any field genuinely absent from the invoice — do not
+   guess or fabricate values."""
+
+    @staticmethod
+    def _parse_json_response(content: str) -> dict:
+        """Defensive JSON parsing — even with json_object mode the model
+        occasionally wraps output in ```json fences or adds chatty prose.
+        Strip fences, then grab the outermost {...} block.
+        """
+        text = (content or "").strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```\s*$", "", text)
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise AIInvoiceProcessingError(
+                f"No JSON object in model response: {text[:300]!r}"
+            )
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError as e:
+            raise AIInvoiceProcessingError(
+                f"Invalid JSON from model ({e!s}): {text[start : end + 1][:300]!r}"
+            )
+
+    @staticmethod
+    def _downscale(image_bytes: bytes, target_bytes: int) -> tuple:
+        """Resize + recompress an image so its raw bytes fit `target_bytes`.
+
+        Returns (bytes, mime). We always emit JPEG because NIM accepts it
+        universally and it compresses photos well. Quality ramps down
+        until we're under the target, then we accept whatever we have.
+        """
+        from PIL import Image  # lazy import — only loaded on AI path
+
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+        except Exception as e:
+            raise AIInvoiceProcessingError(
+                f"Could not decode image for downscale: {e!s}"
+            )
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        # 1568px longest side is a good balance: small enough for the
+        # payload limit, large enough that fine-print HSN codes stay
+        # legible.
+        max_dim = 1568
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            img = img.resize(
+                (int(img.width * ratio), int(img.height * ratio)),
+                Image.Resampling.LANCZOS,
+            )
+        for quality in (85, 75, 65, 55, 45, 35):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            if buf.tell() <= target_bytes:
+                return buf.getvalue(), "image/jpeg"
+        # Last attempt's bytes — still over budget but better than crashing.
+        # NIM may reject; the view bubbles the error to the user.
+        return buf.getvalue(), "image/jpeg"
+
+    @staticmethod
+    def _convert_to_dict(data: dict) -> dict:
+        """Normalise raw model output into the shape the frontend expects.
+
+        Emits floats (not Decimals) — DRF would serialise Decimals as
+        strings which forces the frontend to parseFloat() on every field.
+        Floats are JSON-native and the create endpoint coerces back to
+        Decimal on the way into the DB. Strings are stripped of leading/
+        trailing whitespace because vision LLMs sometimes pad with newlines.
+        """
+
+        def _f(v, fallback=0.0):
+            if v is None or v == "":
+                return fallback
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return fallback
+
+        def _s(v):
+            return (v or "").strip() if isinstance(v, str) else (v or "")
+
+        line_items = []
+        for item in data.get("line_items") or []:
+            qty = _f(item.get("quantity"))
+            rate = _f(item.get("rate"))
+            amount = _f(item.get("amount"))
+            # Some invoices show only qty × rate without a line total —
+            # fill it in so the review form has a sensible value to edit.
+            if amount == 0 and qty and rate:
+                amount = qty * rate
+            line_items.append(
+                {
+                    "product_name": _s(item.get("product_name")),
+                    "quantity": qty,
+                    "rate": rate,
+                    "hsn_code": _s(item.get("hsn_code")),
+                    "gst_tax_rate": _f(item.get("gst_tax_rate"), 0.03),
+                    "amount": amount,
+                }
+            )
+
+        return {
+            "invoice_number": _s(data.get("invoice_number")),
+            "invoice_date": _s(data.get("invoice_date")),
+            "customer_name": _s(data.get("customer_name")),
+            "customer_address": _s(data.get("customer_address")),
+            "customer_gst_number": _s(data.get("customer_gst_number")),
+            "customer_pan_number": _s(data.get("customer_pan_number")),
+            "customer_mobile_number": _s(data.get("customer_mobile_number")),
+            "line_items": line_items,
+            "total_amount": _f(data.get("total_amount")),
+            "cgst_total": _f(data.get("cgst_total")),
+            "sgst_total": _f(data.get("sgst_total")),
+            "igst_total": _f(data.get("igst_total")),
+        }
 
 
 class AIInvoiceProcessingError(Exception):
