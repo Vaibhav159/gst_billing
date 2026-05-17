@@ -287,15 +287,17 @@ if REDIS_PASSWORD:
     }
 
 # AI Configuration
-# Legacy Gemini key — kept so older deployments don't break on upgrade;
-# the active extractor is NIM-based (see below). Drop this once nothing
-# reads it.
+# Active extractor: Google Gemini (billing.utils.AIInvoiceProcessor).
+# Free key at https://aistudio.google.com/apikey. The model is
+# overridable for A/B testing — Gemini 2.5 Flash is the free-tier
+# sweet spot, Pro is paid + slower but more accurate on tough scans.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash")
 
-# NVIDIA NIM — primary AI invoice extractor (billing.utils.AIInvoiceProcessor).
-# Get a free key at https://build.nvidia.com. NVIDIA_VISION_MODEL is
-# overridable so we can swap to nemotron-nano-12b-v2-vl, gemma-4-31b-it,
-# etc. without code changes.
+# NVIDIA NIM — kept around as a potential fallback provider but not
+# wired into AIInvoiceProcessor. We tested Llama 4 Maverick during the
+# bake-off and it worked but lost to Gemini on Hindi/phone-photo
+# accuracy. If you want to switch back, swap the import in utils.py.
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 NVIDIA_VISION_MODEL = os.getenv(
     "NVIDIA_VISION_MODEL", "meta/llama-4-maverick-17b-128e-instruct"

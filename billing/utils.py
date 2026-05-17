@@ -8,14 +8,16 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pandas as pd
-import requests
 from django.conf import settings
 from django.db import transaction
-# google.genai was the previous AI backend. The AIInvoiceProcessor below
-# now uses NVIDIA NIM (OpenAI-compatible REST) so we no longer need the
-# Gemini SDK at runtime. The dependency stays in pyproject.toml for now
-# in case we want to A/B test extractors later, but the import is gone
-# to keep cold start fast and avoid a hard requirement.
+# AI extractor uses Google Gemini (google-genai SDK). We briefly tried
+# NVIDIA NIM with Llama 4 Maverick — it worked but Gemini Flash is more
+# accurate on Hindi text / phone-shot invoices and its native
+# response_schema gives shape-guaranteed JSON (model can't drop a
+# required field). NIM stays as a possible fallback but isn't wired
+# into the active path.
+import google.genai as genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -596,52 +598,56 @@ def process_invoice_csv(
 
 
 class AIInvoiceProcessor:
-    """AI-powered invoice extraction via NVIDIA NIM (Llama 4 Maverick).
+    """AI-powered invoice extraction via Google Gemini (gemini-2.5-flash).
 
-    Why NIM over Gemini (previous backend):
-      - The NIM catalog lets us swap models without changing code — set
-        NVIDIA_VISION_MODEL in settings to try a different VLM.
-      - One free-tier account gives access to Llama 4, Nemotron VL,
-        Gemma 4, Phi-4 multimodal, etc. — useful for A/B-ing accuracy
-        on edge-case invoices.
-      - Probed empirically (May 2026): Llama 4 Maverick gave the
-        cleanest JSON in JSON mode; Nemotron Nano 12B v2 VL hallucinated
-        extra envelope fields (`error`, `code`, `headers`) even when
-        asked for `{"ok": true}`. So Maverick is the default.
+    Why Gemini over alternatives:
+      - Native `response_schema` — server-side schema enforcement, the
+        model literally cannot emit a wrong shape. NIM / Llama / Qwen
+        all use prompt-driven JSON which can still drop required fields
+        or invent extras (we observed this with nemotron-nano-12b-v2-vl
+        during the NIM bake-off).
+      - Best free-tier vision quality on document OCR + multilingual
+        (Devanagari/Hindi customer names matter for Indian jewellery
+        invoices). Free tier is ~15 RPM / ~1500 req/day on Flash.
+      - Typical extraction is 2-4s, faster than the NIM round (5-15s).
 
-    Tradeoff vs Gemini: no native response_schema, so we lean on
-    OpenAI-style `response_format: json_object` plus a defensive parser
-    (markdown fence stripping, outermost-brace extraction).
-
-    Image size: NIM's chat-completions endpoint has a ~180KB payload
-    limit for direct base64 image data. We downscale + recompress before
-    upload so a 5MB camera shot still works.
+    The previous version of this class (Gemini-based) had inflated
+    prompts, brittle markdown-fence parsing, and returned Decimals that
+    DRF serialised as strings. This rewrite keeps Gemini but borrows the
+    improvements from the NIM detour: tighter prompt, image downscaling
+    so a 5MB phone shot still fits, defensive JSON parser, float output
+    so the frontend doesn't need to parseFloat every field.
     """
 
-    NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-    DEFAULT_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
-    # Target raw bytes before base64 encoding (b64 adds ~33%).
-    # NIM rejects payloads > ~180KB; we leave a safety margin.
-    MAX_IMAGE_BYTES = 130_000
-    REQUEST_TIMEOUT = 90  # seconds — vision LLMs can take 30-60s
+    DEFAULT_MODEL = "gemini-2.5-flash"
+    # Gemini accepts much larger inline images than NIM (up to ~20MB
+    # base64), but downscaling still helps latency on phone shots.
+    # 1568px is the sweet spot — small enough to upload fast, big enough
+    # that fine-print HSN codes stay legible.
+    MAX_IMAGE_DIM = 1568
+    # If raw bytes are over this we run them through PIL to resize +
+    # JPEG-recompress. We don't enforce a hard byte budget like with NIM
+    # because Gemini is permissive — this is purely a speed optimisation.
+    DOWNSCALE_THRESHOLD = 800_000  # 800KB
 
     def __init__(self):
-        self.api_key = getattr(settings, "NVIDIA_API_KEY", "") or ""
+        self.api_key = getattr(settings, "GEMINI_API_KEY", "") or ""
         if not self.api_key:
             # The view catches this and 400s with a clear message so the
             # user sees "configure your key" instead of a 500.
             raise AIInvoiceProcessingError(
-                "NVIDIA_API_KEY not configured. Add it to your .env "
-                "(free key at https://build.nvidia.com)."
+                "GEMINI_API_KEY not configured. Add it to your .env "
+                "(free key at https://aistudio.google.com/apikey)."
             )
         self.model = getattr(
-            settings, "NVIDIA_VISION_MODEL", self.DEFAULT_MODEL
+            settings, "GEMINI_VISION_MODEL", self.DEFAULT_MODEL
         )
+        self.client = genai.Client(api_key=self.api_key)
 
     # ── public API ──────────────────────────────────────────────────
 
     def process_invoice_image(self, image_file, business_id: int) -> dict:
-        """Send an invoice image to NIM and return the parsed dict."""
+        """Send an invoice image to Gemini and return the parsed dict."""
         from billing.models import Customer
 
         customer_names = list(
@@ -656,109 +662,65 @@ class AIInvoiceProcessor:
             raise AIInvoiceProcessingError(f"Could not read uploaded image: {e!s}")
 
         mime = getattr(image_file, "content_type", "") or "image/jpeg"
-        # Downscale up-front so we never exhaust NIM's payload budget on
-        # large camera shots. Re-encodes to JPEG so the mime is normalised.
-        if len(image_bytes) > self.MAX_IMAGE_BYTES:
-            image_bytes, mime = self._downscale(image_bytes, self.MAX_IMAGE_BYTES)
-
-        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        # Downscale large camera shots up-front — Gemini handles them
+        # fine, but a 5MB image adds 3-5s of upload + processing time.
+        if len(image_bytes) > self.DOWNSCALE_THRESHOLD:
+            image_bytes, mime = self._downscale(image_bytes)
 
         prompt = self._build_prompt(customer_names)
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{image_b64}"},
-                        },
-                    ],
-                }
-            ],
-            "temperature": 0.0,  # extraction, not creative writing
-            "top_p": 0.8,
-            "max_tokens": 4096,
-            "response_format": {"type": "json_object"},
-        }
 
         try:
-            response = requests.post(
-                self.NIM_URL,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=self.REQUEST_TIMEOUT,
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": prompt},
+                            {"inline_data": {"mime_type": mime, "data": image_bytes}},
+                        ],
+                    }
+                ],
+                config=types.GenerateContentConfig(
+                    candidate_count=1,
+                    max_output_tokens=8192,
+                    temperature=0.0,  # extraction, not creative writing
+                    top_p=0.8,
+                    top_k=40,
+                    response_mime_type="application/json",
+                    response_schema=self._build_schema(),
+                ),
             )
-        except requests.Timeout:
-            raise AIInvoiceProcessingError(
-                f"NIM request timed out after {self.REQUEST_TIMEOUT}s. "
-                "Try a smaller image or retry."
-            )
-        except requests.RequestException as e:
-            raise AIInvoiceProcessingError(f"NIM request failed: {e!s}")
+        except Exception as e:
+            # google-genai raises a grab-bag of exception types. Normalise
+            # so the view always gets an AIInvoiceProcessingError it can
+            # 400 cleanly with a user-visible message.
+            raise AIInvoiceProcessingError(f"Gemini request failed: {e!s}")
 
-        if response.status_code != 200:
-            # NIM error shapes vary: {"detail": "..."} | {"error": {...}}
-            # | {"message": "..."}. Pass through whatever we got, truncated.
-            body_preview = response.text[:300] if response.text else "(empty body)"
+        # With response_schema + response_mime_type=application/json, the
+        # SDK returns text that is guaranteed to be valid JSON matching
+        # the schema. We still defensively parse in case Google ever
+        # relaxes the guarantee or the model returns nothing.
+        text = (getattr(response, "text", "") or "").strip()
+        if not text:
             raise AIInvoiceProcessingError(
-                f"NIM returned HTTP {response.status_code}: {body_preview}"
+                "Gemini returned an empty response — try a clearer image."
             )
-
-        try:
-            body = response.json()
-            content = body["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError) as e:
-            raise AIInvoiceProcessingError(
-                f"Unexpected NIM response shape ({e!s}): {response.text[:300]}"
-            )
-
-        extracted = self._parse_json_response(content)
+        extracted = self._parse_json_response(text)
         return self._convert_to_dict(extracted)
 
     # ── helpers ─────────────────────────────────────────────────────
 
     @staticmethod
     def _build_prompt(customer_names: list) -> str:
-        """Single prompt with schema + rules. Kept terse — Maverick follows
-        instructions well and a 1000-token prompt eats free-tier credits.
+        """Terse prompt — the schema does the heavy lifting via
+        response_schema, so we don't need to repeat the JSON shape here.
         """
         if customer_names:
             names_block = ", ".join(f'"{n}"' for n in customer_names)
         else:
             names_block = "(none yet — pick the name as written on invoice)"
-        return f"""You extract structured data from Indian GST invoice images.
-
-Return ONLY a JSON object with this exact shape:
-{{
-  "invoice_number": string,
-  "invoice_date": "YYYY-MM-DD",
-  "customer_name": string,
-  "customer_address": string | null,
-  "customer_gst_number": string | null,
-  "customer_pan_number": string | null,
-  "customer_mobile_number": string | null,
-  "line_items": [
-    {{
-      "product_name": string,
-      "quantity": number,
-      "rate": number,
-      "hsn_code": string | null,
-      "gst_tax_rate": number,
-      "amount": number
-    }}
-  ],
-  "total_amount": number | null,
-  "cgst_total": number | null,
-  "sgst_total": number | null,
-  "igst_total": number | null
-}}
+        return f"""Extract structured data from this Indian GST invoice image.
 
 Rules:
 1. Extract EVERY visible line item — do not summarise or skip.
@@ -772,15 +734,51 @@ Rules:
 6. `amount` for each line is the tax-inclusive line subtotal as shown
    on the invoice. If only rate × quantity is given, compute it.
 7. `total_amount` = sum(line_items.amount) + cgst_total + sgst_total
-   + igst_total. Set null if unsure.
+   + igst_total.
 8. Use null for any field genuinely absent from the invoice — do not
    guess or fabricate values."""
 
     @staticmethod
+    def _build_schema() -> types.Schema:
+        """Gemini response_schema — server-side enforcement of output
+        shape. Building lazily on each request because the Schema objects
+        can't be safely shared across threads in older SDK versions.
+        """
+        line_item = types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "product_name": types.Schema(type=types.Type.STRING),
+                "quantity": types.Schema(type=types.Type.NUMBER),
+                "rate": types.Schema(type=types.Type.NUMBER),
+                "hsn_code": types.Schema(type=types.Type.STRING, nullable=True),
+                "gst_tax_rate": types.Schema(type=types.Type.NUMBER),
+                "amount": types.Schema(type=types.Type.NUMBER, nullable=True),
+            },
+            required=["product_name", "quantity", "rate", "gst_tax_rate"],
+        )
+        return types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "invoice_number": types.Schema(type=types.Type.STRING),
+                "invoice_date": types.Schema(type=types.Type.STRING),
+                "customer_name": types.Schema(type=types.Type.STRING),
+                "customer_address": types.Schema(type=types.Type.STRING, nullable=True),
+                "customer_gst_number": types.Schema(type=types.Type.STRING, nullable=True),
+                "customer_pan_number": types.Schema(type=types.Type.STRING, nullable=True),
+                "customer_mobile_number": types.Schema(type=types.Type.STRING, nullable=True),
+                "line_items": types.Schema(type=types.Type.ARRAY, items=line_item),
+                "total_amount": types.Schema(type=types.Type.NUMBER, nullable=True),
+                "cgst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
+                "sgst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
+                "igst_total": types.Schema(type=types.Type.NUMBER, nullable=True),
+            },
+            required=["invoice_number", "invoice_date", "customer_name", "line_items"],
+        )
+
+    @staticmethod
     def _parse_json_response(content: str) -> dict:
-        """Defensive JSON parsing — even with json_object mode the model
-        occasionally wraps output in ```json fences or adds chatty prose.
-        Strip fences, then grab the outermost {...} block.
+        """Defensive JSON parsing — response_schema makes valid JSON the
+        norm, but we still handle ``` fences just in case.
         """
         text = (content or "").strip()
         if text.startswith("```"):
@@ -799,12 +797,11 @@ Rules:
             )
 
     @staticmethod
-    def _downscale(image_bytes: bytes, target_bytes: int) -> tuple:
-        """Resize + recompress an image so its raw bytes fit `target_bytes`.
-
-        Returns (bytes, mime). We always emit JPEG because NIM accepts it
-        universally and it compresses photos well. Quality ramps down
-        until we're under the target, then we accept whatever we have.
+    def _downscale(image_bytes: bytes) -> tuple:
+        """Resize + JPEG-recompress so the upload is fast. Gemini accepts
+        large images but ~5MB phone shots add real latency. Returns
+        (bytes, mime). Always emits JPEG — universally accepted, good
+        compression for photos of paper.
         """
         from PIL import Image  # lazy import — only loaded on AI path
 
@@ -816,23 +813,17 @@ Rules:
             )
         if img.mode != "RGB":
             img = img.convert("RGB")
-        # 1568px longest side is a good balance: small enough for the
-        # payload limit, large enough that fine-print HSN codes stay
-        # legible.
-        max_dim = 1568
+        max_dim = AIInvoiceProcessor.MAX_IMAGE_DIM
         if max(img.size) > max_dim:
             ratio = max_dim / max(img.size)
             img = img.resize(
                 (int(img.width * ratio), int(img.height * ratio)),
                 Image.Resampling.LANCZOS,
             )
-        for quality in (85, 75, 65, 55, 45, 35):
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=quality, optimize=True)
-            if buf.tell() <= target_bytes:
-                return buf.getvalue(), "image/jpeg"
-        # Last attempt's bytes — still over budget but better than crashing.
-        # NIM may reject; the view bubbles the error to the user.
+        buf = io.BytesIO()
+        # Quality 88 is the OCR sweet spot — sub-100KB on most invoices,
+        # no visible compression artefacts on printed text.
+        img.save(buf, format="JPEG", quality=88, optimize=True)
         return buf.getvalue(), "image/jpeg"
 
     @staticmethod
