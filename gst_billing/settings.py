@@ -292,7 +292,10 @@ if REDIS_PASSWORD:
 # overridable for A/B testing — Gemini 2.5 Flash is the free-tier
 # sweet spot, Pro is paid + slower but more accurate on tough scans.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash")
+# flash-lite default — ~3s/invoice vs ~15s for full Flash with no
+# measurable quality loss on printed invoices. Override per-environment
+# via .env for tougher scans. See AIInvoiceProcessor.DEFAULT_MODEL.
+GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash-lite")
 
 # NVIDIA NIM — kept around as a potential fallback provider but not
 # wired into AIInvoiceProcessor. We tested Llama 4 Maverick during the
