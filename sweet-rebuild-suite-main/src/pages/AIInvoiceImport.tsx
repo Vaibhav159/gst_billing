@@ -47,7 +47,6 @@ type MatchedBusiness = { id: number; name: string; gst_number: string } | null;
 
 // Per-file state machine.
 type FileStatus = "pending" | "processing" | "ready" | "error" | "created";
-type Provider = "gemini" | "nim" | null;
 type FileEntry = {
   id: string;                  // local-only key
   file: File;
@@ -60,8 +59,6 @@ type FileEntry = {
   errorMsg: string;
   createdInvoiceId: number | null;
   expanded: boolean;
-  provider: Provider;
-  fellBackFromGemini: boolean;
   // For Gemini multi-key rotation: which key (#1/2/3…) processed this
   // file and how many are configured total. Lets the badge show
   // "Gemini #2/3" so the user can see they're burning through the pool.
@@ -134,8 +131,6 @@ export default function AIInvoiceImport() {
         errorMsg: "",
         createdInvoiceId: null,
         expanded: false,
-        provider: null,
-        fellBackFromGemini: false,
         keyIndex: null,
         keyTotal: null,
       });
@@ -178,8 +173,6 @@ export default function AIInvoiceImport() {
         data: Extracted;
         matched_business: MatchedBusiness;
         detected_type: "inward" | "outward" | null;
-        provider: Provider;
-        fallback_from_gemini: boolean;
         key_index: number | null;
         key_total: number | null;
       }>("ai/invoice/process/", fd, { timeout: 120_000 });
@@ -191,20 +184,10 @@ export default function AIInvoiceImport() {
           ? String(res.data.matched_business.id)
           : "",
         type: res.data.detected_type || entry.type,
-        provider: res.data.provider,
-        fellBackFromGemini: !!res.data.fallback_from_gemini,
         keyIndex: res.data.key_index,
         keyTotal: res.data.key_total,
         expanded: true,
       });
-      // Surface the fallback once globally — if Gemini's quota is hit,
-      // subsequent files will all use NIM. Toasting per-file is noisy.
-      if (res.data.fallback_from_gemini && entry.fellBackFromGemini === false) {
-        toast({
-          title: "Gemini daily cap hit",
-          description: "Auto-switched to NVIDIA NIM for this and remaining files.",
-        });
-      }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       const msg = err?.response?.data?.error || err?.message || "AI extraction failed.";
@@ -429,7 +412,7 @@ export default function AIInvoiceImport() {
             <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">How it works</h3>
             <div className="space-y-3">
               {[
-                { icon: Zap, label: "Gemini multi-key rotation", desc: "Multiple keys rotate auto when daily cap hits" },
+                { icon: Zap, label: "Gemini 2.5 Flash-Lite", desc: "Multi-key rotation extends daily quota" },
                 { icon: Sparkles, label: "Business auto-detected", desc: "From the buyer/seller GSTINs on the invoice" },
                 { icon: Shield, label: "Customers auto-created", desc: "If GSTIN doesn't match an existing record" },
                 { icon: Clock, label: "Bulk-friendly", desc: "Drop many, process all, review, bulk-create" },
@@ -527,27 +510,14 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <p className="text-[13px] font-semibold text-foreground truncate">{entry.file.name}</p>
-            {/* Provider badge — only shown post-processing. NIM badge
-                tinted differently so the fallback case is visible at a
-                glance during a bulk import. */}
-            {entry.provider === "gemini" && (
+            {/* Key index badge — only when multiple keys are configured.
+                With one key the "#1/1" is just noise. */}
+            {entry.keyIndex && entry.keyTotal && entry.keyTotal > 1 && (
               <span
                 className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary tracking-wider shrink-0"
-                title={
-                  entry.keyIndex && entry.keyTotal && entry.keyTotal > 1
-                    ? `Gemini key ${entry.keyIndex} of ${entry.keyTotal} (others may be cooled down)`
-                    : "Processed via Google Gemini"
-                }
+                title={`Gemini key ${entry.keyIndex} of ${entry.keyTotal} (others may be cooled down)`}
               >
-                Gemini{entry.keyIndex && entry.keyTotal && entry.keyTotal > 1 ? ` #${entry.keyIndex}/${entry.keyTotal}` : ""}
-              </span>
-            )}
-            {entry.provider === "nim" && (
-              <span
-                className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-chart-3/15 text-chart-3 tracking-wider shrink-0"
-                title={entry.fellBackFromGemini ? "Gemini daily cap hit — auto-fell-back to NIM" : "Processed via NVIDIA NIM"}
-              >
-                {entry.fellBackFromGemini ? "NIM ↩" : "NIM"}
+                Key #{entry.keyIndex}/{entry.keyTotal}
               </span>
             )}
           </div>

@@ -3136,11 +3136,10 @@ class AIInvoiceProcessingView(APIView):
                 extracted_data["customer_name"] = extracted_data.get("buyer_name") or extracted_data.get("customer_name")
                 extracted_data["customer_gst_number"] = buyer_gstin or extracted_data.get("customer_gst_number")
 
-            # Provider info — set by AIInvoiceProcessor when it picks
-            # Gemini vs NIM (or falls back from one to the other).
-            # Frontend surfaces "Processed via X" + a fallback hint.
-            provider = extracted_data.pop("_provider", None)
-            fell_back = extracted_data.pop("_fallback_from_gemini", False)
+            # Strip internal-only fields before responding. _key_index
+            # / _key_total are re-surfaced at the top level so the UI
+            # can show "Gemini #2/3" during a bulk import.
+            extracted_data.pop("_provider", None)
             key_index = extracted_data.pop("_key_index", None)  # 1-indexed
             key_total = extracted_data.pop("_key_total", None)
 
@@ -3150,12 +3149,10 @@ class AIInvoiceProcessingView(APIView):
                     "data": extracted_data,
                     "matched_business": matched_business,  # null if no DB match
                     "detected_type": detected_type,        # "inward" / "outward" / null
-                    "provider": provider,                  # "gemini" | "nim" | null
-                    "fallback_from_gemini": fell_back,
-                    # For Gemini, which of the N rotated keys handled
-                    # this request. Lets the UI show "Gemini #2/3"
-                    # which helps the user see when they're burning
-                    # through their key pool.
+                    # Which of the N rotated Gemini keys handled this
+                    # request. Lets the UI show "Gemini #2/3" so the
+                    # user can see when they're burning through the
+                    # key pool.
                     "key_index": key_index,
                     "key_total": key_total,
                     "message": "Invoice data extracted successfully",

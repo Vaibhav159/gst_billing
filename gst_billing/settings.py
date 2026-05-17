@@ -305,17 +305,6 @@ GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
 # measurable quality loss on printed invoices. Override per-environment
 # via .env for tougher scans. See AIInvoiceProcessor.DEFAULT_MODEL.
 GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash-lite")
-
-# NVIDIA NIM — fallback when ALL Gemini keys are cooled down. Off by
-# default because empirical quality on jewellery invoices is weaker
-# than Gemini (OCR character confusions like O vs 0). Flip to "true"
-# if you'd rather get *some* result than a hard error when Gemini's
-# entire key pool is exhausted.
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
-NVIDIA_VISION_MODEL = os.getenv(
-    "NVIDIA_VISION_MODEL", "meta/llama-4-maverick-17b-128e-instruct"
-)
-AI_NIM_FALLBACK = os.getenv("AI_NIM_FALLBACK", "false").lower() in ("true", "1", "yes")
 # Ensure log dir exists — django.utils.log.configure_logging will fail to
 # attach the FileHandler otherwise (fresh checkouts and CI runners).
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)
