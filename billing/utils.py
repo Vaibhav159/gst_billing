@@ -19,6 +19,19 @@ from django.db import transaction
 import google.genai as genai
 from google.genai import types
 
+# Register HEIC / HEIF opener on Pillow so iPhone photos can be decoded
+# in the same code path as JPEG/PNG. Without this, Image.open() on a
+# .heic file raises UnidentifiedImageError. Imported lazily inside a
+# try block so a missing pillow-heif install only breaks HEIC, not all
+# AI extraction.
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:  # pragma: no cover — fallback if dep missing
+    logging.getLogger(__name__).warning(
+        "pillow-heif not installed — HEIC uploads will fail to decode."
+    )
+
 logger = logging.getLogger(__name__)
 
 DATE_FORMAT_YEAR_MONTH_DATE = "%Y-%m-%d"
@@ -656,15 +669,25 @@ class AIInvoiceProcessor:
 
     # ── public API ──────────────────────────────────────────────────
 
-    def process_invoice_image(self, image_file, business_id: int) -> dict:
-        """Send an invoice image to Gemini and return the parsed dict."""
+    def process_invoice_image(self, image_file, business_id: int | None = None) -> dict:
+        """Send an invoice image to Gemini and return the parsed dict.
+
+        `business_id` is OPTIONAL. When provided, the prompt is scoped
+        to that business's customers (better match accuracy). When
+        omitted, the model extracts the customer name as-it-appears and
+        the caller looks up the customer + business afterwards (used by
+        the auto-detect-business flow on the AI Import page).
+        """
         from billing.models import Customer
 
-        customer_names = list(
-            Customer.objects.filter(businesses__id=business_id).values_list(
-                "name", flat=True
+        # Customer list scoping is optional now — passing an empty list
+        # tells the model "no constraint, transcribe what you see".
+        customer_names = []
+        if business_id:
+            customer_names = list(
+                Customer.objects.filter(businesses__id=business_id)
+                .values_list("name", flat=True)
             )
-        )
 
         try:
             image_bytes = image_file.read()
@@ -672,10 +695,13 @@ class AIInvoiceProcessor:
             raise AIInvoiceProcessingError(f"Could not read uploaded image: {e!s}")
 
         mime = getattr(image_file, "content_type", "") or "image/jpeg"
-        # Downscale large camera shots up-front — Gemini handles them
-        # fine, but a 5MB image adds 3-5s of upload + processing time.
-        if len(image_bytes) > self.DOWNSCALE_THRESHOLD:
-            image_bytes, mime = self._downscale(image_bytes)
+        # ALWAYS normalize through PIL — handles HEIC (iPhone photos),
+        # WebP, oversized images, and odd colorspaces in one pass.
+        # Gemini only reliably accepts JPEG/PNG inline, so re-encoding
+        # to JPEG removes a class of "model returned empty" failures.
+        # Cost is ~50-100ms on a small image; saves much more than that
+        # when the input is a 20MB phone shot.
+        image_bytes, mime = self._normalize_image(image_bytes, mime)
 
         prompt = self._build_prompt(customer_names)
 
@@ -734,10 +760,23 @@ class AIInvoiceProcessor:
         """Terse prompt — the schema does the heavy lifting via
         response_schema, so we don't need to repeat the JSON shape here.
         """
+        # Customer-name constraint is optional. When the caller already
+        # knows the business (legacy flow), passing the list gives the
+        # model better match accuracy. When auto-detecting business from
+        # the invoice itself (new flow), we don't know which business's
+        # customers to constrain to, so we pass an empty list and the
+        # backend matches/auto-creates the customer post-extraction.
         if customer_names:
-            names_block = ", ".join(f'"{n}"' for n in customer_names)
+            names_block = (
+                f"`customer_name` MUST match one of these existing "
+                f"customers when a reasonable case-insensitive match "
+                f"exists: {', '.join(f'\"{n}\"' for n in customer_names)}."
+            )
         else:
-            names_block = "(none yet — pick the name as written on invoice)"
+            names_block = (
+                "`customer_name` — transcribe as written on the invoice "
+                "(matching to existing customers happens server-side)."
+            )
         return f"""Extract structured data from this Indian GST invoice image.
 
 Rules:
@@ -746,14 +785,25 @@ Rules:
 3. Convert dates from DD/MM/YYYY (or DD-MM-YYYY) to YYYY-MM-DD.
 4. Transliterate Devanagari/Hindi names to English Roman script
    (e.g. "अमरकान्त दार्शन मुस्काना" → "Amarakant Darshan Muskana").
-5. `customer_name` must match one of the existing customers when a
-   reasonable match exists (case-insensitive). Allowed names:
-   {names_block}.
-6. `amount` for each line is the tax-inclusive line subtotal as shown
+5. Extract BOTH parties' GSTINs separately — do not guess which is
+   which based on context:
+     - `buyer_gst_number` / `buyer_name`: the entity in the "Bill To"
+       / "Recipient" / "Buyer" / "Consignee" section (the one
+       PURCHASING the goods/services).
+     - `seller_gst_number` / `seller_name`: the entity in the "From"
+       / "Seller" / "Supplier" / header block (the one ISSUING the
+       invoice and selling).
+   Set GSTIN nulls only if a side is genuinely missing from the
+   invoice. We use both server-side to figure out which side is our
+   business — don't try to decide that yourself.
+6. {names_block} — `customer_name` should be the OTHER party's name
+   (the one that is NOT our business; usually equals seller_name on
+   a purchase invoice, or buyer_name on a sale invoice).
+7. `amount` for each line is the tax-inclusive line subtotal as shown
    on the invoice. If only rate × quantity is given, compute it.
-7. `total_amount` = sum(line_items.amount) + cgst_total + sgst_total
+8. `total_amount` = sum(line_items.amount) + cgst_total + sgst_total
    + igst_total.
-8. Use null for any field genuinely absent from the invoice — do not
+9. Use null for any field genuinely absent from the invoice — do not
    guess or fabricate values."""
 
     @staticmethod
@@ -777,6 +827,20 @@ Rules:
         return types.Schema(
             type=types.Type.OBJECT,
             properties={
+                # We ask for BOTH parties' GSTINs because "recipient" /
+                # "customer" is semantically ambiguous (recipient of the
+                # document = buyer; recipient of an invoice in our app
+                # could be either party depending on inward/outward).
+                # Backend matches each GSTIN against Business table:
+                #   - if buyer matches one of our businesses → INWARD
+                #     (we bought from the seller)
+                #   - if seller matches → OUTWARD (we sold to the buyer)
+                # This also auto-detects invoice direction so the user
+                # doesn't have to toggle Sale/Purchase manually.
+                "buyer_gst_number": types.Schema(type=types.Type.STRING, nullable=True),
+                "buyer_name": types.Schema(type=types.Type.STRING, nullable=True),
+                "seller_gst_number": types.Schema(type=types.Type.STRING, nullable=True),
+                "seller_name": types.Schema(type=types.Type.STRING, nullable=True),
                 "invoice_number": types.Schema(type=types.Type.STRING),
                 "invoice_date": types.Schema(type=types.Type.STRING),
                 "customer_name": types.Schema(type=types.Type.STRING),
@@ -815,19 +879,34 @@ Rules:
             )
 
     @staticmethod
-    def _downscale(image_bytes: bytes) -> tuple:
-        """Resize + JPEG-recompress so the upload is fast. Gemini accepts
-        large images but ~5MB phone shots add real latency. Returns
-        (bytes, mime). Always emits JPEG — universally accepted, good
-        compression for photos of paper.
+    def _normalize_image(image_bytes: bytes, mime: str) -> tuple:
+        """Decode → resize-if-needed → re-encode as JPEG.
+
+        Runs on EVERY upload, not just oversized ones. Reasons:
+          - HEIC (iPhone photos) isn't a Gemini-supported format inline,
+            but pillow-heif registered an opener so Image.open() handles
+            it; we re-encode to JPEG before upload.
+          - WebP / TIFF / odd colorspaces also normalised here.
+          - Downscaling to MAX_IMAGE_DIM (1568px longest side) cuts
+            latency on 4000px+ phone shots without losing OCR fidelity.
+          - Cost on a small image is ~50-100ms — well under the network
+            + Gemini round-trip, so always-on is a fair tradeoff for
+            removing the "model returned empty" failure mode that
+            occasionally hit on weird formats.
+
+        Returns `(bytes, "image/jpeg")` — always JPEG out.
         """
         from PIL import Image  # lazy import — only loaded on AI path
 
         try:
             img = Image.open(io.BytesIO(image_bytes))
+            # HEIC + some RAW formats need explicit load() to materialize
+            # before the BytesIO is closed.
+            img.load()
         except Exception as e:
             raise AIInvoiceProcessingError(
-                f"Could not decode image for downscale: {e!s}"
+                f"Could not decode image (format={mime!r}): {e!s}. "
+                "Supported formats: JPEG, PNG, HEIC."
             )
         if img.mode != "RGB":
             img = img.convert("RGB")
@@ -887,6 +966,12 @@ Rules:
             )
 
         return {
+            # GSTINs emitted in upper case — GST format is uppercase and
+            # the view matches exact against Business.gst_number.
+            "buyer_gst_number": _s(data.get("buyer_gst_number")).upper(),
+            "buyer_name": _s(data.get("buyer_name")),
+            "seller_gst_number": _s(data.get("seller_gst_number")).upper(),
+            "seller_name": _s(data.get("seller_name")),
             "invoice_number": _s(data.get("invoice_number")),
             "invoice_date": _s(data.get("invoice_date")),
             "customer_name": _s(data.get("customer_name")),

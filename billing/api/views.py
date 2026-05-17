@@ -3063,37 +3063,46 @@ class AIInvoiceProcessingView(APIView):
 
             image_file = request.FILES["image"]
 
-            # NIM's chat-completions endpoint officially supports PNG/JPG
-            # only. WebP was in the allowed list previously but NVIDIA's
-            # docs don't confirm it; rather than gamble on undocumented
-            # behavior, reject up-front with a clear message.
-            allowed_types = ["image/jpeg", "image/jpg", "image/png"]
+            # HEIC added for iPhone photo uploads — pillow-heif registered
+            # an opener on Pillow, and AIInvoiceProcessor._normalize_image
+            # always re-encodes to JPEG before going to Gemini (which only
+            # accepts JPEG/PNG inline). Browsers send `image/heic` or
+            # `image/heif`; some HEIC files come through as
+            # `application/octet-stream` because the browser couldn't
+            # sniff them — we let those through and rely on PIL to
+            # validate during normalization.
+            allowed_types = [
+                "image/jpeg", "image/jpg", "image/png",
+                "image/heic", "image/heif",
+                "application/octet-stream",  # fallback for .heic from some browsers
+            ]
             if image_file.content_type not in allowed_types:
                 return Response(
                     {
                         "error": (
                             f"Unsupported image type '{image_file.content_type}'. "
-                            "Upload a JPEG or PNG."
+                            "Upload a JPEG, PNG, or HEIC."
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Validate file size (max 10MB)
-            if image_file.size > 10 * 1024 * 1024:
+            # Validate file size (max 20MB — bumped from 10MB to handle
+            # modern iPhone HEIC photos which routinely hit 10-15MB).
+            if image_file.size > 20 * 1024 * 1024:
                 return Response(
                     {
-                        "error": "File size too large. Please upload an image smaller than 10MB."
+                        "error": "File too large. Maximum size is 20MB."
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            business_id = request.data.get("business_id")
-            if not business_id:
-                return Response(
-                    {"error": "Business ID is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            # business_id is OPTIONAL — when omitted, the AI extracts the
+            # recipient GSTIN from the invoice and the frontend looks up
+            # the matching Business after extraction. When provided, the
+            # prompt is scoped to that business's customers for better
+            # match accuracy on suppliers we already know.
+            business_id = request.data.get("business_id") or None
 
             # Process the image with AI
             processor = AIInvoiceProcessor()
@@ -3101,10 +3110,38 @@ class AIInvoiceProcessingView(APIView):
                 image_file, business_id=business_id
             )
 
+            # Auto-detect business AND invoice direction from extracted
+            # buyer/seller GSTINs:
+            #   - Our business is on the BUYER side → INWARD (purchase)
+            #   - Our business is on the SELLER side → OUTWARD (sale)
+            # Whichever side matches a Business, the OTHER side becomes
+            # the Customer for this invoice. This removes the need for
+            # the user to toggle Sale/Purchase manually most of the time.
+            matched_business = None
+            detected_type = None
+            buyer_gstin = (extracted_data.get("buyer_gst_number") or "").strip().upper()
+            seller_gstin = (extracted_data.get("seller_gst_number") or "").strip().upper()
+            buyer_biz = Business.objects.filter(gst_number=buyer_gstin).first() if buyer_gstin else None
+            seller_biz = Business.objects.filter(gst_number=seller_gstin).first() if seller_gstin else None
+            if buyer_biz:
+                matched_business = {"id": buyer_biz.id, "name": buyer_biz.name, "gst_number": buyer_biz.gst_number}
+                detected_type = INVOICE_TYPE_INWARD
+                # Promote seller info into the legacy customer_* fields
+                # so the existing review form / create endpoint just work.
+                extracted_data["customer_name"] = extracted_data.get("seller_name") or extracted_data.get("customer_name")
+                extracted_data["customer_gst_number"] = seller_gstin or extracted_data.get("customer_gst_number")
+            elif seller_biz:
+                matched_business = {"id": seller_biz.id, "name": seller_biz.name, "gst_number": seller_biz.gst_number}
+                detected_type = INVOICE_TYPE_OUTWARD
+                extracted_data["customer_name"] = extracted_data.get("buyer_name") or extracted_data.get("customer_name")
+                extracted_data["customer_gst_number"] = buyer_gstin or extracted_data.get("customer_gst_number")
+
             return Response(
                 {
                     "success": True,
                     "data": extracted_data,
+                    "matched_business": matched_business,  # null if no DB match
+                    "detected_type": detected_type,        # "inward" / "outward" / null
                     "message": "Invoice data extracted successfully",
                 }
             )
@@ -3180,25 +3217,58 @@ class AIInvoiceCreateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Case-insensitive match scoped to this business. The AI
-            # prompt restricts answers to existing customer names but
-            # small variations (whitespace, casing) slip through.
-            customer = (
-                Customer.objects.filter(
-                    businesses__id=business_id, name__iexact=extracted_name
-                ).first()
-            )
+            # Match strategy (in priority order):
+            #   1. GSTIN exact match (most reliable — uniquely identifies
+            #      the supplier even if the name varies).
+            #   2. Name case-insensitive match scoped to this business.
+            #   3. Auto-create if extracted GSTIN is present — matches
+            #      the GSTR-2A import behaviour, lower friction than
+            #      forcing the user to bounce out and create manually.
+            #      Name conflicts are disambiguated with state/GSTIN
+            #      suffix (mirror of GSTR-2A's logic).
+            extracted_gstin = (invoice_data.get("customer_gst_number") or "").strip().upper()
+            customer = None
+            if extracted_gstin:
+                customer = Customer.objects.filter(gst_number=extracted_gstin).first()
             if not customer:
-                return Response(
-                    {
-                        "error": (
-                            f"Customer '{extracted_name}' not found for this "
-                            "business. Create the customer first, then re-run "
-                            "AI import."
-                        ),
-                        "customer_name": extracted_name,
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                customer = (
+                    Customer.objects.filter(
+                        businesses__id=business_id, name__iexact=extracted_name
+                    ).first()
+                )
+            if not customer:
+                if not extracted_gstin:
+                    # No GSTIN to auto-create with — surface a clear error
+                    # so the user creates the customer manually with the
+                    # right details. Better than guessing.
+                    return Response(
+                        {
+                            "error": (
+                                f"Customer '{extracted_name}' not found for this "
+                                "business and no GSTIN was extracted to auto-create. "
+                                "Add the customer manually first."
+                            ),
+                            "customer_name": extracted_name,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # Auto-create with disambiguated name if needed.
+                extracted_state = (invoice_data.get("customer_state_name") or "").strip()
+                final_name = extracted_name[:255]
+                if Customer.objects.filter(name=final_name).exists():
+                    if extracted_state:
+                        candidate = f"{final_name} ({extracted_state})"[:255]
+                        if not Customer.objects.filter(name=candidate).exists():
+                            final_name = candidate
+                    if Customer.objects.filter(name=final_name).exists():
+                        final_name = f"{extracted_name[:230]} · {extracted_gstin}"[:255]
+                customer = Customer.objects.create(
+                    name=final_name,
+                    gst_number=extracted_gstin,
+                    address=(invoice_data.get("customer_address") or "").strip(),
+                    pan_number=(invoice_data.get("customer_pan_number") or "").strip(),
+                    mobile_number=(invoice_data.get("customer_mobile_number") or "").strip(),
+                    state_name=extracted_state[:255] if extracted_state else "",
                 )
 
             # Backfill empty customer fields — never overwrite curated

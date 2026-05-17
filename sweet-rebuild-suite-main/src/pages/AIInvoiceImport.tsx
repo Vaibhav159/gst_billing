@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Upload, Bot, CheckCircle, ArrowRight, Image as ImageIcon, Sparkles,
   Clock, Shield, FileText, ArrowLeft, Zap, Loader2, AlertTriangle,
-  Plus, Trash2, RefreshCw,
+  Plus, Trash2, RefreshCw, X, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -13,9 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import { formatCurrency } from "@/utils/mockData";
 
-// What the backend's AIInvoiceProcessor._convert_to_dict actually returns.
-// Floats (not Decimal strings) so they're editable as numbers without
-// parseFloat on every change. Matches billing/utils.py contract.
+// Mirrors backend AIInvoiceProcessor._convert_to_dict output (floats, not
+// Decimal strings — see billing/utils.py).
 type LineItem = {
   product_name: string;
   quantity: number;
@@ -26,11 +25,15 @@ type LineItem = {
 };
 
 type Extracted = {
+  buyer_gst_number: string;
+  buyer_name: string;
+  seller_gst_number: string;
+  seller_name: string;
   invoice_number: string;
   invoice_date: string; // YYYY-MM-DD
-  customer_name: string;
+  customer_name: string;       // backend promotes the "other" party here
   customer_address: string;
-  customer_gst_number: string;
+  customer_gst_number: string; // backend promotes the "other" party here
   customer_pan_number: string;
   customer_mobile_number: string;
   line_items: LineItem[];
@@ -40,11 +43,42 @@ type Extracted = {
   igst_total: number;
 };
 
-// Accept only what NIM officially supports (per docs.api.nvidia.com).
-// WebP is undocumented and was failing intermittently in testing.
-const ACCEPTED_MIME = ["image/jpeg", "image/jpg", "image/png"];
-const ACCEPT_ATTR = ".jpg,.jpeg,.png,image/jpeg,image/png";
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB hard cap, matches backend
+type MatchedBusiness = { id: number; name: string; gst_number: string } | null;
+
+// Per-file state machine.
+type FileStatus = "pending" | "processing" | "ready" | "error" | "created";
+type FileEntry = {
+  id: string;                  // local-only key
+  file: File;
+  previewUrl: string;
+  type: "outward" | "inward";  // user-toggled per file
+  status: FileStatus;
+  extracted: Extracted | null;
+  matchedBusiness: MatchedBusiness;
+  // If user overrides auto-detected business, store the override id here.
+  businessOverrideId: string;
+  errorMsg: string;
+  createdInvoiceId: number | null;
+  expanded: boolean;           // for inline review form
+};
+
+// HEIC/HEIF added for iPhone uploads — backend's pillow-heif decodes
+// then re-encodes to JPEG before Gemini sees it. Browsers vary in MIME
+// reporting on .heic (Chrome: image/heic, Safari: blank) — we whitelist
+// by extension if the MIME comes through empty.
+const ACCEPTED_MIME = new Set([
+  "image/jpeg", "image/jpg", "image/png",
+  "image/heic", "image/heif",
+]);
+const ACCEPTED_EXT = /\.(jpe?g|png|heic|heif)$/i;
+const ACCEPT_ATTR = ".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif";
+const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20MB
+
+function isAcceptableFile(f: File): boolean {
+  if (ACCEPTED_MIME.has(f.type)) return true;
+  // Safari often sends no MIME for HEIC — fall back to extension.
+  return ACCEPTED_EXT.test(f.name);
+}
 
 export default function AIInvoiceImport() {
   const navigate = useNavigate();
@@ -52,126 +86,195 @@ export default function AIInvoiceImport() {
   const { items: businesses } = useBusinesses();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string>("");
-  const [biz, setBiz] = useState("");
-  const [type, setType] = useState<"outward" | "inward">("outward");
+  const [files, setFiles] = useState<FileEntry[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [processingAll, setProcessingAll] = useState(false);
+  const [creatingAll, setCreatingAll] = useState(false);
 
-  const [extracted, setExtracted] = useState<Extracted | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  // Default to first business when the list loads.
+  // Cleanup object URLs on unmount.
   useEffect(() => {
-    if (!biz && businesses.length > 0) setBiz(String(businesses[0].id));
-  }, [businesses, biz]);
+    return () => {
+      files.forEach((f) => f.previewUrl && URL.revokeObjectURL(f.previewUrl));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Object URL for image preview — revoke on unmount/change to avoid leaks.
-  useEffect(() => {
-    if (!file) { setPreviewUrl(""); return; }
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  const pickFile = (f: File | null | undefined) => {
-    if (!f) return;
-    if (!ACCEPTED_MIME.includes(f.type)) {
+  const addFiles = useCallback((picked: FileList | File[]) => {
+    const arr = Array.from(picked);
+    const accepted: FileEntry[] = [];
+    const rejected: string[] = [];
+    for (const f of arr) {
+      if (!isAcceptableFile(f)) {
+        rejected.push(`${f.name}: unsupported type`);
+        continue;
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        rejected.push(`${f.name}: ${(f.size / 1024 / 1024).toFixed(1)}MB > 20MB cap`);
+        continue;
+      }
+      // HEIC can't be previewed by <img> directly in most browsers — keep
+      // the object URL anyway; the browser will gracefully fall back to
+      // showing nothing rather than crashing.
+      accepted.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        file: f,
+        previewUrl: URL.createObjectURL(f),
+        type: "inward",  // most AI imports are purchase invoices
+        status: "pending",
+        extracted: null,
+        matchedBusiness: null,
+        businessOverrideId: "",
+        errorMsg: "",
+        createdInvoiceId: null,
+        expanded: false,
+      });
+    }
+    if (accepted.length) {
+      setFiles((prev) => [...prev, ...accepted]);
+    }
+    if (rejected.length) {
       toast({
-        title: "Unsupported file type",
-        description: `${f.type || "Unknown type"} — upload a JPEG or PNG.`,
+        title: `${rejected.length} file${rejected.length === 1 ? "" : "s"} rejected`,
+        description: rejected.slice(0, 3).join("\n") + (rejected.length > 3 ? `\n+${rejected.length - 3} more` : ""),
         variant: "destructive",
       });
-      return;
     }
-    if (f.size > MAX_FILE_BYTES) {
-      toast({
-        title: "File too large",
-        description: `${(f.size / 1024 / 1024).toFixed(1)}MB exceeds the 10MB cap.`,
-        variant: "destructive",
-      });
-      return;
-    }
-    setFile(f);
-    setErrorMsg("");
+  }, [toast]);
+
+  const removeFile = (id: string) => {
+    setFiles((prev) => {
+      const target = prev.find((f) => f.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((f) => f.id !== id);
+    });
   };
 
-  const handleProcess = async () => {
-    if (!file || !biz) return;
-    setProcessing(true);
-    setErrorMsg("");
-    setStep(2);
+  const updateFile = useCallback((id: string, patch: Partial<FileEntry>) => {
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  }, []);
+
+  // Process a single file end-to-end (call /ai/invoice/process/).
+  // Used both standalone and from the "Process All" batch.
+  const processOne = useCallback(async (entry: FileEntry) => {
+    updateFile(entry.id, { status: "processing", errorMsg: "" });
     try {
       const fd = new FormData();
-      fd.append("image", file);
-      fd.append("business_id", biz);
-      // axios attaches Bearer token automatically via the request interceptor.
-      // Browser sets multipart Content-Type with boundary.
-      const res = await api.post<{ success: boolean; data: Extracted; message: string }>(
-        "ai/invoice/process/",
-        fd,
-        // Vision LLM can take 30-60s; raise the default axios timeout.
-        { timeout: 120_000 }
-      );
-      setExtracted(res.data.data);
-      setStep(3);
+      fd.append("image", entry.file);
+      // Don't send business_id — let the backend auto-detect from the
+      // extracted recipient GSTIN. If detection fails, the user picks
+      // from the dropdown in the review form.
+      const res = await api.post<{
+        data: Extracted;
+        matched_business: MatchedBusiness;
+        detected_type: "inward" | "outward" | null;
+      }>("ai/invoice/process/", fd, { timeout: 120_000 });
+      updateFile(entry.id, {
+        status: "ready",
+        extracted: res.data.data,
+        matchedBusiness: res.data.matched_business,
+        // Pre-fill the override with the matched business id so the
+        // review form's select shows the right value.
+        businessOverrideId: res.data.matched_business
+          ? String(res.data.matched_business.id)
+          : "",
+        // Auto-set Sale/Purchase from detected direction — user can
+        // still override on the review form if AI got it wrong.
+        type: res.data.detected_type || entry.type,
+        expanded: true,  // auto-expand to show the review form
+      });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       const msg = err?.response?.data?.error || err?.message || "AI extraction failed.";
-      setErrorMsg(msg);
-      toast({ title: "Extraction failed", description: msg, variant: "destructive" });
-      setStep(1);
-    } finally {
-      setProcessing(false);
+      updateFile(entry.id, { status: "error", errorMsg: msg });
     }
+  }, [updateFile]);
+
+  const processAll = async () => {
+    const pending = files.filter((f) => f.status === "pending" || f.status === "error");
+    if (!pending.length) return;
+    setProcessingAll(true);
+    // Serial to respect Gemini free-tier rate limit (15 RPM). Each call
+    // takes ~3-5s anyway; parallel wouldn't help much and risks 429s.
+    for (const f of pending) {
+      await processOne(f);
+    }
+    setProcessingAll(false);
+    toast({
+      title: "Processing complete",
+      description: `Review extracted data for each file, then create.`,
+    });
   };
 
-  const handleCreate = async () => {
-    if (!extracted || !biz) return;
-    setCreating(true);
+  // Create one invoice from a ready file.
+  const createOne = useCallback(async (entry: FileEntry): Promise<boolean> => {
+    if (!entry.extracted) return false;
+    const bizId = entry.businessOverrideId
+      || (entry.matchedBusiness?.id ? String(entry.matchedBusiness.id) : "");
+    if (!bizId) {
+      updateFile(entry.id, { errorMsg: "Pick a business before creating." });
+      return false;
+    }
     try {
       const res = await api.post<{
-        invoice_id: number; invoice_number: string; line_items_created: number;
+        invoice_id: number;
+        invoice_number: string;
+        line_items_created: number;
       }>("ai/invoice/create/", {
-        business_id: biz,
-        type_of_invoice: type,
-        invoice_data: extracted,
+        business_id: bizId,
+        type_of_invoice: entry.type,
+        invoice_data: entry.extracted,
       });
-      toast({
-        title: "Invoice created",
-        description: `${res.data.invoice_number} · ${res.data.line_items_created} line item${res.data.line_items_created === 1 ? "" : "s"}`,
+      updateFile(entry.id, {
+        status: "created",
+        createdInvoiceId: res.data.invoice_id,
+        errorMsg: "",
       });
-      navigate(`/billing/invoice/${res.data.invoice_id}`);
+      return true;
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string; customer_name?: string } } };
-      const data = err?.response?.data;
-      const msg = data?.error || "Failed to create invoice.";
-      // Customer-not-found is the most common predictable failure — surface
-      // a quick "create the customer" link instead of just toasting.
-      if (data?.customer_name) {
-        setErrorMsg(msg);
-        toast({
-          title: "Customer not found",
-          description: `Create "${data.customer_name}" first, then come back.`,
-          variant: "destructive",
-        });
-      } else {
-        toast({ title: "Create failed", description: msg, variant: "destructive" });
-      }
-    } finally {
-      setCreating(false);
+      const err = e as { response?: { data?: { error?: string } } };
+      const msg = err?.response?.data?.error || "Create failed.";
+      updateFile(entry.id, { errorMsg: msg });
+      return false;
+    }
+  }, [updateFile]);
+
+  const createAll = async () => {
+    const ready = files.filter((f) => f.status === "ready");
+    if (!ready.length) return;
+    setCreatingAll(true);
+    let successCount = 0;
+    let failCount = 0;
+    for (const f of ready) {
+      const ok = await createOne(f);
+      if (ok) successCount++;
+      else failCount++;
+    }
+    setCreatingAll(false);
+    if (successCount && !failCount) {
+      toast({
+        title: `${successCount} invoice${successCount === 1 ? "" : "s"} created`,
+        description: failCount ? `${failCount} failed — review and retry.` : "Click an invoice number below to view.",
+      });
+    } else if (successCount) {
+      toast({
+        title: `Created ${successCount}, ${failCount} failed`,
+        description: "Review the failed entries above.",
+        variant: "destructive",
+      });
+    } else {
+      toast({ title: "All creates failed", description: "Check errors and retry.", variant: "destructive" });
     }
   };
 
-  // Sum line subtotals so the totals tile always reflects what'll actually
-  // be saved — invoice.total_amount on the backend is sum(line_items.amount).
-  const lineItemsTotal = useMemo(
-    () => (extracted?.line_items || []).reduce((s, li) => s + (li.amount || 0), 0),
-    [extracted?.line_items]
-  );
+  // Aggregate stats for the header summary.
+  const stats = useMemo(() => {
+    const by: Record<FileStatus, number> = { pending: 0, processing: 0, ready: 0, error: 0, created: 0 };
+    files.forEach((f) => { by[f.status]++; });
+    return by;
+  }, [files]);
+
+  const hasFiles = files.length > 0;
+  const allCreated = hasFiles && stats.created === files.length;
 
   return (
     <div className="p-6 lg:p-8 space-y-6 animate-fade-in max-w-6xl mx-auto">
@@ -187,321 +290,126 @@ export default function AIInvoiceImport() {
             <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-3xl font-display font-bold text-foreground tracking-tight">AI Invoice Import</h1>
               <span className="premium-badge bg-success/15 text-success">Live</span>
+              <span className="premium-badge bg-primary/10 text-primary">Bulk</span>
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Upload an invoice image — Llama 4 Vision extracts fields, you review &amp; create.
+              Drop one or many invoice images — business auto-detected, review &amp; create.
             </p>
           </div>
         </div>
         <Link to="/billing/invoice/list" className="premium-btn-ghost text-[13px]"><ArrowLeft className="w-4 h-4" /> Back to Invoices</Link>
       </div>
 
-      {/* Steps Indicator */}
-      <div className="elevated-card rounded-2xl p-3 sm:p-4">
-        <div className="flex items-center gap-1.5 sm:gap-3">
-          {[{ n: 1, label: "Upload Image", icon: Upload }, { n: 2, label: "AI Processing", icon: Sparkles }, { n: 3, label: "Review & Create", icon: CheckCircle }].map((s, i) => (
-            <div key={s.n} className="flex items-center gap-1.5 sm:gap-2.5 flex-1 min-w-0">
-              <div className={cn("flex items-center gap-1.5 sm:gap-2.5 flex-1 min-w-0 p-2 sm:p-3 rounded-xl transition-all",
-                step === s.n ? "bg-primary/10 border border-primary/20" : step > s.n ? "bg-success/5 border border-success/20" : "border border-transparent"
-              )}>
-                <div className={cn("w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-[12px] sm:text-[13px] font-bold transition-all shrink-0",
-                  step > s.n ? "bg-success text-success-foreground" : step === s.n ? "bg-primary text-primary-foreground glow-sm" : "bg-secondary/50 text-muted-foreground"
-                )}>
-                  {step > s.n ? <CheckCircle className="w-4 h-4" /> : s.n}
-                </div>
-                <div className={cn("min-w-0 flex-1", step !== s.n && "hidden sm:block")}>
-                  <p className={cn("text-[11px] sm:text-[12px] font-semibold truncate", step >= s.n ? "text-foreground" : "text-muted-foreground")}>{s.label}</p>
-                </div>
-              </div>
-              {i < 2 && <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground shrink-0" />}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Inline error banner — surfaces customer-not-found etc. above the
-          step content so users see it before scrolling. */}
-      {errorMsg && step !== 2 && (
-        <div className="elevated-card rounded-2xl p-4 border-l-4 border-l-destructive flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-4 h-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] font-semibold text-foreground">Something went wrong</p>
-            <p className="text-[12px] text-muted-foreground mt-0.5">{errorMsg}</p>
-          </div>
+      {/* Status strip — only shown once at least one file is uploaded so
+          the empty-state page stays uncluttered. */}
+      {hasFiles && (
+        <div className="elevated-card rounded-2xl p-3 flex items-center gap-3 flex-wrap">
+          <StatChip label="Pending" value={stats.pending} color="text-muted-foreground bg-secondary/40" />
+          <StatChip label="Processing" value={stats.processing} color="text-primary bg-primary/10" spinning={stats.processing > 0} />
+          <StatChip label="Ready" value={stats.ready} color="text-warning bg-warning/10" />
+          <StatChip label="Created" value={stats.created} color="text-success bg-success/10" />
+          {stats.error > 0 && <StatChip label="Errors" value={stats.error} color="text-destructive bg-destructive/10" />}
+          <span className="flex-1" />
+          {(stats.pending > 0 || stats.error > 0) && (
+            <button
+              onClick={processAll}
+              disabled={processingAll}
+              className="premium-btn-primary text-[12px] h-9 disabled:opacity-60"
+            >
+              {processingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {processingAll ? "Processing…" : `Process ${stats.pending + stats.error} with AI`}
+            </button>
+          )}
+          {stats.ready > 1 && (
+            <button
+              onClick={createAll}
+              disabled={creatingAll}
+              className="premium-btn-outline text-[12px] h-9 disabled:opacity-60"
+            >
+              {creatingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Create All {stats.ready}
+            </button>
+          )}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content */}
-        <div className="lg:col-span-2">
-          <AnimatePresence mode="wait">
-            {step === 1 && (
-              <motion.div key="upload" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
-                className="elevated-card rounded-2xl p-7 space-y-5">
-                <h2 className="text-[15px] font-display font-semibold text-foreground">Upload Invoice Image</h2>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Business</label>
-                    <select value={biz} onChange={(e) => setBiz(e.target.value)} className="premium-select w-full">
-                      <option value="">Select business</option>
-                      {businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[12px] font-semibold text-foreground uppercase tracking-wider">Invoice Type</label>
-                    <div className="flex rounded-xl overflow-hidden border border-border/60">
-                      <button onClick={() => setType("outward")}
-                        className={cn("flex-1 h-10 text-[12px] font-semibold transition-all",
-                          type === "outward" ? "bg-success/15 text-success" : "text-muted-foreground hover:bg-secondary/30")}>
-                        Sale (Outward)
-                      </button>
-                      <button onClick={() => setType("inward")}
-                        className={cn("flex-1 h-10 text-[12px] font-semibold transition-all",
-                          type === "inward" ? "bg-warning/15 text-warning" : "text-muted-foreground hover:bg-secondary/30")}>
-                        Purchase (Inward)
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => { e.preventDefault(); setDragOver(false); pickFile(e.dataTransfer.files[0]); }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={cn(
-                    "border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300 min-h-[200px] flex items-center justify-center",
-                    dragOver ? "border-primary bg-primary/5 scale-[1.01]" :
-                    file ? "border-success/40 bg-success/3" :
-                    "border-border hover:border-primary/50 hover:bg-secondary/10"
-                  )}
-                >
-                  {file && previewUrl ? (
-                    <div className="space-y-3">
-                      <img src={previewUrl} alt="Invoice preview" className="max-h-48 mx-auto rounded-lg shadow-md" />
-                      <div>
-                        <p className="text-[14px] font-semibold text-foreground">{file.name}</p>
-                        <p className="text-[12px] text-muted-foreground">{(file.size / 1024).toFixed(1)} KB · Click to change</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <ImageIcon className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-                      <p className="text-[14px] font-semibold text-foreground">Drop an invoice image here</p>
-                      <p className="text-[12px] text-muted-foreground">JPEG or PNG · max 10MB</p>
-                    </div>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={ACCEPT_ATTR}
-                    className="hidden"
-                    onChange={(e) => pickFile(e.target.files?.[0])}
-                  />
-                </div>
-
-                <button
-                  disabled={!file || !biz || processing}
-                  onClick={handleProcess}
-                  className={cn(
-                    "w-full h-12 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 transition-all",
-                    file && biz && !processing ? "bg-primary text-primary-foreground hover:brightness-110 glow-sm" : "bg-secondary/40 text-muted-foreground cursor-not-allowed"
-                  )}
-                >
-                  {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Bot className="w-5 h-5" />}
-                  {processing ? "Processing…" : "Process with AI"}
-                </button>
-              </motion.div>
+        <div className="lg:col-span-2 space-y-4">
+          {/* Always-visible drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={cn(
+              "border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-300",
+              dragOver ? "border-primary bg-primary/5 scale-[1.01]"
+                       : "border-border hover:border-primary/50 hover:bg-secondary/10"
             )}
+          >
+            <div className="flex flex-col items-center gap-2">
+              <ImageIcon className="w-10 h-10 text-muted-foreground/40" />
+              <p className="text-[14px] font-semibold text-foreground">
+                {hasFiles ? "Drop more or click to add" : "Drop invoice images here"}
+              </p>
+              <p className="text-[11px] text-muted-foreground">JPEG, PNG, HEIC · max 20MB each · multi-select supported</p>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT_ATTR}
+              multiple
+              className="hidden"
+              onChange={(e) => e.target.files && addFiles(e.target.files)}
+            />
+          </div>
 
-            {step === 2 && (
-              <motion.div key="processing" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
-                className="elevated-card rounded-2xl p-16 text-center space-y-6">
-                <div className="w-20 h-20 rounded-2xl bg-primary/15 flex items-center justify-center mx-auto animate-pulse glow-primary">
-                  <Bot className="w-10 h-10 text-primary" />
-                </div>
-                <div>
-                  <p className="text-xl font-display font-bold text-foreground">Extracting invoice data…</p>
-                  <p className="text-[13px] text-muted-foreground mt-2">Sending image to Llama 4 Vision · typically 5–15s</p>
-                </div>
-                <div className="flex items-center justify-center gap-2 text-[12px] text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Don't close this tab</span>
-                </div>
-              </motion.div>
-            )}
+          {/* Per-file list */}
+          {files.length > 0 && (
+            <div className="space-y-3">
+              {files.map((f) => (
+                <FileCard
+                  key={f.id}
+                  entry={f}
+                  businesses={businesses}
+                  onRemove={() => removeFile(f.id)}
+                  onProcess={() => processOne(f)}
+                  onCreate={() => createOne(f)}
+                  onUpdate={(patch) => updateFile(f.id, patch)}
+                  onUpdateExtracted={(ex) => updateFile(f.id, { extracted: ex })}
+                />
+              ))}
+            </div>
+          )}
 
-            {step === 3 && extracted && (
-              <motion.div key="review" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
-                className="elevated-card rounded-2xl p-6 space-y-5">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2.5 text-success">
-                    <CheckCircle className="w-5 h-5" />
-                    <h2 className="text-[16px] font-display font-bold">Extracted — review &amp; edit</h2>
-                  </div>
-                  <button onClick={() => { setExtracted(null); setStep(1); setErrorMsg(""); }} className="premium-btn-ghost text-[12px]">
-                    <RefreshCw className="w-3.5 h-3.5" /> Re-upload
-                  </button>
-                </div>
-                <p className="text-[12px] text-muted-foreground -mt-2">
-                  AI is a first draft — verify every number before creating the invoice.
-                </p>
-
-                {/* Invoice meta */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Invoice Number" value={extracted.invoice_number}
-                    onChange={(v) => setExtracted({ ...extracted, invoice_number: v })} />
-                  <Field label="Invoice Date" type="date" value={extracted.invoice_date}
-                    onChange={(v) => setExtracted({ ...extracted, invoice_date: v })} />
-                </div>
-
-                {/* Customer */}
-                <div className="space-y-2">
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Customer</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <Field label="Name" value={extracted.customer_name}
-                      onChange={(v) => setExtracted({ ...extracted, customer_name: v })} />
-                    <Field label="GSTIN" value={extracted.customer_gst_number}
-                      onChange={(v) => setExtracted({ ...extracted, customer_gst_number: v })} />
-                    <Field label="PAN" value={extracted.customer_pan_number}
-                      onChange={(v) => setExtracted({ ...extracted, customer_pan_number: v })} />
-                    <Field label="Mobile" value={extracted.customer_mobile_number}
-                      onChange={(v) => setExtracted({ ...extracted, customer_mobile_number: v })} />
-                  </div>
-                  <Field label="Address" value={extracted.customer_address}
-                    onChange={(v) => setExtracted({ ...extracted, customer_address: v })} />
-                </div>
-
-                {/* Line items */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      Line Items · {extracted.line_items.length}
-                    </p>
-                    <button
-                      onClick={() => setExtracted({
-                        ...extracted,
-                        line_items: [
-                          ...extracted.line_items,
-                          { product_name: "", quantity: 1, rate: 0, hsn_code: "", gst_tax_rate: 0.03, amount: 0 },
-                        ],
-                      })}
-                      className="text-[11px] text-primary font-semibold flex items-center gap-1 hover:underline"
-                    >
-                      <Plus className="w-3 h-3" /> Add row
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {extracted.line_items.map((li, i) => (
-                      <div key={i} className="grid grid-cols-12 gap-2 items-end p-2.5 rounded-xl bg-secondary/20">
-                        <div className="col-span-12 sm:col-span-4">
-                          <label className="text-[10px] text-muted-foreground uppercase">Product</label>
-                          <input type="text" value={li.product_name}
-                            onChange={(e) => updateItem(extracted, setExtracted, i, "product_name", e.target.value)}
-                            className="premium-input h-9 w-full text-[12px]" />
-                        </div>
-                        <div className="col-span-3 sm:col-span-1">
-                          <label className="text-[10px] text-muted-foreground uppercase">Qty</label>
-                          <input type="number" value={li.quantity} min={0} step="0.001"
-                            onChange={(e) => updateItem(extracted, setExtracted, i, "quantity", Number(e.target.value))}
-                            className="premium-input h-9 w-full text-[12px] text-center" />
-                        </div>
-                        <div className="col-span-3 sm:col-span-2">
-                          <label className="text-[10px] text-muted-foreground uppercase">Rate</label>
-                          <input type="number" value={li.rate} min={0} step="0.01"
-                            onChange={(e) => updateItem(extracted, setExtracted, i, "rate", Number(e.target.value))}
-                            className="premium-input h-9 w-full text-[12px]" />
-                        </div>
-                        <div className="col-span-3 sm:col-span-1">
-                          <label className="text-[10px] text-muted-foreground uppercase">GST%</label>
-                          <input type="number" value={Math.round((li.gst_tax_rate || 0) * 1000) / 10} min={0} step="0.1"
-                            onChange={(e) => updateItem(extracted, setExtracted, i, "gst_tax_rate", Number(e.target.value) / 100)}
-                            className="premium-input h-9 w-full text-[12px] text-center" />
-                        </div>
-                        <div className="col-span-3 sm:col-span-1">
-                          <label className="text-[10px] text-muted-foreground uppercase">HSN</label>
-                          <input type="text" value={li.hsn_code}
-                            onChange={(e) => updateItem(extracted, setExtracted, i, "hsn_code", e.target.value)}
-                            className="premium-input h-9 w-full text-[12px] font-mono" />
-                        </div>
-                        <div className="col-span-9 sm:col-span-2">
-                          <label className="text-[10px] text-muted-foreground uppercase">Amount</label>
-                          <input type="number" value={li.amount} min={0} step="0.01"
-                            onChange={(e) => updateItem(extracted, setExtracted, i, "amount", Number(e.target.value))}
-                            className="premium-input h-9 w-full text-[12px] tabular-nums font-semibold" />
-                        </div>
-                        <div className="col-span-3 sm:col-span-1 flex items-end">
-                          <button
-                            onClick={() => setExtracted({
-                              ...extracted,
-                              line_items: extracted.line_items.filter((_, idx) => idx !== i),
-                            })}
-                            className="w-9 h-9 rounded-lg flex items-center justify-center text-destructive/70 hover:bg-destructive/10 hover:text-destructive transition-colors"
-                            title="Remove row"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Totals */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-border/40">
-                  <NumField label="CGST" value={extracted.cgst_total}
-                    onChange={(v) => setExtracted({ ...extracted, cgst_total: v })} />
-                  <NumField label="SGST" value={extracted.sgst_total}
-                    onChange={(v) => setExtracted({ ...extracted, sgst_total: v })} />
-                  <NumField label="IGST" value={extracted.igst_total}
-                    onChange={(v) => setExtracted({ ...extracted, igst_total: v })} />
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Invoice Total</label>
-                    <div className="h-9 px-3 rounded-lg bg-success/8 border border-success/20 flex items-center font-semibold text-success tabular-nums text-[13px]"
-                         title="Sum of line item amounts — what the invoice will be saved as.">
-                      {formatCurrency(lineItemsTotal)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 pt-2">
-                  <button onClick={() => { setExtracted(null); setStep(1); setErrorMsg(""); }}
-                    disabled={creating}
-                    className="premium-btn-ghost flex-1 text-[13px]">
-                    <ArrowLeft className="w-4 h-4" /> Re-upload
-                  </button>
-                  <button onClick={handleCreate} disabled={creating}
-                    className="premium-btn-primary flex-[2] text-[13px] disabled:opacity-50">
-                    {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                    {creating ? "Creating…" : "Create Invoice"}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {allCreated && (
+            <div className="elevated-card rounded-2xl p-6 border-l-4 border-l-success text-center">
+              <CheckCircle className="w-10 h-10 text-success mx-auto mb-2" />
+              <p className="text-[15px] font-semibold text-foreground">
+                {stats.created} invoice{stats.created === 1 ? "" : "s"} created.
+              </p>
+              <button onClick={() => navigate("/billing/invoice/list")} className="premium-btn-ghost text-[13px] mt-3">
+                <FileText className="w-4 h-4" /> View invoice list
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
         <div className="space-y-5">
-          {/* Image preview persists across steps so user can cross-check */}
-          {previewUrl && (
-            <div className="elevated-card rounded-2xl p-4 space-y-3">
-              <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Source Image</h3>
-              <img src={previewUrl} alt="Source invoice" className="w-full rounded-lg" />
-              {file && <p className="text-[10px] text-muted-foreground text-center">{(file.size / 1024).toFixed(1)} KB</p>}
-            </div>
-          )}
-
           <div className="elevated-card rounded-2xl p-6 space-y-4">
             <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">How it works</h3>
             <div className="space-y-3">
               {[
-                { icon: Zap, label: "Llama 4 Vision (NVIDIA NIM)", desc: "OpenAI-compatible, free tier" },
-                { icon: Shield, label: "Customer must exist", desc: "Add the customer first; AI matches by name" },
-                { icon: Clock, label: "5–15 seconds", desc: "Vision LLM, depends on image size" },
+                { icon: Zap, label: "Gemini 2.5 Flash-Lite", desc: "Google's vision LLM, ~3s/invoice" },
+                { icon: Sparkles, label: "Business auto-detected", desc: "From the recipient GSTIN on the invoice" },
+                { icon: Shield, label: "Customers auto-created", desc: "If GSTIN doesn't match an existing record" },
+                { icon: Clock, label: "Bulk-friendly", desc: "Drop many, process all, review, bulk-create" },
               ].map((f) => (
                 <div key={f.label} className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
@@ -515,13 +423,331 @@ export default function AIInvoiceImport() {
               ))}
             </div>
           </div>
+
+          <div className="elevated-card rounded-2xl p-5 space-y-2">
+            <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Supported formats</h3>
+            <div className="flex flex-wrap gap-2">
+              {["JPEG", "PNG", "HEIC", "HEIF"].map((fmt) => (
+                <span key={fmt} className="premium-badge bg-secondary/40 text-muted-foreground">{fmt}</span>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">Max 20MB each · iPhone HEIC photos work natively</p>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ── small editable field helpers ────────────────────────────────────
+// ── status chip ─────────────────────────────────────────────────────
+
+function StatChip({ label, value, color, spinning = false }: {
+  label: string; value: number; color: string; spinning?: boolean;
+}) {
+  if (value === 0 && !spinning) return null;
+  return (
+    <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium", color)}>
+      {spinning && <Loader2 className="w-3 h-3 animate-spin" />}
+      <span>{label}: {value}</span>
+    </div>
+  );
+}
+
+// ── per-file card ───────────────────────────────────────────────────
+
+type FileCardProps = {
+  entry: FileEntry;
+  businesses: Array<{ id: number | string; name: string; gst_number?: string }>;
+  onRemove: () => void;
+  onProcess: () => void;
+  onCreate: () => Promise<boolean>;
+  onUpdate: (patch: Partial<FileEntry>) => void;
+  onUpdateExtracted: (ex: Extracted) => void;
+};
+
+function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, onUpdateExtracted }: FileCardProps) {
+  const statusLabel: Record<FileStatus, string> = {
+    pending: "Pending",
+    processing: "Extracting…",
+    ready: "Review",
+    error: "Failed",
+    created: "Created",
+  };
+  const statusColor: Record<FileStatus, string> = {
+    pending: "bg-secondary/40 text-muted-foreground",
+    processing: "bg-primary/10 text-primary",
+    ready: "bg-warning/10 text-warning",
+    error: "bg-destructive/10 text-destructive",
+    created: "bg-success/15 text-success",
+  };
+
+  const lineItemsTotal = useMemo(() => {
+    if (!entry.extracted) return 0;
+    return entry.extracted.line_items.reduce((s, li) => s + (li.amount || 0), 0);
+  }, [entry.extracted]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="elevated-card rounded-xl overflow-hidden"
+    >
+      {/* Card header — always visible */}
+      <div className="p-3 flex items-center gap-3">
+        <img
+          src={entry.previewUrl}
+          alt=""
+          className="w-12 h-12 rounded-lg object-cover shrink-0 bg-secondary/40"
+          onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }}
+        />
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-foreground truncate">{entry.file.name}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {(entry.file.size / 1024 / 1024).toFixed(2)}MB
+            {entry.extracted && ` · ${entry.extracted.line_items.length} item${entry.extracted.line_items.length === 1 ? "" : "s"} · ${formatCurrency(lineItemsTotal)}`}
+            {entry.matchedBusiness && ` · ${entry.matchedBusiness.name}`}
+          </p>
+        </div>
+        <span className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-md flex items-center gap-1", statusColor[entry.status])}>
+          {entry.status === "processing" && <Loader2 className="w-3 h-3 animate-spin" />}
+          {entry.status === "created" && <CheckCircle className="w-3 h-3" />}
+          {entry.status === "error" && <AlertTriangle className="w-3 h-3" />}
+          {statusLabel[entry.status]}
+        </span>
+        {entry.status === "pending" && (
+          <button onClick={onProcess} className="premium-btn-outline text-[11px] h-8">
+            <Sparkles className="w-3.5 h-3.5" /> Process
+          </button>
+        )}
+        {entry.status === "ready" && (
+          <button
+            onClick={() => onUpdate({ expanded: !entry.expanded })}
+            className="premium-btn-ghost text-[11px] h-8"
+          >
+            {entry.expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {entry.expanded ? "Collapse" : "Review"}
+          </button>
+        )}
+        {entry.status === "error" && (
+          <button onClick={onProcess} className="premium-btn-outline text-[11px] h-8 border-warning/30 text-warning">
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        )}
+        {entry.status === "created" && entry.createdInvoiceId && (
+          <Link
+            to={`/billing/invoice/${entry.createdInvoiceId}`}
+            className="text-[11px] text-primary font-semibold hover:underline"
+          >
+            View →
+          </Link>
+        )}
+        {entry.status !== "processing" && entry.status !== "created" && (
+          <button
+            onClick={onRemove}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            title="Remove"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {entry.status === "error" && entry.errorMsg && (
+        <div className="px-3 pb-3 text-[11px] text-destructive bg-destructive/5 -mt-1">
+          {entry.errorMsg}
+        </div>
+      )}
+
+      {/* Inline review form — appears when expanded */}
+      <AnimatePresence>
+        {entry.expanded && entry.extracted && entry.status === "ready" && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden border-t border-border/40"
+          >
+            <ReviewForm
+              entry={entry}
+              businesses={businesses}
+              onUpdate={onUpdate}
+              onUpdateExtracted={onUpdateExtracted}
+              onCreate={onCreate}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+// ── review form ─────────────────────────────────────────────────────
+
+function ReviewForm({
+  entry, businesses, onUpdate, onUpdateExtracted, onCreate,
+}: {
+  entry: FileEntry;
+  businesses: Array<{ id: number | string; name: string; gst_number?: string }>;
+  onUpdate: (patch: Partial<FileEntry>) => void;
+  onUpdateExtracted: (ex: Extracted) => void;
+  onCreate: () => Promise<boolean>;
+}) {
+  const ex = entry.extracted!;
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    await onCreate();
+    setCreating(false);
+  };
+
+  const updateLine = (i: number, key: keyof LineItem, val: unknown) => {
+    const next = [...ex.line_items];
+    next[i] = { ...next[i], [key]: val } as LineItem;
+    onUpdateExtracted({ ...ex, line_items: next });
+  };
+
+  const lineItemsTotal = ex.line_items.reduce((s, li) => s + (li.amount || 0), 0);
+
+  return (
+    <div className="p-4 space-y-4 bg-secondary/5">
+      {/* Business + invoice type controls */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Business {entry.matchedBusiness && <span className="text-success normal-case font-normal">· auto-detected</span>}
+          </label>
+          <select
+            value={entry.businessOverrideId}
+            onChange={(e) => onUpdate({ businessOverrideId: e.target.value })}
+            className="premium-select w-full text-[12px]"
+          >
+            <option value="">Select business</option>
+            {businesses.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+          {!entry.matchedBusiness && ex.recipient_gst_number && (
+            <p className="text-[10px] text-warning">
+              GSTIN {ex.recipient_gst_number} on invoice doesn't match any of your businesses — pick manually.
+            </p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Invoice Type</label>
+          <div className="flex rounded-lg overflow-hidden border border-border/60 h-9">
+            <button
+              onClick={() => onUpdate({ type: "outward" })}
+              className={cn("flex-1 text-[11px] font-semibold transition-all",
+                entry.type === "outward" ? "bg-success/15 text-success" : "text-muted-foreground hover:bg-secondary/30")}
+            >
+              Sale
+            </button>
+            <button
+              onClick={() => onUpdate({ type: "inward" })}
+              className={cn("flex-1 text-[11px] font-semibold transition-all",
+                entry.type === "inward" ? "bg-warning/15 text-warning" : "text-muted-foreground hover:bg-secondary/30")}
+            >
+              Purchase
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Invoice meta */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Invoice Number" value={ex.invoice_number}
+          onChange={(v) => onUpdateExtracted({ ...ex, invoice_number: v })} />
+        <Field label="Invoice Date" type="date" value={ex.invoice_date}
+          onChange={(v) => onUpdateExtracted({ ...ex, invoice_date: v })} />
+      </div>
+
+      {/* Customer (supplier for purchase) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Customer Name" value={ex.customer_name}
+          onChange={(v) => onUpdateExtracted({ ...ex, customer_name: v })} />
+        <Field label="GSTIN" value={ex.customer_gst_number}
+          onChange={(v) => onUpdateExtracted({ ...ex, customer_gst_number: v })} />
+      </div>
+
+      {/* Line items — compact table */}
+      <div className="space-y-1">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Line Items · {ex.line_items.length}
+        </p>
+        <div className="space-y-1.5">
+          {ex.line_items.map((li, i) => (
+            <div key={i} className="grid grid-cols-12 gap-1.5 items-end p-2 rounded-lg bg-background/40">
+              <div className="col-span-12 sm:col-span-5">
+                <input type="text" value={li.product_name} onChange={(e) => updateLine(i, "product_name", e.target.value)}
+                  className="premium-input h-8 w-full text-[11px]" placeholder="Product" />
+              </div>
+              <div className="col-span-3 sm:col-span-1">
+                <input type="number" value={li.quantity} step="0.001" onChange={(e) => updateLine(i, "quantity", Number(e.target.value))}
+                  className="premium-input h-8 w-full text-[11px] text-center" placeholder="Qty" />
+              </div>
+              <div className="col-span-3 sm:col-span-2">
+                <input type="number" value={li.rate} step="0.01" onChange={(e) => updateLine(i, "rate", Number(e.target.value))}
+                  className="premium-input h-8 w-full text-[11px]" placeholder="Rate" />
+              </div>
+              <div className="col-span-3 sm:col-span-1">
+                <input type="number" value={Math.round((li.gst_tax_rate || 0) * 1000) / 10} step="0.1" onChange={(e) => updateLine(i, "gst_tax_rate", Number(e.target.value) / 100)}
+                  className="premium-input h-8 w-full text-[11px] text-center" placeholder="GST%" />
+              </div>
+              <div className="col-span-3 sm:col-span-2">
+                <input type="number" value={li.amount} step="0.01" onChange={(e) => updateLine(i, "amount", Number(e.target.value))}
+                  className="premium-input h-8 w-full text-[11px] tabular-nums font-semibold" placeholder="Amount" />
+              </div>
+              <div className="col-span-12 sm:col-span-1 flex justify-end">
+                <button
+                  onClick={() => onUpdateExtracted({ ...ex, line_items: ex.line_items.filter((_, idx) => idx !== i) })}
+                  className="w-7 h-7 rounded-md flex items-center justify-center text-destructive/70 hover:bg-destructive/10"
+                  title="Remove row"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            onClick={() => onUpdateExtracted({
+              ...ex,
+              line_items: [...ex.line_items, { product_name: "", quantity: 1, rate: 0, hsn_code: "", gst_tax_rate: 0.03, amount: 0 }],
+            })}
+            className="text-[11px] text-primary font-semibold flex items-center gap-1 hover:underline"
+          >
+            <Plus className="w-3 h-3" /> Add row
+          </button>
+        </div>
+      </div>
+
+      {/* Totals + action */}
+      <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/40">
+        <div className="text-[11px] text-muted-foreground">
+          Total: <span className="font-semibold text-foreground tabular-nums">{formatCurrency(lineItemsTotal)}</span>
+          {ex.cgst_total > 0 && <span className="ml-3">CGST: {formatCurrency(ex.cgst_total)}</span>}
+          {ex.sgst_total > 0 && <span className="ml-1.5">· SGST: {formatCurrency(ex.sgst_total)}</span>}
+          {ex.igst_total > 0 && <span className="ml-1.5">· IGST: {formatCurrency(ex.igst_total)}</span>}
+        </div>
+        <button
+          onClick={handleCreate}
+          disabled={creating || !entry.businessOverrideId}
+          className="premium-btn-primary text-[12px] h-9 disabled:opacity-50"
+        >
+          {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+          {creating ? "Creating…" : "Create Invoice"}
+        </button>
+      </div>
+
+      {entry.errorMsg && (
+        <p className="text-[11px] text-destructive">{entry.errorMsg}</p>
+      )}
+    </div>
+  );
+}
+
+// ── small editable field ────────────────────────────────────────────
 
 function Field({ label, value, onChange, type = "text" }: {
   label: string; value: string; onChange: (v: string) => void; type?: string;
@@ -537,33 +763,4 @@ function Field({ label, value, onChange, type = "text" }: {
       />
     </div>
   );
-}
-
-function NumField({ label, value, onChange }: {
-  label: string; value: number; onChange: (v: number) => void;
-}) {
-  return (
-    <div className="space-y-1">
-      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</label>
-      <input
-        type="number"
-        value={value || 0}
-        min={0}
-        step="0.01"
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="premium-input h-9 w-full text-[12px] tabular-nums"
-      />
-    </div>
-  );
-}
-
-// Inlined here (rather than a top-level helper) so the state-shape is
-// obvious at call site — we're mutating one field of one line item.
-function updateItem<K extends keyof LineItem>(
-  ex: Extracted, set: (e: Extracted) => void,
-  i: number, key: K, val: LineItem[K]
-) {
-  const next = [...ex.line_items];
-  next[i] = { ...next[i], [key]: val };
-  set({ ...ex, line_items: next });
 }
