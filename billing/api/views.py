@@ -3110,31 +3110,82 @@ class AIInvoiceProcessingView(APIView):
                 image_file, business_id=business_id
             )
 
-            # Auto-detect business AND invoice direction from extracted
-            # buyer/seller GSTINs:
-            #   - Our business is on the BUYER side → INWARD (purchase)
-            #   - Our business is on the SELLER side → OUTWARD (sale)
-            # Whichever side matches a Business, the OTHER side becomes
-            # the Customer for this invoice. This removes the need for
-            # the user to toggle Sale/Purchase manually most of the time.
+            # Auto-detect which Business this invoice belongs to AND the
+            # invoice direction. We check EVERY GSTIN the AI extracted
+            # (buyer, seller, AND the legacy customer_gst_number),
+            # because in practice the AI sometimes ignores the
+            # buyer/seller split and only fills the legacy customer
+            # field — particularly on Indian invoices where the "Bill
+            # To" block is the most visually prominent block.
+            #
+            # Routing:
+            #   - GSTIN matches on buyer or customer side → our business
+            #     bought from someone → INWARD. The "customer" (in the
+            #     app's data-model sense, i.e. the OTHER party) is the
+            #     seller.
+            #   - GSTIN matches on seller side → our business sold to
+            #     someone → OUTWARD. The "customer" is the buyer.
+            #
+            # If the AI confused itself and put our business's data into
+            # the customer_* fields, we'll detect this here and clear
+            # them — user fills in the actual supplier/buyer manually
+            # rather than seeing their own business listed as the
+            # customer (the previous behaviour, which the user flagged
+            # as wrong).
             matched_business = None
             detected_type = None
+            our_role: str | None = None  # "buyer" or "seller"
+
             buyer_gstin = (extracted_data.get("buyer_gst_number") or "").strip().upper()
             seller_gstin = (extracted_data.get("seller_gst_number") or "").strip().upper()
-            buyer_biz = Business.objects.filter(gst_number=buyer_gstin).first() if buyer_gstin else None
-            seller_biz = Business.objects.filter(gst_number=seller_gstin).first() if seller_gstin else None
-            if buyer_biz:
-                matched_business = {"id": buyer_biz.id, "name": buyer_biz.name, "gst_number": buyer_biz.gst_number}
-                detected_type = INVOICE_TYPE_INWARD
-                # Promote seller info into the legacy customer_* fields
-                # so the existing review form / create endpoint just work.
-                extracted_data["customer_name"] = extracted_data.get("seller_name") or extracted_data.get("customer_name")
-                extracted_data["customer_gst_number"] = seller_gstin or extracted_data.get("customer_gst_number")
-            elif seller_biz:
-                matched_business = {"id": seller_biz.id, "name": seller_biz.name, "gst_number": seller_biz.gst_number}
-                detected_type = INVOICE_TYPE_OUTWARD
-                extracted_data["customer_name"] = extracted_data.get("buyer_name") or extracted_data.get("customer_name")
-                extracted_data["customer_gst_number"] = buyer_gstin or extracted_data.get("customer_gst_number")
+            customer_gstin = (extracted_data.get("customer_gst_number") or "").strip().upper()
+
+            for gstin, role in (
+                (buyer_gstin, "buyer"),
+                (seller_gstin, "seller"),
+                (customer_gstin, "customer"),  # legacy AI fill — usually = buyer
+            ):
+                if not gstin:
+                    continue
+                biz = Business.objects.filter(gst_number=gstin).first()
+                if biz:
+                    matched_business = {
+                        "id": biz.id, "name": biz.name, "gst_number": biz.gst_number,
+                    }
+                    # buyer + customer (the most common AI conflation)
+                    # both mean we were the recipient → INWARD.
+                    our_role = "seller" if role == "seller" else "buyer"
+                    detected_type = (
+                        INVOICE_TYPE_OUTWARD if our_role == "seller"
+                        else INVOICE_TYPE_INWARD
+                    )
+                    break
+
+            if matched_business:
+                # Promote the OTHER party into the legacy customer_*
+                # fields the review form binds against. Preference
+                # order: the explicit field for that side → the legacy
+                # customer field if it's not our own business name.
+                our_gstin = matched_business["gst_number"]
+                our_name_upper = matched_business["name"].upper()
+                if our_role == "buyer":
+                    other_name = extracted_data.get("seller_name") or ""
+                    other_gstin = seller_gstin
+                else:
+                    other_name = extracted_data.get("buyer_name") or ""
+                    other_gstin = buyer_gstin
+
+                # Fall back to the legacy customer_* fields ONLY if they
+                # don't refer to our own business (avoids the AI's
+                # mistake leaking through to the review form).
+                legacy_name = extracted_data.get("customer_name") or ""
+                if not other_name and legacy_name and legacy_name.upper() != our_name_upper:
+                    other_name = legacy_name
+                if not other_gstin and customer_gstin and customer_gstin != our_gstin:
+                    other_gstin = customer_gstin
+
+                extracted_data["customer_name"] = other_name
+                extracted_data["customer_gst_number"] = other_gstin
 
             # Strip internal-only fields before responding. _key_index
             # / _key_total are re-surfaced at the top level so the UI
