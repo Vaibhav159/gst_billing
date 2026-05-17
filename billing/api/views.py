@@ -3187,6 +3187,44 @@ class AIInvoiceProcessingView(APIView):
                 extracted_data["customer_name"] = other_name
                 extracted_data["customer_gst_number"] = other_gstin
 
+                # ── Backfill from existing Customer if we can find one ──
+                # AI vision often misses small text like GSTINs (15
+                # alphanumeric chars in fine print). The Customer table
+                # is the source of truth — if a Customer matches the
+                # extracted name and/or GSTIN, copy the missing fields
+                # (GSTIN, address, PAN, mobile) from the DB record so
+                # the review form is fully populated.
+                # Match priority:
+                #   1. Exact GSTIN match (most reliable identifier)
+                #   2. Case-insensitive name match scoped to the
+                #      matched business (multi-state suppliers have
+                #      distinct rows; we want the one this business
+                #      actually transacts with)
+                existing = None
+                if other_gstin:
+                    existing = Customer.objects.filter(gst_number=other_gstin).first()
+                if existing is None and other_name:
+                    existing = (
+                        Customer.objects.filter(
+                            businesses__id=matched_business["id"],
+                            name__iexact=other_name,
+                        ).first()
+                    )
+                if existing:
+                    # Always trust DB for canonical name (handles AI
+                    # casing/whitespace differences). Backfill the rest
+                    # only when AI didn't extract them.
+                    extracted_data["customer_name"] = existing.name
+                    if not extracted_data.get("customer_gst_number") and existing.gst_number:
+                        extracted_data["customer_gst_number"] = existing.gst_number
+                    for db_field, ai_key in (
+                        ("address", "customer_address"),
+                        ("pan_number", "customer_pan_number"),
+                        ("mobile_number", "customer_mobile_number"),
+                    ):
+                        if not extracted_data.get(ai_key) and getattr(existing, db_field, ""):
+                            extracted_data[ai_key] = getattr(existing, db_field)
+
             # Strip internal-only fields before responding. _key_index
             # / _key_total are re-surfaced at the top level so the UI
             # can show "Gemini #2/3" during a bulk import.
