@@ -609,25 +609,27 @@ def process_invoice_csv(
 
 
 class AIInvoiceProcessor:
-    """AI-powered invoice extraction with Gemini → NIM fallback.
+    """AI-powered invoice extraction with multi-key Gemini rotation.
 
     Primary: Google Gemini (gemini-2.5-flash-lite by default).
+      - Supports MULTIPLE API keys via GEMINI_API_KEYS (comma-separated).
+        Each free-tier Gemini key has its own 20-req/day cap, so N keys
+        ≈ N × 20 effective daily capacity. The rotator tries keys in
+        order, marks 429'd keys as cooled down for the retry-after
+        window the API suggests, and skips them on subsequent calls.
+      - Per-key cooldown is process-wide (class-level dict) — restart
+        Django to force-retry a key.
       - Native response_schema → server-side shape-guaranteed JSON.
-      - Best vision quality + Hindi handling on the free tier when
-        you have quota.
-      - BUT: the free tier daily cap is *tight* — 20 req/day on
-        flash-lite (yes, twenty, not 200). One bulk invoice import
-        session exhausts the day's budget.
+        Best vision quality + Hindi handling on the free tier.
 
     Fallback: NVIDIA NIM (meta/llama-4-maverick-17b-128e-instruct).
-      - Used automatically when Gemini returns 429 / RESOURCE_EXHAUSTED.
-      - Same prompt + same JSON parsing (the SDK gives us OpenAI-style
-        json_object mode — close enough to Gemini's schema-mode for
-        invoice extraction, just with slightly more defensive parsing).
-      - Slightly slower (~5s vs ~3s) but the daily cap is much higher
-        (~hundreds of req/day on the free NIM tier).
-      - Requires NVIDIA_API_KEY in .env. If absent, Gemini errors
-        bubble straight through.
+      - DISABLED by default (set AI_NIM_FALLBACK=true to enable).
+      - Empirical quality on jewellery invoices is weaker than Gemini
+        (OCR character confusions like O vs 0). When all Gemini keys
+        are cooled down, prefer to error cleanly so the user can wait
+        or add more keys rather than silently downgrade quality.
+      - Same prompt + same JSON parsing; just an OpenAI-compatible REST
+        endpoint instead of google-genai SDK.
 
     Provider used per request is returned to callers via `_provider`
     field on the result dict (frontend shows a small badge).
@@ -635,49 +637,94 @@ class AIInvoiceProcessor:
 
     # Gemini config (primary)
     DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
-    # NIM config (fallback) — benchmark from May 2026 NIM bake-off:
-    # Llama 4 Maverick gave the cleanest JSON in json_object mode.
+    # NIM config (fallback when AI_NIM_FALLBACK=true)
     DEFAULT_NIM_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
     NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-    NIM_TIMEOUT = 90  # seconds — vision LLMs can be slow
-    # NIM payload limit ~180KB inline. Gemini accepts much larger but
-    # we normalize via PIL regardless so the wire shape is identical
-    # for both providers.
+    NIM_TIMEOUT = 90
     NIM_MAX_IMAGE_BYTES = 130_000
     MAX_IMAGE_DIM = 1568
 
+    # Class-level cooldown registry. Maps key_fingerprint (first 8
+    # chars of the key, for safe logging) → epoch timestamp when the
+    # key becomes eligible to try again. Shared across all instances
+    # in the process — every AIInvoiceProcessor() check this before
+    # routing a request.
+    _key_cooldowns: dict = {}
+
     def __init__(self):
-        self.gemini_key = getattr(settings, "GEMINI_API_KEY", "") or ""
+        # Collect all configured Gemini keys (plural + single fallback)
+        keys_csv = getattr(settings, "GEMINI_API_KEYS", "") or ""
+        keys = [k.strip() for k in keys_csv.split(",") if k.strip()]
+        single = getattr(settings, "GEMINI_API_KEY", "") or ""
+        if single and single not in keys:
+            keys.append(single)
+        # Dedupe while preserving order
+        seen = set()
+        self.gemini_keys = [k for k in keys if not (k in seen or seen.add(k))]
+
         self.nvidia_key = getattr(settings, "NVIDIA_API_KEY", "") or ""
+        self.nim_fallback_enabled = bool(getattr(settings, "AI_NIM_FALLBACK", False))
         self.gemini_model = getattr(
             settings, "GEMINI_VISION_MODEL", self.DEFAULT_GEMINI_MODEL
         )
         self.nim_model = getattr(
             settings, "NVIDIA_VISION_MODEL", self.DEFAULT_NIM_MODEL
         )
-        if not self.gemini_key and not self.nvidia_key:
-            # The view catches this and 400s with a clear message so the
-            # user sees "configure a key" instead of a 500.
+
+        if not self.gemini_keys and not (self.nim_fallback_enabled and self.nvidia_key):
             raise AIInvoiceProcessingError(
-                "No AI provider configured. Add GEMINI_API_KEY (free at "
-                "https://aistudio.google.com/apikey) or NVIDIA_API_KEY "
-                "(free at https://build.nvidia.com) to your .env."
+                "No AI provider configured. Add GEMINI_API_KEYS "
+                "(comma-separated, free keys at "
+                "https://aistudio.google.com/apikey) to your .env."
             )
-        # Lazy-init Gemini client only when we have a key — avoids the
-        # SDK doing any startup work if the user is NIM-only.
-        self.gemini_client = (
-            genai.Client(api_key=self.gemini_key) if self.gemini_key else None
-        )
+
+    # ── cooldown helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def _key_fp(key: str) -> str:
+        """Short fingerprint for safe logging — never log the full key."""
+        return f"{key[:8]}…{key[-4:]}" if len(key) > 14 else "***"
+
+    @classmethod
+    def _is_cooled_down(cls, key: str) -> bool:
+        import time
+        fp = cls._key_fp(key)
+        until = cls._key_cooldowns.get(fp)
+        if until is None:
+            return False
+        if time.time() >= until:
+            cls._key_cooldowns.pop(fp, None)
+            return False
+        return True
+
+    @classmethod
+    def _set_cooldown(cls, key: str, seconds: float) -> None:
+        import time
+        cls._key_cooldowns[cls._key_fp(key)] = time.time() + seconds
+
+    @classmethod
+    def _cooldown_remaining(cls, key: str) -> float:
+        import time
+        until = cls._key_cooldowns.get(cls._key_fp(key))
+        return max(0.0, until - time.time()) if until else 0.0
 
     # ── public API ──────────────────────────────────────────────────
 
     def process_invoice_image(self, image_file, business_id: int | None = None) -> dict:
         """Extract structured data from an invoice image.
 
-        Routing: try Gemini first (better quality + schema); on a 429
-        / quota error, fall back to NIM if a key is configured. Other
-        Gemini errors (network, malformed image, etc.) propagate
-        without fallback because NIM would likely fail the same way.
+        Routing:
+          1. Iterate Gemini keys in declared order, skipping any in
+             cooldown. First key that succeeds wins.
+          2. On 429 from a key, mark it cooled down for the retry-after
+             window the API suggests (parsed from error) and move to
+             the next key.
+          3. Non-quota Gemini errors (network, bad image, auth) bubble
+             up immediately — trying another key won't help.
+          4. If every Gemini key is cooled down AND AI_NIM_FALLBACK is
+             enabled AND NVIDIA_API_KEY is set, fall back to NIM.
+          5. Otherwise raise with a clear "all keys cooled down" error
+             showing the soonest retry time.
 
         `business_id` is OPTIONAL. When provided, the prompt is scoped
         to that business's customers (better match accuracy). When
@@ -687,8 +734,6 @@ class AIInvoiceProcessor:
         """
         from billing.models import Customer
 
-        # Customer list scoping is optional now — passing an empty list
-        # tells the model "no constraint, transcribe what you see".
         customer_names = []
         if business_id:
             customer_names = list(
@@ -702,62 +747,105 @@ class AIInvoiceProcessor:
             raise AIInvoiceProcessingError(f"Could not read uploaded image: {e!s}")
 
         mime = getattr(image_file, "content_type", "") or "image/jpeg"
-        # ALWAYS normalize through PIL — handles HEIC (iPhone photos),
-        # WebP, oversized images, and odd colorspaces in one pass.
-        # Gemini only reliably accepts JPEG/PNG inline, so re-encoding
-        # to JPEG removes a class of "model returned empty" failures.
-        # Cost is ~50-100ms on a small image; saves much more than that
-        # when the input is a 20MB phone shot.
         image_bytes, mime = self._normalize_image(image_bytes, mime)
         prompt = self._build_prompt(customer_names)
 
-        # ── Routing: Gemini primary → NIM fallback ────────────────
+        # ── Gemini key rotation ────────────────────────────────────
         last_error: AIInvoiceProcessingError | None = None
-        if self.gemini_client:
+        for idx, key in enumerate(self.gemini_keys, start=1):
+            if self._is_cooled_down(key):
+                continue
             try:
-                extracted = self._extract_via_gemini(image_bytes, mime, prompt)
+                extracted = self._extract_via_gemini(key, image_bytes, mime, prompt)
                 result = self._convert_to_dict(extracted)
                 result["_provider"] = "gemini"
+                # 1-indexed for UX: "Gemini #1 of 3"
+                result["_key_index"] = idx
+                result["_key_total"] = len(self.gemini_keys)
                 return result
             except AIInvoiceProcessingError as e:
-                last_error = e
-                # Only fall back on quota / rate-limit errors — not on
-                # bad images or auth errors (NIM would 4xx the same way).
-                if not (self._is_quota_error(e) and self.nvidia_key):
-                    raise
-                logger.warning(
-                    "Gemini quota exhausted, falling back to NIM: %s",
-                    str(e)[:200],
-                )
+                if self._is_quota_error(e):
+                    # Cool down this key for the retry-after window
+                    # the API suggested (or 1h default if not parseable).
+                    retry_s = self._extract_retry_seconds(e) or 3600
+                    self._set_cooldown(key, retry_s)
+                    logger.warning(
+                        "Gemini key %s 429'd, cooled down for %.0fs",
+                        self._key_fp(key), retry_s,
+                    )
+                    last_error = e
+                    continue
+                # Non-quota error: don't try other keys (auth /
+                # network / bad image would fail the same way).
+                raise
 
-        if self.nvidia_key:
+        # All Gemini keys cooled down (or none configured).
+        if self.nim_fallback_enabled and self.nvidia_key:
+            logger.warning(
+                "All %d Gemini keys cooled down, falling back to NIM",
+                len(self.gemini_keys),
+            )
             try:
                 extracted = self._extract_via_nim(image_bytes, mime, prompt)
                 result = self._convert_to_dict(extracted)
                 result["_provider"] = "nim"
-                # If we got here via fallback, surface that so the
-                # frontend can show "Gemini cap hit, processed via NIM".
-                if last_error is not None:
-                    result["_fallback_from_gemini"] = True
+                result["_fallback_from_gemini"] = True
                 return result
             except AIInvoiceProcessingError as e:
-                # If Gemini already failed too, prefer NIM's error
-                # (it's the one the user actually needs to act on).
                 last_error = e
+
+        # If we got here, every Gemini key was cooled down and NIM
+        # either wasn't enabled or also failed. Give a helpful error
+        # showing how long until the soonest key is back.
+        if self.gemini_keys:
+            soonest = min(
+                (self._cooldown_remaining(k) for k in self.gemini_keys),
+                default=0.0,
+            )
+            if soonest > 0:
+                # Show seconds for short cooldowns, minutes for longer,
+                # hours for daily-quota cases ("retry tomorrow").
+                if soonest < 60:
+                    wait = f"~{int(soonest)}s"
+                elif soonest < 3600:
+                    wait = f"~{int(soonest // 60)}min"
+                else:
+                    wait = f"~{int(soonest // 3600)}h"
+                raise AIInvoiceProcessingError(
+                    f"All {len(self.gemini_keys)} Gemini key{'s' if len(self.gemini_keys) != 1 else ''} "
+                    f"exhausted. Next reset in {wait}. Add more keys "
+                    f"to GEMINI_API_KEYS in .env to extend capacity."
+                )
 
         raise last_error or AIInvoiceProcessingError(
             "All configured AI providers failed."
         )
 
+    @staticmethod
+    def _extract_retry_seconds(err: Exception) -> float | None:
+        """Pull the retry-after hint from a Gemini error message.
+        Format: 'Please retry in 55.422993778s.' → 55.4 (seconds).
+        Returns None if not present (caller picks a default).
+        """
+        m = re.search(r"retry\s*in\s*([\d.]+)\s*s", str(err), re.IGNORECASE)
+        return float(m.group(1)) if m else None
+
     # ── provider impls ─────────────────────────────────────────────
 
-    def _extract_via_gemini(self, image_bytes: bytes, mime: str, prompt: str) -> dict:
-        """Single Gemini call. Raises AIInvoiceProcessingError with a
-        cleaned message — the raw google-genai exception str() dumps
-        the entire error dict which is ugly when surfaced in a toast.
+    def _extract_via_gemini(self, key: str, image_bytes: bytes, mime: str, prompt: str) -> dict:
+        """Single Gemini call against the given API key. Raises
+        AIInvoiceProcessingError with a cleaned message — the raw
+        google-genai exception str() dumps the entire error dict
+        which is ugly when surfaced in a toast.
+
+        Creating a fresh client per call is fine — the SDK's startup
+        cost is ~50ms (mostly auth header setup). Caching clients per
+        key would marginally help under concurrent load but adds state
+        management we don't need yet.
         """
+        client = genai.Client(api_key=key)
         try:
-            response = self.gemini_client.models.generate_content(
+            response = client.models.generate_content(
                 model=self.gemini_model,
                 contents=[
                     {

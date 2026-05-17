@@ -292,19 +292,30 @@ if REDIS_PASSWORD:
 # overridable for A/B testing — Gemini 2.5 Flash is the free-tier
 # sweet spot, Pro is paid + slower but more accurate on tough scans.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Multi-key rotation: comma-separated list of Gemini keys. The
+# extractor tries each in order, marks 429'd keys as cooled down for
+# the retry-after window suggested by the API, and skips them on
+# subsequent calls. Effectively multiplies the free-tier daily cap
+# (20/day on flash-lite) by the number of keys. Keys can come from
+# different Google accounts — each has its own quota.
+# Backward compat: single GEMINI_API_KEY is appended to this list if
+# both are set.
+GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
 # flash-lite default — ~3s/invoice vs ~15s for full Flash with no
 # measurable quality loss on printed invoices. Override per-environment
 # via .env for tougher scans. See AIInvoiceProcessor.DEFAULT_MODEL.
 GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash-lite")
 
-# NVIDIA NIM — kept around as a potential fallback provider but not
-# wired into AIInvoiceProcessor. We tested Llama 4 Maverick during the
-# bake-off and it worked but lost to Gemini on Hindi/phone-photo
-# accuracy. If you want to switch back, swap the import in utils.py.
+# NVIDIA NIM — fallback when ALL Gemini keys are cooled down. Off by
+# default because empirical quality on jewellery invoices is weaker
+# than Gemini (OCR character confusions like O vs 0). Flip to "true"
+# if you'd rather get *some* result than a hard error when Gemini's
+# entire key pool is exhausted.
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 NVIDIA_VISION_MODEL = os.getenv(
     "NVIDIA_VISION_MODEL", "meta/llama-4-maverick-17b-128e-instruct"
 )
+AI_NIM_FALLBACK = os.getenv("AI_NIM_FALLBACK", "false").lower() in ("true", "1", "yes")
 # Ensure log dir exists — django.utils.log.configure_logging will fail to
 # attach the FileHandler otherwise (fresh checkouts and CI runners).
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)

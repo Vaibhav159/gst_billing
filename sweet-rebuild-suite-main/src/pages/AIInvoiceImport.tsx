@@ -56,16 +56,17 @@ type FileEntry = {
   status: FileStatus;
   extracted: Extracted | null;
   matchedBusiness: MatchedBusiness;
-  // If user overrides auto-detected business, store the override id here.
   businessOverrideId: string;
   errorMsg: string;
   createdInvoiceId: number | null;
-  expanded: boolean;           // for inline review form
-  // Which AI provider actually processed this file — Gemini primary,
-  // NIM fallback when Gemini hits its daily cap. Shown as a small
-  // badge so the user can see when the cap was hit.
+  expanded: boolean;
   provider: Provider;
   fellBackFromGemini: boolean;
+  // For Gemini multi-key rotation: which key (#1/2/3…) processed this
+  // file and how many are configured total. Lets the badge show
+  // "Gemini #2/3" so the user can see they're burning through the pool.
+  keyIndex: number | null;
+  keyTotal: number | null;
 };
 
 // HEIC/HEIF added for iPhone uploads — backend's pillow-heif decodes
@@ -135,6 +136,8 @@ export default function AIInvoiceImport() {
         expanded: false,
         provider: null,
         fellBackFromGemini: false,
+        keyIndex: null,
+        keyTotal: null,
       });
     }
     if (accepted.length) {
@@ -177,6 +180,8 @@ export default function AIInvoiceImport() {
         detected_type: "inward" | "outward" | null;
         provider: Provider;
         fallback_from_gemini: boolean;
+        key_index: number | null;
+        key_total: number | null;
       }>("ai/invoice/process/", fd, { timeout: 120_000 });
       updateFile(entry.id, {
         status: "ready",
@@ -188,6 +193,8 @@ export default function AIInvoiceImport() {
         type: res.data.detected_type || entry.type,
         provider: res.data.provider,
         fellBackFromGemini: !!res.data.fallback_from_gemini,
+        keyIndex: res.data.key_index,
+        keyTotal: res.data.key_total,
         expanded: true,
       });
       // Surface the fallback once globally — if Gemini's quota is hit,
@@ -422,7 +429,7 @@ export default function AIInvoiceImport() {
             <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">How it works</h3>
             <div className="space-y-3">
               {[
-                { icon: Zap, label: "Gemini → NIM fallback", desc: "Auto-switches to NVIDIA NIM when Gemini's daily cap is hit" },
+                { icon: Zap, label: "Gemini multi-key rotation", desc: "Multiple keys rotate auto when daily cap hits" },
                 { icon: Sparkles, label: "Business auto-detected", desc: "From the buyer/seller GSTINs on the invoice" },
                 { icon: Shield, label: "Customers auto-created", desc: "If GSTIN doesn't match an existing record" },
                 { icon: Clock, label: "Bulk-friendly", desc: "Drop many, process all, review, bulk-create" },
@@ -524,8 +531,15 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
                 tinted differently so the fallback case is visible at a
                 glance during a bulk import. */}
             {entry.provider === "gemini" && (
-              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary tracking-wider shrink-0">
-                Gemini
+              <span
+                className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary tracking-wider shrink-0"
+                title={
+                  entry.keyIndex && entry.keyTotal && entry.keyTotal > 1
+                    ? `Gemini key ${entry.keyIndex} of ${entry.keyTotal} (others may be cooled down)`
+                    : "Processed via Google Gemini"
+                }
+              >
+                Gemini{entry.keyIndex && entry.keyTotal && entry.keyTotal > 1 ? ` #${entry.keyIndex}/${entry.keyTotal}` : ""}
               </span>
             )}
             {entry.provider === "nim" && (

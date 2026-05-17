@@ -3141,6 +3141,8 @@ class AIInvoiceProcessingView(APIView):
             # Frontend surfaces "Processed via X" + a fallback hint.
             provider = extracted_data.pop("_provider", None)
             fell_back = extracted_data.pop("_fallback_from_gemini", False)
+            key_index = extracted_data.pop("_key_index", None)  # 1-indexed
+            key_total = extracted_data.pop("_key_total", None)
 
             return Response(
                 {
@@ -3150,6 +3152,12 @@ class AIInvoiceProcessingView(APIView):
                     "detected_type": detected_type,        # "inward" / "outward" / null
                     "provider": provider,                  # "gemini" | "nim" | null
                     "fallback_from_gemini": fell_back,
+                    # For Gemini, which of the N rotated keys handled
+                    # this request. Lets the UI show "Gemini #2/3"
+                    # which helps the user see when they're burning
+                    # through their key pool.
+                    "key_index": key_index,
+                    "key_total": key_total,
                     "message": "Invoice data extracted successfully",
                 }
             )
