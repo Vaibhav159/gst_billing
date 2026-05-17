@@ -46,7 +46,10 @@ type Extracted = {
 type MatchedBusiness = { id: number; name: string; gst_number: string } | null;
 
 // Per-file state machine.
-type FileStatus = "pending" | "processing" | "ready" | "error" | "created";
+//   "duplicate" = backend dedup'd against an existing invoice; we link
+//   to the existing row instead of double-creating. Distinct from
+//   "created" so the UI shows "ALREADY EXISTS" vs "CREATED".
+type FileStatus = "pending" | "processing" | "ready" | "error" | "created" | "duplicate";
 type FileEntry = {
   id: string;                  // local-only key
   file: File;
@@ -244,9 +247,12 @@ export default function AIInvoiceImport() {
         invoice_id: number;
         invoice_number: string;
         line_items_created: number;
+        duplicate?: boolean;
       }>("ai/invoice/create/", fd);
       updateFile(entry.id, {
-        status: "created",
+        // Distinguish "we created a new one" from "backend dedup'd to
+        // an existing one" so the user knows we skipped a duplicate.
+        status: res.data.duplicate ? "duplicate" : "created",
         createdInvoiceId: res.data.invoice_id,
         errorMsg: "",
       });
@@ -303,13 +309,17 @@ export default function AIInvoiceImport() {
 
   // Aggregate stats for the header summary.
   const stats = useMemo(() => {
-    const by: Record<FileStatus, number> = { pending: 0, processing: 0, ready: 0, error: 0, created: 0 };
+    const by: Record<FileStatus, number> = {
+      pending: 0, processing: 0, ready: 0, error: 0, created: 0, duplicate: 0,
+    };
     files.forEach((f) => { by[f.status]++; });
     return by;
   }, [files]);
 
   const hasFiles = files.length > 0;
-  const allCreated = hasFiles && stats.created === files.length;
+  // "Done" means every file is in a terminal state — created OR
+  // dedup'd as duplicate. Both count as success for the user's flow.
+  const allDone = hasFiles && (stats.created + stats.duplicate) === files.length;
 
   return (
     <div className="p-6 lg:p-8 space-y-6 animate-fade-in max-w-6xl mx-auto">
@@ -343,6 +353,7 @@ export default function AIInvoiceImport() {
           <StatChip label="Processing" value={stats.processing} color="text-primary bg-primary/10" spinning={stats.processing > 0} />
           <StatChip label="Ready" value={stats.ready} color="text-warning bg-warning/10" />
           <StatChip label="Created" value={stats.created} color="text-success bg-success/10" />
+          <StatChip label="Duplicates" value={stats.duplicate} color="text-chart-3 bg-chart-3/10" />
           {stats.error > 0 && <StatChip label="Errors" value={stats.error} color="text-destructive bg-destructive/10" />}
           <span className="flex-1" />
           {(stats.pending > 0 || stats.error > 0) && (
@@ -422,11 +433,12 @@ export default function AIInvoiceImport() {
             </div>
           )}
 
-          {allCreated && (
+          {allDone && (
             <div className="elevated-card rounded-2xl p-6 border-l-4 border-l-success text-center">
               <CheckCircle className="w-10 h-10 text-success mx-auto mb-2" />
               <p className="text-[15px] font-semibold text-foreground">
-                {stats.created} invoice{stats.created === 1 ? "" : "s"} created.
+                {stats.created} created
+                {stats.duplicate > 0 && `, ${stats.duplicate} already existed (skipped)`}.
               </p>
               <button onClick={() => navigate("/billing/invoice/list")} className="premium-btn-ghost text-[13px] mt-3">
                 <FileText className="w-4 h-4" /> View invoice list
@@ -507,6 +519,7 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
     ready: "Review",
     error: "Failed",
     created: "Created",
+    duplicate: "Already Exists",
   };
   const statusColor: Record<FileStatus, string> = {
     pending: "bg-secondary/40 text-muted-foreground",
@@ -514,6 +527,10 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
     ready: "bg-warning/10 text-warning",
     error: "bg-destructive/10 text-destructive",
     created: "bg-success/15 text-success",
+    // Tinted differently from "created" — accent/info color so user
+    // can scan a bulk list and see how many were actual creates vs
+    // dedup'd skips at a glance.
+    duplicate: "bg-chart-3/15 text-chart-3",
   };
 
   const lineItemsTotal = useMemo(() => {
@@ -559,6 +576,7 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
         <span className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-md flex items-center gap-1", statusColor[entry.status])}>
           {entry.status === "processing" && <Loader2 className="w-3 h-3 animate-spin" />}
           {entry.status === "created" && <CheckCircle className="w-3 h-3" />}
+          {entry.status === "duplicate" && <CheckCircle className="w-3 h-3" />}
           {entry.status === "error" && <AlertTriangle className="w-3 h-3" />}
           {statusLabel[entry.status]}
         </span>
@@ -581,15 +599,16 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
             <RefreshCw className="w-3.5 h-3.5" /> Retry
           </button>
         )}
-        {entry.status === "created" && entry.createdInvoiceId && (
+        {(entry.status === "created" || entry.status === "duplicate") && entry.createdInvoiceId && (
           <Link
             to={`/billing/invoice/${entry.createdInvoiceId}`}
             className="text-[11px] text-primary font-semibold hover:underline"
+            title={entry.status === "duplicate" ? "Open the existing invoice" : "Open the newly created invoice"}
           >
             View →
           </Link>
         )}
-        {entry.status !== "processing" && entry.status !== "created" && (
+        {entry.status !== "processing" && entry.status !== "created" && entry.status !== "duplicate" && (
           <button
             onClick={onRemove}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"

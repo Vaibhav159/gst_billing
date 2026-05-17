@@ -3411,12 +3411,46 @@ class AIInvoiceCreateView(APIView):
             if dirty:
                 customer.save()
 
+            # Dedup check — same natural key as GSTR-2A import: a given
+            # (business, customer, invoice_number, invoice_date) tuple
+            # uniquely identifies a real-world invoice. Re-uploading
+            # the same image through AI Import should NOT create a
+            # second DB row. Returns the existing invoice instead so
+            # the frontend can still link to it.
+            inv_number = invoice_data.get("invoice_number", "") or ""
+            inv_date = (
+                invoice_data.get("invoice_date") or datetime.now().date()
+            )
+            existing = (
+                Invoice.objects.filter(
+                    business_id=business_id,
+                    customer_id=customer.id,
+                    invoice_number__iexact=inv_number,
+                    invoice_date=inv_date,
+                ).first()
+            )
+            if existing is not None:
+                return Response(
+                    {
+                        "success": True,
+                        "invoice_id": existing.id,
+                        "invoice_number": existing.invoice_number,
+                        "customer_name": customer.name,
+                        "line_items_created": 0,
+                        "total_amount": existing.total_amount,
+                        "duplicate": True,
+                        "message": (
+                            f"Invoice {inv_number} from {customer.name} on "
+                            f"{inv_date} already exists — skipped duplicate."
+                        ),
+                    }
+                )
+
             invoice = Invoice.objects.create(
                 customer=customer,
                 business=business,
-                invoice_number=invoice_data.get("invoice_number", ""),
-                invoice_date=invoice_data.get("invoice_date")
-                or datetime.now().date(),
+                invoice_number=inv_number,
+                invoice_date=inv_date,
                 type_of_invoice=type_of_invoice,
                 total_amount=invoice_data.get("total_amount", 0) or 0,
             )
