@@ -3399,17 +3399,44 @@ class AIInvoiceCreateView(APIView):
                 total_amount=invoice_data.get("total_amount", 0) or 0,
             )
 
+            # Compute per-line tax breakdown. Previous version created
+            # LineItems with cgst/sgst/igst all defaulting to 0 — the
+            # invoice showed up in the UI with Total Tax: ₹0 even
+            # when the AI correctly extracted gst_tax_rate=0.03.
+            # User flagged this on a SOLANKI inward invoice.
+            #
+            # Also recompute `amount` from qty * rate * (1 + gst_rate)
+            # because the AI sometimes returns the PRE-tax subtotal in
+            # the supposedly-tax-inclusive `amount` slot. Recomputing
+            # ensures Invoice.total_amount = sum(LineItem.amount) =
+            # actual tax-inclusive total, internally consistent.
+            from decimal import Decimal as _D
+            is_igst = invoice.is_igst_applicable
             line_items_created = 0
             for item_data in invoice_data.get("line_items", []) or []:
+                qty = _D(str(item_data.get("quantity", 0) or 0))
+                rate = _D(str(item_data.get("rate", 0) or 0))
+                gst_rate = _D(str(item_data.get("gst_tax_rate", 0.03) or 0.03))
+                pre_tax = qty * rate
+                tax = pre_tax * gst_rate
+                amount = pre_tax + tax  # tax-inclusive — matches app contract
+                if is_igst:
+                    igst, cgst, sgst = tax, _D("0"), _D("0")
+                else:
+                    cgst = sgst = tax / _D("2")
+                    igst = _D("0")
                 LineItem.objects.create(
                     customer=customer,
                     invoice=invoice,
                     product_name=item_data.get("product_name", "") or "",
                     hsn_code=item_data.get("hsn_code", "") or "",
-                    gst_tax_rate=item_data.get("gst_tax_rate", 0.03) or 0.03,
-                    quantity=item_data.get("quantity", 0) or 0,
-                    rate=item_data.get("rate", 0) or 0,
-                    amount=item_data.get("amount", 0) or 0,
+                    gst_tax_rate=gst_rate,
+                    quantity=qty,
+                    rate=rate,
+                    amount=amount,
+                    cgst=cgst,
+                    sgst=sgst,
+                    igst=igst,
                 )
                 line_items_created += 1
 
