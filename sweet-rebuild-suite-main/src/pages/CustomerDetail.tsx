@@ -4,6 +4,7 @@ import {
   ArrowLeft, Pencil, FileText, Trash2, Plus, Phone, Mail, MapPin,
   Tag, Building2, TrendingUp, TrendingDown, Activity, Calendar,
   Eye, Printer, ExternalLink, Copy, CheckCircle2, Download, Loader2, FileArchive,
+  Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
@@ -36,11 +37,25 @@ export default function CustomerDetail() {
   const { items: businesses } = useBusinesses();
   const { items: invoices, isLoading: isLoadingInvoices } = useInvoices({ customerId: id });
 
-  if (isLoading) return <div className="p-10 text-muted-foreground">Loading customer...</div>;
+  // Consistent loading + not-found treatment, mirrors InvoiceDetail.
+  if (isLoading) return (
+    <div className="p-10 flex items-center gap-3 text-muted-foreground">
+      <Loader2 className="w-5 h-5 animate-spin" />
+      <span className="text-sm">Loading customer…</span>
+    </div>
+  );
   if (!customer) return (
-    <div className="p-10 flex flex-col items-center gap-4 text-muted-foreground">
-      <p className="text-lg font-display font-semibold">Customer not found</p>
-      <Link to="/billing/customer/list" className="premium-btn-ghost text-sm"><ArrowLeft className="w-4 h-4" /> Back</Link>
+    <div className="p-10 max-w-md mx-auto">
+      <div className="elevated-card rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center">
+          <Users className="w-7 h-7 text-warning" />
+        </div>
+        <div>
+          <h2 className="text-[16px] font-display font-semibold text-foreground">Customer not found</h2>
+          <p className="text-xs text-muted-foreground mt-1">This customer may have been deleted or the link is stale.</p>
+        </div>
+        <Link to="/billing/customer/list" className="premium-btn-ghost text-sm"><ArrowLeft className="w-4 h-4" /> Back to customers</Link>
+      </div>
     </div>
   );
 

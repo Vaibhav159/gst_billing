@@ -110,7 +110,7 @@ export default function AuditLog() {
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
 
   return (
-    <div className={cn("space-y-5 max-w-[1200px] mx-auto animate-fade-in", isMobile ? "p-4 pb-20" : "p-6 lg:p-10 space-y-6")}>
+    <div className={cn("space-y-5 max-w-[1200px] mx-auto animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-10 space-y-6")}>
       <Breadcrumbs items={[{ label: "Audit Log" }]} />
 
       <div className="flex items-center gap-3 flex-wrap">

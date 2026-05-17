@@ -210,7 +210,9 @@ export default function Dashboard() {
 
   if (isMobile) {
     return (
-      <div className="p-4 space-y-5">
+      // pb-24 clears the fixed bottom nav (h-16 + iOS safe-area). pb-5 alone
+      // left "Top Customers" peeking out under the nav on iPhone.
+      <div className="p-4 pb-24 space-y-5">
         {/* Mobile Header */}
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">Dashboard</h1>
@@ -312,9 +314,12 @@ export default function Dashboard() {
                     inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning"
                   )}>{inv.type}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] text-muted-foreground">{inv.businessName}</p>
-                  <p className="text-[14px] font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-muted-foreground truncate">{inv.businessName}</p>
+                  {/* Compact (₹2.86L) so a long business name + ₹1,39,363.59
+                      don't wrap or collide on a 375px screen. Full value in
+                      the title for hover/long-press access. */}
+                  <p className="text-[14px] font-bold text-foreground tabular-nums shrink-0" title={formatCurrency(inv.total)}>{formatCompactCurrency(inv.total)}</p>
                 </div>
               </Link>
             ))}
@@ -330,11 +335,11 @@ export default function Dashboard() {
           <div className="space-y-3">
             {customerTotals.filter(c => c.total > 0).slice(0, 4).map((c, i) => (
               <Link key={c.id} to={`/billing/customer/${c.id}`} className="flex items-center gap-3">
-                <span className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-primary text-[10px] font-bold">{i + 1}</span>
+                <span className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-primary text-[10px] font-bold shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-medium text-foreground truncate">{c.name}</p>
                 </div>
-                <span className="text-[12px] font-bold text-foreground tabular-nums">{formatCurrency(c.total)}</span>
+                <span className="text-[12px] font-bold text-foreground tabular-nums shrink-0" title={formatCurrency(c.total)}>{formatCompactCurrency(c.total)}</span>
               </Link>
             ))}
           </div>
