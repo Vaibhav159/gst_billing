@@ -745,19 +745,24 @@ class AIInvoiceProcessor:
                 result["_key_total"] = len(self.gemini_keys)
                 return result
             except AIInvoiceProcessingError as e:
-                if self._is_quota_error(e):
-                    # Cool down this key for the retry-after window
-                    # the API suggested (or 1h default if not parseable).
-                    retry_s = self._extract_retry_seconds(e) or 3600
+                if self._is_per_key_error(e):
+                    # Cool down this key. Quota errors usually carry a
+                    # "retry in Xs" hint we honour. 403/401 don't —
+                    # default to 24h since revoked/denied keys rarely
+                    # recover quickly, and re-trying just burns the
+                    # request slot.
+                    retry_s = self._extract_retry_seconds(e)
+                    if retry_s is None:
+                        retry_s = 86400 if "403" in str(e) or "401" in str(e) else 3600
                     self._set_cooldown(key, retry_s)
                     logger.warning(
-                        "Gemini key %s 429'd, cooled down for %.0fs",
-                        self._key_fp(key), retry_s,
+                        "Gemini key %s failed (%s), cooled down for %.0fs",
+                        self._key_fp(key), str(e)[:80], retry_s,
                     )
                     last_error = e
                     continue
-                # Non-quota error: don't try other keys (auth /
-                # network / bad image would fail the same way).
+                # Non-key error (bad image / 400 / 500): trying other
+                # keys would just fail the same way.
                 raise
 
         # All keys cooled down — give a helpful error showing how long
@@ -844,19 +849,44 @@ class AIInvoiceProcessor:
     # ── error classification ───────────────────────────────────────
 
     @staticmethod
-    def _is_quota_error(err: Exception) -> bool:
-        """True if the error is a rate-limit / quota exhaustion that
-        should trigger rotation to the next Gemini key. Heuristic: look
-        for 429, RESOURCE_EXHAUSTED, or 'quota' in the message.
+    def _is_per_key_error(err: Exception) -> bool:
+        """True if the error is bound to THIS key, not the request —
+        another key from the pool might succeed. Triggers rotation +
+        cooldown on the failing key.
+
+        Covers:
+          - 429 / RESOURCE_EXHAUSTED / quota (daily/per-minute cap hit)
+          - 403 PERMISSION_DENIED ("Your project has been denied
+            access" — typically billing-state or terms violation, key
+            won't work today)
+          - 401 UNAUTHENTICATED / API_KEY_INVALID (key revoked / typo)
+
+        Does NOT cover:
+          - 400 INVALID_ARGUMENT (bad image / oversized prompt — would
+            fail on any key)
+          - 500 / 503 (Google-side transient — different keys won't help)
         """
         msg = str(err).lower()
-        return (
-            "429" in msg
-            or "resource_exhausted" in msg
-            or "quota" in msg
-            or "rate limit" in msg
-            or "ratelimit" in msg
-        )
+        # Quota / rate-limit signals
+        if any(s in msg for s in ("429", "resource_exhausted", "quota", "rate limit", "ratelimit")):
+            return True
+        # Per-key auth / access signals
+        if any(s in msg for s in (
+            "403", "permission_denied", "denied access",
+            "401", "unauthenticated", "api_key_invalid", "api key not valid",
+        )):
+            return True
+        return False
+
+    @staticmethod
+    def _is_quota_error(err: Exception) -> bool:
+        """Backward-compat alias — narrower check (quota only, not
+        all per-key errors). Kept in case external callers used it.
+        """
+        msg = str(err).lower()
+        return any(s in msg for s in (
+            "429", "resource_exhausted", "quota", "rate limit", "ratelimit",
+        ))
 
     @staticmethod
     def _format_gemini_error(err: Exception) -> str:
@@ -907,11 +937,25 @@ class AIInvoiceProcessor:
 
 Rules:
 1. Extract EVERY visible line item — do not summarise or skip.
-2. Convert tax percentages to decimals: 3% → 0.03, 18% → 0.18.
-3. Convert dates from DD/MM/YYYY (or DD-MM-YYYY) to YYYY-MM-DD.
-4. Transliterate Devanagari/Hindi names to English Roman script
+2. NORMALIZE jewellery product names to clean category strings:
+     - Anything gold (gold ornament, gold bullion, semi-finished gold,
+       22ct/20ct/24ct/18ct gold, BIS hallmarked gold, etc.)
+       → `"Gold Ornament"`
+     - Anything silver (silver bar, silver ornament, polished silver,
+       silver bullion, etc.) → `"Silver Ornament"`
+     - Diamond items → `"Diamond Ornament"`
+     - Platinum items → `"Platinum Ornament"`
+     - For non-jewellery line items (packaging, courier, hallmarking
+       charges, etc.) keep the original short description.
+   STRIP all qualifiers: purity grades (22ct/916/750), finish
+   descriptors (semi-finished/rough/polished/hallmarked), part/SKU
+   codes. HSN code + GST rate already tell us the material breakdown
+   — the product_name field is for human-readable category.
+3. Convert tax percentages to decimals: 3% → 0.03, 18% → 0.18.
+4. Convert dates from DD/MM/YYYY (or DD-MM-YYYY) to YYYY-MM-DD.
+5. Transliterate Devanagari/Hindi names to English Roman script
    (e.g. "अमरकान्त दार्शन मुस्काना" → "Amarakant Darshan Muskana").
-5. Extract BOTH parties' GSTINs separately — do not guess which is
+6. Extract BOTH parties' GSTINs separately — do not guess which is
    which based on context:
      - `buyer_gst_number` / `buyer_name`: the entity in the "Bill To"
        / "Recipient" / "Buyer" / "Consignee" section (the one
@@ -922,15 +966,15 @@ Rules:
    Set GSTIN nulls only if a side is genuinely missing from the
    invoice. We use both server-side to figure out which side is our
    business — don't try to decide that yourself.
-6. {names_block} — `customer_name` should be the OTHER party's name
+7. {names_block} — `customer_name` should be the OTHER party's name
    (the one that is NOT our business; usually equals seller_name on
    a purchase invoice, or buyer_name on a sale invoice).
-7. `amount` for each line is the tax-inclusive line subtotal as shown
+8. `amount` for each line is the tax-inclusive line subtotal as shown
    on the invoice. If only rate × quantity is given, compute it.
-8. `total_amount` = sum(line_items.amount) + cgst_total + sgst_total
+9. `total_amount` = sum(line_items.amount) + cgst_total + sgst_total
    + igst_total.
-9. Use null for any field genuinely absent from the invoice — do not
-   guess or fabricate values."""
+10. Use null for any field genuinely absent from the invoice — do not
+    guess or fabricate values."""
 
     @staticmethod
     def _build_schema() -> types.Schema:
