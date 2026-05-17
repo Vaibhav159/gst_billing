@@ -287,6 +287,17 @@ class Invoice(AbstractBaseModel):
         verbose_name="Source File",
         help_text="Original invoice image/PDF (audit trail for AI imports).",
     )
+    # JPEG-rendered preview of source_file, for inline browser display.
+    # Browsers can't render HEIC inline (Chrome/Firefox); this is the
+    # browser-safe version. AI Import generates it from source_file
+    # using PIL+pillow-heif. For JPEG/PNG uploads it's a recompressed
+    # copy at the OCR-friendly quality we already use for Gemini.
+    source_preview = models.ImageField(
+        upload_to="invoice_sources/%Y/%m/previews/",
+        null=True, blank=True,
+        verbose_name="Source Preview",
+        help_text="JPEG preview of source_file for in-browser display.",
+    )
 
     history = HistoricalRecords()
 

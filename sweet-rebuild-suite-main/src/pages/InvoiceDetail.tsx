@@ -428,11 +428,15 @@ export default function InvoiceDetail() {
 
         {/* Right Sidebar */}
         <div className="space-y-5">
-          {/* Source image — only shown when present (AI Import populates
-              this). Audit trail of what the OCR actually saw, so the
-              user can verify extraction or download the original.
-              HEIC previews don't render in Chrome/Firefox; we still
-              attempt <img> but show a download link as the fallback. */}
+          {/* Source image — populated by AI Import.
+              `sourcePreview` is the JPEG-converted version we save
+              alongside the original for browser-safe inline display
+              (HEIC originals don't render in Chrome/Firefox).
+              `sourceFile` is the untouched original — used for the
+              Download button + the click-to-open-full-size link, so
+              the audit trail stays bit-for-bit faithful. Falls back
+              to sourceFile for the inline <img> on older imports
+              that don't have a preview yet. */}
           {inv.sourceFile && (
             <div className="elevated-card rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -450,13 +454,13 @@ export default function InvoiceDetail() {
               </div>
               <a href={inv.sourceFile} target="_blank" rel="noreferrer" className="block">
                 <img
-                  src={inv.sourceFile}
+                  src={inv.sourcePreview || inv.sourceFile}
                   alt="Source invoice"
                   className="w-full rounded-lg border border-border/40 hover:border-primary/40 transition-colors"
                   onError={(e) => {
-                    // HEIC files won't render in most browsers — hide
-                    // the broken-image icon and let the download link
-                    // above do the job.
+                    // Defensive fallback in case preview generation
+                    // failed AND the original is HEIC — show the
+                    // download CTA instead of a broken-image icon.
                     (e.target as HTMLImageElement).style.display = "none";
                     const fallback = (e.target as HTMLImageElement).nextElementSibling;
                     if (fallback) (fallback as HTMLElement).style.display = "flex";
@@ -464,11 +468,11 @@ export default function InvoiceDetail() {
                 />
                 <div className="hidden flex-col items-center gap-2 py-8 text-muted-foreground text-[11px] text-center">
                   <ImageIcon className="w-10 h-10 opacity-40" />
-                  <span>HEIC files don't preview in browser — click "Download" above to view.</span>
+                  <span>Preview unavailable — click "Download" above to view.</span>
                 </div>
               </a>
               <p className="text-[10px] text-muted-foreground">
-                Original uploaded for AI extraction · click to open full size
+                Original uploaded for AI extraction · click image to open full size
               </p>
             </div>
           )}

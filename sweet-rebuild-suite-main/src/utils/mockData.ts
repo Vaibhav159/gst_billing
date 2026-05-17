@@ -114,8 +114,14 @@ export interface Invoice {
   distance_km?: number;
   // Original invoice file uploaded for AI extraction — null when
   // the invoice was created manually. URL is relative to MEDIA_URL
-  // ("/media/invoice_sources/YYYY/MM/filename").
+  // ("/media/invoice_sources/YYYY/MM/filename"). Original format
+  // preserved (could be JPEG, PNG, or HEIC from iPhone uploads).
   sourceFile?: string | null;
+  // JPEG-rendered preview of sourceFile, for in-browser <img> display.
+  // Browsers can't render HEIC inline — preview is the browser-safe
+  // version. Falls back to sourceFile when null (e.g. older imports
+  // before the preview generation was added).
+  sourcePreview?: string | null;
 }
 
 

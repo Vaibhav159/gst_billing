@@ -274,6 +274,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     // Audit-trail source image (populated by AI Import). URL from
     // Django's FileField default serialization — relative to MEDIA_URL.
     sourceFile: inv.source_file || null,
+    sourcePreview: inv.source_preview || null,
   };
 }
 

@@ -3460,8 +3460,34 @@ class AIInvoiceCreateView(APIView):
             # Invoice.objects.create() because FileField.save() with
             # save=True triggers another model save — keeps the upload
             # path deterministic regardless of pre-save signals.
+            #
+            # Also generate a JPEG preview alongside the original.
+            # Chrome/Firefox can't render HEIC inline so without this
+            # the InvoiceDetail page shows a broken-image fallback.
+            # _normalize_image is the same path AIInvoiceProcessor
+            # uses to prep images for Gemini (PIL + pillow-heif decode
+            # → JPEG q=88), so we get a browser-safe preview for free.
+            # Preview generation is best-effort — if it fails the
+            # original is still there and downloadable.
             if source_file is not None:
                 invoice.source_file.save(source_file.name, source_file, save=True)
+                try:
+                    source_file.seek(0)
+                    original_bytes = source_file.read()
+                    jpeg_bytes, _ = AIInvoiceProcessor._normalize_image(
+                        original_bytes,
+                        source_file.content_type or "image/jpeg",
+                    )
+                    from django.core.files.base import ContentFile
+                    base = source_file.name.rsplit(".", 1)[0] or "preview"
+                    invoice.source_preview.save(
+                        f"{base}.jpg", ContentFile(jpeg_bytes), save=True
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not generate preview for invoice %s: %s",
+                        invoice.pk, e,
+                    )
 
             # Compute per-line tax breakdown. Previous version created
             # LineItems with cgst/sgst/igst all defaulting to 0 — the
