@@ -304,35 +304,59 @@ export default function InvoiceDetail() {
       <div className={cn("grid gap-6", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
         {/* Left: Parties + Items */}
         <div className={cn(isMobile ? "" : "lg:col-span-2", "space-y-6")}>
-          {/* Parties */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="elevated-card rounded-2xl p-5 space-y-2">
-              <div className="flex items-center gap-2 mb-1">
-                <Building2 className="w-4 h-4 text-primary" />
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">From</p>
-              </div>
-              <p className="text-[14px] font-display font-bold text-foreground">{inv.businessName}</p>
-              {biz && (biz.gst_number || biz.address) && (
-                <div className="space-y-1 text-[12px] text-muted-foreground">
-                  {biz.gst_number && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{biz.gst_number}</span></p>}
-                  {biz.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{biz.address}</p>}
+          {/* Parties — FROM/TO depend on direction.
+              For OUTWARD (sale): we issued the invoice → FROM=us, TO=customer.
+              For INWARD (purchase): supplier issued it → FROM=customer, TO=us.
+              The icon also flips with the entity (Building2 = business,
+              User = customer) so the visual stays consistent. */}
+          {(() => {
+            const isInward = inv.type === "INWARD";
+            const businessCard = {
+              entity: "business" as const,
+              name: inv.businessName,
+              gstin: biz?.gst_number,
+              address: biz?.address,
+              link: null,  // we don't link to business detail from invoice — same business throughout
+            };
+            const customerCard = {
+              entity: "customer" as const,
+              name: inv.customerName,
+              gstin: customer?.gst_number,
+              address: customer?.address,
+              link: `/billing/customer/${inv.customerId}`,
+            };
+            const fromParty = isInward ? customerCard : businessCard;
+            const toParty   = isInward ? businessCard : customerCard;
+            const renderCard = (party: typeof businessCard, label: "From" | "To") => {
+              const Icon = party.entity === "business" ? Building2 : User;
+              const iconColor = party.entity === "business" ? "text-primary" : "text-chart-3";
+              return (
+                <div className="elevated-card rounded-2xl p-5 space-y-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={cn("w-4 h-4", iconColor)} />
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
+                  </div>
+                  {party.link ? (
+                    <Link to={party.link} className="text-[14px] font-display font-bold text-primary hover:underline block">{party.name}</Link>
+                  ) : (
+                    <p className="text-[14px] font-display font-bold text-foreground">{party.name}</p>
+                  )}
+                  {(party.gstin || party.address) && (
+                    <div className="space-y-1 text-[12px] text-muted-foreground">
+                      {party.gstin && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{party.gstin}</span></p>}
+                      {party.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{party.address}</p>}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="elevated-card rounded-2xl p-5 space-y-2">
-              <div className="flex items-center gap-2 mb-1">
-                <User className="w-4 h-4 text-chart-3" />
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">To</p>
+              );
+            };
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {renderCard(fromParty, "From")}
+                {renderCard(toParty, "To")}
               </div>
-              <Link to={`/billing/customer/${inv.customerId}`} className="text-[14px] font-display font-bold text-primary hover:underline">{inv.customerName}</Link>
-              {customer && (customer.gst_number || customer.address) && (
-                <div className="space-y-1 text-[12px] text-muted-foreground">
-                  {customer.gst_number && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{customer.gst_number}</span></p>}
-                  {customer.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{customer.address}</p>}
-                </div>
-              )}
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Line Items */}
           <div className="elevated-card rounded-2xl overflow-hidden">
