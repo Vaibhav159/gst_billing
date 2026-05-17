@@ -198,6 +198,25 @@ export default function AIInvoiceImport() {
     }
   }, [updateFile]);
 
+  // Auto-process newly-added files. Sliding window: as files complete
+  // (status flips off "processing"), this effect re-runs and kicks off
+  // the next "pending" until none are left. The "processing" status
+  // itself acts as the per-file lock — already-in-flight files won't
+  // be re-triggered. Concurrency cap matches processAll (4) so single-
+  // file drops feel instant and bulk drops stay within Gemini's
+  // free-tier 15 RPM-per-key budget even on the worst-case routing.
+  // Errored files are NOT auto-retried (would loop forever on a
+  // persistently-bad image); user clicks "Retry" per-file.
+  const AUTO_PROCESS_CONCURRENCY = 4;
+  useEffect(() => {
+    const inFlight = files.filter((f) => f.status === "processing").length;
+    const slots = AUTO_PROCESS_CONCURRENCY - inFlight;
+    if (slots <= 0) return;
+    const pending = files.filter((f) => f.status === "pending");
+    if (pending.length === 0) return;
+    pending.slice(0, slots).forEach((f) => { void processOne(f); });
+  }, [files, processOne]);
+
   const processAll = async () => {
     const pending = files.filter((f) => f.status === "pending" || f.status === "error");
     if (!pending.length) return;
