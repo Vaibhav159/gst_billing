@@ -5,10 +5,21 @@ and the GSTR-2A Import frontend page (ongoing user-driven imports).
 
 Design notes:
 
-* Only the `invoice` sheet is processed. The `note` sheet (credit/debit
-  notes) is intentionally skipped — the user wanted these excluded
-  because the existing app already tracks notes elsewhere via direct
-  entry, and double-importing would mis-count ITC.
+* Both `invoice` and `note` sheets are parsed. The `note` sheet drives
+  credit-note netting: for each credit note we try to find a matching
+  invoice (same supplier_gstin + same tax-inclusive value) and mark
+  that invoice as "fully cancelled" — it's then skipped on import.
+  Partial credit notes (no exact value match) are not auto-applied to
+  avoid silently mutating invoice amounts; they're surfaced in the
+  ImportResult so the user can handle them manually.
+
+  Background: the v1 of this service imported the invoice sheet
+  raw and ignored the note sheet entirely. On a real-world FY25-26
+  import of 67 invoices we discovered 17 of them had been fully
+  credit-noted by the supplier (Amazon/Flipkart returns + a returned
+  SKYMART batch). The user's reconciled "net invoices" spreadsheet
+  had the correct 50-invoice count; the v1 import had to be manually
+  cleaned up. Auto-netting fixes this going forward.
 
 * Idempotency is enforced via the natural key
   `(business_id, customer_id, invoice_number, invoice_date)`. The same
@@ -87,6 +98,22 @@ class GSTR2ARow:
 
 
 @dataclass
+class GSTR2ANote:
+    """One row of the `note` sheet — a credit or debit note from a supplier."""
+
+    supplier_name: str
+    supplier_gstin: str
+    note_number: str
+    note_date: date | None
+    note_type: str           # "Credit" or "Debit"
+    note_value: Decimal      # tax-inclusive
+    taxable_value: Decimal
+    igst: Decimal
+    cgst: Decimal
+    sgst: Decimal
+
+
+@dataclass
 class FilePreview:
     """Per-file summary returned by `preview_file`."""
 
@@ -96,6 +123,12 @@ class FilePreview:
     matched_business_id: int | None
     matched_business_name: str
     parsed_rows: list[GSTR2ARow]
+    parsed_notes: list[GSTR2ANote] = field(default_factory=list)
+    # invoice keys (supplier_gstin, invoice_number, invoice_date) that were
+    # fully cancelled by a matching credit note — these are skipped on import
+    cancelled_invoice_keys: set = field(default_factory=set)
+    # credit notes that had no matching invoice — flagged for the user
+    partial_notes: list[GSTR2ANote] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
 
 
@@ -109,11 +142,16 @@ class ImportResult:
     created_suppliers: int = 0
     skipped_duplicates: int = 0
     skipped_no_business: int = 0
+    # Invoices skipped because a matching credit note fully cancelled them.
+    skipped_credit_noted: int = 0
     errors: list[str] = field(default_factory=list)
     # Detail lists for the CLI/UI to render
     created_detail: list[str] = field(default_factory=list)
     skipped_detail: list[str] = field(default_factory=list)
     not_filed_warnings: list[str] = field(default_factory=list)
+    # Credit notes with no full invoice match — user should review.
+    # Each entry: "CN <num> from <supplier> ₹<value> (-₹<itc>)"
+    partial_credit_notes: list[str] = field(default_factory=list)
 
 
 # ── parsing ────────────────────────────────────────────────────────────
@@ -159,6 +197,96 @@ def _extract_recipient_gstin(header_row_0: str) -> str:
 
     m = re.search(r"\b([0-9]{2}[A-Z0-9]{13})\b", header_row_0 or "")
     return m.group(1) if m else ""
+
+
+def _match_credit_notes(
+    invoices: list[GSTR2ARow], notes: list[GSTR2ANote]
+) -> tuple[set, list[GSTR2ANote]]:
+    """Pair each credit note with an invoice it fully cancels.
+
+    Matching key is `(supplier_gstin, tax_inclusive_value)` — a credit
+    note fully cancels an invoice when both numbers line up to the
+    paisa. Pairing is greedy and one-to-one: a CN that finds a match
+    consumes that invoice from the candidate pool, so two CNs at the
+    same value won't both claim the same invoice.
+
+    Why tax_inclusive value (not invoice number): the 2A export does
+    NOT populate the `Invoice No`/`Invoice Date` columns on note rows
+    reliably — they're often blank because the GSTN portal doesn't
+    require them. Tax-inclusive value at the paisa-level is unique
+    enough in practice (jewellery invoices are rarely round numbers).
+
+    Returns `(cancelled_keys, partial_notes)`. `cancelled_keys` is a
+    set of `(supplier_gstin, invoice_number, invoice_date)` tuples
+    that should be skipped on import. `partial_notes` is the CNs we
+    couldn't pair — surfaced to the user for manual handling.
+    """
+    cancelled_keys: set = set()
+    used_invoice_keys: set = set()
+    partials: list[GSTR2ANote] = []
+    for note in notes:
+        # Only Credit notes reduce ITC. Debit notes add to it (rare in
+        # GSTR-2A — usually appear in 2B for the recipient's own debit
+        # notes, not the supplier's). Treat debits as partial for now.
+        if (note.note_type or "").strip().lower() != "credit":
+            partials.append(note)
+            continue
+        match_inv = None
+        for inv in invoices:
+            inv_key = (inv.supplier_gstin, inv.invoice_number, inv.invoice_date)
+            if inv_key in used_invoice_keys:
+                continue
+            if (
+                inv.supplier_gstin == note.supplier_gstin
+                and abs(inv.invoice_value - note.note_value) < Decimal("0.01")
+            ):
+                match_inv = inv_key
+                break
+        if match_inv:
+            cancelled_keys.add(match_inv)
+            used_invoice_keys.add(match_inv)
+        else:
+            partials.append(note)
+    return cancelled_keys, partials
+
+
+def _parse_note_sheet(xl: pd.ExcelFile) -> list[GSTR2ANote]:
+    """Best-effort parse of the `note` sheet. Returns [] if missing
+    or empty — credit-note netting just becomes a no-op."""
+    if "note" not in xl.sheet_names:
+        return []
+    try:
+        df_raw = xl.parse("note", header=None)
+    except Exception:
+        return []
+    if df_raw.shape[0] < 4:
+        return []
+    headers = [str(x).strip() for x in df_raw.iloc[2].tolist()]
+    df = df_raw.iloc[3:].copy()
+    df.columns = headers
+    # Drop rows where Supplier Name is null (header artefacts / blank rows)
+    if "Supplier Name" not in df.columns:
+        return []
+    df = df[df["Supplier Name"].notna()].reset_index(drop=True)
+    notes: list[GSTR2ANote] = []
+    for _, r in df.iterrows():
+        try:
+            notes.append(GSTR2ANote(
+                supplier_name=str(r.get("Supplier Name", "")).strip(),
+                supplier_gstin=str(r.get("GSTIN", "")).strip().upper(),
+                note_number=str(r.get("Note No", "")).strip(),
+                note_date=_to_date(r.get("Note Date")),
+                note_type=str(r.get("Note Type", "")).strip(),
+                note_value=_to_decimal(r.get("Note Value")),
+                taxable_value=_to_decimal(r.get("Taxable Value")),
+                igst=_to_decimal(r.get("IGST")),
+                cgst=_to_decimal(r.get("CGST")),
+                sgst=_to_decimal(r.get("SGST")),
+            ))
+        except Exception:
+            # Don't fail the whole import for one malformed note row.
+            continue
+    return notes
 
 
 def preview_file(file_path_or_buffer, filename: str | None = None) -> FilePreview:
@@ -240,6 +368,12 @@ def preview_file(file_path_or_buffer, filename: str | None = None) -> FilePrevie
         except Exception as e:
             parse_errors.append(f"Row {idx + 4}: {e!s}")
 
+    # Parse the note sheet and net it against invoices. Fully-matched
+    # credit notes cancel out their invoices (skipped on import).
+    # Unmatched / partial CNs are reported but not auto-applied.
+    notes = _parse_note_sheet(xl)
+    cancelled_keys, partials = _match_credit_notes(rows, notes)
+
     return FilePreview(
         filename=fname,
         recipient_header=header_row_0,
@@ -247,6 +381,9 @@ def preview_file(file_path_or_buffer, filename: str | None = None) -> FilePrevie
         matched_business_id=matched_biz.id if matched_biz else None,
         matched_business_name=matched_biz.name if matched_biz else "",
         parsed_rows=rows,
+        parsed_notes=notes,
+        cancelled_invoice_keys=cancelled_keys,
+        partial_notes=partials,
         parse_errors=parse_errors,
     )
 
@@ -351,9 +488,29 @@ def import_file(
         result.created_invoices, result.created_line_items,
         result.created_suppliers, result.skipped_duplicates,
     )
+    # Surface partial credit notes regardless of dry-run/live — these
+    # are informational, the import doesn't act on them either way.
+    for n in preview.partial_notes:
+        result.partial_credit_notes.append(
+            f"  ~ partial CN {n.note_number} from {n.supplier_name} "
+            f"₹{n.note_value} (-₹{n.cgst + n.sgst + n.igst} ITC)"
+        )
+
     try:
       with transaction.atomic():
         for row in preview.parsed_rows:
+            # Skip rows that a credit note fully cancelled. This is the
+            # main behaviour change from v1 — previously these slipped
+            # through as phantom invoices and had to be manually deleted.
+            row_key = (row.supplier_gstin, row.invoice_number, row.invoice_date)
+            if row_key in preview.cancelled_invoice_keys:
+                result.skipped_credit_noted += 1
+                result.skipped_detail.append(
+                    f"  CN-cancelled {row.invoice_number} from {row.supplier_name} "
+                    f"({row.invoice_date}) ₹{row.invoice_value}"
+                )
+                continue
+
             cust, was_created = _find_or_create_supplier(row, dry_run=dry_run)
             if dry_run and was_created:
                 # Count phantom creation for the preview report

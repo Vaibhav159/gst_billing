@@ -50,6 +50,8 @@ class Command(BaseCommand):
             "created_suppliers": 0,
             "skipped_duplicates": 0,
             "skipped_no_business": 0,
+            "skipped_credit_noted": 0,
+            "partial_credit_notes": 0,
             "errors": 0,
             "not_filed": 0,
         }
@@ -66,6 +68,8 @@ class Command(BaseCommand):
             agg["created_suppliers"] += result.created_suppliers
             agg["skipped_duplicates"] += result.skipped_duplicates
             agg["skipped_no_business"] += result.skipped_no_business
+            agg["skipped_credit_noted"] += result.skipped_credit_noted
+            agg["partial_credit_notes"] += len(result.partial_credit_notes)
             agg["errors"] += len(result.errors)
             agg["not_filed"] += len(result.not_filed_warnings)
 
@@ -82,6 +86,18 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.NOTICE(
                     f"│  Skipped duplicates:        {result.skipped_duplicates} (already in DB)"
                 ))
+            if result.skipped_credit_noted:
+                self.stdout.write(self.style.NOTICE(
+                    f"│  Skipped — fully credit-noted: {result.skipped_credit_noted} "
+                    "(matching CN in note sheet zeroes out the invoice)"
+                ))
+            if result.partial_credit_notes:
+                self.stdout.write(self.style.WARNING(
+                    f"│  ~ Partial CNs (need manual review): {len(result.partial_credit_notes)}"
+                ))
+                if verbose:
+                    for p in result.partial_credit_notes:
+                        self.stdout.write(f"│  {p}")
             if result.skipped_no_business:
                 self.stdout.write(self.style.ERROR(
                     f"│  Skipped — no Business match: {result.skipped_no_business}"
@@ -116,9 +132,15 @@ class Command(BaseCommand):
             f"TOTAL: {agg['created_invoices']} invoice{'s' if agg['created_invoices'] != 1 else ''} "
             f"{'would be' if dry_run else ''} created, "
             f"{agg['skipped_duplicates']} dedup'd, "
+            f"{agg['skipped_credit_noted']} CN-cancelled, "
             f"{agg['created_suppliers']} supplier{'s' if agg['created_suppliers'] != 1 else ''} "
             f"{'would be ' if dry_run else ''}auto-created"
         ))
+        if agg["partial_credit_notes"]:
+            self.stdout.write(self.style.WARNING(
+                f"  ~ {agg['partial_credit_notes']} partial credit note{'s' if agg['partial_credit_notes'] != 1 else ''} "
+                "with no full invoice match — review and handle manually."
+            ))
         if agg["not_filed"]:
             self.stdout.write(self.style.WARNING(
                 f"  ⚠ {agg['not_filed']} invoice{'s' if agg['not_filed'] != 1 else ''} "
