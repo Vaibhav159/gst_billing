@@ -1,4 +1,5 @@
 import csv
+import json
 import logging
 from calendar import monthrange
 from datetime import datetime
@@ -3527,11 +3528,25 @@ class AIInvoiceCreateView(APIView):
             )
 
         except Exception as e:
+            # Full traceback to logs (with exc_info) — that's where the
+            # actual exception type, line, and stack live for debugging.
+            # The user sees a generic message; surfacing raw Python
+            # errors like "name 'json' is not defined" is bad UX and a
+            # mild info leak (tells anyone hitting the API what
+            # libraries/functions are in play). The exception class
+            # name is included as a small hint without the message
+            # body so the user can mention it when reporting bugs.
             logger.error(
-                f"Error creating invoice from AI data: {e}", exc_info=True
+                "Error creating invoice from AI data: %s", e, exc_info=True
             )
             return Response(
-                {"error": f"Could not create invoice: {e!s}"},
+                {
+                    "error": (
+                        "Could not create invoice due to an internal error. "
+                        f"(Reference: {type(e).__name__}) "
+                        "Check the server logs or try again."
+                    ),
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
