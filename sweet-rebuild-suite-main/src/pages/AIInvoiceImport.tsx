@@ -47,6 +47,7 @@ type MatchedBusiness = { id: number; name: string; gst_number: string } | null;
 
 // Per-file state machine.
 type FileStatus = "pending" | "processing" | "ready" | "error" | "created";
+type Provider = "gemini" | "nim" | null;
 type FileEntry = {
   id: string;                  // local-only key
   file: File;
@@ -60,6 +61,11 @@ type FileEntry = {
   errorMsg: string;
   createdInvoiceId: number | null;
   expanded: boolean;           // for inline review form
+  // Which AI provider actually processed this file — Gemini primary,
+  // NIM fallback when Gemini hits its daily cap. Shown as a small
+  // badge so the user can see when the cap was hit.
+  provider: Provider;
+  fellBackFromGemini: boolean;
 };
 
 // HEIC/HEIF added for iPhone uploads — backend's pillow-heif decodes
@@ -127,6 +133,8 @@ export default function AIInvoiceImport() {
         errorMsg: "",
         createdInvoiceId: null,
         expanded: false,
+        provider: null,
+        fellBackFromGemini: false,
       });
     }
     if (accepted.length) {
@@ -167,21 +175,29 @@ export default function AIInvoiceImport() {
         data: Extracted;
         matched_business: MatchedBusiness;
         detected_type: "inward" | "outward" | null;
+        provider: Provider;
+        fallback_from_gemini: boolean;
       }>("ai/invoice/process/", fd, { timeout: 120_000 });
       updateFile(entry.id, {
         status: "ready",
         extracted: res.data.data,
         matchedBusiness: res.data.matched_business,
-        // Pre-fill the override with the matched business id so the
-        // review form's select shows the right value.
         businessOverrideId: res.data.matched_business
           ? String(res.data.matched_business.id)
           : "",
-        // Auto-set Sale/Purchase from detected direction — user can
-        // still override on the review form if AI got it wrong.
         type: res.data.detected_type || entry.type,
-        expanded: true,  // auto-expand to show the review form
+        provider: res.data.provider,
+        fellBackFromGemini: !!res.data.fallback_from_gemini,
+        expanded: true,
       });
+      // Surface the fallback once globally — if Gemini's quota is hit,
+      // subsequent files will all use NIM. Toasting per-file is noisy.
+      if (res.data.fallback_from_gemini && entry.fellBackFromGemini === false) {
+        toast({
+          title: "Gemini daily cap hit",
+          description: "Auto-switched to NVIDIA NIM for this and remaining files.",
+        });
+      }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       const msg = err?.response?.data?.error || err?.message || "AI extraction failed.";
@@ -406,8 +422,8 @@ export default function AIInvoiceImport() {
             <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">How it works</h3>
             <div className="space-y-3">
               {[
-                { icon: Zap, label: "Gemini 2.5 Flash-Lite", desc: "Google's vision LLM, ~3s/invoice" },
-                { icon: Sparkles, label: "Business auto-detected", desc: "From the recipient GSTIN on the invoice" },
+                { icon: Zap, label: "Gemini → NIM fallback", desc: "Auto-switches to NVIDIA NIM when Gemini's daily cap is hit" },
+                { icon: Sparkles, label: "Business auto-detected", desc: "From the buyer/seller GSTINs on the invoice" },
                 { icon: Shield, label: "Customers auto-created", desc: "If GSTIN doesn't match an existing record" },
                 { icon: Clock, label: "Bulk-friendly", desc: "Drop many, process all, review, bulk-create" },
               ].map((f) => (
@@ -502,7 +518,25 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
           onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }}
         />
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-semibold text-foreground truncate">{entry.file.name}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-[13px] font-semibold text-foreground truncate">{entry.file.name}</p>
+            {/* Provider badge — only shown post-processing. NIM badge
+                tinted differently so the fallback case is visible at a
+                glance during a bulk import. */}
+            {entry.provider === "gemini" && (
+              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary tracking-wider shrink-0">
+                Gemini
+              </span>
+            )}
+            {entry.provider === "nim" && (
+              <span
+                className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-chart-3/15 text-chart-3 tracking-wider shrink-0"
+                title={entry.fellBackFromGemini ? "Gemini daily cap hit — auto-fell-back to NIM" : "Processed via NVIDIA NIM"}
+              >
+                {entry.fellBackFromGemini ? "NIM ↩" : "NIM"}
+              </span>
+            )}
+          </div>
           <p className="text-[11px] text-muted-foreground">
             {(entry.file.size / 1024 / 1024).toFixed(2)}MB
             {entry.extracted && ` · ${entry.extracted.line_items.length} item${entry.extracted.line_items.length === 1 ? "" : "s"} · ${formatCurrency(lineItemsTotal)}`}

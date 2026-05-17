@@ -8,14 +8,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pandas as pd
+import requests  # used by AIInvoiceProcessor's NIM fallback path
 from django.conf import settings
 from django.db import transaction
-# AI extractor uses Google Gemini (google-genai SDK). We briefly tried
-# NVIDIA NIM with Llama 4 Maverick — it worked but Gemini Flash is more
-# accurate on Hindi text / phone-shot invoices and its native
-# response_schema gives shape-guaranteed JSON (model can't drop a
-# required field). NIM stays as a possible fallback but isn't wired
-# into the active path.
+# AI extractor uses Google Gemini (primary) with NVIDIA NIM as automatic
+# fallback when Gemini's free-tier daily cap is hit. See
+# AIInvoiceProcessor docstring for the routing logic.
 import google.genai as genai
 from google.genai import types
 
@@ -611,66 +609,75 @@ def process_invoice_csv(
 
 
 class AIInvoiceProcessor:
-    """AI-powered invoice extraction via Google Gemini (gemini-2.5-flash).
+    """AI-powered invoice extraction with Gemini → NIM fallback.
 
-    Why Gemini over alternatives:
-      - Native `response_schema` — server-side schema enforcement, the
-        model literally cannot emit a wrong shape. NIM / Llama / Qwen
-        all use prompt-driven JSON which can still drop required fields
-        or invent extras (we observed this with nemotron-nano-12b-v2-vl
-        during the NIM bake-off).
-      - Best free-tier vision quality on document OCR + multilingual
-        (Devanagari/Hindi customer names matter for Indian jewellery
-        invoices). Free tier is ~15 RPM / ~1500 req/day on Flash.
-      - Typical extraction is 2-4s, faster than the NIM round (5-15s).
+    Primary: Google Gemini (gemini-2.5-flash-lite by default).
+      - Native response_schema → server-side shape-guaranteed JSON.
+      - Best vision quality + Hindi handling on the free tier when
+        you have quota.
+      - BUT: the free tier daily cap is *tight* — 20 req/day on
+        flash-lite (yes, twenty, not 200). One bulk invoice import
+        session exhausts the day's budget.
 
-    The previous version of this class (Gemini-based) had inflated
-    prompts, brittle markdown-fence parsing, and returned Decimals that
-    DRF serialised as strings. This rewrite keeps Gemini but borrows the
-    improvements from the NIM detour: tighter prompt, image downscaling
-    so a 5MB phone shot still fits, defensive JSON parser, float output
-    so the frontend doesn't need to parseFloat every field.
+    Fallback: NVIDIA NIM (meta/llama-4-maverick-17b-128e-instruct).
+      - Used automatically when Gemini returns 429 / RESOURCE_EXHAUSTED.
+      - Same prompt + same JSON parsing (the SDK gives us OpenAI-style
+        json_object mode — close enough to Gemini's schema-mode for
+        invoice extraction, just with slightly more defensive parsing).
+      - Slightly slower (~5s vs ~3s) but the daily cap is much higher
+        (~hundreds of req/day on the free NIM tier).
+      - Requires NVIDIA_API_KEY in .env. If absent, Gemini errors
+        bubble straight through.
+
+    Provider used per request is returned to callers via `_provider`
+    field on the result dict (frontend shows a small badge).
     """
 
-    # gemini-2.5-flash-lite chosen empirically — benchmark on the same
-    # synthetic invoice (May 2026):
-    #   gemini-2.5-flash + 8K tokens:  12.6s  ← previous default (slow)
-    #   gemini-2.5-flash + 2K tokens:   4.5s
-    #   gemini-2.5-flash-lite + schema: 2.9s  ← current default
-    #   gemini-3.1-flash-lite:          3.2s  (no improvement)
-    # Lite is 5x faster than the old default. Accuracy delta vs full
-    # Flash isn't visible on printed invoices; if it surfaces on tough
-    # phone shots, override via GEMINI_VISION_MODEL=gemini-2.5-flash
-    # (or gemini-2.5-pro for max accuracy at ~3x the latency).
-    DEFAULT_MODEL = "gemini-2.5-flash-lite"
-    # Gemini accepts much larger inline images than NIM (up to ~20MB
-    # base64), but downscaling still helps latency on phone shots.
-    # 1568px is the sweet spot — small enough to upload fast, big enough
-    # that fine-print HSN codes stay legible.
+    # Gemini config (primary)
+    DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+    # NIM config (fallback) — benchmark from May 2026 NIM bake-off:
+    # Llama 4 Maverick gave the cleanest JSON in json_object mode.
+    DEFAULT_NIM_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
+    NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+    NIM_TIMEOUT = 90  # seconds — vision LLMs can be slow
+    # NIM payload limit ~180KB inline. Gemini accepts much larger but
+    # we normalize via PIL regardless so the wire shape is identical
+    # for both providers.
+    NIM_MAX_IMAGE_BYTES = 130_000
     MAX_IMAGE_DIM = 1568
-    # If raw bytes are over this we run them through PIL to resize +
-    # JPEG-recompress. We don't enforce a hard byte budget like with NIM
-    # because Gemini is permissive — this is purely a speed optimisation.
-    DOWNSCALE_THRESHOLD = 800_000  # 800KB
 
     def __init__(self):
-        self.api_key = getattr(settings, "GEMINI_API_KEY", "") or ""
-        if not self.api_key:
-            # The view catches this and 400s with a clear message so the
-            # user sees "configure your key" instead of a 500.
-            raise AIInvoiceProcessingError(
-                "GEMINI_API_KEY not configured. Add it to your .env "
-                "(free key at https://aistudio.google.com/apikey)."
-            )
-        self.model = getattr(
-            settings, "GEMINI_VISION_MODEL", self.DEFAULT_MODEL
+        self.gemini_key = getattr(settings, "GEMINI_API_KEY", "") or ""
+        self.nvidia_key = getattr(settings, "NVIDIA_API_KEY", "") or ""
+        self.gemini_model = getattr(
+            settings, "GEMINI_VISION_MODEL", self.DEFAULT_GEMINI_MODEL
         )
-        self.client = genai.Client(api_key=self.api_key)
+        self.nim_model = getattr(
+            settings, "NVIDIA_VISION_MODEL", self.DEFAULT_NIM_MODEL
+        )
+        if not self.gemini_key and not self.nvidia_key:
+            # The view catches this and 400s with a clear message so the
+            # user sees "configure a key" instead of a 500.
+            raise AIInvoiceProcessingError(
+                "No AI provider configured. Add GEMINI_API_KEY (free at "
+                "https://aistudio.google.com/apikey) or NVIDIA_API_KEY "
+                "(free at https://build.nvidia.com) to your .env."
+            )
+        # Lazy-init Gemini client only when we have a key — avoids the
+        # SDK doing any startup work if the user is NIM-only.
+        self.gemini_client = (
+            genai.Client(api_key=self.gemini_key) if self.gemini_key else None
+        )
 
     # ── public API ──────────────────────────────────────────────────
 
     def process_invoice_image(self, image_file, business_id: int | None = None) -> dict:
-        """Send an invoice image to Gemini and return the parsed dict.
+        """Extract structured data from an invoice image.
+
+        Routing: try Gemini first (better quality + schema); on a 429
+        / quota error, fall back to NIM if a key is configured. Other
+        Gemini errors (network, malformed image, etc.) propagate
+        without fallback because NIM would likely fail the same way.
 
         `business_id` is OPTIONAL. When provided, the prompt is scoped
         to that business's customers (better match accuracy). When
@@ -702,12 +709,56 @@ class AIInvoiceProcessor:
         # Cost is ~50-100ms on a small image; saves much more than that
         # when the input is a 20MB phone shot.
         image_bytes, mime = self._normalize_image(image_bytes, mime)
-
         prompt = self._build_prompt(customer_names)
 
+        # ── Routing: Gemini primary → NIM fallback ────────────────
+        last_error: AIInvoiceProcessingError | None = None
+        if self.gemini_client:
+            try:
+                extracted = self._extract_via_gemini(image_bytes, mime, prompt)
+                result = self._convert_to_dict(extracted)
+                result["_provider"] = "gemini"
+                return result
+            except AIInvoiceProcessingError as e:
+                last_error = e
+                # Only fall back on quota / rate-limit errors — not on
+                # bad images or auth errors (NIM would 4xx the same way).
+                if not (self._is_quota_error(e) and self.nvidia_key):
+                    raise
+                logger.warning(
+                    "Gemini quota exhausted, falling back to NIM: %s",
+                    str(e)[:200],
+                )
+
+        if self.nvidia_key:
+            try:
+                extracted = self._extract_via_nim(image_bytes, mime, prompt)
+                result = self._convert_to_dict(extracted)
+                result["_provider"] = "nim"
+                # If we got here via fallback, surface that so the
+                # frontend can show "Gemini cap hit, processed via NIM".
+                if last_error is not None:
+                    result["_fallback_from_gemini"] = True
+                return result
+            except AIInvoiceProcessingError as e:
+                # If Gemini already failed too, prefer NIM's error
+                # (it's the one the user actually needs to act on).
+                last_error = e
+
+        raise last_error or AIInvoiceProcessingError(
+            "All configured AI providers failed."
+        )
+
+    # ── provider impls ─────────────────────────────────────────────
+
+    def _extract_via_gemini(self, image_bytes: bytes, mime: str, prompt: str) -> dict:
+        """Single Gemini call. Raises AIInvoiceProcessingError with a
+        cleaned message — the raw google-genai exception str() dumps
+        the entire error dict which is ugly when surfaced in a toast.
+        """
         try:
-            response = self.client.models.generate_content(
-                model=self.model,
+            response = self.gemini_client.models.generate_content(
+                model=self.gemini_model,
                 contents=[
                     {
                         "role": "user",
@@ -722,36 +773,142 @@ class AIInvoiceProcessor:
                     # 4096 is the sweet spot. Benchmark measurements:
                     #   8K → 12.6s (model pads output well past need)
                     #   4K →  3-5s (current — comfortable headroom)
-                    #   2K →  truncates on pretty-printed JSON with
-                    #         long addresses; the model occasionally
-                    #         emits indented JSON which doubles tokens.
-                    # 4K fits a 25-line-item invoice with addresses
-                    # even in pretty-printed form.
+                    #   2K →  truncates on pretty-printed JSON
                     max_output_tokens=4096,
-                    temperature=0.0,  # extraction, not creative writing
-                    # top_p / top_k dropped — at temp=0 (greedy decoding)
-                    # they're inert but still cost setup time.
+                    temperature=0.0,
                     response_mime_type="application/json",
                     response_schema=self._build_schema(),
                 ),
             )
         except Exception as e:
-            # google-genai raises a grab-bag of exception types. Normalise
-            # so the view always gets an AIInvoiceProcessingError it can
-            # 400 cleanly with a user-visible message.
-            raise AIInvoiceProcessingError(f"Gemini request failed: {e!s}")
+            # Try to pull a clean message out of the raw exception.
+            raise AIInvoiceProcessingError(self._format_gemini_error(e))
 
-        # With response_schema + response_mime_type=application/json, the
-        # SDK returns text that is guaranteed to be valid JSON matching
-        # the schema. We still defensively parse in case Google ever
-        # relaxes the guarantee or the model returns nothing.
         text = (getattr(response, "text", "") or "").strip()
         if not text:
             raise AIInvoiceProcessingError(
                 "Gemini returned an empty response — try a clearer image."
             )
-        extracted = self._parse_json_response(text)
-        return self._convert_to_dict(extracted)
+        return self._parse_json_response(text)
+
+    def _extract_via_nim(self, image_bytes: bytes, mime: str, prompt: str) -> dict:
+        """Single NIM (OpenAI-compatible) call. Falls back from Gemini
+        when the free-tier daily quota is exhausted. Same prompt, same
+        parsing, just a different vendor doing the OCR.
+        """
+        # NIM's inline image limit is ~180KB (vs Gemini's much higher);
+        # if the normalized image is still too big, re-shrink with a
+        # tighter byte budget.
+        if len(image_bytes) > self.NIM_MAX_IMAGE_BYTES:
+            from PIL import Image
+            try:
+                img = Image.open(io.BytesIO(image_bytes))
+                img.load()
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                # Try progressively lower quality until under budget.
+                for quality in (80, 70, 60, 50):
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=quality, optimize=True)
+                    if buf.tell() <= self.NIM_MAX_IMAGE_BYTES:
+                        image_bytes = buf.getvalue()
+                        break
+                else:
+                    image_bytes = buf.getvalue()  # last attempt — may still 413
+            except Exception:
+                pass  # let NIM tell us if the image is unprocessable
+
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        payload = {
+            "model": self.nim_model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_b64}"
+                    }},
+                ],
+            }],
+            "temperature": 0.0,
+            "top_p": 0.8,
+            "max_tokens": 4096,
+            # OpenAI-style JSON mode — model emits valid JSON without
+            # schema enforcement. Our prompt + defensive parser handle
+            # the rare cases where the model still hallucinates fields.
+            "response_format": {"type": "json_object"},
+        }
+
+        try:
+            response = requests.post(
+                self.NIM_URL,
+                headers={
+                    "Authorization": f"Bearer {self.nvidia_key}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self.NIM_TIMEOUT,
+            )
+        except requests.Timeout:
+            raise AIInvoiceProcessingError(
+                f"NIM request timed out after {self.NIM_TIMEOUT}s."
+            )
+        except requests.RequestException as e:
+            raise AIInvoiceProcessingError(f"NIM request failed: {e!s}")
+
+        if response.status_code != 200:
+            body = response.text[:300] if response.text else "(empty body)"
+            raise AIInvoiceProcessingError(
+                f"NIM returned HTTP {response.status_code}: {body}"
+            )
+
+        try:
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError) as e:
+            raise AIInvoiceProcessingError(
+                f"Unexpected NIM response shape ({e!s}): {response.text[:300]}"
+            )
+        return self._parse_json_response(content)
+
+    # ── error classification ───────────────────────────────────────
+
+    @staticmethod
+    def _is_quota_error(err: Exception) -> bool:
+        """True if the error is a rate-limit / quota exhaustion that
+        should trigger fallback to another provider. Heuristic: look
+        for 429, RESOURCE_EXHAUSTED, or 'quota' in the message.
+        """
+        msg = str(err).lower()
+        return (
+            "429" in msg
+            or "resource_exhausted" in msg
+            or "quota" in msg
+            or "rate limit" in msg
+            or "ratelimit" in msg
+        )
+
+    @staticmethod
+    def _format_gemini_error(err: Exception) -> str:
+        """The google-genai SDK puts the entire API response in str(err).
+        Pull out the human-readable bits so toasts look like
+        "Quota exceeded, retry in 55s" instead of a 2KB JSON dump.
+        """
+        raw = str(err)
+        # Common case: 429 with retry guidance.
+        if "RESOURCE_EXHAUSTED" in raw or "429" in raw:
+            # Extract the suggested retry delay if present.
+            m = re.search(r"retry in ([\d.]+)s", raw)
+            retry_hint = f" Retry in {float(m.group(1)):.0f}s." if m else ""
+            limit_match = re.search(r"limit:\s*(\d+)", raw)
+            limit_hint = f" (free-tier cap: {limit_match.group(1)}/day)." if limit_match else ""
+            return f"Gemini quota exceeded.{limit_hint}{retry_hint}"
+        # Try to extract a clean message from the error dict shape.
+        m = re.search(r"'message':\s*'([^']+)'", raw)
+        if m:
+            return f"Gemini: {m.group(1)[:200]}"
+        return f"Gemini request failed: {raw[:200]}"
 
     # ── helpers ─────────────────────────────────────────────────────
 
