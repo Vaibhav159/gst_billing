@@ -3267,6 +3267,11 @@ class AIInvoiceCreateView(APIView):
     API endpoint for creating invoices from AI-extracted data.
     """
 
+    # Accept both JSON (legacy / non-AI flows) and multipart (AI Import
+    # which now ships the original source image alongside the extracted
+    # data so we can store an audit-trail copy).
+    parser_classes = [MultiPartParser, JSONParser]
+
     def post(self, request):
         """Create an invoice from AI-extracted data.
 
@@ -3294,7 +3299,24 @@ class AIInvoiceCreateView(APIView):
                     )
 
             business_id = request.data["business_id"]
+            # When the request comes in as multipart (AI Import sends
+            # the source image alongside), nested JSON fields arrive
+            # as strings. Parse on the way in so the rest of the view
+            # is agnostic to wire format.
             invoice_data = request.data["invoice_data"]
+            if isinstance(invoice_data, str):
+                try:
+                    invoice_data = json.loads(invoice_data)
+                except json.JSONDecodeError as e:
+                    return Response(
+                        {"error": f"invoice_data is not valid JSON: {e!s}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            # Optional source image — kept as audit trail of what the
+            # AI actually saw. Saved to invoice.source_file after the
+            # Invoice row is created (need invoice.pk first for the
+            # upload path).
+            source_file = request.FILES.get("source_file")
             type_of_invoice = (
                 request.data.get("type_of_invoice") or INVOICE_TYPE_OUTWARD
             )
@@ -3398,6 +3420,13 @@ class AIInvoiceCreateView(APIView):
                 type_of_invoice=type_of_invoice,
                 total_amount=invoice_data.get("total_amount", 0) or 0,
             )
+
+            # Persist the source image as audit trail. Done AFTER
+            # Invoice.objects.create() because FileField.save() with
+            # save=True triggers another model save — keeps the upload
+            # path deterministic regardless of pre-save signals.
+            if source_file is not None:
+                invoice.source_file.save(source_file.name, source_file, save=True)
 
             # Compute per-line tax breakdown. Previous version created
             # LineItems with cgst/sgst/igst all defaulting to 0 — the

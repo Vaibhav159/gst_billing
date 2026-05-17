@@ -112,6 +112,10 @@ export interface Invoice {
   vehicle_number?: string;
   transport_mode?: string;
   distance_km?: number;
+  // Original invoice file uploaded for AI extraction — null when
+  // the invoice was created manually. URL is relative to MEDIA_URL
+  // ("/media/invoice_sources/YYYY/MM/filename").
+  sourceFile?: string | null;
 }
 
 

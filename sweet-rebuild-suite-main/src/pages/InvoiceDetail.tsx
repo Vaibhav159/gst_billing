@@ -9,6 +9,7 @@ import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
   FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check, Loader2,
+  Image as ImageIcon,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
 import { cn, pluralize } from "@/utils/utils";
@@ -427,6 +428,51 @@ export default function InvoiceDetail() {
 
         {/* Right Sidebar */}
         <div className="space-y-5">
+          {/* Source image — only shown when present (AI Import populates
+              this). Audit trail of what the OCR actually saw, so the
+              user can verify extraction or download the original.
+              HEIC previews don't render in Chrome/Firefox; we still
+              attempt <img> but show a download link as the fallback. */}
+          {inv.sourceFile && (
+            <div className="elevated-card rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-[13px] font-display font-semibold text-foreground flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-chart-3" /> Source Image
+                </h2>
+                <a
+                  href={inv.sourceFile}
+                  download
+                  className="text-[11px] text-primary font-semibold flex items-center gap-1 hover:underline"
+                  title="Download original file"
+                >
+                  <Download className="w-3 h-3" /> Download
+                </a>
+              </div>
+              <a href={inv.sourceFile} target="_blank" rel="noreferrer" className="block">
+                <img
+                  src={inv.sourceFile}
+                  alt="Source invoice"
+                  className="w-full rounded-lg border border-border/40 hover:border-primary/40 transition-colors"
+                  onError={(e) => {
+                    // HEIC files won't render in most browsers — hide
+                    // the broken-image icon and let the download link
+                    // above do the job.
+                    (e.target as HTMLImageElement).style.display = "none";
+                    const fallback = (e.target as HTMLImageElement).nextElementSibling;
+                    if (fallback) (fallback as HTMLElement).style.display = "flex";
+                  }}
+                />
+                <div className="hidden flex-col items-center gap-2 py-8 text-muted-foreground text-[11px] text-center">
+                  <ImageIcon className="w-10 h-10 opacity-40" />
+                  <span>HEIC files don't preview in browser — click "Download" above to view.</span>
+                </div>
+              </a>
+              <p className="text-[10px] text-muted-foreground">
+                Original uploaded for AI extraction · click to open full size
+              </p>
+            </div>
+          )}
+
           {/* Summary */}
           <div className="elevated-card rounded-2xl p-5 space-y-3">
             <h2 className="text-[13px] font-display font-semibold text-foreground">Financial Summary</h2>

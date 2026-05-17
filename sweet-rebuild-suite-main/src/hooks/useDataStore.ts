@@ -271,6 +271,9 @@ export function mapDjangoInvoice(inv: any): Invoice {
     createdAt: inv.created_at || "",
     updatedAt: inv.updated_at || "",
     lineItemCount: hasItems ? items.length : (inv.line_item_count || 0),
+    // Audit-trail source image (populated by AI Import). URL from
+    // Django's FileField default serialization — relative to MEDIA_URL.
+    sourceFile: inv.source_file || null,
   };
 }
 

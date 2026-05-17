@@ -274,6 +274,20 @@ class Invoice(AbstractBaseModel):
     transport_mode = models.CharField(max_length=10, blank=True, default="Road", choices=[("Road", "Road"), ("Rail", "Rail"), ("Air", "Air"), ("Ship", "Ship")])
     distance_km = models.IntegerField(blank=True, null=True, verbose_name="Distance (KM)")
 
+    # Source image — primarily populated by AI Import (the original
+    # invoice photo the user uploaded for extraction) so we have an
+    # audit trail of what the OCR actually saw. Nothing else writes
+    # this today but the field is generic — any upload flow (manual
+    # scan, e-invoice attachment, etc.) could populate it later.
+    # Stored under MEDIA_ROOT/invoice_sources/YYYY/MM/ to keep the
+    # directory tree shallow as the corpus grows.
+    source_file = models.FileField(
+        upload_to="invoice_sources/%Y/%m/",
+        null=True, blank=True,
+        verbose_name="Source File",
+        help_text="Original invoice image/PDF (audit trail for AI imports).",
+    )
+
     history = HistoricalRecords()
 
     def __str__(self):

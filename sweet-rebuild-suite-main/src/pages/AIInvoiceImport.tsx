@@ -231,15 +231,20 @@ export default function AIInvoiceImport() {
       return false;
     }
     try {
+      // Multipart so we can ship the original source image alongside
+      // the extracted data. Backend saves it as audit trail on
+      // invoice.source_file (visible on InvoiceDetail). JSON fields
+      // get JSON.stringified — backend parses on the way in.
+      const fd = new FormData();
+      fd.append("business_id", bizId);
+      fd.append("type_of_invoice", entry.type);
+      fd.append("invoice_data", JSON.stringify(entry.extracted));
+      fd.append("source_file", entry.file, entry.file.name);
       const res = await api.post<{
         invoice_id: number;
         invoice_number: string;
         line_items_created: number;
-      }>("ai/invoice/create/", {
-        business_id: bizId,
-        type_of_invoice: entry.type,
-        invoice_data: entry.extracted,
-      });
+      }>("ai/invoice/create/", fd);
       updateFile(entry.id, {
         status: "created",
         createdInvoiceId: res.data.invoice_id,
