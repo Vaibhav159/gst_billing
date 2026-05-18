@@ -923,10 +923,16 @@ class AIInvoiceProcessor:
         # customers to constrain to, so we pass an empty list and the
         # backend matches/auto-creates the customer post-extraction.
         if customer_names:
+            # Build the joined name list OUTSIDE the f-string — Python
+            # 3.10/3.11 (CI runs 3.10) doesn't allow backslashes inside
+            # f-string expression parts, and `\"{n}\"` would trip that.
+            # Single quotes work fine here since customer names don't
+            # contain them in practice.
+            quoted = ", ".join(f"'{n}'" for n in customer_names)
             names_block = (
                 f"`customer_name` MUST match one of these existing "
                 f"customers when a reasonable case-insensitive match "
-                f"exists: {', '.join(f'\"{n}\"' for n in customer_names)}."
+                f"exists: {quoted}."
             )
         else:
             names_block = (
