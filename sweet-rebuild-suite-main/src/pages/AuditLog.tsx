@@ -110,19 +110,51 @@ export default function AuditLog() {
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
 
   return (
-    <div className={cn("space-y-5 max-w-[1200px] mx-auto animate-fade-in", isMobile ? "p-4 pb-20" : "p-6 lg:p-10 space-y-6")}>
+    <div className={cn("space-y-5 max-w-[1200px] mx-auto animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-10 space-y-6")}>
       <Breadcrumbs items={[{ label: "Audit Log" }]} />
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className={cn("rounded-2xl bg-gradient-to-br from-chart-4/20 to-chart-4/5 border border-chart-4/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
           <History className="w-5 h-5 text-chart-4" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>Audit Log</h1>
           <p className="text-xs text-muted-foreground">
             {isLoading ? "Loading…" : `${totalCount.toLocaleString("en-IN")} ${totalCount === 1 ? "entry" : "entries"}`}
           </p>
         </div>
+        {/* Export currently-loaded entries to CSV. Accountants frequently
+            ask "what changed last month?" — this gives them a file they
+            can open in Excel. No backend route needed; works off the
+            in-memory list. */}
+        {auditLog.length > 0 && (
+          <button
+            onClick={() => {
+              const rows = [["Timestamp", "Action", "Type", "Name", "User", "Details"]];
+              auditLog.forEach((e) => rows.push([
+                e.timestamp,
+                e.action,
+                e.entity,
+                e.entityName || "",
+                e.user || "",
+                e.details || "",
+              ]));
+              const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `audit-log-${new Date().toISOString().split("T")[0]}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+              toast({ title: "Exported", description: `${auditLog.length} entries to CSV` });
+            }}
+            className="premium-btn-ghost text-[12px] h-9 shrink-0"
+            title="Download currently-loaded audit entries as CSV"
+          >
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
+        )}
       </div>
 
       {/* Filters */}
@@ -136,12 +168,10 @@ export default function AuditLog() {
             <option value="all">All Actions</option>
             {Object.entries(actionConfig).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
           </select>
-          {!isMobile && (
-            <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className="premium-select text-[12px]">
-              <option value="all">All Types</option>
-              {Object.entries(entityConfig).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-            </select>
-          )}
+          <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className="premium-select text-[12px]">
+            <option value="all">All Types</option>
+            {Object.entries(entityConfig).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
+          </select>
           {(search || actionFilter !== "all" || entityFilter !== "all") && (
             <button
               onClick={() => { setSearch(""); setActionFilter("all"); setEntityFilter("all"); }}

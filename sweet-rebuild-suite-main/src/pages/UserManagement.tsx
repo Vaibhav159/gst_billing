@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Users, Plus, Shield, Pencil, UserCheck, UserX, Loader2, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Users, Plus, Shield, Pencil, UserCheck, UserX, Loader2, X, Search } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion } from "framer-motion";
 import { cn, pluralize } from "@/utils/utils";
@@ -36,6 +36,20 @@ export default function UserManagement() {
   const [createForm, setCreateForm] = useState({ username: "", password: "", email: "", first_name: "", last_name: "", role: "editor" });
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "editor" | "viewer">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return users.filter((u) => {
+      if (q && !u.username.toLowerCase().includes(q) && !(u.full_name || "").toLowerCase().includes(q) && !(u.email || "").toLowerCase().includes(q)) return false;
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (statusFilter === "active" && !u.is_active) return false;
+      if (statusFilter === "inactive" && u.is_active) return false;
+      return true;
+    });
+  }, [users, search, roleFilter, statusFilter]);
 
   const fetchUsers = async () => {
     try {
@@ -87,12 +101,19 @@ export default function UserManagement() {
   };
 
   const handleRoleChange = async (userId: number, newRole: string) => {
+    // Optimistic update — flip the badge instantly, reconcile from server
+    // on success, roll back on failure. Previously the page did a full
+    // fetchUsers() refetch after every change, producing a ~200ms blink
+    // of the badge dropping back to its old value before the new one
+    // appeared.
+    const prev = users;
+    setUsers((current) => current.map((u) => u.id === userId ? { ...u, role: newRole } : u));
+    setEditingId(null);
     try {
       await api.patch("users/", { user_id: userId, role: newRole });
       toast({ title: "Role Updated", description: `Changed to ${newRole}` });
-      fetchUsers();
-      setEditingId(null);
     } catch (err: any) {
+      setUsers(prev); // roll back
       toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not update role."), variant: "destructive", duration: 12000 });
     }
   };
@@ -105,11 +126,13 @@ export default function UserManagement() {
       const ok = confirm(`Deactivate "${username}"? They won't be able to sign in until you reactivate.`);
       if (!ok) return;
     }
+    const prev = users;
+    setUsers((current) => current.map((u) => u.id === userId ? { ...u, is_active: !isActive } : u));
     try {
       await api.patch("users/", { user_id: userId, is_active: !isActive });
       toast({ title: isActive ? "User Deactivated" : "User Activated", description: username });
-      fetchUsers();
     } catch (err: any) {
+      setUsers(prev); // roll back
       toast({ title: `Failed ${errorTag(err)}`, description: formatApiError(err, "Could not toggle user state."), variant: "destructive", duration: 12000 });
     }
   };
@@ -118,20 +141,50 @@ export default function UserManagement() {
     <div className="space-y-5 max-w-4xl mx-auto p-6 lg:p-8">
       <Breadcrumbs items={[{ label: "Settings", href: "/billing/settings" }, { label: "User Management" }]} />
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
             <Users className="w-5 h-5 text-primary" />
           </div>
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">User Management</h1>
-            <p className="text-sm text-muted-foreground">{pluralize(users.length, "user")}</p>
+            <p className="text-sm text-muted-foreground">
+              {users.length === filteredUsers.length
+                ? pluralize(users.length, "user")
+                : `${filteredUsers.length} of ${pluralize(users.length, "user")}`}
+            </p>
           </div>
         </div>
         <button onClick={() => setShowCreate(!showCreate)} className={cn("text-[13px]", showCreate ? "premium-btn-ghost" : "premium-btn-primary")}>
           {showCreate ? <><X className="w-4 h-4" /> Cancel</> : <><Plus className="w-4 h-4" /> Add User</>}
         </button>
       </div>
+
+      {/* Filter row — search by name / username / email, role, active.
+          Past a handful of users the page was an undifferentiated scroll;
+          this makes it actually navigable. */}
+      {users.length > 3 && (
+        <div className="elevated-card rounded-2xl p-3 flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, username, or email…" className="premium-input pl-9 w-full text-[13px]" />
+          </div>
+          <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as any)} className="premium-select text-[12px]">
+            <option value="all">All Roles</option>
+            <option value="admin">Admin</option>
+            <option value="editor">Editor</option>
+            <option value="viewer">Viewer</option>
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="premium-select text-[12px]">
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          {(search || roleFilter !== "all" || statusFilter !== "all") && (
+            <button onClick={() => { setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }} className="text-[12px] text-destructive hover:underline font-medium px-2">Clear</button>
+          )}
+        </div>
+      )}
 
       {/* Create User Form */}
       {showCreate && (
@@ -164,20 +217,24 @@ export default function UserManagement() {
           <div className="p-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" /></div>
         ) : (
           <div className="overflow-x-auto -mx-px">
-          <table className="table-premium text-[13px] min-w-[640px]">
-            <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+          <table className="table-premium text-[13px] min-w-[720px]">
+            <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Last Login</th><th>Actions</th></tr></thead>
             <tbody>
-              {users.map((u) => {
+              {filteredUsers.map((u) => {
                 const rc = ROLE_CONFIG[u.role as keyof typeof ROLE_CONFIG] || ROLE_CONFIG.viewer;
+                // Initials sourced from full_name (display name) with
+                // username fallback — matches the convention used on
+                // CustomerList / BusinessList for consistency.
+                const initial = (u.full_name || u.username || "?").trim().charAt(0).toUpperCase();
                 return (
                   <tr key={u.id}>
                     <td>
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold">
-                          {u.username.charAt(0).toUpperCase()}
+                          {initial}
                         </div>
                         <div>
-                          <p className="font-medium">{u.full_name}</p>
+                          <p className="font-medium">{u.full_name || u.username}</p>
                           <p className="text-[10px] text-muted-foreground">@{u.username}</p>
                         </div>
                       </div>
@@ -200,6 +257,9 @@ export default function UserManagement() {
                         {u.is_active ? "Active" : "Inactive"}
                       </span>
                     </td>
+                    <td className="text-muted-foreground text-[11px]" title={u.date_joined ? new Date(u.date_joined).toLocaleString("en-IN") : ""}>
+                      {u.date_joined ? new Date(u.date_joined).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                    </td>
                     <td className="text-muted-foreground text-[11px]">
                       {u.last_login ? new Date(u.last_login).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Never"}
                     </td>
@@ -216,16 +276,41 @@ export default function UserManagement() {
                   </tr>
                 );
               })}
+              {filteredUsers.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm font-medium text-foreground/70">
+                      {users.length === 0 ? "No users yet" : "No users match these filters"}
+                    </p>
+                    {users.length === 0 ? (
+                      <button onClick={() => setShowCreate(true)} className="mt-2 text-[12px] text-primary hover:underline font-medium inline-flex items-center gap-1.5">
+                        <Plus className="w-3 h-3" /> Create your first user
+                      </button>
+                    ) : (
+                      <button onClick={() => { setSearch(""); setRoleFilter("all"); setStatusFilter("all"); }} className="mt-2 text-[12px] text-primary hover:underline font-medium">Clear filters</button>
+                    )}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
           </div>
         )}
       </div>
 
-      {/* Role Legend */}
-      <div className="elevated-card rounded-2xl p-5">
-        <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Role Permissions</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-[12px]">
+      {/* Role legend — collapsed by default. Reference info that's
+          mostly read once and then ignored; folding it saves ~180px on
+          the typical render. Stays first-class via the chevron. */}
+      <details className="elevated-card rounded-2xl group">
+        <summary className="flex items-center justify-between p-4 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+          <div className="flex items-center gap-2">
+            <Shield className="w-3.5 h-3.5 text-muted-foreground" />
+            <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">Role Permissions</h3>
+          </div>
+          <span className="text-muted-foreground group-open:rotate-90 transition-transform">›</span>
+        </summary>
+        <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4 text-[12px]">
           {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
             <div key={key} className="space-y-1">
               <span className={cn("premium-badge text-[10px]", cfg.bg, cfg.color)}>{cfg.label}</span>
@@ -237,7 +322,7 @@ export default function UserManagement() {
             </div>
           ))}
         </div>
-      </div>
+      </details>
     </div>
   );
 }

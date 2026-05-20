@@ -8,7 +8,8 @@ import { useState, useEffect } from "react";
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
-  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check,
+  FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check, Loader2,
+  Image as ImageIcon,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
 import { cn, pluralize } from "@/utils/utils";
@@ -108,7 +109,16 @@ export default function InvoiceDetail() {
     }
   };
 
-  if (isLoading) return <div className="p-8 text-muted-foreground">Loading invoice...</div>;
+  if (isLoading) {
+    return (
+      <div className={cn("animate-fade-in", isMobile ? "p-4" : "p-6 lg:p-8")}>
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          <span className="text-[13px]">Loading invoice…</span>
+        </div>
+      </div>
+    );
+  }
 
   // Number-slug lookup found multiple matches — render a picker so the
   // user can pick which business they meant. Only happens when the URL
@@ -167,7 +177,49 @@ export default function InvoiceDetail() {
     );
   }
 
-  if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
+  if (!inv) {
+    // Dead-end "Invoice not found" cases:
+    //   - User followed a stale Audit Log link (action on a deleted
+    //     invoice). The audit entry stays even after the invoice is
+    //     gone, so any "Updated" / "Printed" link on a since-deleted
+    //     row lands here.
+    //   - User typed an id-based URL that doesn't exist.
+    //   - User opened a number-based URL whose number was renamed.
+    //
+    // The previous state was a flat single line of grey text — no way to
+    // get back into the app. This branch tries to surface what we DO
+    // know (the slug or candidate matches if the lookup found any),
+    // and gives the user CTAs that lead somewhere useful.
+    return (
+      <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 max-w-3xl mx-auto")}>
+        <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: slug || "Not found" }]} />
+        <div className="elevated-card rounded-2xl p-8 flex flex-col items-center text-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7 text-warning" />
+          </div>
+          <div>
+            <h2 className="text-[16px] font-display font-semibold text-foreground">Invoice not found</h2>
+            <p className="text-[12px] text-muted-foreground mt-1 max-w-md">
+              {/^\d+$/.test(slug || "")
+                ? <>Internal id <span className="font-mono text-foreground">{slug}</span> doesn't exist. It may have been deleted, or the link is from an older database.</>
+                : <>No invoice matches <span className="font-mono text-foreground">{slug}</span>. Check the number or use the list / search.</>}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px]">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <Link to="/billing/invoice/list" className="premium-btn-outline text-[13px] border-primary/30 text-primary">
+              <FileText className="w-4 h-4" /> All Invoices
+            </Link>
+            <Link to="/billing/audit-log" className="premium-btn-ghost text-[13px]">
+              <Clock className="w-4 h-4" /> View Audit Log
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
 
   const itemChartData = inv.items.map((item) => ({
@@ -253,35 +305,59 @@ export default function InvoiceDetail() {
       <div className={cn("grid gap-6", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
         {/* Left: Parties + Items */}
         <div className={cn(isMobile ? "" : "lg:col-span-2", "space-y-6")}>
-          {/* Parties */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="elevated-card rounded-2xl p-5 space-y-2">
-              <div className="flex items-center gap-2 mb-1">
-                <Building2 className="w-4 h-4 text-primary" />
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">From</p>
-              </div>
-              <p className="text-[14px] font-display font-bold text-foreground">{inv.businessName}</p>
-              {biz && (biz.gst_number || biz.address) && (
-                <div className="space-y-1 text-[12px] text-muted-foreground">
-                  {biz.gst_number && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{biz.gst_number}</span></p>}
-                  {biz.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{biz.address}</p>}
+          {/* Parties — FROM/TO depend on direction.
+              For OUTWARD (sale): we issued the invoice → FROM=us, TO=customer.
+              For INWARD (purchase): supplier issued it → FROM=customer, TO=us.
+              The icon also flips with the entity (Building2 = business,
+              User = customer) so the visual stays consistent. */}
+          {(() => {
+            const isInward = inv.type === "INWARD";
+            const businessCard = {
+              entity: "business" as const,
+              name: inv.businessName,
+              gstin: biz?.gst_number,
+              address: biz?.address,
+              link: null,  // we don't link to business detail from invoice — same business throughout
+            };
+            const customerCard = {
+              entity: "customer" as const,
+              name: inv.customerName,
+              gstin: customer?.gst_number,
+              address: customer?.address,
+              link: `/billing/customer/${inv.customerId}`,
+            };
+            const fromParty = isInward ? customerCard : businessCard;
+            const toParty   = isInward ? businessCard : customerCard;
+            const renderCard = (party: typeof businessCard, label: "From" | "To") => {
+              const Icon = party.entity === "business" ? Building2 : User;
+              const iconColor = party.entity === "business" ? "text-primary" : "text-chart-3";
+              return (
+                <div className="elevated-card rounded-2xl p-5 space-y-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={cn("w-4 h-4", iconColor)} />
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
+                  </div>
+                  {party.link ? (
+                    <Link to={party.link} className="text-[14px] font-display font-bold text-primary hover:underline block">{party.name}</Link>
+                  ) : (
+                    <p className="text-[14px] font-display font-bold text-foreground">{party.name}</p>
+                  )}
+                  {(party.gstin || party.address) && (
+                    <div className="space-y-1 text-[12px] text-muted-foreground">
+                      {party.gstin && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{party.gstin}</span></p>}
+                      {party.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{party.address}</p>}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="elevated-card rounded-2xl p-5 space-y-2">
-              <div className="flex items-center gap-2 mb-1">
-                <User className="w-4 h-4 text-chart-3" />
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">To</p>
+              );
+            };
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {renderCard(fromParty, "From")}
+                {renderCard(toParty, "To")}
               </div>
-              <Link to={`/billing/customer/${inv.customerId}`} className="text-[14px] font-display font-bold text-primary hover:underline">{inv.customerName}</Link>
-              {customer && (customer.gst_number || customer.address) && (
-                <div className="space-y-1 text-[12px] text-muted-foreground">
-                  {customer.gst_number && <p className="flex items-center gap-1.5"><Hash className="w-3 h-3" /><span className="font-mono">{customer.gst_number}</span></p>}
-                  {customer.address && <p className="flex items-center gap-1.5"><MapPin className="w-3 h-3" />{customer.address}</p>}
-                </div>
-              )}
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Line Items */}
           <div className="elevated-card rounded-2xl overflow-hidden">
@@ -352,6 +428,55 @@ export default function InvoiceDetail() {
 
         {/* Right Sidebar */}
         <div className="space-y-5">
+          {/* Source image — populated by AI Import.
+              `sourcePreview` is the JPEG-converted version we save
+              alongside the original for browser-safe inline display
+              (HEIC originals don't render in Chrome/Firefox).
+              `sourceFile` is the untouched original — used for the
+              Download button + the click-to-open-full-size link, so
+              the audit trail stays bit-for-bit faithful. Falls back
+              to sourceFile for the inline <img> on older imports
+              that don't have a preview yet. */}
+          {inv.sourceFile && (
+            <div className="elevated-card rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-[13px] font-display font-semibold text-foreground flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-chart-3" /> Source Image
+                </h2>
+                <a
+                  href={inv.sourceFile}
+                  download
+                  className="text-[11px] text-primary font-semibold flex items-center gap-1 hover:underline"
+                  title="Download original file"
+                >
+                  <Download className="w-3 h-3" /> Download
+                </a>
+              </div>
+              <a href={inv.sourceFile} target="_blank" rel="noreferrer" className="block">
+                <img
+                  src={inv.sourcePreview || inv.sourceFile}
+                  alt="Source invoice"
+                  className="w-full rounded-lg border border-border/40 hover:border-primary/40 transition-colors"
+                  onError={(e) => {
+                    // Defensive fallback in case preview generation
+                    // failed AND the original is HEIC — show the
+                    // download CTA instead of a broken-image icon.
+                    (e.target as HTMLImageElement).style.display = "none";
+                    const fallback = (e.target as HTMLImageElement).nextElementSibling;
+                    if (fallback) (fallback as HTMLElement).style.display = "flex";
+                  }}
+                />
+                <div className="hidden flex-col items-center gap-2 py-8 text-muted-foreground text-[11px] text-center">
+                  <ImageIcon className="w-10 h-10 opacity-40" />
+                  <span>Preview unavailable — click "Download" above to view.</span>
+                </div>
+              </a>
+              <p className="text-[10px] text-muted-foreground">
+                Original uploaded for AI extraction · click image to open full size
+              </p>
+            </div>
+          )}
+
           {/* Summary */}
           <div className="elevated-card rounded-2xl p-5 space-y-3">
             <h2 className="text-[13px] font-display font-semibold text-foreground">Financial Summary</h2>

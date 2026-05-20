@@ -5,7 +5,7 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   ArrowLeft, Pencil, Trash2, Phone, Mail, Building2, CreditCard,
   Plus, MapPin, Hash, TrendingUp, TrendingDown, Scale, Receipt,
-  Copy, CheckCircle2, Eye, Users, FileText, Landmark,
+  Copy, CheckCircle2, Eye, Users, FileText, Landmark, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -30,8 +30,27 @@ export default function BusinessDetail() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  if (isLoading) return <div className="p-8 text-muted-foreground">Loading business...</div>;
-  if (!biz) return <div className="p-8 text-muted-foreground">Business not found.</div>;
+  // Consistent loading + not-found treatment — mirrors InvoiceDetail.
+  if (isLoading) return (
+    <div className="p-10 flex items-center gap-3 text-muted-foreground">
+      <Loader2 className="w-5 h-5 animate-spin" />
+      <span className="text-sm">Loading business…</span>
+    </div>
+  );
+  if (!biz) return (
+    <div className="p-10 max-w-md mx-auto">
+      <div className="elevated-card rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center">
+          <Building2 className="w-7 h-7 text-warning" />
+        </div>
+        <div>
+          <h2 className="text-[16px] font-display font-semibold text-foreground">Business not found</h2>
+          <p className="text-xs text-muted-foreground mt-1">This business may have been deleted or the link is stale.</p>
+        </div>
+        <Link to="/billing/business/list" className="premium-btn-ghost text-sm"><ArrowLeft className="w-4 h-4" /> Back to businesses</Link>
+      </div>
+    </div>
+  );
 
   const bizInvoices = invoices.filter((inv) => String(inv.businessId) === String(id));
   const bizCustomers = customers.filter((c) => (c.businesses || []).some(bid => String(bid) === String(id)));

@@ -287,7 +287,24 @@ if REDIS_PASSWORD:
     }
 
 # AI Configuration
+# Active extractor: Google Gemini (billing.utils.AIInvoiceProcessor).
+# Free key at https://aistudio.google.com/apikey. The model is
+# overridable for A/B testing — Gemini 2.5 Flash is the free-tier
+# sweet spot, Pro is paid + slower but more accurate on tough scans.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Multi-key rotation: comma-separated list of Gemini keys. The
+# extractor tries each in order, marks 429'd keys as cooled down for
+# the retry-after window suggested by the API, and skips them on
+# subsequent calls. Effectively multiplies the free-tier daily cap
+# (20/day on flash-lite) by the number of keys. Keys can come from
+# different Google accounts — each has its own quota.
+# Backward compat: single GEMINI_API_KEY is appended to this list if
+# both are set.
+GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
+# flash-lite default — ~3s/invoice vs ~15s for full Flash with no
+# measurable quality loss on printed invoices. Override per-environment
+# via .env for tougher scans. See AIInvoiceProcessor.DEFAULT_MODEL.
+GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash-lite")
 # Ensure log dir exists — django.utils.log.configure_logging will fail to
 # attach the FileHandler otherwise (fresh checkouts and CI runners).
 os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)

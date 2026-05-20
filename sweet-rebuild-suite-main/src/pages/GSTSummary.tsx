@@ -414,7 +414,7 @@ export default function GSTSummary() {
   }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, recon, aging, isHydrating]);
 
   return (
-    <div className={cn("space-y-4", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-5")}>
+    <div className={cn("space-y-4", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 space-y-5")}>
       <Breadcrumbs items={[{ label: "Reports", href: "/billing/reports" }, { label: "GST" }]} />
 
       {/* Header */}
@@ -442,7 +442,10 @@ export default function GSTSummary() {
             <button onClick={() => setUseCustomRange(false)} className={cn("px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all", !useCustomRange ? "bg-primary/15 border-primary/30 text-primary" : "bg-muted/50 border-border/40 text-muted-foreground hover:text-foreground")}>By Month</button>
             <button onClick={() => setUseCustomRange(true)} className={cn("px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all", useCustomRange ? "bg-primary/15 border-primary/30 text-primary" : "bg-muted/50 border-border/40 text-muted-foreground hover:text-foreground")}>Custom Range</button>
           </div>
-          {!isMobile && <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select w-auto text-[13px]"><option value="all">All Businesses</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>}
+          {/* Business filter — visible on mobile too. Hiding it before meant
+              mobile users couldn't scope GST math to a specific business and
+              might mistake combined figures for single-business totals. */}
+          <select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className={cn("premium-select w-auto text-[13px]", isMobile && "flex-1 min-w-0 text-[12px]")}><option value="all">All Businesses</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
         </div>
         {useCustomRange ? (
           <DateRangePicker startDate={customStart} endDate={customEnd} onStartChange={setCustomStart} onEndChange={setCustomEnd} fyStart={fyStart} />

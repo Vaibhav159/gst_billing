@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3, FileBarChart2 } from "lucide-react";
+import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3, FileBarChart2, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatCurrency, formatDate, currentFY } from "@/utils/mockData";
 import { useDashboardStats, useInvoices, mapDjangoInvoice } from "@/hooks/useDataStore";
@@ -127,8 +127,10 @@ export default function EasyDashboard({ selectedFY }: Props) {
         <div className="space-y-2.5">
           {recentInvoices.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-              <FileText className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">{isLoading ? "Loading..." : "No invoices yet"}</p>
+              {isLoading
+                ? <Loader2 className="w-6 h-6 animate-spin text-primary/70" />
+                : <FileText className="w-10 h-10 opacity-30" />}
+              <p className="text-sm font-medium">{isLoading ? "Loading invoices…" : "No invoices yet"}</p>
               {!isLoading && <p className="text-xs">Create your first invoice above</p>}
             </div>
           )}

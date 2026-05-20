@@ -1,4 +1,5 @@
 import csv
+import json
 import logging
 from calendar import monthrange
 from datetime import datetime
@@ -3063,31 +3064,46 @@ class AIInvoiceProcessingView(APIView):
 
             image_file = request.FILES["image"]
 
-            # Validate file type
-            allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+            # HEIC added for iPhone photo uploads — pillow-heif registered
+            # an opener on Pillow, and AIInvoiceProcessor._normalize_image
+            # always re-encodes to JPEG before going to Gemini (which only
+            # accepts JPEG/PNG inline). Browsers send `image/heic` or
+            # `image/heif`; some HEIC files come through as
+            # `application/octet-stream` because the browser couldn't
+            # sniff them — we let those through and rely on PIL to
+            # validate during normalization.
+            allowed_types = [
+                "image/jpeg", "image/jpg", "image/png",
+                "image/heic", "image/heif",
+                "application/octet-stream",  # fallback for .heic from some browsers
+            ]
             if image_file.content_type not in allowed_types:
                 return Response(
                     {
-                        "error": "Invalid file type. Please upload a JPEG, PNG, or WebP image."
+                        "error": (
+                            f"Unsupported image type '{image_file.content_type}'. "
+                            "Upload a JPEG, PNG, or HEIC."
+                        )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Validate file size (max 10MB)
-            if image_file.size > 10 * 1024 * 1024:
+            # Validate file size (max 20MB — bumped from 10MB to handle
+            # modern iPhone HEIC photos which routinely hit 10-15MB).
+            if image_file.size > 20 * 1024 * 1024:
                 return Response(
                     {
-                        "error": "File size too large. Please upload an image smaller than 10MB."
+                        "error": "File too large. Maximum size is 20MB."
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            business_id = request.data.get("business_id")
-            if not business_id:
-                return Response(
-                    {"error": "Business ID is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            # business_id is OPTIONAL — when omitted, the AI extracts the
+            # recipient GSTIN from the invoice and the frontend looks up
+            # the matching Business after extraction. When provided, the
+            # prompt is scoped to that business's customers for better
+            # match accuracy on suppliers we already know.
+            business_id = request.data.get("business_id") or None
 
             # Process the image with AI
             processor = AIInvoiceProcessor()
@@ -3095,10 +3111,140 @@ class AIInvoiceProcessingView(APIView):
                 image_file, business_id=business_id
             )
 
+            # Auto-detect which Business this invoice belongs to AND the
+            # invoice direction. We check EVERY GSTIN the AI extracted
+            # (buyer, seller, AND the legacy customer_gst_number),
+            # because in practice the AI sometimes ignores the
+            # buyer/seller split and only fills the legacy customer
+            # field — particularly on Indian invoices where the "Bill
+            # To" block is the most visually prominent block.
+            #
+            # Routing:
+            #   - GSTIN matches on buyer or customer side → our business
+            #     bought from someone → INWARD. The "customer" (in the
+            #     app's data-model sense, i.e. the OTHER party) is the
+            #     seller.
+            #   - GSTIN matches on seller side → our business sold to
+            #     someone → OUTWARD. The "customer" is the buyer.
+            #
+            # If the AI confused itself and put our business's data into
+            # the customer_* fields, we'll detect this here and clear
+            # them — user fills in the actual supplier/buyer manually
+            # rather than seeing their own business listed as the
+            # customer (the previous behaviour, which the user flagged
+            # as wrong).
+            matched_business = None
+            detected_type = None
+            our_role: str | None = None  # "buyer" or "seller"
+
+            buyer_gstin = (extracted_data.get("buyer_gst_number") or "").strip().upper()
+            seller_gstin = (extracted_data.get("seller_gst_number") or "").strip().upper()
+            customer_gstin = (extracted_data.get("customer_gst_number") or "").strip().upper()
+
+            for gstin, role in (
+                (buyer_gstin, "buyer"),
+                (seller_gstin, "seller"),
+                (customer_gstin, "customer"),  # legacy AI fill — usually = buyer
+            ):
+                if not gstin:
+                    continue
+                biz = Business.objects.filter(gst_number=gstin).first()
+                if biz:
+                    matched_business = {
+                        "id": biz.id, "name": biz.name, "gst_number": biz.gst_number,
+                    }
+                    # buyer + customer (the most common AI conflation)
+                    # both mean we were the recipient → INWARD.
+                    our_role = "seller" if role == "seller" else "buyer"
+                    detected_type = (
+                        INVOICE_TYPE_OUTWARD if our_role == "seller"
+                        else INVOICE_TYPE_INWARD
+                    )
+                    break
+
+            if matched_business:
+                # Promote the OTHER party into the legacy customer_*
+                # fields the review form binds against. Preference
+                # order: the explicit field for that side → the legacy
+                # customer field if it's not our own business name.
+                our_gstin = matched_business["gst_number"]
+                our_name_upper = matched_business["name"].upper()
+                if our_role == "buyer":
+                    other_name = extracted_data.get("seller_name") or ""
+                    other_gstin = seller_gstin
+                else:
+                    other_name = extracted_data.get("buyer_name") or ""
+                    other_gstin = buyer_gstin
+
+                # Fall back to the legacy customer_* fields ONLY if they
+                # don't refer to our own business (avoids the AI's
+                # mistake leaking through to the review form).
+                legacy_name = extracted_data.get("customer_name") or ""
+                if not other_name and legacy_name and legacy_name.upper() != our_name_upper:
+                    other_name = legacy_name
+                if not other_gstin and customer_gstin and customer_gstin != our_gstin:
+                    other_gstin = customer_gstin
+
+                extracted_data["customer_name"] = other_name
+                extracted_data["customer_gst_number"] = other_gstin
+
+                # ── Backfill from existing Customer if we can find one ──
+                # AI vision often misses small text like GSTINs (15
+                # alphanumeric chars in fine print). The Customer table
+                # is the source of truth — if a Customer matches the
+                # extracted name and/or GSTIN, copy the missing fields
+                # (GSTIN, address, PAN, mobile) from the DB record so
+                # the review form is fully populated.
+                # Match priority:
+                #   1. Exact GSTIN match (most reliable identifier)
+                #   2. Case-insensitive name match scoped to the
+                #      matched business (multi-state suppliers have
+                #      distinct rows; we want the one this business
+                #      actually transacts with)
+                existing = None
+                if other_gstin:
+                    existing = Customer.objects.filter(gst_number=other_gstin).first()
+                if existing is None and other_name:
+                    existing = (
+                        Customer.objects.filter(
+                            businesses__id=matched_business["id"],
+                            name__iexact=other_name,
+                        ).first()
+                    )
+                if existing:
+                    # Always trust DB for canonical name (handles AI
+                    # casing/whitespace differences). Backfill the rest
+                    # only when AI didn't extract them.
+                    extracted_data["customer_name"] = existing.name
+                    if not extracted_data.get("customer_gst_number") and existing.gst_number:
+                        extracted_data["customer_gst_number"] = existing.gst_number
+                    for db_field, ai_key in (
+                        ("address", "customer_address"),
+                        ("pan_number", "customer_pan_number"),
+                        ("mobile_number", "customer_mobile_number"),
+                    ):
+                        if not extracted_data.get(ai_key) and getattr(existing, db_field, ""):
+                            extracted_data[ai_key] = getattr(existing, db_field)
+
+            # Strip internal-only fields before responding. _key_index
+            # / _key_total are re-surfaced at the top level so the UI
+            # can show "Gemini #2/3" during a bulk import.
+            extracted_data.pop("_provider", None)
+            key_index = extracted_data.pop("_key_index", None)  # 1-indexed
+            key_total = extracted_data.pop("_key_total", None)
+
             return Response(
                 {
                     "success": True,
                     "data": extracted_data,
+                    "matched_business": matched_business,  # null if no DB match
+                    "detected_type": detected_type,        # "inward" / "outward" / null
+                    # Which of the N rotated Gemini keys handled this
+                    # request. Lets the UI show "Gemini #2/3" so the
+                    # user can see when they're burning through the
+                    # key pool.
+                    "key_index": key_index,
+                    "key_total": key_total,
                     "message": "Invoice data extracted successfully",
                 }
             )
@@ -3122,12 +3268,31 @@ class AIInvoiceCreateView(APIView):
     API endpoint for creating invoices from AI-extracted data.
     """
 
+    # Accept both JSON (legacy / non-AI flows) and multipart (AI Import
+    # which now ships the original source image alongside the extracted
+    # data so we can store an audit-trail copy).
+    parser_classes = [MultiPartParser, JSONParser]
+
     def post(self, request):
-        """Create invoice from AI-extracted data"""
+        """Create an invoice from AI-extracted data.
+
+        Three latent bugs in the previous version were fixed here:
+          1. `Customer.objects.get(name=...)` raised DoesNotExist (→ 500)
+             when the AI returned a name that wasn't an exact match.
+             Case-insensitive lookup scoped to the chosen business now,
+             with a clear 400 + customer_name in the response so the
+             frontend can prompt the user to create them first.
+          2. `type_of_invoice` was hardcoded OUTWARD. Now respects the
+             `type_of_invoice` field in the request body (defaulting to
+             OUTWARD), so purchase invoices can be imported too.
+          3. The `customer_data` dict was built but never used — the
+             extracted address/GST/PAN/mobile from OCR was silently
+             dropped. Now we backfill empty customer fields from
+             extracted data (never overwrite curated values; OCR can
+             misread a GSTIN).
+        """
         try:
-            # Validate required fields
-            required_fields = ["business_id", "invoice_data"]
-            for field in required_fields:
+            for field in ("business_id", "invoice_data"):
                 if field not in request.data:
                     return Response(
                         {"error": f"Missing required field: {field}"},
@@ -3135,53 +3300,240 @@ class AIInvoiceCreateView(APIView):
                     )
 
             business_id = request.data["business_id"]
+            # When the request comes in as multipart (AI Import sends
+            # the source image alongside), nested JSON fields arrive
+            # as strings. Parse on the way in so the rest of the view
+            # is agnostic to wire format.
             invoice_data = request.data["invoice_data"]
+            if isinstance(invoice_data, str):
+                try:
+                    invoice_data = json.loads(invoice_data)
+                except json.JSONDecodeError as e:
+                    return Response(
+                        {"error": f"invoice_data is not valid JSON: {e!s}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            # Optional source image — kept as audit trail of what the
+            # AI actually saw. Saved to invoice.source_file after the
+            # Invoice row is created (need invoice.pk first for the
+            # upload path).
+            source_file = request.FILES.get("source_file")
+            type_of_invoice = (
+                request.data.get("type_of_invoice") or INVOICE_TYPE_OUTWARD
+            )
+            if type_of_invoice not in (INVOICE_TYPE_OUTWARD, INVOICE_TYPE_INWARD):
+                return Response(
+                    {"error": "type_of_invoice must be 'outward' or 'inward'"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            # Validate business exists
             try:
                 business = Business.objects.get(id=business_id)
             except Business.DoesNotExist:
                 return Response(
-                    {"error": "Business not found"}, status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Business not found"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Create or get customer
-            customer_data = {
-                "name": invoice_data.get("customer_name", ""),
-                "address": invoice_data.get("customer_address", ""),
-                "gst_number": invoice_data.get("customer_gst_number", ""),
-                "pan_number": invoice_data.get("customer_pan_number", ""),
-                "mobile_number": invoice_data.get("customer_mobile_number", ""),
-            }
+            extracted_name = (invoice_data.get("customer_name") or "").strip()
+            if not extracted_name:
+                return Response(
+                    {"error": "Customer name missing in extracted data."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            customer = Customer.objects.get(name=customer_data["name"])
+            # Match strategy (in priority order):
+            #   1. GSTIN exact match (most reliable — uniquely identifies
+            #      the supplier even if the name varies).
+            #   2. Name case-insensitive match scoped to this business.
+            #   3. Auto-create if extracted GSTIN is present — matches
+            #      the GSTR-2A import behaviour, lower friction than
+            #      forcing the user to bounce out and create manually.
+            #      Name conflicts are disambiguated with state/GSTIN
+            #      suffix (mirror of GSTR-2A's logic).
+            extracted_gstin = (invoice_data.get("customer_gst_number") or "").strip().upper()
+            customer = None
+            if extracted_gstin:
+                customer = Customer.objects.filter(gst_number=extracted_gstin).first()
+            if not customer:
+                customer = (
+                    Customer.objects.filter(
+                        businesses__id=business_id, name__iexact=extracted_name
+                    ).first()
+                )
+            if not customer:
+                if not extracted_gstin:
+                    # No GSTIN to auto-create with — surface a clear error
+                    # so the user creates the customer manually with the
+                    # right details. Better than guessing.
+                    return Response(
+                        {
+                            "error": (
+                                f"Customer '{extracted_name}' not found for this "
+                                "business and no GSTIN was extracted to auto-create. "
+                                "Add the customer manually first."
+                            ),
+                            "customer_name": extracted_name,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # Auto-create with disambiguated name if needed.
+                extracted_state = (invoice_data.get("customer_state_name") or "").strip()
+                final_name = extracted_name[:255]
+                if Customer.objects.filter(name=final_name).exists():
+                    if extracted_state:
+                        candidate = f"{final_name} ({extracted_state})"[:255]
+                        if not Customer.objects.filter(name=candidate).exists():
+                            final_name = candidate
+                    if Customer.objects.filter(name=final_name).exists():
+                        final_name = f"{extracted_name[:230]} · {extracted_gstin}"[:255]
+                customer = Customer.objects.create(
+                    name=final_name,
+                    gst_number=extracted_gstin,
+                    address=(invoice_data.get("customer_address") or "").strip(),
+                    pan_number=(invoice_data.get("customer_pan_number") or "").strip(),
+                    mobile_number=(invoice_data.get("customer_mobile_number") or "").strip(),
+                    state_name=extracted_state[:255] if extracted_state else "",
+                )
 
-            # Create invoice
+            # Backfill empty customer fields — never overwrite curated
+            # data because OCR can misread a GSTIN/PAN by a digit.
+            dirty = False
+            for db_field, extracted_key in (
+                ("address", "customer_address"),
+                ("gst_number", "customer_gst_number"),
+                ("pan_number", "customer_pan_number"),
+                ("mobile_number", "customer_mobile_number"),
+            ):
+                val = (invoice_data.get(extracted_key) or "").strip()
+                if val and not getattr(customer, db_field, ""):
+                    setattr(customer, db_field, val)
+                    dirty = True
+            if dirty:
+                customer.save()
+
+            # Dedup check — same natural key as GSTR-2A import: a given
+            # (business, customer, invoice_number, invoice_date) tuple
+            # uniquely identifies a real-world invoice. Re-uploading
+            # the same image through AI Import should NOT create a
+            # second DB row. Returns the existing invoice instead so
+            # the frontend can still link to it.
+            inv_number = invoice_data.get("invoice_number", "") or ""
+            inv_date = (
+                invoice_data.get("invoice_date") or datetime.now().date()
+            )
+            existing = (
+                Invoice.objects.filter(
+                    business_id=business_id,
+                    customer_id=customer.id,
+                    invoice_number__iexact=inv_number,
+                    invoice_date=inv_date,
+                ).first()
+            )
+            if existing is not None:
+                return Response(
+                    {
+                        "success": True,
+                        "invoice_id": existing.id,
+                        "invoice_number": existing.invoice_number,
+                        "customer_name": customer.name,
+                        "line_items_created": 0,
+                        "total_amount": existing.total_amount,
+                        "duplicate": True,
+                        "message": (
+                            f"Invoice {inv_number} from {customer.name} on "
+                            f"{inv_date} already exists — skipped duplicate."
+                        ),
+                    }
+                )
+
             invoice = Invoice.objects.create(
                 customer=customer,
                 business=business,
-                invoice_number=invoice_data.get("invoice_number", ""),
-                invoice_date=invoice_data.get("invoice_date", datetime.now().date()),
-                type_of_invoice=INVOICE_TYPE_OUTWARD,
-                total_amount=invoice_data.get("total_amount", 0),
+                invoice_number=inv_number,
+                invoice_date=inv_date,
+                type_of_invoice=type_of_invoice,
+                total_amount=invoice_data.get("total_amount", 0) or 0,
             )
 
-            # Create line items
+            # Persist the source image as audit trail. Done AFTER
+            # Invoice.objects.create() because FileField.save() with
+            # save=True triggers another model save — keeps the upload
+            # path deterministic regardless of pre-save signals.
+            #
+            # Also generate a JPEG preview alongside the original.
+            # Chrome/Firefox can't render HEIC inline so without this
+            # the InvoiceDetail page shows a broken-image fallback.
+            # _normalize_image is the same path AIInvoiceProcessor
+            # uses to prep images for Gemini (PIL + pillow-heif decode
+            # → JPEG q=88), so we get a browser-safe preview for free.
+            # Preview generation is best-effort — if it fails the
+            # original is still there and downloadable.
+            if source_file is not None:
+                invoice.source_file.save(source_file.name, source_file, save=True)
+                try:
+                    source_file.seek(0)
+                    original_bytes = source_file.read()
+                    jpeg_bytes, _ = AIInvoiceProcessor._normalize_image(
+                        original_bytes,
+                        source_file.content_type or "image/jpeg",
+                    )
+                    from django.core.files.base import ContentFile
+                    base = source_file.name.rsplit(".", 1)[0] or "preview"
+                    invoice.source_preview.save(
+                        f"{base}.jpg", ContentFile(jpeg_bytes), save=True
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not generate preview for invoice %s: %s",
+                        invoice.pk, e,
+                    )
+
+            # Compute per-line tax breakdown. Previous version created
+            # LineItems with cgst/sgst/igst all defaulting to 0 — the
+            # invoice showed up in the UI with Total Tax: ₹0 even
+            # when the AI correctly extracted gst_tax_rate=0.03.
+            # User flagged this on a SOLANKI inward invoice.
+            #
+            # Also recompute `amount` from qty * rate * (1 + gst_rate)
+            # because the AI sometimes returns the PRE-tax subtotal in
+            # the supposedly-tax-inclusive `amount` slot. Recomputing
+            # ensures Invoice.total_amount = sum(LineItem.amount) =
+            # actual tax-inclusive total, internally consistent.
+            from decimal import Decimal as _D
+            is_igst = invoice.is_igst_applicable
             line_items_created = 0
-            for item_data in invoice_data.get("line_items", []):
+            for item_data in invoice_data.get("line_items", []) or []:
+                qty = _D(str(item_data.get("quantity", 0) or 0))
+                rate = _D(str(item_data.get("rate", 0) or 0))
+                gst_rate = _D(str(item_data.get("gst_tax_rate", 0.03) or 0.03))
+                pre_tax = qty * rate
+                tax = pre_tax * gst_rate
+                amount = pre_tax + tax  # tax-inclusive — matches app contract
+                if is_igst:
+                    igst, cgst, sgst = tax, _D("0"), _D("0")
+                else:
+                    cgst = sgst = tax / _D("2")
+                    igst = _D("0")
                 LineItem.objects.create(
                     customer=customer,
                     invoice=invoice,
-                    product_name=item_data.get("product_name", ""),
-                    hsn_code=item_data.get("hsn_code", ""),
-                    gst_tax_rate=item_data.get("gst_tax_rate", 0.03),
-                    quantity=item_data.get("quantity", 0),
-                    rate=item_data.get("rate", 0),
-                    amount=item_data.get("amount", 0),
+                    product_name=item_data.get("product_name", "") or "",
+                    hsn_code=item_data.get("hsn_code", "") or "",
+                    gst_tax_rate=gst_rate,
+                    quantity=qty,
+                    rate=rate,
+                    amount=amount,
+                    cgst=cgst,
+                    sgst=sgst,
+                    igst=igst,
                 )
                 line_items_created += 1
 
-            # Update invoice total
+            # Recompute invoice total from line items — `amount` is the
+            # tax-inclusive line subtotal (matches InvoiceForm's contract),
+            # so summing gives the true total even if the AI's
+            # `total_amount` was off.
             invoice.total_amount = sum(
                 LineItem.objects.filter(invoice=invoice).values_list(
                     "amount", flat=True
@@ -3202,9 +3554,25 @@ class AIInvoiceCreateView(APIView):
             )
 
         except Exception as e:
-            logger.error(f"Error creating invoice from AI data: {e}", exc_info=True)
+            # Full traceback to logs (with exc_info) — that's where the
+            # actual exception type, line, and stack live for debugging.
+            # The user sees a generic message; surfacing raw Python
+            # errors like "name 'json' is not defined" is bad UX and a
+            # mild info leak (tells anyone hitting the API what
+            # libraries/functions are in play). The exception class
+            # name is included as a small hint without the message
+            # body so the user can mention it when reporting bugs.
+            logger.error(
+                "Error creating invoice from AI data: %s", e, exc_info=True
+            )
             return Response(
-                {"error": "An unexpected error occurred while creating the invoice"},
+                {
+                    "error": (
+                        "Could not create invoice due to an internal error. "
+                        f"(Reference: {type(e).__name__}) "
+                        "Check the server logs or try again."
+                    ),
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

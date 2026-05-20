@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Database, Download, Trash2, HardDrive, Info } from "lucide-react";
+import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Database, Download, Trash2, HardDrive, Info, AlertTriangle, Check } from "lucide-react";
 import { financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import api from "@/utils/api";
@@ -56,6 +56,10 @@ export default function Settings() {
   const { items: businesses } = useBusinesses();
   const [settings, setSettings] = useState(() => loadSettings(businesses[0]?.id || ""));
   const [nextInvoiceInfo, setNextInvoiceInfo] = useState<string>("");
+  // `dirty` tracks whether any field has changed since the last save.
+  // Drives the save bar's enabled state + label, so the sticky button isn't
+  // a phantom CTA when nothing's pending.
+  const [dirty, setDirty] = useState(false);
 
   // useState initializer runs before businesses load (async fetch), so
   // defaultBusinessId starts empty and stays empty even after the dropdown
@@ -85,13 +89,17 @@ export default function Settings() {
       .catch(() => {});
   }, [settings.defaultBusinessId]);
 
-  const set = (field: string, val: any) => setSettings((p) => ({ ...p, [field]: val }));
+  const set = (field: string, val: any) => {
+    setSettings((p) => ({ ...p, [field]: val }));
+    setDirty(true);
+  };
   const handleSave = () => {
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch {
       // storage full or unavailable
     }
+    setDirty(false);
     toast({ title: "Settings Saved", description: "Your preferences have been updated." });
   };
 
@@ -150,26 +158,38 @@ export default function Settings() {
     },
     ...(!isMobile ? [{
       title: "Keyboard Shortcuts", icon: Keyboard,
+      // Collapsed by default — this is reference info, not a setting.
+      // Saves ~150px of vertical space on the typical render.
       fields: (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[{ keys: "N", desc: "New Invoice" }, { keys: "D", desc: "Dashboard" }, { keys: "C", desc: "Customers" }, { keys: "I", desc: "Invoices" }, { keys: "P", desc: "Products" }, { keys: "⌘S", desc: "Save form" }, { keys: "Esc", desc: "Close modal" }].map((s) => (
-            <div key={s.keys} className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
-              <span className="text-[13px] text-muted-foreground">{s.desc}</span>
-              <kbd className="px-2.5 py-1 rounded-lg bg-secondary/50 border border-border/50 text-[11px] font-mono font-bold text-foreground">{s.keys}</kbd>
-            </div>
-          ))}
-        </div>
+        <details className="group">
+          <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[12px] text-muted-foreground hover:text-foreground transition-colors">
+            <span>Show 7 shortcuts</span>
+            <span className="text-[10px] group-open:rotate-90 transition-transform">›</span>
+          </summary>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+            {[{ keys: "N", desc: "New Invoice" }, { keys: "D", desc: "Dashboard" }, { keys: "C", desc: "Customers" }, { keys: "I", desc: "Invoices" }, { keys: "P", desc: "Products" }, { keys: "⌘S", desc: "Save form" }, { keys: "Esc", desc: "Close modal" }].map((s) => (
+              <div key={s.keys} className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/20">
+                <span className="text-[12px] text-muted-foreground">{s.desc}</span>
+                <kbd className="px-2 py-0.5 rounded bg-secondary/50 border border-border/50 text-[11px] font-mono font-bold text-foreground">{s.keys}</kbd>
+              </div>
+            ))}
+          </div>
+        </details>
       ),
     }] : []),
     // Invoice template removed — using Tally Classic format
+    // Data Management + Setup folded into one card — the "Setup" card had
+    // a single row, and the actions are cousins anyway. Destructive action
+    // ("Clear Local Settings") lives in its own dedicated Danger Zone
+    // card below so a misclick is less likely.
     {
       title: "Data Management", icon: Database,
       fields: (
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
             <div>
-              <p className="text-[13px] font-semibold text-foreground">Export All Data</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Download all invoices, customers, and products as JSON</p>
+              <p className="text-[13px] font-semibold text-foreground">Export Settings</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Download a JSON snapshot of your preferences</p>
             </div>
             <button onClick={() => {
               const data = { settings, exportedAt: new Date().toISOString() };
@@ -186,77 +206,98 @@ export default function Settings() {
           <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
             <div>
               <p className="text-[13px] font-semibold text-foreground">Backup & Restore</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Full database backup from the Backup page</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Full database backup (invoices, customers, products)</p>
             </div>
             <Link to="/billing/backup"
               className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-chart-3/10 text-chart-3 hover:bg-chart-3/20 transition-colors flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5" /> Go to Backup
+              <HardDrive className="w-3.5 h-3.5" /> Open
             </Link>
           </div>
-          <div className="flex items-center justify-between p-3 rounded-xl bg-destructive/5 border border-destructive/10">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
             <div>
-              <p className="text-[13px] font-semibold text-foreground">Clear Local Settings</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Reset all app preferences to defaults (does not delete server data)</p>
+              <p className="text-[13px] font-semibold text-foreground">Onboarding Wizard</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Re-run the getting-started flow</p>
             </div>
-            <button onClick={() => {
-              localStorage.removeItem(SETTINGS_STORAGE_KEY);
-              setSettings(loadSettings(businesses[0]?.id || ""));
-              toast({ title: "Settings Cleared", description: "Preferences reset to defaults.", variant: "destructive" });
-            }}
-              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors flex items-center gap-1.5">
-              <Trash2 className="w-3.5 h-3.5" /> Clear
+            <button onClick={() => { resetOnboarding(); toast({ title: "Onboarding Reset", description: "Visit Dashboard to see the wizard." }); }}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5">
+              <RotateCcw className="w-3.5 h-3.5" /> Reset
             </button>
           </div>
         </div>
       ),
     },
     {
-      title: "Setup", icon: RotateCcw,
+      title: "Danger Zone", icon: AlertTriangle,
+      danger: true,
       fields: (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20">
-            <div>
-              <p className="text-[13px] font-semibold text-foreground">Onboarding Wizard</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Re-run the getting started wizard</p>
-            </div>
-            <button onClick={() => { resetOnboarding(); toast({ title: "Onboarding Reset", description: "Visit Dashboard to see the wizard." }); }}
-              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-              Reset
-            </button>
+        <div className="flex items-center justify-between p-3 rounded-xl bg-destructive/5 border border-destructive/15">
+          <div>
+            <p className="text-[13px] font-semibold text-foreground">Clear Local Settings</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Reset all preferences to defaults. Doesn't delete server data — just your local browser config.</p>
           </div>
+          <button onClick={() => {
+            if (!confirm("Clear all local settings and reset to defaults? This affects only your browser, not server data.")) return;
+            localStorage.removeItem(SETTINGS_STORAGE_KEY);
+            setSettings(loadSettings(businesses[0]?.id || ""));
+            setDirty(false);
+            toast({ title: "Settings Cleared", description: "Preferences reset to defaults.", variant: "destructive" });
+          }}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors flex items-center gap-1.5 shrink-0">
+            <Trash2 className="w-3.5 h-3.5" /> Clear
+          </button>
         </div>
       ),
     },
   ];
 
   return (
-    <div className={cn("space-y-5 animate-fade-in max-w-4xl mx-auto", isMobile ? "p-4 pb-20" : "p-6 lg:p-8 space-y-6")}>
+    <div className={cn("space-y-5 animate-fade-in max-w-4xl mx-auto", isMobile ? "p-4 pb-28" : "p-6 lg:p-8 space-y-6")}>
       <Breadcrumbs items={[{ label: "Settings" }]} />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className={cn("rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}><SettingsIcon className="w-5 h-5 text-primary" /></div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-xl" : "text-3xl")}>Settings</h1>
           <p className="text-xs text-muted-foreground mt-0.5">App preferences and defaults · saved locally to your browser</p>
         </div>
+        {/* Unsaved-changes indicator — gives the user a peripheral signal so
+            they don't navigate away mid-edit and lose the change. */}
+        {dirty && !isMobile && (
+          <span className="text-[11px] font-semibold text-warning bg-warning/10 px-2.5 py-1 rounded-full">
+            Unsaved changes
+          </span>
+        )}
       </div>
       <div className="space-y-4">
         {sections.map((section, i) => {
           const Icon = section.icon;
+          const danger = (section as any).danger;
           return (
-            <motion.div key={section.title} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="elevated-card rounded-2xl p-5 space-y-4">
-              <div className="flex items-center gap-2"><Icon className="w-4 h-4 text-primary" /><h2 className="text-[13px] font-display font-semibold text-foreground">{section.title}</h2></div>
+            <motion.div key={section.title} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}
+              className={cn("elevated-card rounded-2xl p-5 space-y-4", danger && "border-destructive/30")}>
+              <div className="flex items-center gap-2">
+                <Icon className={cn("w-4 h-4", danger ? "text-destructive" : "text-primary")} />
+                <h2 className={cn("text-[13px] font-display font-semibold", danger ? "text-destructive" : "text-foreground")}>{section.title}</h2>
+              </div>
               {section.fields}
             </motion.div>
           );
         })}
       </div>
-      {/* Sticky save bar */}
+      {/* Sticky save bar — disabled when nothing's pending. Label flips to
+          "All changes saved" so the bar is informative even at rest. */}
       <div className={cn(
         "sticky bottom-0 z-30 -mx-4 px-4 py-3 bg-card/95 backdrop-blur-md border-t border-border/50",
         isMobile ? "-mx-4 px-4" : "-mx-6 lg:-mx-8 px-6 lg:px-8"
       )}>
-        <div className={cn("flex max-w-4xl mx-auto", isMobile ? "justify-center" : "justify-end")}>
-          <button onClick={handleSave} className={cn("premium-btn-primary text-[13px]", isMobile && "w-full")}><Save className="w-4 h-4" /> Save Settings</button>
+        <div className={cn("flex items-center gap-3 max-w-4xl mx-auto", isMobile ? "justify-between" : "justify-end")}>
+          {!dirty && (
+            <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+              <Check className="w-3.5 h-3.5 text-success" /> All changes saved
+            </span>
+          )}
+          <button onClick={handleSave} disabled={!dirty} className={cn("premium-btn-primary text-[13px] disabled:opacity-40 disabled:cursor-not-allowed", isMobile && "flex-1")}>
+            <Save className="w-4 h-4" /> {dirty ? "Save Settings" : "Saved"}
+          </button>
         </div>
       </div>
     </div>

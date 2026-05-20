@@ -5,7 +5,7 @@ import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   ArrowLeft, Pencil, Trash2, Package, Hash, TrendingUp, BarChart3,
-  Receipt, Eye, Printer, Copy, CheckCircle2, Users, ShoppingCart, Scale,
+  Receipt, Eye, Printer, Copy, CheckCircle2, Users, ShoppingCart, Scale, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -32,8 +32,27 @@ export default function ProductDetail() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  if (productLoading) return <div className="p-8 text-muted-foreground">Loading product...</div>;
-  if (!product) return <div className="p-8 text-muted-foreground">Product not found.</div>;
+  // Consistent loading + not-found treatment — mirrors InvoiceDetail.
+  if (productLoading) return (
+    <div className="p-10 flex items-center gap-3 text-muted-foreground">
+      <Loader2 className="w-5 h-5 animate-spin" />
+      <span className="text-sm">Loading product…</span>
+    </div>
+  );
+  if (!product) return (
+    <div className="p-10 max-w-md mx-auto">
+      <div className="elevated-card rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center">
+          <Package className="w-7 h-7 text-warning" />
+        </div>
+        <div>
+          <h2 className="text-[16px] font-display font-semibold text-foreground">Product not found</h2>
+          <p className="text-xs text-muted-foreground mt-1">This product may have been deleted or the link is stale.</p>
+        </div>
+        <Link to="/billing/product/list" className="premium-btn-ghost text-sm"><ArrowLeft className="w-4 h-4" /> Back to products</Link>
+      </div>
+    </div>
+  );
 
   const productInvoiceItems = invoices.flatMap((inv) =>
     inv.items.filter((it) => it.productId === id).map((it) => ({ ...it, invoice: inv }))

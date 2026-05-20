@@ -32,7 +32,10 @@ commands:
 jobs:
   build-and-test:
     docker:
-      - image: cimg/python:3.10
+      # Matches GitHub Actions (.github/workflows/test.yml) and the
+      # production Dockerfile. Was 3.10 — caught a f-string backslash
+      # SyntaxError that 3.12 (PEP 701) allows.
+      - image: cimg/python:3.12
         environment:
           DJANGO_SETTINGS_MODULE: gst_billing.ci_settings
           DATABASE_URL: postgresql://circleci:circleci@localhost/circle_test

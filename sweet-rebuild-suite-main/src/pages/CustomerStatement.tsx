@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { formatCurrency, formatCompactCurrency, formatDate, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt, Download } from "lucide-react";
+import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt, Download, Users } from "lucide-react";
 import { downloadStatementPDF } from "@/utils/generateStatementPDF";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -24,7 +24,21 @@ export default function CustomerStatement() {
   const [endDate, setEndDate] = useState(`${_fyStartYear + 1}-03-31`);
   const [bizFilter, setBizFilter] = useState("all");
 
-  if (!customer) return <div className="p-8 text-muted-foreground">Customer not found.</div>;
+  // Consistent not-found treatment — mirrors other detail pages.
+  if (!customer) return (
+    <div className="p-10 max-w-md mx-auto">
+      <div className="elevated-card rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center">
+          <Users className="w-7 h-7 text-warning" />
+        </div>
+        <div>
+          <h2 className="text-[16px] font-display font-semibold text-foreground">Customer not found</h2>
+          <p className="text-xs text-muted-foreground mt-1">This customer may have been deleted or the link is stale.</p>
+        </div>
+        <Link to="/billing/customer/list" className="premium-btn-ghost text-sm"><ArrowLeft className="w-4 h-4" /> Back to customers</Link>
+      </div>
+    </div>
+  );
 
   const filtered = invoices.filter((inv) => {
     const d = new Date(inv.invoice_date || "");
@@ -41,7 +55,7 @@ export default function CustomerStatement() {
   const sortedFiltered = [...filtered].sort((a, b) => new Date(a.invoice_date || "").getTime() - new Date(b.invoice_date || "").getTime());
 
   return (
-    <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-20" : "p-6 lg:p-10 space-y-7")}>
+    <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-24" : "p-6 lg:p-10 space-y-7")}>
       <Breadcrumbs items={[{ label: "Customers", href: "/billing/customer/list" }, { label: customer.name, href: `/billing/customer/${id}` }, { label: "Statement" }]} />
 
       {/* Header */}

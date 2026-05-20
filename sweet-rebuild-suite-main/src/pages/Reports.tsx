@@ -220,7 +220,7 @@ export default function Reports() {
   ];
 
   return (
-    <div className={cn("space-y-5", isMobile ? "p-4 pb-20" : "p-8 space-y-6")}>
+    <div className={cn("space-y-5", isMobile ? "p-4 pb-24" : "p-8 space-y-6")}>
       <Breadcrumbs items={[{ label: "Reports" }]} />
 
       {/* Header Card */}
@@ -231,18 +231,31 @@ export default function Reports() {
             <div className={cn("rounded-2xl bg-gradient-to-br from-chart-3/20 to-chart-3/5 border border-chart-3/20 flex items-center justify-center", isMobile ? "w-10 h-10" : "w-12 h-12")}>
               <BarChart3 className="w-5 h-5 text-chart-3" />
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <h1 className={cn("font-display font-bold text-foreground tracking-tight", isMobile ? "text-lg" : "text-2xl")}>Reports</h1>
               <p className="text-xs text-muted-foreground">FY {selectedFY} · {totalCount} invoices</p>
             </div>
           </div>
-          {!isMobile && (
+          {/* Export row — desktop renders inline; mobile gets a compact
+              icon-label grid so users actually have access to Excel/CSV
+              exports (they were previously desktop-only — real gap). */}
+          {!isMobile ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
               className="flex items-center gap-2.5">
               <button onClick={handlePreviewExcel} disabled={exporting} className="premium-btn-outline text-[13px] border-success/30 text-success">{exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />} {exporting ? "Loading..." : "Excel Report"}</button>
               <button onClick={handleExportCSV} className="premium-btn-outline text-[13px]"><FileSpreadsheet className="w-4 h-4" /> CSV</button>
               <button className="premium-btn-outline text-[13px] border-success/30 text-success"><Download className="w-4 h-4" /> GSTR-1</button>
             </motion.div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={handlePreviewExcel} disabled={exporting} className="premium-btn-outline text-[12px] border-success/30 text-success justify-center">
+                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+                {exporting ? "Loading…" : "Excel"}
+              </button>
+              <button onClick={handleExportCSV} className="premium-btn-outline text-[12px] justify-center">
+                <FileSpreadsheet className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
           )}
         </div>
         <div className="border-t border-border/40 mt-4 pt-4 space-y-3">
@@ -253,9 +266,12 @@ export default function Reports() {
             onEndChange={setEndDate}
             fyStart={fyStartYear}
           />
+          {/* Business + Type filters — both render on mobile too. The Type
+              filter was previously desktop-only, which hid the Sales /
+              Purchases drill-down from phone users entirely. */}
           <div className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-1 md:grid-cols-2 xl:grid-cols-4")}>
             <div className={cn("space-y-1", isMobile ? "col-span-2" : "xl:col-span-2")}><label className="text-[10px] font-medium text-muted-foreground uppercase">Business</label><select value={bizFilter} onChange={(e) => setBizFilter(e.target.value)} className="premium-select !w-full text-[12px]"><option value="all">All</option>{businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
-            {!isMobile && <div className="space-y-1 xl:col-span-2"><label className="text-[10px] font-medium text-muted-foreground uppercase">Type</label><select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="premium-select !w-full text-[12px]"><option value="all">All</option><option value="OUTWARD">Sales</option><option value="INWARD">Purchases</option></select></div>}
+            <div className={cn("space-y-1", isMobile ? "col-span-2" : "xl:col-span-2")}><label className="text-[10px] font-medium text-muted-foreground uppercase">Type</label><select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="premium-select !w-full text-[12px]"><option value="all">All</option><option value="OUTWARD">Sales</option><option value="INWARD">Purchases</option></select></div>
           </div>
         </div>
       </motion.div>

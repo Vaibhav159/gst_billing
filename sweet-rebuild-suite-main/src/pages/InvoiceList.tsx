@@ -63,18 +63,27 @@ export default function InvoiceList() {
   const noHsnFilter = searchParams.get("no_hsn") === "1";
   const hasHygieneFilter = dupsFilter || emptyFilter || noHsnFilter;
 
-  // Build filters object for the API-driven hook
+  // Build filters object for the API-driven hook.
+  //
+  // When a hygiene URL drill-down is active (dups / empty / no_hsn), the
+  // data_quality scan that produced the count was global across all
+  // financial years — but the user might be sitting on FY 2025-26 with
+  // the duplicates living in FY 2023-24 / 2024-25. Without this override
+  // the list would show 0 rows after clicking the DataQualityBanner chip
+  // even though the count said 5. We force fyFilter + monthFilter to
+  // "all" for hygiene drill-downs so the listed invoices match the
+  // count the user came here from.
   const apiFilters: InvoiceFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
     businessId: bizFilter,
     customerId: custFilter,
     typeFilter,
-    fyFilter,
-    monthFilter,
+    fyFilter: hasHygieneFilter ? "all" : fyFilter,
+    monthFilter: hasHygieneFilter ? "all" : monthFilter,
     dups: dupsFilter || undefined,
     empty: emptyFilter || undefined,
     noHsn: noHsnFilter || undefined,
-  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter]);
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
@@ -391,7 +400,7 @@ export default function InvoiceList() {
           <SlidersHorizontal className="w-4 h-4 text-warning shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-[13px] font-semibold text-foreground">Filtered: {hygieneFilterLabel}</p>
-            <p className="text-[11px] text-muted-foreground">Showing only invoices flagged by data-quality scan.</p>
+            <p className="text-[11px] text-muted-foreground">Showing flagged invoices across all financial years (data-quality scan is global).</p>
           </div>
           <button onClick={clearFilters} className="text-[12px] font-semibold text-primary hover:underline shrink-0">
             Clear filter
