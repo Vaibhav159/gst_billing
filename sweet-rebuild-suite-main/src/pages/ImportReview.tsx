@@ -87,26 +87,64 @@ function normalizeName(s: string): string {
     .trim();
 }
 
+// Two tokens "match" when one is a clear truncation of the other —
+// e.g. "jew" → "jewellers", "ent" → "enterprises". The 3-char floor
+// stops trivially-short prefixes ("a"→"anything") from matching.
+function isPrefixAbbrev(x: string, y: string): boolean {
+  const [shortT, longT] = x.length <= y.length ? [x, y] : [y, x];
+  return shortT.length >= 3 && longT.startsWith(shortT) && shortT !== longT;
+}
+
+// Token-aligned score: the precise matcher for this domain. Requires the
+// SAME token count (after honorific stripping) and that every aligned
+// token pair is identical, a fuzzy near-match (≥0.7), or a prefix
+// abbreviation. ANY failing token kills the match outright.
+//
+// This is what catches the abbreviation case "DARSHAN JEW." ↔ "DARSHAN
+// JEWELLERS" (Levenshtein ratio alone scored it 0.75, just under the
+// bar, because it penalises the dropped "ELLERS"). It's also stricter
+// than the blended score on false positives: different token COUNT or
+// any sub-0.7 token returns 0, so "DARSHAN JEWELLERS"↔"KRISHNA
+// JEWELLERS" (darshan/krishna ≈0.29) and "RAMLAL DANGI"↔"RAMLAL JI"
+// (1 token vs 2 after stripping "ji") both fail cleanly.
+function tokenAlignScore(imp: string, cust: string): number {
+  const a = normalizeName(imp).split(" ").filter(Boolean);
+  const b = normalizeName(cust).split(" ").filter(Boolean);
+  if (a.length === 0 || b.length === 0) return 0;
+  if (a.length !== b.length) return 0;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) { sum += 1; continue; }
+    if (isPrefixAbbrev(a[i], b[i])) { sum += 0.9; continue; }
+    const r = ratio(a[i], b[i]);
+    if (r < 0.7) return 0; // one mismatched token ⇒ different entity
+    sum += r;
+  }
+  return sum / a.length;
+}
+
+// Blended Levenshtein score — handles same-length typos/transliteration
+// where token-align might be slightly off. First-token gate guards
+// against shared-suffix false positives.
+function blendedScore(imp: string, cust: string): number {
+  const a = normalizeName(imp), b = normalizeName(cust);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const aFirst = a.split(" ")[0] || "";
+  const bFirst = b.split(" ")[0] || "";
+  const firstTok = ratio(aFirst, bFirst);
+  if (firstTok < 0.6) return 0;
+  return ratio(a, b) * 0.7 + firstTok * 0.3;
+}
+
 // Returns a 0..1 confidence that `imp` and `cust` are the same entity.
-// Combines overall similarity with first-token similarity; the latter
-// is the guard against shared-suffix false positives.
+// Max of the two scorers — both independently reject the false
+// positives, so taking the max only ever helps recall.
 function nameMatchScore(imp: string, cust: string): number {
   const a = normalizeName(imp), b = normalizeName(cust);
   if (!a || !b) return 0;
   if (a === b) return 1;
-  const overall = ratio(a, b);
-  const aFirst = a.split(" ")[0] || "";
-  const bFirst = b.split(" ")[0] || "";
-  const firstTok = ratio(aFirst, bFirst);
-  // Gate: a weak first-token match can't produce a suggestion even if
-  // the suffix matches perfectly. 0.6 cleanly separates real variants
-  // (satyanaryan/satyanarayan ≈0.9, gordhanlal/goverdhanlal ≈0.83) from
-  // false positives (darshan/krishna ≈0.29, ramlal/gahrilal ≈0.38).
-  if (firstTok < 0.6) return 0;
-  // Blend: overall similarity carries the decision, first-token acts as
-  // a confidence multiplier so a same-first-name-different-surname pair
-  // still needs decent overall similarity to surface.
-  return overall * 0.7 + firstTok * 0.3;
+  return Math.max(tokenAlignScore(imp, cust), blendedScore(imp, cust));
 }
 
 const SUGGEST_THRESHOLD = 0.78;
