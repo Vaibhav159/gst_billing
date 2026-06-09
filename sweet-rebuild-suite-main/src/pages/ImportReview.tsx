@@ -512,6 +512,7 @@ export default function ImportReview() {
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">GST</th>
                 <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Firm</th>
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Items</th>
+                <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground whitespace-nowrap">Rate</th>
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap">GST&nbsp;%</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Taxable</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground">CGST</th>
@@ -597,6 +598,22 @@ export default function ImportReview() {
                         <>{inv.items.length}<span className="text-[9px] text-muted-foreground ml-0.5">({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})</span></>
                       )}
                     </td>
+                    {/* Rate (₹ per unit). In edit mode the value is edited
+                        in the Items cell above (qty @ rate); here we mirror
+                        the live value muted so the column stays populated. */}
+                    <td className="px-3 py-2 text-right tabular-nums font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                      {editingIdx === idx ? (
+                        <span className="opacity-70">{"₹"}{editForm.rate || 0}</span>
+                      ) : (() => {
+                        const rates = Array.from(new Set(inv.items.map(i => i.rate))).filter(r => r > 0);
+                        if (rates.length === 0) return <span className="text-muted-foreground/50">-</span>;
+                        const units = Array.from(new Set(inv.items.map(i => i.unit || "gms")));
+                        const suffix = units.length === 1 ? `/${units[0]}` : "";
+                        return rates.length === 1
+                          ? <>{"₹"}{fmt(rates[0])}<span className="text-[9px] opacity-50">{suffix}</span></>
+                          : rates.map(r => `${"₹"}${fmt(r)}`).join(" / ");
+                      })()}
+                    </td>
                     <td className="px-3 py-2 text-center font-mono text-muted-foreground text-[11px]">
                       {(() => {
                         const rates = Array.from(new Set(inv.items.map(i => i.gstRate))).filter(r => r > 0);
@@ -625,7 +642,7 @@ export default function ImportReview() {
             </tbody>
             <tfoot className="bg-secondary/40 border-t-2 border-border/40">
               <tr className="font-semibold text-[11px]">
-                <td colSpan={9} className="px-3 py-2.5 text-right text-muted-foreground uppercase">
+                <td colSpan={10} className="px-3 py-2.5 text-right text-muted-foreground uppercase">
                   Selected Total ({selectedInvoices.size} invoices)
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{"\u20b9"}{fmt(selectedResults.reduce((s, v) => s + v.invoice.subtotal, 0))}</td>
