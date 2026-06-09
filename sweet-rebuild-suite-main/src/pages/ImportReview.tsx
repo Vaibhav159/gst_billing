@@ -36,6 +36,81 @@ function fmt(n: number) {
   return new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
+// ─── Fuzzy customer-name matching (suggest-only) ───────────────────────
+// Indian jewellery customer names have lots of transliteration variants
+// and typos: CHARBHUJA JEWLLERS↔JEWELLERS, KISHANLAL CHHOGALAL↔CHOGALAL,
+// SATYANARYAN↔SATYANARAYAN, plus "JI" honorifics. Exact match misses all
+// of these and flags them as new customers — creating duplicate ledgers.
+//
+// But naive fuzzy matching is DANGEROUS here: "DARSHAN JEWELLERS" and
+// "KRISHNA JEWELLERS" share the " JEWELLERS" suffix and score ~0.7
+// overall despite being different shops; "RAMLAL DANGI" and "GAHRILAL
+// DANGI" are different people sharing the "DANGI" surname. Auto-merging
+// those corrupts GST records by attributing sales to the wrong party.
+//
+// Defense: require the FIRST token (the distinctive part — given name or
+// shop name) to be similar, not just the whole string. The shared suffix
+// can't carry a false match on its own. And we only ever SUGGEST — the
+// user clicks to adopt, never silent.
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  let cur = new Array(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
+
+function ratio(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+}
+
+// Strip the common honorifics/suffixes that inflate or deflate the
+// comparison without changing identity. "JI", "SHRI", "SMT" etc.
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\b(ji|shri|sri|smt|shree|m\/s|messrs)\b/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Returns a 0..1 confidence that `imp` and `cust` are the same entity.
+// Combines overall similarity with first-token similarity; the latter
+// is the guard against shared-suffix false positives.
+function nameMatchScore(imp: string, cust: string): number {
+  const a = normalizeName(imp), b = normalizeName(cust);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const overall = ratio(a, b);
+  const aFirst = a.split(" ")[0] || "";
+  const bFirst = b.split(" ")[0] || "";
+  const firstTok = ratio(aFirst, bFirst);
+  // Gate: a weak first-token match can't produce a suggestion even if
+  // the suffix matches perfectly. 0.6 cleanly separates real variants
+  // (satyanaryan/satyanarayan ≈0.9, gordhanlal/goverdhanlal ≈0.83) from
+  // false positives (darshan/krishna ≈0.29, ramlal/gahrilal ≈0.38).
+  if (firstTok < 0.6) return 0;
+  // Blend: overall similarity carries the decision, first-token acts as
+  // a confidence multiplier so a same-first-name-different-surname pair
+  // still needs decent overall similarity to surface.
+  return overall * 0.7 + firstTok * 0.3;
+}
+
+const SUGGEST_THRESHOLD = 0.78;
+
 export default function ImportReview() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -53,6 +128,9 @@ export default function ImportReview() {
   const [editForm, setEditForm] = useState({ date: "", party: "", gst: "", qty: "", rate: "" });
   const [newlyCreatedCustomers, setNewlyCreatedCustomers] = useState<string[]>([]);
   const [bizFilter] = useState(state?.bizFilter || "all");
+  // Bumped when a fuzzy suggestion is adopted (mutates excelPreview in
+  // place) — forces the validation memo to recompute against the new name.
+  const [adoptTick, setAdoptTick] = useState(0);
 
   // Redirect if no data
   if (!state?.parsedInvoices || state.parsedInvoices.length === 0) {
@@ -117,12 +195,53 @@ export default function ImportReview() {
 
       return { invoice: inv, businessMatch, customerMatch, isDuplicate, status };
     });
-  }, [excelPreview, businesses, customers, existingInvoices, bizFilter, customerNameMap, newlyCreatedCustomers]);
+    // adoptTick: excelPreview rows are mutated in place when a suggestion
+    // is adopted, so the reference doesn't change — the tick forces recompute.
+  }, [excelPreview, businesses, customers, existingInvoices, bizFilter, customerNameMap, newlyCreatedCustomers, adoptTick]);
 
   const readyCount = validationResults.filter(v => v.status === "ready").length;
   const missingCustCount = validationResults.filter(v => v.status === "missing_customer").length;
   const duplicateCount = validationResults.filter(v => v.status === "duplicate").length;
   const missingBizCount = validationResults.filter(v => v.status === "missing_business").length;
+
+  // Fuzzy suggestions for "New Customer" rows — best existing customer
+  // above the confidence threshold. Suggest-only: the user clicks to
+  // adopt (adoptSuggestion below). Keyed by the row's excelPreview index.
+  const suggestionByIdx = useMemo(() => {
+    const out = new Map<number, { customer: Customer; score: number }>();
+    if (customers.length === 0) return out;
+    validationResults.forEach((v, idx) => {
+      if (v.status !== "missing_customer") return;
+      const imp = v.invoice.customerName || "";
+      if (!imp.trim()) return;
+      let best: { customer: Customer; score: number } | null = null;
+      for (const c of customers) {
+        const s = nameMatchScore(imp, c.name);
+        if (s >= SUGGEST_THRESHOLD && (!best || s > best.score)) {
+          best = { customer: c, score: s };
+        }
+      }
+      if (best) out.set(idx, best);
+    });
+    return out;
+  }, [validationResults, customers]);
+
+  const suggestionCount = suggestionByIdx.size;
+
+  // Adopt a suggested customer: rewrite the row's party name (and GST if
+  // we have one and the row lacks it) to the canonical DB customer, so
+  // the backend's exact-name match links it instead of creating a new
+  // one. Mutates excelPreview in place (same pattern as saveEditing) and
+  // bumps a counter to force the validation memo to recompute.
+  const adoptSuggestion = (idx: number, customer: Customer) => {
+    const inv = excelPreview[idx];
+    if (!inv) return;
+    inv.customerName = customer.name;
+    const gst = (customer as any).gst_number;
+    if (gst && (!inv.customerGST || inv.customerGST === "-")) inv.customerGST = gst;
+    setAdoptTick(t => t + 1);
+    toast({ title: "Customer matched", description: `Linked to ${customer.name}` });
+  };
 
   // Auto-select importable
   useEffect(() => {
@@ -350,6 +469,28 @@ export default function ImportReview() {
             Invoices ({validationResults.length})
           </h2>
           <div className="flex items-center gap-3">
+            {suggestionCount > 0 && (
+              <button
+                onClick={() => {
+                  // Snapshot first — adopting mutates excelPreview, which
+                  // would shrink suggestionByIdx mid-iteration.
+                  const toAdopt = Array.from(suggestionByIdx.entries());
+                  toAdopt.forEach(([idx, sug]) => {
+                    const inv = excelPreview[idx];
+                    if (!inv) return;
+                    inv.customerName = sug.customer.name;
+                    const gst = (sug.customer as any).gst_number;
+                    if (gst && (!inv.customerGST || inv.customerGST === "-")) inv.customerGST = gst;
+                  });
+                  setAdoptTick(t => t + 1);
+                  toast({ title: "Suggestions applied", description: `${toAdopt.length} customer${toAdopt.length === 1 ? "" : "s"} linked to existing records.` });
+                }}
+                className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 px-2 py-1 text-[11px] text-blue-400 font-medium transition-colors"
+                title="Link all near-match names to their suggested existing customers"
+              >
+                <Check className="w-3 h-3" /> Match all {suggestionCount} suggestion{suggestionCount === 1 ? "" : "s"}
+              </button>
+            )}
             <span className="text-[11px] text-muted-foreground">{selectedInvoices.size} selected</span>
             <button onClick={toggleAll} className="text-[11px] text-primary hover:underline font-medium">
               {selectedInvoices.size === (readyCount + missingCustCount) ? "Deselect All" : "Select All"}
@@ -408,11 +549,33 @@ export default function ImportReview() {
                         : inv.invoice_date
                       }
                     </td>
-                    <td className="px-3 py-2 max-w-[160px] truncate" title={inv.customerName}>
-                      {editingIdx === idx
-                        ? <input type="text" value={editForm.party} onChange={e => setEditForm(p => ({ ...p, party: e.target.value }))} className="w-full px-1.5 py-1 rounded bg-input border border-border text-[11px]" />
-                        : <>{inv.customerName}{v.customerMatch && <span className="text-[9px] text-success ml-1">(matched)</span>}</>
-                      }
+                    <td className="px-3 py-2 max-w-[200px]" title={inv.customerName}>
+                      {editingIdx === idx ? (
+                        <input type="text" value={editForm.party} onChange={e => setEditForm(p => ({ ...p, party: e.target.value }))} className="w-full px-1.5 py-1 rounded bg-input border border-border text-[11px]" />
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="truncate">{inv.customerName}{v.customerMatch && <span className="text-[9px] text-success ml-1">(matched)</span>}</span>
+                          {/* Fuzzy suggestion chip — only on unmatched rows.
+                              One click rewrites the name to the canonical DB
+                              customer so the backend links instead of dupes. */}
+                          {(() => {
+                            const sug = suggestionByIdx.get(idx);
+                            if (!sug || v.status !== "missing_customer") return null;
+                            const pct = Math.round(sug.score * 100);
+                            return (
+                              <button
+                                onClick={() => adoptSuggestion(idx, sug.customer)}
+                                className="inline-flex items-center gap-1 self-start rounded-md bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 px-1.5 py-0.5 text-[9px] text-blue-400 transition-colors"
+                                title={`Use existing customer "${sug.customer.name}" (${pct}% match)`}
+                              >
+                                <Check className="w-2.5 h-2.5" />
+                                <span className="truncate max-w-[130px]">≈ {sug.customer.name}</span>
+                                <span className="opacity-60">{pct}%</span>
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2 font-mono text-[10px] max-w-[110px] truncate" title={inv.customerGST}>
                       {editingIdx === idx
