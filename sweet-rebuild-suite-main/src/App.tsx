@@ -39,6 +39,9 @@ const InvoicePrint = lazy(() => import("@/pages/InvoicePrint"));
 const InvoicePrintTally = lazy(() => import("@/pages/InvoicePrintTally"));
 const InvoiceForm = lazy(() => import("@/pages/InvoiceForm"));
 const AIInvoiceImport = lazy(() => import("@/pages/AIInvoiceImport"));
+const InwardBills = lazy(() => import("@/pages/InwardBills"));
+const InwardBillAdd = lazy(() => import("@/pages/InwardBillAdd"));
+const InwardBillDetail = lazy(() => import("@/pages/InwardBillDetail"));
 const UserManagement = lazy(() => import("@/pages/UserManagement"));
 const ImportPreview = lazy(() => import("@/pages/ImportPreview"));
 const ImportReview = lazy(() => import("@/pages/ImportReview"));
@@ -120,6 +123,12 @@ const App = () => (
                     <Route path="/billing/invoice/edit/:id" element={<InvoiceForm mode="edit" />} />
                     <Route path="/billing/invoice/import" element={<ImportPage type="invoice" />} />
                     <Route path="/billing/invoice/ai-import" element={<AIInvoiceImport />} />
+
+                    {/* Inward Bills (purchase register + capture) */}
+                    <Route path="/billing/inward-bills" element={<InwardBills />} />
+                    <Route path="/billing/inward-bills/add" element={<InwardBillAdd />} />
+                    <Route path="/billing/inward-bills/:id" element={<InwardBillDetail />} />
+
                     <Route path="/billing/import/review" element={<ImportReview />} />
                     <Route path="/billing/import/preview" element={<ImportPreview />} />
                     {/* Multi-segment pretty URL:
