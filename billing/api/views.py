@@ -3136,33 +3136,63 @@ class AIInvoiceProcessingView(APIView):
             matched_business = None
             detected_type = None
             our_role: str | None = None  # "buyer" or "seller"
+            inter_firm_buyer = None      # set when BOTH parties are our firms
 
             buyer_gstin = (extracted_data.get("buyer_gst_number") or "").strip().upper()
             seller_gstin = (extracted_data.get("seller_gst_number") or "").strip().upper()
             customer_gstin = (extracted_data.get("customer_gst_number") or "").strip().upper()
 
-            for gstin, role in (
-                (buyer_gstin, "buyer"),
-                (seller_gstin, "seller"),
-                (customer_gstin, "customer"),  # legacy AI fill — usually = buyer
-            ):
-                if not gstin:
-                    continue
-                biz = Business.objects.filter(gst_number=gstin).first()
-                if biz:
-                    matched_business = {
-                        "id": biz.id, "name": biz.name, "gst_number": biz.gst_number,
-                    }
-                    # buyer + customer (the most common AI conflation)
-                    # both mean we were the recipient → INWARD.
-                    our_role = "seller" if role == "seller" else "buyer"
-                    detected_type = (
-                        INVOICE_TYPE_OUTWARD if our_role == "seller"
-                        else INVOICE_TYPE_INWARD
-                    )
-                    break
+            buyer_biz = (
+                Business.objects.filter(gst_number=buyer_gstin).first()
+                if buyer_gstin else None
+            )
+            seller_biz = (
+                Business.objects.filter(gst_number=seller_gstin).first()
+                if seller_gstin else None
+            )
+            # Legacy fallback: the AI sometimes only fills the customer_*
+            # fields (usually the buyer — the "Bill To" block is the most
+            # prominent on Indian invoices).
+            if buyer_biz is None and seller_biz is None and customer_gstin:
+                buyer_biz = Business.objects.filter(gst_number=customer_gstin).first()
 
-            if matched_business:
+            if buyer_biz and seller_biz and buyer_biz.id != seller_biz.id:
+                # ── INTER-FIRM: both parties are our businesses. One
+                # physical bill = two ledger entries. Primary is the
+                # OUTWARD for the seller firm; the create endpoint also
+                # writes the INWARD mirror for the buyer firm (see
+                # AIInvoiceCreateView inter_firm handling). Detected
+                # this way, the sale AND the purchase/ITC side both
+                # land without the user importing the bill twice.
+                matched_business = {
+                    "id": seller_biz.id, "name": seller_biz.name,
+                    "gst_number": seller_biz.gst_number,
+                }
+                inter_firm_buyer = {
+                    "id": buyer_biz.id, "name": buyer_biz.name,
+                    "gst_number": buyer_biz.gst_number,
+                }
+                our_role = "seller"
+                detected_type = INVOICE_TYPE_OUTWARD
+                # The outward entry's customer is the buyer firm.
+                extracted_data["customer_name"] = buyer_biz.name
+                extracted_data["customer_gst_number"] = buyer_biz.gst_number
+            elif seller_biz:
+                matched_business = {
+                    "id": seller_biz.id, "name": seller_biz.name,
+                    "gst_number": seller_biz.gst_number,
+                }
+                our_role = "seller"
+                detected_type = INVOICE_TYPE_OUTWARD
+            elif buyer_biz:
+                matched_business = {
+                    "id": buyer_biz.id, "name": buyer_biz.name,
+                    "gst_number": buyer_biz.gst_number,
+                }
+                our_role = "buyer"
+                detected_type = INVOICE_TYPE_INWARD
+
+            if matched_business and not inter_firm_buyer:
                 # Promote the OTHER party into the legacy customer_*
                 # fields the review form binds against. Preference
                 # order: the explicit field for that side → the legacy
@@ -3239,6 +3269,11 @@ class AIInvoiceProcessingView(APIView):
                     "data": extracted_data,
                     "matched_business": matched_business,  # null if no DB match
                     "detected_type": detected_type,        # "inward" / "outward" / null
+                    # Inter-firm: both GSTINs on the bill are OUR firms.
+                    # matched_business is the seller (outward side);
+                    # this is the buyer firm that gets the inward mirror.
+                    "inter_firm": inter_firm_buyer is not None,
+                    "inter_firm_buyer_business": inter_firm_buyer,
                     # Which of the N rotated Gemini keys handled this
                     # request. Lets the UI show "Gemini #2/3" so the
                     # user can see when they're burning through the
@@ -3326,6 +3361,15 @@ class AIInvoiceCreateView(APIView):
                     {"error": "type_of_invoice must be 'outward' or 'inward'"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            # Inter-firm: both parties on the bill are our businesses.
+            # The primary invoice (business_id/type above — the seller's
+            # OUTWARD) is created as usual; then an INWARD mirror is
+            # written for the buyer firm so the purchase/ITC side lands
+            # from the same upload. Values arrive as strings when the
+            # request is multipart.
+            inter_firm = str(request.data.get("inter_firm", "")).lower() in ("true", "1")
+            inter_firm_buyer_id = request.data.get("inter_firm_buyer_business_id") or None
 
             try:
                 business = Business.objects.get(id=business_id)
@@ -3422,6 +3466,89 @@ class AIInvoiceCreateView(APIView):
             inv_date = (
                 invoice_data.get("invoice_date") or datetime.now().date()
             )
+            # Inter-firm mirror helper — creates (or finds) the INWARD
+            # entry for the buyer firm, copying lines from the primary
+            # invoice. Used on both the fresh-create path AND the
+            # primary-duplicate path, so re-uploading a bill whose
+            # outward already exists still completes a missing inward
+            # mirror instead of silently skipping it.
+            def ensure_inward_mirror(primary_invoice):
+                if not (inter_firm and inter_firm_buyer_id):
+                    return None, False
+                buyer_business = Business.objects.filter(id=inter_firm_buyer_id).first()
+                if buyer_business is None:
+                    logger.warning("inter_firm buyer business %s not found", inter_firm_buyer_id)
+                    return None, False
+                supplier_cust = None
+                if business.gst_number:
+                    supplier_cust = Customer.objects.filter(
+                        gst_number=business.gst_number
+                    ).first()
+                if supplier_cust is None:
+                    supplier_cust = Customer.objects.filter(
+                        name__iexact=business.name
+                    ).first()
+                if supplier_cust is None:
+                    supplier_cust = Customer.objects.create(
+                        name=business.name[:255],
+                        gst_number=business.gst_number or "",
+                        state_name=(getattr(business, "state_name", "") or "RAJASTHAN")[:255],
+                        workspace_id=1,
+                    )
+                mirror_existing = Invoice.objects.filter(
+                    business=buyer_business,
+                    invoice_number__iexact=inv_number,
+                    invoice_date=inv_date,
+                    type_of_invoice=INVOICE_TYPE_INWARD,
+                ).first()
+                if mirror_existing is not None:
+                    return mirror_existing.id, True
+                mirror = Invoice.objects.create(
+                    customer=supplier_cust,
+                    business=buyer_business,
+                    invoice_number=inv_number,
+                    invoice_date=inv_date,
+                    type_of_invoice=INVOICE_TYPE_INWARD,
+                    total_amount=primary_invoice.total_amount,
+                )
+                for li in LineItem.objects.filter(invoice=primary_invoice):
+                    LineItem.objects.create(
+                        customer=supplier_cust,
+                        invoice=mirror,
+                        product_name=li.product_name,
+                        hsn_code=li.hsn_code,
+                        gst_tax_rate=li.gst_tax_rate,
+                        quantity=li.quantity,
+                        rate=li.rate,
+                        amount=li.amount,
+                        cgst=li.cgst,
+                        sgst=li.sgst,
+                        igst=li.igst,
+                    )
+                mirror.total_amount = primary_invoice.total_amount
+                mirror.save()
+                # Audit image on the mirror too — same physical document.
+                if source_file is not None:
+                    try:
+                        source_file.seek(0)
+                        mirror.source_file.save(
+                            source_file.name, source_file, save=True
+                        )
+                        if primary_invoice.source_preview:
+                            from django.core.files.base import ContentFile
+                            with primary_invoice.source_preview.open("rb") as pf:
+                                mirror.source_preview.save(
+                                    primary_invoice.source_preview.name.rsplit("/", 1)[-1],
+                                    ContentFile(pf.read()),
+                                    save=True,
+                                )
+                    except Exception as e:
+                        logger.warning(
+                            "Could not copy source image to mirror %s: %s",
+                            mirror.pk, e,
+                        )
+                return mirror.id, False
+
             existing = (
                 Invoice.objects.filter(
                     business_id=business_id,
@@ -3431,6 +3558,9 @@ class AIInvoiceCreateView(APIView):
                 ).first()
             )
             if existing is not None:
+                # Primary already exists — still ensure the inter-firm
+                # inward mirror is present (completes half-done pairs).
+                inward_invoice_id, inward_duplicate = ensure_inward_mirror(existing)
                 return Response(
                     {
                         "success": True,
@@ -3440,6 +3570,8 @@ class AIInvoiceCreateView(APIView):
                         "line_items_created": 0,
                         "total_amount": existing.total_amount,
                         "duplicate": True,
+                        "inward_invoice_id": inward_invoice_id,
+                        "inward_duplicate": inward_duplicate,
                         "message": (
                             f"Invoice {inv_number} from {customer.name} on "
                             f"{inv_date} already exists — skipped duplicate."
@@ -3541,6 +3673,10 @@ class AIInvoiceCreateView(APIView):
             )
             invoice.save()
 
+            # Inter-firm: also write the INWARD mirror for the buyer firm
+            # (no-op unless inter_firm was requested).
+            inward_invoice_id, inward_duplicate = ensure_inward_mirror(invoice)
+
             return Response(
                 {
                     "success": True,
@@ -3549,6 +3685,9 @@ class AIInvoiceCreateView(APIView):
                     "customer_name": customer.name,
                     "line_items_created": line_items_created,
                     "total_amount": invoice.total_amount,
+                    # Inter-firm mirror info (null when not inter-firm)
+                    "inward_invoice_id": inward_invoice_id,
+                    "inward_duplicate": inward_duplicate,
                     "message": "Invoice created successfully",
                 }
             )

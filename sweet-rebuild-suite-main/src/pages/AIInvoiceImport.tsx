@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useBusinesses } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import type { Customer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Upload, Bot, CheckCircle, ArrowRight, Image as ImageIcon, Sparkles,
@@ -67,6 +68,11 @@ type FileEntry = {
   // "Gemini #2/3" so the user can see they're burning through the pool.
   keyIndex: number | null;
   keyTotal: number | null;
+  // Inter-firm: both GSTINs on the bill are our own firms. The create
+  // call writes TWO entries — OUTWARD for the seller (matchedBusiness)
+  // and an INWARD mirror for this buyer firm.
+  interFirm: boolean;
+  interFirmBuyer: { id: number; name: string } | null;
 };
 
 // HEIC/HEIF added for iPhone uploads — backend's pillow-heif decodes
@@ -136,6 +142,8 @@ export default function AIInvoiceImport() {
         expanded: false,
         keyIndex: null,
         keyTotal: null,
+        interFirm: false,
+        interFirmBuyer: null,
       });
     }
     if (accepted.length) {
@@ -176,6 +184,8 @@ export default function AIInvoiceImport() {
         data: Extracted;
         matched_business: MatchedBusiness;
         detected_type: "inward" | "outward" | null;
+        inter_firm?: boolean;
+        inter_firm_buyer_business?: { id: number; name: string; gst_number: string } | null;
         key_index: number | null;
         key_total: number | null;
       }>("ai/invoice/process/", fd, { timeout: 120_000 });
@@ -189,6 +199,10 @@ export default function AIInvoiceImport() {
         type: res.data.detected_type || entry.type,
         keyIndex: res.data.key_index,
         keyTotal: res.data.key_total,
+        interFirm: !!res.data.inter_firm,
+        interFirmBuyer: res.data.inter_firm_buyer_business
+          ? { id: res.data.inter_firm_buyer_business.id, name: res.data.inter_firm_buyer_business.name }
+          : null,
         expanded: true,
       });
     } catch (e: unknown) {
@@ -262,11 +276,19 @@ export default function AIInvoiceImport() {
       fd.append("type_of_invoice", entry.type);
       fd.append("invoice_data", JSON.stringify(entry.extracted));
       fd.append("source_file", entry.file, entry.file.name);
+      // Inter-firm: ask the backend to also write the INWARD mirror
+      // for the buyer firm from this same upload.
+      if (entry.interFirm && entry.interFirmBuyer) {
+        fd.append("inter_firm", "true");
+        fd.append("inter_firm_buyer_business_id", String(entry.interFirmBuyer.id));
+      }
       const res = await api.post<{
         invoice_id: number;
         invoice_number: string;
         line_items_created: number;
         duplicate?: boolean;
+        inward_invoice_id?: number | null;
+        inward_duplicate?: boolean;
       }>("ai/invoice/create/", fd);
       updateFile(entry.id, {
         // Distinguish "we created a new one" from "backend dedup'd to
@@ -275,6 +297,12 @@ export default function AIInvoiceImport() {
         createdInvoiceId: res.data.invoice_id,
         errorMsg: "",
       });
+      if (entry.interFirm && res.data.inward_invoice_id) {
+        toast({
+          title: res.data.inward_duplicate ? "Inter-firm: inward already existed" : "Inter-firm: 2 entries created",
+          description: `${entry.matchedBusiness?.name || "Seller"} outward + ${entry.interFirmBuyer?.name || "buyer"} inward #${res.data.invoice_number}`,
+        });
+      }
       return true;
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
@@ -585,6 +613,14 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
                 Key #{entry.keyIndex}/{entry.keyTotal}
               </span>
             )}
+            {entry.interFirm && (
+              <span
+                className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-chart-3/15 text-chart-3 tracking-wider shrink-0"
+                title={`Both parties are your firms — creates OUTWARD for ${entry.matchedBusiness?.name} + INWARD for ${entry.interFirmBuyer?.name}`}
+              >
+                Inter-firm ×2
+              </span>
+            )}
           </div>
           <p className="text-[11px] text-muted-foreground">
             {(entry.file.size / 1024 / 1024).toFixed(2)}MB
@@ -680,6 +716,10 @@ function ReviewForm({
 }) {
   const ex = entry.extracted!;
   const [creating, setCreating] = useState(false);
+  // Existing customers for the name autocomplete. Lets the user pick an
+  // existing record (filling GSTIN/address too) instead of free-typing a
+  // name that risks a near-duplicate.
+  const { items: customers } = useCustomers();
 
   const handleCreate = async () => {
     setCreating(true);
@@ -721,6 +761,13 @@ function ReviewForm({
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Invoice Type</label>
+          {entry.interFirm ? (
+            /* Inter-firm bills produce BOTH entries — direction toggle
+               would be misleading, so show what will happen instead. */
+            <div className="h-9 px-3 rounded-lg bg-chart-3/10 border border-chart-3/25 flex items-center gap-1.5 text-[11px] text-chart-3 font-medium">
+              Inter-firm: Sale ({entry.matchedBusiness?.name?.split(" ")[0]}) + Purchase ({entry.interFirmBuyer?.name?.split(" ")[0]})
+            </div>
+          ) : (
           <div className="flex rounded-lg overflow-hidden border border-border/60 h-9">
             <button
               onClick={() => onUpdate({ type: "outward" })}
@@ -737,6 +784,7 @@ function ReviewForm({
               Purchase
             </button>
           </div>
+          )}
         </div>
       </div>
 
@@ -750,8 +798,21 @@ function ReviewForm({
 
       {/* Customer (supplier for purchase) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Customer Name" value={ex.customer_name}
-          onChange={(v) => onUpdateExtracted({ ...ex, customer_name: v })} />
+        <CustomerNameField
+          value={ex.customer_name}
+          customers={customers}
+          onChange={(v) => onUpdateExtracted({ ...ex, customer_name: v })}
+          onPick={(c) => onUpdateExtracted({
+            ...ex,
+            customer_name: c.name,
+            // Fill the related fields from the chosen record — but never
+            // clobber a value the AI already extracted with a blank.
+            customer_gst_number: c.gst_number || ex.customer_gst_number,
+            customer_address: c.address || ex.customer_address,
+            customer_pan_number: c.pan_number || ex.customer_pan_number,
+            customer_mobile_number: c.mobile_number || ex.customer_mobile_number,
+          })}
+        />
         <Field label="GSTIN" value={ex.customer_gst_number}
           onChange={(v) => onUpdateExtracted({ ...ex, customer_gst_number: v })} />
       </div>
@@ -846,6 +907,97 @@ function Field({ label, value, onChange, type = "text" }: {
         onChange={(e) => onChange(e.target.value)}
         className="premium-input h-9 w-full text-[12px]"
       />
+    </div>
+  );
+}
+
+// Customer name field with a type-ahead dropdown of existing customers.
+// Picking one fills the related fields (GSTIN/address/etc.) so the user
+// links to an existing record instead of free-typing a near-duplicate.
+// Free text is still allowed — typing a brand-new name just creates a
+// new customer on import, same as before.
+function CustomerNameField({ value, customers, onChange, onPick }: {
+  value: string;
+  customers: Customer[];
+  onChange: (name: string) => void;
+  onPick: (c: Customer) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Filter by substring; prefix matches rank first. Cap at 8 so the list
+  // stays scannable even with hundreds of customers.
+  const matches = useMemo(() => {
+    const q = (value || "").toLowerCase().trim();
+    if (!q) return customers.slice(0, 8);
+    const scored = customers
+      .filter((c) => c.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return ap - bp || a.name.localeCompare(b.name);
+      });
+    return scored.slice(0, 8);
+  }, [value, customers]);
+
+  // Close on outside click.
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  // Exact-match indicator so the user knows when their typed name already
+  // resolves to an existing customer (no new record will be created).
+  const exact = customers.find((c) => c.name.toLowerCase().trim() === (value || "").toLowerCase().trim());
+
+  return (
+    <div className="space-y-1" ref={wrapRef}>
+      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+        Customer Name
+        {exact ? <span className="text-success normal-case font-normal ml-1">· existing</span>
+               : (value || "").trim() ? <span className="text-warning normal-case font-normal ml-1">· new</span> : null}
+      </label>
+      <div className="relative">
+        <input
+          type="text"
+          value={value || ""}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(0); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (!open || matches.length === 0) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, matches.length - 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+            else if (e.key === "Enter") { e.preventDefault(); onPick(matches[active]); setOpen(false); }
+            else if (e.key === "Escape") { setOpen(false); }
+          }}
+          placeholder="Search or type a name…"
+          className="premium-input h-9 w-full text-[12px]"
+          autoComplete="off"
+        />
+        {open && matches.length > 0 && (
+          <div className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-lg border border-border/60 bg-popover shadow-lg">
+            {matches.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                onMouseEnter={() => setActive(i)}
+                onClick={() => { onPick(c); setOpen(false); }}
+                className={cn(
+                  "w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors",
+                  i === active ? "bg-accent/40" : "hover:bg-accent/25"
+                )}
+              >
+                <span className="text-[12px] text-foreground truncate">{c.name}</span>
+                {c.gst_number && <span className="text-[10px] font-mono text-muted-foreground shrink-0">{c.gst_number}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
