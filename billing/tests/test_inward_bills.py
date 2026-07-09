@@ -147,6 +147,21 @@ class InwardBillAPITest(BaseAPITestCase):
         self.assertTrue(resp.data["warnings"]["gstin_mismatch"])
         self.assertEqual(resp.data["tax_type"], "cgst_sgst")  # 22 == 22
 
+    def test_extract_missing_buyer_gstin_does_not_false_flag(self):
+        # AI failed to read the buyer GSTIN -> we must NOT flag a mismatch
+        # (would false-positive on clean bills addressed to the firm).
+        fake = {
+            "buyer_gst_number": "", "seller_gst_number": "27AABCR1718E1ZP",
+            "seller_name": "ACME", "invoice_number": "AC-9",
+            "invoice_date": "2026-05-01", "customer_name": "", "customer_gst_number": "",
+            "line_items": [],
+        }
+        f = SimpleUploadedFile("b.jpg", b"x", content_type="image/jpeg")
+        with patch("billing.api.inward_bills.AIInvoiceProcessor.process_invoice_image", return_value=fake):
+            resp = self.client.post(reverse("inward-bill-extract"),
+                                    {"file": f, "business_id": self.business.id})
+        self.assertFalse(resp.data["warnings"]["gstin_mismatch"])
+
     def test_extract_pdf_falls_back_to_manual(self):
         f = SimpleUploadedFile("b.pdf", b"%PDF-1.4", content_type="application/pdf")
         resp = self.client.post(reverse("inward-bill-extract"),

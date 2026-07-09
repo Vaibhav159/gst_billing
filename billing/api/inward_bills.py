@@ -277,7 +277,11 @@ class InwardBillExtractView(APIView):
             "line_items": data.get("line_items") or [],
             "tax_type": "cgst_sgst" if intra else "igst",
             "warnings": {
-                "gstin_mismatch": bool(business) and not gstin_matches(buyer_gstin, firm_gstin),
+                # Only flag a mismatch when the AI actually read a buyer GSTIN
+                # that differs from the firm's — not when it simply failed to
+                # extract one (empty), which would false-positive on clean bills.
+                "gstin_mismatch": bool(business) and bool(buyer_gstin)
+                and not gstin_matches(buyer_gstin, firm_gstin),
                 "duplicate": bool(business and invoice_number
                                   and find_duplicate(business, invoice_number)),
                 "extraction_failed": False,
