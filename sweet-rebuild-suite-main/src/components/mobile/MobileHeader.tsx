@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Moon, Sun, Flame, Gem, TreePine } from "lucide-react";
+import { ChevronDown, Moon, Sun, Flame, Gem, TreePine, Sparkles } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useMobileMode } from "@/contexts/MobileModeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/utils/utils";
 import { financialYears } from "@/utils/mockData";
@@ -21,6 +22,7 @@ interface MobileHeaderProps {
 
 export default function MobileHeader({ selectedFY, onFYChange }: MobileHeaderProps) {
   const { theme, setTheme } = useTheme();
+  const { setMobileMode } = useMobileMode();
   const { user } = useAuth();
   const userInitial = user?.name?.charAt(0)?.toUpperCase() || "U";
   const [fyOpen, setFyOpen] = useState(false);
@@ -108,6 +110,15 @@ export default function MobileHeader({ selectedFY, onFYChange }: MobileHeaderPro
               </div>
             )}
           </div>
+
+          {/* Switch to Easy */}
+          <button
+            onClick={() => setMobileMode("easy")}
+            className="p-2 rounded-lg glass-subtle text-muted-foreground hover:text-foreground transition-colors"
+            title="Switch to Easy Mode"
+          >
+            <Sparkles className="w-4 h-4" />
+          </button>
 
           {/* Avatar */}
           <Link to="/billing/profile" className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground text-[10px] font-bold">
