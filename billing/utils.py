@@ -654,12 +654,12 @@ class AIInvoiceProcessor:
             settings, "GEMINI_VISION_MODEL", self.DEFAULT_GEMINI_MODEL
         )
 
-        if not self.gemini_keys:
-            raise AIInvoiceProcessingError(
-                "No Gemini API key configured. Add GEMINI_API_KEYS "
-                "(comma-separated, free keys at "
-                "https://aistudio.google.com/apikey) to your .env."
-            )
+        # NOTE: a missing key is raised from process_invoice_image(), not here.
+        # Constructing the processor must stay side-effect free: callers build
+        # it and call it inside the same try block, so the user-facing error is
+        # identical either way — but a raising __init__ also fires in tests that
+        # patch process_invoice_image, making them pass only on machines with
+        # keys in .env. That's what turned CI red on the inward-bills PR.
 
     # ── cooldown helpers ───────────────────────────────────────────
 
@@ -715,6 +715,13 @@ class AIInvoiceProcessor:
         the auto-detect-business flow on the AI Import page).
         """
         from billing.models import Customer
+
+        if not self.gemini_keys:
+            raise AIInvoiceProcessingError(
+                "No Gemini API key configured. Add GEMINI_API_KEYS "
+                "(comma-separated, free keys at "
+                "https://aistudio.google.com/apikey) to your .env."
+            )
 
         customer_names = []
         if business_id:

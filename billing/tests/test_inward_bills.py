@@ -5,7 +5,7 @@ from decimal import Decimal as D
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 
 from billing.api.inward_bills_service import (
@@ -133,6 +133,25 @@ class InwardBillAPITest(BaseAPITestCase):
         self.assertEqual(resp.data["tax_type"], "igst")  # 27 != 22
         self.assertFalse(resp.data["warnings"]["gstin_mismatch"])
         self.assertEqual(len(resp.data["line_items"]), 1)
+
+    @override_settings(GEMINI_API_KEYS="", GEMINI_API_KEY="")
+    def test_extract_works_without_api_keys_configured(self):
+        # Regression guard: the processor must be constructible without keys so
+        # that patching process_invoice_image is enough to test this view. When
+        # the key check lived in __init__, these tests passed only on machines
+        # with keys in .env and failed in CI.
+        fake = {
+            "buyer_gst_number": self.business.gst_number,
+            "seller_gst_number": "27AABCR1718E1ZP", "seller_name": "ACME SUPPLIES",
+            "invoice_number": "AC-2", "invoice_date": "2026-05-01", "line_items": [],
+        }
+        f = SimpleUploadedFile("b.jpg", b"x", content_type="image/jpeg")
+        with patch("billing.api.inward_bills.AIInvoiceProcessor.process_invoice_image", return_value=fake):
+            resp = self.client.post(reverse("inward-bill-extract"),
+                                    {"file": f, "business_id": self.business.id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["warnings"]["extraction_failed"])
+        self.assertEqual(resp.data["supplier"]["gstin"], "27AABCR1718E1ZP")
 
     def test_extract_flags_gstin_mismatch(self):
         fake = {
