@@ -129,15 +129,15 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
       else {
         // For CSV all, export each entity as separate file
         const invData = invoices.map((i) => ({
-          "Invoice Number": i.invoiceNumber, Date: i.date, Customer: i.customerName,
+          "Invoice Number": i.invoiceNumber, Date: i.invoice_date, Customer: i.customerName,
           Business: i.businessName, Type: i.type, Subtotal: i.subtotal, "Total Tax": i.totalTax, Total: i.total,
           "GST Type": i.isIGST ? "IGST" : "CGST/SGST",
         }));
         if (invData.length > 0) exportCSV(invData, Object.keys(invData[0]), `all-invoices-${dateStr}`);
 
         const custData = customers.map((c) => ({
-          Name: c.name, GST: c.gst, PAN: c.pan, Mobile: c.mobile,
-          Email: c.email, State: c.state, Address: c.address,
+          Name: c.name, GST: c.gst_number, PAN: c.pan_number, Mobile: c.mobile_number,
+          Email: c.email, State: c.state_name, Address: c.address,
         }));
         if (custData.length > 0) exportCSV(custData, Object.keys(custData[0]), `all-customers-${dateStr}`);
 
@@ -147,8 +147,8 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
         if (prodData.length > 0) exportCSV(prodData, Object.keys(prodData[0]), `all-products-${dateStr}`);
 
         const bizData = businesses.map((b) => ({
-          Name: b.name, GST: b.gst, PAN: b.pan, State: b.state,
-          Address: b.address, Mobile: b.mobile, Email: b.email,
+          Name: b.name, GST: b.gst_number, PAN: b.pan_number, State: b.state_name,
+          Address: b.address, Mobile: b.mobile_number, Email: b.email,
         }));
         if (bizData.length > 0) exportCSV(bizData, Object.keys(bizData[0]), `all-businesses-${dateStr}`);
       }

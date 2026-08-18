@@ -618,13 +618,20 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if business_id:
             query = query.filter(invoice__business_id=business_id)
 
-        # Group by product name, calculate totals
-        top_products = query.values(
-            "product_name", "hsn_code", "gst_tax_rate"
-        ).annotate(
+        # Group by product name ALONE. Grouping by (name, hsn, rate) split one
+        # product across several rows whenever historical line items carried a
+        # different HSN or rate — the same "Silver Payal" appearing twice in a
+        # Top Products list reads as a bug. hsn_variants tells the UI when the
+        # underlying data disagrees so it can say so instead of hiding it.
+        from django.db.models import Max
+        top_products = query.values("product_name").annotate(
             total_amount=Sum("amount"),
             total_quantity=Sum("quantity"),
             invoice_count=Count("invoice", distinct=True),
+            hsn_pick=Max("hsn_code"),
+            rate_pick=Max("gst_tax_rate"),
+            unit_pick=Max("unit"),
+            hsn_variants=Count("hsn_code", distinct=True),
         )
 
         # Sort by the requested field
@@ -643,11 +650,15 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 {
                     "id": product_obj.id if product_obj else None,
                     "name": product["product_name"],
-                    "hsn_code": product["hsn_code"],
-                    "gst_tax_rate": product["gst_tax_rate"],
+                    "hsn_code": product["hsn_pick"],
+                    "gst_tax_rate": product["rate_pick"],
                     "total_amount": product["total_amount"],
                     "total_quantity": product["total_quantity"],
                     "invoice_count": product["invoice_count"],
+                    # Real unit off the line items — the UI printed "units" for
+                    # everything, including grams.
+                    "unit": product.get("unit_pick") or "",
+                    "hsn_variants": product.get("hsn_variants", 1),
                 }
             )
 
@@ -1298,13 +1309,26 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             for c in top_customers
         ]
 
-        # 4. Top Products (include hsn_code for dashboard display)
+        # 4. Top Products — grouped by name only. Grouping by (name, hsn) split
+        # one product into several rows whenever historical line items carried a
+        # different HSN, so the same product appeared twice in the widget. `unit`
+        # comes off the line items; the widget used to print "units" for
+        # everything, grams included.
+        from django.db.models import Max as _Max
         top_products = (
             LineItem.objects.filter(
                 invoice__in=queryset, invoice__type_of_invoice="outward"
             )
-            .values("product_name", "hsn_code")
-            .annotate(total_rev=Sum("amount"), total_qty=Sum("quantity"))
+            .values("product_name")
+            .annotate(
+                total_rev=Sum("amount"),
+                total_qty=Sum("quantity"),
+                # aliases must not shadow the field names, or Count() below
+                # resolves to the aggregate instead of the column
+                hsn_pick=_Max("hsn_code"),
+                unit_pick=_Max("unit"),
+                hsn_variants=Count("hsn_code", distinct=True),
+            )
             .order_by("-total_rev")[:5]
         )
         results["top_products"] = [
@@ -1312,7 +1336,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "name": p["product_name"],
                 "total": float(p["total_rev"] or 0),
                 "qty": float(p["total_qty"] or 0),
-                "hsn": p["hsn_code"] or "",
+                "hsn": p["hsn_pick"] or "",
+                "unit": p["unit_pick"] or "",
+                "hsn_variants": p["hsn_variants"],
             }
             for p in top_products
         ]

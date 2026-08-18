@@ -328,7 +328,9 @@ export default function InvoiceDetail() {
             };
             const fromParty = isInward ? customerCard : businessCard;
             const toParty   = isInward ? businessCard : customerCard;
-            const renderCard = (party: typeof businessCard, label: "From" | "To") => {
+            // Either card can be passed in — typing the parameter as the business
+            // card alone made the customer variant unassignable.
+            const renderCard = (party: typeof businessCard | typeof customerCard, label: "From" | "To") => {
               const Icon = party.entity === "business" ? Building2 : User;
               const iconColor = party.entity === "business" ? "text-primary" : "text-chart-3";
               return (

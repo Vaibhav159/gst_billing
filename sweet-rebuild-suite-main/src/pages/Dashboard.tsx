@@ -157,7 +157,9 @@ export default function Dashboard() {
     name: p.name,
     totalAmt: Number(p.total),
     totalQty: Number(p.qty),
-    hsn: p.hsn || ""
+    hsn: p.hsn || "",
+    unit: (p as any).unit || "",
+    hsnVariants: Number((p as any).hsn_variants || 1),
   })).slice(0, 5);
 
   const pieData = [{ name: "Outward", value: totals.outward }, { name: "Inward", value: totals.inward }];
@@ -173,13 +175,20 @@ export default function Dashboard() {
   ];
 
 
+  // The percentage is month-over-month (latest month with activity vs the one
+  // before). It used to render bare, so a red "↓90%" sat next to a healthy
+  // positive number with nothing saying what it was measured against.
   const TrendBadge = ({ value }: { value: number }) => (
     value !== 0 ? (
-      <span className={cn(
-        "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold",
-        value > 0 ? "bg-success/12 text-success" : "bg-destructive/12 text-destructive"
-      )}>
+      <span
+        title={`${value > 0 ? "Up" : "Down"} ${Math.abs(value)}% versus the previous month`}
+        className={cn(
+          "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold",
+          value > 0 ? "bg-success/12 text-success" : "bg-destructive/12 text-destructive"
+        )}
+      >
         {value > 0 ? "↑" : "↓"}{Math.abs(value)}%
+        <span className="font-medium opacity-70">vs last mo.</span>
       </span>
     ) : null
   );
@@ -557,7 +566,14 @@ export default function Dashboard() {
           </div>
           <div className="space-y-0">
             {(() => {
-              const activityList = auditEntries.length > 0 ? auditEntries.slice(0, 8) : recentInvoices;
+              // When there is no audit history we fall back to invoices, which arrive
+              // ordered by creation. The row prints the INVOICE date, so a back-dated
+              // entry made today sat on top showing an old date and read as broken
+              // sorting. Order the fallback by what the row displays.
+              const activityList = auditEntries.length > 0
+                ? auditEntries.slice(0, 8)
+                : [...recentInvoices].sort((a: any, b: any) =>
+                    String(b.invoice_date || "").localeCompare(String(a.invoice_date || "")));
               return activityList.map((entry: any, i: number) => {
               const isAudit = !!entry.action;
               const actionColors: Record<string, { bg: string; text: string }> = {
@@ -654,12 +670,12 @@ export default function Dashboard() {
                 <span className="w-7 h-7 rounded-lg bg-success/10 border border-success/20 flex items-center justify-center text-success text-[11px] font-bold shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-medium text-foreground group-hover:text-primary transition-colors truncate">{p.name}</p>
-                  {p.hsn && <p className="text-[11px] text-muted-foreground">HSN: {p.hsn}</p>}
+                  {p.hsn && <p className="text-[11px] text-muted-foreground">HSN: {p.hsn}{p.hsnVariants > 1 ? ` +${p.hsnVariants - 1} more` : ""}</p>}
                   {!p.hsn && <p className="text-[11px] text-muted-foreground/50 italic">No HSN</p>}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-[13px] font-bold text-foreground tabular-nums">{formatCurrency(p.totalAmt)}</p>
-                  <p className="text-[10px] text-muted-foreground">{p.totalQty} units</p>
+                  <p className="text-[10px] text-muted-foreground">{p.totalQty} {p.unit || "units"}</p>
                 </div>
               </Link>
             ))}

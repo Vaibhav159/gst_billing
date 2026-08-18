@@ -82,3 +82,50 @@ class DashboardStatsTest(BaseAPITestCase):
         totals = self._stats()
         expected = self._db_total(INVOICE_TYPE_OUTWARD) - self._db_total(INVOICE_TYPE_INWARD)
         self.assertAlmostEqual(float(totals["net"]), float(expected), places=2)
+
+
+class TopProductsGroupingTest(BaseAPITestCase):
+    """One product must be one row, even when its HSN drifted over time."""
+
+    def _line(self, invoice, name, hsn, qty, rate, unit="gms"):
+        taxable = D(str(qty)) * D(str(rate))
+        tax = taxable * D("0.03")
+        LineItem.objects.create(
+            workspace_id=1, customer=self.customer, invoice=invoice, product_name=name,
+            hsn_code=hsn, gst_tax_rate=D("0.03"), quantity=D(str(qty)), rate=D(str(rate)),
+            cgst=tax / 2, sgst=tax / 2, igst=D("0"), amount=taxable + tax, unit=unit,
+        )
+
+    def _invoice_with(self, number, lines):
+        inv = Invoice.objects.create(
+            workspace_id=1, business=self.business, customer=self.customer,
+            invoice_number=number, invoice_date="2026-05-01",
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount=0,
+        )
+        for name, hsn, qty, rate in lines:
+            self._line(inv, name, hsn, qty, rate)
+        return inv
+
+    def _top(self):
+        resp = self.client.get(reverse("invoice-stats"))
+        self.assertEqual(resp.status_code, 200)
+        return resp.data["top_products"]
+
+    def test_same_product_under_two_hsn_codes_is_one_row(self):
+        self._invoice_with("HSN-1", [("Silver Payal", "711311", 100, 90)])
+        self._invoice_with("HSN-2", [("Silver Payal", "711319", 50, 90)])
+        rows = [r for r in self._top() if r["name"] == "Silver Payal"]
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(float(rows[0]["qty"]), 150.0, places=3)
+
+    def test_row_flags_how_many_hsn_codes_it_merged(self):
+        self._invoice_with("HSN-3", [("Bangle", "711311", 10, 100)])
+        self._invoice_with("HSN-4", [("Bangle", "711319", 10, 100)])
+        row = [r for r in self._top() if r["name"] == "Bangle"][0]
+        self.assertEqual(row["hsn_variants"], 2)
+
+    def test_row_carries_the_line_unit(self):
+        inv = self._invoice_with("UNIT-2", [])
+        self._line(inv, "Anklet Pair", "711311", 3, 500, unit="pcs")
+        row = [r for r in self._top() if r["name"] == "Anklet Pair"][0]
+        self.assertEqual(row["unit"], "pcs")

@@ -22,7 +22,7 @@ interface MobileHeaderProps {
 export default function MobileHeader({ selectedFY, onFYChange }: MobileHeaderProps) {
   const { theme, setTheme } = useTheme();
   const { user } = useAuth();
-  const userInitial = user?.name?.charAt(0)?.toUpperCase() || "U";
+  const userInitial = user?.username?.charAt(0)?.toUpperCase() || "U";
   const [fyOpen, setFyOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const fyRef = useRef<HTMLDivElement>(null);
