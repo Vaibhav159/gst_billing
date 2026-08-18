@@ -14,10 +14,12 @@ import {
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useInwardBills } from "@/hooks/useInwardBills";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 
 export default function InwardBills() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { items: businesses } = useBusinesses();
   const [business, setBusiness] = useState("all");
   const [search, setSearch] = useState("");
@@ -61,7 +63,7 @@ export default function InwardBills() {
           />
         </div>
         <Select value={business} onValueChange={setBusiness}>
-          <SelectTrigger className="w-[190px]"><SelectValue placeholder="All firms" /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-[190px]"><SelectValue placeholder="All firms" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All firms</SelectItem>
             {businesses.map((b) => (
@@ -69,10 +71,61 @@ export default function InwardBills() {
             ))}
           </SelectContent>
         </Select>
-        <Input type="date" className="w-[150px]" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" />
-        <Input type="date" className="w-[150px]" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" />
+        <Input type="date" className="w-full sm:w-[150px]" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" />
+        <Input type="date" className="w-full sm:w-[150px]" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" />
       </div>
 
+      {/* Phones get cards, matching InvoiceList. The table put Taxable / Tax /
+          Total — the reason you open a register — behind a horizontal scroll. */}
+      {isMobile ? (
+        <div className="space-y-2.5">
+          {loading ? (
+            <div className="rounded-lg border bg-card py-10 text-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin inline mr-2" /> Loading…
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border bg-card py-10 text-center text-destructive">{error}</div>
+          ) : items.length === 0 ? (
+            <div className="rounded-lg border bg-card py-12 text-center text-muted-foreground">
+              <FileText className="h-8 w-8 mx-auto mb-2 opacity-40" />
+              No inward bills yet. Tap <span className="font-medium">Add Inward Bill</span> to record one.
+            </div>
+          ) : (
+            items.map((b) => {
+              const tax = (parseFloat(b.cgst) + parseFloat(b.sgst) + parseFloat(b.igst)).toFixed(2);
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => navigate(`/billing/inward-bills/${b.id}`)}
+                  className="w-full text-left rounded-xl border bg-card p-4 space-y-2.5 active:bg-secondary/30 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{b.supplier?.name || "—"}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        #{b.invoice_number} · {formatDate(b.invoice_date)}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold tabular-nums">{formatCurrency(Number(b.total_amount))}</p>
+                      <p className="text-[11px] text-muted-foreground tabular-nums">
+                        tax {formatCurrency(Number(tax))}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="truncate">{b.business_name}</span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="tabular-nums">taxable {formatCurrency(Number(b.taxable))}</span>
+                      {b.has_file && <Paperclip className="h-3.5 w-3.5" />}
+                    </span>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : (
       <div className="rounded-lg border bg-card overflow-x-auto">
         <Table>
           <TableHeader>
@@ -141,6 +194,7 @@ export default function InwardBills() {
           </TableBody>
         </Table>
       </div>
+      )}
     </div>
   );
 }

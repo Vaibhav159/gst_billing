@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Settings, LogOut, X, Wrench, User } from "lucide-react";
+import { Settings, LogOut, X, Wrench, User, ReceiptText } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -46,6 +46,27 @@ export default function EasyMoreDrawer({ open, onOpenChange }: Props) {
             </div>
 
             <div className="p-3 space-y-1">
+              {/* Inward Bills — recording a purchase bill is a phone-first job,
+                  and this drawer was the only place left to reach it from. */}
+              <Link
+                to="/billing/inward-bills"
+                onClick={() => onOpenChange(false)}
+                className={cn(
+                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
+                  location.pathname.startsWith("/billing/inward-bills")
+                    ? "bg-primary/10 text-primary"
+                    : "text-foreground hover:bg-secondary/30"
+                )}
+              >
+                <div className={cn(
+                  "w-9 h-9 rounded-xl flex items-center justify-center",
+                  location.pathname.startsWith("/billing/inward-bills") ? "bg-primary/15" : "bg-secondary/40"
+                )}>
+                  <ReceiptText className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[14px] font-medium">Inward Bills</span>
+              </Link>
+
               {/* Profile */}
               <Link
                 to="/billing/profile"

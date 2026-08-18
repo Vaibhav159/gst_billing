@@ -246,18 +246,41 @@ export default function InwardBillAdd() {
               <Badge variant="outline">{intra ? "Intra-state · CGST + SGST" : "Inter-state · IGST"}</Badge>
             </div>
             <div className="space-y-2">
+              {/* One card per line on phones. The 5-column desktop grid squeezed
+                  HSN, Qty and Rate into ~45px boxes with clipped placeholders —
+                  unusable for typing a rate like 7186.75 on a handset. */}
               {lines.map((l, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <Input className="col-span-4" placeholder="Product" value={l.product_name} onChange={(e) => setLine(i, { product_name: e.target.value })} />
-                  <Input className="col-span-2" placeholder="HSN" value={l.hsn_code} onChange={(e) => setLine(i, { hsn_code: e.target.value })} />
-                  <Input className="col-span-2" placeholder="Qty" inputMode="decimal" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} />
-                  <Input className="col-span-2" placeholder="Rate" inputMode="decimal" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />
-                  <div className="col-span-1 text-right text-sm tabular-nums text-muted-foreground">
-                    {formatCurrency((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0))}
+                <div
+                  key={i}
+                  className="rounded-xl border p-3 space-y-2 sm:border-0 sm:p-0 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-center"
+                >
+                  <div className="sm:col-span-4">
+                    <Label className="text-[11px] text-muted-foreground sm:hidden">Product</Label>
+                    <Input placeholder="Product" value={l.product_name} onChange={(e) => setLine(i, { product_name: e.target.value })} />
                   </div>
-                  <Button className="col-span-1" variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))} disabled={lines.length === 1}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="grid grid-cols-3 gap-2 sm:contents">
+                    <div className="sm:col-span-2">
+                      <Label className="text-[11px] text-muted-foreground sm:hidden">HSN</Label>
+                      <Input placeholder="HSN" value={l.hsn_code} onChange={(e) => setLine(i, { hsn_code: e.target.value })} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className="text-[11px] text-muted-foreground sm:hidden">Qty</Label>
+                      <Input placeholder="Qty" inputMode="decimal" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className="text-[11px] text-muted-foreground sm:hidden">Rate</Label>
+                      <Input placeholder="Rate" inputMode="decimal" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between sm:contents">
+                    <div className="text-sm tabular-nums text-muted-foreground sm:col-span-1 sm:text-right">
+                      <span className="sm:hidden text-[11px] mr-1">Line total</span>
+                      {formatCurrency((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0))}
+                    </div>
+                    <Button className="sm:col-span-1" variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))} disabled={lines.length === 1}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
               <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, { ...emptyLine }])}>

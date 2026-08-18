@@ -8,6 +8,7 @@ Register (list/detail), AI-assisted extraction (pre-fill only), and create
 
 import json
 import logging
+from types import SimpleNamespace
 from decimal import Decimal
 
 from django.core.files.base import ContentFile
@@ -22,6 +23,8 @@ from rest_framework.views import APIView
 from billing.constants import INVOICE_TYPE_INWARD
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.utils import AIInvoiceProcessor
+
+from billing.tax_rules import is_interstate
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
 from .permissions import RoleBasedPermission
@@ -113,14 +116,6 @@ class InwardBillListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        override = str(request.data.get("override_warnings", "")).lower() in ("true", "1")
-        if find_duplicate(business, invoice_number) and not override:
-            return Response(
-                {"error": "duplicate", "detail":
-                 f"An inward bill #{invoice_number} already exists for {business.name}."},
-                status=status.HTTP_409_CONFLICT,
-            )
-
         supplier_gstin = (request.data.get("supplier_gstin") or "").strip().upper()
         supplier_name = (request.data.get("supplier_name") or "").strip()
         if not supplier_name and not supplier_gstin:
@@ -137,6 +132,18 @@ class InwardBillListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Dup check AFTER the supplier is known, so the key is
+        # (business, supplier, number) — the same bill number from two
+        # different suppliers is not a duplicate.
+        override = str(request.data.get("override_warnings", "")).lower() in ("true", "1")
+        if find_duplicate(business, invoice_number, supplier) and not override:
+            return Response(
+                {"error": "duplicate", "detail":
+                 f"An inward bill #{invoice_number} from {supplier.name} already exists "
+                 f"for {business.name}."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         try:
             lines_in = json.loads(request.data.get("lines") or "[]")
         except (ValueError, TypeError):
@@ -144,7 +151,14 @@ class InwardBillListCreateView(APIView):
         if not lines_in:
             return Response({"error": "At least one line item is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        intra = bool(supplier_gstin) and supplier_gstin[:2] == (business.gst_number or "")[:2]
+        # Shared rule with the invoice write paths. The old inline check was
+        # `bool(supplier_gstin) and codes match`, so a supplier with no GSTIN
+        # fell through to interstate and the whole bill was taxed IGST.
+        supplier_for_rule = SimpleNamespace(
+            gst_number=supplier_gstin,
+            state_name=(request.data.get("supplier_state") or getattr(supplier, "state_name", "") or ""),
+        )
+        intra = not is_interstate(business, supplier_for_rule)
         service_lines = []
         for ln in lines_in:
             qty = Decimal(str(ln.get("quantity") or "0"))
@@ -263,7 +277,10 @@ class InwardBillExtractView(APIView):
             seller_name = data.get("customer_name") or ""
 
         firm_gstin = business.gst_number if business else ""
-        intra = bool(seller_gstin) and bool(firm_gstin) and seller_gstin[:2] == firm_gstin[:2]
+        # Same rule as create(), so the preview and the saved bill agree.
+        intra = bool(business) and not is_interstate(
+            business, SimpleNamespace(gst_number=seller_gstin, state_name="")
+        )
         invoice_number = data.get("invoice_number") or ""
 
         return Response({

@@ -225,20 +225,41 @@ class InwardBillAPITest(BaseAPITestCase):
         self.assertEqual(li.cgst, D("0"))
         self.assertEqual(li.sgst, D("0"))
 
-    def test_create_duplicate_409_then_override(self):
-        self._make_inward(number="DUP-1")
-        base = {
-            "business_id": self.business.id, "supplier_gstin": "22ZZZZZ0000Z1Z5",
-            "supplier_name": "DUPCO", "invoice_number": "DUP-1", "invoice_date": "2026-05-05",
+    def _dup_payload(self, number, supplier_name, supplier_gstin):
+        return {
+            "business_id": self.business.id, "supplier_gstin": supplier_gstin,
+            "supplier_name": supplier_name, "invoice_number": number,
+            "invoice_date": "2026-05-05",
             "lines": json.dumps([{"product_name": "A", "hsn_code": "1",
                                   "quantity": "1", "rate": "100", "gst_tax_rate": "0.03"}]),
         }
-        r1 = self.client.post(reverse("inward-bill-list"),
-                              {**base, "file": SimpleUploadedFile("a.jpg", b"d", content_type="image/jpeg")})
-        self.assertEqual(r1.status_code, 409)
-        r2 = self.client.post(reverse("inward-bill-list"),
-                              {**base, "override_warnings": "true",
-                               "file": SimpleUploadedFile("a.jpg", b"d", content_type="image/jpeg")})
-        self.assertEqual(r2.status_code, 201, r2.data)
+
+    def test_same_supplier_same_number_is_409_then_overridable(self):
+        base = self._dup_payload("DUP-1", "DUPCO", "22ZZZZZ0000Z1Z5")
+        first = self.client.post(reverse("inward-bill-list"),
+                                 {**base, "file": SimpleUploadedFile("a.jpg", b"d", content_type="image/jpeg")})
+        self.assertEqual(first.status_code, 201, first.data)
+
+        again = self.client.post(reverse("inward-bill-list"),
+                                 {**base, "file": SimpleUploadedFile("a.jpg", b"d", content_type="image/jpeg")})
+        self.assertEqual(again.status_code, 409)
+
+        forced = self.client.post(reverse("inward-bill-list"),
+                                  {**base, "override_warnings": "true",
+                                   "file": SimpleUploadedFile("a.jpg", b"d", content_type="image/jpeg")})
+        self.assertEqual(forced.status_code, 201, forced.data)
         self.assertEqual(Invoice.objects.filter(invoice_number="DUP-1",
+                         type_of_invoice=INVOICE_TYPE_INWARD).count(), 2)
+
+    def test_two_suppliers_may_both_use_the_same_bill_number(self):
+        # Bill numbering belongs to the supplier, so two of them issuing a
+        # "001" in the same year is ordinary. Keying the duplicate check on
+        # (business, number) alone rejected the second one outright.
+        one = self.client.post(reverse("inward-bill-list"),
+                               self._dup_payload("001", "SUPPLIER ONE", "22AAAAA1111A1Z5"))
+        self.assertEqual(one.status_code, 201, one.data)
+        two = self.client.post(reverse("inward-bill-list"),
+                               self._dup_payload("001", "SUPPLIER TWO", "22BBBBB2222B1Z5"))
+        self.assertEqual(two.status_code, 201, two.data)
+        self.assertEqual(Invoice.objects.filter(invoice_number="001",
                          type_of_invoice=INVOICE_TYPE_INWARD).count(), 2)

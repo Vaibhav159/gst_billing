@@ -72,16 +72,21 @@ def gstin_matches(bill_gstin, firm_gstin):
     )
 
 
-def find_duplicate(business, invoice_number):
-    """Return an existing inward invoice with this (business, number), or None."""
+def find_duplicate(business, invoice_number, supplier=None):
+    """Return an existing inward invoice that is really the same bill, or None.
+
+    Keyed on (business, supplier, number) when the supplier is known. Supplier
+    numbering is the supplier's own, so two of them issuing a "001" in the same
+    year is ordinary — keying on (business, number) alone rejected the second
+    as a duplicate. Matches the natural key the AI-import path already uses.
+    """
     from billing.models import Invoice
 
-    return (
-        Invoice.objects.defer("source_file", "source_preview")
-        .filter(
-            business=business,
-            invoice_number=invoice_number,
-            type_of_invoice=INVOICE_TYPE_INWARD,
-        )
-        .first()
+    qs = Invoice.objects.defer("source_file", "source_preview").filter(
+        business=business,
+        invoice_number=invoice_number,
+        type_of_invoice=INVOICE_TYPE_INWARD,
     )
+    if supplier is not None:
+        qs = qs.filter(customer=supplier)
+    return qs.first()
