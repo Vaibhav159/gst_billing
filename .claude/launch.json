@@ -4,9 +4,16 @@
     {
       "name": "sweet-rebuild-suite-main",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 8081,
-      "cwd": "/Users/lakshya/projects/gst/gst_billing/sweet-rebuild-suite-main"
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5001,
+      "cwd": "/Users/lakshya/projects/gst/gst_billing/sweet-rebuild-suite-main",
+      "env": {
+        "VITE_DEV_PORT": "5001",
+        "VITE_API_TARGET": "http://127.0.0.1:5002"
+      }
     }
   ]
 }

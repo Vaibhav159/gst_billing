@@ -1,7 +1,7 @@
 import { type Invoice, formatCurrency } from "./mockData";
 
 export async function shareInvoice(invoice: Invoice) {
-  const text = `Invoice ${invoice.invoiceNumber}\nCustomer: ${invoice.customerName}\nAmount: ${formatCurrency(invoice.total)}\nDate: ${invoice.date}`;
+  const text = `Invoice ${invoice.invoiceNumber}\nCustomer: ${invoice.customerName}\nAmount: ${formatCurrency(invoice.total)}\nDate: ${invoice.invoice_date}`;
   const url = `${window.location.origin}/billing/invoice/${invoice.id}/print`;
 
   if (navigator.share) {
@@ -20,7 +20,7 @@ export async function shareInvoice(invoice: Invoice) {
 }
 
 export function shareViaWhatsApp(invoice: Invoice, phone?: string) {
-  const text = `Invoice ${invoice.invoiceNumber}\nCustomer: ${invoice.customerName}\nAmount: ${formatCurrency(invoice.total)}\nDate: ${invoice.date}\n${window.location.origin}/billing/invoice/${invoice.id}/print`;
+  const text = `Invoice ${invoice.invoiceNumber}\nCustomer: ${invoice.customerName}\nAmount: ${formatCurrency(invoice.total)}\nDate: ${invoice.invoice_date}\n${window.location.origin}/billing/invoice/${invoice.id}/print`;
   const base = phone ? `https://wa.me/${phone}` : "https://wa.me/";
   window.open(`${base}?text=${encodeURIComponent(text)}`, "_blank");
 }

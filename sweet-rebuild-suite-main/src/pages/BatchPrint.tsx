@@ -111,7 +111,10 @@ export default function BatchPrint() {
           return null;
         }
       }));
-      const filtered = results.filter((r): r is InvoiceWithMeta => r !== null);
+      // NonNullable of the actual element type — the old predicate claimed
+      // InvoiceWithMeta, whose qrDataUrl is optional, so it did not describe
+      // the array being filtered.
+      const filtered = results.filter((r): r is NonNullable<typeof r> => r !== null);
 
       if (skipped > 0) logger.warn(`BatchPrint: ${skipped} invoices skipped due to errors`);
       if (!cancelled) {

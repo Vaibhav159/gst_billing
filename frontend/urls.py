@@ -3,6 +3,9 @@ from django.urls import re_path
 from . import views
 
 urlpatterns = [
-    # This will catch all routes and let React Router handle them
-    re_path(r"^.*$", views.index),
+    # Catch-all for React Router — but NOT /api/. Without the negative
+    # lookahead an unknown endpoint fell through to here and returned 200 with
+    # the SPA shell, so a typo'd URL looked like success to the client and
+    # failed somewhere far from the cause.
+    re_path(r"^(?!api/).*$", views.index),
 ]

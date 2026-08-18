@@ -5,7 +5,8 @@
 services:
   # PostgreSQL Database
   db:
-    image: postgres:13
+    # 16: Django 5.2 requires Postgres 14+.
+    image: postgres:16-alpine
     restart: always
     volumes:
       - postgres_data:/var/lib/postgresql/data/

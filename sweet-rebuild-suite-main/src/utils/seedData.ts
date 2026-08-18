@@ -212,7 +212,7 @@ export function generateSeedData(): {
           const inv: Invoice = {
             id: `inv-${fy.replace("-", "")}-${bizIdx}-${String(seq).padStart(4, "0")}`,
             invoiceNumber: invNumber,
-            date: dateStr,
+            invoice_date: dateStr,
             customerId: cust.id,
             customerName: cust.name,
             businessId: biz.id,
@@ -268,7 +268,7 @@ export function generateSeedData(): {
           invoices.push({
             id: `inv-${fy.replace("-", "")}-in-${bizIdx}-${String(inSeq).padStart(3, "0")}`,
             invoiceNumber: `PUR-${bizIdx + 1}-${String(inSeq).padStart(3, "0")}`,
-            date: dateStr,
+            invoice_date: dateStr,
             customerId: supplier.id,
             customerName: supplier.name,
             businessId: biz.id,
@@ -306,7 +306,7 @@ export function generateSeedData(): {
   invoices.push({
     id: "inv-manual-lodha-100",
     invoiceNumber: "100",
-    date: "2026-02-06",
+    invoice_date: "2026-02-06",
     customerId: "cust-001",
     customerName: "Inderjeet Singh Prem Singh Sisodia",
     businessId: "biz-lodha01",
@@ -340,7 +340,7 @@ export function generateSeedData(): {
   });
 
   // Sort invoices by date
-  invoices.sort((a, b) => a.date.localeCompare(b.date));
+  invoices.sort((a, b) => a.invoice_date.localeCompare(b.invoice_date));
 
   return {
     businesses: BUSINESSES,

@@ -5,7 +5,7 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import (
     Count,
     F,
@@ -28,11 +28,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.constants import (
+    B2CL_THRESHOLD,
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
 )
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
+from billing.tax_rules import is_interstate, normalize_tax_heads, state_code
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -616,13 +618,20 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if business_id:
             query = query.filter(invoice__business_id=business_id)
 
-        # Group by product name, calculate totals
-        top_products = query.values(
-            "product_name", "hsn_code", "gst_tax_rate"
-        ).annotate(
+        # Group by product name ALONE. Grouping by (name, hsn, rate) split one
+        # product across several rows whenever historical line items carried a
+        # different HSN or rate — the same "Silver Payal" appearing twice in a
+        # Top Products list reads as a bug. hsn_variants tells the UI when the
+        # underlying data disagrees so it can say so instead of hiding it.
+        from django.db.models import Max
+        top_products = query.values("product_name").annotate(
             total_amount=Sum("amount"),
             total_quantity=Sum("quantity"),
             invoice_count=Count("invoice", distinct=True),
+            hsn_pick=Max("hsn_code"),
+            rate_pick=Max("gst_tax_rate"),
+            unit_pick=Max("unit"),
+            hsn_variants=Count("hsn_code", distinct=True),
         )
 
         # Sort by the requested field
@@ -641,11 +650,15 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 {
                     "id": product_obj.id if product_obj else None,
                     "name": product["product_name"],
-                    "hsn_code": product["hsn_code"],
-                    "gst_tax_rate": product["gst_tax_rate"],
+                    "hsn_code": product["hsn_pick"],
+                    "gst_tax_rate": product["rate_pick"],
                     "total_amount": product["total_amount"],
                     "total_quantity": product["total_quantity"],
                     "invoice_count": product["invoice_count"],
+                    # Real unit off the line items — the UI printed "units" for
+                    # everything, including grams.
+                    "unit": product.get("unit_pick") or "",
+                    "hsn_variants": product.get("hsn_variants", 1),
                 }
             )
 
@@ -834,37 +847,62 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=payload)
         serializer.is_valid(raise_exception=True)
 
-        with transaction.atomic():
-            self.perform_create(serializer)  # saves invoice + writes audit log
-            invoice = serializer.instance
+        try:
+            with transaction.atomic():
+                self.perform_create(serializer)  # saves invoice + writes audit log
+                invoice = serializer.instance
 
-            if line_items_data:
-                new_total = Decimal("0")
-                new_lis = []
-                for item_data in line_items_data:
-                    qty = Decimal(str(item_data.get("quantity", 1)))
-                    rate = Decimal(str(item_data.get("rate", 0)))
-                    amount = Decimal(str(item_data.get("amount", qty * rate)))
-                    new_total += amount
-                    new_lis.append(LineItem(
-                        invoice=invoice,
-                        customer=invoice.customer,
-                        product_name=item_data.get("product_name", ""),
-                        hsn_code=item_data.get("hsn_code", ""),
-                        gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
-                        quantity=qty,
-                        rate=rate,
-                        cgst=Decimal(str(item_data.get("cgst", 0))),
-                        sgst=Decimal(str(item_data.get("sgst", 0))),
-                        igst=Decimal(str(item_data.get("igst", 0))),
-                        amount=amount,
-                        unit=item_data.get("unit", "gms"),
-                        workspace_id=1,
-                    ))
-                LineItem.objects.bulk_create(new_lis, batch_size=100)
-                # Bypass save()'s sum() roundtrip — we already know the total.
-                invoice.total_amount = new_total
-                Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
+                if line_items_data:
+                    interstate = is_interstate(invoice.business, invoice.customer)
+                    new_total = Decimal("0")
+                    new_lis = []
+                    for item_data in line_items_data:
+                        qty = Decimal(str(item_data.get("quantity", 1)))
+                        rate = Decimal(str(item_data.get("rate", 0)))
+                        amount = Decimal(str(item_data.get("amount", qty * rate)))
+                        new_total += amount
+                        n_cgst, n_sgst, n_igst = normalize_tax_heads(
+                            Decimal(str(item_data.get("cgst", 0))),
+                            Decimal(str(item_data.get("sgst", 0))),
+                            Decimal(str(item_data.get("igst", 0))),
+                            interstate,
+                        )
+                        new_lis.append(LineItem(
+                            invoice=invoice,
+                            customer=invoice.customer,
+                            product_name=item_data.get("product_name", ""),
+                            hsn_code=item_data.get("hsn_code", ""),
+                            gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                            quantity=qty,
+                            rate=rate,
+                            # Heads re-derived server-side; the client's split is advisory.
+                            cgst=n_cgst,
+                            sgst=n_sgst,
+                            igst=n_igst,
+                            amount=amount,
+                            unit=item_data.get("unit", "gms"),
+                            workspace_id=1,
+                        ))
+                    LineItem.objects.bulk_create(new_lis, batch_size=100)
+                    # Bypass save()'s sum() roundtrip — we already know the total.
+                    invoice.total_amount = new_total
+                    Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
+
+        except IntegrityError:
+            # The DB-level guard (uniq_outward_number_per_business_fy) caught a
+            # duplicate the read-then-write suggestion raced past. Same shape
+            # as the pre-save duplicate check so the frontend shows its normal
+            # duplicate dialog instead of a generic failure.
+            return Response(
+                {
+                    "error": "duplicate_invoice_number",
+                    "detail": (
+                        "An outward invoice with this number already exists for "
+                        "this business in the same financial year."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # Re-serialize so the response includes the persisted total + line items.
         invoice.refresh_from_db()
@@ -913,6 +951,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             old_lis_qs = LineItem.objects.filter(invoice=invoice)
             old_lis_qs._raw_delete(old_lis_qs.db)
 
+            # After the in-memory patch above, so a changed customer/business
+            # is reflected in the interstate decision.
+            interstate = is_interstate(invoice.business, invoice.customer)
             new_lis = []
             new_total = Decimal("0")
             for item_data in line_items_data:
@@ -920,6 +961,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 rate = Decimal(str(item_data.get("rate", 0)))
                 amount = Decimal(str(item_data.get("amount", qty * rate)))
                 new_total += amount
+                n_cgst, n_sgst, n_igst = normalize_tax_heads(
+                    Decimal(str(item_data.get("cgst", 0))),
+                    Decimal(str(item_data.get("sgst", 0))),
+                    Decimal(str(item_data.get("igst", 0))),
+                    interstate,
+                )
                 new_lis.append(LineItem(
                     invoice=invoice,
                     customer=invoice.customer,
@@ -928,9 +975,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
                     quantity=qty,
                     rate=rate,
-                    cgst=Decimal(str(item_data.get("cgst", 0))),
-                    sgst=Decimal(str(item_data.get("sgst", 0))),
-                    igst=Decimal(str(item_data.get("igst", 0))),
+                    # Heads re-derived server-side; the client's split is advisory.
+                    cgst=n_cgst,
+                    sgst=n_sgst,
+                    igst=n_igst,
                     amount=amount,
                     unit=item_data.get("unit", "gms"),
                     workspace_id=1,
@@ -1181,6 +1229,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         results = {}
         # 1. Totals
+        #
+        # Invoice-level sums and line-item tax sums MUST come from separate
+        # aggregates. Putting them in one .aggregate() makes Django join
+        # billing_lineitem, so an invoice with N line items appears N times and
+        # Sum("total_amount") / Count("id") count it N times — a 2-line invoice
+        # was inflating dashboard sales by its own value. (Same row-
+        # multiplication trap already documented in get_queryset(); it survived
+        # here.) The tax sums are correct over the joined rows, since one row
+        # per line item is exactly what they want.
         totals = queryset.aggregate(
             outward=Coalesce(
                 Sum("total_amount", filter=Q(type_of_invoice="outward")),
@@ -1190,22 +1247,27 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 Sum("total_amount", filter=Q(type_of_invoice="inward")),
                 Decimal("0.00"),
             ),
+            count=Count("id"),
+        )
+        tax_totals = LineItem.objects.filter(
+            invoice_id__in=queryset.values("id")
+        ).aggregate(
             outward_tax=Coalesce(
                 Sum(
-                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
-                    filter=Q(type_of_invoice="outward"),
+                    F("cgst") + F("sgst") + F("igst"),
+                    filter=Q(invoice__type_of_invoice="outward"),
                 ),
                 Decimal("0.00"),
             ),
             inward_tax=Coalesce(
                 Sum(
-                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
-                    filter=Q(type_of_invoice="inward"),
+                    F("cgst") + F("sgst") + F("igst"),
+                    filter=Q(invoice__type_of_invoice="inward"),
                 ),
                 Decimal("0.00"),
             ),
-            count=Count("id"),
         )
+        totals.update(tax_totals)
 
         # 2. Monthly summary
         monthly_raw = (
@@ -1264,13 +1326,26 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             for c in top_customers
         ]
 
-        # 4. Top Products (include hsn_code for dashboard display)
+        # 4. Top Products — grouped by name only. Grouping by (name, hsn) split
+        # one product into several rows whenever historical line items carried a
+        # different HSN, so the same product appeared twice in the widget. `unit`
+        # comes off the line items; the widget used to print "units" for
+        # everything, grams included.
+        from django.db.models import Max as _Max
         top_products = (
             LineItem.objects.filter(
                 invoice__in=queryset, invoice__type_of_invoice="outward"
             )
-            .values("product_name", "hsn_code")
-            .annotate(total_rev=Sum("amount"), total_qty=Sum("quantity"))
+            .values("product_name")
+            .annotate(
+                total_rev=Sum("amount"),
+                total_qty=Sum("quantity"),
+                # aliases must not shadow the field names, or Count() below
+                # resolves to the aggregate instead of the column
+                hsn_pick=_Max("hsn_code"),
+                unit_pick=_Max("unit"),
+                hsn_variants=Count("hsn_code", distinct=True),
+            )
             .order_by("-total_rev")[:5]
         )
         results["top_products"] = [
@@ -1278,7 +1353,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "name": p["product_name"],
                 "total": float(p["total_rev"] or 0),
                 "qty": float(p["total_qty"] or 0),
-                "hsn": p["hsn_code"] or "",
+                "hsn": p["hsn_pick"] or "",
+                "unit": p["unit_pick"] or "",
+                "hsn_variants": p["hsn_variants"],
             }
             for p in top_products
         ]
@@ -1785,10 +1862,14 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if cust_gst and len(cust_gst) >= 15:
                 continue  # Skip registered
-            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
-            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
-            if cust_state != biz_state:
+            # One rule decides direction everywhere (is_interstate compares
+            # like with like: GSTINs when both sides have one, else state
+            # names). The old code read the customer's state off their GSTIN
+            # and fell back to the SELLER's state when they had none — so an
+            # interstate B2C sale was filed here as a local supply.
+            if is_interstate(inv.business, inv.customer):
                 continue  # Inter-state goes to B2CL
+            biz_state = state_code(inv.business)
             items = inv.lineitem_set.all()
             for li in items:
                 rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
@@ -1800,18 +1881,23 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 b2cs_agg[key]["samt"] += float(li.sgst)
         b2cs = list(b2cs_agg.values())
 
-        # B2CL: Large invoices to unregistered (>2.5L, inter-state)
+        # B2CL: Large invoices to unregistered (> B2CL_THRESHOLD, inter-state)
         b2cl = []
         for inv in outward_invoices:
-            if float(inv.total_amount) <= 250000:
+            if float(inv.total_amount) <= B2CL_THRESHOLD:
                 continue
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if cust_gst and len(cust_gst) >= 15:
                 continue
-            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
-            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
-            if cust_state == biz_state:
+            # Every invoice reaching this point has no customer GSTIN, so the
+            # old "GSTIN prefix else seller's state" fallback made the customer
+            # look local every single time — B2CL was structurally unreachable
+            # and these sales silently went to B2CS instead.
+            if not is_interstate(inv.business, inv.customer):
                 continue  # Intra-state goes to B2CS
+            cust_state = state_code(inv.customer)
+            if not cust_state:
+                continue  # No place of supply to report against
             items = inv.lineitem_set.all()
             inv_items = [{
                 "num": int(li.id),
@@ -1869,7 +1955,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "osup_det": {"txval": float(ot["txval"]), "camt": float(ot["cgst"]), "samt": float(ot["sgst"]), "iamt": float(ot["igst"])},
             },
             "itc_elg": {
-                "itc_avl": [{"ty": "IMPG", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
+                # "OTH" = all other ITC (GSTR-3B table 4(A)(5)). This used to say
+                # "IMPG" (import of goods), which files every rupee of domestic
+                # purchase tax under imports.
+                "itc_avl": [{"ty": "OTH", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
             },
             "intr_ltfee": {
                 "intr_details": {"iamt": 0, "camt": 0, "samt": 0},

@@ -39,11 +39,20 @@ INSTALLED_APPS = [
     "explorer",
     "simple_history",
     "rest_framework",
+    # Stores rotated-out refresh tokens so they die on rotation.
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "frontend",
+    # Was missing while CACHEOPS below was fully configured, so none of the
+    # query caching this file describes was actually running in production.
+    "cacheops",
 ]
 
 MIDDLEWARE = [
+    # First so it compresses everything below. gst_summary is ~80 KB raw and
+    # ~12 KB gzipped; production was serving all of it uncompressed because
+    # this middleware only existed in the dev settings.
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -142,10 +151,14 @@ REST_FRAMEWORK = {
 
 # JWT settings
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=180),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
+    # 12h access / 30d refresh with rotation + blacklist — was 30d/180d static,
+    # which meant a leaked localStorage token worked for a month and a stolen
+    # refresh for six. The SPA refreshes transparently on 401 (api.ts), so
+    # shorter lifetimes cost the user nothing.
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
@@ -166,6 +179,9 @@ SIMPLE_JWT = {
 }
 
 # Security settings
+# nginx terminates in front of Django and forwards over plain http, so without
+# this any absolute URL Django builds comes back as http:// on an https:// page.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
@@ -215,6 +231,13 @@ else:
         "db": 2,
         "socket_timeout": 3,
     }
+
+# Cacheops only runs when a Redis host is actually configured. The app is in
+# INSTALLED_APPS unconditionally (so models register), but with no REDIS_HOST —
+# CI's E2E job, a bare local run — every cached query/invalidation would try
+# localhost:6379 and crash the first save. CACHEOPS_ENABLED=False makes cacheops
+# a no-op instead.
+CACHEOPS_ENABLED = bool(os.environ.get("REDIS_HOST"))
 
 # Cacheops configuration
 CACHEOPS_DEFAULTS = {

@@ -6,8 +6,10 @@ import MobileMoreDrawer from "./MobileMoreDrawer";
 
 const tabs = [
   { label: "Home", href: "/", icon: LayoutDashboard },
-  { label: "Customers", href: "/billing/customer/list", icon: Users },
+  // Same order as Easy Mode's bar — the tab under your thumb must not change
+  // meaning when you switch modes. Invoices second: billing is the daily job.
   { label: "Invoices", href: "/billing/invoice/list", icon: FileText },
+  { label: "Customers", href: "/billing/customer/list", icon: Users },
   { label: "Products", href: "/billing/product/list", icon: Package },
 ];
 

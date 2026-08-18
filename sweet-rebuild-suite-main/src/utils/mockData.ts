@@ -4,34 +4,58 @@
 
 export type InvoiceType = "OUTWARD" | "INWARD";
 
+/** Legacy camelCase demo shape. Nothing in the app receives these any more —
+ *  every list comes from the API — but the fields stay optional so old seed
+ *  data still type-checks. The snake_case fields below are what actually
+ *  arrives; components were reading `.gst` off objects that only ever had
+ *  `.gst_number`, which is why exports came out with empty columns. */
 export interface Business {
   id: string;
   name: string;
-  gst: string;
-  pan: string;
-  state: string;
-  address: string;
-  mobile: string;
-  email: string;
-  bankName: string;
-  accountNo: string;
-  ifsc: string;
-  branch: string;
-  createdAt: string;
+  address?: string;
+  email?: string | null;
+  // API shape
+  gst_number?: string | null;
+  pan_number?: string | null;
+  state_name?: string | null;
+  mobile_number?: string | null;
+  bank_name?: string | null;
+  bank_account_number?: string | null;
+  bank_ifsc_code?: string | null;
+  bank_branch_name?: string | null;
+  // legacy demo shape
+  gst?: string;
+  pan?: string;
+  state?: string;
+  mobile?: string;
+  bankName?: string;
+  accountNo?: string;
+  ifsc?: string;
+  branch?: string;
+  createdAt?: string;
 }
 
+/** Same story as Business: snake_case is what the API sends, the camelCase
+ *  fields are legacy demo data. */
 export interface Customer {
   id: string;
   name: string;
-  gst: string;
-  pan: string;
-  mobile: string;
-  email: string;
-  state: string;
-  address: string;
-  businesses: string[];
-  tags: string[];
-  createdAt: string;
+  address?: string;
+  email?: string | null;
+  // API shape
+  gst_number?: string | null;
+  pan_number?: string | null;
+  mobile_number?: string | null;
+  state_name?: string | null;
+  businesses?: string[];
+  // legacy demo shape
+  gst?: string;
+  pan?: string;
+  mobile?: string;
+  state?: string;
+  businessIds?: string[];
+  tags?: string[];
+  createdAt?: string;
 }
 
 export interface Product {
@@ -72,6 +96,8 @@ export const itemUnitLabels: Record<ItemUnit, string> = {
 export interface InvoiceItem {
   productId: string;
   productName: string;
+  /** Free-text line description, printed by the Tally-format PDF. */
+  description?: string;
   hsn: string;
   gstRate: number;
   qty: number;
@@ -83,7 +109,27 @@ export interface InvoiceItem {
   igst: number;
 }
 
-export interface Invoice {
+/** Optional Tally-format header fields. The PDF renders each one only when
+ *  present (`invoice.shippingName || customer.name`), so they stay optional —
+ *  they were being read without ever being declared. */
+export interface TallyInvoiceMeta {
+  shippingName?: string;
+  shippingAddress?: string;
+  shippingGst?: string;
+  deliveryNote?: string;
+  deliveryNoteDate?: string;
+  modeOfPayment?: string;
+  referenceNo?: string;
+  referenceDate?: string;
+  buyersOrderNo?: string;
+  buyersOrderDate?: string;
+  dispatchDocNo?: string;
+  dispatchedThrough?: string;
+  destination?: string;
+  termsOfDelivery?: string;
+}
+
+export interface Invoice extends TallyInvoiceMeta {
   id: string;
   invoiceNumber: string;
   invoice_date: string;

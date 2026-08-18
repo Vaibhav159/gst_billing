@@ -298,8 +298,8 @@ export default function InvoiceDetail() {
       )}
 
       {/* E-way Bill Form */}
-      {showEway && id && (
-        <EwayBillForm invoiceId={id} onClose={() => setShowEway(false)} onSaved={refetchInvoice} />
+      {showEway && dbId && (
+        <EwayBillForm invoiceId={dbId} onClose={() => setShowEway(false)} onSaved={refetchInvoice} />
       )}
 
       <div className={cn("grid gap-6", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
@@ -328,7 +328,9 @@ export default function InvoiceDetail() {
             };
             const fromParty = isInward ? customerCard : businessCard;
             const toParty   = isInward ? businessCard : customerCard;
-            const renderCard = (party: typeof businessCard, label: "From" | "To") => {
+            // Either card can be passed in — typing the parameter as the business
+            // card alone made the customer variant unassignable.
+            const renderCard = (party: typeof businessCard | typeof customerCard, label: "From" | "To") => {
               const Icon = party.entity === "business" ? Building2 : User;
               const iconColor = party.entity === "business" ? "text-primary" : "text-chart-3";
               return (

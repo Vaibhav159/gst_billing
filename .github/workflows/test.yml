@@ -109,6 +109,12 @@ jobs:
       - name: Install frontend deps
         working-directory: sweet-rebuild-suite-main
         run: npm ci
+      - name: Typecheck frontend
+        working-directory: sweet-rebuild-suite-main
+        # vite build does not typecheck, so nothing was looking at these. A
+        # number-vs-string id comparison that tsc flags plainly is what silently
+        # booked interstate invoices as CGST+SGST for months.
+        run: npx tsc --noEmit -p tsconfig.app.json
       - name: Run frontend unit tests
         working-directory: sweet-rebuild-suite-main
         run: npm run test -- --run

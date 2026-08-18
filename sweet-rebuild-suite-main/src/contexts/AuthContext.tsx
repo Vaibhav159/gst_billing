@@ -34,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (accessToken) {
       try {
         const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string; role?: string }>(accessToken);
-        setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || "User", role: (decoded.role as UserRole) || "editor" });
+        setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || "User", role: (decoded.role as UserRole) || "viewer" });
       } catch (e) {
         localStorage.removeItem(ACCESS_KEY);
         localStorage.removeItem(REFRESH_KEY);
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(REFRESH_KEY, refresh);
 
       const decoded = jwtDecode<{ user_id: string; username?: string; full_name?: string; role?: string }>(access);
-      setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || username, role: (decoded.role as UserRole) || "editor" });
+      setUser({ id: decoded.user_id, username: decoded.username || decoded.full_name || username, role: (decoded.role as UserRole) || "viewer" });
 
       return { success: true };
     } catch (error: any) {

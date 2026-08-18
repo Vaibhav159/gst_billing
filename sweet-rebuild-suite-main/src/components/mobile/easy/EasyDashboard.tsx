@@ -13,11 +13,12 @@ interface Props {
 export default function EasyDashboard({ selectedFY }: Props) {
   const { data: statsData, isLoading } = useDashboardStats({ fyFilter: selectedFY });
   const totals = statsData?.totals || { outward: 0, inward: 0, count: 0, tax: 0 };
-  // Show the current month on the GST tile so the user knows which return
-  // period they're about to look at — Easy Mode is for users who don't think
-  // in "GSTR-3B due on the 20th" terms.
-  const now = new Date();
-  const monthLabel = now.toLocaleString("en-IN", { month: "long" });
+  // The tile badge must name the period the numbers actually cover. It used to
+  // show the current month next to full-financial-year totals, so August read
+  // as "Tax ₹29,249 · 12 invoices" when August itself was ₹13,853 across 7 —
+  // over double, on the screen aimed at the least technical user. Showing a
+  // real month here means fetching month-scoped stats; until then, label the FY.
+  const periodLabel = `FY ${selectedFY}`;
 
   const recentInvoices = useMemo(
     () => (statsData?.recent_invoices || []).map(mapDjangoInvoice),
@@ -65,7 +66,7 @@ export default function EasyDashboard({ selectedFY }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <p className="text-[14px] font-display font-semibold text-foreground">GST Summary</p>
-                <span className="premium-badge text-[9px] bg-primary/12 text-primary">{monthLabel}</span>
+                <span className="premium-badge text-[9px] bg-primary/12 text-primary">{periodLabel}</span>
               </div>
               <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
                 Tax {formatCurrency(Number(totals.tax) || 0)} · {totals.count} invoice{totals.count === 1 ? "" : "s"}

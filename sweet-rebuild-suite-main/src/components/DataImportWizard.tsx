@@ -184,10 +184,17 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
         const now = new Date().toISOString().split("T")[0];
 
         if (entity === "customers") {
+          // API field names. These used to be posted as gst/pan/mobile/state,
+          // which the serializer ignores — every imported customer arrived with
+          // a name and nothing else, silently.
           createCustomer({
-            id, name: mapped.name, gst: mapped.gst || "", pan: mapped.pan || "",
-            mobile: mapped.mobile, email: mapped.email || "", state: mapped.state || "",
-            address: mapped.address || "", businessIds: [], tags: [], createdAt: now,
+            name: mapped.name,
+            gst_number: mapped.gst || "",
+            pan_number: mapped.pan || "",
+            mobile_number: mapped.mobile || "",
+            email: mapped.email || "",
+            state_name: mapped.state || "",
+            address: mapped.address || "",
           });
         } else if (entity === "products") {
           createProduct({
@@ -196,10 +203,17 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
           });
         } else if (entity === "businesses") {
           createBusiness({
-            id, name: mapped.name, gst: mapped.gst || "", pan: mapped.pan || "",
-            state: mapped.state || "", address: mapped.address || "", mobile: mapped.mobile,
-            email: mapped.email || "", bankName: mapped.bankName || "", accountNo: mapped.accountNo || "",
-            ifsc: mapped.ifsc || "", branch: mapped.branch || "", createdAt: now,
+            name: mapped.name,
+            gst_number: mapped.gst || "",
+            pan_number: mapped.pan || "",
+            state_name: mapped.state || "",
+            address: mapped.address || "",
+            mobile_number: mapped.mobile || "",
+            email: mapped.email || "",
+            bank_name: mapped.bankName || "",
+            bank_account_number: mapped.accountNo || "",
+            bank_ifsc_code: mapped.ifsc || "",
+            bank_branch_name: mapped.branch || "",
           });
         }
         success++;
