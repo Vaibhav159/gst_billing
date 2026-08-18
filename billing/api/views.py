@@ -1181,6 +1181,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         results = {}
         # 1. Totals
+        #
+        # Invoice-level sums and line-item tax sums MUST come from separate
+        # aggregates. Putting them in one .aggregate() makes Django join
+        # billing_lineitem, so an invoice with N line items appears N times and
+        # Sum("total_amount") / Count("id") count it N times — a 2-line invoice
+        # was inflating dashboard sales by its own value. (Same row-
+        # multiplication trap already documented in get_queryset(); it survived
+        # here.) The tax sums are correct over the joined rows, since one row
+        # per line item is exactly what they want.
         totals = queryset.aggregate(
             outward=Coalesce(
                 Sum("total_amount", filter=Q(type_of_invoice="outward")),
@@ -1190,22 +1199,27 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 Sum("total_amount", filter=Q(type_of_invoice="inward")),
                 Decimal("0.00"),
             ),
+            count=Count("id"),
+        )
+        tax_totals = LineItem.objects.filter(
+            invoice_id__in=queryset.values("id")
+        ).aggregate(
             outward_tax=Coalesce(
                 Sum(
-                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
-                    filter=Q(type_of_invoice="outward"),
+                    F("cgst") + F("sgst") + F("igst"),
+                    filter=Q(invoice__type_of_invoice="outward"),
                 ),
                 Decimal("0.00"),
             ),
             inward_tax=Coalesce(
                 Sum(
-                    F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst"),
-                    filter=Q(type_of_invoice="inward"),
+                    F("cgst") + F("sgst") + F("igst"),
+                    filter=Q(invoice__type_of_invoice="inward"),
                 ),
                 Decimal("0.00"),
             ),
-            count=Count("id"),
         )
+        totals.update(tax_totals)
 
         # 2. Monthly summary
         monthly_raw = (
