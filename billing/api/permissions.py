@@ -22,8 +22,10 @@ def get_user_role(user):
         return "editor"
     if "viewer" in groups:
         return "viewer"
-    # No group assigned — default to editor for backward compatibility
-    return "editor"
+    # No group assigned — least privilege. This used to default to editor,
+    # which silently granted create/update to any account someone forgot to
+    # put in a group. setup_roles assigns groups; ungrouped now means read-only.
+    return "viewer"
 
 
 class RoleBasedPermission(BasePermission):

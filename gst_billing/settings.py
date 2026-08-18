@@ -68,6 +68,8 @@ INSTALLED_APPS = [
     "explorer",
     "simple_history",
     "rest_framework",
+    # Stores rotated-out refresh tokens so they die on rotation.
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "frontend",
     "cacheops",
@@ -115,15 +117,36 @@ WSGI_APPLICATION = "gst_billing.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/4.0/ref/settings/#databases
-if not local.DATABASES:
+# Database selection is explicit, env-driven, and defaults to the SAFE branch:
+#   (unset)                        -> local.DATABASES_DEV (or legacy DATABASES)
+#   GST_DB=prod                    -> refuses unless GST_ALLOW_PROD=1 is also set
+#   GST_DB=prod GST_ALLOW_PROD=1   -> local.DATABASES_PROD, with a loud banner
+# Production containers never reach this code — they run production_settings.py
+# with env-provided DB_* — so this gate exists purely to keep a local
+# runserver/migrate/shell away from the real books by accident.
+_db_choice = os.environ.get("GST_DB", "dev").lower()
+_dev_db = getattr(local, "DATABASES_DEV", None) or getattr(local, "DATABASES", None)
+_prod_db = getattr(local, "DATABASES_PROD", None)
+
+if _db_choice == "prod":
+    if os.environ.get("GST_ALLOW_PROD") != "1":
+        raise RuntimeError(
+            "GST_DB=prod refused: set GST_ALLOW_PROD=1 as well to confirm you "
+            "really want local commands pointed at the PRODUCTION database."
+        )
+    if not _prod_db:
+        raise RuntimeError("GST_DB=prod but local.py defines no DATABASES_PROD.")
+    print("\n*** WARNING: connected to the PRODUCTION database (REAL DATA). ***\n")
+    DATABASES = _prod_db
+elif _dev_db:
+    DATABASES = _dev_db
+else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
-else:
-    DATABASES = local.DATABASES
 
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators
@@ -213,10 +236,14 @@ REST_FRAMEWORK = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=180),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
+    # 12h access / 30d refresh with rotation + blacklist — was 30d/180d static,
+    # which meant a leaked localStorage token worked for a month and a stolen
+    # refresh for six. The SPA refreshes transparently on 401 (api.ts), so
+    # shorter lifetimes cost the user nothing.
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,

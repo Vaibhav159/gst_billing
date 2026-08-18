@@ -5,7 +5,7 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import (
     Count,
     F,
@@ -847,45 +847,62 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=payload)
         serializer.is_valid(raise_exception=True)
 
-        with transaction.atomic():
-            self.perform_create(serializer)  # saves invoice + writes audit log
-            invoice = serializer.instance
+        try:
+            with transaction.atomic():
+                self.perform_create(serializer)  # saves invoice + writes audit log
+                invoice = serializer.instance
 
-            if line_items_data:
-                interstate = is_interstate(invoice.business, invoice.customer)
-                new_total = Decimal("0")
-                new_lis = []
-                for item_data in line_items_data:
-                    qty = Decimal(str(item_data.get("quantity", 1)))
-                    rate = Decimal(str(item_data.get("rate", 0)))
-                    amount = Decimal(str(item_data.get("amount", qty * rate)))
-                    new_total += amount
-                    n_cgst, n_sgst, n_igst = normalize_tax_heads(
-                        Decimal(str(item_data.get("cgst", 0))),
-                        Decimal(str(item_data.get("sgst", 0))),
-                        Decimal(str(item_data.get("igst", 0))),
-                        interstate,
-                    )
-                    new_lis.append(LineItem(
-                        invoice=invoice,
-                        customer=invoice.customer,
-                        product_name=item_data.get("product_name", ""),
-                        hsn_code=item_data.get("hsn_code", ""),
-                        gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
-                        quantity=qty,
-                        rate=rate,
-                        # Heads re-derived server-side; the client's split is advisory.
-                        cgst=n_cgst,
-                        sgst=n_sgst,
-                        igst=n_igst,
-                        amount=amount,
-                        unit=item_data.get("unit", "gms"),
-                        workspace_id=1,
-                    ))
-                LineItem.objects.bulk_create(new_lis, batch_size=100)
-                # Bypass save()'s sum() roundtrip — we already know the total.
-                invoice.total_amount = new_total
-                Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
+                if line_items_data:
+                    interstate = is_interstate(invoice.business, invoice.customer)
+                    new_total = Decimal("0")
+                    new_lis = []
+                    for item_data in line_items_data:
+                        qty = Decimal(str(item_data.get("quantity", 1)))
+                        rate = Decimal(str(item_data.get("rate", 0)))
+                        amount = Decimal(str(item_data.get("amount", qty * rate)))
+                        new_total += amount
+                        n_cgst, n_sgst, n_igst = normalize_tax_heads(
+                            Decimal(str(item_data.get("cgst", 0))),
+                            Decimal(str(item_data.get("sgst", 0))),
+                            Decimal(str(item_data.get("igst", 0))),
+                            interstate,
+                        )
+                        new_lis.append(LineItem(
+                            invoice=invoice,
+                            customer=invoice.customer,
+                            product_name=item_data.get("product_name", ""),
+                            hsn_code=item_data.get("hsn_code", ""),
+                            gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
+                            quantity=qty,
+                            rate=rate,
+                            # Heads re-derived server-side; the client's split is advisory.
+                            cgst=n_cgst,
+                            sgst=n_sgst,
+                            igst=n_igst,
+                            amount=amount,
+                            unit=item_data.get("unit", "gms"),
+                            workspace_id=1,
+                        ))
+                    LineItem.objects.bulk_create(new_lis, batch_size=100)
+                    # Bypass save()'s sum() roundtrip — we already know the total.
+                    invoice.total_amount = new_total
+                    Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
+
+        except IntegrityError:
+            # The DB-level guard (uniq_outward_number_per_business_fy) caught a
+            # duplicate the read-then-write suggestion raced past. Same shape
+            # as the pre-save duplicate check so the frontend shows its normal
+            # duplicate dialog instead of a generic failure.
+            return Response(
+                {
+                    "error": "duplicate_invoice_number",
+                    "detail": (
+                        "An outward invoice with this number already exists for "
+                        "this business in the same financial year."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # Re-serialize so the response includes the persisted total + line items.
         invoice.refresh_from_db()

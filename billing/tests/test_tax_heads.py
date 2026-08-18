@@ -130,3 +130,20 @@ class InvoiceWriteTaxHeadsTest(BaseAPITestCase):
         )
         inv = Invoice.objects.get(id=resp.data["id"])
         self.assertEqual(inv.total_amount, D("10300.000"))
+
+
+class DefaultRoleTest(BaseAPITestCase):
+    """An account nobody put in a group must be read-only, not an editor."""
+
+    def test_ungrouped_user_cannot_write(self):
+        from django.contrib.auth.models import User
+        from rest_framework.test import APIClient
+        u = User.objects.create_user(username="ungrouped", password="x")
+        c = APIClient(); c.force_authenticate(user=u)
+        self.assertEqual(c.get(reverse("invoice-list")).status_code, 200)
+        resp = c.post(reverse("invoice-list"), {
+            "business": self.business.id, "customer": self.customer.id,
+            "invoice_number": "NOPE-1", "invoice_date": "2026-08-01",
+            "type_of_invoice": INVOICE_TYPE_OUTWARD,
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
