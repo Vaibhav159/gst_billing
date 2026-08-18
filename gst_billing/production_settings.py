@@ -232,6 +232,13 @@ else:
         "socket_timeout": 3,
     }
 
+# Cacheops only runs when a Redis host is actually configured. The app is in
+# INSTALLED_APPS unconditionally (so models register), but with no REDIS_HOST —
+# CI's E2E job, a bare local run — every cached query/invalidation would try
+# localhost:6379 and crash the first save. CACHEOPS_ENABLED=False makes cacheops
+# a no-op instead.
+CACHEOPS_ENABLED = bool(os.environ.get("REDIS_HOST"))
+
 # Cacheops configuration
 CACHEOPS_DEFAULTS = {
     "timeout": 60 * 15,  # 15 minutes default cache timeout
