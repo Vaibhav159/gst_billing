@@ -38,6 +38,12 @@ api.interceptors.response.use(
         try {
           const response = await axios.post("/api/token/refresh/", { refresh: refreshToken });
           localStorage.setItem("gst_access_token", response.data.access);
+          // Rotation is ON server-side: each refresh returns a NEW refresh
+          // token and blacklists the old one. Not storing it would log the
+          // user out on the second refresh of every session.
+          if (response.data.refresh) {
+            localStorage.setItem("gst_refresh_token", response.data.refresh);
+          }
           api.defaults.headers.common["Authorization"] = `Bearer ${response.data.access}`;
           originalRequest.headers["Authorization"] = `Bearer ${response.data.access}`;
           return api(originalRequest);

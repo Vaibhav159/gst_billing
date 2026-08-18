@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     "explorer",
     "simple_history",
     "rest_framework",
+    # Stores rotated-out refresh tokens so they die on rotation.
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "frontend",
     # Was missing while CACHEOPS below was fully configured, so none of the
@@ -149,10 +151,14 @@ REST_FRAMEWORK = {
 
 # JWT settings
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=180),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
+    # 12h access / 30d refresh with rotation + blacklist — was 30d/180d static,
+    # which meant a leaked localStorage token worked for a month and a stolen
+    # refresh for six. The SPA refreshes transparently on 401 (api.ts), so
+    # shorter lifetimes cost the user nothing.
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,

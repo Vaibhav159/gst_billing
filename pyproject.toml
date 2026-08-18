@@ -3,23 +3,33 @@ name = "gst-billing"
 version = "0.1.0"
 description = "GST Billing Application"
 readme = "README.md"
-requires-python = ">=3.12"
+# <3.14 until pydantic-core (via google-genai) ships cp314 wheels.
+requires-python = ">=3.12,<3.14"
 license = {text = "MIT"}
 dependencies = [
-    "django==4.2.2",
-    "django-cors-headers==4.3.1",
-    "django-crispy-forms==1.14.0",
-    "django-htmx==1.12.0",
-    "django-simple-history==3.2.0",
-    "django-sql-explorer==3.0.1",
-    "djangorestframework>=3.14.0",
-    "djangorestframework-simplejwt>=5.3.0",
+    # 5.2 LTS — the 4.2 line left extended support in April 2026, so the old
+    # ==4.2.2 pin (June 2023) was an EOL branch on a public-internet app.
+    "django>=5.2,<5.3",
+    "django-cors-headers>=4.7",
+    # crispy 2.x split the bootstrap4 template pack into its own package. Only
+    # the legacy (unrouted) HTMX templates render through it, but the app must
+    # still import cleanly under Django 5.
+    "django-crispy-forms>=2.4",
+    "crispy-bootstrap4>=2024.10",
+    "django-htmx>=1.21",
+    "django-simple-history>=3.10",
+    "django-sql-explorer>=5.3",
+    "djangorestframework>=3.16",
+    "djangorestframework-simplejwt>=5.5",
     "freezegun>=1.5.1",
     "ipython>=8.14.0",
     "num2words>=0.5.14",
-    "openpyxl==3.0.10",
+    "openpyxl>=3.1",
     "pre-commit>=2.19.0",
-    "psycopg2-binary>=2.9.6",
+    # psycopg 3 — Django 5.x's preferred driver (psycopg2-binary has no clean
+    # build on newer Pythons here). ENGINE stays django.db.backends.postgresql,
+    # which auto-detects the installed driver.
+    "psycopg[binary]>=3.2",
     "requests>=2.28.1",
     "pandas>=2.0.2",
     "pillow>=9.5.0",
@@ -30,8 +40,8 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "pytz>=2023.3",
     "setuptools>=61.0",
-    "xlsxwriter==3.0.3",
-    "django-cacheops>=7.1",
+    "xlsxwriter>=3.2",
+    "django-cacheops>=7.2",
     "python-dotenv>=1.1.0",
     "pip-system-certs>=4.0",
     "google-genai>=1.33.0",
