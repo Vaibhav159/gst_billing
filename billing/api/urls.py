@@ -7,6 +7,11 @@ from rest_framework_simplejwt.views import (
 )
 from .serializers import CustomTokenObtainPairSerializer
 
+from .inward_bills import (
+    InwardBillDetailView,
+    InwardBillExtractView,
+    InwardBillListCreateView,
+)
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
@@ -37,6 +42,10 @@ urlpatterns = [
     path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
     path("csv/import/", CSVImportView.as_view(), name="csv-import"),
+    # Inward Bills module (explicit paths BEFORE router)
+    path("inward-bills/", InwardBillListCreateView.as_view(), name="inward-bill-list"),
+    path("inward-bills/extract/", InwardBillExtractView.as_view(), name="inward-bill-extract"),
+    path("inward-bills/<int:pk>/", InwardBillDetailView.as_view(), name="inward-bill-detail"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",

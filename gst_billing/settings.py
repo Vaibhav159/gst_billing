@@ -185,6 +185,13 @@ STATICFILES_DIRS = [
     os.path.join(BASE_DIR, "static"),
 ]
 
+# Same-origin framing must be allowed: the Inward Bills detail page renders the
+# stored bill in an <iframe src="/media/…">. Django's default is DENY, which the
+# browser applies to the media response in DEBUG (where Django serves /media/
+# itself) and blocks the viewer. SAMEORIGIN still blocks cross-origin framing,
+# which is the clickjacking threat we actually care about.
+X_FRAME_OPTIONS = "SAMEORIGIN"
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 

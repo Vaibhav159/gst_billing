@@ -1,12 +1,14 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, FileText, Users, Truck,
-} from "lucide-react";
+  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, FileText, Users, Truck, ReceiptText } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 const moreItems = [
+  // Photographing a supplier bill is a phone job, but the module was only
+  // in the desktop top nav — unreachable here except by typing the URL.
+  { label: "Inward Bills", href: "/billing/inward-bills", icon: ReceiptText },
   { label: "Profile", href: "/billing/profile", icon: User },
   { label: "Businesses", href: "/billing/business/list", icon: Building2 },
   { label: "Reports", href: "/billing/reports", icon: BarChart3 },

@@ -112,7 +112,9 @@
     --success: 152 69% 30%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 45%;
+    /* 45% lightness amber read at 2.63:1 on pearl's light cards (the INWARD
+       badge) — darkened to clear 4.5:1 while staying recognisably amber. */
+    --warning: 35 95% 30%;
     --warning-foreground: 240 15% 8%;
 
     --border: 250 12% 86%;

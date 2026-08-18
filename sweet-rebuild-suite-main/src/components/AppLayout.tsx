@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import TopNavbar from "./TopNavbar";
 import AnimatedOutlet from "./AnimatedOutlet";
 import { currentFY } from "@/utils/mockData";
@@ -16,6 +17,7 @@ import { useComplianceScanner } from "@/hooks/useComplianceScanner";
 export const FYContext = { selectedFY: currentFY };
 
 function AppLayoutInner() {
+  const location = useLocation();
   const [selectedFY, setSelectedFY] = useState(() => {
     return localStorage.getItem('gst_selected_fy') || currentFY;
   });
@@ -49,7 +51,10 @@ function AppLayoutInner() {
         <TopNavbar selectedFY={selectedFY} onFYChange={setSelectedFY} />
       )}
       <main id="main-content" className={`flex-1 overflow-auto ${isMobile ? "pb-20" : ""}`}>
-        <ErrorBoundary>
+        {/* Keyed by path so a crash on one page doesn't brick every page after
+            it — without the key the boundary held its error state across
+            navigation and only "Reload App" recovered. */}
+        <ErrorBoundary key={location.pathname}>
           <div className="max-w-[1440px] mx-auto">
             <AnimatedOutlet context={{ selectedFY, setSelectedFY }} />
           </div>

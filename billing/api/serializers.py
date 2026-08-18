@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+from decimal import Decimal
 
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -124,6 +125,101 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class InwardBillListSerializer(serializers.ModelSerializer):
+    """Register row for an inward bill: header + tax breakup + preview URL."""
+
+    business_name = serializers.CharField(source="business.name", read_only=True)
+    business_gstin = serializers.CharField(source="business.gst_number", read_only=True)
+    supplier = serializers.SerializerMethodField()
+    is_igst_applicable = serializers.BooleanField(read_only=True)
+    taxable = serializers.SerializerMethodField()
+    cgst = serializers.SerializerMethodField()
+    sgst = serializers.SerializerMethodField()
+    igst = serializers.SerializerMethodField()
+    has_file = serializers.SerializerMethodField()
+    source_preview_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "invoice_number",
+            "invoice_date",
+            "total_amount",
+            "business",
+            "business_name",
+            "business_gstin",
+            "customer",
+            "supplier",
+            "is_igst_applicable",
+            "taxable",
+            "cgst",
+            "sgst",
+            "igst",
+            "has_file",
+            "source_preview_url",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_supplier(self, obj):
+        c = obj.customer
+        return {"id": c.id, "name": c.name, "gst_number": c.gst_number} if c else None
+
+    def _lines(self, obj):
+        return obj.lineitem_set.all()
+
+    def _sum(self, values):
+        return str(sum(values, Decimal("0")).quantize(Decimal("0.01")))
+
+    def get_taxable(self, obj):
+        return self._sum([li.quantity * li.rate for li in self._lines(obj)])
+
+    def get_cgst(self, obj):
+        return self._sum([li.cgst for li in self._lines(obj)])
+
+    def get_sgst(self, obj):
+        return self._sum([li.sgst for li in self._lines(obj)])
+
+    def get_igst(self, obj):
+        return self._sum([li.igst for li in self._lines(obj)])
+
+    def get_has_file(self, obj):
+        return bool(obj.source_file)
+
+    def _abs(self, url):
+        # Deliberately RELATIVE ("/media/…"), not build_absolute_uri().
+        #
+        # The SPA is same-origin with the API in every environment, so a
+        # relative URL always resolves: nginx serves /media/ from the shared
+        # volume in production, and the Vite dev server proxies it to Django
+        # locally. An absolute URL would be built from the proxied request,
+        # which reaches Django over plain http (nginx overwrites
+        # X-Forwarded-Proto with its own $scheme and SECURE_PROXY_SSL_HEADER
+        # isn't set), so it would come back as http:// on an https:// page —
+        # mixed content, and the browser blocks the iframe/img outright.
+        return url
+
+    def get_source_preview_url(self, obj):
+        return self._abs(obj.source_preview.url) if obj.source_preview else None
+
+
+class InwardBillSerializer(InwardBillListSerializer):
+    """Full inward bill: register fields + line items + original file URL."""
+
+    line_items = LineItemSerializer(many=True, read_only=True, source="lineitem_set")
+    source_file_url = serializers.SerializerMethodField()
+
+    class Meta(InwardBillListSerializer.Meta):
+        fields = InwardBillListSerializer.Meta.fields + [
+            "line_items",
+            "source_file_url",
+        ]
+
+    def get_source_file_url(self, obj):
+        return self._abs(obj.source_file.url) if obj.source_file else None
 
 
 class InvoiceSummarySerializer(serializers.Serializer):

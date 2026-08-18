@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Users, Building2, Package, FileText,
   BarChart3, Calculator, HardDrive, LogOut, ChevronDown,
-  Moon, Sun, Flame, Gem, Menu, X, TreePine, Settings, History, User, Search
+  Moon, Sun, Flame, Gem, Menu, X, TreePine, Settings, History, User, Search, ReceiptText
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -27,6 +27,7 @@ const navItems = [
   { label: "Businesses", href: "/billing/business/list", icon: Building2, preload: prefetch(() => import("@/pages/BusinessList")) },
   { label: "Products", href: "/billing/product/list", icon: Package, preload: prefetch(() => import("@/pages/ProductList")) },
   { label: "Invoices", href: "/billing/invoice/list", icon: FileText, preload: prefetch(() => import("@/pages/InvoiceList")) },
+  { label: "Inward Bills", href: "/billing/inward-bills", icon: ReceiptText, preload: prefetch(() => import("@/pages/InwardBills")) },
   { label: "Reports", href: "/billing/reports", icon: BarChart3, preload: prefetch(() => import("@/pages/Reports")) },
   { label: "GST", href: "/billing/gst-summary", icon: Calculator, preload: prefetch(() => import("@/pages/GSTSummary")) },
 ];

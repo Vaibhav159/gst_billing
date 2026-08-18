@@ -63,6 +63,11 @@ export default function ProductForm() {
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
   const [showHSNSuggestions, setShowHSNSuggestions] = useState(false);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  // Must be declared before the isLoading early-return below — a hook after a
+  // conditional return crashes with "Rendered fewer hooks than expected" the
+  // moment loading flips, which took the whole edit route into the error
+  // boundary.
+  const [isSaving, setIsSaving] = useState(false);
 
   // Browser beforeunload guard
   useEffect(() => {
@@ -117,7 +122,6 @@ export default function ProductForm() {
     return errs;
   };
 
-  const [isSaving, setIsSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
