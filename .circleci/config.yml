@@ -39,7 +39,9 @@ jobs:
         environment:
           DJANGO_SETTINGS_MODULE: gst_billing.ci_settings
           DATABASE_URL: postgresql://circleci:circleci@localhost/circle_test
-      - image: cimg/postgres:13.7
+      # 16: Django 5.2 requires Postgres 14+ (13.7 made every migrate fail).
+      # Prod is Neon (15+), so CI was the only place still on 13.
+      - image: cimg/postgres:16.4
         environment:
           POSTGRES_USER: circleci
           POSTGRES_PASSWORD: circleci
