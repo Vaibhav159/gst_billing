@@ -38,6 +38,18 @@ export default function InvoiceDetail() {
   // Print / edit / share routes must hit the database id (the print path
   // doesn't go through useInvoice's slug-lookup branch). When the URL slug
   // is the invoice_number, fall back to the loaded record's id.
+  // Render the heads that are actually STORED, not the ones is_igst_applicable
+  // predicts. When a row was written under the wrong head (see the interstate
+  // bug fixed in billing/tax_rules.py) the two disagree, and keying the display
+  // off the prediction printed "IGST ₹0" and "Tax: ₹0" beside a non-zero Total
+  // Tax. Flag the contradiction instead of quietly showing zero.
+  const storedIsIGST = ((inv?.items ?? []) as any[]).some((it: any) => Number(it.igst) > 0);
+  const storedIsSplit = ((inv?.items ?? []) as any[]).some(
+    (it: any) => Number(it.cgst) > 0 || Number(it.sgst) > 0
+  );
+  const headsMismatch = !!inv && (storedIsIGST || storedIsSplit) && storedIsIGST !== !!inv.isIGST;
+  const showIGST = storedIsIGST || (!storedIsSplit && !!inv?.isIGST);
+
   const dbId = slug && /^\d+$/.test(slug) ? slug : (inv ? String(inv.id) : "");
   const printUrl = `/billing/invoice/${dbId}/print`;
 
@@ -225,7 +237,7 @@ export default function InvoiceDetail() {
   const itemChartData = inv.items.map((item) => ({
     name: item.productName.length > 12 ? item.productName.slice(0, 12) + "…" : item.productName,
     amount: item.amount,
-    tax: inv.isIGST ? item.igst : item.cgst + item.sgst,
+    tax: item.igst > 0 ? item.igst : item.cgst + item.sgst,
   }));
 
   const customerInvoices = invoices.filter((i) => String(i.customerId) === String(inv.customerId) && String(i.id) !== String(inv.id)).slice(0, 5);
@@ -252,7 +264,7 @@ export default function InvoiceDetail() {
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" />{formatDate(inv.invoice_date || "")}</span>
               <span className={cn("premium-badge text-[10px]", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span>
-              {inv.isIGST && <span className="premium-badge bg-warning/12 text-warning text-[10px]">IGST</span>}
+              {showIGST && <span className="premium-badge bg-warning/12 text-warning text-[10px]">IGST</span>}
             </div>
           </div>
         </div>
@@ -284,6 +296,21 @@ export default function InvoiceDetail() {
           </motion.div>
         ))}
       </div>
+
+      {/* Tax heads contradict the supply direction — the invoice was written
+          before the interstate fix, or imported that way. Say so rather than
+          rendering a confident ₹0. */}
+      {headsMismatch && (
+        <div className="flex items-center gap-3 px-5 py-3 rounded-xl border border-amber-500/30 bg-amber-500/5">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-[13px] text-foreground flex-1">
+            Tax is filed under {storedIsIGST ? "IGST" : "CGST + SGST"} but this is
+            {inv?.isIGST ? " an inter-state" : " a local"} supply. Run
+            <span className="font-mono text-[12px]"> manage.py fix_tax_heads </span>
+            to correct it.
+          </span>
+        </div>
+      )}
 
       {/* E-way Bill Prompt */}
       {inv && inv.total > 50000 && !inv.eway_bill_number && !showEway && (
@@ -365,7 +392,7 @@ export default function InvoiceDetail() {
           <div className="elevated-card rounded-2xl overflow-hidden">
             <div className="px-5 py-3 border-b border-border/50 flex items-center justify-between">
               <h2 className="text-[13px] font-display font-semibold text-foreground">Line Items ({inv.items.length})</h2>
-              <span className="text-[11px] text-muted-foreground">{inv.isIGST ? "IGST" : "CGST+SGST"}</span>
+              <span className="text-[11px] text-muted-foreground">{showIGST ? "IGST" : "CGST+SGST"}</span>
             </div>
             {isMobile ? (
               <div className="divide-y divide-border/30">
@@ -383,7 +410,7 @@ export default function InvoiceDetail() {
                       <span className="font-bold text-foreground">{formatCurrency(item.amount)}</span>
                     </div>
                     <div className="text-[11px] text-muted-foreground text-right">
-                      Tax: {inv.isIGST ? formatCurrency(item.igst) : `${formatCurrency(item.cgst)} + ${formatCurrency(item.sgst)}`}
+                      Tax: {showIGST ? formatCurrency(item.igst) : `${formatCurrency(item.cgst)} + ${formatCurrency(item.sgst)}`}
                     </div>
                   </div>
                 ))}
@@ -391,7 +418,7 @@ export default function InvoiceDetail() {
             ) : (
               <table className="table-premium">
                 <thead><tr>
-                  <th>#</th><th>Product</th><th>HSN</th><th>GST%</th><th>Qty</th><th>Rate</th><th>Amount</th><th>{inv.isIGST ? "IGST" : "CGST/SGST"}</th>
+                  <th>#</th><th>Product</th><th>HSN</th><th>GST%</th><th>Qty</th><th>Rate</th><th>Amount</th><th>{showIGST ? "IGST" : "CGST/SGST"}</th>
                 </tr></thead>
                 <tbody>{inv.items.map((item, i) => (
                   <tr key={i}>
@@ -402,7 +429,7 @@ export default function InvoiceDetail() {
                     <td className="text-foreground font-medium">{item.qty}</td>
                     <td className="text-foreground">{formatCurrency(item.rate)}</td>
                     <td className="font-bold text-foreground">{formatCurrency(item.amount)}</td>
-                    <td className="text-muted-foreground">{inv.isIGST ? formatCurrency(item.igst) : `${formatCurrency(item.cgst)} + ${formatCurrency(item.sgst)}`}</td>
+                    <td className="text-muted-foreground">{showIGST ? formatCurrency(item.igst) : `${formatCurrency(item.cgst)} + ${formatCurrency(item.sgst)}`}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -485,9 +512,9 @@ export default function InvoiceDetail() {
             <div className="space-y-2 text-[13px]">
               {[
                 { label: "Subtotal", value: formatCurrency(inv.subtotal) },
-                inv.isIGST ? { label: "IGST", value: formatCurrency(inv.totalIGST) } : null,
-                !inv.isIGST ? { label: "CGST", value: formatCurrency(inv.totalCGST) } : null,
-                !inv.isIGST ? { label: "SGST", value: formatCurrency(inv.totalSGST) } : null,
+                showIGST ? { label: "IGST", value: formatCurrency(inv.totalIGST) } : null,
+                !showIGST ? { label: "CGST", value: formatCurrency(inv.totalCGST) } : null,
+                !showIGST ? { label: "SGST", value: formatCurrency(inv.totalSGST) } : null,
                 { label: "Total Tax", value: formatCurrency(inv.totalTax) },
               ].filter(Boolean).map((row) => row && (
                 <div key={row.label} className="flex justify-between"><span className="text-muted-foreground">{row.label}</span><span className="text-foreground">{row.value}</span></div>
