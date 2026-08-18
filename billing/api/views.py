@@ -33,6 +33,7 @@ from billing.constants import (
     INVOICE_TYPE_OUTWARD,
 )
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
+from billing.tax_rules import is_interstate, normalize_tax_heads
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -839,6 +840,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             invoice = serializer.instance
 
             if line_items_data:
+                interstate = is_interstate(invoice.business, invoice.customer)
                 new_total = Decimal("0")
                 new_lis = []
                 for item_data in line_items_data:
@@ -846,6 +848,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     rate = Decimal(str(item_data.get("rate", 0)))
                     amount = Decimal(str(item_data.get("amount", qty * rate)))
                     new_total += amount
+                    n_cgst, n_sgst, n_igst = normalize_tax_heads(
+                        Decimal(str(item_data.get("cgst", 0))),
+                        Decimal(str(item_data.get("sgst", 0))),
+                        Decimal(str(item_data.get("igst", 0))),
+                        interstate,
+                    )
                     new_lis.append(LineItem(
                         invoice=invoice,
                         customer=invoice.customer,
@@ -854,9 +862,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                         gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
                         quantity=qty,
                         rate=rate,
-                        cgst=Decimal(str(item_data.get("cgst", 0))),
-                        sgst=Decimal(str(item_data.get("sgst", 0))),
-                        igst=Decimal(str(item_data.get("igst", 0))),
+                        # Heads re-derived server-side; the client's split is advisory.
+                        cgst=n_cgst,
+                        sgst=n_sgst,
+                        igst=n_igst,
                         amount=amount,
                         unit=item_data.get("unit", "gms"),
                         workspace_id=1,
@@ -913,6 +922,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             old_lis_qs = LineItem.objects.filter(invoice=invoice)
             old_lis_qs._raw_delete(old_lis_qs.db)
 
+            # After the in-memory patch above, so a changed customer/business
+            # is reflected in the interstate decision.
+            interstate = is_interstate(invoice.business, invoice.customer)
             new_lis = []
             new_total = Decimal("0")
             for item_data in line_items_data:
@@ -920,6 +932,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 rate = Decimal(str(item_data.get("rate", 0)))
                 amount = Decimal(str(item_data.get("amount", qty * rate)))
                 new_total += amount
+                n_cgst, n_sgst, n_igst = normalize_tax_heads(
+                    Decimal(str(item_data.get("cgst", 0))),
+                    Decimal(str(item_data.get("sgst", 0))),
+                    Decimal(str(item_data.get("igst", 0))),
+                    interstate,
+                )
                 new_lis.append(LineItem(
                     invoice=invoice,
                     customer=invoice.customer,
@@ -928,9 +946,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
                     quantity=qty,
                     rate=rate,
-                    cgst=Decimal(str(item_data.get("cgst", 0))),
-                    sgst=Decimal(str(item_data.get("sgst", 0))),
-                    igst=Decimal(str(item_data.get("igst", 0))),
+                    # Heads re-derived server-side; the client's split is advisory.
+                    cgst=n_cgst,
+                    sgst=n_sgst,
+                    igst=n_igst,
                     amount=amount,
                     unit=item_data.get("unit", "gms"),
                     workspace_id=1,
