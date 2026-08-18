@@ -42,3 +42,23 @@ def normalize_tax_heads(cgst, sgst, igst, interstate):
         return Decimal("0"), Decimal("0"), Decimal(total)
     half = Decimal(total) / 2
     return half, half, Decimal("0")
+
+
+def state_code(party):
+    """Two-digit GST state code for a Business or Customer.
+
+    GSTIN first; otherwise derive it from state_name via the GST_CODE table, so
+    unregistered (B2C) parties still get a place of supply. Empty when neither
+    is known.
+    """
+    gstin = (getattr(party, "gst_number", "") or "").strip()
+    if len(gstin) >= 2:
+        return gstin[:2]
+
+    from billing.models import get_state_code_from_state_name
+
+    name = (getattr(party, "state_name", "") or "").strip().upper()
+    if not name:
+        return ""
+    code = get_state_code_from_state_name(name)
+    return f"{int(code):02d}" if code not in ("", None) else ""

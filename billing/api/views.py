@@ -28,12 +28,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.constants import (
+    B2CL_THRESHOLD,
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
 )
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
-from billing.tax_rules import is_interstate, normalize_tax_heads
+from billing.tax_rules import is_interstate, normalize_tax_heads, state_code
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -1818,10 +1819,14 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if cust_gst and len(cust_gst) >= 15:
                 continue  # Skip registered
-            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
-            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
-            if cust_state != biz_state:
+            # One rule decides direction everywhere (is_interstate compares
+            # like with like: GSTINs when both sides have one, else state
+            # names). The old code read the customer's state off their GSTIN
+            # and fell back to the SELLER's state when they had none — so an
+            # interstate B2C sale was filed here as a local supply.
+            if is_interstate(inv.business, inv.customer):
                 continue  # Inter-state goes to B2CL
+            biz_state = state_code(inv.business)
             items = inv.lineitem_set.all()
             for li in items:
                 rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
@@ -1833,18 +1838,23 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 b2cs_agg[key]["samt"] += float(li.sgst)
         b2cs = list(b2cs_agg.values())
 
-        # B2CL: Large invoices to unregistered (>2.5L, inter-state)
+        # B2CL: Large invoices to unregistered (> B2CL_THRESHOLD, inter-state)
         b2cl = []
         for inv in outward_invoices:
-            if float(inv.total_amount) <= 250000:
+            if float(inv.total_amount) <= B2CL_THRESHOLD:
                 continue
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if cust_gst and len(cust_gst) >= 15:
                 continue
-            biz_state = inv.business.gst_number[:2] if inv.business.gst_number else ""
-            cust_state = inv.customer.gst_number[:2] if inv.customer.gst_number and len(inv.customer.gst_number) >= 2 else biz_state
-            if cust_state == biz_state:
+            # Every invoice reaching this point has no customer GSTIN, so the
+            # old "GSTIN prefix else seller's state" fallback made the customer
+            # look local every single time — B2CL was structurally unreachable
+            # and these sales silently went to B2CS instead.
+            if not is_interstate(inv.business, inv.customer):
                 continue  # Intra-state goes to B2CS
+            cust_state = state_code(inv.customer)
+            if not cust_state:
+                continue  # No place of supply to report against
             items = inv.lineitem_set.all()
             inv_items = [{
                 "num": int(li.id),
@@ -1902,7 +1912,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "osup_det": {"txval": float(ot["txval"]), "camt": float(ot["cgst"]), "samt": float(ot["sgst"]), "iamt": float(ot["igst"])},
             },
             "itc_elg": {
-                "itc_avl": [{"ty": "IMPG", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
+                # "OTH" = all other ITC (GSTR-3B table 4(A)(5)). This used to say
+                # "IMPG" (import of goods), which files every rupee of domestic
+                # purchase tax under imports.
+                "itc_avl": [{"ty": "OTH", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
             },
             "intr_ltfee": {
                 "intr_details": {"iamt": 0, "camt": 0, "samt": 0},

@@ -567,14 +567,18 @@ class LineItem(AbstractBaseModel):
                     ExtractYear("invoice__invoice_date"),
                     output_field=CharField(),
                 ),
+                # Use the line's own unit — this used to hardcode " gm" and
+                # " / g", so a row sold in pcs or kg exported as grams.
                 quantity_with_unit=Concat(
                     F("quantity"),
-                    Value(" gm"),
+                    Value(" "),
+                    F("unit"),
                     output_field=CharField(),
                 ),
                 rate_with_unit=Concat(
                     F("rate"),
-                    Value(" / g"),
+                    Value(" / "),
+                    F("unit"),
                     output_field=CharField(),
                 ),
                 amount_before_tax=F("quantity") * F("rate"),
