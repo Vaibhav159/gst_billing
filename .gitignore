@@ -161,3 +161,6 @@ audit-results/
 
 # Stray nested duplicate of the React app
 sweet-rebuild-suite-main/sweet-rebuild-suite-main/
+
+# Claude Code worktrees — local scratch checkouts, never part of the repo
+.claude/worktrees/
