@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { isIntraState } from "@/utils/taxRules";
 import { useNavigate } from "react-router-dom";
 import {
   Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck,
@@ -58,8 +59,8 @@ export default function InwardBillAdd() {
     () => businesses.find((b) => String(b.id) === business)?.gst_number || "",
     [businesses, business],
   );
-  const intra = supplierGstin.length >= 2 && firmGstin.length >= 2 &&
-    supplierGstin.slice(0, 2) === firmGstin.slice(0, 2);
+  // Same rule as billing/tax_rules.py, so this preview and the saved bill agree.
+  const intra = isIntraState(supplierGstin, firmGstin);
 
   const computed = useMemo(() => {
     let taxable = 0, cgst = 0, sgst = 0, igst = 0;
