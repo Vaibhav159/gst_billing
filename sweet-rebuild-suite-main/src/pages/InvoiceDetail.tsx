@@ -298,8 +298,8 @@ export default function InvoiceDetail() {
       )}
 
       {/* E-way Bill Form */}
-      {showEway && id && (
-        <EwayBillForm invoiceId={id} onClose={() => setShowEway(false)} onSaved={refetchInvoice} />
+      {showEway && dbId && (
+        <EwayBillForm invoiceId={dbId} onClose={() => setShowEway(false)} onSaved={refetchInvoice} />
       )}
 
       <div className={cn("grid gap-6", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>

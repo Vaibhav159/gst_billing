@@ -301,6 +301,20 @@ class Invoice(AbstractBaseModel):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # Every report filters on some combination of these three, and the
+        # table had no indexes at all beyond the implicit FK ones.
+        #
+        # Deliberately NOT a unique constraint on
+        # (business, invoice_number, type_of_invoice): duplicates already exist
+        # in real data (the data_quality endpoint reports them), so the
+        # migration would fail on deploy. Clean those up first, then add it.
+        indexes = [
+            models.Index(fields=["invoice_date"]),
+            models.Index(fields=["type_of_invoice", "invoice_date"]),
+            models.Index(fields=["business", "invoice_number"]),
+        ]
+
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
 

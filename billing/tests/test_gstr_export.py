@@ -152,3 +152,19 @@ class B2CPlaceOfSupplyTest(BaseAPITestCase):
         # It is below the B2CL threshold, but it must not be filed as a local
         # supply under the seller's own state code.
         self.assertNotIn(self.business.gst_number[:2], [r["pos"] for r in b2cs])
+
+
+class ApiNotFoundTest(BaseAPITestCase):
+    """Unknown /api/ paths must fail as JSON 404s, not fall through to the SPA."""
+
+    def test_unknown_api_path_is_a_404_not_the_react_shell(self):
+        resp = self.client.get("/api/definitely-not-an-endpoint/")
+        self.assertEqual(resp.status_code, 404)
+        self.assertNotIn(b"<!DOCTYPE html>", resp.content)
+
+    def test_known_api_path_still_works(self):
+        self.assertEqual(self.client.get(reverse("invoice-list")).status_code, 200)
+
+    def test_frontend_routes_still_serve_the_shell(self):
+        resp = self.client.get("/billing/invoice/list")
+        self.assertEqual(resp.status_code, 200)
