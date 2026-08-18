@@ -1,10 +1,19 @@
 import { Link } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Wrench } from "lucide-react";
+import { ChevronDown, Wrench, Moon, Sun, Flame, Gem, TreePine } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { financialYears } from "@/utils/mockData";
 import { useMobileMode } from "@/contexts/MobileModeContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
+
+const themeOptions = [
+  { id: "obsidian" as const, label: "Obsidian", icon: Moon },
+  { id: "pearl" as const, label: "Pearl", icon: Sun },
+  { id: "sapphire" as const, label: "Sapphire", icon: Gem },
+  { id: "ember" as const, label: "Ember", icon: Flame },
+  { id: "forest" as const, label: "Forest", icon: TreePine },
+];
 
 interface EasyHeaderProps {
   selectedFY: string;
@@ -13,14 +22,20 @@ interface EasyHeaderProps {
 
 export default function EasyHeader({ selectedFY, onFYChange }: EasyHeaderProps) {
   const { setMobileMode } = useMobileMode();
+  const { theme, setTheme } = useTheme();
   const { user } = useAuth();
   const userInitial = user?.username?.charAt(0)?.toUpperCase() || "U";
   const [fyOpen, setFyOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
   const fyRef = useRef<HTMLDivElement>(null);
+  const themeRef = useRef<HTMLDivElement>(null);
+
+  const currentTheme = themeOptions.find((t) => t.id === theme);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (fyRef.current && !fyRef.current.contains(e.target as Node)) setFyOpen(false);
+      if (themeRef.current && !themeRef.current.contains(e.target as Node)) setThemeOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -40,7 +55,7 @@ export default function EasyHeader({ selectedFY, onFYChange }: EasyHeaderProps) 
           {/* FY Selector */}
           <div className="relative" ref={fyRef}>
             <button
-              onClick={() => setFyOpen(!fyOpen)}
+              onClick={() => { setFyOpen(!fyOpen); setThemeOpen(false); }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold glass-subtle text-foreground"
             >
               <span className="text-primary">FY</span>
@@ -61,6 +76,37 @@ export default function EasyHeader({ selectedFY, onFYChange }: EasyHeaderProps) 
                     FY {fy}
                   </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Theme switcher */}
+          <div className="relative" ref={themeRef}>
+            <button
+              onClick={() => { setThemeOpen(!themeOpen); setFyOpen(false); }}
+              className="p-2 rounded-lg glass-subtle text-foreground"
+              title="Change theme"
+            >
+              {currentTheme && <currentTheme.icon className="w-4 h-4" />}
+            </button>
+            {themeOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-44 rounded-xl elevated-card z-50 py-1 animate-fade-in overflow-hidden">
+                {themeOptions.map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => { setTheme(t.id); setThemeOpen(false); }}
+                      className={cn(
+                        "w-full text-left px-3.5 py-2.5 flex items-center gap-2.5 transition-colors text-[12px]",
+                        t.id === theme ? "text-primary font-semibold bg-primary/10" : "text-foreground hover:bg-secondary/50"
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {t.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
