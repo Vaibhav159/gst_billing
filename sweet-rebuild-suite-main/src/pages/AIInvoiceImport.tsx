@@ -26,6 +26,8 @@ type LineItem = {
 };
 
 type Extracted = {
+  /** Legacy field: some extractions return the buyer GSTIN under this name. */
+  recipient_gst_number?: string;
   buyer_gst_number: string;
   buyer_name: string;
   seller_gst_number: string;

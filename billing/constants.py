@@ -6,6 +6,13 @@ HSN_CODE = 711319
 
 PAGINATION_PAGE_SIZE = 15
 
+# B2CL applies to interstate B2C invoices above this value. Was Rs 2.5 lakh
+# until Notification 12/2024 dropped it to Rs 1 lakh with effect from
+# 1 Nov 2024. Invoices between the two thresholds belong invoice-wise in
+# B2CL, not aggregated into B2CS.
+B2CL_THRESHOLD = 100000
+
+
 INVOICE_TYPE_INWARD = "inward"
 INVOICE_TYPE_OUTWARD = "outward"
 

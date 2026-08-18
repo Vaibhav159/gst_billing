@@ -301,6 +301,20 @@ class Invoice(AbstractBaseModel):
 
     history = HistoricalRecords()
 
+    class Meta:
+        # Every report filters on some combination of these three, and the
+        # table had no indexes at all beyond the implicit FK ones.
+        #
+        # Deliberately NOT a unique constraint on
+        # (business, invoice_number, type_of_invoice): duplicates already exist
+        # in real data (the data_quality endpoint reports them), so the
+        # migration would fail on deploy. Clean those up first, then add it.
+        indexes = [
+            models.Index(fields=["invoice_date"]),
+            models.Index(fields=["type_of_invoice", "invoice_date"]),
+            models.Index(fields=["business", "invoice_number"]),
+        ]
+
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
 
@@ -567,14 +581,18 @@ class LineItem(AbstractBaseModel):
                     ExtractYear("invoice__invoice_date"),
                     output_field=CharField(),
                 ),
+                # Use the line's own unit — this used to hardcode " gm" and
+                # " / g", so a row sold in pcs or kg exported as grams.
                 quantity_with_unit=Concat(
                     F("quantity"),
-                    Value(" gm"),
+                    Value(" "),
+                    F("unit"),
                     output_field=CharField(),
                 ),
                 rate_with_unit=Concat(
                     F("rate"),
-                    Value(" / g"),
+                    Value(" / "),
+                    F("unit"),
                     output_field=CharField(),
                 ),
                 amount_before_tax=F("quantity") * F("rate"),

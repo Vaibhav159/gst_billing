@@ -4,6 +4,9 @@ import { logger } from "@/utils/logger";
 import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
+// Re-exported: several pages import { Invoice } from this module because it
+// is where the invoice hooks live.
+export type { Invoice, Product };
 
 /**
  * Extracts relative URL from a DRF absolute `next` URL.

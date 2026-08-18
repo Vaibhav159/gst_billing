@@ -1,23 +1,31 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  // Dev ports live in the environment, not in this file. CI starts Django on
+  // 8000 and expects Vite on 8080, so those stay the defaults; put your own
+  // preference in sweet-rebuild-suite-main/.env.local (gitignored):
+  //   VITE_DEV_PORT=5001
+  //   VITE_API_TARGET=http://127.0.0.1:5002
+  const env = { ...process.env, ...loadEnv(mode, __dirname, "") };
+  const apiTarget = env.VITE_API_TARGET || "http://127.0.0.1:8000";
+  return ({
   server: {
     host: "::",
-    port: 8080,
+    port: Number(env.VITE_DEV_PORT) || 8080,
     hmr: {
       overlay: false,
     },
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: apiTarget,
         changeOrigin: true,
       },
       "/media": {
-        target: "http://127.0.0.1:8000",
+        target: apiTarget,
         changeOrigin: true,
       },
     },
@@ -58,4 +66,5 @@ export default defineConfig(({ mode }) => ({
     // warning (recharts is ~250 kB minified, near the threshold).
     chunkSizeWarningLimit: 800,
   },
-}));
+});
+});

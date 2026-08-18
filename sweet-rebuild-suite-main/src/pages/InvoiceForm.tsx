@@ -311,8 +311,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const totalTax = items.reduce((s, it) => s + calcItem(it).tax, 0);
   const total = subtotal + totalTax;
 
-  const selectedCustomer = localCustomers.find((c) => c.id === form.customerId);
-  const selectedBusiness = effectiveBusinesses.find((b) => b.id === form.businessId);
+  // String(): the API hands back numeric ids while SearchableSelect stores its
+  // value as a string, so `c.id === form.customerId` was never true. That made
+  // selectedCustomer/selectedBusiness permanently undefined, which silently
+  // disabled BOTH the interstate badge and the auto-IGST switch below — every
+  // interstate invoice was saved as CGST+SGST with the right total but the
+  // wrong tax heads.
+  const selectedCustomer = localCustomers.find((c) => String(c.id) === String(form.customerId));
+  const selectedBusiness = effectiveBusinesses.find((b) => String(b.id) === String(form.businessId));
   const isInterstate = selectedBusiness && selectedCustomer && selectedBusiness.state_name !== selectedCustomer.state_name;
 
   useEffect(() => {
@@ -347,8 +353,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     setIsSaving(true);
     setDirty(false);
 
-    const selectedBiz = effectiveBusinesses.find(b => b.id === form.businessId);
-    const selectedCust = localCustomers.find(c => c.id === form.customerId);
+    const selectedBiz = effectiveBusinesses.find(b => String(b.id) === String(form.businessId));
+    const selectedCust = localCustomers.find(c => String(c.id) === String(form.customerId));
     const invoiceItems = items.map(it => {
       const product = localProducts.find(p => p.id === it.productId);
       const netAmount = Math.round(it.qty * it.rate * 100) / 100;

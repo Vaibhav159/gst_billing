@@ -41,9 +41,16 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "frontend",
+    # Was missing while CACHEOPS below was fully configured, so none of the
+    # query caching this file describes was actually running in production.
+    "cacheops",
 ]
 
 MIDDLEWARE = [
+    # First so it compresses everything below. gst_summary is ~80 KB raw and
+    # ~12 KB gzipped; production was serving all of it uncompressed because
+    # this middleware only existed in the dev settings.
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -166,6 +173,9 @@ SIMPLE_JWT = {
 }
 
 # Security settings
+# nginx terminates in front of Django and forwards over plain http, so without
+# this any absolute URL Django builds comes back as http:// on an https:// page.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 # SAMEORIGIN, not DENY: the Inward Bills detail page frames the stored bill
