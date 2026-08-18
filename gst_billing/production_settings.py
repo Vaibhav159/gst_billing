@@ -168,7 +168,9 @@ SIMPLE_JWT = {
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = "DENY"
+# SAMEORIGIN, not DENY: the Inward Bills detail page frames the stored bill
+# from /media/ on the same origin. Cross-origin framing stays blocked.
+X_FRAME_OPTIONS = "SAMEORIGIN"
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins in development

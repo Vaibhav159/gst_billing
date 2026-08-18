@@ -190,8 +190,17 @@ class InwardBillListSerializer(serializers.ModelSerializer):
         return bool(obj.source_file)
 
     def _abs(self, url):
-        request = self.context.get("request")
-        return request.build_absolute_uri(url) if request is not None else url
+        # Deliberately RELATIVE ("/media/…"), not build_absolute_uri().
+        #
+        # The SPA is same-origin with the API in every environment, so a
+        # relative URL always resolves: nginx serves /media/ from the shared
+        # volume in production, and the Vite dev server proxies it to Django
+        # locally. An absolute URL would be built from the proxied request,
+        # which reaches Django over plain http (nginx overwrites
+        # X-Forwarded-Proto with its own $scheme and SECURE_PROXY_SSL_HEADER
+        # isn't set), so it would come back as http:// on an https:// page —
+        # mixed content, and the browser blocks the iframe/img outright.
+        return url
 
     def get_source_preview_url(self, obj):
         return self._abs(obj.source_preview.url) if obj.source_preview else None
