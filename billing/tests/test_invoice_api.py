@@ -495,38 +495,44 @@ class InvoiceAPITestCase(BaseAPITestCase):
             cgst="1.5", sgst="1.5", igst="0", amount="100",
             unit="gms", workspace_id=1,
         )
-        # Add two invoices with the same number/date/type → 1 dup group
+        # Add two invoices with the same number/type in one FY → 1 dup group.
+        # INWARD, because the outward constraint now blocks creating this
+        # state at the DB level — exactly the point of that constraint.
         Invoice.objects.create(
             invoice_number="DUP1", invoice_date="2026-05-01",
             business=self.business, customer=self.customer,
-            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="50",
+            type_of_invoice=INVOICE_TYPE_INWARD, total_amount="50",
         )
         Invoice.objects.create(
             invoice_number="DUP1", invoice_date="2026-05-15",
             business=self.business, customer=self.customer,
-            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="60",
+            type_of_invoice=INVOICE_TYPE_INWARD, total_amount="60",
         )
 
         r = self.client.get(url)
         # 3 new empty invoices: EMPTY1, DUP1×2. NOHSN1 has a line item.
         self.assertEqual(r.data["invoices_no_line_items"], baseline_empty + 3)
         self.assertEqual(r.data["line_items_missing_hsn"], baseline_no_hsn + 1)
-        # 1 new dup group: (business, DUP1, FY 2026-27, outward)
+        # 1 new dup group: (business, DUP1, FY 2026-27, inward)
         self.assertEqual(r.data["duplicate_invoice_groups"], baseline_dups + 1)
         self.assertTrue(r.data["has_issues"])
 
     def test_invoice_list_hygiene_filters(self):
         """?dups=1, ?empty=1, ?no_hsn=1 narrow the list correctly."""
         # Setup: 1 dup pair, 1 empty invoice, 1 no-hsn invoice
+        # Duplicate pair is INWARD: the uniq_outward_number_per_business_fy
+        # constraint makes same-FY outward duplicates impossible at the DB
+        # level, so the hygiene filter's remaining job is inward dups and
+        # pre-constraint production data.
         Invoice.objects.create(
             invoice_number="DUPA", invoice_date="2026-05-01",
             business=self.business, customer=self.customer,
-            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="10",
+            type_of_invoice=INVOICE_TYPE_INWARD, total_amount="10",
         )
         Invoice.objects.create(
             invoice_number="DUPA", invoice_date="2026-05-02",
             business=self.business, customer=self.customer,
-            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount="20",
+            type_of_invoice=INVOICE_TYPE_INWARD, total_amount="20",
         )
         Invoice.objects.create(
             invoice_number="EMPTYA", invoice_date="2026-05-01",
