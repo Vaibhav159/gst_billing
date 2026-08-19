@@ -43,6 +43,23 @@ function getMonthlyDataFromStats(fy: string, monthlyRaw: any[]) {
 
 interface OutletCtx { selectedFY: string }
 
+/** Next GST filing deadline under the monthly scheme: GSTR-1 by the 11th,
+ * GSTR-3B by the 20th, each for the previous month's period. (QRMP filers
+ * have different dates — this app's user files monthly.) */
+function nextGstDue(now = new Date()) {
+  const mk = (day: number, name: string) => {
+    const due = new Date(now.getFullYear(), now.getMonth(), day, 23, 59, 59);
+    if (now > due) due.setMonth(due.getMonth() + 1);
+    const period = new Date(due.getFullYear(), due.getMonth() - 1, 1)
+      .toLocaleString("en", { month: "short" });
+    const days = Math.max(0, Math.ceil((due.getTime() - now.getTime()) / 86400000));
+    return { name, period, due, days };
+  };
+  const r1 = mk(11, "GSTR-1");
+  const r3b = mk(20, "GSTR-3B");
+  return r1.due <= r3b.due ? r1 : r3b;
+}
+
 function getMiniTrend(
   data: { month: string; outward: number; inward: number }[],
   type: "outward" | "inward" | "net",
@@ -457,7 +474,7 @@ export default function Dashboard() {
             <p className="text-[11px] text-muted-foreground">{thisMonthData.monthName}</p>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="text-center p-3 rounded-xl bg-secondary/20">
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Invoices</p>
             <p className="text-xl font-display font-bold text-foreground"><AnimatedCounter value={thisMonthData.count.toString()} /></p>
@@ -470,6 +487,19 @@ export default function Dashboard() {
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Purchases</p>
             <p className="text-xl font-display font-bold text-warning tabular-nums"><AnimatedCounter value={formatCompactCurrency(thisMonthData.inward)} /></p>
           </div>
+          {(() => {
+            const due = nextGstDue();
+            const tone = due.days <= 3 ? "text-destructive" : due.days <= 7 ? "text-warning" : "text-foreground";
+            const box = due.days <= 3 ? "bg-destructive/5 border border-destructive/15" : due.days <= 7 ? "bg-warning/5 border border-warning/10" : "bg-secondary/20";
+            return (
+              <div className={cn("text-center p-3 rounded-xl", box)}
+                title={`${due.name} for ${due.period} — due ${due.due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} (monthly scheme)`}>
+                <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Next GST Due</p>
+                <p className={cn("text-xl font-display font-bold tabular-nums", tone)}>{due.days}d</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{due.name} · {due.period}</p>
+              </div>
+            );
+          })()}
         </div>
       </motion.div>
 
