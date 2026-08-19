@@ -309,13 +309,36 @@ class Invoice(AbstractBaseModel):
             models.Index(fields=["type_of_invoice", "invoice_date"]),
             models.Index(fields=["business", "invoice_number"]),
         ]
-        # The outward-number-per-FY unique constraint (0033) is DEFERRED:
-        # production has real duplicates (e.g. LODHA #61 twice in FY 2024-25)
-        # and the index build fails on them by design — which took the site
-        # down at deploy because compose runs migrate before gunicorn. Clean
-        # the duplicates via the data-hygiene banner, then reintroduce the
-        # constraint as a fresh migration. The API's IntegrityError→409
-        # handler stays in place so re-adding it needs no code change.
+        constraints = [
+            # One outward number per business per financial year. Scoped to:
+            #   - OUTWARD only: inward numbers belong to suppliers, and two
+            #     suppliers both issuing an "001" is ordinary.
+            #   - the FY (Apr-Mar): plain numeric series legitimately restart
+            #     at 1 every April, so (business, number) alone would reject
+            #     next year's first invoice.
+            #   - non-empty numbers: imports can land drafts without numbers.
+            # next_invoice_number is read-then-write, so two simultaneous saves
+            # could take the same number; this turns that race from silent
+            # duplicate data into an IntegrityError the API maps to a 409.
+            # Production data was verified duplicate-free on 19 Aug 2026
+            # (the single #61 collision was renumbered to the gap at #62),
+            # so this migration now applies cleanly.
+            models.UniqueConstraint(
+                models.F("business"),
+                models.F("invoice_number"),
+                models.expressions.ExpressionWrapper(
+                    ExtractYear("invoice_date")
+                    - models.Case(
+                        models.When(invoice_date__month__lt=4, then=models.Value(1)),
+                        default=models.Value(0),
+                        output_field=IntegerField(),
+                    ),
+                    output_field=IntegerField(),
+                ),
+                condition=models.Q(type_of_invoice="outward") & ~models.Q(invoice_number=""),
+                name="uniq_outward_number_per_business_fy",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
