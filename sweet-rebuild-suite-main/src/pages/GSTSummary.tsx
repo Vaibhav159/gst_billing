@@ -450,11 +450,17 @@ export default function GSTSummary() {
         {useCustomRange ? (
           <DateRangePicker startDate={customStart} endDate={customEnd} onStartChange={setCustomStart} onEndChange={setCustomEnd} fyStart={fyStart} />
         ) : (
-          <div className={cn("flex rounded-xl overflow-hidden border border-border", isMobile ? "overflow-x-auto max-w-full -mx-1 px-1" : "flex-shrink-0")}>
-            <button onClick={() => setSelectedMonth("All")} className={cn("px-3 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === "All" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>All</button>
-            {MONTHS.map((m) => (
-              <button key={m} onClick={() => setSelectedMonth(m)} className={cn("px-2 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>{m.slice(0, 3)}</button>
-            ))}
+          /* relative wrapper + right-edge fade: at 375px most month pills sit
+             off-screen in this scroll strip with nothing signalling "more
+             this way". Fade only on mobile, where the strip actually scrolls. */
+          <div className="relative">
+            <div className={cn("flex rounded-xl overflow-hidden border border-border", isMobile ? "overflow-x-auto max-w-full -mx-1 px-1" : "flex-shrink-0")}>
+              <button onClick={() => setSelectedMonth("All")} className={cn("px-3 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === "All" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>All</button>
+              {MONTHS.map((m) => (
+                <button key={m} onClick={() => setSelectedMonth(m)} className={cn("px-2 py-2 text-[11px] font-medium transition-all whitespace-nowrap", selectedMonth === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/40")}>{m.slice(0, 3)}</button>
+              ))}
+            </div>
+            {isMobile && <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent" />}
           </div>
         )}
       </motion.div>
@@ -653,12 +659,17 @@ export default function GSTSummary() {
       {/* Tabs */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.5 }}
         className="elevated-card rounded-2xl overflow-hidden">
-        <div className="flex border-b border-border/50 overflow-x-auto">
-          {TABS.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)} className={cn("px-5 py-3 text-[12px] font-semibold border-b-2 -mb-px transition-all whitespace-nowrap", activeTab === t.key ? "border-primary text-primary" : "border-transparent text-muted-foreground")}>
-              {t.label}
-            </button>
-          ))}
+        {/* 4 of the 5 GSTR tabs sit off-screen at 375px — fade signals the
+            scroll. from-card because this strip lives inside the elevated card. */}
+        <div className="relative">
+          <div className="flex border-b border-border/50 overflow-x-auto">
+            {TABS.map((t) => (
+              <button key={t.key} onClick={() => setTab(t.key)} className={cn("px-5 py-3 text-[12px] font-semibold border-b-2 -mb-px transition-all whitespace-nowrap", activeTab === t.key ? "border-primary text-primary" : "border-transparent text-muted-foreground")}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-card to-transparent md:hidden" />
         </div>
 
         {/* Summary tab — rate slab + GSTR-3B + HSN */}

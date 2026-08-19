@@ -13,12 +13,23 @@ interface Props {
 export default function EasyDashboard({ selectedFY }: Props) {
   const { data: statsData, isLoading } = useDashboardStats({ fyFilter: selectedFY });
   const totals = statsData?.totals || { outward: 0, inward: 0, count: 0, tax: 0 };
-  // The tile badge must name the period the numbers actually cover. It used to
-  // show the current month next to full-financial-year totals, so August read
-  // as "Tax ₹29,249 · 12 invoices" when August itself was ₹13,853 across 7 —
-  // over double, on the screen aimed at the least technical user. Showing a
-  // real month here means fetching month-scoped stats; until then, label the FY.
-  const periodLabel = `FY ${selectedFY}`;
+  // The tile badge must name the period the numbers actually cover. The
+  // monthly rollup now carries outward_tax (summed on line items, join-safe),
+  // so the tile can finally show the current filing month — which is what the
+  // 20th-of-the-month question actually is. Falls back to FY totals early in
+  // a month with no activity yet.
+  const now = new Date();
+  const thisMonth = (statsData?.monthly || []).find(
+    (m: any) => m.month === now.getMonth() + 1 && m.year === now.getFullYear()
+  );
+  const monthHasActivity = !!thisMonth && (thisMonth.outward_count + thisMonth.inward_count) > 0;
+  const periodLabel = monthHasActivity
+    ? now.toLocaleString("en-IN", { month: "long" })
+    : `FY ${selectedFY}`;
+  const tileTax = monthHasActivity ? Number(thisMonth.outward_tax) || 0 : Number(totals.tax) || 0;
+  const tileCount = monthHasActivity
+    ? thisMonth.outward_count + thisMonth.inward_count
+    : totals.count;
 
   const recentInvoices = useMemo(
     () => (statsData?.recent_invoices || []).map(mapDjangoInvoice),
@@ -69,7 +80,7 @@ export default function EasyDashboard({ selectedFY }: Props) {
                 <span className="premium-badge text-[9px] bg-primary/12 text-primary">{periodLabel}</span>
               </div>
               <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
-                Tax {formatCurrency(Number(totals.tax) || 0)} · {totals.count} invoice{totals.count === 1 ? "" : "s"}
+                Tax {formatCurrency(tileTax)} · {tileCount} invoice{tileCount === 1 ? "" : "s"}
               </p>
             </div>
             <ArrowRight className="w-4 h-4 text-muted-foreground" />

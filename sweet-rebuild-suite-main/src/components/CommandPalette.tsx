@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, FileText, Users, Package, Building2, BarChart3, Calculator, Settings, HardDrive, History, LayoutDashboard } from "lucide-react";
+import { Search, FileText, Users, Package, Building2, BarChart3, Calculator, Settings, HardDrive, History, LayoutDashboard, ReceiptText } from "lucide-react";
 import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { formatCurrency } from "@/utils/mockData";
 import { cn } from "@/utils/utils";
@@ -12,6 +12,7 @@ const pages = [
   { label: "Businesses", href: "/billing/business/list", icon: Building2, shortcut: "B" },
   { label: "Products", href: "/billing/product/list", icon: Package, shortcut: "P" },
   { label: "Invoices", href: "/billing/invoice/list", icon: FileText, shortcut: "I" },
+  { label: "Inward Bills", href: "/billing/inward-bills", icon: ReceiptText, shortcut: "W" },
   { label: "Reports", href: "/billing/reports", icon: BarChart3, shortcut: "R" },
   { label: "GST", href: "/billing/gst-summary", icon: Calculator, shortcut: "G" },
   { label: "GSTR-1 Filing", href: "/billing/gst-summary?tab=gstr1", icon: FileText, shortcut: "" },

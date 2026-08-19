@@ -129,3 +129,43 @@ class TopProductsGroupingTest(BaseAPITestCase):
         self._line(inv, "Anklet Pair", "711311", 3, 500, unit="pcs")
         row = [r for r in self._top() if r["name"] == "Anklet Pair"][0]
         self.assertEqual(row["unit"], "pcs")
+
+
+class MonthlyTaxTest(BaseAPITestCase):
+    """The monthly rollup must carry per-month output tax, summed on LineItem
+    directly — a 2-line invoice counts once, and only its own month."""
+
+    def _mk(self, number, lines):
+        inv = Invoice.objects.create(
+            workspace_id=1, business=self.business, customer=self.customer,
+            invoice_number=number, invoice_date="2026-05-01",
+            type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount=0,
+        )
+        for qty, rate, gst in lines:
+            taxable = D(str(qty)) * D(str(rate)); tax = taxable * D(str(gst))
+            LineItem.objects.create(
+                workspace_id=1, customer=self.customer, invoice=inv,
+                product_name="Item", hsn_code="711319", gst_tax_rate=D(str(gst)),
+                quantity=D(str(qty)), rate=D(str(rate)),
+                cgst=tax / 2, sgst=tax / 2, igst=D("0"),
+                amount=taxable + tax, unit="gms",
+            )
+        return inv
+
+    def test_monthly_outward_tax_is_join_safe_and_month_scoped(self):
+        self._mk("MAY-1", [(10, 100, "0.03"), (5, 200, "0.03")])
+        resp = self.client.get(reverse("invoice-stats"))
+        months = {(m["year"], m["month"]): m for m in resp.data["monthly"]}
+        may = months[(2026, 5)]
+        # taxable 1000+1000=2000 → tax 60 across both lines, exactly once
+        self.assertAlmostEqual(may["outward_tax"], 60.0, places=2)
+        self.assertEqual(may["outward_count"], 1)
+        # Global invariant: the monthly tax figures partition the outward
+        # total exactly — every line counted once, none double-joined.
+        # (The base fixture's invoice contributes to its own month, so
+        # asserting "other months are zero" would be wrong.)
+        db_total = sum(
+            float(li.cgst + li.sgst + li.igst)
+            for li in LineItem.objects.filter(invoice__type_of_invoice=INVOICE_TYPE_OUTWARD)
+        )
+        self.assertAlmostEqual(sum(m["outward_tax"] for m in months.values()), db_total, places=2)

@@ -1298,6 +1298,21 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "inward_tax": float(totals["inward_tax"]),
             "count": totals["count"],
         }
+        # Per-month output tax, aggregated on LineItem directly — joining the
+        # tax into monthly_raw's invoice-level query would re-introduce the
+        # row-multiplication bug fixed in `totals` above. The Easy-mode GST
+        # tile needs this to show a real month instead of FY totals.
+        monthly_tax = {
+            (t["y"], t["m"]): float(t["tax"] or 0)
+            for t in LineItem.objects.filter(
+                invoice_id__in=queryset.values("id"),
+                invoice__type_of_invoice="outward",
+            )
+            .annotate(m=ExtractMonth("invoice__invoice_date"),
+                      y=ExtractYear("invoice__invoice_date"))
+            .values("y", "m")
+            .annotate(tax=Sum(F("cgst") + F("sgst") + F("igst")))
+        }
         results["monthly"] = [
             {
                 "month": m["month"],
@@ -1306,6 +1321,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "inward_total": float(m["inward_total"]),
                 "outward_count": m["outward_count"],
                 "inward_count": m["inward_count"],
+                "outward_tax": monthly_tax.get((m["year"], m["month"]), 0.0),
             }
             for m in monthly_raw
         ]

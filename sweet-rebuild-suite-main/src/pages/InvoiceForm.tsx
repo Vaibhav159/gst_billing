@@ -1,5 +1,5 @@
 import { logger } from "@/utils/logger";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
 import DraftRestoreBanner from "@/components/DraftRestoreBanner";
@@ -12,6 +12,7 @@ import {
   FileText, Package, Calculator, CheckCircle2, IndianRupee, UserPlus,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { isIntraState } from "@/utils/taxRules";
 import { cn } from "@/utils/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import QuickCustomerModal from "@/components/QuickCustomerModal";
@@ -201,6 +202,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const [dirty, setDirty] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [showTaxAdjust, setShowTaxAdjust] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [showQuickCustomer, setShowQuickCustomer] = useState(false);
   const [showDraftBanner, setShowDraftBanner] = useState(false);
@@ -319,14 +321,25 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   // wrong tax heads.
   const selectedCustomer = localCustomers.find((c) => String(c.id) === String(form.customerId));
   const selectedBusiness = effectiveBusinesses.find((b) => String(b.id) === String(form.businessId));
-  const isInterstate = selectedBusiness && selectedCustomer && selectedBusiness.state_name !== selectedCustomer.state_name;
+  // Same rule as billing/tax_rules.py (GSTIN state codes first, state_name
+  // fallback) so the chip below, the client math, and the server's re-derived
+  // heads can never disagree.
+  const isInterstate = !!(selectedBusiness && selectedCustomer) && !isIntraState(
+    selectedCustomer.gst_number, selectedBusiness.gst_number,
+    selectedCustomer.state_name, selectedBusiness.state_name,
+  );
 
+  // Keep isIGST synced to the detected direction BOTH ways (the old effect
+  // only ever switched it on, never back). Manual override via "Adjust" wins,
+  // and edit mode never auto-rewrites what a stored invoice already says —
+  // InvoiceDetail's mismatch banner owns that conversation.
+  const igstManual = useRef(false);
   useEffect(() => {
-    if (isInterstate && !form.isIGST) {
-      set("isIGST", true);
-      toast({ title: "Auto-detected IGST", description: `${selectedBusiness?.state_name} → ${selectedCustomer?.state_name}` });
-    }
-  }, [form.businessId, form.customerId]);
+    if (mode === "edit" || igstManual.current) return;
+    if (!selectedBusiness || !selectedCustomer) return;
+    if (form.isIGST !== isInterstate) set("isIGST", isInterstate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.businessId, form.customerId, isInterstate]);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } };
@@ -558,12 +571,25 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">GST Type</label>
-                  <div className="flex items-center gap-3 h-10">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.isIGST} onChange={(e) => set("isIGST", e.target.checked)} className="accent-primary w-4 h-4" />
-                      <span className="text-[13px] text-foreground">IGST</span>
-                    </label>
-                    {isInterstate && <span className="premium-badge bg-warning/12 text-warning text-[10px]">Interstate</span>}
+                  {/* Read-out, not a decision: direction is auto-detected and
+                      the server re-derives the heads anyway. The raw checkbox
+                      (which silently rewired tax columns, on the screen Easy
+                      mode users see) now lives behind "Adjust" for the rare
+                      genuine override. */}
+                  <div className="flex items-center gap-2.5 h-10 flex-wrap">
+                    <span className={cn("premium-badge text-[10px]", form.isIGST ? "bg-warning/12 text-warning" : "bg-success/12 text-success")}>
+                      {form.isIGST ? "Inter-state · IGST" : "Local · CGST + SGST"}
+                    </span>
+                    {showTaxAdjust ? (
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.isIGST} onChange={(e) => { igstManual.current = true; set("isIGST", e.target.checked); }} className="accent-primary w-4 h-4" />
+                        <span className="text-[13px] text-foreground">IGST</span>
+                      </label>
+                    ) : (
+                      <button type="button" onClick={() => setShowTaxAdjust(true)} className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2">
+                        Adjust
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
