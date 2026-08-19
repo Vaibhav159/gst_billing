@@ -65,6 +65,7 @@ export interface Product {
   gstRate: number;
   description: string;
   createdAt: string;
+  defaultUnit?: ItemUnit;
   total_revenue?: number;
   qty_sold?: number;
   usage_count?: number;

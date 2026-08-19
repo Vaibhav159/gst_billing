@@ -296,7 +296,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const handleProductChange = (i: number, productId: string) => {
     const product = localProducts.find((p) => p.id === productId);
-    setItems((p) => p.map((it, idx) => idx === i ? { ...it, productId, rate: product && it.rate === 0 ? 0 : it.rate } : it));
+    // Picking a product adopts its default unit (a pcs product should not
+    // start in gms); the unit select stays editable per line afterwards.
+    setItems((p) => p.map((it, idx) => idx === i ? { ...it, productId, unit: product?.defaultUnit || it.unit, rate: product && it.rate === 0 ? 0 : it.rate } : it));
     setDirty(true);
   };
 

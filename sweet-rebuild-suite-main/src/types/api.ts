@@ -91,6 +91,7 @@ export interface DjangoCustomer {
 }
 
 export interface DjangoProduct {
+  default_unit?: string;
   id: number;
   name: string;
   hsn_code: string;
