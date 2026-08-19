@@ -687,6 +687,26 @@ class Product(AbstractBaseModel):
     )
 
 
+class UserPreference(models.Model):
+    """Per-user app preferences (default business, invoice defaults, UI
+    toggles), stored as one JSON blob so the Settings page roams across
+    devices instead of living in one browser's localStorage.
+
+    Shape is owned by the frontend; the API only enforces that it stays a
+    reasonably-sized JSON object. Device-local concerns (theme, mobile mode)
+    deliberately stay in localStorage.
+    """
+
+    user = models.OneToOneField(
+        "auth.User", on_delete=models.CASCADE, related_name="preference"
+    )
+    data = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"preferences<{self.user.username}>"
+
+
 class AuditLog(models.Model):
     ACTION_CHOICES = [
         ("created", "Created"),

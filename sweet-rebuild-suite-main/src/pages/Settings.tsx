@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { resetOnboarding } from "@/components/OnboardingWizard";
 // Invoice template removed — Tally format is the standard
 
-const SETTINGS_STORAGE_KEY = "gst_app_settings";
+import { fetchPreferences, patchPreferences, SETTINGS_STORAGE_KEY } from "@/hooks/usePreferences";
 
 function getCurrentFinancialYear(): string {
   const now = new Date();
@@ -55,6 +55,18 @@ export default function Settings() {
   const { mobileMode, setMobileMode } = useMobileMode();
   const { items: businesses } = useBusinesses();
   const [settings, setSettings] = useState(() => loadSettings(businesses[0]?.id || ""));
+
+  // Server copy wins over the localStorage mirror once it arrives, so the
+  // same preferences follow the user to any device.
+  useEffect(() => {
+    let alive = true;
+    fetchPreferences().then((server) => {
+      if (alive && server && Object.keys(server).length > 0) {
+        setSettings((p) => ({ ...p, ...server }));
+      }
+    });
+    return () => { alive = false; };
+  }, []);
   const [nextInvoiceInfo, setNextInvoiceInfo] = useState<string>("");
   // `dirty` tracks whether any field has changed since the last save.
   // Drives the save bar's enabled state + label, so the sticky button isn't
@@ -93,14 +105,17 @@ export default function Settings() {
     setSettings((p) => ({ ...p, [field]: val }));
     setDirty(true);
   };
-  const handleSave = () => {
+  const handleSave = async () => {
     try {
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+      await patchPreferences(settings);
+      setDirty(false);
+      toast({ title: "Settings Saved", description: "Saved to your account — they follow you to any device." });
     } catch {
-      // storage full or unavailable
+      // Offline or server hiccup: keep the local mirror so nothing is lost.
+      try { localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+      setDirty(false);
+      toast({ title: "Saved locally", description: "Could not reach the server — will apply on this device.", variant: "destructive" });
     }
-    setDirty(false);
-    toast({ title: "Settings Saved", description: "Your preferences have been updated." });
   };
 
   const sections = [
@@ -232,15 +247,17 @@ export default function Settings() {
       fields: (
         <div className="flex items-center justify-between p-3 rounded-xl bg-destructive/5 border border-destructive/15">
           <div>
-            <p className="text-[13px] font-semibold text-foreground">Clear Local Settings</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Reset all preferences to defaults. Doesn't delete server data — just your local browser config.</p>
+            <p className="text-[13px] font-semibold text-foreground">Reset Preferences</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Reset your saved preferences to defaults, on this device and your account. Business data is untouched.</p>
           </div>
-          <button onClick={() => {
-            if (!confirm("Clear all local settings and reset to defaults? This affects only your browser, not server data.")) return;
+          <button onClick={async () => {
+            if (!confirm("Reset all preferences to defaults? Business data is untouched.")) return;
             localStorage.removeItem(SETTINGS_STORAGE_KEY);
-            setSettings(loadSettings(businesses[0]?.id || ""));
+            const defaults = loadSettings(businesses[0]?.id || "");
+            setSettings(defaults);
             setDirty(false);
-            toast({ title: "Settings Cleared", description: "Preferences reset to defaults.", variant: "destructive" });
+            try { await patchPreferences(Object.fromEntries(Object.keys(defaults).map((k) => [k, null]))); } catch { /* offline — mirror already cleared */ }
+            toast({ title: "Preferences Reset", description: "Back to defaults.", variant: "destructive" });
           }}
             className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors flex items-center gap-1.5 shrink-0">
             <Trash2 className="w-3.5 h-3.5" /> Clear

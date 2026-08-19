@@ -26,6 +26,7 @@ from .views import (
     ReportView,
     UserManagementView,
 )
+from .preferences import PreferencesView
 
 router = DefaultRouter()
 router.register(r"businesses", BusinessViewSet)
@@ -67,6 +68,7 @@ urlpatterns = [
     path("gstin/<str:gstin>/", GstinLookupView.as_view(), name="gstin-lookup"),
     path("profile/", ProfileView.as_view(), name="profile"),
     path("users/", UserManagementView.as_view(), name="user-management"),
+    path("preferences/", PreferencesView.as_view(), name="preferences"),
     # JWT Authentication endpoints
     path("token/", ThrottledTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", ThrottledTokenRefreshView.as_view(), name="token_refresh"),
