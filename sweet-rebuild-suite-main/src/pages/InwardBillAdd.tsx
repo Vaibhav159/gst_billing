@@ -2,8 +2,7 @@ import { useMemo, useState } from "react";
 import { isIntraState } from "@/utils/taxRules";
 import { useNavigate } from "react-router-dom";
 import {
-  Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck,
-} from "lucide-react";
+  Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck, PenLine } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -205,6 +204,19 @@ export default function InwardBillAdd() {
             </label>
           </div>
         </div>
+        {/* Manual path: setReady only ever fired inside the file handler, so a
+            user recording a bill WITHOUT a file (paper in hand, no photo) hit a
+            dead end after picking the firm — found by the money-path E2E. */}
+        {!ready && (
+          <button
+            type="button"
+            disabled={!business || extracting}
+            onClick={() => setReady(true)}
+            className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 underline underline-offset-4"
+          >
+            <PenLine className="h-3.5 w-3.5" /> Enter details manually
+          </button>
+        )}
       </div>
 
       {ready && (
