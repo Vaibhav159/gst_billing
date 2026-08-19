@@ -4,6 +4,42 @@ BILLING_DECIMAL_PLACE_PRECISION = 3
 GST_TAX_RATE = Decimal("0.03")
 HSN_CODE = 711319
 
+# Units. LineItem.unit stays free-text so historical rows keep whatever they
+# say; these choices constrain Product.default_unit and are the API's canon.
+# The V2 UI keeps a mirror in sweet-rebuild-suite-main/src/utils/mockData.ts
+# (itemUnits / itemUnitLabels) — change both together.
+UNIT_GMS = "gms"
+UNIT_CHOICES = (
+    ("gms", "Grams (gms)"),
+    ("g", "Grams (g)"),
+    ("kg", "Kilograms (kg)"),
+    ("pcs", "Pieces (pcs)"),
+    ("unit", "Unit"),
+    ("nos", "Numbers (nos)"),
+    ("mtr", "Meters (mtr)"),
+    ("ltr", "Litres (ltr)"),
+    ("ml", "Millilitres (ml)"),
+    ("box", "Box"),
+    ("pair", "Pair"),
+    ("ct", "Carat (ct)"),
+    ("oz", "Ounce (oz)"),
+    ("tola", "Tola"),
+    ("set", "Set"),
+    ("dozen", "Dozen"),
+)
+# Mass units only — a quantity in pcs/box/set has no gram equivalent, and
+# mapping them to 1 (as the original units draft did) would silently corrupt
+# any normalized weight report. ct is the metric carat; oz is the troy ounce
+# and tola the standard Indian bullion tola, as used in the jewellery trade.
+UNIT_TO_GRAM = {
+    "gms": Decimal("1"),
+    "g": Decimal("1"),
+    "kg": Decimal("1000"),
+    "ct": Decimal("0.2"),
+    "oz": Decimal("31.1034768"),
+    "tola": Decimal("11.6638038"),
+}
+
 PAGINATION_PAGE_SIZE = 15
 
 # B2CL applies to interstate B2C invoices above this value. Was Rs 2.5 lakh

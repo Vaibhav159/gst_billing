@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProducts, useProduct, useInvoices, generateId } from "@/hooks/useDataStore";
+import { itemUnits, itemUnitLabels, type ItemUnit } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Save, X, AlertTriangle, Package, Pencil, Hash, FileText,
@@ -45,6 +46,7 @@ export default function ProductForm() {
     hsn: "",
     gstRate: "3",
     description: "",
+    defaultUnit: "gms",
   });
 
   useEffect(() => {
@@ -54,6 +56,7 @@ export default function ProductForm() {
         hsn: existing.hsn || "",
         gstRate: existing.gstRate?.toString() || "3",
         description: existing.description || "",
+        defaultUnit: existing.defaultUnit || "gms",
       });
     }
   }, [existing, isEdit]);
@@ -135,11 +138,11 @@ export default function ProductForm() {
     setIsSaving(true);
     try {
       if (isEdit) {
-        await updateProduct(id!, { name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description });
+        await updateProduct(id!, { name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description, defaultUnit: form.defaultUnit as ItemUnit });
         toast({ title: "Product Updated", description: form.name });
       } else {
         const newId = generateId("p-");
-        await createProduct({ id: newId, name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description, createdAt: new Date().toISOString() });
+        await createProduct({ id: newId, name: form.name, hsn: form.hsn, gstRate: Number(form.gstRate), description: form.description, defaultUnit: form.defaultUnit as ItemUnit, createdAt: new Date().toISOString() });
         toast({ title: "Product Created", description: form.name });
       }
       setDirty(false);
@@ -273,6 +276,14 @@ export default function ProductForm() {
                   <select value={form.gstRate} onChange={(e) => handleChange("gstRate", e.target.value)} className="premium-select w-full">
                     {["0", "0.25", "3", "5", "12", "18", "28"].map((r) => (
                       <option key={r} value={r}>{r}%</option>
+                    ))}
+                  </select>
+                </FormField>
+
+                <FormField label="Default Unit" icon={Hash}>
+                  <select value={form.defaultUnit} onChange={(e) => handleChange("defaultUnit", e.target.value)} className="premium-select w-full">
+                    {itemUnits.map((u) => (
+                      <option key={u} value={u}>{itemUnitLabels[u]}</option>
                     ))}
                   </select>
                 </FormField>

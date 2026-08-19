@@ -289,6 +289,7 @@ export function mapDjangoProduct(prod: any): Product {
     gstRate: (() => { const r = parseFloat(prod.gst_tax_rate) || 0; return Math.round(r > 1 ? r : r * 100); })(),
     description: prod.description || "",
     createdAt: prod.created_at || "",
+    defaultUnit: (prod.default_unit || "gms") as Product["defaultUnit"],
     total_revenue: Number(prod.total_revenue) || 0,
     qty_sold: Number(prod.qty_sold) || 0,
     usage_count: Number(prod.usage_count) || 0,
@@ -643,7 +644,8 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
   }, [items]);
 
   const create = async (data: Partial<Product>) => {
-    const payload = { ...data, hsn_code: data.hsn, gst_tax_rate: (data.gstRate || 0) / 100 };
+    const payload: any = { ...data, hsn_code: data.hsn, gst_tax_rate: (data.gstRate || 0) / 100 };
+    if (payload.defaultUnit !== undefined) { payload.default_unit = payload.defaultUnit; delete payload.defaultUnit; }
     const res = await api.post<any>("products/", payload);
     setItems((prev) => [...prev, mapDjangoProduct(res.data)]);
     return res.data;
@@ -653,6 +655,7 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
     const payload = { ...updates };
     if (payload.hsn !== undefined) { (payload as any).hsn_code = payload.hsn; delete payload.hsn; }
     if (payload.gstRate !== undefined) { (payload as any).gst_tax_rate = payload.gstRate / 100; delete payload.gstRate; }
+    if (payload.defaultUnit !== undefined) { (payload as any).default_unit = payload.defaultUnit; delete payload.defaultUnit; }
     
     const res = await api.patch<any>(`products/${id}/`, payload);
     setItems((prev) => prev.map((it) => (String(it.id) === String(id) ? mapDjangoProduct(res.data) : it)));
