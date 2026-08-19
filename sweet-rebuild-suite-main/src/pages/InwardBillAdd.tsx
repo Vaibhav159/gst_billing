@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { isIntraState } from "@/utils/taxRules";
 import { useNavigate } from "react-router-dom";
 import {
-  Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck,, PenLine } from "lucide-react";
+  Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck, PenLine } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
