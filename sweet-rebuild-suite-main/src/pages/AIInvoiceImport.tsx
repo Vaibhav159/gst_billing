@@ -483,7 +483,7 @@ export default function AIInvoiceImport() {
           )}
 
           {allDone && (
-            <div className="elevated-card rounded-2xl p-6 border-l-4 border-l-success text-center">
+            <div className="rounded-2xl p-6 bg-success/5 border border-success/20 text-center">
               <CheckCircle className="w-10 h-10 text-success mx-auto mb-2" />
               <p className="text-[15px] font-semibold text-foreground">
                 {stats.created} created

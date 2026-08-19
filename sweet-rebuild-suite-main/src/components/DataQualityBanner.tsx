@@ -80,7 +80,7 @@ export default function DataQualityBanner() {
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
-        className="elevated-card rounded-2xl p-4 border-l-4 border-l-warning relative"
+        className="rounded-2xl p-4 bg-warning/5 border border-warning/20 relative"
       >
         <div className="flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
