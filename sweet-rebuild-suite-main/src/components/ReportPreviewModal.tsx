@@ -165,14 +165,14 @@ function SummaryCard({ icon: Icon, label, count, data, color }: {
   color: string;
 }) {
   const colorMap: Record<string, { text: string; bg: string; border: string }> = {
-    emerald: { text: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-l-emerald-500" },
-    blue: { text: "text-blue-600", bg: "bg-blue-500/10", border: "border-l-blue-500" },
-    primary: { text: "text-primary", bg: "bg-primary/10", border: "border-l-primary" },
+    emerald: { text: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-emerald-500/25" },
+    blue: { text: "text-blue-600", bg: "bg-blue-500/10", border: "border-blue-500/25" },
+    primary: { text: "text-primary", bg: "bg-primary/10", border: "border-primary/25" },
   };
   const c = colorMap[color] || colorMap.primary;
 
   return (
-    <div className={`rounded-xl border border-border/30 p-3 border-l-4 ${c.border}`}>
+    <div className={`rounded-xl border p-3 ${c.bg} ${c.border}`}>
       <div className="flex items-center gap-2 mb-2">
         <Icon className={`w-3.5 h-3.5 ${c.text}`} />
         <span className={`text-[10px] font-bold uppercase tracking-wider ${c.text}`}>{label}</span>

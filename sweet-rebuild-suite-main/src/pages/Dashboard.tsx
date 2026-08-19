@@ -397,12 +397,7 @@ export default function Dashboard() {
           return (
             <motion.div key={card.label} variants={fadeUp}
               title={card.full}
-              className={cn("group relative overflow-hidden stat-card rounded-2xl p-5 space-y-3 border-l-[3px]",
-                card.color === "text-success" ? "border-l-success" :
-                card.color === "text-warning" ? "border-l-warning" :
-                card.color === "text-chart-4" ? "border-l-chart-4" :
-                netAmount >= 0 ? "border-l-success" : "border-l-destructive"
-              )}>
+              className="group relative overflow-hidden stat-card rounded-2xl p-5 space-y-3">
               <div className={cn("absolute -top-8 -right-8 w-32 h-32 rounded-full bg-gradient-radial opacity-0 group-hover:opacity-100 transition-opacity duration-500", card.bgGlow)} />
               <div className="relative flex items-start justify-between">
                 <div className="space-y-1">

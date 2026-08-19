@@ -526,7 +526,7 @@ export default function GSTSummary() {
           user hasn't set up yet). */}
       {!isHydrating && carryFwdTotal > 0 && (
         <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-          className="elevated-card rounded-2xl p-3 border-l-4 border-l-success/50 flex items-center gap-3 flex-wrap">
+          className="rounded-2xl p-3 bg-success/5 border border-success/20 flex items-center gap-3 flex-wrap">
           <div className="w-8 h-8 rounded-lg bg-success/10 text-success flex items-center justify-center shrink-0">
             <Clock className="w-4 h-4" />
           </div>
@@ -550,10 +550,10 @@ export default function GSTSummary() {
           While loading, every check shows a neutral "Checking…" rather than
           falsely claiming "no data" before the API resolves. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-        className={cn("elevated-card rounded-2xl p-4 border-l-4",
-          readiness.hydrating ? "border-l-muted-foreground/30" :
-          readiness.ready ? "border-l-success" :
-          readiness.passed >= readiness.total - 1 ? "border-l-warning" : "border-l-destructive"
+        className={cn("rounded-2xl p-4 border",
+          readiness.hydrating ? "bg-muted/20 border-border/40" :
+          readiness.ready ? "bg-success/5 border-success/20" :
+          readiness.passed >= readiness.total - 1 ? "bg-warning/5 border-warning/20" : "bg-destructive/5 border-destructive/20"
         )}>
         <div className="flex items-start gap-3 flex-wrap">
           <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
@@ -604,7 +604,7 @@ export default function GSTSummary() {
 
       {/* GSTR-1 vs GSTR-3B reconciliation banner — only shown when there's a real variance */}
       {reconHasIssue && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="elevated-card rounded-2xl p-4 border-l-4 border-l-warning">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-2xl p-4 bg-warning/5 border border-warning/20">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
@@ -991,7 +991,7 @@ export default function GSTSummary() {
             </div>
 
             {bizFilter === "all" ? (
-              <div className="elevated-card rounded-2xl p-6 border-l-4 border-l-warning">
+              <div className="rounded-2xl p-6 bg-warning/5 border border-warning/20">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
                   <div>
@@ -1091,7 +1091,7 @@ export default function GSTSummary() {
                     const b = aging.buckets[k];
                     const tone = k === "expired" ? "text-destructive" : k === "fresh" ? "text-warning" : k === "warning" ? "text-chart-3" : "text-success";
                     return (
-                      <div key={k} className={cn("stat-card rounded-2xl p-4 border-l-4", k === "expired" ? "border-l-destructive" : k === "fresh" ? "border-l-warning" : "border-l-border")}>
+                      <div key={k} className="stat-card rounded-2xl p-4">
                         <p className="text-[10px] text-muted-foreground font-medium">{b.label}</p>
                         <p className={cn("font-display font-bold mt-1 text-xl", tone)}>{b.count}</p>
                         <p className="text-[11px] text-muted-foreground mt-0.5">tax {formatCurrency(b.tax)}</p>

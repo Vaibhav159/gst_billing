@@ -140,7 +140,7 @@ export default function InvoiceDetail() {
     return (
       <div className={cn("space-y-5 animate-fade-in", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 max-w-3xl mx-auto")}>
         <Breadcrumbs items={[{ label: "Invoices", href: "/billing/invoice/list" }, { label: slug || "Invoice" }]} />
-        <div className="elevated-card rounded-2xl p-5 border-l-4 border-l-warning flex items-start gap-3">
+        <div className="rounded-2xl p-5 bg-warning/5 border border-warning/20 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-[14px] font-semibold text-foreground">Multiple invoices share number "{slug}"</p>

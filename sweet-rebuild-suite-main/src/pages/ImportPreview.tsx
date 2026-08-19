@@ -98,7 +98,7 @@ export default function ImportPreview() {
       {/* Outward / Inward / Grand Total Summary */}
       <motion.div variants={fadeUp} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Outward */}
-        <div className="elevated-card rounded-2xl p-5 border-l-4 border-l-emerald-500">
+        <div className="elevated-card rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-4 h-4 text-emerald-500" />
             <h3 className="text-xs font-display font-bold uppercase tracking-wider text-emerald-600">Outward Supply</h3>
@@ -114,7 +114,7 @@ export default function ImportPreview() {
         </div>
 
         {/* Inward */}
-        <div className="elevated-card rounded-2xl p-5 border-l-4 border-l-blue-500">
+        <div className="elevated-card rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <TrendingDown className="w-4 h-4 text-blue-500" />
             <h3 className="text-xs font-display font-bold uppercase tracking-wider text-blue-600">Inward Supply</h3>
@@ -130,7 +130,7 @@ export default function ImportPreview() {
         </div>
 
         {/* Grand Total */}
-        <div className="elevated-card rounded-2xl p-5 border-l-4 border-l-primary">
+        <div className="elevated-card rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <Receipt className="w-4 h-4 text-primary" />
             <h3 className="text-xs font-display font-bold uppercase tracking-wider text-primary">Grand Total</h3>
@@ -148,7 +148,7 @@ export default function ImportPreview() {
 
       {/* Errors (if any) */}
       {result.errors && result.errors.length > 0 && (
-        <motion.div variants={fadeUp} className="elevated-card rounded-2xl p-5 border-l-4 border-l-destructive">
+        <motion.div variants={fadeUp} className="rounded-2xl p-5 bg-destructive/5 border border-destructive/20">
           <h3 className="text-xs font-display font-bold uppercase tracking-wider text-destructive mb-3">Errors ({result.errors.length})</h3>
           <ul className="space-y-1 text-[12px] text-muted-foreground max-h-40 overflow-y-auto">
             {result.errors.map((err, i) => <li key={i} className="flex gap-2"><span className="text-destructive shrink-0">{i + 1}.</span>{err}</li>)}

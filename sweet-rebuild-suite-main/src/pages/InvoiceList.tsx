@@ -396,7 +396,7 @@ export default function InvoiceList() {
           drill-down, make it explicit *why* the list looks short, and give a
           one-click escape hatch back to the unfiltered view. */}
       {hygieneFilterLabel && (
-        <div className="elevated-card rounded-2xl p-3.5 border-l-4 border-l-warning flex items-center gap-3">
+        <div className="rounded-2xl p-3.5 bg-warning/5 border border-warning/20 flex items-center gap-3">
           <SlidersHorizontal className="w-4 h-4 text-warning shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-[13px] font-semibold text-foreground">Filtered: {hygieneFilterLabel}</p>
