@@ -3600,20 +3600,27 @@ class AIInvoiceCreateView(APIView):
                     type_of_invoice=INVOICE_TYPE_INWARD,
                     total_amount=primary_invoice.total_amount,
                 )
-                for li in LineItem.objects.filter(invoice=primary_invoice):
-                    LineItem.objects.create(
-                        customer=supplier_cust,
-                        invoice=mirror,
-                        product_name=li.product_name,
-                        hsn_code=li.hsn_code,
-                        gst_tax_rate=li.gst_tax_rate,
-                        quantity=li.quantity,
-                        rate=li.rate,
-                        amount=li.amount,
-                        cgst=li.cgst,
-                        sgst=li.sgst,
-                        igst=li.igst,
-                    )
+                # bulk_create: the per-line signal would re-sum the mirror
+                # once per copied line; the total is set explicitly below.
+                LineItem.objects.bulk_create(
+                    [
+                        LineItem(
+                            customer=supplier_cust,
+                            invoice=mirror,
+                            product_name=li.product_name,
+                            hsn_code=li.hsn_code,
+                            gst_tax_rate=li.gst_tax_rate,
+                            quantity=li.quantity,
+                            rate=li.rate,
+                            amount=li.amount,
+                            cgst=li.cgst,
+                            sgst=li.sgst,
+                            igst=li.igst,
+                        )
+                        for li in LineItem.objects.filter(invoice=primary_invoice)
+                    ],
+                    batch_size=100,
+                )
                 mirror.total_amount = primary_invoice.total_amount
                 mirror.save()
                 # Audit image on the mirror too — same physical document.
@@ -3723,7 +3730,8 @@ class AIInvoiceCreateView(APIView):
             # actual tax-inclusive total, internally consistent.
             from decimal import Decimal as _D
             is_igst = invoice.is_igst_applicable
-            line_items_created = 0
+            new_lis = []
+            running_total = _D("0")
             for item_data in invoice_data.get("line_items", []) or []:
                 qty = _D(str(item_data.get("quantity", 0) or 0))
                 rate = _D(str(item_data.get("rate", 0) or 0))
@@ -3736,7 +3744,8 @@ class AIInvoiceCreateView(APIView):
                 else:
                     cgst = sgst = tax / _D("2")
                     igst = _D("0")
-                LineItem.objects.create(
+                running_total += amount
+                new_lis.append(LineItem(
                     customer=customer,
                     invoice=invoice,
                     product_name=item_data.get("product_name", "") or "",
@@ -3748,18 +3757,17 @@ class AIInvoiceCreateView(APIView):
                     cgst=cgst,
                     sgst=sgst,
                     igst=igst,
-                )
-                line_items_created += 1
+                ))
+            # bulk_create skips the per-line resync signal (which would re-sum
+            # the invoice once per line); the total is the running sum of the
+            # recomputed amounts, so no post-hoc SELECT is needed either.
+            LineItem.objects.bulk_create(new_lis, batch_size=100)
+            line_items_created = len(new_lis)
 
-            # Recompute invoice total from line items — `amount` is the
-            # tax-inclusive line subtotal (matches InvoiceForm's contract),
-            # so summing gives the true total even if the AI's
-            # `total_amount` was off.
-            invoice.total_amount = sum(
-                LineItem.objects.filter(invoice=invoice).values_list(
-                    "amount", flat=True
-                )
-            )
+            # `amount` is the tax-inclusive line subtotal (matches
+            # InvoiceForm's contract), so its sum is the true total even if
+            # the AI's `total_amount` was off.
+            invoice.total_amount = running_total
             invoice.save()
 
             # Inter-firm: also write the INWARD mirror for the buyer firm

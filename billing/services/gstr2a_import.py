@@ -561,12 +561,11 @@ def import_file(
                 invoice_number=row.invoice_number,
                 invoice_date=row.invoice_date,
                 type_of_invoice=INVOICE_TYPE_INWARD,
-                # total_amount is recomputed via LineItem signal on save,
-                # but set initial value so it's right even if signals are
-                # disabled in a future refactor.
+                # bulk_create below skips the resync signal, so this stored
+                # total IS the final value (and equals the line amount).
                 total_amount=row.invoice_value,
             )
-            LineItem.objects.create(
+            LineItem.objects.bulk_create([LineItem(
                 invoice=invoice,
                 customer=cust,
                 product_name=f"GSTR-2A import · {row.supplier_name[:80]}",
@@ -579,7 +578,7 @@ def import_file(
                 igst=row.igst,
                 amount=row.invoice_value,  # tax-inclusive (matches app contract)
                 unit="lot",
-            )
+            )])
             result.created_invoices += 1
             result.created_line_items += 1
             result.created_detail.append(

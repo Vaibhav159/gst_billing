@@ -176,20 +176,31 @@ class InwardBillListCreateView(APIView):
             })
         bill_total = request.data.get("bill_total")
         bill_total = Decimal(str(bill_total)) if bill_total not in (None, "") else None
-        computed, _total = compute_lines(service_lines, intra=intra, bill_total=bill_total)
+        computed, total = compute_lines(service_lines, intra=intra, bill_total=bill_total)
 
         invoice = Invoice.objects.create(
             workspace_id=WORKSPACE_ID, business=business, customer=supplier,
             invoice_number=invoice_number, invoice_date=invoice_date,
             type_of_invoice=INVOICE_TYPE_INWARD, total_amount=Decimal("0"),
         )
-        for c in computed:
-            LineItem.objects.create(
-                workspace_id=WORKSPACE_ID, customer=supplier, invoice=invoice,
-                product_name=c["product_name"], hsn_code=c["hsn_code"],
-                gst_tax_rate=c["gst_tax_rate"], quantity=c["quantity"], rate=c["price_rate"],
-                cgst=c["cgst"], sgst=c["sgst"], igst=c["igst"], amount=c["amount"], unit=c["unit"],
-            )
+        # bulk_create skips the per-line signal; compute_lines already returned
+        # the round-off-adjusted total, so store that instead of re-summing.
+        LineItem.objects.bulk_create(
+            [
+                LineItem(
+                    workspace_id=WORKSPACE_ID, customer=supplier, invoice=invoice,
+                    product_name=c["product_name"], hsn_code=c["hsn_code"],
+                    gst_tax_rate=c["gst_tax_rate"], quantity=c["quantity"], rate=c["price_rate"],
+                    cgst=c["cgst"], sgst=c["sgst"], igst=c["igst"], amount=c["amount"], unit=c["unit"],
+                )
+                for c in computed
+            ],
+            batch_size=100,
+        )
+        # In-memory too: _store_file_and_preview saves the instance (file
+        # field), and a stale 0 here would clobber the total just written.
+        invoice.total_amount = total
+        Invoice.objects.filter(pk=invoice.pk).update(total_amount=total)
         _store_file_and_preview(invoice, request.FILES.get("file"))
         invoice.refresh_from_db()
         return Response(
