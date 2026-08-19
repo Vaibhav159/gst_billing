@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
+import { useGstinLookup } from "@/hooks/useGstinLookup";
+import { validateGstin } from "@/utils/gstin";
+import GstinStatus from "@/components/GstinStatus";
 import { cn } from "@/utils/utils";
 import { formatApiError, errorTag } from "@/utils/apiError";
 
@@ -147,6 +150,22 @@ export default function CustomerForm() {
     "36": "Telangana", "37": "Andhra Pradesh",
   };
 
+  const gstinState = useGstinLookup(form.gst_number);
+  useEffect(() => {
+    if (gstinState.status !== "done" || !gstinState.data.valid) return;
+    const d = gstinState.data;
+    // Fill only what the user hasn't typed — a lookup must never overwrite
+    // curated data (the AI-import path follows the same rule).
+    setForm((p) => ({
+      ...p,
+      name: p.name || d.trade_name || d.legal_name || p.name,
+      pan_number: p.pan_number || d.pan || "",
+      state_name: p.state_name || d.state_name || "",
+      address: p.address || d.address || "",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gstinState]);
+
   const handleGSTChange = (val: string) => {
     const upper = val.toUpperCase();
     handleChange("gst_number", upper);
@@ -162,7 +181,9 @@ export default function CustomerForm() {
     if (form.mobile_number && form.mobile_number.length !== 10) errs.mobile_number = "Enter 10-digit number";
     if (form.mobile_number && !/^\d+$/.test(form.mobile_number)) errs.mobile_number = "Enter 10-digit number";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = "Enter valid email";
-    if (form.gst_number && !/^\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z]\d$/.test(form.gst_number)) errs.gst_number = "Invalid GSTIN format (e.g. 08AAKPL4741M1Z9)";
+    // The old regex here demanded a digit in position 15 and rejected REAL
+    // GSTINs (the firm's own ends in "...1ZO"). Checksum validation instead.
+    if (form.gst_number) { const v = validateGstin(form.gst_number); if (!v.ok) errs.gst_number = v.reason; }
     if (form.pan_number && !/^[A-Z]{5}\d{4}[A-Z]$/.test(form.pan_number)) errs.pan_number = "Invalid PAN format (e.g. AAKPL4741M)";
     return errs;
   };
@@ -398,6 +419,7 @@ export default function CustomerForm() {
                   <input type="text" value={form.gst_number} onChange={(e) => handleGSTChange(e.target.value)}
                     placeholder="e.g. 27AABCK5461H1ZO" maxLength={15}
                     className={cn("premium-input font-mono uppercase tracking-wider", errors.gst_number && "border-destructive/50 focus:ring-destructive/30")} />
+                  <GstinStatus state={gstinState} />
                 </FormField>
 
                 <FormField label="PAN Number" icon={CreditCard} error={errors.pan_number}>

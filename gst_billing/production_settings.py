@@ -331,3 +331,29 @@ LOGGING = {
         },
     },
 }
+
+# GSTIN taxpayer lookup (billing/gstin.py). Without a key the endpoint still
+# validates the checksum and derives state + PAN from the number itself;
+# a key adds legal/trade name, address and status. Free key: gstincheck.co.in
+GSTIN_API_KEY = os.getenv("GSTIN_API_KEY", "")
+GSTIN_API_URL = os.getenv("GSTIN_API_URL", "https://sheet.gstincheck.co.in/check")
+# Provider selection: "gstincheck" (default; free keyed lookups) or "cleartax"
+# (unmetered within a ClearTax subscription — use when the firm/CA already
+# files through ClearTax; token from the ClearTax account).
+GSTIN_PROVIDER = os.getenv("GSTIN_PROVIDER", "gstincheck")
+CLEARTAX_HOST = os.getenv("CLEARTAX_HOST", "")
+CLEARTAX_AUTH_TOKEN = os.getenv("CLEARTAX_AUTH_TOKEN", "")
+CLEARTAX_ENTITY_ID = os.getenv("CLEARTAX_ENTITY_ID", "")
+# KnowYourGST: flat-fee plan with unlimited lookups (no per-call metering).
+KNOWYOURGST_API_KEY = os.getenv("KNOWYOURGST_API_KEY", "")
+KNOWYOURGST_API_URL = os.getenv(
+    "KNOWYOURGST_API_URL", "https://www.knowyourgst.com/developers/gstincall/"
+)
+
+# AppyFlow: 50 free lookups on signup — the largest free tier available.
+APPYFLOW_KEY_SECRET = os.getenv("APPYFLOW_KEY_SECRET", "")
+APPYFLOW_API_URL = os.getenv("APPYFLOW_API_URL", "https://appyflow.in/api/verifyGST")
+
+# How long a taxpayer lookup stays cached (default 180 days). Longer = fewer
+# metered requests; names/addresses rarely change.
+GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))

@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { isIntraState } from "@/utils/taxRules";
+import { useGstinLookup } from "@/hooks/useGstinLookup";
+import GstinStatus from "@/components/GstinStatus";
 import { useNavigate } from "react-router-dom";
 import {
   Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck, PenLine } from "lucide-react";
@@ -59,6 +61,16 @@ export default function InwardBillAdd() {
     [businesses, business],
   );
   // Same rule as billing/tax_rules.py, so this preview and the saved bill agree.
+  const gstinState = useGstinLookup(supplierGstin);
+  useEffect(() => {
+    if (gstinState.status !== "done" || !gstinState.data.valid) return;
+    const d = gstinState.data;
+    // Autofill only what's still empty — AI extraction may have filled these.
+    if (!supplierName && (d.trade_name || d.legal_name)) setSupplierName(d.trade_name || d.legal_name || "");
+    if (!supplierAddress && d.address) setSupplierAddress(d.address);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gstinState]);
+
   const intra = isIntraState(supplierGstin, firmGstin);
 
   const computed = useMemo(() => {
@@ -246,7 +258,10 @@ export default function InwardBillAdd() {
           <div className="rounded-lg border bg-card p-4 space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Supplier name" value={supplierName} onChange={setSupplierName} />
-              <Field label="Supplier GSTIN" value={supplierGstin} onChange={(v) => setSupplierGstin(v.toUpperCase())} />
+              <div>
+                <Field label="Supplier GSTIN" value={supplierGstin} onChange={(v) => setSupplierGstin(v.toUpperCase())} />
+                <GstinStatus state={gstinState} />
+              </div>
               <Field label="Invoice #" value={invoiceNumber} onChange={setInvoiceNumber} />
               <div className="space-y-1.5">
                 <Label>Invoice date</Label>
