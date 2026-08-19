@@ -17,7 +17,7 @@ Including another URLconf
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -30,7 +30,20 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-# React frontend - this should be last as it catches all other routes
+# SPA fallback — nginx serves the real app in production; this answers direct
+# Django hits (dev runserver, probes) now that the V1 webpack shell is deleted.
+# The negative lookahead keeps unknown /api/ paths as JSON 404s, not HTML 200s.
+def spa_fallback(request):
+    from django.http import HttpResponse
+
+    return HttpResponse(
+        "<!doctype html><title>GST Billing</title>"
+        "<p>API lives at <code>/api/</code>. The app UI is served by nginx in "
+        "production; locally, run the Vite dev server "
+        "(sweet-rebuild-suite-main).</p>"
+    )
+
+
 urlpatterns += [
-    path("", include("frontend.urls")),
+    re_path(r"^(?!api/).*$", spa_fallback),
 ]

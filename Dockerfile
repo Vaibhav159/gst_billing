@@ -1,22 +1,6 @@
-# Stage 1: Build React Frontend
-FROM node:18-alpine AS frontend-builder
-
-WORKDIR /app/frontend
-
-# Copy package.json and package-lock.json
-COPY package.json package-lock.json ./
-# Copy frontend directory
-COPY frontend ./frontend
-# Copy webpack config
-COPY webpack.config.js ./
-# Copy babel config
-COPY .babelrc ./
-
-# Install dependencies and build
-RUN npm ci
-RUN npm run build
-
-# Stage 2: Python/Django Backend
+# Python/Django backend. The old Stage-1 node build compiled the V1 webpack
+# app that nothing has routed to since nginx took over the SPA — deleting it
+# shaves node_modules and ~1 minute off every image build.
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -56,11 +40,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy project files
 COPY . /app/
 
-# Copy built frontend assets from Stage 1
-COPY --from=frontend-builder /app/frontend/static/frontend /app/static/frontend
 
-# Verify crispy_forms is installed
-RUN python -c "import crispy_forms; print('crispy_forms is installed')"
 
 # Run gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "gst_billing.wsgi:application"]

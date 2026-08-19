@@ -13,7 +13,10 @@ A comprehensive billing and invoice management system designed for Indian busine
 
 ## 📋 Project Status
 
-Currently migrating the frontend from HTMX to React. See [CURRENT_TASK.md](CURRENT_TASK.md) for details on the current development focus.
+The HTMX → React migration is complete: the app UI is the Vite/React SPA in
+`sweet-rebuild-suite-main/`, served by nginx in production. The old webpack/HTMX
+frontend has been removed; Django now serves only the API, the admin, and SQL
+explorer.
 
 ## 🛠️ Tech Stack
 
@@ -91,23 +94,20 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
    python manage.py migrate
    ```
 
-3. Install frontend dependencies
-   ```bash
-   cd frontend
-   npm install
-   ```
-
-4. Build the frontend
-   ```bash
-   npm run build
-   ```
-
-5. Start the development server
+3. Start the API server
    ```bash
    python manage.py runserver
    ```
 
-6. Access the application at http://localhost:8000
+4. Start the frontend dev server (separate terminal)
+   ```bash
+   cd sweet-rebuild-suite-main
+   npm install
+   npm run dev
+   ```
+
+5. Access the app at the Vite URL it prints (the dev server proxies `/api/`
+   to Django on port 8000)
 
 ### Managing Dependencies with pip
 
@@ -145,9 +145,13 @@ python manage.py test
 
 ### Frontend Tests
 ```bash
-cd frontend
-npm test
+cd sweet-rebuild-suite-main
+npm test        # vitest unit tests
+npx tsc --noEmit -p tsconfig.app.json   # typecheck
 ```
+
+End-to-end tests (Playwright) live in `e2e-tests/` — see that folder's
+config for the dev-server setup they expect.
 
 ### Continuous Integration
 This project uses CircleCI for continuous integration. Every push to the repository triggers a build that runs all the tests with PostgreSQL. You can view the build status in the CircleCI dashboard.
