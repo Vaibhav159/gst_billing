@@ -151,7 +151,12 @@ jobs:
           # is reproducible and cache-friendly (vs the previous
           # `npm init -y && npm install` which had no lockfile).
           npm ci
-          npx playwright install --with-deps chromium
+          # No --with-deps: it runs apt against the Azure Ubuntu mirrors, which
+          # wedged this job twice (once for 40+ minutes, once eating the whole
+          # 8-minute timeout on 19 Aug 2026). The ubuntu-24.04 runner image
+          # already ships Chrome and therefore every shared library headless
+          # Chromium needs — apt here was all risk, no benefit.
+          npx playwright install chromium
       - name: Run E2E tests
         working-directory: e2e-tests
         timeout-minutes: 15
