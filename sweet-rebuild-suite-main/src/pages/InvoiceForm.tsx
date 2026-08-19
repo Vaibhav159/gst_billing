@@ -207,6 +207,22 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const DRAFT_KEY = "gst_invoice_draft";
 
+  // Settings' "Default Business" finally does something: preselect it on a
+  // fresh create (never over a draft, duplicate, or a choice already made).
+  useEffect(() => {
+    if (mode !== "create" || duplicateFrom || form.businessId) return;
+    let alive = true;
+    import("@/hooks/usePreferences").then(({ fetchPreferences }) =>
+      fetchPreferences().then((prefs) => {
+        const preferred = String(prefs?.defaultBusinessId || "");
+        if (!alive || !preferred) return;
+        setForm((p) => (p.businessId ? p : { ...p, businessId: preferred }));
+      })
+    );
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, duplicateFrom]);
+
   // Check for saved draft on mount (create mode only)
   useEffect(() => {
     if (mode !== "create" || duplicateFrom) return;

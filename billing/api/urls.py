@@ -28,6 +28,7 @@ from .views import (
     ReportView,
     UserManagementView,
 )
+from .preferences import PreferencesView
 
 router = DefaultRouter()
 router.register(r"businesses", BusinessViewSet)
@@ -67,6 +68,7 @@ urlpatterns = [
     # Profile & User Management
     path("profile/", ProfileView.as_view(), name="profile"),
     path("users/", UserManagementView.as_view(), name="user-management"),
+    path("preferences/", PreferencesView.as_view(), name="preferences"),
     # JWT Authentication endpoints
     path("token/", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
