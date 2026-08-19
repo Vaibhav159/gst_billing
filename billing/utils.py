@@ -364,7 +364,8 @@ def process_invoice_csv(
     2. Validates that customers exist in the database (doesn't create new ones)
     3. Filters customers by business association to ensure data integrity
     """
-    from billing.models import Business, Customer, Invoice, LineItem
+    from billing.constants import GST_TAX_RATE, HSN_CODE
+    from billing.models import Business, Customer, Invoice, LineItem, Product
 
     # Initialize result counters
     logger.info(f"Processing invoices from CSV file: {file_content}")
@@ -539,6 +540,10 @@ def process_invoice_csv(
 
         # Process each invoice with its line items in a transaction
         with transaction.atomic():
+            # One catalog read for the whole file (Product.name is unique) —
+            # the old per-line helper SELECTed the product and the invoice
+            # again for every row.
+            products_by_name = {p.name: p for p in Product.objects.all()}
             for invoice_number, data in invoice_data.items():
                 invoice_info = data["invoice_info"]
                 line_items_data = data["line_items"]
@@ -571,21 +576,44 @@ def process_invoice_csv(
 
                 result["invoices_created"] += 1
 
-                # Create line items for the invoice
+                # Line items are built in memory and bulk_created so the
+                # per-line resync signal doesn't re-sum the invoice once per
+                # row — imports are the largest n this code ever sees. Same
+                # math as LineItem.create_line_item_for_invoice, minus its
+                # two per-row SELECTs (product, invoice).
+                is_igst = invoice.is_igst_applicable
+                new_lis = []
+                new_total = Decimal("0")
                 for item_data in line_items_data:
                     try:
-                        # Convert quantity and rate to Decimal
                         quantity = Decimal(str(item_data["quantity"]))
                         rate = Decimal(str(item_data["rate"]))
-
-                        # Create line item
-                        LineItem.create_line_item_for_invoice(
-                            invoice_id=invoice.id,
-                            product_name=item_data["product_name"],
-                            quantity=quantity,
-                            rate=rate,
+                        product = products_by_name.get(item_data["product_name"])
+                        hsn_code = product.hsn_code if product else HSN_CODE
+                        gst_rate = product.gst_tax_rate if product else GST_TAX_RATE
+                        net_amount = quantity * rate
+                        tax_amount = net_amount * gst_rate
+                        if is_igst:
+                            cgst, sgst, igst = Decimal("0"), Decimal("0"), tax_amount
+                        else:
+                            cgst = sgst = tax_amount / 2
+                            igst = Decimal("0")
+                        new_lis.append(
+                            LineItem(
+                                product_name=item_data["product_name"],
+                                quantity=quantity,
+                                rate=rate,
+                                invoice_id=invoice.id,
+                                hsn_code=hsn_code,
+                                customer_id=invoice.customer_id,
+                                gst_tax_rate=gst_rate,
+                                cgst=cgst,
+                                sgst=sgst,
+                                igst=igst,
+                                amount=net_amount + tax_amount,
+                            )
                         )
-
+                        new_total += net_amount + tax_amount
                         result["line_items_created"] += 1
                     except Exception as e:
                         logger.warning(
@@ -595,8 +623,9 @@ def process_invoice_csv(
                             f"Error creating line item for invoice {invoice_number}: {e!s}"
                         )
 
-                # Update invoice total amount
-                invoice.save()  # This will recalculate the total_amount
+                LineItem.objects.bulk_create(new_lis, batch_size=100)
+                invoice.total_amount = new_total
+                Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
 
     except Exception as e:
         if isinstance(e, CSVImportError):
