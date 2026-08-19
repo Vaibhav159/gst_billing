@@ -334,6 +334,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # different Google accounts — each has its own quota.
 # Backward compat: single GEMINI_API_KEY is appended to this list if
 # both are set.
+# GSTIN taxpayer lookup (billing/gstin.py). Without a key the endpoint still
+# validates the checksum and derives state + PAN from the number itself;
+# a key adds legal/trade name, address and status. Free key: gstincheck.co.in
+GSTIN_API_KEY = os.getenv("GSTIN_API_KEY", "")
+GSTIN_API_URL = os.getenv("GSTIN_API_URL", "https://sheet.gstincheck.co.in/check")
 GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
 # flash-lite default — ~3s/invoice vs ~15s for full Flash with no
 # measurable quality loss on printed invoices. Override per-environment

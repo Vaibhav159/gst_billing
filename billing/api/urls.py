@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import (
 )
 from .serializers import CustomTokenObtainPairSerializer
 
+from .gstin_lookup import GstinLookupView
 from .inward_bills import (
     InwardBillDetailView,
     InwardBillExtractView,
@@ -65,6 +66,8 @@ urlpatterns = [
         name="itc-reclaim-ledger",
     ),
     # Profile & User Management
+    # GSTIN validation + taxpayer autofill (see billing/gstin.py)
+    path("gstin/<str:gstin>/", GstinLookupView.as_view(), name="gstin-lookup"),
     path("profile/", ProfileView.as_view(), name="profile"),
     path("users/", UserManagementView.as_view(), name="user-management"),
     # JWT Authentication endpoints

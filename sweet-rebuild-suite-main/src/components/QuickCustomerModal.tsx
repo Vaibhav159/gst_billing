@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useGstinLookup } from "@/hooks/useGstinLookup";
+import { validateGstin } from "@/utils/gstin";
+import GstinStatus from "@/components/GstinStatus";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, UserPlus, Phone, Mail, MapPin, Hash, CreditCard, Save } from "lucide-react";
 import { indianStates } from "@/utils/mockData";
@@ -34,6 +37,20 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
     if (errors[field]) setErrors((p) => ({ ...p, [field]: "" }));
   };
 
+  const gstinState = useGstinLookup(form.gst);
+  useEffect(() => {
+    if (gstinState.status !== "done" || !gstinState.data.valid) return;
+    const d = gstinState.data;
+    setForm((p) => ({
+      ...p,
+      name: p.name || d.trade_name || d.legal_name || p.name,
+      pan: p.pan || d.pan || "",
+      state: p.state || d.state_name || "",
+      address: p.address || d.address || "",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gstinState]);
+
   const handleGSTChange = (val: string) => {
     const upper = val.toUpperCase();
     handleChange("gst", upper);
@@ -47,7 +64,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Name is required";
     if (form.mobile && (form.mobile.length !== 10 || !/^\d+$/.test(form.mobile))) errs.mobile = "Valid 10-digit number";
-    if (form.gst && form.gst.length !== 15) errs.gst = "GST must be 15 chars";
+    if (form.gst) { const v = validateGstin(form.gst); if (!v.ok) errs.gst = v.reason; }
     return errs;
   };
 
@@ -132,6 +149,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
                   <input type="text" value={form.gst} onChange={(e) => handleGSTChange(e.target.value)}
                     placeholder="e.g. 27AABCK5461H1ZO" maxLength={15}
                     className={cn("premium-input font-mono uppercase tracking-wider", errors.gst && "border-destructive/50")} />
+                  <GstinStatus state={gstinState} />
                 </Field>
                 <Field label="State" icon={MapPin}>
                   <select value={form.state} onChange={(e) => handleChange("state", e.target.value)} className="premium-select w-full">

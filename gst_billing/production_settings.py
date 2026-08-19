@@ -317,3 +317,9 @@ LOGGING = {
         },
     },
 }
+
+# GSTIN taxpayer lookup (billing/gstin.py). Without a key the endpoint still
+# validates the checksum and derives state + PAN from the number itself;
+# a key adds legal/trade name, address and status. Free key: gstincheck.co.in
+GSTIN_API_KEY = os.getenv("GSTIN_API_KEY", "")
+GSTIN_API_URL = os.getenv("GSTIN_API_URL", "https://sheet.gstincheck.co.in/check")
