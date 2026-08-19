@@ -134,6 +134,25 @@ STATICFILES_DIRS = [
     os.path.join(BASE_DIR, "static"),
 ]
 
+# ── Error tracking ────────────────────────────────────────────────────────────
+# Initialized only when SENTRY_DSN is set, so environments without it (CI, a
+# bare local run) change nothing. Until this, a production exception was
+# invisible unless someone happened to tail the container logs — the E-way
+# button crashed for four months without anyone knowing.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+        # Error tracking only by default — tracing costs quota and this app
+        # has ~3 users. Turn on with SENTRY_TRACES=0.1 style values if wanted.
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES", "0") or 0),
+        # Books data: never ship request bodies / user PII with events.
+        send_default_pii=False,
+    )
+
 # Media files
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")

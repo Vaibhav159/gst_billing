@@ -45,6 +45,10 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "pip-system-certs>=4.0",
     "google-genai>=1.33.0",
+    # Error tracking — initialized only when SENTRY_DSN is set (production).
+    # Until this, prod exceptions were invisible unless someone tailed the
+    # container logs.
+    "sentry-sdk[django]>=2.0",
 ]
 
 [project.optional-dependencies]
