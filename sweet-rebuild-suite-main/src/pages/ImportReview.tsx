@@ -452,19 +452,19 @@ export default function ImportReview() {
 
       {/* Status Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="elevated-card rounded-xl p-3 border-l-4 border-l-success">
+        <div className="elevated-card rounded-xl p-3">
           <p className="text-[10px] text-muted-foreground uppercase font-semibold">Ready</p>
           <p className="text-xl font-bold text-success">{readyCount}</p>
         </div>
-        <div className="elevated-card rounded-xl p-3 border-l-4 border-l-blue-500">
+        <div className="elevated-card rounded-xl p-3">
           <p className="text-[10px] text-muted-foreground uppercase font-semibold">New Customers</p>
           <p className="text-xl font-bold text-blue-500">{missingCustCount}</p>
         </div>
-        <div className="elevated-card rounded-xl p-3 border-l-4 border-l-amber-500">
+        <div className="elevated-card rounded-xl p-3">
           <p className="text-[10px] text-muted-foreground uppercase font-semibold">Duplicates</p>
           <p className="text-xl font-bold text-amber-500">{duplicateCount}</p>
         </div>
-        <div className="elevated-card rounded-xl p-3 border-l-4 border-l-destructive">
+        <div className="elevated-card rounded-xl p-3">
           <p className="text-[10px] text-muted-foreground uppercase font-semibold">No Business</p>
           <p className="text-xl font-bold text-destructive">{missingBizCount}</p>
         </div>
@@ -472,7 +472,7 @@ export default function ImportReview() {
 
       {/* Outward/Inward Totals for selected */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div className="elevated-card rounded-xl p-4 border-l-4 border-l-emerald-500">
+        <div className="elevated-card rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <TrendingUp className="w-4 h-4 text-emerald-500" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Outward ({outward.length})</span>
@@ -485,7 +485,7 @@ export default function ImportReview() {
             <div><span className="text-muted-foreground block">Total</span><span className="font-bold text-emerald-600">{fmt(sumInvs(outward).total)}</span></div>
           </div>
         </div>
-        <div className="elevated-card rounded-xl p-4 border-l-4 border-l-blue-500">
+        <div className="elevated-card rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <TrendingDown className="w-4 h-4 text-blue-500" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Inward ({inward.length})</span>
