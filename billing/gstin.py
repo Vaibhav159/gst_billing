@@ -31,7 +31,13 @@ logger = logging.getLogger(__name__)
 GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$")
 _CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _CACHE_PREFIX = "gstin_lookup:"
-_CACHE_TTL = 60 * 60 * 24 * 30
+# Cached long on purpose. A taxpayer's legal name, trade name and address
+# essentially never change, and every provider meters lookups — a long TTL is
+# what turns a 20-50 request free tier into "free forever" at the volume a
+# single shop actually onboards new parties. Registration STATUS can change
+# (active → cancelled), so anything that must be current for ITC decisions
+# should be re-checked at filing time rather than trusted from this cache.
+_CACHE_TTL_DEFAULT = 60 * 60 * 24 * 180
 
 
 def check_digit(first14: str) -> str:
@@ -195,10 +201,37 @@ def _fetch_knowyourgst(gstin: str) -> dict | None:
     }
 
 
+def _fetch_appyflow(gstin: str) -> dict | None:
+    """AppyFlow: GET /api/verifyGST?gstNo=&key_secret=.
+
+    50 free lookups on signup — the largest free tier of the lot, which with
+    our cache is what makes this feature genuinely free at personal volume.
+    Returns taxpayer fields under GSTN-ish names inside a `taxpayerInfo` object.
+    """
+    key = getattr(settings, "APPYFLOW_KEY_SECRET", "")
+    if not key:
+        return None
+    url = getattr(settings, "APPYFLOW_API_URL", "https://appyflow.in/api/verifyGST")
+    try:
+        resp = requests.get(url, params={"gstNo": gstin, "key_secret": key}, timeout=8)
+        payload = resp.json()
+    except Exception as e:
+        logger.warning("appyflow unreachable for %s: %s", gstin, e)
+        return None
+    if resp.status_code != 200 or not isinstance(payload, dict) or payload.get("error"):
+        logger.info("appyflow error for %s: %s", gstin, str(payload)[:120])
+        return None
+    d = payload.get("taxpayerInfo") if isinstance(payload.get("taxpayerInfo"), dict) else payload
+    if not (d.get("lgnm") or d.get("tradeNam")):
+        return None
+    return _map_gstn_payload(d)
+
+
 _PROVIDERS = {
     "gstincheck": _fetch_gstincheck,
     "cleartax": _fetch_cleartax,
     "knowyourgst": _fetch_knowyourgst,
+    "appyflow": _fetch_appyflow,
 }
 
 
@@ -228,7 +261,8 @@ def lookup(gstin: str) -> dict:
 
     fetched = _fetch_provider(g)
     if fetched is not None:
-        cache.set(_CACHE_PREFIX + g, fetched, _CACHE_TTL)
+        ttl = int(getattr(settings, "GSTIN_CACHE_SECONDS", _CACHE_TTL_DEFAULT))
+        cache.set(_CACHE_PREFIX + g, fetched, ttl)
         return {**result, **fetched, "source": "provider"}
 
     provider = (getattr(settings, "GSTIN_PROVIDER", "gstincheck") or "gstincheck").lower()
@@ -236,6 +270,7 @@ def lookup(gstin: str) -> dict:
         "gstincheck": getattr(settings, "GSTIN_API_KEY", ""),
         "cleartax": getattr(settings, "CLEARTAX_AUTH_TOKEN", ""),
         "knowyourgst": getattr(settings, "KNOWYOURGST_API_KEY", ""),
+        "appyflow": getattr(settings, "APPYFLOW_KEY_SECRET", ""),
     }.get(provider, "")
     if not configured:
         result["hint"] = (
@@ -244,6 +279,7 @@ def lookup(gstin: str) -> dict:
             "the firm files through ClearTax, set GSTIN_PROVIDER=cleartax with "
             "CLEARTAX_HOST, CLEARTAX_AUTH_TOKEN and CLEARTAX_ENTITY_ID; or "
             "GSTIN_PROVIDER=knowyourgst with KNOWYOURGST_API_KEY for a flat-fee "
-            "unlimited plan."
+            "unlimited plan; or GSTIN_PROVIDER=appyflow with APPYFLOW_KEY_SECRET, "
+            "whose 50 free lookups go a long way against the cache."
         )
     return result

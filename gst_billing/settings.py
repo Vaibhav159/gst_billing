@@ -351,6 +351,14 @@ KNOWYOURGST_API_KEY = os.getenv("KNOWYOURGST_API_KEY", "")
 KNOWYOURGST_API_URL = os.getenv(
     "KNOWYOURGST_API_URL", "https://www.knowyourgst.com/developers/gstincall/"
 )
+
+# AppyFlow: 50 free lookups on signup — the largest free tier available.
+APPYFLOW_KEY_SECRET = os.getenv("APPYFLOW_KEY_SECRET", "")
+APPYFLOW_API_URL = os.getenv("APPYFLOW_API_URL", "https://appyflow.in/api/verifyGST")
+
+# How long a taxpayer lookup stays cached (default 180 days). Longer = fewer
+# metered requests; names/addresses rarely change.
+GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))
 GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
 # flash-lite default — ~3s/invoice vs ~15s for full Flash with no
 # measurable quality loss on printed invoices. Override per-environment

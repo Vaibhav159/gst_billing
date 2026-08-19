@@ -208,3 +208,59 @@ class KnowYourGstProviderTest(BaseAPITestCase):
             resp = self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
         self.assertTrue(resp.data["valid"])
         self.assertEqual(resp.data["source"], "checksum")
+
+
+@override_settings(GSTIN_PROVIDER="appyflow", APPYFLOW_KEY_SECRET="af-1",
+                   GSTIN_API_KEY="", CLEARTAX_AUTH_TOKEN="", KNOWYOURGST_API_KEY="")
+class AppyFlowProviderTest(BaseAPITestCase):
+    """AppyFlow — largest free tier (50). GSTN-shaped fields inside taxpayerInfo."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    def test_taxpayerinfo_wrapper_is_unwrapped(self):
+        with patch("billing.gstin.requests.get") as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.json.return_value = {"taxpayerInfo": GSTN_PAYLOAD["data"]}
+            r = self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+        self.assertEqual(r.data["source"], "provider")
+        self.assertEqual(r.data["legal_name"], "LODHA JEWELLERS")
+        self.assertIn("313001", r.data["address"])
+        params = mock_get.call_args.kwargs["params"]
+        self.assertEqual(params["gstNo"], "08AAGPL3375F1ZO")
+        self.assertEqual(params["key_secret"], "af-1")
+
+    def test_error_flag_degrades_to_derived(self):
+        with patch("billing.gstin.requests.get") as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.json.return_value = {"error": True, "message": "quota over"}
+            r = self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+        self.assertTrue(r.data["valid"])
+        self.assertEqual(r.data["source"], "checksum")
+        self.assertEqual(r.data["state_name"], "RAJASTHAN")
+
+
+class GstinCacheTtlTest(BaseAPITestCase):
+    """A long TTL is what makes a small free tier last — assert it's honoured."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    @override_settings(GSTIN_API_KEY="k", GSTIN_PROVIDER="gstincheck",
+                       GSTIN_CACHE_SECONDS=1234)
+    def test_configured_ttl_is_passed_to_cache(self):
+        with patch("billing.gstin.requests.get") as mock_get, \
+             patch("billing.gstin.cache.set") as mock_set:
+            mock_get.return_value.json.return_value = GSTN_PAYLOAD
+            self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+        self.assertEqual(mock_set.call_args.args[2], 1234)
+
+    @override_settings(GSTIN_API_KEY="k", GSTIN_PROVIDER="gstincheck")
+    def test_default_ttl_is_180_days(self):
+        with patch("billing.gstin.requests.get") as mock_get, \
+             patch("billing.gstin.cache.set") as mock_set:
+            mock_get.return_value.json.return_value = GSTN_PAYLOAD
+            self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+        self.assertEqual(mock_set.call_args.args[2], 60 * 60 * 24 * 180)
