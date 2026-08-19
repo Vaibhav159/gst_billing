@@ -1,20 +1,54 @@
-name: Docker Publish
+name: Release
+
+# Tag-based releases: images are built ONLY when a version tag is pushed
+# (git tag v2.0.0 && git push origin v2.0.0, or a GitHub Release). Merging
+# to main runs Tests but publishes nothing — you choose when prod changes.
+# On the server, Watchtower (see docker-compose.yml) sees the new :latest
+# within a minute and redeploys automatically; the versioned tag stays on
+# Docker Hub for rollback.
+#
+# workflow_dispatch is the manual escape hatch: it builds whatever ref you
+# run it from and tags the images :latest + :<ref-name>.
 
 on:
   push:
-    branches:
-      - main
-      - new_ui
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a release mid-push — a half-published pair of images
+  # (new backend, old nginx) is worse than a slightly slower queue.
+  cancel-in-progress: false
 
 jobs:
+  test:
+    # Release gate: the fast backend suite. E2E already gated every PR on
+    # its way into main; this catches a bad tag (wrong commit, stale branch).
+    name: Backend tests (release gate)
+    runs-on: ubuntu-24.04
+    env:
+      DJANGO_SETTINGS_MODULE: gst_billing.test_settings
+      DJANGO_SECRET_KEY: ci-test-key-not-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install . pytest pytest-django gunicorn 'setuptools<81'
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+          pytest billing/ -x --tb=short
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -48,8 +82,10 @@ jobs:
           file: ${{ matrix.file }}
           push: true
           platforms: linux/amd64,linux/arm64
+          # :latest is what the server tracks; :vX.Y.Z (the git tag name) is
+          # the immutable handle you roll back to.
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:latest
-            ${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:${{ github.sha }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:${{ github.ref_name }}
           cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache
           cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache,mode=max

@@ -71,6 +71,9 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
+This first `up -d` also starts **Watchtower**, after which day-to-day deploys
+are automatic — see [Releases and automatic deployment](#releases-and-automatic-deployment).
+
 ### 6. Set Up SSL (Optional but Recommended)
 
 #### Using Let's Encrypt:
@@ -432,3 +435,67 @@ For better performance:
    ```
 
    Add performance tuning parameters and update docker-compose.yml to mount this configuration.
+
+## Releases and automatic deployment
+
+Deploys are **tag-driven**. Merging PRs changes `main` (and runs Tests) but
+does not touch production; production changes when you cut a release.
+
+### Cut a release
+
+```bash
+git tag -a v2.0.0 -m "everything since the May image"
+git push origin v2.0.0
+```
+
+(Equivalently: GitHub → Releases → *Draft a new release* → create the tag
+there — publishing the release pushes the tag.)
+
+That tag triggers the **Release** workflow:
+
+1. the backend test suite runs as a gate (a bad tag never builds),
+2. both images build for amd64+arm64 and push to Docker Hub as
+   `:latest` **and** `:v2.0.0`.
+
+### What the server does (nothing, automatically)
+
+`docker compose up -d` runs a **Watchtower** container that polls Docker Hub
+every 60 seconds. When a release lands, it pulls the new `:latest`, recreates
+`web` and `nginx` (only those two — they're label-scoped), and prunes the old
+images. The `web` container's start command runs `migrate`, so database
+migrations apply exactly as they did under manual deploys. End to end: a tag
+push is live in production about 5–10 minutes later (mostly build time).
+
+Watch it happen:
+
+```bash
+docker compose logs -f watchtower
+```
+
+### Roll back
+
+Every release keeps its immutable version tag on Docker Hub. To roll back,
+pin the compose file to the last good version and restart:
+
+```yaml
+# docker-compose.yml (temporarily)
+web:
+  image: vaibhav198/gst-billing:v1.9.0
+nginx:
+  image: vaibhav198/gst-billing-nginx:v1.9.0
+```
+
+```bash
+docker compose up -d web nginx
+```
+
+Watchtower only tracks the tag a container was started from, so a container
+pinned to `v1.9.0` stays put until you switch it back to `:latest`.
+(Remember migrations don't auto-reverse — rolling back past a migration needs
+a manual `manage.py migrate billing <previous>` first.)
+
+### Manual escape hatch
+
+The Release workflow also has a **Run workflow** button (`workflow_dispatch`)
+— it builds whatever ref you point it at and tags the images
+`:latest` + `:<ref-name>`, for the rare "rebuild without a new tag" case.

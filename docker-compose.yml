@@ -9,6 +9,10 @@ services:
   web:
     image: vaibhav198/gst-billing:latest
     restart: unless-stopped
+    labels:
+      # Watchtower redeploys this service when a new :latest lands on
+      # Docker Hub (published only by the tag-triggered Release workflow).
+      - com.centurylinklabs.watchtower.enable=true
     volumes:
       - gst_static_volume:/app/staticfiles
       - gst_media_volume:/app/media
@@ -38,6 +42,8 @@ services:
     # Uses the image built via Github Actions
     image: vaibhav198/gst-billing-nginx:latest
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     ports:
       # Map to a port Cosmos can reverse proxy (e.g. 8060)
       - "8060:80"
@@ -46,3 +52,18 @@ services:
       - gst_media_volume:/var/www/media:ro
     depends_on:
       - web
+
+  # Auto-deploy: polls Docker Hub every 60s and recreates ONLY the services
+  # labeled watchtower.enable=true (web + nginx) when their :latest changes —
+  # redis and anything else on the box are never touched (--label-enable).
+  # The web container's own start command runs migrate, so a new release
+  # applies its migrations exactly like a manual `compose pull && up -d` did.
+  # --cleanup prunes the superseded images so the disk doesn't fill up.
+  # Note: mounting docker.sock gives this container Docker-level (root)
+  # control of the host — standard for Watchtower; it runs no exposed ports.
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --label-enable --cleanup --interval 60
