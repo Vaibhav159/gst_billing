@@ -19,4 +19,13 @@ PASSWORD_HASHERS = [
 
 # Disable throttling for tests
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
-REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {}
+# Scoped throttles on the token views instantiate ScopedRateThrottle at the
+# view level (bypassing DEFAULT_THROTTLE_CLASSES), and a missing scope rate
+# raises ImproperlyConfigured — so give every scope a rate too high to ever
+# trip in tests. The throttle test overrides these to a tight rate itself.
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    "anon": "10000/min",
+    "user": "10000/min",
+    "login": "10000/min",
+    "token_refresh": "10000/min",
+}

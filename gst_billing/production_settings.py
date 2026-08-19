@@ -11,7 +11,15 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "insecure-key-for-dev-only")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    # This used to fall back to a string that is committed to a public repo —
+    # which also signs every JWT. A missing env var must stop the boot, not
+    # silently run with a known key.
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY is not set. Refusing to start production with a "
+        "known default key."
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "False") == "True"
@@ -23,7 +31,6 @@ CSRF_TRUSTED_ORIGINS = [
     "http://billing.cheq.dpdns.org",
 ]
 
-print(f"DEBUG: {DEBUG}, ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 
 # Application definition
 INSTALLED_APPS = [
@@ -147,6 +154,13 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # Production previously had NO throttling — the login endpoint accepted
+    # unlimited password attempts (verified live 19 Aug 2026). With REDIS_HOST
+    # set (prod compose), throttle state is shared across all gunicorn workers.
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/min",
+        "token_refresh": "60/min",
+    },
 }
 
 # JWT settings
@@ -283,12 +297,12 @@ LOGGING = {
     },
     "handlers": {
         "console": {
-            "level": "DEBUG",
+            "level": "INFO",
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
         "file": {
-            "level": "DEBUG",
+            "level": "INFO",
             "class": "logging.FileHandler",
             "filename": os.path.join(BASE_DIR, "logs/django.log"),
             "formatter": "verbose",
@@ -312,7 +326,7 @@ LOGGING = {
         },
         "billing": {
             "handlers": ["console", "file"],
-            "level": "DEBUG",
+            "level": "INFO",
             "propagate": False,
         },
     },
