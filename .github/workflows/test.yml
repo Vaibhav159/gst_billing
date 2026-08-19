@@ -133,8 +133,19 @@ jobs:
           done
           curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/
           curl -s -o /dev/null -w "API via proxy: %{http_code}\n" http://localhost:8080/api/profile/
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e-tests/package-lock.json') }}
       - name: Install Playwright
         working-directory: e2e-tests
+        # timeout-minutes: a CDN stall here once sat "in_progress" for 40+
+        # minutes (runs 32216340885 / 32217543370, 19 Aug 2026) with the
+        # default 6h job timeout as the only backstop. The cache makes the
+        # download a no-op on repeat runs; the timeout makes a stall a fast,
+        # retryable failure instead of a hung job.
+        timeout-minutes: 8
         run: |
           # e2e-tests/package.json + lockfile are checked in, so npm ci
           # is reproducible and cache-friendly (vs the previous
@@ -143,6 +154,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Run E2E tests
         working-directory: e2e-tests
+        timeout-minutes: 15
         env:
           BASE_URL: http://localhost:8080
         run: npx playwright test --reporter=list

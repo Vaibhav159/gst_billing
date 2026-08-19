@@ -10,7 +10,10 @@ export default defineConfig(({ mode }) => {
   // preference in sweet-rebuild-suite-main/.env.local (gitignored):
   //   VITE_DEV_PORT=5001
   //   VITE_API_TARGET=http://127.0.0.1:5002
-  const env = { ...process.env, ...loadEnv(mode, __dirname, "") };
+  // Real environment variables beat .env files (standard Vite precedence) —
+  // spread order matters: an explicit VITE_DEV_PORT=8080 on the command line
+  // must override a developer's .env.local, not lose to it.
+  const env = { ...loadEnv(mode, __dirname, ""), ...process.env };
   const apiTarget = env.VITE_API_TARGET || "http://127.0.0.1:8000";
   return ({
   server: {
