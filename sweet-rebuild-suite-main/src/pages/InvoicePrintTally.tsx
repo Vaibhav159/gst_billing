@@ -5,6 +5,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/utils/utils";
 import { BlobProvider } from "@react-pdf/renderer";
 import TallyInvoicePDF from "@/components/TallyInvoicePDF";
+import InvoiceHTMLPreview from "@/components/InvoiceHTMLPreview";
 import { useState, useEffect } from "react";
 import QRCode from "qrcode";
 import { useToast } from "@/hooks/use-toast";
@@ -171,9 +172,11 @@ export default function InvoicePrintTally() {
               );
             }
             if (isMobile) {
+              // Mobile browsers ignore PDF iframes, so show an HTML facsimile
+              // of the same figures instead of a download-only dead end.
               return (
-                <div className="flex flex-col items-center justify-center py-16 px-6 text-center gap-4">
-                  <p className="text-sm text-muted-foreground">PDF preview is not available on mobile. Tap the PDF button above to download it.</p>
+                <div className="p-4 pb-10">
+                  <InvoiceHTMLPreview invoice={inv} business={biz} customer={customer} />
                 </div>
               );
             }
