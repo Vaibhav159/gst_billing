@@ -10,7 +10,7 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -31,6 +31,18 @@ export default function ProductDetail() {
   const { items: customers } = useCustomers();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  type HsnVariant = { hsn_code: string; lines: number; quantity: string; amount: string; first_used: string; last_used: string; matches_catalog: boolean };
+  const [hsnUsage, setHsnUsage] = useState<{ catalog_hsn: string; variants: HsnVariant[] } | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    api.get(`products/${id}/hsn_usage/`)
+      .then((res) => { if (alive) setHsnUsage(res.data); })
+      .catch(() => { /* the card simply doesn't render */ });
+    return () => { alive = false; };
+  }, [id]);
+  // Only worth a card when history disagrees with itself or the catalog.
+  const hsnDrift = hsnUsage && (hsnUsage.variants.length > 1 || hsnUsage.variants.some((v) => !v.matches_catalog));
 
   // Consistent loading + not-found treatment — mirrors InvoiceDetail.
   if (productLoading) return (
@@ -156,6 +168,34 @@ export default function ProductDetail() {
               </div>
             ))}
           </div>
+
+          {hsnDrift && hsnUsage && (
+            <div className="rounded-2xl p-5 space-y-3 bg-warning/5 border border-warning/20">
+              <div>
+                <h2 className="text-xs font-display font-semibold text-warning uppercase tracking-wider">HSN drift on invoice lines</h2>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Lines keep the HSN they were saved with. New lines follow the catalog
+                  ({hsnUsage.catalog_hsn || "none"}); older ones are fixed by editing their invoices.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {hsnUsage.variants.map((v) => (
+                  <div key={v.hsn_code || "(blank)"} className="flex items-center gap-3 p-2 rounded-xl bg-background/40">
+                    <span className="font-mono text-[12px] text-foreground shrink-0">{v.hsn_code || "(blank)"}</span>
+                    {v.matches_catalog ? (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-success/10 text-success shrink-0">catalog</span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-warning/10 text-warning shrink-0">drift</span>
+                    )}
+                    <span className="text-[11px] text-muted-foreground ml-auto text-right">
+                      {v.lines} line{v.lines === 1 ? "" : "s"}
+                      <span className="block text-[10px]">{formatDate(v.first_used)} – {formatDate(v.last_used)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {customerUsage.length > 0 && (
             <div className="elevated-card rounded-2xl p-5 space-y-3">
