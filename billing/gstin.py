@@ -137,7 +137,69 @@ def _fetch_cleartax(gstin: str) -> dict | None:
     return _map_gstn_payload(d)
 
 
-_PROVIDERS = {"gstincheck": _fetch_gstincheck, "cleartax": _fetch_cleartax}
+def _fetch_knowyourgst(gstin: str) -> dict | None:
+    """KnowYourGST: GET /developers/gstincall/ with a `passthrough` API key.
+
+    Flat-fee plan with unlimited calls (no per-lookup metering), which suits a
+    shop that occasionally onboards many parties at once. Unlike the other two
+    it does NOT use GSTN's field names — it returns hyphenated keys and a
+    structured address object — so it needs its own mapping.
+    """
+    key = getattr(settings, "KNOWYOURGST_API_KEY", "")
+    if not key:
+        return None
+    url = getattr(settings, "KNOWYOURGST_API_URL",
+                  "https://www.knowyourgst.com/developers/gstincall/")
+    try:
+        resp = requests.get(url, params={"gstin": gstin},
+                            headers={"passthrough": key}, timeout=8)
+        d = resp.json()
+    except Exception as e:
+        logger.warning("knowyourgst unreachable for %s: %s", gstin, e)
+        return None
+    if resp.status_code != 200 or not isinstance(d, dict):
+        logger.info("knowyourgst returned %s for %s", resp.status_code, gstin)
+        return None
+    if not (d.get("legal-name") or d.get("trade-name")):
+        logger.info("knowyourgst had no taxpayer for %s: %s", gstin, str(d)[:120])
+        return None
+
+    # Address arrives as an object whose exact keys vary by record; compose
+    # from whatever is present rather than assuming a fixed set.
+    addr = d.get("address") or {}
+    if isinstance(addr, dict):
+        ordered = ["bno", "building", "floor", "street", "location", "city",
+                   "district", "state", "pincode"]
+        seen, parts = set(), []
+        for k in ordered:
+            v = str(addr.get(k, "") or "").strip()
+            if v and v.lower() not in seen:
+                seen.add(v.lower())
+                parts.append(v)
+        for k, v in addr.items():           # anything unexpected, appended once
+            v = str(v or "").strip()
+            if k not in ordered and v and v.lower() not in seen:
+                seen.add(v.lower())
+                parts.append(v)
+        address = ", ".join(parts)
+    else:
+        address = str(addr or "")
+
+    return {
+        "legal_name": d.get("legal-name", "") or "",
+        "trade_name": d.get("trade-name", "") or "",
+        "status": d.get("status", "") or "",
+        "taxpayer_type": d.get("dealer-type", "") or d.get("entity-type", "") or "",
+        "registered_on": d.get("registration-date", "") or "",
+        "address": address,
+    }
+
+
+_PROVIDERS = {
+    "gstincheck": _fetch_gstincheck,
+    "cleartax": _fetch_cleartax,
+    "knowyourgst": _fetch_knowyourgst,
+}
 
 
 def _fetch_provider(gstin: str) -> dict | None:
@@ -170,15 +232,18 @@ def lookup(gstin: str) -> dict:
         return {**result, **fetched, "source": "provider"}
 
     provider = (getattr(settings, "GSTIN_PROVIDER", "gstincheck") or "gstincheck").lower()
-    configured = (
-        getattr(settings, "GSTIN_API_KEY", "") if provider == "gstincheck"
-        else getattr(settings, "CLEARTAX_AUTH_TOKEN", "")
-    )
+    configured = {
+        "gstincheck": getattr(settings, "GSTIN_API_KEY", ""),
+        "cleartax": getattr(settings, "CLEARTAX_AUTH_TOKEN", ""),
+        "knowyourgst": getattr(settings, "KNOWYOURGST_API_KEY", ""),
+    }.get(provider, "")
     if not configured:
         result["hint"] = (
             "State and PAN were derived from the number. For name and address "
             "autofill, set GSTIN_API_KEY (free key: gstincheck.co.in) — or, if "
             "the firm files through ClearTax, set GSTIN_PROVIDER=cleartax with "
-            "CLEARTAX_HOST, CLEARTAX_AUTH_TOKEN and CLEARTAX_ENTITY_ID."
+            "CLEARTAX_HOST, CLEARTAX_AUTH_TOKEN and CLEARTAX_ENTITY_ID; or "
+            "GSTIN_PROVIDER=knowyourgst with KNOWYOURGST_API_KEY for a flat-fee "
+            "unlimited plan."
         )
     return result

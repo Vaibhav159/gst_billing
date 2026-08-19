@@ -346,6 +346,11 @@ GSTIN_PROVIDER = os.getenv("GSTIN_PROVIDER", "gstincheck")
 CLEARTAX_HOST = os.getenv("CLEARTAX_HOST", "")
 CLEARTAX_AUTH_TOKEN = os.getenv("CLEARTAX_AUTH_TOKEN", "")
 CLEARTAX_ENTITY_ID = os.getenv("CLEARTAX_ENTITY_ID", "")
+# KnowYourGST: flat-fee plan with unlimited lookups (no per-call metering).
+KNOWYOURGST_API_KEY = os.getenv("KNOWYOURGST_API_KEY", "")
+KNOWYOURGST_API_URL = os.getenv(
+    "KNOWYOURGST_API_URL", "https://www.knowyourgst.com/developers/gstincall/"
+)
 GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
 # flash-lite default — ~3s/invoice vs ~15s for full Flash with no
 # measurable quality loss on printed invoices. Override per-environment
