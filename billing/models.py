@@ -23,6 +23,8 @@ from billing.constants import (
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_OUTWARD,
     STATE_CHOICES,
+    UNIT_CHOICES,
+    UNIT_GMS,
 )
 
 
@@ -674,6 +676,14 @@ class Product(AbstractBaseModel):
         default=GST_TAX_RATE,
         verbose_name="GST Tax Rate",
         help_text="GST Tax Rate of the product.",
+    )
+
+    default_unit = models.CharField(
+        max_length=20,
+        choices=UNIT_CHOICES,
+        default=UNIT_GMS,
+        verbose_name="Default Unit",
+        help_text="Unit a new invoice line starts with when this product is picked.",
     )
 
 
