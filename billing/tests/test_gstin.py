@@ -112,3 +112,36 @@ class GstinEndpointTest(BaseAPITestCase):
         from rest_framework.test import APIClient
         r = APIClient().get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
         self.assertEqual(r.status_code, 401)
+
+
+@override_settings(GSTIN_PROVIDER="cleartax", CLEARTAX_HOST="https://ct.example",
+                   CLEARTAX_AUTH_TOKEN="tok-1", CLEARTAX_ENTITY_ID="ent-1",
+                   GSTIN_API_KEY="")
+class ClearTaxProviderTest(BaseAPITestCase):
+    """ClearTax adapter: header auth, top-level GSTN-shaped payload."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    def test_cleartax_payload_maps_and_caches(self):
+        top_level = dict(GSTN_PAYLOAD["data"])  # ClearTax returns the object unwrapped
+        with patch("billing.gstin.requests.get") as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.json.return_value = top_level
+            r1 = self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+            r2 = self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+        self.assertEqual(r1.data["source"], "provider")
+        self.assertEqual(r1.data["legal_name"], "LODHA JEWELLERS")
+        self.assertIn("313001", r1.data["address"])
+        self.assertEqual(r2.data["source"], "cache")
+        self.assertEqual(mock_get.call_count, 1)
+        url = mock_get.call_args.args[0]
+        self.assertIn("/gst/api/v0.2/taxable_entities/ent-1/gstin_verification", url)
+        self.assertEqual(mock_get.call_args.kwargs["headers"]["X-Cleartax-Auth-Token"], "tok-1")
+
+    @override_settings(CLEARTAX_AUTH_TOKEN="")
+    def test_missing_cleartax_config_degrades_to_derived_with_hint(self):
+        r = self.client.get(reverse("gstin-lookup", args=["08AAGPL3375F1ZO"]))
+        self.assertEqual(r.data["source"], "checksum")
+        self.assertIn("cleartax", r.data["hint"].lower())

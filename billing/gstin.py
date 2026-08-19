@@ -75,25 +75,9 @@ def _compose_address(pradr: dict) -> str:
     return f"{line} - {pncd}" if line and pncd else line
 
 
-def _fetch_provider(gstin: str) -> dict | None:
-    """gstincheck.co.in: GET {base}/{key}/{gstin} → GSTN-standard payload.
-    Returns the mapped dict, or None when unavailable (no key, timeout, error).
-    """
-    key = getattr(settings, "GSTIN_API_KEY", "")
-    if not key:
-        return None
-    base = getattr(settings, "GSTIN_API_URL", "https://sheet.gstincheck.co.in/check")
-    try:
-        resp = requests.get(f"{base}/{key}/{gstin}", timeout=6)
-        payload = resp.json()
-    except Exception as e:
-        logger.warning("GSTIN provider unreachable for %s: %s", gstin, e)
-        return None
-    if not payload.get("flag") or not isinstance(payload.get("data"), dict):
-        logger.info("GSTIN provider returned no data for %s: %s",
-                    gstin, str(payload.get("message"))[:120])
-        return None
-    d = payload["data"]
+def _map_gstn_payload(d: dict) -> dict:
+    """GSTN-standard taxpayer fields → our response shape. Both providers
+    return the portal's own field names (lgnm / tradeNam / sts / pradr)."""
     return {
         "legal_name": d.get("lgnm", "") or "",
         "trade_name": d.get("tradeNam", "") or "",
@@ -102,6 +86,67 @@ def _fetch_provider(gstin: str) -> dict | None:
         "registered_on": d.get("rgdt", "") or "",
         "address": _compose_address(d.get("pradr")),
     }
+
+
+def _fetch_gstincheck(gstin: str) -> dict | None:
+    """gstincheck.co.in: GET {base}/{key}/{gstin} → {flag, message, data}."""
+    key = getattr(settings, "GSTIN_API_KEY", "")
+    if not key:
+        return None
+    base = getattr(settings, "GSTIN_API_URL", "https://sheet.gstincheck.co.in/check")
+    try:
+        payload = requests.get(f"{base}/{key}/{gstin}", timeout=6).json()
+    except Exception as e:
+        logger.warning("gstincheck unreachable for %s: %s", gstin, e)
+        return None
+    if not payload.get("flag") or not isinstance(payload.get("data"), dict):
+        logger.info("gstincheck returned no data for %s: %s",
+                    gstin, str(payload.get("message"))[:120])
+        return None
+    return _map_gstn_payload(payload["data"])
+
+
+def _fetch_cleartax(gstin: str) -> dict | None:
+    """ClearTax GST API (docs.cleartax.in): taxpayer profile by GSTIN.
+
+    GET {host}/gst/api/v0.2/taxable_entities/{entity_id}/gstin_verification
+        ?gstin=... with X-Cleartax-Auth-Token. Effectively unmetered within a
+    ClearTax subscription — the right provider when the firm/CA already files
+    through ClearTax. Response carries the GSTN field names at the top level.
+    """
+    host = getattr(settings, "CLEARTAX_HOST", "")
+    token = getattr(settings, "CLEARTAX_AUTH_TOKEN", "")
+    entity = getattr(settings, "CLEARTAX_ENTITY_ID", "")
+    if not (host and token and entity):
+        return None
+    url = f"{host.rstrip('/')}/gst/api/v0.2/taxable_entities/{entity}/gstin_verification"
+    try:
+        resp = requests.get(url, params={"gstin": gstin},
+                            headers={"X-Cleartax-Auth-Token": token}, timeout=8)
+        payload = resp.json()
+    except Exception as e:
+        logger.warning("cleartax unreachable for %s: %s", gstin, e)
+        return None
+    if resp.status_code != 200 or not isinstance(payload, dict):
+        logger.info("cleartax returned %s for %s", resp.status_code, gstin)
+        return None
+    # Some deployments wrap the taxpayer object; accept both shapes.
+    d = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not (d.get("lgnm") or d.get("tradeNam")):
+        return None
+    return _map_gstn_payload(d)
+
+
+_PROVIDERS = {"gstincheck": _fetch_gstincheck, "cleartax": _fetch_cleartax}
+
+
+def _fetch_provider(gstin: str) -> dict | None:
+    name = (getattr(settings, "GSTIN_PROVIDER", "gstincheck") or "gstincheck").lower()
+    fetch = _PROVIDERS.get(name)
+    if fetch is None:
+        logger.warning("Unknown GSTIN_PROVIDER %r — falling back to derived fields.", name)
+        return None
+    return fetch(gstin)
 
 
 def lookup(gstin: str) -> dict:
@@ -124,9 +169,16 @@ def lookup(gstin: str) -> dict:
         cache.set(_CACHE_PREFIX + g, fetched, _CACHE_TTL)
         return {**result, **fetched, "source": "provider"}
 
-    if not getattr(settings, "GSTIN_API_KEY", ""):
+    provider = (getattr(settings, "GSTIN_PROVIDER", "gstincheck") or "gstincheck").lower()
+    configured = (
+        getattr(settings, "GSTIN_API_KEY", "") if provider == "gstincheck"
+        else getattr(settings, "CLEARTAX_AUTH_TOKEN", "")
+    )
+    if not configured:
         result["hint"] = (
             "State and PAN were derived from the number. For name and address "
-            "autofill, add GSTIN_API_KEY to .env (free key: gstincheck.co.in)."
+            "autofill, set GSTIN_API_KEY (free key: gstincheck.co.in) — or, if "
+            "the firm files through ClearTax, set GSTIN_PROVIDER=cleartax with "
+            "CLEARTAX_HOST, CLEARTAX_AUTH_TOKEN and CLEARTAX_ENTITY_ID."
         )
     return result

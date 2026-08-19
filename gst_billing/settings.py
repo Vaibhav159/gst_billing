@@ -339,6 +339,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # a key adds legal/trade name, address and status. Free key: gstincheck.co.in
 GSTIN_API_KEY = os.getenv("GSTIN_API_KEY", "")
 GSTIN_API_URL = os.getenv("GSTIN_API_URL", "https://sheet.gstincheck.co.in/check")
+# Provider selection: "gstincheck" (default; free keyed lookups) or "cleartax"
+# (unmetered within a ClearTax subscription — use when the firm/CA already
+# files through ClearTax; token from the ClearTax account).
+GSTIN_PROVIDER = os.getenv("GSTIN_PROVIDER", "gstincheck")
+CLEARTAX_HOST = os.getenv("CLEARTAX_HOST", "")
+CLEARTAX_AUTH_TOKEN = os.getenv("CLEARTAX_AUTH_TOKEN", "")
+CLEARTAX_ENTITY_ID = os.getenv("CLEARTAX_ENTITY_ID", "")
 GEMINI_API_KEYS = os.getenv("GEMINI_API_KEYS", "")
 # flash-lite default — ~3s/invoice vs ~15s for full Flash with no
 # measurable quality loss on printed invoices. Override per-environment
