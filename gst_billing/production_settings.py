@@ -41,15 +41,12 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "billing",
-    "crispy_forms",
-    "django_htmx",
     "explorer",
     "simple_history",
     "rest_framework",
     # Stores rotated-out refresh tokens so they die on rotation.
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
-    "frontend",
     # Was missing while CACHEOPS below was fully configured, so none of the
     # query caching this file describes was actually running in production.
     "cacheops",
@@ -68,7 +65,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "django_htmx.middleware.HtmxMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
 ]
 
@@ -159,7 +155,6 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-CRISPY_TEMPLATE_PACK = "bootstrap4"
 
 # Explorer settings
 EXPLORER_CONNECTIONS = {"Default": "default"}
