@@ -673,6 +673,46 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         return Response(defaults)
 
+    @action(detail=True, methods=["get"])
+    def hsn_usage(self, request, pk=None):
+        """How this product's name actually appears on invoice lines, grouped
+        by HSN code — the drill-down behind Top Products' "+N more" flag.
+
+        Line items store product_name as text, so when the catalog HSN
+        changes (or an import carried its own code) the history drifts
+        silently. Each variant is named with its usage window so the drift
+        can be repaired: new lines follow the catalog automatically, old
+        lines are fixed by editing their invoices.
+        """
+        from django.db.models import Max, Min
+
+        product = self.get_object()
+        rows = (
+            LineItem.objects.filter(product_name=product.name)
+            .values("hsn_code")
+            .annotate(
+                lines=Count("id"),
+                quantity=Sum("quantity"),
+                amount=Sum("amount"),
+                first_used=Min("invoice__invoice_date"),
+                last_used=Max("invoice__invoice_date"),
+            )
+            .order_by("-lines")
+        )
+        catalog = (product.hsn_code or "").strip()
+        return Response(
+            {
+                "catalog_hsn": catalog,
+                "variants": [
+                    {
+                        **r,
+                        "matches_catalog": (r["hsn_code"] or "").strip() == catalog,
+                    }
+                    for r in rows
+                ],
+            }
+        )
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
