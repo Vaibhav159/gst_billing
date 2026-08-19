@@ -212,7 +212,15 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
-    "DEFAULT_THROTTLE_RATES": {"anon": "100/day", "user": "1000/day"},
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/day",
+        "user": "1000/day",
+        # Scoped rates for the unauthenticated token endpoints (billing.api.auth).
+        # 10 login attempts/min per IP stops naive brute force without ever
+        # touching a human; refresh is authenticated-adjacent and more frequent.
+        "login": "10/min",
+        "token_refresh": "60/min",
+    },
     "DEFAULT_RENDERER_CLASSES": (
         [
             "rest_framework.renderers.JSONRenderer",

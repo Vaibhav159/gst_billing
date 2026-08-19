@@ -1,11 +1,8 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-    TokenVerifyView,
-)
-from .serializers import CustomTokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenVerifyView
+
+from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 
 from .inward_bills import (
     InwardBillDetailView,
@@ -68,7 +65,7 @@ urlpatterns = [
     path("profile/", ProfileView.as_view(), name="profile"),
     path("users/", UserManagementView.as_view(), name="user-management"),
     # JWT Authentication endpoints
-    path("token/", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token_obtain_pair"),
-    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("token/", ThrottledTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", ThrottledTokenRefreshView.as_view(), name="token_refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
 ]
