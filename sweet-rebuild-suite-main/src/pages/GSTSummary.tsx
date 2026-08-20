@@ -220,7 +220,14 @@ export default function GSTSummary() {
     .sort((a: any, b: any) => Number(a.rate) - Number(b.rate));
   const hsnRows = gstData?.hsn_summary || [];
   const gstr3b = gstData?.gstr3b || { output_tax: { cgst: 0, sgst: 0, igst: 0, total: 0 }, input_tax_credit: { cgst: 0, sgst: 0, igst: 0, total: 0 }, net_payable: { cgst: 0, sgst: 0, igst: 0, total: 0 } };
-  const totalOutward = statsData?.totals?.outward || 0;
+  // Outward Supply must honour the month/range filter like every other card
+  // on this row. statsData is FY-scoped (it fed this card ₹24.3L on an empty
+  // February); the gst_summary payload is period-scoped and its outward
+  // slabs' `total` is gross sales+tax — exactly this card's number.
+  const periodScoped = useCustomRange || selectedMonth !== "All";
+  const totalOutward = periodScoped
+    ? (gstData?.rate_slabs?.outward || []).reduce((s: number, r: any) => s + Number(r.total || 0), 0)
+    : statsData?.totals?.outward || 0;
   const totalOutwardTax = gstr3b.output_tax.total;
   const totalITC = gstr3b.input_tax_credit.total;
   // Carry-forward (opening) ITC from previous FY, surfaced at top-level on
