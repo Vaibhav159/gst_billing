@@ -2479,7 +2479,10 @@ class ReportView(APIView):
                 ]
             )
 
-        # Grand Total (Outward + Inward combined)
+        # NET row (Outward − Inward). This used to ADD sales to purchases —
+        # a figure that means nothing and that the CA review flagged (D7).
+        # Outward − inward is the real position: sales margin on value, and
+        # output tax − ITC on the tax columns (the GSTR-3B shape).
         if invoice_type == "both" and (
             totals["outward_taxable"] or totals["inward_taxable"]
         ):
@@ -2487,16 +2490,16 @@ class ReportView(APIView):
             sheet.append(
                 [""] * 5
                 + [
-                    f"GRAND TOTAL ({date_range_str})",
+                    f"NET (OUTWARD − INWARD) ({date_range_str})",
                     "",
                     "",
                     "",
                     "",
-                    totals["outward_taxable"] + totals["inward_taxable"],
-                    totals["outward_cgst"] + totals["inward_cgst"],
-                    totals["outward_sgst"] + totals["inward_sgst"],
-                    totals["outward_igst"] + totals["inward_igst"],
-                    totals["outward_total"] + totals["inward_total"],
+                    totals["outward_taxable"] - totals["inward_taxable"],
+                    totals["outward_cgst"] - totals["inward_cgst"],
+                    totals["outward_sgst"] - totals["inward_sgst"],
+                    totals["outward_igst"] - totals["inward_igst"],
+                    totals["outward_total"] - totals["inward_total"],
                 ]
             )
 

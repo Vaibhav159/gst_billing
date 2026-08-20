@@ -125,3 +125,36 @@ class ReportViewTestCase(BaseAPITestCase):
         # Verify the invoice IDs are included
         self.assertTrue(any(item[15] == self.outward_invoice.id for item in line_items))
         self.assertTrue(any(item[15] == self.inward_invoice.id for item in line_items))
+
+
+    def test_both_report_net_row_subtracts_inward_from_outward(self):
+        """The combined row is NET (outward − inward) — it used to ADD sales
+        to purchases, which the CA review flagged as meaningless (D7)."""
+        import io
+
+        from openpyxl import load_workbook
+
+        today = datetime.now().date()
+        data = {
+            "start_date": (today - timedelta(days=7)).strftime("%Y-%m-%d"),
+            "end_date": (today + timedelta(days=1)).strftime("%Y-%m-%d"),
+            "invoice_type": "both",
+        }
+        response = self.client.post(reverse("generate-report"), data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        wb = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = wb["Test Business Report"]
+
+        net_rows = [
+            row for row in sheet.iter_rows(values_only=True)
+            if any(isinstance(c, str) and c.startswith("NET (OUTWARD") for c in row)
+        ]
+        self.assertEqual(len(net_rows), 1, "exactly one NET row expected")
+        row = net_rows[0]
+        # Fixture: outward 10×100, inward 5×100 → net taxable 500.
+        self.assertEqual(float(row[10]), 500.0)
+        # And no additive GRAND TOTAL row survives anywhere.
+        for r in sheet.iter_rows(values_only=True):
+            for c in r:
+                if isinstance(c, str):
+                    self.assertFalse(c.startswith("GRAND TOTAL"), f"additive row still present: {c}")
