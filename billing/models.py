@@ -446,8 +446,10 @@ class LineItem(AbstractBaseModel):
         max_length=255, verbose_name="HSN Code", help_text="HSN Code of the product."
     )
     gst_tax_rate = models.DecimalField(
-        max_digits=12,
-        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
+        max_digits=13,
+        # 4 places, not the money-wide 3: the diamond/stone rate is 0.25%
+        # (0.0025), which numeric(12,3) silently rounds to 0.003.
+        decimal_places=4,
         default=GST_TAX_RATE,
         verbose_name="GST Tax Rate",
         help_text="GST Tax Rate of the product.",
@@ -667,8 +669,9 @@ class Product(AbstractBaseModel):
     )
 
     gst_tax_rate = models.DecimalField(
-        max_digits=12,
-        decimal_places=BILLING_DECIMAL_PLACE_PRECISION,
+        max_digits=13,
+        # 4 places so 0.25% (0.0025) survives — see LineItem.gst_tax_rate.
+        decimal_places=4,
         validators=[
             MinValueValidator(Decimal("0.00")),
             MaxValueValidator(Decimal("1.00")),
@@ -676,6 +679,12 @@ class Product(AbstractBaseModel):
         default=GST_TAX_RATE,
         verbose_name="GST Tax Rate",
         help_text="GST Tax Rate of the product.",
+    )
+
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Free-text note shown on the product page.",
     )
 
     default_unit = models.CharField(
