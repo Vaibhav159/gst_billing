@@ -75,6 +75,8 @@ export interface InwardFilters {
 export function useInwardBills(filters: InwardFilters = {}) {
   const [items, setItems] = useState<InwardBillRow[]>([]);
   const [count, setCount] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrevious, setHasPrevious] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const key = JSON.stringify(filters);
@@ -92,6 +94,10 @@ export function useInwardBills(filters: InwardFilters = {}) {
       const res = await api.get("inward-bills/", { params });
       setItems(res.data.results ?? []);
       setCount(res.data.count ?? 0);
+      // DRF's envelope knows the truth about page bounds — no client-side
+      // page-size math that can drift from the server's setting.
+      setHasNext(Boolean(res.data.next));
+      setHasPrevious(Boolean(res.data.previous));
     } catch (e: any) {
       setError(e?.response?.data?.error || "Failed to load inward bills.");
     } finally {
@@ -104,7 +110,7 @@ export function useInwardBills(filters: InwardFilters = {}) {
     refetch();
   }, [refetch]);
 
-  return { items, count, loading, error, refetch };
+  return { items, count, hasNext, hasPrevious, loading, error, refetch };
 }
 
 export function useInwardBill(id?: string) {

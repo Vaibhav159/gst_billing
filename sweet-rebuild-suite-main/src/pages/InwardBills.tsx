@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Plus, Search, FileText, Paperclip, Loader2, ReceiptText } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { ChevronLeft, ChevronRight, Plus, Search, FileText, Paperclip, Loader2, ReceiptText } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,18 +21,57 @@ export default function InwardBills() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { items: businesses } = useBusinesses();
+  // The global FY selector (top bar) scopes every register; this page used to
+  // ignore it — "FY 2025-26" up top while July 2026 bills filled the list.
+  const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const [business, setBusiness] = useState("all");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
   const debouncedSearch = useDebouncedValue(search, 400);
 
-  const { items, count, loading, error } = useInwardBills({
+  // FY "2025-26" → Apr 1 2025 … Mar 31 2026. The manual date inputs override
+  // their respective FY bound when set (narrowing inside or outside the FY).
+  const fyRange = useMemo(() => {
+    const m = /^(\d{4})-\d{2}$/.exec(selectedFY || "");
+    if (!m) return null;
+    const start = parseInt(m[1], 10);
+    return { from: `${start}-04-01`, to: `${start + 1}-03-31` };
+  }, [selectedFY]);
+  const effectiveFrom = dateFrom || fyRange?.from || "";
+  const effectiveTo = dateTo || fyRange?.to || "";
+
+  // Any filter change restarts from page 1 — page 7 of a different query is
+  // meaningless and DRF would 404 past the last page.
+  useEffect(() => {
+    setPage(1);
+  }, [business, debouncedSearch, effectiveFrom, effectiveTo]);
+
+  const { items, count, hasNext, hasPrevious, loading, error } = useInwardBills({
     business,
     q: debouncedSearch,
-    date_from: dateFrom,
-    date_to: dateTo,
+    date_from: effectiveFrom,
+    date_to: effectiveTo,
+    page,
   });
+  const totalPages = Math.max(1, Math.ceil(count / 15));
+
+  const pager = count > 0 && (hasNext || hasPrevious || totalPages > 1) ? (
+    <div className="flex items-center justify-between gap-3 pt-1">
+      <Button variant="outline" size="sm" disabled={!hasPrevious || loading}
+        onClick={() => setPage((p) => Math.max(1, p - 1))}>
+        <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+      </Button>
+      <span className="text-xs text-muted-foreground tabular-nums">
+        Page {page} of {totalPages} · {count} bills
+      </span>
+      <Button variant="outline" size="sm" disabled={!hasNext || loading}
+        onClick={() => setPage((p) => p + 1)}>
+        Next <ChevronRight className="h-4 w-4 ml-1" />
+      </Button>
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-5">
@@ -44,7 +83,8 @@ export default function InwardBills() {
             <ReceiptText className="h-5 w-5 text-primary" /> Inward Bills
           </h1>
           <p className="text-sm text-muted-foreground">
-            {count} purchase {count === 1 ? "bill" : "bills"} on record
+            {count} purchase {count === 1 ? "bill" : "bills"}
+            {fyRange && !dateFrom && !dateTo ? ` in FY ${selectedFY}` : " on record"}
           </p>
         </div>
         <Button onClick={() => navigate("/billing/inward-bills/add")}>
@@ -124,8 +164,10 @@ export default function InwardBills() {
               );
             })
           )}
+          {pager}
         </div>
       ) : (
+      <>
       <div className="rounded-lg border bg-card overflow-x-auto">
         <Table>
           <TableHeader>
@@ -194,6 +236,8 @@ export default function InwardBills() {
           </TableBody>
         </Table>
       </div>
+      {pager}
+      </>
       )}
     </div>
   );
