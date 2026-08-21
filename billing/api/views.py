@@ -215,6 +215,15 @@ class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
     permission_classes = [RoleBasedPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        # Registry completes whatever the form left blank (address/state/PAN)
+        # — the frontend autofills too, but this covers raw API creates and
+        # anything the user skipped. Empty fields only; quiet on failure.
+        from billing.gstin import enrich_customer
+
+        enrich_customer(serializer.instance)
+
     def get_entity_name(self, instance):
         return instance.name
     search_fields = ["name", "gst_number", "mobile_number"]
@@ -2908,6 +2917,9 @@ class BulkInvoiceImportView(APIView):
                             pan_number=clean_pan, state_name="RAJASTHAN",
                             workspace_id=1,
                         )
+                        from billing.gstin import enrich_customer
+
+                        enrich_customer(customer)
                         # Update ALL lookup caches so a later row referencing the
                         # same GST/PAN under a different name resolves to this
                         # customer instead of creating a duplicate.
@@ -3587,6 +3599,10 @@ class AIInvoiceCreateView(APIView):
                     mobile_number=(invoice_data.get("customer_mobile_number") or "").strip(),
                     state_name=extracted_state[:255] if extracted_state else "",
                 )
+                # OCR fills first; the registry completes what it missed.
+                from billing.gstin import enrich_customer
+
+                enrich_customer(customer)
 
             # Backfill empty customer fields — never overwrite curated
             # data because OCR can misread a GSTIN/PAN by a digit.
