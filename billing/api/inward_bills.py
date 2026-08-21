@@ -223,6 +223,11 @@ class InwardBillListCreateView(APIView):
                 mobile_number=(data.get("supplier_mobile") or "") or None,
                 state_name=(data.get("supplier_state") or "") or None,
             )
+            # Registry fills whatever the bill didn't carry (address, state,
+            # PAN) — empty fields only, quiet on failure.
+            from billing.gstin import enrich_customer
+
+            enrich_customer(supplier)
         if not supplier.businesses.filter(id=business.id).exists():
             supplier.businesses.add(business)
         return supplier

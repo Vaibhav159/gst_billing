@@ -433,6 +433,10 @@ def _find_or_create_supplier(row: GSTR2ARow, dry_run: bool) -> tuple[Customer | 
         gst_number=row.supplier_gstin,
         state_name=row.supplier_state[:255] if row.supplier_state else "",
     )
+    # 2A rows carry no address; the registry does. Empty fields only.
+    from billing.gstin import enrich_customer
+
+    enrich_customer(cust)
     return cust, True
 
 
