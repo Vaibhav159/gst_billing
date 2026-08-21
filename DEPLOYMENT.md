@@ -499,3 +499,47 @@ a manual `manage.py migrate billing <previous>` first.)
 The Release workflow also has a **Run workflow** button (`workflow_dispatch`)
 — it builds whatever ref you point it at and tags the images
 `:latest` + `:<ref-name>`, for the rare "rebuild without a new tag" case.
+
+## Backups
+
+A `backup` sidecar (postgres:16-alpine, **not** watchtower-labeled) runs
+`deploy/backup/backup.sh`: on start and every 24h it takes
+
+- `pg_dump --format=custom` of the app database (`db-<stamp>.dump`), verified
+  with `pg_restore --list`, and
+- a tar of the media volume (`media-<stamp>.tar.gz`)
+
+into `./backups` on the host, deleting files older than 30 days. First run:
+
+```bash
+mkdir -p backups && docker compose up -d backup && docker compose logs -f backup
+```
+
+**Off-site copy**: `./backups` lives on the same disk as everything else.
+Sync it somewhere else (cron + rclone/rsync, or your provider's snapshot
+feature) — a backup on the failed disk is not a backup.
+
+### Restore drill (do this once now, not during an outage)
+
+```bash
+docker compose exec backup sh
+pg_restore --list /backups/db-<stamp>.dump | head    # archive is readable
+createdb  -h "$DB_HOST" -U "$DB_USER" restore_drill
+pg_restore -h "$DB_HOST" -U "$DB_USER" -d restore_drill --no-owner /backups/db-<stamp>.dump
+psql -h "$DB_HOST" -U "$DB_USER" -d restore_drill -c 'SELECT COUNT(*) FROM billing_invoice;'
+dropdb    -h "$DB_HOST" -U "$DB_USER" restore_drill
+```
+
+Media check: `tar -tzf /backups/media-<stamp>.tar.gz | head`.
+
+## Health checks and alerts
+
+`GET /healthz` (no auth) answers `200 {"ok": true, "db": true}` when Django
+can reach the database, `503` otherwise. Point a free uptime monitor
+(UptimeRobot, Better Stack, …) at `https://<your-domain>/healthz` and you'll
+hear about outages before anyone else does.
+
+Deploy notifications: set `WATCHTOWER_NOTIFICATION_URL` in `.env` using any
+[shoutrrr](https://containrrr.dev/shoutrrr/) URL — e.g.
+`telegram://<bot-token>@telegram?chats=<chat-id>` — and Watchtower announces
+every image update (and failed pull). Leave it unset for silence.
