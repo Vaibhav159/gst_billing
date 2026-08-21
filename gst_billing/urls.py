@@ -30,6 +30,24 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
+# Liveness for uptime monitors and Watchtower sanity: 200 when the DB
+# answers, 503 when it doesn't. Registered before the SPA fallback so the
+# catch-all never swallows it. No auth — it leaks nothing but "up".
+def healthz(request):
+    from django.db import connection
+    from django.http import JsonResponse
+
+    try:
+        with connection.cursor() as c:
+            c.execute("SELECT 1")
+        return JsonResponse({"ok": True, "db": True})
+    except Exception:
+        return JsonResponse({"ok": False, "db": False}, status=503)
+
+
+urlpatterns += [path("healthz", healthz)]
+
+
 # SPA fallback — nginx serves the real app in production; this answers direct
 # Django hits (dev runserver, probes) now that the V1 webpack shell is deleted.
 # The negative lookahead keeps unknown /api/ paths as JSON 404s, not HTML 200s.

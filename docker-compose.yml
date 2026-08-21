@@ -66,4 +66,26 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    # Set WATCHTOWER_NOTIFICATION_URL in .env (shoutrrr format, e.g.
+    # telegram://<bot-token>@telegram?chats=<chat-id>) and every deploy —
+    # or failed pull — announces itself. Empty means no notifications.
+    environment:
+      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
     command: --label-enable --cleanup --interval 60
+
+  # Nightly backups: pg_dump of the (external) Postgres + a tar of the media
+  # volume, kept 30 days under ./backups on the host. Deliberately NOT
+  # watchtower-labeled — a backup container should never restart mid-dump.
+  # Restore drill: see DEPLOYMENT.md "Backups".
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      - PGSSLMODE=require
+    volumes:
+      - gst_media_volume:/media:ro
+      - ./backups:/backups
+      - ./deploy/backup:/opt/backup:ro
+    entrypoint: ["sh", "/opt/backup/backup.sh"]

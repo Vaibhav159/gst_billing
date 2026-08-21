@@ -14,6 +14,18 @@ on:
     branches: [main]
 
 jobs:
+  nginx-config:
+    # A broken conf would brick the nginx container on Watchtower's next
+    # auto-deploy — validate it the way nginx itself will read it.
+    name: nginx config validates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: nginx -t against the shipped conf.d
+        run: |
+          docker run --rm -v "$PWD/nginx/conf.d":/etc/nginx/conf.d:ro nginx:alpine \
+            sh -c "mkdir -p /var/www/static /var/www/media /usr/share/nginx/html && nginx -t"
+
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-24.04
