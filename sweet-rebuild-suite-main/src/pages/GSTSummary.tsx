@@ -307,6 +307,39 @@ export default function GSTSummary() {
     toast({ title: "Downloaded", description: `${section.toUpperCase()} JSON exported` });
   };
 
+  // Portal JSON files one (business, month) — exactly what the GSTN offline
+  // tool imports. Anything looser (All months, custom range, All businesses)
+  // can't produce a valid return period, so the button gates on both.
+  const portalReady = bizFilter !== "all" && selectedMonth !== "All" && !useCustomRange;
+  const [portalBusy, setPortalBusy] = useState(false);
+  const handleDownloadPortalJSON = async () => {
+    if (!portalReady || portalBusy) return;
+    const y = monthIdx < 9 ? fyStart : fyStart + 1;
+    const m = monthIdx < 9 ? monthIdx + 4 : monthIdx - 8;
+    setPortalBusy(true);
+    try {
+      const res = await api.get<any>(`invoices/gstr1-portal-json/?business_id=${bizFilter}&month=${m}&year=${y}`);
+      const { file, meta } = res.data;
+      const blob = new Blob([JSON.stringify(file)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `GSTR1_${meta.gstin}_${meta.fp}.json`; a.click();
+      URL.revokeObjectURL(url);
+      const c = meta.invoice_counts;
+      const issues = (meta.skipped?.length || 0) + (meta.warnings?.length || 0);
+      toast({
+        title: "Portal JSON ready",
+        description: `${c.b2b} B2B, ${c.b2cl} B2CL, ${c.b2cs} B2C invoices — upload on the portal via Returns → GSTR-1 → Prepare Offline${issues ? `. ${issues} item(s) need attention — check the data-quality banner.` : ""}`,
+      });
+      if (meta.skipped?.length) logger.warn("GSTR-1 portal export skipped invoices", meta.skipped);
+      if (meta.warnings?.length) logger.warn("GSTR-1 portal export warnings", meta.warnings);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e?.response?.data?.error || "Could not build the portal file", variant: "destructive" });
+    } finally {
+      setPortalBusy(false);
+    }
+  };
+
   const TABS: { key: TabKey; label: string }[] = [
     { key: "summary", label: "Summary" },
     { key: "gstr1", label: "GSTR-1 (Outward)" },
@@ -827,7 +860,17 @@ export default function GSTSummary() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[14px] font-semibold">GSTR-1 — Outward Supplies</h3>
-                  <button onClick={() => handleDownloadJSON("gstr1")} className="premium-btn-primary text-[12px] h-9"><FileJson className="w-3.5 h-3.5" /> Download JSON</button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleDownloadPortalJSON}
+                      disabled={!portalReady || portalBusy}
+                      title={portalReady ? "GSTN offline-tool import file for the selected business and month" : "Select one business and one month (not All / custom range) to build a portal file"}
+                      className="premium-btn-ghost text-[12px] h-9 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {portalBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileJson className="w-3.5 h-3.5" />} Portal JSON
+                    </button>
+                    <button onClick={() => handleDownloadJSON("gstr1")} className="premium-btn-primary text-[12px] h-9"><FileJson className="w-3.5 h-3.5" /> Download JSON</button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2B — Registered Dealers ({pluralize(exGstr1.b2b?.length || 0, "party", "parties")})</h4>

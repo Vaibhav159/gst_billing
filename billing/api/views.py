@@ -2058,6 +2058,219 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "gstr2b": {"inward_invoices": inward_list},
         })
 
+    @action(detail=False, methods=["get"], url_path="gstr1-portal-json")
+    def gstr1_portal_json(self, request):
+        """GSTR-1 as the GST portal offline tool's import JSON.
+
+        One business, one month — that's the granularity the portal files at,
+        so unlike gstr_export this endpoint refuses to run without both.
+        Returns {"file": <upload as-is>, "meta": {counts, skipped, warnings}}:
+        only `file` goes to the portal; extra keys inside it break the import,
+        which is why the diagnostics live outside it.
+
+        Differences from the gstr_export shape that the portal cares about:
+        - gstin/fp header present, values quantized to exactly 2 decimals
+          (float artifacts like 0.30000000000000004 fail schema validation)
+        - b2cs carries the mandatory sply_ty, and inter-state B2C sales at or
+          under the B2CL threshold are filed here as INTER rows — previously
+          they fell through both sections and were silently missing
+        - b2cl groups invoices under one entry per place of supply
+        - per-invoice items are aggregated per rate slab with serial nums
+        - HSN summary (table 12, mandatory since 2021) is included
+        """
+        try:
+            business = Business.objects.get(id=int(request.query_params.get("business_id") or 0))
+        except (ValueError, Business.DoesNotExist):
+            return Response({"error": "A valid business_id is required."}, status=400)
+        try:
+            month = int(request.query_params.get("month") or 0)
+            year = int(request.query_params.get("year") or 0)
+            assert 1 <= month <= 12 and 2017 <= year <= 2099
+        except (ValueError, AssertionError):
+            return Response({"error": "month (1-12) and year are required."}, status=400)
+
+        gstin = (business.gst_number or "").strip().upper()
+        if len(gstin) != 15:
+            return Response(
+                {"error": f"Business '{business.name}' has no 15-character GSTIN — "
+                          "set it before generating a portal file."},
+                status=400,
+            )
+
+        TWO = Decimal("0.01")
+
+        def r2(x):
+            return float(Decimal(x or 0).quantize(TWO))
+
+        def rate_pct(li):
+            r = li.gst_tax_rate or Decimal(0)
+            return float(r * 100 if r <= 1 else r)
+
+        UQC = {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
+               "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM"}
+
+        invoices = (
+            Invoice.objects.filter(
+                business=business, type_of_invoice="outward",
+                invoice_date__year=year, invoice_date__month=month,
+            )
+            .select_related("customer")
+            .prefetch_related("lineitem_set")
+            .order_by("invoice_date", "id")
+        )
+
+        skipped, warnings = [], []
+        b2b_data, b2cl_data, b2cs_agg, hsn_agg = {}, {}, {}, {}
+        biz_pos = state_code(business)
+        counts = {"b2b": 0, "b2cl": 0, "b2cs": 0}
+
+        def slabs(items):
+            """Aggregate an invoice's lines into per-rate slabs (portal itms)."""
+            agg = {}
+            for li in items:
+                rt = rate_pct(li)
+                s = agg.setdefault(rt, {"txval": Decimal(0), "camt": Decimal(0),
+                                        "samt": Decimal(0), "iamt": Decimal(0)})
+                s["txval"] += (li.quantity or 0) * (li.rate or 0)
+                s["camt"] += li.cgst or 0
+                s["samt"] += li.sgst or 0
+                s["iamt"] += li.igst or 0
+            return agg
+
+        for inv in invoices:
+            items = list(inv.lineitem_set.all())
+            label = f"{inv.invoice_number or '(no number)'} / {inv.invoice_date}"
+            if not inv.invoice_number or not inv.invoice_date:
+                skipped.append(f"{label}: missing invoice number or date")
+                continue
+            if not items:
+                skipped.append(f"{label}: no line items")
+                continue
+
+            agg = slabs(items)
+            idt = inv.invoice_date.strftime("%d-%m-%Y")
+            val = r2(inv.total_amount)
+            cust_gstin = (inv.customer.gst_number or "").strip().upper()
+
+            if len(cust_gstin) == 15:
+                itms = [
+                    {"num": i + 1, "itm_det": {
+                        "txval": r2(s["txval"]), "rt": rt,
+                        "camt": r2(s["camt"]), "samt": r2(s["samt"]),
+                        "iamt": r2(s["iamt"]), "csamt": 0,
+                    }}
+                    for i, (rt, s) in enumerate(sorted(agg.items()))
+                ]
+                b2b_data.setdefault(cust_gstin, {"ctin": cust_gstin, "inv": []})["inv"].append({
+                    "inum": inv.invoice_number, "idt": idt, "val": val,
+                    "pos": cust_gstin[:2], "rchrg": "N", "inv_typ": "R", "itms": itms,
+                })
+                counts["b2b"] += 1
+                continue
+
+            inter = is_interstate(business, inv.customer)
+            cust_pos = state_code(inv.customer)
+
+            if inter and not cust_pos:
+                warnings.append(f"{label}: inter-state but customer state unknown — filed as intra-state")
+                inter = False
+
+            if inter and float(inv.total_amount) > B2CL_THRESHOLD:
+                itms = [
+                    {"num": i + 1, "itm_det": {
+                        "txval": r2(s["txval"]), "rt": rt,
+                        "iamt": r2(s["iamt"]), "csamt": 0,
+                    }}
+                    for i, (rt, s) in enumerate(sorted(agg.items()))
+                ]
+                b2cl_data.setdefault(cust_pos, {"pos": cust_pos, "inv": []})["inv"].append({
+                    "inum": inv.invoice_number, "idt": idt, "val": val, "itms": itms,
+                })
+                counts["b2cl"] += 1
+                continue
+
+            # Consolidated B2C: intra-state at any value, inter-state <= threshold.
+            pos = cust_pos if inter else (biz_pos or gstin[:2])
+            sply = "INTER" if inter else "INTRA"
+            for rt, s in agg.items():
+                b = b2cs_agg.setdefault((sply, pos, rt), {
+                    "sply_ty": sply, "pos": pos, "typ": "OE", "rt": rt,
+                    "txval": Decimal(0), "camt": Decimal(0),
+                    "samt": Decimal(0), "iamt": Decimal(0),
+                })
+                b["txval"] += s["txval"]
+                b["camt"] += s["camt"]
+                b["samt"] += s["samt"]
+                b["iamt"] += s["iamt"]
+                if sply == "INTRA" and s["iamt"]:
+                    warnings.append(f"{label}: intra-state supply carries IGST — run fix_tax_heads")
+                if sply == "INTER" and (s["camt"] or s["samt"]):
+                    warnings.append(f"{label}: inter-state supply carries CGST/SGST — run fix_tax_heads")
+            counts["b2cs"] += 1
+
+        # HSN summary (table 12) over everything that made it into the file.
+        for inv in invoices:
+            if not inv.invoice_number or not inv.invoice_date:
+                continue
+            for li in inv.lineitem_set.all():
+                hsn = (li.hsn_code or "").strip()
+                uqc = UQC.get((li.unit or "").strip().lower(), "OTH")
+                rt = rate_pct(li)
+                h = hsn_agg.setdefault((hsn, uqc, rt), {
+                    "hsn_sc": hsn, "desc": (li.product_name or "")[:30], "uqc": uqc,
+                    "rt": rt, "qty": Decimal(0), "txval": Decimal(0),
+                    "camt": Decimal(0), "samt": Decimal(0), "iamt": Decimal(0),
+                })
+                h["qty"] += li.quantity or 0
+                h["txval"] += (li.quantity or 0) * (li.rate or 0)
+                h["camt"] += li.cgst or 0
+                h["samt"] += li.sgst or 0
+                h["iamt"] += li.igst or 0
+                if not hsn:
+                    warnings.append(f"{inv.invoice_number}: line '{li.product_name}' has no HSN")
+
+        fp = f"{month:02d}{year}"
+        file_obj = {"gstin": gstin, "fp": fp, "version": "GST3.2.1", "hash": "hash"}
+        if b2b_data:
+            file_obj["b2b"] = list(b2b_data.values())
+        if b2cl_data:
+            file_obj["b2cl"] = list(b2cl_data.values())
+        if b2cs_agg:
+            file_obj["b2cs"] = [
+                {"sply_ty": b["sply_ty"], "pos": b["pos"], "typ": b["typ"], "rt": b["rt"],
+                 "txval": r2(b["txval"]),
+                 **({"iamt": r2(b["iamt"])} if b["sply_ty"] == "INTER"
+                    else {"camt": r2(b["camt"]), "samt": r2(b["samt"])}),
+                 "csamt": 0}
+                for b in b2cs_agg.values()
+            ]
+        if hsn_agg:
+            file_obj["hsn"] = {"data": [
+                {"num": i + 1, "hsn_sc": h["hsn_sc"], "desc": h["desc"], "uqc": h["uqc"],
+                 "qty": r2(h["qty"]), "rt": h["rt"], "txval": r2(h["txval"]),
+                 "camt": r2(h["camt"]), "samt": r2(h["samt"]),
+                 "iamt": r2(h["iamt"]), "csamt": 0}
+                for i, h in enumerate(hsn_agg.values())
+            ]}
+
+        total_txval = sum(
+            r2(b["txval"]) for b in b2cs_agg.values()
+        ) + sum(
+            i["itm_det"]["txval"] for g in b2b_data.values() for v in g["inv"] for i in v["itms"]
+        ) + sum(
+            i["itm_det"]["txval"] for g in b2cl_data.values() for v in g["inv"] for i in v["itms"]
+        )
+
+        return Response({
+            "file": file_obj,
+            "meta": {
+                "business": business.name, "gstin": gstin, "fp": fp,
+                "invoice_counts": counts,
+                "taxable_total": round(total_txval, 2),
+                "skipped": skipped, "warnings": warnings,
+            },
+        })
+
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
         """Get the next invoice number for a business.
