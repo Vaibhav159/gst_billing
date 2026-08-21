@@ -135,6 +135,10 @@ STATICFILES_DIRS = [
 # bare local run) change nothing. Until this, a production exception was
 # invisible unless someone happened to tail the container logs — the E-way
 # button crashed for four months without anyone knowing.
+# Signed media URLs hand the actual file streaming to nginx via
+# X-Accel-Redirect (see billing/api/media.py + nginx protected-media block).
+MEDIA_ACCEL_REDIRECT = True
+
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
 if SENTRY_DSN:
     import sentry_sdk

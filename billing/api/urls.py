@@ -26,6 +26,7 @@ from .views import (
     ReportView,
     UserManagementView,
 )
+from .media import SignedMediaView
 from .preferences import PreferencesView
 
 router = DefaultRouter()
@@ -69,6 +70,7 @@ urlpatterns = [
     path("profile/", ProfileView.as_view(), name="profile"),
     path("users/", UserManagementView.as_view(), name="user-management"),
     path("preferences/", PreferencesView.as_view(), name="preferences"),
+    path("media/<path:subpath>", SignedMediaView.as_view(), name="signed-media"),
     # JWT Authentication endpoints
     path("token/", ThrottledTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", ThrottledTokenRefreshView.as_view(), name="token_refresh"),

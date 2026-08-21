@@ -203,7 +203,10 @@ class InwardBillListSerializer(serializers.ModelSerializer):
         return url
 
     def get_source_preview_url(self, obj):
-        return self._abs(obj.source_preview.url) if obj.source_preview else None
+        # Signed, expiring URL — /media/ is no longer publicly served.
+        from billing.api.media import sign_media_path
+
+        return sign_media_path(obj.source_preview.name) if obj.source_preview else None
 
 
 class InwardBillSerializer(InwardBillListSerializer):
@@ -219,7 +222,9 @@ class InwardBillSerializer(InwardBillListSerializer):
         ]
 
     def get_source_file_url(self, obj):
-        return self._abs(obj.source_file.url) if obj.source_file else None
+        from billing.api.media import sign_media_path
+
+        return sign_media_path(obj.source_file.name) if obj.source_file else None
 
 
 class InvoiceSummarySerializer(serializers.Serializer):
