@@ -538,7 +538,7 @@ export default function ImportReview() {
 
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
-            <thead className="bg-secondary/50 sticky top-0 z-10">
+            <thead className="bg-card border-b border-border/60 sticky top-0 z-10">
               <tr>
                 <th className="px-3 py-2.5 text-left w-8">
                   <input type="checkbox" checked={selectedInvoices.size === (readyCount + missingCustCount) && (readyCount + missingCustCount) > 0} onChange={toggleAll} className="rounded" />

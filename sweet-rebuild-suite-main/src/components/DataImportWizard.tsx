@@ -284,7 +284,7 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
             {/* Preview table */}
             <div className="overflow-x-auto max-h-[250px] rounded-xl border border-border/30">
               <table className="w-full text-[11px]">
-                <thead className="bg-secondary/30 sticky top-0">
+                <thead className="bg-card border-b border-border/60 sticky top-0">
                   <tr>{csvHeaders.map((h) => <th key={h} className="px-3 py-2 text-left font-semibold text-foreground whitespace-nowrap">{h}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y divide-border/20">
