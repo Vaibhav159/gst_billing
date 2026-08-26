@@ -148,6 +148,7 @@ export interface Invoice extends TallyInvoiceMeta {
   totalTax: number;
   total: number;
   roundedOff?: number;
+  paymentMode?: string; // "bank" | "cash" | "credit" | "mixed" | "" (not recorded)
   jurisdictionCity?: string;
   financialYear: string;
   createdAt: string;

@@ -275,6 +275,14 @@ class Invoice(AbstractBaseModel):
     vehicle_type = models.CharField(max_length=10, blank=True, default="Regular", choices=[("Regular", "Regular"), ("ODC", "Over Dimensional Cargo")])
     transport_mode = models.CharField(max_length=10, blank=True, default="Road", choices=[("Road", "Road"), ("Rail", "Rail"), ("Air", "Air"), ("Ship", "Ship")])
     distance_km = models.IntegerField(blank=True, null=True, verbose_name="Distance (KM)")
+    payment_mode = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        choices=[("bank", "Bank"), ("cash", "Cash"), ("credit", "Credit"), ("mixed", "Mixed")],
+        verbose_name="Payment Mode",
+        help_text='How the invoice was settled; blank = not recorded.',
+    )
 
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an

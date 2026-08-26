@@ -111,6 +111,7 @@ const REQUIRED_HEADERS = [
 // Optional column the user can fill if they want to lock in a final total
 // (otherwise the parser auto-computes Taxable / CGST / SGST / Total).
 const OPTIONAL_HEADER = "Total Invoice Value (₹) (optional)";
+const OPTIONAL_HEADER_2 = "Payment (Bank/Cash/Credit) (optional)";
 
 const COL_W = [
   { wch: 6 },  // S.No.
@@ -122,6 +123,7 @@ const COL_W = [
   { wch: 12 }, // Qty (gm)
   { wch: 14 }, // Rate (₹/gm)
   { wch: 24 }, // Total Invoice Value (optional)
+  { wch: 24 }, // Payment (optional)
 ];
 const TC = COL_W.length;
 
@@ -175,6 +177,7 @@ function buildFirmSheet(opts: {
   // Row 6: column headers (required + 1 optional)
   REQUIRED_HEADERS.forEach((h, c) => sc(ws, r, c, h, hdrS()));
   sc(ws, r, REQUIRED_HEADERS.length, OPTIONAL_HEADER, optHdrS());
+  sc(ws, r, REQUIRED_HEADERS.length + 1, OPTIONAL_HEADER_2, optHdrS());
   r++;
 
   const headerRowIdx = r - 1; // for data validation reference
@@ -332,6 +335,7 @@ function buildInstructionsSheet(opts: { businessCount: number; productCount: num
   r++;
   NOTE("If a Commodity isn't in your Product list, the row will fail at import — add the product first via Products → Add Product."); r++;
   NOTE("If a row doesn't have either (Qty + Rate) or a Total Invoice Value, the import skips it.");
+  NOTE("Payment column is optional: Bank / Cash / Credit / Mixed (aliases like UPI, NEFT, cheque count as Bank). Anything else imports as 'not recorded'.");
 
   ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r + 1, c: 3 } });
   ws["!merges"] = merges;

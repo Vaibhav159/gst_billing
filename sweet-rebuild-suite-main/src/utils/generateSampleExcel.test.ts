@@ -83,7 +83,7 @@ describe("generateSampleExcel — smart import template", () => {
     expect(wb.SheetNames.length).toBeGreaterThan(1); // at least one fallback firm sheet
   });
 
-  it("template has 8 column headers (7 required + 1 optional Total)", async () => {
+  it("template has 9 column headers (7 required + optional Total and Payment)", async () => {
     const wb = buildWorkbook({
       businesses: [{ name: "F1", gst_number: "08X" }],
       products: [{ name: "GOLD" }],
@@ -100,7 +100,8 @@ describe("generateSampleExcel — smart import template", () => {
     expect(getCellText(ws, "G6")).toBe("Qty (gm)");
     expect(getCellText(ws, "H6")).toBe("Rate (₹/gm)");
     expect(getCellText(ws, "I6")).toContain("Total Invoice Value");
+    expect(getCellText(ws, "J6")).toContain("Payment");
     // Should NOT have a "GST Rate" or "HSN Code" column in the smart template
-    expect(getCellText(ws, "J6")).toBe("");
+    expect(getCellText(ws, "K6")).toBe("");
   });
 });

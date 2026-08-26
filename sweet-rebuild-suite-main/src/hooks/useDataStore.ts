@@ -270,6 +270,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     totalTax,
     total: roundedTotal,
     roundedOff: roundedOff !== 0 ? roundedOff : undefined,
+    paymentMode: inv.payment_mode || "",
     financialYear: getFinancialYear(inv.invoice_date),
     createdAt: inv.created_at || "",
     updatedAt: inv.updated_at || "",
@@ -301,6 +302,7 @@ export interface InvoiceFilters {
   businessId?: string;
   customerId?: string;
   typeFilter?: string;  // "all" | "OUTWARD" | "INWARD"
+  paymentFilter?: string; // "all" | "bank" | "cash" | "credit" | "mixed" | "none"
   fyFilter?: string;    // "all" | "2024-25" etc.
   monthFilter?: string; // "all" | "1"-"12"
   startDate?: string;   // "YYYY-MM-DD" explicit date range override
@@ -367,6 +369,9 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       if (f.typeFilter && f.typeFilter !== "all") {
         params.set("type_of_invoice", f.typeFilter.toLowerCase());
       }
+      if (f.paymentFilter && f.paymentFilter !== "all") {
+        params.set("payment_mode", f.paymentFilter);
+      }
 
       const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
       if (dateRange.start_date) params.set("start_date", dateRange.start_date);
@@ -431,6 +436,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     if (data.invoiceNumber) apiPayload.invoice_number = data.invoiceNumber;
     if (data.invoice_date) apiPayload.invoice_date = data.invoice_date;
     if (data.type) apiPayload.type_of_invoice = data.type.toLowerCase();
+    if (data.paymentMode !== undefined) apiPayload.payment_mode = data.paymentMode;
     if (data.total !== undefined) apiPayload.total_amount = data.total;
 
     if (data.items && data.items.length > 0) {
@@ -468,6 +474,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     if (updates.invoiceNumber) invoiceFields.invoice_number = updates.invoiceNumber;
     if (updates.invoice_date) invoiceFields.invoice_date = updates.invoice_date;
     if (updates.type) invoiceFields.type_of_invoice = updates.type.toLowerCase();
+    if (updates.paymentMode !== undefined) invoiceFields.payment_mode = updates.paymentMode;
 
     // Single round-trip: invoice fields + line items in one call.
     // The combined endpoint replaces the old PATCH + update_line_items pair

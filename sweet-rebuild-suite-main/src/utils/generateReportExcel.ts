@@ -19,6 +19,8 @@ function mk(d: string) { return d.slice(0, 7); }
 function ml(k: string) { const [y, m] = k.split("-"); return `${MN[parseInt(m, 10) - 1]} ${y}`; }
 function trunc(n: string) { return n.length > 31 ? n.slice(0, 31) : n; }
 function r2(n: number) { return Math.round(n * 100) / 100; }
+/** Payment mode label for a detail row; "" when never recorded. */
+function pm(inv: Invoice) { const v = (inv as any).paymentMode || ""; return v ? v.charAt(0).toUpperCase() + v.slice(1) : ""; }
 // Per-invoice round-off (rounded total - raw total, from the adapter).
 // Written next to Total Invoice Value so every row cross-foots exactly:
 // Taxable + CGST + SGST + IGST + Round Off = Total Invoice Value.
@@ -37,7 +39,7 @@ const dS = (ev: boolean, a: "left"|"center"|"right" = "left") => ({ font: { sz: 
 const plainS = (a: "left"|"center"|"right" = "left") => ({ font: { sz: 9, name: "Arial" }, alignment: { horizontal: a, vertical: "center" as const } });
 
 const NF = "#,##0.00";
-const TC = 16; // columns: S.No thru Round Off + Total Invoice Value
+const TC = 17; // columns: S.No thru Total Invoice Value + Payment
 
 function sc(ws: any, r: number, c: number, v: string|number, s: any, z?: string) {
   const addr = XLSX.utils.encode_cell({ r, c });
@@ -53,13 +55,14 @@ function fillR(ws: any, r: number, n: number, s: any) {
 const COL_HDRS = [
   "S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number",
   "Commodity", "HSN Code", "GST Rate", "Qty (gm)", "Rate (\u20b9/gm)",
-  "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Round Off (\u20b9)", "Total Invoice Value (\u20b9)",
+  "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Round Off (\u20b9)", "Total Invoice Value (\u20b9)", "Payment",
 ];
 
 const COL_W = [
   { wch: 6 }, { wch: 12 }, { wch: 13 }, { wch: 30 }, { wch: 20 },
   { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
   { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 22 },
+  { wch: 10 }, // Payment
 ];
 
 // Section header styles
@@ -150,6 +153,7 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
       sc(ws, r, 13, inv.totalIGST > 0 ? r2(inv.totalIGST) : 0, dS(ev, "right"), NF);
       sc(ws, r, 14, r2(ro(inv)), dS(ev, "right"), NF);
       sc(ws, r, 15, r2(inv.total), dS(ev, "right"), NF);
+      sc(ws, r, 16, pm(inv), dS(ev, "center"));
       r++; sno++;
     } else {
       inv.items.forEach((item, idx) => {
@@ -171,6 +175,7 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
         // Round Off + Total Invoice Value only on first item row
         sc(ws, r, 14, idx === 0 ? r2(ro(inv)) : "", dS(re, "right"), idx === 0 ? NF : undefined);
         sc(ws, r, 15, idx === 0 ? r2(inv.total) : "", dS(re, "right"), idx === 0 ? NF : undefined);
+        sc(ws, r, 16, idx === 0 ? pm(inv) : "", dS(re, "center"));
         r++;
       });
       sno++;

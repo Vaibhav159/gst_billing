@@ -22,6 +22,7 @@ export interface ParsedInvoiceRow {
   cgst: number;
   sgst: number;
   igst: number;
+  payment?: string;
   totalInvoiceValue: number;
 }
 
@@ -147,6 +148,7 @@ function detectColumnMap(row: any[]): Record<string, number> {
     if (val === "sgst" || val.includes("sgst")) map.sgst = idx;
     if (val === "igst" || val.includes("igst")) map.igst = idx;
     if (val.includes("total") && !val.includes("cgst") && !val.includes("sgst") && !val.includes("igst")) map.total = idx;
+    if (val.includes("payment")) map.payment = idx;
   });
   return map;
 }
@@ -252,6 +254,7 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : 0;
       const igst = colMap.igst !== undefined ? numVal(row[colMap.igst]) : 0;
       const totalInvoiceValue = colMap.total !== undefined ? numVal(row[colMap.total]) : 0;
+      const payment = colMap.payment !== undefined ? strVal(row[colMap.payment]).trim().toLowerCase() : "";
 
       // Skip blank lines — must have a bill# AND party name AND at least
       // one signal of monetary content (qty+rate, total, or taxableValue —
@@ -275,6 +278,7 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
         sgst,
         igst,
         totalInvoiceValue,
+        payment,
       });
     }
   }
@@ -500,6 +504,7 @@ export function toImportReadyInvoices(
         invoice_date: firstRow.invoiceDate,
         customerName: firstRow.partyName,
         customerGST: firstRow.gstNumber,
+        paymentMode: firstRow.payment || "",
         type,
         firmName: firm.firmName,
         firmGSTIN: firm.gstin,

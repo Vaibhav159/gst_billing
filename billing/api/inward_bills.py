@@ -20,7 +20,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.constants import INVOICE_TYPE_INWARD
+from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.utils import AIInvoiceProcessor
 
@@ -182,6 +182,7 @@ class InwardBillListCreateView(APIView):
             workspace_id=WORKSPACE_ID, business=business, customer=supplier,
             invoice_number=invoice_number, invoice_date=invoice_date,
             type_of_invoice=INVOICE_TYPE_INWARD, total_amount=Decimal("0"),
+            payment_mode=normalize_payment_mode(request.data.get("payment_mode")),
         )
         # bulk_create skips the per-line signal; compute_lines already returned
         # the round-off-adjusted total, so store that instead of re-summing.

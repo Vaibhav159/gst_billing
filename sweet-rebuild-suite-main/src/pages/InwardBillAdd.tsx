@@ -49,6 +49,7 @@ export default function InwardBillAdd() {
   const [supplierAddress, setSupplierAddress] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
   const [lines, setLines] = useState<FormLine[]>([{ ...emptyLine }]);
 
   const [warnings, setWarnings] = useState<ExtractResult["warnings"]>({
@@ -147,6 +148,7 @@ export default function InwardBillAdd() {
       fd.append("supplier_address", supplierAddress);
       fd.append("invoice_number", invoiceNumber);
       fd.append("invoice_date", invoiceDate);
+      fd.append("payment_mode", paymentMode);
       fd.append("bill_total", computed.total.toFixed(2));
       fd.append(
         "lines",
@@ -266,6 +268,16 @@ export default function InwardBillAdd() {
               <div className="space-y-1.5">
                 <Label>Invoice date</Label>
                 <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                <div className="mt-3 space-y-1.5">
+                  <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Payment</label>
+                  <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} className="premium-select w-full">
+                    <option value="">— Not recorded</option>
+                    <option value="bank">Bank</option>
+                    <option value="cash">Cash</option>
+                    <option value="credit">Credit (udhaar)</option>
+                    <option value="mixed">Mixed</option>
+                  </select>
+                </div>
               </div>
             </div>
 
