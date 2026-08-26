@@ -95,6 +95,8 @@ export interface DashboardStats {
     count: number;
     tax: number;
     inward_tax: number;
+    outward_count?: number;
+    inward_count?: number;
   };
   monthly: any[];
   tax_distribution?: {

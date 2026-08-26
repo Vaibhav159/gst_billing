@@ -1305,6 +1305,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 Decimal("0.00"),
             ),
             count=Count("id"),
+            outward_count=Count("id", filter=Q(type_of_invoice="outward")),
+            inward_count=Count("id", filter=Q(type_of_invoice="inward")),
         )
         tax_totals = LineItem.objects.filter(
             invoice_id__in=queryset.values("id")
@@ -1354,6 +1356,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "tax": float(totals["outward_tax"]),
             "inward_tax": float(totals["inward_tax"]),
             "count": totals["count"],
+            "outward_count": totals["outward_count"],
+            "inward_count": totals["inward_count"],
         }
         # Per-month output tax, aggregated on LineItem directly — joining the
         # tax into monthly_raw's invoice-level query would re-introduce the

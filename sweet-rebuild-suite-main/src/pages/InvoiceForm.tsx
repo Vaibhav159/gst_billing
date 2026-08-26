@@ -1,5 +1,6 @@
 import { logger } from "@/utils/logger";
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
 import DraftRestoreBanner from "@/components/DraftRestoreBanner";
@@ -375,15 +376,23 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
   const [isSaving, setIsSaving] = useState(false);
+  // Review-before-save: the calculator, absorbed. Submit opens the sheet;
+  // the actual save runs only from its Confirm button.
+  const [showReview, setShowReview] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
+    if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
+    setShowReview(true);
+  };
+
+  const performSave = async () => {
     // Guard against rapid double-clicks creating duplicate invoices.
     // setIsSaving is reset only inside the create/update branches below
     // (since they each navigate or set their own error state).
     if (isSaving) return;
-    if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
-    if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
     setIsSaving(true);
     setDirty(false);
 
@@ -454,8 +463,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           message: `${form.invoiceNumber} · ${selectedCust?.name || "Customer"} · ${formatCurrency(total)}`,
         });
         const navId = created?.id ? String(created.id) : newId;
-        if (isMobile && mobileMode === "easy") {
-          navigate(`/billing/invoice/${navId}`);
+        if (isMobile) {
+          // Phone flow: land on the printable bill with the native share
+          // sheet already opening — save → WhatsApp in one motion.
+          navigate(`/billing/invoice/${navId}/print?share=1`);
         } else {
           navigate("/billing/invoice/list");
         }
@@ -658,10 +669,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                           placeholder="Search Product"
                         />
                         <div className="grid grid-cols-3 gap-2">
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="number" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full text-center" /></div>
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Unit</label><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-full text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="number" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="number" inputMode="decimal" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-11 w-full text-center tabular-nums" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Unit</label><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-11 w-full text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="number" inputMode="decimal" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-11 w-full tabular-nums" /></div>
                         </div>
+                        {/* The calculator, absorbed: the exact math, live, before saving. */}
+                        {item.qty > 0 && item.rate > 0 && (
+                          <p className="text-[11px] text-muted-foreground tabular-nums">
+                            {item.qty} {item.unit} × ₹{item.rate} = <span className="text-foreground font-medium">{formatCurrency(amount)}</span>
+                            {gstRate > 0 && <> · +{gstRate}% GST = <span className="text-foreground font-semibold">{formatCurrency(amount + tax)}</span></>}
+                          </p>
+                        )}
                         <div className="flex items-center justify-between text-[12px]">
                           <span className="text-muted-foreground">GST: {gstRate}% · Tax: {formatCurrency(tax)}</span>
                           <span className="font-bold text-foreground">{formatCurrency(amount)}</span>
@@ -693,9 +711,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
                             <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
-                            <td><input type="number" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full text-center" /></td>
+                            <td><input type="number" inputMode="decimal" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full text-center tabular-nums" /></td>
                             <td><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-full text-[12px] !px-2">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
-                            <td><input type="number" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full" /></td>
+                            <td><input type="number" inputMode="decimal" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full tabular-nums" /></td>
                             <td className="font-bold text-foreground whitespace-nowrap">{formatCurrency(amount)}</td>
                             <td className="text-muted-foreground whitespace-nowrap text-[12px]">{formatCurrency(tax)}</td>
                             <td><button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></td>
@@ -804,6 +822,83 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Review before save: every figure eyeballed once, then committed.
+             Portaled + opaque per the overlay rules; Escape goes back. ── */}
+      {showReview && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Review invoice before saving"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => !isSaving && setShowReview(false)}
+          onKeyDown={(e) => { if (e.key === "Escape" && !isSaving) setShowReview(false); }}
+        >
+          <div
+            className="bg-card border border-border/60 w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-border/40 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-display font-bold">Review &amp; confirm</h2>
+                <p className="text-[11px] text-muted-foreground">
+                  {form.invoiceNumber} · {selectedCustomer?.name || "Customer"} · {selectedBusiness?.name || ""}
+                </p>
+              </div>
+              <button onClick={() => setShowReview(false)} disabled={isSaving} aria-label="Go back" className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50"><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="px-5 py-3 space-y-2">
+              {items.map((it, i) => {
+                const product = localProducts.find((p) => p.id === it.productId);
+                const { amount, tax, gstRate } = calcItem(it);
+                return (
+                  <div key={i} className="py-2 border-b border-border/20 last:border-b-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[13px] font-medium truncate" title={product?.name}>{product?.name || "Item"}</span>
+                      <span className="text-[13px] font-semibold tabular-nums whitespace-nowrap">{formatCurrency(amount + tax)}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground tabular-nums">
+                      {it.qty} {it.unit} × ₹{it.rate} = {formatCurrency(amount)} · +{gstRate}% GST {formatCurrency(tax)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="px-5 py-3 bg-secondary/20 space-y-1.5 text-[13px] tabular-nums">
+              <div className="flex justify-between"><span className="text-muted-foreground">Taxable value</span><span>{formatCurrency(subtotal)}</span></div>
+              {form.isIGST ? (
+                <div className="flex justify-between"><span className="text-muted-foreground">IGST</span><span>{formatCurrency(totalTax)}</span></div>
+              ) : (
+                <>
+                  <div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(totalTax / 2)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(totalTax / 2)}</span></div>
+                </>
+              )}
+              {form.paymentMode && <div className="flex justify-between"><span className="text-muted-foreground">Payment</span><span className="capitalize">{form.paymentMode}</span></div>}
+              <div className="flex justify-between items-baseline pt-2 border-t border-border/40">
+                <span className="font-semibold">Grand Total</span>
+                <span className="text-xl font-display font-bold text-primary">{formatCurrency(total)}</span>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 flex items-center gap-2">
+              <button onClick={() => setShowReview(false)} disabled={isSaving} className="premium-btn-ghost flex-1 h-11 text-[13px] disabled:opacity-50">
+                Go back
+              </button>
+              <button
+                onClick={() => performSave()}
+                disabled={isSaving}
+                className="premium-btn-primary flex-1 h-11 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Save className="w-4 h-4" /> {isSaving ? "Saving…" : "Confirm & Save"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

@@ -169,3 +169,10 @@ class MonthlyTaxTest(BaseAPITestCase):
             for li in LineItem.objects.filter(invoice__type_of_invoice=INVOICE_TYPE_OUTWARD)
         )
         self.assertAlmostEqual(sum(m["outward_tax"] for m in months.values()), db_total, places=2)
+
+    def test_per_direction_counts_match_total(self):
+        """Cards pair full-period money with counts — same base, or they lie."""
+        r = self.client.get(reverse("invoice-stats"))
+        t = r.data["totals"]
+        self.assertEqual(t["outward_count"] + t["inward_count"], t["count"])
+        self.assertGreaterEqual(t["outward_count"], 0)

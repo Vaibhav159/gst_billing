@@ -120,7 +120,7 @@ export default function InvoiceList() {
     return info;
   }, [filtered]);
 
-  const statsInfo = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, count: 0 };
+  const statsInfo = statsData?.totals || { outward: 0, inward: 0, net: 0, tax: 0, count: 0, outward_count: 0, inward_count: 0 };
   const totalOutward = statsInfo.outward;
   const totalInward = statsInfo.inward;
   const totalTaxCollected = statsInfo.tax;
@@ -141,19 +141,16 @@ export default function InvoiceList() {
   // pulls double duty as context AND as an extra figure (count or average).
   // 5 cards: Sales · Purchases · Net Revenue · Tax · Avg Invoice. Avg gives
   // a quick read on whether the period skews toward small or large invoices.
-  const outwardInvCount = useMemo(
-    () => filtered.filter((i) => i.type === "OUTWARD").length,
-    [filtered]
-  );
-  const inwardInvCount = useMemo(
-    () => filtered.filter((i) => i.type === "INWARD").length,
-    [filtered]
-  );
+  // Counts come from the same server aggregate as the money — the loaded
+  // page is only a slice, and "47 outward inv." under a full-year ₹2.23Cr
+  // was exactly the kind of lie that erodes trust in every other number.
+  const outwardInvCount = statsInfo.outward_count ?? 0;
+  const inwardInvCount = statsInfo.inward_count ?? 0;
   const avgInvoice = totalCount > 0 ? (totalOutward + totalInward) / totalCount : 0;
   const stats = [
     { label: "Sales", value: formatCompactCurrency(totalOutward), full: formatCurrency(totalOutward), sub: outwardInvCount > 0 ? `${outwardInvCount} outward inv.` : "—", icon: TrendingUp, color: "text-success" },
     { label: "Purchases", value: formatCompactCurrency(totalInward), full: formatCurrency(totalInward), sub: inwardInvCount > 0 ? `${inwardInvCount} inward inv.` : "—", icon: TrendingDown, color: "text-warning" },
-    { label: "Net Revenue", value: formatCompactCurrency(totalOutward - totalInward), full: formatCurrency(totalOutward - totalInward), sub: "Sales − Purchases", icon: IndianRupee, color: "text-success" },
+    { label: "Net (Sales − Purchases)", value: formatCompactCurrency(totalOutward - totalInward), full: formatCurrency(totalOutward - totalInward), sub: "Money flow, not profit", icon: IndianRupee, color: "text-success" },
     { label: "Tax", value: formatCompactCurrency(totalTaxCollected), full: formatCurrency(totalTaxCollected), sub: "GST collected", icon: Receipt, color: "text-chart-3" },
     { label: "Avg Invoice", value: formatCompactCurrency(avgInvoice), full: formatCurrency(avgInvoice), sub: totalCount > 0 ? `Across ${totalCount} inv.` : "No invoices", icon: Calendar, color: "text-chart-2" },
   ];
@@ -443,10 +440,11 @@ export default function InvoiceList() {
           )}>All Months</button>
         {["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"].map((m, i) => {
           const monthNum = String(i < 9 ? i + 4 : i - 8);
-          const hasInvoices = invoices.some((inv) => {
-            const d = new Date(inv.invoice_date);
-            return d.getMonth() + 1 === Number(monthNum);
-          });
+          // Server monthly aggregate, not the loaded page — the first 50 rows
+          // are usually one month, which lit exactly one pill and no others.
+          const hasInvoices = (statsData?.monthly || []).some((r: any) =>
+            Number(r.month) === Number(monthNum) &&
+            ((Number(r.outward_total) || 0) > 0 || (Number(r.inward_total) || 0) > 0));
           return (
             <button key={m} onClick={() => setMonthFilter(monthFilter === monthNum ? "all" : monthNum)}
               className={cn("px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-all whitespace-nowrap border relative",
@@ -499,8 +497,8 @@ export default function InvoiceList() {
               <th><button onClick={() => { setSortBy("invoiceNumber"); setSortDir(d => sortBy === "invoiceNumber" ? (d === "asc" ? "desc" : "asc") : "asc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Invoice # {sortBy === "invoiceNumber" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
               <th><button onClick={() => { setSortBy("date"); setSortDir(d => sortBy === "date" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Date {sortBy === "date" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
               <th>Customer</th><th>Business</th>
-              <th><button onClick={() => { setSortBy("total"); setSortDir(d => sortBy === "total" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider">Amount {sortBy === "total" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
-              <th>Tax</th><th title="Effective tax rate inferred from tax÷subtotal — handy for spotting wrong rate slabs at a glance.">Rate</th><th>Type</th><th>Actions</th>
+              <th className="text-right"><button onClick={() => { setSortBy("total"); setSortDir(d => sortBy === "total" ? (d === "asc" ? "desc" : "asc") : "desc"); }} className="flex items-center gap-1 hover:text-foreground uppercase tracking-wider ml-auto">Amount {sortBy === "total" && <ArrowUpDown className="w-3 h-3 text-primary" />}</button></th>
+              <th className="text-right">Tax</th><th className="text-right" title="Effective tax rate inferred from tax÷subtotal — handy for spotting wrong rate slabs at a glance.">Rate</th><th>Type</th><th>Actions</th>
             </tr></thead>
             <tbody>
               {filtered.map((inv, i) => {
@@ -543,12 +541,12 @@ export default function InvoiceList() {
                         <motion.tr initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i * 0.025, 0.5), duration: 0.2 }} className={selected.has(inv.id) ? "!bg-primary/5" : ""}>
                           <td><button onClick={() => toggle(inv.id)} className="text-muted-foreground hover:text-primary">{selected.has(inv.id) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}</button></td>
                           <td><Link to={`/billing/invoice/${inv.id}`} className="text-primary hover:underline font-semibold">{inv.invoiceNumber}</Link></td>
-                          <td className="text-muted-foreground"><div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" />{formatDate(inv.invoice_date)}</div></td>
+                          <td className="text-muted-foreground whitespace-nowrap">{sortBy === "date" ? <span className="text-muted-foreground/40" title={formatDate(inv.invoice_date)}>·</span> : formatDate(inv.invoice_date)}</td>
                           <td className="text-foreground font-medium">{inv.customerName}</td>
                           <td className="text-muted-foreground text-[12px]">{inv.businessName}</td>
-                          <td className="font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</td>
-                          <td className="text-muted-foreground text-[12px] tabular-nums">{formatCurrency(inv.totalTax)}</td>
-                          <td className={cn("text-[12px] tabular-nums", rateAnomalous ? "text-warning font-semibold" : "text-muted-foreground")} title={rateAnomalous ? "Not a standard GST slab — open the invoice to verify" : "Tax ÷ subtotal"}>
+                          <td className="font-bold text-foreground tabular-nums text-right whitespace-nowrap">{formatCurrency(inv.total)}</td>
+                          <td className="text-muted-foreground text-[12px] tabular-nums text-right whitespace-nowrap">{formatCurrency(inv.totalTax)}</td>
+                          <td className={cn("text-[12px] tabular-nums text-right", rateAnomalous ? "text-warning font-semibold" : "text-muted-foreground")} title={rateAnomalous ? "Not a standard GST slab — open the invoice to verify" : "Tax ÷ subtotal"}>
                             {ratePct > 0 ? rateLabel : "—"}
                           </td>
                           <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span>{inv.paymentMode && <div className="text-[10px] text-muted-foreground capitalize mt-0.5">{inv.paymentMode}</div>}</td>
@@ -556,9 +554,17 @@ export default function InvoiceList() {
                         <div className="flex items-center gap-0.5">
                           <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
                           <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
-                          <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success transition-colors"><Printer className="w-4 h-4" /></Link>
-                          <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Copy className="w-4 h-4" /></button>
-                          <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} aria-label="Delete invoice" className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button aria-label="More actions" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><MoreHorizontal className="w-4 h-4" /></button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => navigate(`/billing/invoice/${inv.id}/print`)}><Printer className="w-4 h-4 mr-2" /> Print</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => navigate(`/billing/invoice/${inv.id}/print?share=1`)}><Share2 className="w-4 h-4 mr-2" /> Share PDF</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })}><Copy className="w-4 h-4 mr-2" /> Duplicate</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="text-destructive focus:text-destructive"><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </td>
                     </motion.tr>

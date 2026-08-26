@@ -1,11 +1,11 @@
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { formatCurrency, amountToWords, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useInvoice } from "@/hooks/useDataStore";
 import { Printer, Download, Share2, ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/utils/utils";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { downloadInvoicePDF, sharePDFViaWebShare, sharePDFViaWhatsApp } from "@/utils/generatePDF";
 import { useToast } from "@/hooks/use-toast";
 
@@ -15,7 +15,32 @@ export default function InvoicePrint() {
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [generating, setGenerating] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const { item: inv, isLoading: isLoadingInvoice } = useInvoice(id);
+
+  // ?share=1 — arriving straight from "Confirm & Save" on the phone: once the
+  // printable bill is on screen, open the native share sheet by itself so
+  // save → WhatsApp is one motion. The param is consumed immediately so a
+  // reload or back-swipe never re-triggers it.
+  const autoShared = useRef(false);
+  const wantAutoShare = searchParams.get("share") === "1";
+  useEffect(() => {
+    if (!wantAutoShare || autoShared.current || !inv || !printRef.current) return;
+    autoShared.current = true;
+    setSearchParams({}, { replace: true });
+    // Give the print layout one frame to settle before rasterizing it.
+    const t = setTimeout(async () => {
+      setGenerating(true);
+      try {
+        await sharePDFViaWebShare(printRef.current!, inv);
+      } catch {
+        toast({ title: "Share failed", description: "Use the Share button below.", variant: "destructive" });
+      }
+      setGenerating(false);
+    }, 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantAutoShare, inv]);
   const { items: businesses, isLoading: isLoadingBusinesses } = useBusinesses();
   const { items: customers, isLoading: isLoadingCustomers } = useCustomers();
 
