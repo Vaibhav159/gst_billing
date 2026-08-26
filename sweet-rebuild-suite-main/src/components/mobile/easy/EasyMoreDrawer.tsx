@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Settings, LogOut, X, Wrench, User, ReceiptText } from "lucide-react";
 import { cn } from "@/utils/utils";
@@ -16,7 +17,9 @@ export default function EasyMoreDrawer({ open, onOpenChange }: Props) {
   const { setMobileMode } = useMobileMode();
   const { logout: authLogout } = useAuth();
 
-  return (
+  // Portal to <body>: a transformed ancestor (page transition mid-flight)
+  // otherwise becomes the containing block for this fixed overlay.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -137,6 +140,7 @@ export default function EasyMoreDrawer({ open, onOpenChange }: Props) {
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

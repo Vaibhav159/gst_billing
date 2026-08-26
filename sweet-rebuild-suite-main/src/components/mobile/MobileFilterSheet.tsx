@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
+import { createPortal } from "react-dom";
 import { X, SlidersHorizontal } from "lucide-react";
 
 interface FilterOption {
@@ -17,7 +18,9 @@ interface Props {
 }
 
 export default function MobileFilterSheet({ open, onOpenChange, filters, onClear, title = "Filters" }: Props) {
-  return (
+  // Portal to <body>: a transformed ancestor (page transition mid-flight)
+  // otherwise becomes the containing block for this fixed overlay.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -81,6 +84,7 @@ export default function MobileFilterSheet({ open, onOpenChange, filters, onClear
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

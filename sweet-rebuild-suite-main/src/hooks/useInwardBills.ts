@@ -8,6 +8,7 @@ export interface InwardSupplier {
 }
 
 export interface InwardBillRow {
+  payment_mode?: string; // "bank" | "cash" | "credit" | "mixed" | "" — not recorded
   id: number;
   invoice_number: string;
   invoice_date: string;

@@ -1151,7 +1151,7 @@ export default function ImportPage({ type }: ImportPageProps) {
                               </span>
                             </td>
                             <td className="px-2 py-1.5 font-medium text-primary">{inv.invoiceNumber}</td>
-                            <td className="px-2 py-1.5 tabular-nums">
+                            <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">
                               {editingIdx === idx ? (
                                 <input type="date" value={editForm.date} onChange={(e) => setEditForm(p => ({ ...p, date: e.target.value }))}
                                   className="w-[110px] px-1 py-0.5 rounded bg-input border border-border text-[11px]" />
@@ -1164,13 +1164,13 @@ export default function ImportPage({ type }: ImportPageProps) {
                                 <input type="text" value={editForm.party} onChange={(e) => setEditForm(p => ({ ...p, party: e.target.value }))}
                                   className="w-full px-1 py-0.5 rounded bg-input border border-border text-[11px]" />
                               ) : (
-                                <>
-                                  {inv.customerName}
-                                  {v.customerMatch && <span className="text-[9px] text-success ml-1">(matched)</span>}
-                                </>
+                                <span className="inline-flex items-center gap-1 min-w-0">
+                                  <span className="truncate">{inv.customerName}</span>
+                                  {v.customerMatch && <Check className="w-3 h-3 text-success shrink-0" aria-label="Matched to an existing customer" />}
+                                </span>
                               )}
                             </td>
-                            <td className="px-2 py-1.5 font-mono text-[10px] truncate max-w-[100px]" title={inv.customerGST}>
+                            <td className="px-2 py-1.5 font-mono text-[10px] whitespace-nowrap">
                               {editingIdx === idx ? (
                                 <input type="text" value={editForm.gst} onChange={(e) => setEditForm(p => ({ ...p, gst: e.target.value }))}
                                   className="w-full px-1 py-0.5 rounded bg-input border border-border text-[10px] font-mono" placeholder="GST Number" />
@@ -1178,11 +1178,11 @@ export default function ImportPage({ type }: ImportPageProps) {
                                 inv.customerGST || "-"
                               )}
                             </td>
-                            <td className="px-2 py-1.5 truncate max-w-[100px]" title={inv.firmName}>
-                              {inv.firmName}
-                              {v.businessMatch && (
-                                <span className="text-[9px] text-success ml-1">(ok)</span>
-                              )}
+                            <td className="px-2 py-1.5 max-w-[100px]" title={inv.firmName}>
+                              <span className="inline-flex items-center gap-1 min-w-0">
+                                <span className="truncate">{inv.firmName}</span>
+                                {v.businessMatch && <Check className="w-3 h-3 text-success shrink-0" aria-label="Firm matched" />}
+                              </span>
                             </td>
                             <td className="px-2 py-1.5 text-center">
                               {editingIdx === idx ? (
@@ -1194,12 +1194,16 @@ export default function ImportPage({ type }: ImportPageProps) {
                                     className="w-[60px] px-1 py-0.5 rounded bg-input border border-border text-[11px] tabular-nums" step="0.01" />
                                 </div>
                               ) : (
-                                <>
-                                  {inv.items.length}
-                                  <span className="text-[9px] text-muted-foreground ml-0.5">
-                                    ({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})
-                                  </span>
-                                </>
+                                (() => {
+                                  const totalQty = inv.items.reduce((q, i) => q + (i.qty || 0), 0);
+                                  const units = Array.from(new Set(inv.items.map(i => i.unit || "gms")));
+                                  const qtyLabel = units.length === 1 ? `${roundAmount(totalQty)} ${units[0]}` : `${inv.items.length} units`;
+                                  return (
+                                    <span className="whitespace-nowrap" title={inv.items.map(i => `${i.qty} ${i.unit || "gms"} @ ₹${i.rate}`).join("\n")}>
+                                      {inv.items.length} · <span className="text-muted-foreground">{qtyLabel}</span>
+                                    </span>
+                                  );
+                                })()
                               )}
                             </td>
                             <td className="px-2 py-1.5 text-right tabular-nums">

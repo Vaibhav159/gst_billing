@@ -107,7 +107,7 @@ export default function SearchableSelect({
           !selectedOption && "text-muted-foreground"
         )}
       >
-        <span className="truncate text-[13px]">
+        <span className="truncate text-[13px]" title={selectedOption ? selectedOption.label : placeholder}>
           {selectedOption ? selectedOption.label : placeholder}
         </span>
         <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform", isOpen && "rotate-180")} />
@@ -150,7 +150,7 @@ export default function SearchableSelect({
                     opt.value === value && "font-semibold text-primary"
                   )}
                 >
-                  <span className="truncate">{opt.label}</span>
+                  <span className="truncate" title={opt.label}>{opt.label}</span>
                   {opt.sublabel && <span className="text-[10px] text-muted-foreground font-mono ml-2 shrink-0">{opt.sublabel}</span>}
                 </div>
               ))

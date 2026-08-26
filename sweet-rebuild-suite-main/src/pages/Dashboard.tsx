@@ -341,7 +341,7 @@ export default function Dashboard() {
                   )}>{inv.type}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] text-muted-foreground truncate">{inv.businessName}</p>
+                  <p className="text-[11px] text-muted-foreground truncate" title={inv.businessName}>{inv.businessName}</p>
                   {/* Compact (₹2.86L) so a long business name + ₹1,39,363.59
                       don't wrap or collide on a 375px screen. Full value in
                       the title for hover/long-press access. */}
@@ -363,7 +363,7 @@ export default function Dashboard() {
               <Link key={c.id} to={`/billing/customer/${c.id}`} className="flex items-center gap-3">
                 <span className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-primary text-[10px] font-bold shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[12px] font-medium text-foreground truncate">{c.name}</p>
+                  <p className="text-[12px] font-medium text-foreground truncate" title={c.name}>{c.name}</p>
                 </div>
                 <span className="text-[12px] font-bold text-foreground tabular-nums shrink-0" title={formatCurrency(c.total)}>{formatCompactCurrency(c.total)}</span>
               </Link>
@@ -628,13 +628,13 @@ export default function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       {link ? (
-                        <Link to={link} className="text-[13px] font-medium text-foreground hover:text-primary transition-colors truncate">{name}</Link>
+                        <Link to={link} className="text-[13px] font-medium text-foreground hover:text-primary transition-colors truncate" title={name}>{name}</Link>
                       ) : (
-                        <span className="text-[13px] font-medium text-foreground truncate">{name}</span>
+                        <span className="text-[13px] font-medium text-foreground truncate" title={name}>{name}</span>
                       )}
                       <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{isAudit ? label : detail}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate" title={isAudit ? label : detail}>{isAudit ? label : detail}</p>
                   </div>
                 </div>
               );
@@ -665,7 +665,7 @@ export default function Dashboard() {
                 <span className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[13px] font-medium text-foreground group-hover:text-primary transition-colors truncate">{c.name}</span>
+                    <span className="text-[13px] font-medium text-foreground group-hover:text-primary transition-colors truncate" title={c.name}>{c.name}</span>
                     <span className="text-[12px] font-semibold text-muted-foreground tabular-nums ml-2">{formatCurrency(c.total)}</span>
                   </div>
                   <div className="w-full h-1 bg-secondary/40 rounded-full overflow-hidden">
@@ -694,7 +694,7 @@ export default function Dashboard() {
               <Link key={p.id} to={`/billing/product/${p.id}`} className="flex items-center gap-3 group p-2 -mx-2 rounded-xl hover:bg-secondary/20 transition-colors">
                 <span className="w-7 h-7 rounded-lg bg-success/10 border border-success/20 flex items-center justify-center text-success text-[11px] font-bold shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium text-foreground group-hover:text-primary transition-colors truncate">{p.name}</p>
+                  <p className="text-[13px] font-medium text-foreground group-hover:text-primary transition-colors truncate" title={p.name}>{p.name}</p>
                   {p.hsn && <p className="text-[11px] text-muted-foreground">HSN: {p.hsn}{p.hsnVariants > 1 ? ` +${p.hsnVariants - 1} more` : ""}</p>}
                   {!p.hsn && <p className="text-[11px] text-muted-foreground/50 italic">No HSN</p>}
                 </div>

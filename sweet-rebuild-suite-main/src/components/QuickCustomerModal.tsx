@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useGstinLookup } from "@/hooks/useGstinLookup";
 import { validateGstin } from "@/utils/gstin";
 import GstinStatus from "@/components/GstinStatus";
@@ -107,7 +108,9 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
     setSubmitting(false);
   };
 
-  return (
+  // Portal to <body>: a transformed ancestor (page transition mid-flight)
+  // otherwise becomes the containing block for this fixed overlay.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -177,7 +180,8 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 

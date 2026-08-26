@@ -736,7 +736,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   if (item.qty === 0 && item.rate === 0 && !product) return null;
                   return (
                     <div key={item._key} className="space-y-1.5 pb-2 border-b border-border/30">
-                      {product && <div className="text-[12px] font-medium text-foreground truncate">{product.name}</div>}
+                      {product && <div className="text-[12px] font-medium text-foreground truncate" title={product.name}>{product.name}</div>}
                       <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{item.qty} {item.unit}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(item.rate)}/{item.unit}</span></div>
                     </div>

@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, FileText, Users, Truck, ReceiptText } from "lucide-react";
@@ -31,7 +32,9 @@ export default function MobileMoreDrawer({ open, onOpenChange }: Props) {
 
   const isActive = (href: string) => location.pathname.startsWith(href);
 
-  return (
+  // Portal to <body>: a transformed ancestor (page transition mid-flight)
+  // otherwise becomes the containing block for this fixed overlay.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -102,6 +105,7 @@ export default function MobileMoreDrawer({ open, onOpenChange }: Props) {
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

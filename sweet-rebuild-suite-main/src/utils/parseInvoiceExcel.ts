@@ -338,6 +338,7 @@ export interface ImportReadyInvoice {
   invoice_date: string;
   customerName: string;
   customerGST: string;
+  paymentMode?: string; // "bank" | "cash" | "credit" | "mixed" | "" — from the optional Payment column
   type: "OUTWARD" | "INWARD";
   firmName: string;
   firmGSTIN: string;
