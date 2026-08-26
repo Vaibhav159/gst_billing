@@ -19,6 +19,10 @@ function mk(d: string) { return d.slice(0, 7); }
 function ml(k: string) { const [y, m] = k.split("-"); return `${MN[parseInt(m, 10) - 1]} ${y}`; }
 function trunc(n: string) { return n.length > 31 ? n.slice(0, 31) : n; }
 function r2(n: number) { return Math.round(n * 100) / 100; }
+// Per-invoice round-off (rounded total - raw total, from the adapter).
+// Written next to Total Invoice Value so every row cross-foots exactly:
+// Taxable + CGST + SGST + IGST + Round Off = Total Invoice Value.
+function ro(i: Invoice) { return i.roundedOff || 0; }
 function fd(d: string) { try { return format(new Date(d), "dd-MM-yyyy"); } catch { return d; } }
 
 function bdr() {
@@ -33,7 +37,7 @@ const dS = (ev: boolean, a: "left"|"center"|"right" = "left") => ({ font: { sz: 
 const plainS = (a: "left"|"center"|"right" = "left") => ({ font: { sz: 9, name: "Arial" }, alignment: { horizontal: a, vertical: "center" as const } });
 
 const NF = "#,##0.00";
-const TC = 15; // columns: S.No thru Total Invoice Value (matching user's format)
+const TC = 16; // columns: S.No thru Round Off + Total Invoice Value
 
 function sc(ws: any, r: number, c: number, v: string|number, s: any, z?: string) {
   const addr = XLSX.utils.encode_cell({ r, c });
@@ -49,13 +53,13 @@ function fillR(ws: any, r: number, n: number, s: any) {
 const COL_HDRS = [
   "S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number",
   "Commodity", "HSN Code", "GST Rate", "Qty (gm)", "Rate (\u20b9/gm)",
-  "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Total Invoice Value (\u20b9)",
+  "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Round Off (\u20b9)", "Total Invoice Value (\u20b9)",
 ];
 
 const COL_W = [
   { wch: 6 }, { wch: 12 }, { wch: 13 }, { wch: 30 }, { wch: 20 },
   { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
-  { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 22 },
+  { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 22 },
 ];
 
 // Section header styles
@@ -144,7 +148,8 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
       sc(ws, r, 11, r2(inv.totalCGST), dS(ev, "right"), NF);
       sc(ws, r, 12, r2(inv.totalSGST), dS(ev, "right"), NF);
       sc(ws, r, 13, inv.totalIGST > 0 ? r2(inv.totalIGST) : 0, dS(ev, "right"), NF);
-      sc(ws, r, 14, r2(inv.total), dS(ev, "right"), NF);
+      sc(ws, r, 14, r2(ro(inv)), dS(ev, "right"), NF);
+      sc(ws, r, 15, r2(inv.total), dS(ev, "right"), NF);
       r++; sno++;
     } else {
       inv.items.forEach((item, idx) => {
@@ -163,8 +168,9 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
         sc(ws, r, 11, r2(item.cgst), dS(re, "right"), NF);
         sc(ws, r, 12, r2(item.sgst), dS(re, "right"), NF);
         sc(ws, r, 13, item.igst > 0 ? r2(item.igst) : 0, dS(re, "right"), NF);
-        // Total Invoice Value only on first item row
-        sc(ws, r, 14, idx === 0 ? r2(inv.total) : "", dS(re, "right"), idx === 0 ? NF : undefined);
+        // Round Off + Total Invoice Value only on first item row
+        sc(ws, r, 14, idx === 0 ? r2(ro(inv)) : "", dS(re, "right"), idx === 0 ? NF : undefined);
+        sc(ws, r, 15, idx === 0 ? r2(inv.total) : "", dS(re, "right"), idx === 0 ? NF : undefined);
         r++;
       });
       sno++;
@@ -184,7 +190,8 @@ function writeGrandTotal(ws: any, merges: any[], r: number, invs: Invoice[]): nu
   sc(ws, r, 11, r2(invs.reduce((s, i) => s + i.totalCGST, 0)), tsr, NF);
   sc(ws, r, 12, r2(invs.reduce((s, i) => s + i.totalSGST, 0)), tsr, NF);
   sc(ws, r, 13, invs.some(i => i.totalIGST > 0) ? r2(invs.reduce((s, i) => s + i.totalIGST, 0)) : "-" as any, tsr, NF);
-  sc(ws, r, 14, r2(invs.reduce((s, i) => s + i.total, 0)), tsr, NF);
+  sc(ws, r, 14, r2(invs.reduce((s, i) => s + ro(i), 0)), tsr, NF);
+  sc(ws, r, 15, r2(invs.reduce((s, i) => s + i.total, 0)), tsr, NF);
   return r + 1;
 }
 
@@ -214,7 +221,7 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
 
   // ── Summary Sheet ──
   const ws: any = {};
-  const SC = 14;
+  const SC = 16;
   const sMerges: any[] = [];
 
   // Title row
@@ -225,18 +232,18 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
   // Group header row (Outward / Inward)
   const grpS = () => ({ font: { bold: true, sz: 10, name: "Arial", color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK_BLUE } }, alignment: { horizontal: "center" as const, vertical: "center" as const }, border: bdr() });
   sc(ws, 1, 0, "", grpS());
-  // Outward group header (cols 1-6)
+  // Outward group header (cols 1-7)
   sc(ws, 1, 1, "OUTWARD SUPPLY", grpS());
-  for (let c = 2; c <= 6; c++) sc(ws, 1, c, "", grpS());
-  sMerges.push({ s: { r: 1, c: 1 }, e: { r: 1, c: 6 } });
-  // Inward group header (cols 7-12)
-  sc(ws, 1, 7, "INWARD SUPPLY", grpS());
-  for (let c = 8; c <= 12; c++) sc(ws, 1, c, "", grpS());
-  sMerges.push({ s: { r: 1, c: 7 }, e: { r: 1, c: 12 } });
-  sc(ws, 1, 13, "", grpS());
+  for (let c = 2; c <= 7; c++) sc(ws, 1, c, "", grpS());
+  sMerges.push({ s: { r: 1, c: 1 }, e: { r: 1, c: 7 } });
+  // Inward group header (cols 8-14)
+  sc(ws, 1, 8, "INWARD SUPPLY", grpS());
+  for (let c = 9; c <= 14; c++) sc(ws, 1, c, "", grpS());
+  sMerges.push({ s: { r: 1, c: 8 }, e: { r: 1, c: 14 } });
+  sc(ws, 1, 15, "", grpS());
 
   // Column headers
-  const subHdrs = ["Firm Name", "Invoices", "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Total Invoice Value (\u20b9)", "Invoices", "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Total Invoice Value (\u20b9)", "Net Total (\u20b9)"];
+  const subHdrs = ["Firm Name", "Invoices", "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Round Off (\u20b9)", "Total Invoice Value (\u20b9)", "Invoices", "Taxable Value (\u20b9)", "CGST (\u20b9)", "SGST (\u20b9)", "IGST (\u20b9)", "Round Off (\u20b9)", "Total Invoice Value (\u20b9)", "Net Total (\u20b9)"];
   subHdrs.forEach((h, c) => sc(ws, 2, c, h, hdrS()));
 
   let row = 3;
@@ -253,16 +260,18 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
     sc(ws, row, 3, r2(out.reduce((s, i) => s + i.totalCGST, 0)), dS(ev, "right"), NF);
     sc(ws, row, 4, r2(out.reduce((s, i) => s + i.totalSGST, 0)), dS(ev, "right"), NF);
     sc(ws, row, 5, r2(out.reduce((s, i) => s + i.totalIGST, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 6, r2(out.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 6, r2(out.reduce((s, i) => s + ro(i), 0)), dS(ev, "right"), NF);
+    sc(ws, row, 7, r2(out.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
     // Inward columns
-    sc(ws, row, 7, inw.length, dS(ev, "center"));
-    sc(ws, row, 8, r2(inw.reduce((s, i) => s + i.subtotal, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 9, r2(inw.reduce((s, i) => s + i.totalCGST, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 10, r2(inw.reduce((s, i) => s + i.totalSGST, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 11, r2(inw.reduce((s, i) => s + i.totalIGST, 0)), dS(ev, "right"), NF);
-    sc(ws, row, 12, r2(inw.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 8, inw.length, dS(ev, "center"));
+    sc(ws, row, 9, r2(inw.reduce((s, i) => s + i.subtotal, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 10, r2(inw.reduce((s, i) => s + i.totalCGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 11, r2(inw.reduce((s, i) => s + i.totalSGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 12, r2(inw.reduce((s, i) => s + i.totalIGST, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 13, r2(inw.reduce((s, i) => s + ro(i), 0)), dS(ev, "right"), NF);
+    sc(ws, row, 14, r2(inw.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
     // Net total
-    sc(ws, row, 13, r2(list.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
+    sc(ws, row, 15, r2(list.reduce((s, i) => s + i.total, 0)), dS(ev, "right"), NF);
     row++;
   });
 
@@ -276,21 +285,23 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
   sc(ws, row, 3, r2(outAll.reduce((s, i) => s + i.totalCGST, 0)), gtr, NF);
   sc(ws, row, 4, r2(outAll.reduce((s, i) => s + i.totalSGST, 0)), gtr, NF);
   sc(ws, row, 5, r2(outAll.reduce((s, i) => s + i.totalIGST, 0)), gtr, NF);
-  sc(ws, row, 6, r2(outAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
-  sc(ws, row, 7, inwAll.length, gtc);
-  sc(ws, row, 8, r2(inwAll.reduce((s, i) => s + i.subtotal, 0)), gtr, NF);
-  sc(ws, row, 9, r2(inwAll.reduce((s, i) => s + i.totalCGST, 0)), gtr, NF);
-  sc(ws, row, 10, r2(inwAll.reduce((s, i) => s + i.totalSGST, 0)), gtr, NF);
-  sc(ws, row, 11, r2(inwAll.reduce((s, i) => s + i.totalIGST, 0)), gtr, NF);
-  sc(ws, row, 12, r2(inwAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
-  sc(ws, row, 13, r2(invoices.reduce((s, i) => s + i.total, 0)), gtr, NF);
+  sc(ws, row, 6, r2(outAll.reduce((s, i) => s + ro(i), 0)), gtr, NF);
+  sc(ws, row, 7, r2(outAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
+  sc(ws, row, 8, inwAll.length, gtc);
+  sc(ws, row, 9, r2(inwAll.reduce((s, i) => s + i.subtotal, 0)), gtr, NF);
+  sc(ws, row, 10, r2(inwAll.reduce((s, i) => s + i.totalCGST, 0)), gtr, NF);
+  sc(ws, row, 11, r2(inwAll.reduce((s, i) => s + i.totalSGST, 0)), gtr, NF);
+  sc(ws, row, 12, r2(inwAll.reduce((s, i) => s + i.totalIGST, 0)), gtr, NF);
+  sc(ws, row, 13, r2(inwAll.reduce((s, i) => s + ro(i), 0)), gtr, NF);
+  sc(ws, row, 14, r2(inwAll.reduce((s, i) => s + i.total, 0)), gtr, NF);
+  sc(ws, row, 15, r2(invoices.reduce((s, i) => s + i.total, 0)), gtr, NF);
 
   ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: row, c: SC - 1 } });
   ws["!merges"] = sMerges;
   ws["!cols"] = [
     { wch: 28 }, // Firm Name
-    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, // Outward
-    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, // Inward
+    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 20 }, // Outward
+    { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 20 }, // Inward
     { wch: 20 }, // Net Total
   ];
   XLSX.utils.book_append_sheet(wb, ws, "Summary");
@@ -356,7 +367,8 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
       sc(bws, r, 11, "CGST", subHdrS());
       sc(bws, r, 12, "SGST", subHdrS());
       sc(bws, r, 13, "IGST", subHdrS());
-      sc(bws, r, 14, "Total Invoice Value", subHdrS());
+      sc(bws, r, 14, "Round Off", subHdrS());
+      sc(bws, r, 15, "Total Invoice Value", subHdrS());
       r++;
 
       const allOut = list.filter(i => i.type === "OUTWARD");
@@ -374,7 +386,8 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
         sc(bws, r, 11, r2(allOut.reduce((s, i) => s + i.totalCGST, 0)), rowSR(true), NF);
         sc(bws, r, 12, r2(allOut.reduce((s, i) => s + i.totalSGST, 0)), rowSR(true), NF);
         sc(bws, r, 13, allOut.some(i => i.totalIGST > 0) ? r2(allOut.reduce((s, i) => s + i.totalIGST, 0)) : 0, rowSR(true), NF);
-        sc(bws, r, 14, r2(allOut.reduce((s, i) => s + i.total, 0)), rowSR(true), NF);
+        sc(bws, r, 14, r2(allOut.reduce((s, i) => s + ro(i), 0)), rowSR(true), NF);
+        sc(bws, r, 15, r2(allOut.reduce((s, i) => s + i.total, 0)), rowSR(true), NF);
         r++;
       }
 
@@ -387,7 +400,8 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
         sc(bws, r, 11, r2(allIn.reduce((s, i) => s + i.totalCGST, 0)), rowSR(false), NF);
         sc(bws, r, 12, r2(allIn.reduce((s, i) => s + i.totalSGST, 0)), rowSR(false), NF);
         sc(bws, r, 13, allIn.some(i => i.totalIGST > 0) ? r2(allIn.reduce((s, i) => s + i.totalIGST, 0)) : 0, rowSR(false), NF);
-        sc(bws, r, 14, r2(allIn.reduce((s, i) => s + i.total, 0)), rowSR(false), NF);
+        sc(bws, r, 14, r2(allIn.reduce((s, i) => s + ro(i), 0)), rowSR(false), NF);
+        sc(bws, r, 15, r2(allIn.reduce((s, i) => s + i.total, 0)), rowSR(false), NF);
         r++;
       }
 
@@ -400,7 +414,8 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
       sc(bws, r, 11, r2(list.reduce((s, i) => s + i.totalCGST, 0)), tsr, NF);
       sc(bws, r, 12, r2(list.reduce((s, i) => s + i.totalSGST, 0)), tsr, NF);
       sc(bws, r, 13, list.some(i => i.totalIGST > 0) ? r2(list.reduce((s, i) => s + i.totalIGST, 0)) : 0, tsr, NF);
-      sc(bws, r, 14, r2(list.reduce((s, i) => s + i.total, 0)), tsr, NF);
+      sc(bws, r, 14, r2(list.reduce((s, i) => s + ro(i), 0)), tsr, NF);
+      sc(bws, r, 15, r2(list.reduce((s, i) => s + i.total, 0)), tsr, NF);
       r++;
     }
 
