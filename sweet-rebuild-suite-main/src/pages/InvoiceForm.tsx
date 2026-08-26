@@ -375,6 +375,24 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   ];
   const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
+  // Filed-period awareness: warn while typing, not after the server refuses.
+  const [filedPeriods, setFiledPeriods] = useState<any[]>([]);
+  useEffect(() => {
+    if (!form.businessId) { setFiledPeriods([]); return; }
+    let alive = true;
+    import("@/utils/api").then(({ default: api }) =>
+      api.get<any>(`filed-periods/?business_id=${form.businessId}`)
+        .then((r) => { if (alive) setFiledPeriods(r.data?.results ?? r.data ?? []); })
+        .catch(() => { if (alive) setFiledPeriods([]); })
+    );
+    return () => { alive = false; };
+  }, [form.businessId]);
+  const lockedPeriodForDate = (() => {
+    if (!form.date) return undefined;
+    const [y, m] = form.date.split("-").map(Number);
+    return filedPeriods.find((p) => Number(p.year) === y && Number(p.month) === m);
+  })();
+
   const [isSaving, setIsSaving] = useState(false);
   // Review-before-save: the calculator, absorbed. Submit opens the sheet;
   // the actual save runs only from its Confirm button.
@@ -603,6 +621,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                     <option value="INWARD">Inward (Purchase)</option>
                   </select>
                 </div>
+                {lockedPeriodForDate && (
+                  <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>
+                      <b>{String(lockedPeriodForDate.month).padStart(2, "0")}/{lockedPeriodForDate.year} is filed &amp; locked</b> for this business — saving into it will be refused. Pick another date, or unlock the month on the GST page (audit-logged).
+                    </span>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Payment</label>
                   <select value={form.paymentMode} onChange={(e) => set("paymentMode", e.target.value)} className="premium-select w-full">

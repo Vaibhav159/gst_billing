@@ -804,3 +804,38 @@ class ITCReclaimLedger(AbstractBaseModel):
 
     def __str__(self):
         return f"ITC Ledger — {self.business.name}"
+
+
+class FiledPeriod(AbstractBaseModel):
+    """A month whose GST return has been filed — its invoices are locked.
+
+    Once the CA files GSTR-1/3B for (business, month), the figures on the
+    portal are the figures. Any later edit to an invoice in that month makes
+    the books silently disagree with the filed return — the exact drift the
+    user re-checks Excel to catch. Locking is enforced at the API write
+    paths (see billing/period_lock.py); deliberate corrections go through
+    an explicit, audit-logged unlock first.
+    """
+
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        verbose_name="Business",
+        help_text="Business whose return was filed.",
+    )
+    year = models.IntegerField(help_text="Calendar year of the period (e.g. 2026).")
+    month = models.IntegerField(help_text="Calendar month of the period (1-12).")
+    note = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Optional filing reference (ARN, date filed, remarks).",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["business", "year", "month"], name="uniq_filed_period"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.business.name} — {self.month:02d}/{self.year} (filed)"
