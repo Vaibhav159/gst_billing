@@ -44,6 +44,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     invoiceNumber: "",
     date: new Date().toISOString().split("T")[0],
     type: "OUTWARD",
+    paymentMode: "",
     isIGST: false,
     financialYear: "",
   });
@@ -67,6 +68,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       invoiceNumber: "", // blank — will auto-fetch next number
       date: new Date().toISOString().split("T")[0],
       type: duplicateFrom.type || "OUTWARD",
+      paymentMode: duplicateFrom.paymentMode || "",
       isIGST: duplicateFrom.isIGST || false,
       financialYear: "",
     });
@@ -101,6 +103,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           invoiceNumber: inv.invoice_number || "",
           date: inv.invoice_date || new Date().toISOString().split("T")[0],
           type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
+          paymentMode: inv.payment_mode || "",
           isIGST: inv.is_igst_applicable || false,
           financialYear: inv.financial_year || currentFY,
         });
@@ -426,6 +429,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         businessId: form.businessId,
         businessName: selectedBiz?.name || "",
         type: form.type as "OUTWARD" | "INWARD",
+        paymentMode: form.paymentMode,
         isIGST: form.isIGST,
         items: invoiceItems,
         subtotal,
@@ -470,6 +474,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           businessId: form.businessId,
           businessName: selectedBiz?.name || "",
           type: form.type as "OUTWARD" | "INWARD",
+        paymentMode: form.paymentMode,
           isIGST: form.isIGST,
           items: invoiceItems,
           subtotal,
@@ -585,6 +590,16 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   <select value={form.type} onChange={(e) => set("type", e.target.value)} className="premium-select w-full">
                     <option value="OUTWARD">Outward (Sales)</option>
                     <option value="INWARD">Inward (Purchase)</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-foreground uppercase tracking-wider">Payment</label>
+                  <select value={form.paymentMode} onChange={(e) => set("paymentMode", e.target.value)} className="premium-select w-full">
+                    <option value="">— Not recorded</option>
+                    <option value="bank">Bank</option>
+                    <option value="cash">Cash</option>
+                    <option value="credit">Credit (udhaar)</option>
+                    <option value="mixed">Mixed</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">

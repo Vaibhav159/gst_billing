@@ -119,3 +119,28 @@ GST_CODE = {
 }
 
 STATE_CHOICES = [(state, state) for state in GST_CODE.values()]
+
+# Payment settlement modes for invoices. Blank ("") means "not recorded" —
+# the truthful default for every invoice that predates the field.
+PAYMENT_MODES = [
+    ("bank", "Bank"),
+    ("cash", "Cash"),
+    ("credit", "Credit"),
+    ("mixed", "Mixed"),
+]
+PAYMENT_MODE_VALUES = {value for value, _ in PAYMENT_MODES}
+
+
+def normalize_payment_mode(raw):
+    """Import-tolerant mapping to a canonical mode; anything else -> ""."""
+    v = str(raw or "").strip().lower()
+    aliases = {
+        "b": "bank", "bank": "bank", "upi": "bank", "neft": "bank",
+        "rtgs": "bank", "imps": "bank", "cheque": "bank", "check": "bank",
+        "card": "bank", "online": "bank",
+        "c": "cash", "cash": "cash",
+        "credit": "credit", "udhaar": "credit", "udhar": "credit",
+        "unpaid": "credit", "due": "credit",
+        "mixed": "mixed", "part": "mixed", "partial": "mixed",
+    }
+    return aliases.get(v, v if v in PAYMENT_MODE_VALUES else "")

@@ -43,6 +43,7 @@ export default function InvoiceList() {
   const [bizFilter, setBizFilter] = useState("all");
   const [custFilter, setCustFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState("all");
   const [fyFilter, setFyFilter] = useState(selectedFY);
   useEffect(() => { setFyFilter(selectedFY); }, [selectedFY]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -78,12 +79,13 @@ export default function InvoiceList() {
     businessId: bizFilter,
     customerId: custFilter,
     typeFilter,
+    paymentFilter,
     fyFilter: hasHygieneFilter ? "all" : fyFilter,
     monthFilter: hasHygieneFilter ? "all" : monthFilter,
     dups: dupsFilter || undefined,
     empty: emptyFilter || undefined,
     noHsn: noHsnFilter || undefined,
-  }), [debouncedSearch, bizFilter, custFilter, typeFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter]);
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
@@ -127,8 +129,8 @@ export default function InvoiceList() {
   const toggle = useCallback((id: string) => { setSelected(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
 
   const handleExportCSV = () => {
-    const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total", "GST Type"];
-    const rows = filtered.map((inv) => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
+    const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Payment", "Subtotal", "Tax", "Total", "GST Type"];
+    const rows = filtered.map((inv) => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.paymentMode || "", inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
     downloadCSV(toCSV([headers, ...rows]), "invoices-export.csv");
     toast({ title: "Exported", description: `${filtered.length} invoices exported to CSV` });
   };
@@ -157,7 +159,7 @@ export default function InvoiceList() {
   ];
 
   const clearFilters = () => {
-    setBizFilter("all"); setCustFilter("all"); setTypeFilter("all"); setFyFilter(selectedFY); setMonthFilter("all"); setSearch("");
+    setBizFilter("all"); setCustFilter("all"); setTypeFilter("all"); setPaymentFilter("all"); setFyFilter(selectedFY); setMonthFilter("all"); setSearch("");
     // Also drop hygiene URL params so "Clear" really does clear everything.
     if (hasHygieneFilter) {
       searchParams.delete("dups"); searchParams.delete("empty"); searchParams.delete("no_hsn");
@@ -203,7 +205,7 @@ export default function InvoiceList() {
           </div>
           <button onClick={() => setFilterOpen(true)}
             className={cn("w-11 h-11 rounded-xl border flex items-center justify-center transition-all",
-              (bizFilter !== "all" || custFilter !== "all" || typeFilter !== "all" || monthFilter !== "all")
+              (bizFilter !== "all" || custFilter !== "all" || typeFilter !== "all" || paymentFilter !== "all" || monthFilter !== "all")
                 ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-input/50 text-muted-foreground"
             )}>
             <SlidersHorizontal className="w-4 h-4" />
@@ -292,6 +294,11 @@ export default function InvoiceList() {
               label: "Type", value: typeFilter,
               options: [{ label: "All Types", value: "all" }, { label: "Outward (Sales)", value: "OUTWARD" }, { label: "Inward (Purchases)", value: "INWARD" }],
               onChange: setTypeFilter,
+            },
+            {
+              label: "Payment", value: paymentFilter,
+              options: [{ label: "All Payments", value: "all" }, { label: "Bank", value: "bank" }, { label: "Cash", value: "cash" }, { label: "Credit (udhaar)", value: "credit" }, { label: "Mixed", value: "mixed" }, { label: "Not recorded", value: "none" }],
+              onChange: setPaymentFilter,
             },
             {
               label: "Business", value: bizFilter,
@@ -544,7 +551,7 @@ export default function InvoiceList() {
                           <td className={cn("text-[12px] tabular-nums", rateAnomalous ? "text-warning font-semibold" : "text-muted-foreground")} title={rateAnomalous ? "Not a standard GST slab — open the invoice to verify" : "Tax ÷ subtotal"}>
                             {ratePct > 0 ? rateLabel : "—"}
                           </td>
-                          <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span></td>
+                          <td><span className={cn("premium-badge", inv.type === "OUTWARD" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{inv.type}</span>{inv.paymentMode && <div className="text-[10px] text-muted-foreground capitalize mt-0.5">{inv.paymentMode}</div>}</td>
                       <td>
                         <div className="flex items-center gap-0.5">
                           <Link to={`/billing/invoice/${inv.id}`} aria-label="View invoice" className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>

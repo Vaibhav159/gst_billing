@@ -32,6 +32,7 @@ from billing.constants import (
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
+    normalize_payment_mode,
 )
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.tax_rules import is_interstate, normalize_tax_heads, state_code
@@ -800,6 +801,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         invoice_type = self.request.query_params.get("type_of_invoice")
         if invoice_type:
             queryset = queryset.filter(type_of_invoice=invoice_type)
+
+        # Filter by payment mode; "none" selects rows where it was never set.
+        payment_mode = self.request.query_params.get("payment_mode")
+        if payment_mode == "none":
+            queryset = queryset.filter(payment_mode="")
+        elif payment_mode:
+            queryset = queryset.filter(payment_mode=payment_mode)
 
         # Data-hygiene filters used by DataQualityBanner drill-down URLs:
         #   ?empty=1      → invoices with zero line items
@@ -3170,6 +3178,7 @@ class BulkInvoiceImportView(APIView):
                         business=business,
                         type_of_invoice=type_of_invoice,
                         total_amount=Decimal(str(inv_data.get("total", 0))),
+                        payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                         workspace_id=1,
                     )
                     invoices_to_create.append((invoice, inv_data))

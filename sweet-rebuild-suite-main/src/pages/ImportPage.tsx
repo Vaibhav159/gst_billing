@@ -1093,7 +1093,7 @@ export default function ImportPage({ type }: ImportPageProps) {
               {showPreview && (
                 <div className="max-h-[500px] overflow-auto rounded-xl border border-border/40">
                   <table className="w-full text-[11px]">
-                    <thead className="bg-secondary/50 sticky top-0 z-10">
+                    <thead className="bg-card border-b border-border/60 sticky top-0 z-10">
                       <tr>
                         <th className="px-2 py-2 text-left w-8">
                           <input

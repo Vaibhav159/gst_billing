@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, FileSpreadsheet, Plus, Pencil,
-  Check, X, UserPlus, Receipt, Upload, AlertCircle, TrendingUp, TrendingDown,
+  Check, X, UserPlus, Receipt, Upload, AlertCircle,
 } from "lucide-react";
 import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import type { Business, Customer } from "@/hooks/useDataStore";
@@ -34,6 +34,39 @@ function roundAmount(val: number): number {
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+function StatusChip({ label, count, className }: { label: string; count: number; className: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+      className, count === 0 && "opacity-40")}>
+      <span className="tabular-nums text-[12px]">{count}</span> {label}
+    </span>
+  );
+}
+
+const LEDGER_NUM = "px-3 py-1.5 text-right tabular-nums whitespace-nowrap";
+
+function SummaryLedgerRow({ label, dotClass, count, sums }: {
+  label: string; dotClass: string; count: number;
+  sums: { taxable: number; cgst: number; sgst: number; igst: number; total: number };
+}) {
+  return (
+    <tr className="border-t border-border/20 first:border-t-0">
+      <td className="px-3 py-1.5 whitespace-nowrap">
+        <span className="inline-flex items-center gap-2">
+          <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} aria-hidden />
+          {label}
+        </span>
+      </td>
+      <td className={cn(LEDGER_NUM, "text-muted-foreground")}>{count}</td>
+      <td className={LEDGER_NUM}>{fmt(sums.taxable)}</td>
+      <td className={LEDGER_NUM}>{fmt(sums.cgst)}</td>
+      <td className={LEDGER_NUM}>{fmt(sums.sgst)}</td>
+      <td className={LEDGER_NUM}>{fmt(sums.igst)}</td>
+      <td className={cn(LEDGER_NUM, "font-semibold")}>{fmt(sums.total)}</td>
+    </tr>
+  );
 }
 
 // ─── Fuzzy customer-name matching (suggest-only) ───────────────────────
@@ -450,54 +483,34 @@ export default function ImportReview() {
         </Link>
       </div>
 
-      {/* Status Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="elevated-card rounded-xl p-3">
-          <p className="text-[10px] text-muted-foreground uppercase font-semibold">Ready</p>
-          <p className="text-xl font-bold text-success">{readyCount}</p>
-        </div>
-        <div className="elevated-card rounded-xl p-3">
-          <p className="text-[10px] text-muted-foreground uppercase font-semibold">New Customers</p>
-          <p className="text-xl font-bold text-blue-500">{missingCustCount}</p>
-        </div>
-        <div className="elevated-card rounded-xl p-3">
-          <p className="text-[10px] text-muted-foreground uppercase font-semibold">Duplicates</p>
-          <p className="text-xl font-bold text-amber-500">{duplicateCount}</p>
-        </div>
-        <div className="elevated-card rounded-xl p-3">
-          <p className="text-[10px] text-muted-foreground uppercase font-semibold">No Business</p>
-          <p className="text-xl font-bold text-destructive">{missingBizCount}</p>
-        </div>
+      {/* Parse outcome at a glance: compact chips (zero counts recede),
+          then one aligned ledger — five money figures per row only stay
+          readable as real table columns, never as per-card mini-grids. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusChip label="Ready" count={readyCount} className="bg-success/10 text-success" />
+        <StatusChip label="New customers" count={missingCustCount} className="bg-blue-500/10 text-blue-600 dark:text-blue-400" />
+        <StatusChip label="Duplicates" count={duplicateCount} className="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
+        <StatusChip label="No business" count={missingBizCount} className="bg-destructive/10 text-destructive" />
       </div>
 
-      {/* Outward/Inward Totals for selected */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div className="elevated-card rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Outward ({outward.length})</span>
-          </div>
-          <div className="grid grid-cols-5 gap-2 text-[11px]">
-            <div><span className="text-muted-foreground block">Taxable</span><span className="font-semibold">{fmt(sumInvs(outward).taxable)}</span></div>
-            <div><span className="text-muted-foreground block">CGST</span><span>{fmt(sumInvs(outward).cgst)}</span></div>
-            <div><span className="text-muted-foreground block">SGST</span><span>{fmt(sumInvs(outward).sgst)}</span></div>
-            <div><span className="text-muted-foreground block">IGST</span><span>{fmt(sumInvs(outward).igst)}</span></div>
-            <div><span className="text-muted-foreground block">Total</span><span className="font-bold text-emerald-600">{fmt(sumInvs(outward).total)}</span></div>
-          </div>
-        </div>
-        <div className="elevated-card rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingDown className="w-4 h-4 text-blue-500" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Inward ({inward.length})</span>
-          </div>
-          <div className="grid grid-cols-5 gap-2 text-[11px]">
-            <div><span className="text-muted-foreground block">Taxable</span><span className="font-semibold">{fmt(sumInvs(inward).taxable)}</span></div>
-            <div><span className="text-muted-foreground block">CGST</span><span>{fmt(sumInvs(inward).cgst)}</span></div>
-            <div><span className="text-muted-foreground block">SGST</span><span>{fmt(sumInvs(inward).sgst)}</span></div>
-            <div><span className="text-muted-foreground block">IGST</span><span>{fmt(sumInvs(inward).igst)}</span></div>
-            <div><span className="text-muted-foreground block">Total</span><span className="font-bold text-blue-600">{fmt(sumInvs(inward).total)}</span></div>
-          </div>
-        </div>
+      <div className="rounded-xl border border-border/60 bg-card overflow-x-auto">
+        <table className="w-full min-w-[40rem] text-[12px]">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+              <th className="px-3 py-2 text-left font-semibold">Section</th>
+              <th className="px-3 py-2 text-right font-semibold">Invoices</th>
+              <th className="px-3 py-2 text-right font-semibold">Taxable</th>
+              <th className="px-3 py-2 text-right font-semibold">CGST</th>
+              <th className="px-3 py-2 text-right font-semibold">SGST</th>
+              <th className="px-3 py-2 text-right font-semibold">IGST</th>
+              <th className="px-3 py-2 text-right font-semibold">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <SummaryLedgerRow label="Outward" dotClass="bg-success" count={outward.length} sums={sumInvs(outward)} />
+            <SummaryLedgerRow label="Inward" dotClass="bg-blue-500" count={inward.length} sums={sumInvs(inward)} />
+          </tbody>
+        </table>
       </div>
 
       {/* Full Invoice Table */}
@@ -538,7 +551,7 @@ export default function ImportReview() {
 
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
-            <thead className="bg-secondary/50 sticky top-0 z-10">
+            <thead className="bg-card border-b border-border/60 sticky top-0 z-10">
               <tr>
                 <th className="px-3 py-2.5 text-left w-8">
                   <input type="checkbox" checked={selectedInvoices.size === (readyCount + missingCustCount) && (readyCount + missingCustCount) > 0} onChange={toggleAll} className="rounded" />
@@ -582,7 +595,7 @@ export default function ImportReview() {
                       <span className="inline-flex items-center gap-1">{statusIcon(v.status)}<span className="text-[10px]">{statusLabel(v.status)}</span></span>
                     </td>
                     <td className="px-3 py-2 font-medium text-primary">{inv.invoiceNumber}</td>
-                    <td className="px-3 py-2 tabular-nums">
+                    <td className="px-3 py-2 tabular-nums whitespace-nowrap">
                       {editingIdx === idx
                         ? <input type="date" value={editForm.date} onChange={e => setEditForm(p => ({ ...p, date: e.target.value }))} className="w-[120px] px-1.5 py-1 rounded bg-input border border-border text-[11px]" />
                         : inv.invoice_date
@@ -593,7 +606,7 @@ export default function ImportReview() {
                         <input type="text" value={editForm.party} onChange={e => setEditForm(p => ({ ...p, party: e.target.value }))} className="w-full px-1.5 py-1 rounded bg-input border border-border text-[11px]" />
                       ) : (
                         <div className="flex flex-col gap-0.5">
-                          <span className="truncate">{inv.customerName}{v.customerMatch && <span className="text-[9px] text-success ml-1">(matched)</span>}</span>
+                          <span className="inline-flex items-center gap-1 min-w-0"><span className="truncate">{inv.customerName}</span>{v.customerMatch && <Check className="w-3 h-3 text-success shrink-0" aria-label="Matched to an existing customer" />}</span>
                           {/* Fuzzy suggestion chip — only on unmatched rows.
                               One click rewrites the name to the canonical DB
                               customer so the backend links instead of dupes. */}
@@ -616,14 +629,14 @@ export default function ImportReview() {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 font-mono text-[10px] max-w-[110px] truncate" title={inv.customerGST}>
+                    <td className="px-3 py-2 font-mono text-[10px] whitespace-nowrap">
                       {editingIdx === idx
                         ? <input type="text" value={editForm.gst} onChange={e => setEditForm(p => ({ ...p, gst: e.target.value }))} className="w-full px-1.5 py-1 rounded bg-input border border-border text-[10px] font-mono" />
                         : inv.customerGST || "-"
                       }
                     </td>
                     <td className="px-3 py-2 max-w-[120px] truncate" title={inv.firmName}>
-                      {inv.firmName}{v.businessMatch && <span className="text-[9px] text-success ml-1">(ok)</span>}
+                      <span className="inline-flex items-center gap-1 min-w-0"><span className="truncate">{inv.firmName}</span>{v.businessMatch && <Check className="w-3 h-3 text-success shrink-0" aria-label="Firm matched" />}</span>
                     </td>
                     <td className="px-3 py-2 text-center">
                       {editingIdx === idx ? (
@@ -633,13 +646,22 @@ export default function ImportReview() {
                           <input type="number" value={editForm.rate} onChange={e => setEditForm(p => ({ ...p, rate: e.target.value }))} className="w-[65px] px-1 py-0.5 rounded bg-input border border-border text-[11px]" step="0.01" />
                         </div>
                       ) : (
-                        <>{inv.items.length}<span className="text-[9px] text-muted-foreground ml-0.5">({inv.items.map(i => `${i.qty}${i.unit || "gms"}`).join(", ")})</span></>
+                        (() => {
+                          const totalQty = inv.items.reduce((q, i) => q + (i.qty || 0), 0);
+                          const units = Array.from(new Set(inv.items.map(i => i.unit || "gms")));
+                          const qtyLabel = units.length === 1 ? `${fmt(totalQty)} ${units[0]}` : `${inv.items.length} units`;
+                          return (
+                            <span className="whitespace-nowrap" title={inv.items.map(i => `${i.qty} ${i.unit || "gms"} @ ₹${fmt(i.rate)}`).join("\n")}>
+                              {inv.items.length} · <span className="text-muted-foreground">{qtyLabel}</span>
+                            </span>
+                          );
+                        })()
                       )}
                     </td>
                     {/* Rate (₹ per unit). In edit mode the value is edited
                         in the Items cell above (qty @ rate); here we mirror
                         the live value muted so the column stays populated. */}
-                    <td className="px-3 py-2 text-right tabular-nums font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                    <td className="px-3 py-2 text-right tabular-nums text-[11px] text-muted-foreground whitespace-nowrap">
                       {editingIdx === idx ? (
                         <span className="opacity-70">{"₹"}{editForm.rate || 0}</span>
                       ) : (() => {
@@ -647,12 +669,12 @@ export default function ImportReview() {
                         if (rates.length === 0) return <span className="text-muted-foreground/50">-</span>;
                         const units = Array.from(new Set(inv.items.map(i => i.unit || "gms")));
                         const suffix = units.length === 1 ? `/${units[0]}` : "";
-                        return rates.length === 1
-                          ? <>{"₹"}{fmt(rates[0])}<span className="text-[9px] opacity-50">{suffix}</span></>
-                          : rates.map(r => `${"₹"}${fmt(r)}`).join(" / ");
+                        if (rates.length === 1) return <>{"₹"}{fmt(rates[0])}<span className="text-[9px] opacity-50">{suffix}</span></>;
+                        const lo = Math.min(...rates), hi = Math.max(...rates);
+                        return <span title={rates.map(r => `₹${fmt(r)}`).join(", ")}>{"₹"}{fmt(lo)}<span className="opacity-50">–</span>{fmt(hi)}</span>;
                       })()}
                     </td>
-                    <td className="px-3 py-2 text-center font-mono text-muted-foreground text-[11px]">
+                    <td className="px-3 py-2 text-center text-muted-foreground text-[11px] whitespace-nowrap">
                       {(() => {
                         const rates = Array.from(new Set(inv.items.map(i => i.gstRate))).filter(r => r > 0);
                         if (rates.length === 0) return <span className="text-destructive/70">?</span>;

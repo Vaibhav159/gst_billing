@@ -176,6 +176,7 @@ export default function InwardBills() {
               <TableHead>Supplier</TableHead>
               <TableHead>Firm</TableHead>
               <TableHead>Date</TableHead>
+              <TableHead>Payment</TableHead>
               <TableHead className="text-right">Taxable</TableHead>
               <TableHead className="text-right">Tax</TableHead>
               <TableHead className="text-right">Total</TableHead>
@@ -218,6 +219,7 @@ export default function InwardBills() {
                     </TableCell>
                     <TableCell className="text-sm">{b.business_name}</TableCell>
                     <TableCell className="text-sm whitespace-nowrap">{formatDate(b.invoice_date)}</TableCell>
+                    <TableCell className="text-sm capitalize text-muted-foreground">{b.payment_mode || "—"}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(parseFloat(b.taxable))}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatCurrency(parseFloat(tax))}
