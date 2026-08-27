@@ -42,7 +42,7 @@ export default function MobileHeader({ selectedFY, onFYChange }: MobileHeaderPro
   }, []);
 
   return (
-    <header className="sticky top-0 z-50 glass-nav">
+    <header className="sticky top-0 z-50 glass-nav safe-area-top">
       <div className="flex items-center justify-between h-14 px-4">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2.5">

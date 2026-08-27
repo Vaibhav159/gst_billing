@@ -42,7 +42,7 @@ export default function EasyHeader({ selectedFY, onFYChange }: EasyHeaderProps) 
   }, []);
 
   return (
-    <header className="sticky top-0 z-50 glass-nav">
+    <header className="sticky top-0 z-50 glass-nav safe-area-top">
       <div className="flex items-center justify-between h-14 px-4">
         <Link to="/" className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center glow-sm">

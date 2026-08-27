@@ -454,7 +454,7 @@
   }
 
   .premium-input {
-    @apply w-full h-10 px-4 rounded-xl border border-border bg-input/50 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-primary/50 backdrop-blur-sm transition-all;
+    @apply w-full h-10 px-4 rounded-xl border border-border bg-input/50 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-primary/50 transition-all;
   }
 
   /* Hide number input spinners */
@@ -469,7 +469,10 @@
   }
 
   .premium-select {
-    @apply h-10 px-4 rounded-xl border border-border bg-input/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-primary/50 backdrop-blur-sm transition-all;
+    /* No backdrop-blur here: the background below is opaque (blur would be
+       invisible), and backdrop-filter layers make WKWebView skip text
+       repaints — selected labels froze on iOS. */
+    @apply h-10 px-4 rounded-xl border border-border bg-input/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-primary/50 transition-all;
   }
 
   .premium-btn-primary {
@@ -575,6 +578,11 @@
 /* Safe area for mobile bottom nav */
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Safe area for the sticky top navbar (notch / Dynamic Island) */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* Mobile FAB */
