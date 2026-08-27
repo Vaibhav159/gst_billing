@@ -11,6 +11,10 @@ interface Props {
   onDownload: () => void;
   onClose: () => void;
   filename: string;
+  /** Optional cash/bank toggle rendered beside Download — the choice is
+      made at the moment of export, where it matters. */
+  splitChecked?: boolean;
+  onSplitChange?: (v: boolean) => void;
 }
 
 function fmt(n: number) {
@@ -33,7 +37,7 @@ interface SectionSums {
    ledger scannable, so every numeric cell goes through this one class. */
 const NUM = "px-3 py-2 text-right tabular-nums whitespace-nowrap";
 
-export default function ReportPreviewModal({ isOpen, invoices, businesses, customers, onDownload, onClose, filename }: Props) {
+export default function ReportPreviewModal({ isOpen, invoices, businesses, customers, onDownload, onClose, filename, splitChecked, onSplitChange }: Props) {
   const bizMap = useMemo(() => {
     const m: Record<string, Business> = {};
     businesses.forEach(b => (m[b.id] = b));
@@ -114,6 +118,12 @@ export default function ReportPreviewModal({ isOpen, invoices, businesses, custo
                   {filename} · {grand.count} {grand.count === 1 ? "invoice" : "invoices"}
                 </p>
               </div>
+              {onSplitChange && (
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none whitespace-nowrap">
+                  <input type="checkbox" checked={!!splitChecked} onChange={(e) => onSplitChange(e.target.checked)} className="rounded" />
+                  Cash/bank split
+                </label>
+              )}
               <button onClick={onDownload} className="premium-btn-primary text-[13px] h-9">
                 <Download className="w-3.5 h-3.5" /> Download Excel
               </button>

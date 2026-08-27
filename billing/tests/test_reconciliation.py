@@ -157,3 +157,17 @@ class SegmentFilterTest(BaseAPITestCase):
         nums = [i["invoice_number"] for i in b2c.data["results"]]
         self.assertIn("SEG-B2C", nums)
         self.assertNotIn("SEG-B2B", nums)
+
+
+class InterstateReconTest(BaseAPITestCase):
+    def test_igst_rows_flow_and_checks_pass(self):
+        rows = [
+            row(1, date(2025, 5, 1), "27X", "bank", [line("100000", igst=True)]),
+            row(2, date(2025, 8, 1), "", "cash", [line("50000")]),
+        ]
+        res = reconcile("2025-26", rows)
+        self.assertEqual(res.rollup["b2b"]["FY"].igst, D("3000.00"))
+        self.assertEqual(res.rollup["gstr3b"]["FY"].igst, D("3000.00"))
+        self.assertEqual(res.rollup["gstr3b"]["FY"].cgst, D("750.00"))
+        fails = [c for c in res.checks if c.status == "fail"]
+        self.assertFalse(fails, [f"{c.id}@{c.period}" for c in fails])

@@ -196,10 +196,18 @@ export default function Reports() {
     }
   };
 
+  const [includeSplit, setIncludeSplit] = useState<boolean>(() => {
+    try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; }
+  });
+  const toggleSplit = (v: boolean) => {
+    setIncludeSplit(v);
+    try { localStorage.setItem("gst_export_split_pref", v ? "1" : "0"); } catch { /* private mode */ }
+  };
+
   const handleConfirmDownload = () => {
     if (!previewInvoices) return;
     const filename = `GST Report ${selectedFY}.xlsx`;
-    downloadReportExcel({ invoices: previewInvoices, businesses, customers }, filename);
+    downloadReportExcel({ invoices: previewInvoices, businesses, customers }, filename, { includePayment: includeSplit });
     setShowPreview(false);
     // Log to audit
     api.post("audit-logs/log/", {
@@ -486,6 +494,8 @@ export default function Reports() {
         onDownload={handleConfirmDownload}
         onClose={() => setShowPreview(false)}
         filename={`GST Report ${selectedFY}.xlsx`}
+        splitChecked={includeSplit}
+        onSplitChange={toggleSplit}
       />
     </div>
   );
