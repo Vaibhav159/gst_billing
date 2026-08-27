@@ -6,6 +6,7 @@ from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 
 from .gstin_lookup import GstinLookupView
 from .search import QuickSearchView
+from .reconciliation import ReconciliationView
 from .inward_bills import (
     InwardCaptureDetailView,
     InwardCaptureListCreateView,
@@ -53,6 +54,7 @@ urlpatterns = [
     path("inward-captures/", InwardCaptureListCreateView.as_view(), name="inward-capture-list"),
     path("inward-captures/<int:pk>/", InwardCaptureDetailView.as_view(), name="inward-capture-detail"),
     path("search/quick/", QuickSearchView.as_view(), name="quick-search"),
+    path("reconciliation/", ReconciliationView.as_view(), name="reconciliation"),
     path("inward-bills/<int:pk>/", InwardBillDetailView.as_view(), name="inward-bill-detail"),
     path("", include(router.urls)),
     path(

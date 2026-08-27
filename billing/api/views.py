@@ -818,6 +818,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except Exception:
                 pass
 
+        # Reconciliation drill-down: B2B (customer holds a GSTIN) vs B2C.
+        segment = self.request.query_params.get("segment")
+        if segment == "b2b":
+            queryset = queryset.exclude(customer__gst_number__isnull=True).exclude(customer__gst_number="")
+        elif segment == "b2c":
+            queryset = queryset.filter(Q(customer__gst_number__isnull=True) | Q(customer__gst_number=""))
+
         # Filter by payment mode; "none" selects rows where it was never set.
         payment_mode = self.request.query_params.get("payment_mode")
         if payment_mode == "none":

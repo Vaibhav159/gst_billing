@@ -20,7 +20,7 @@ interface OutletCtx { selectedFY: string }
 const MONTHS = ["April","May","June","July","August","September","October","November","December","January","February","March"];
 const SHORT = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
-type TabKey = "summary" | "gstr1" | "gstr3b" | "gstr2b" | "itc-ledger" | "aging";
+type TabKey = "summary" | "gstr1" | "gstr3b" | "gstr2b" | "recon" | "itc-ledger" | "aging";
 
 interface ITCLedger {
   id?: number;
@@ -170,7 +170,7 @@ export default function GSTSummary() {
   // Tab is URL-driven so /billing/gstr-export?tab=gstr1 (etc.) deep-links work.
   const initialTab = (searchParams.get("tab") as TabKey) || "summary";
   const [activeTab, setActiveTab] = useState<TabKey>(
-    (["summary", "gstr1", "gstr3b", "gstr2b", "itc-ledger", "aging"] as const).includes(initialTab as any) ? initialTab : "summary"
+    (["summary", "gstr1", "gstr3b", "gstr2b", "recon", "itc-ledger", "aging"] as const).includes(initialTab as any) ? initialTab : "summary"
   );
   const setTab = (t: TabKey) => {
     setActiveTab(t);
@@ -260,7 +260,7 @@ export default function GSTSummary() {
     return { month: m, output: (found?.outward_total || 0) / 1000, itc: (found?.inward_total || 0) / 1000, isCurrent: m === SHORT[monthIdx] };
   });
 
-  const handleDownloadCSV = () => {
+  const handleDownloadCSV = async () => {
     // Header layout matches what a CA expects when reconciling against the
     // GST portal: taxable + tax components + the actual tax sum + the gross
     // invoice total. Previously this exported `r.total` under "Total Tax"
@@ -291,6 +291,24 @@ export default function GSTSummary() {
         Number(h.total).toFixed(2),
       ]);
     });
+    if (includeSplit) {
+      // The split rides the reconciliation endpoint so CSV and recon tab can
+      // never disagree; fetched on demand when the tab hasn't loaded it.
+      try {
+        let rd = reconData;
+        if (!rd) {
+          const params = new URLSearchParams({ fy: selectedFY });
+          if (bizFilter !== "all") params.set("business_id", bizFilter);
+          rd = (await api.get<any>(`reconciliation/?${params.toString()}`)).data;
+        }
+        rows.push([]);
+        rows.push(["PAYMENT SPLIT (cash / bank)"]);
+        rows.push(["Mode", "Invoices", "Gross", "Taxable", "CGST", "SGST", "Share %"]);
+        rd.payment_split.forEach((m: any) => {
+          rows.push([m.mode, m.invoice_count, m.gross, m.taxable, m.cgst, m.sgst, m.share_pct]);
+        });
+      } catch { /* split unavailable — export the plain report */ }
+    }
     const csv = rows.map((r: any) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `gst-summary-${selectedFY}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -406,11 +424,40 @@ export default function GSTSummary() {
     } finally { setBundleBusy(false); }
   };
 
+  // ── Sales Reconciliation (CA's year-end working) ──
+  const [reconData, setReconData] = useState<any>(null);
+  const [reconLoading, setReconLoading] = useState(false);
+  const reconKey = useRef("");
+  useEffect(() => {
+    if (activeTab !== "recon") return;
+    const key = `${selectedFY}|${bizFilter}`;
+    if (reconKey.current === key && reconData) return;
+    setReconLoading(true);
+    const params = new URLSearchParams({ fy: selectedFY });
+    if (bizFilter !== "all") params.set("business_id", bizFilter);
+    api.get<any>(`reconciliation/?${params.toString()}`)
+      .then((r) => { setReconData(r.data); reconKey.current = key; })
+      .catch(() => setReconData(null))
+      .finally(() => setReconLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedFY, bizFilter]);
+
+  // Cash/bank split toggle, shared by every export on this page; the last
+  // choice sticks so month-end muscle memory holds.
+  const [includeSplit, setIncludeSplit] = useState<boolean>(() => {
+    try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; }
+  });
+  const toggleSplit = (v: boolean) => {
+    setIncludeSplit(v);
+    try { localStorage.setItem("gst_export_split_pref", v ? "1" : "0"); } catch { /* private mode */ }
+  };
+
   const TABS: { key: TabKey; label: string }[] = [
     { key: "summary", label: "Summary" },
     { key: "gstr1", label: "GSTR-1 (Outward)" },
     { key: "gstr3b", label: "GSTR-3B (Tax)" },
     { key: "gstr2b", label: "GSTR-2B (Inward)" },
+    { key: "recon", label: "Reconciliation" },
     { key: "itc-ledger", label: "ITC Ledger" },
     { key: "aging", label: "ITC Aging" },
   ];
@@ -536,7 +583,12 @@ export default function GSTSummary() {
           </div>
         </div>
         {activeTab === "summary" && (
-          <button onClick={handleDownloadCSV} className={cn("premium-btn-primary text-[12px]", isMobile ? "h-9" : "")}><Download className="w-4 h-4" /> Download CSV</button>
+          <div className="flex items-center gap-2">
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
+              <input type="checkbox" checked={includeSplit} onChange={(e) => toggleSplit(e.target.checked)} className="rounded" /> Cash/bank split
+            </label>
+            <button onClick={handleDownloadCSV} className={cn("premium-btn-primary text-[12px]", isMobile ? "h-9" : "")}><Download className="w-4 h-4" /> Download CSV</button>
+          </div>
         )}
       </motion.div>
 
@@ -1127,6 +1179,164 @@ export default function GSTSummary() {
         )}
 
         {/* ITC Ledger tab — ECRRS opening balance editor (per business) */}
+        {/* Sales Reconciliation — the CA's year-end working, live */}
+        {activeTab === "recon" && (
+          <div className="p-5 space-y-4">
+            {reconLoading || !reconData ? (
+              <div className="p-10 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> {reconLoading ? "Reconciling…" : "No data for this year."}
+              </div>
+            ) : (() => {
+              const checks = reconData.checks as any[];
+              const fails = checks.filter((c) => c.status === "fail");
+              const roundings = checks.filter((c) => c.status === "rounding");
+              const qDates = (idx: number) => {
+                const y = parseInt(selectedFY.split("-")[0]);
+                const startM = 4 + idx * 3;
+                const sy = startM > 12 ? y + 1 : y;
+                const sm = ((startM - 1) % 12) + 1;
+                const em = sm + 2;
+                const ey = em > 12 ? y + 1 : sy;
+                const emm = ((em - 1) % 12) + 1;
+                const last = new Date(ey, emm, 0).getDate();
+                return { start: `${sy}-${String(sm).padStart(2, "0")}-01`, end: `${ey}-${String(emm).padStart(2, "0")}-${last}` };
+              };
+              const drill = (idx: number | null, segment?: string) => {
+                const p = new URLSearchParams({ type: "outward" });
+                if (idx !== null) { const d = qDates(idx); p.set("start_date", d.start); p.set("end_date", d.end); }
+                else { const y = parseInt(selectedFY.split("-")[0]); p.set("start_date", `${y}-04-01`); p.set("end_date", `${y + 1}-03-31`); }
+                if (segment) p.set("segment", segment);
+                if (bizFilter !== "all") p.set("business_id", bizFilter);
+                return `/billing/invoice/list?${p.toString()}`;
+              };
+              const num = (v: string) => formatCurrency(Number(v));
+              const Cell = ({ v, bold = false }: { v: string; bold?: boolean }) => (
+                <td className={cn("text-right tabular-nums whitespace-nowrap px-3 py-2", bold && "font-semibold")}>{num(v)}</td>
+              );
+              return (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold",
+                      fails.length ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success")}>
+                      {fails.length ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                      {fails.length ? `${fails.length} check${fails.length === 1 ? "" : "s"} failing` : "All checks tie out"}
+                    </span>
+                    {roundings.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 text-[12px] font-semibold">
+                        {roundings.length} rounding (≤ ₹1, exact paise shown below)
+                      </span>
+                    )}
+                    <label className="ml-auto inline-flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer select-none">
+                      <input type="checkbox" checked={includeSplit} onChange={(e) => toggleSplit(e.target.checked)} className="rounded" />
+                      Cash/bank split in export
+                    </label>
+                    <button
+                      onClick={async () => {
+                        const { downloadReconExcel } = await import("@/utils/generateReconExcel");
+                        downloadReconExcel(reconData, includeSplit);
+                        toast({ title: "Reconciliation exported", description: includeSplit ? "With the payment split." : "Plain, as the CA's sheet." });
+                      }}
+                      className="premium-btn-primary h-9 text-[12px]"
+                    ><FileJson className="w-3.5 h-3.5" /> Export Excel</button>
+                  </div>
+
+                  {(fails.length > 0 || roundings.length > 0) && (
+                    <div className="rounded-xl border border-border/60 bg-card overflow-x-auto">
+                      <table className="w-full min-w-[42rem] text-[12px]">
+                        <thead><tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                          <th className="px-3 py-2 text-left font-semibold">Check</th><th className="px-3 py-2 text-left font-semibold">Period</th>
+                          <th className="px-3 py-2 text-right font-semibold">Expected</th><th className="px-3 py-2 text-right font-semibold">Actual</th>
+                          <th className="px-3 py-2 text-right font-semibold">Difference</th>
+                        </tr></thead>
+                        <tbody>
+                          {[...fails, ...roundings].map((c, i) => (
+                            <tr key={i} className={cn("border-t border-border/20", c.status === "fail" && "bg-destructive/5")}>
+                              <td className="px-3 py-2">{c.label}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">{c.period}</td>
+                              <Cell v={c.expected} /><Cell v={c.actual} />
+                              <td className={cn("text-right tabular-nums px-3 py-2 font-semibold", c.status === "fail" ? "text-destructive" : "text-amber-600 dark:text-amber-400")}>{Number(c.difference) > 0 ? "+" : ""}{num(c.difference)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-border/60 bg-card overflow-x-auto">
+                    <table className="w-full min-w-[62rem] text-[12px]">
+                      <thead>
+                        <tr className="text-[11px] font-semibold text-muted-foreground border-b border-border/60">
+                          <th className="px-3 py-2 text-left" rowSpan={2}>PERIOD</th>
+                          <th className="px-3 py-1.5 text-center border-l border-border/40" colSpan={4}>GSTR-3B</th>
+                          <th className="px-3 py-1.5 text-center border-l border-border/40" colSpan={4}><RouterLink className="text-primary hover:underline" to={drill(null, "b2b")}>GSTR-1 B2B ↗</RouterLink></th>
+                          <th className="px-3 py-1.5 text-center border-l border-border/40" colSpan={4}><RouterLink className="text-primary hover:underline" to={drill(null, "b2c")}>GSTR-1 B2C ↗</RouterLink></th>
+                        </tr>
+                        <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                          {[0, 1, 2].map((b) => (["Taxable", "IGST", "CGST", "SGST"].map((h, k) => (
+                            <th key={`${b}-${k}`} className={cn("px-3 py-1.5 text-right font-semibold", k === 0 && "border-l border-border/40")}>{h}</th>
+                          ))))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reconData.quarters.map((q: any, idx: number) => (
+                          <tr key={q.label} className="border-t border-border/20">
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <RouterLink className="text-primary hover:underline" to={drill(idx)} title="Invoices in this quarter">{q.label}</RouterLink>
+                              <span className="text-muted-foreground text-[10px] ml-1.5">({q.invoice_count})</span>
+                            </td>
+                            {(["gstr3b", "b2b", "b2c"] as const).map((sec) => (
+                              ["taxable", "igst", "cgst", "sgst"].map((col, k) => (
+                                <td key={`${sec}-${col}`} className={cn("text-right tabular-nums whitespace-nowrap px-3 py-2", k === 0 && "border-l border-border/40")}>{num(q[sec][col])}</td>
+                              ))
+                            ))}
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-primary/40 font-semibold bg-primary/5">
+                          <td className="px-3 py-2">TOTAL <span className="text-muted-foreground text-[10px] font-normal">({reconData.total.invoice_count})</span></td>
+                          {(["gstr3b", "b2b", "b2c"] as const).map((sec) => (
+                            ["taxable", "igst", "cgst", "sgst"].map((col, k) => (
+                              <td key={`t-${sec}-${col}`} className={cn("text-right tabular-nums whitespace-nowrap px-3 py-2", k === 0 && "border-l border-border/40")}>{num(reconData.total[sec][col])}</td>
+                            ))
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-card overflow-x-auto">
+                    <table className="w-full min-w-[40rem] text-[12px]">
+                      <thead><tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                        <th className="px-3 py-2 text-left font-semibold">Payment mode</th>
+                        <th className="px-3 py-2 text-right font-semibold">Invoices</th>
+                        <th className="px-3 py-2 text-right font-semibold">Gross</th>
+                        <th className="px-3 py-2 text-right font-semibold">Taxable</th>
+                        <th className="px-3 py-2 text-right font-semibold">CGST</th>
+                        <th className="px-3 py-2 text-right font-semibold">SGST</th>
+                        <th className="px-3 py-2 text-right font-semibold">Share</th>
+                      </tr></thead>
+                      <tbody>
+                        {reconData.payment_split.map((m: any) => (
+                          <tr key={m.mode} className="border-t border-border/20">
+                            <td className="px-3 py-2 capitalize">{m.mode}</td>
+                            <td className="text-right tabular-nums px-3 py-2 text-muted-foreground">{m.invoice_count}</td>
+                            <Cell v={m.gross} /><Cell v={m.taxable} /><Cell v={m.cgst} /><Cell v={m.sgst} />
+                            <td className="text-right tabular-nums px-3 py-2">{Number(m.share_pct).toFixed(4)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {reconData.payment_split.some((m: any) => m.mode === "(not set)") && (
+                      <p className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border/20">
+                        "(not set)" are invoices recorded before payment modes existed — new invoices carry their mode automatically.
+                      </p>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
+
         {activeTab === "itc-ledger" && (
           <div className="p-5 space-y-5">
             <div>

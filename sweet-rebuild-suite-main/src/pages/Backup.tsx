@@ -124,7 +124,8 @@ export default function Backup() {
       const results = Array.isArray(res.data) ? res.data : (res.data.results || []);
       const fullInvoices = results.map(mapDjangoInvoice);
 
-      downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${new Date().toISOString().split("T")[0]}.xlsx`);
+      const includeSplit = (() => { try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; } })();
+      downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${new Date().toISOString().split("T")[0]}.xlsx`, { includePayment: includeSplit });
       toast({ title: "Excel Downloaded", description: `${fullInvoices.length} invoices exported.` });
     } catch (err) {
       logger.error("Excel export failed", err);

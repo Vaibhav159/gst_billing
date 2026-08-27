@@ -44,6 +44,14 @@ export default function InvoiceList() {
   const [custFilter, setCustFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
+  // Cash/bank split in the Excel export — sticky preference, off by default.
+  const [includeSplit, setIncludeSplit] = useState<boolean>(() => {
+    try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; }
+  });
+  const toggleSplit = (v: boolean) => {
+    setIncludeSplit(v);
+    try { localStorage.setItem("gst_export_split_pref", v ? "1" : "0"); } catch { /* private mode */ }
+  };
   const [fyFilter, setFyFilter] = useState(selectedFY);
   useEffect(() => { setFyFilter(selectedFY); }, [selectedFY]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -71,7 +79,8 @@ export default function InvoiceList() {
   const drillEnd = searchParams.get("end_date") || "";
   const drillBiz = searchParams.get("business_id") || "";
   const drillType = (searchParams.get("type") || "").toUpperCase();
-  const hasSlabDrill = !!gstRateParam;
+  const segParam = searchParams.get("segment") || "";
+  const hasSlabDrill = !!gstRateParam || !!segParam || !!(drillStart && drillEnd);
 
   // Build filters object for the API-driven hook.
   //
@@ -90,6 +99,7 @@ export default function InvoiceList() {
     typeFilter: hasSlabDrill && drillType ? drillType : typeFilter,
     paymentFilter,
     gstRate: gstRateParam || undefined,
+    segment: segParam || undefined,
     startDate: hasSlabDrill && drillStart ? drillStart : undefined,
     endDate: hasSlabDrill && drillEnd ? drillEnd : undefined,
     fyFilter: hasHygieneFilter || hasSlabDrill ? "all" : fyFilter,
@@ -97,7 +107,7 @@ export default function InvoiceList() {
     dups: dupsFilter || undefined,
     empty: emptyFilter || undefined,
     noHsn: noHsnFilter || undefined,
-  }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter, hasSlabDrill, gstRateParam, drillStart, drillEnd, drillBiz, drillType]);
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter, hasSlabDrill, gstRateParam, segParam, drillStart, drillEnd, drillBiz, drillType]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
@@ -175,7 +185,7 @@ export default function InvoiceList() {
       setSearchParams(searchParams, { replace: true });
     }
     if (hasSlabDrill) {
-      ["gst_rate", "start_date", "end_date", "business_id", "type"].forEach((k) => searchParams.delete(k));
+      ["gst_rate", "segment", "start_date", "end_date", "business_id", "type"].forEach((k) => searchParams.delete(k));
       setSearchParams(searchParams, { replace: true });
     }
   };
@@ -397,12 +407,19 @@ export default function InvoiceList() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Export ({filtered.length} {filtered.length === 1 ? "invoice" : "invoices"})</DropdownMenuLabel>
+              <label
+                className="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted-foreground cursor-pointer select-none hover:bg-secondary/40 rounded-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input type="checkbox" checked={includeSplit} onChange={(e) => toggleSplit(e.target.checked)} className="rounded" />
+                Cash/bank split in Excel
+              </label>
               <DropdownMenuItem onClick={handleExportCSV}>
                 <Download className="w-4 h-4 mr-2" /> Export to CSV
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => {
-                downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`);
-                toast({ title: "Excel Exported", description: `${filtered.length} invoices exported to Excel` });
+                downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`, { includePayment: includeSplit });
+                toast({ title: "Excel Exported", description: `${filtered.length} invoices${includeSplit ? " · with cash/bank split" : ""}` });
               }}>
                 <FileSpreadsheet className="w-4 h-4 mr-2" /> Export to Excel
               </DropdownMenuItem>
@@ -476,9 +493,9 @@ export default function InvoiceList() {
       {hasSlabDrill && (
         <div className="flex items-center gap-2 text-[12px]">
           <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 text-primary border border-primary/25 px-3 py-1.5 font-semibold">
-            Drill-down: {gstRateParam}% slab{drillStart && ` · ${drillStart} → ${drillEnd}`}
+            Drill-down: {gstRateParam ? `${gstRateParam}% slab` : segParam ? segParam.toUpperCase() : "period"}{drillStart && ` · ${drillStart} → ${drillEnd}`}
             <button
-              onClick={() => { ["gst_rate", "start_date", "end_date", "business_id", "type"].forEach((k) => searchParams.delete(k)); setSearchParams(searchParams, { replace: true }); }}
+              onClick={() => { ["gst_rate", "segment", "start_date", "end_date", "business_id", "type"].forEach((k) => searchParams.delete(k)); setSearchParams(searchParams, { replace: true }); }}
               aria-label="Clear drill-down"
               className="hover:text-foreground"
             >✕</button>
