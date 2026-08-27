@@ -41,6 +41,7 @@ const InvoiceForm = lazy(() => import("@/pages/InvoiceForm"));
 const AIInvoiceImport = lazy(() => import("@/pages/AIInvoiceImport"));
 const InwardBills = lazy(() => import("@/pages/InwardBills"));
 const InwardBillAdd = lazy(() => import("@/pages/InwardBillAdd"));
+const CaptureBill = lazy(() => import("@/pages/CaptureBill"));
 const InwardBillDetail = lazy(() => import("@/pages/InwardBillDetail"));
 const UserManagement = lazy(() => import("@/pages/UserManagement"));
 const ImportPreview = lazy(() => import("@/pages/ImportPreview"));
@@ -127,6 +128,7 @@ const App = () => (
                     {/* Inward Bills (purchase register + capture) */}
                     <Route path="/billing/inward-bills" element={<InwardBills />} />
                     <Route path="/billing/inward-bills/add" element={<InwardBillAdd />} />
+                    <Route path="/billing/inward-bills/capture" element={<CaptureBill />} />
                     <Route path="/billing/inward-bills/:id" element={<InwardBillDetail />} />
 
                     <Route path="/billing/import/review" element={<ImportReview />} />

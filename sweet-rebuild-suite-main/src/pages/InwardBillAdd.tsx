@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { isIntraState } from "@/utils/taxRules";
 import { useGstinLookup } from "@/hooks/useGstinLookup";
 import GstinStatus from "@/components/GstinStatus";
-import { useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Upload, Loader2, AlertTriangle, Trash2, Plus, ArrowLeft, Save, FileCheck, PenLine } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -17,7 +17,8 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/utils/mockData";
 import {
-  extractInwardBill, createInwardBill, type ExtractResult,
+  extractInwardBill, createInwardBill, extractInwardCapture, getCapture,
+  type ExtractResult, type InwardCaptureRow,
 } from "@/hooks/useInwardBills";
 
 interface FormLine {
@@ -37,6 +38,10 @@ export default function InwardBillAdd() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { items: businesses } = useBusinesses();
+
+  const [searchParams] = useSearchParams();
+  const captureId = searchParams.get("capture") || "";
+  const [capture, setCapture] = useState<InwardCaptureRow | null>(null);
 
   const [business, setBusiness] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -86,6 +91,65 @@ export default function InwardBillAdd() {
     return { taxable, cgst, sgst, igst, total: taxable + cgst + sgst + igst };
   }, [lines, intra]);
 
+  // Converting a phone capture: pull the stored photo through the same AI
+  // extract the upload path uses, and carry capture_id into the save so the
+  // photo rides onto the invoice and the capture leaves the inbox.
+  useEffect(() => {
+    if (!captureId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const cap = await getCapture(captureId);
+        if (!alive) return;
+        setCapture(cap);
+        if (cap.business) setBusiness(String(cap.business));
+        if (cap.supplier_hint) setSupplierName(cap.supplier_hint);
+        setExtracting(true);
+        try {
+          const res = await extractInwardCapture(captureId, cap.business ? String(cap.business) : "");
+          if (!alive) return;
+          applyExtract(res);
+          if (cap.supplier_hint && !res.supplier.name) setSupplierName(cap.supplier_hint);
+        } catch {
+          setReady(true);
+          toast({ title: "Couldn't auto-read the photo", description: "Fill the details manually — the photo still attaches to the bill." });
+        } finally {
+          if (alive) setExtracting(false);
+        }
+      } catch {
+        toast({ title: "Capture not found", variant: "destructive" });
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureId]);
+
+  function applyExtract(res: ExtractResult) {
+    setSupplierName(res.supplier.name || "");
+    setSupplierGstin((res.supplier.gstin || "").toUpperCase());
+    setSupplierAddress(res.supplier.address || "");
+    setInvoiceNumber(res.invoice_number || "");
+    setInvoiceDate(normalizeDate(res.invoice_date));
+    setLines(
+      res.line_items.length
+        ? res.line_items.map((li) => ({
+            product_name: li.product_name || "",
+            hsn_code: li.hsn_code || "",
+            quantity: li.quantity ? String(li.quantity) : "",
+            rate: li.rate ? String(li.rate) : "",
+            gst_tax_rate: li.gst_tax_rate ? String(li.gst_tax_rate) : "0.03",
+            unit: "gms",
+          }))
+        : [{ ...emptyLine }],
+    );
+    setWarnings(res.warnings);
+    setAckMismatch(false);
+    setReady(true);
+    if (res.warnings.extraction_failed) {
+      toast({ title: "Couldn't auto-read this file", description: "Fill the details in manually — the file is still saved with the bill." });
+    }
+  }
+
   async function handleFile(f: File | null) {
     setFile(f);
     if (!f) return;
@@ -96,31 +160,11 @@ export default function InwardBillAdd() {
     setExtracting(true);
     try {
       const res = await extractInwardBill(f, business);
-      setSupplierName(res.supplier.name || "");
-      setSupplierGstin((res.supplier.gstin || "").toUpperCase());
-      setSupplierAddress(res.supplier.address || "");
-      setInvoiceNumber(res.invoice_number || "");
-      setInvoiceDate(normalizeDate(res.invoice_date));
-      setLines(
-        res.line_items.length
-          ? res.line_items.map((li) => ({
-              product_name: li.product_name || "",
-              hsn_code: li.hsn_code || "",
-              quantity: li.quantity ? String(li.quantity) : "",
-              rate: li.rate ? String(li.rate) : "",
-              gst_tax_rate: li.gst_tax_rate ? String(li.gst_tax_rate) : "0.03",
-              unit: "gms",
-            }))
-          : [{ ...emptyLine }],
-      );
-      setWarnings(res.warnings);
-      setAckMismatch(false);
-      setReady(true);
-      if (res.warnings.extraction_failed) {
-        toast({ title: "Couldn't auto-read this file", description: "Fill the details in manually — the file is still saved with the bill." });
-      }
+      applyExtract(res);
+      return;
     } catch (e: any) {
       toast({ title: "Extraction failed", description: e?.response?.data?.error || "Upload a PDF, JPEG, PNG, or HEIC.", variant: "destructive" });
+      return;
     } finally {
       setExtracting(false);
     }
@@ -165,6 +209,7 @@ export default function InwardBillAdd() {
       );
       if (override || warnings.gstin_mismatch) fd.append("override_warnings", "true");
       if (file) fd.append("file", file, file.name);
+      if (captureId) fd.append("capture_id", captureId);
       const bill = await createInwardBill(fd);
       toast({ title: "Inward bill saved", description: `#${bill.invoice_number} recorded.` });
       navigate(`/billing/inward-bills/${bill.id}`);
@@ -205,6 +250,19 @@ export default function InwardBillAdd() {
             </Select>
           </div>
           <div className="space-y-1.5">
+            {capture && (
+              <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/20 p-2.5">
+                <a href={capture.image_url} target="_blank" rel="noreferrer" title="Open the captured photo">
+                  <img src={capture.image_url} alt="Captured bill" className="w-14 h-14 rounded-lg object-cover border border-border/50" />
+                </a>
+                <div className="min-w-0 text-[12px]">
+                  <p className="font-medium">Converting capture #{capture.id}</p>
+                  <p className="text-muted-foreground truncate" title={capture.note || undefined}>
+                    {capture.supplier_hint || "No supplier hint"}{capture.note ? ` · ${capture.note}` : ""} — the photo attaches to this bill on save.
+                  </p>
+                </div>
+              </div>
+            )}
             <Label>Bill file (PDF / image / HEIC)</Label>
             <label className="flex items-center gap-2 border rounded-md px-3 h-10 cursor-pointer hover:bg-accent text-sm">
               {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}

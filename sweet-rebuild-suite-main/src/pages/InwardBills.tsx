@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Plus, Search, FileText, Paperclip, Loader2, ReceiptText } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search, FileText, Paperclip, Loader2, ReceiptText, Camera, Trash2, Pencil } from "lucide-react";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,13 +12,19 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useBusinesses } from "@/hooks/useDataStore";
-import { useInwardBills } from "@/hooks/useInwardBills";
+import { listCaptures, deleteCapture, type InwardCaptureRow, useInwardBills } from "@/hooks/useInwardBills";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 
 export default function InwardBills() {
   const navigate = useNavigate();
+  const [captures, setCaptures] = useState<InwardCaptureRow[]>([]);
+  useEffect(() => {
+    let alive = true;
+    listCaptures().then((r) => { if (alive) setCaptures(r.results); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const isMobile = useIsMobile();
   const { items: businesses } = useBusinesses();
   // The global FY selector (top bar) scopes every register; this page used to
@@ -87,10 +93,42 @@ export default function InwardBills() {
             {fyRange && !dateFrom && !dateTo ? ` in FY ${selectedFY}` : " on record"}
           </p>
         </div>
+        <Button variant="outline" onClick={() => navigate("/billing/inward-bills/capture")}>
+          <Camera className="h-4 w-4 mr-1.5" /> Capture
+        </Button>
         <Button onClick={() => navigate("/billing/inward-bills/add")}>
           <Plus className="h-4 w-4 mr-1.5" /> Add Inward Bill
         </Button>
       </div>
+
+      {captures.length > 0 && (
+        <div className="elevated-card rounded-2xl p-4 space-y-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Captures inbox · {captures.length} waiting
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {captures.map((c) => (
+              <div key={c.id} className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/15 p-2.5">
+                <a href={c.image_url} target="_blank" rel="noreferrer" className="shrink-0" title="Open photo">
+                  <img src={c.image_url} alt="Captured bill" className="w-12 h-12 rounded-lg object-cover border border-border/50" />
+                </a>
+                <div className="flex-1 min-w-0 text-[12px]">
+                  <p className="font-medium truncate" title={c.supplier_hint || undefined}>{c.supplier_hint || "Unknown supplier"}</p>
+                  <p className="text-muted-foreground truncate" title={c.note || undefined}>
+                    {c.business_name || "Firm TBD"}{c.note ? ` · ${c.note}` : ""} · {new Date(c.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                  </p>
+                </div>
+                <button onClick={() => navigate(`/billing/inward-bills/add?capture=${c.id}`)} className="premium-btn-ghost h-8 text-[12px]" title="Fill in the bill from this photo"><Pencil className="w-3.5 h-3.5" /> Fill in</button>
+                <button
+                  onClick={async () => { if (window.confirm("Discard this capture? The photo is deleted.")) { await deleteCapture(c.id); setCaptures((p) => p.filter((x) => x.id !== c.id)); } }}
+                  className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  aria-label="Discard capture"
+                ><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]">

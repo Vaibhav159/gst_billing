@@ -5,7 +5,10 @@ from rest_framework_simplejwt.views import TokenVerifyView
 from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 
 from .gstin_lookup import GstinLookupView
+from .search import QuickSearchView
 from .inward_bills import (
+    InwardCaptureDetailView,
+    InwardCaptureListCreateView,
     InwardBillDetailView,
     InwardBillExtractView,
     InwardBillListCreateView,
@@ -47,6 +50,9 @@ urlpatterns = [
     # Inward Bills module (explicit paths BEFORE router)
     path("inward-bills/", InwardBillListCreateView.as_view(), name="inward-bill-list"),
     path("inward-bills/extract/", InwardBillExtractView.as_view(), name="inward-bill-extract"),
+    path("inward-captures/", InwardCaptureListCreateView.as_view(), name="inward-capture-list"),
+    path("inward-captures/<int:pk>/", InwardCaptureDetailView.as_view(), name="inward-capture-detail"),
+    path("search/quick/", QuickSearchView.as_view(), name="quick-search"),
     path("inward-bills/<int:pk>/", InwardBillDetailView.as_view(), name="inward-bill-detail"),
     path("", include(router.urls)),
     path(
