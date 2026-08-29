@@ -34,8 +34,9 @@ from billing.constants import (
     INVOICE_TYPE_OUTWARD,
     normalize_payment_mode,
 )
-from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
+from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
 from billing.tax_rules import is_interstate, normalize_tax_heads, state_code
+from billing.period_lock import assert_period_unlocked, locked_period_or_none
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -48,6 +49,7 @@ from billing.utils import (
 from .mixins import AuditLogMixin
 from .permissions import RoleBasedPermission, AdminOnlyPermission, get_user_role
 from .serializers import (
+    FiledPeriodSerializer,
     AuditLogSerializer,
     BusinessSerializer,
     CustomerSerializer,
@@ -802,6 +804,20 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if invoice_type:
             queryset = queryset.filter(type_of_invoice=invoice_type)
 
+        # Reconciliation drill-down: invoices whose lines carry a given GST
+        # slab (percent, e.g. 3). Rates are stored as fractions (0.03), so
+        # accept both spellings. distinct() because the join can multiply.
+        gst_rate = self.request.query_params.get("gst_rate")
+        if gst_rate:
+            try:
+                pct = Decimal(str(gst_rate))
+                frac = pct / 100
+                queryset = queryset.filter(
+                    Q(lineitem__gst_tax_rate=frac) | Q(lineitem__gst_tax_rate=pct)
+                ).distinct()
+            except Exception:
+                pass
+
         # Filter by payment mode; "none" selects rows where it was never set.
         payment_mode = self.request.query_params.get("payment_mode")
         if payment_mode == "none":
@@ -901,6 +917,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # the serializer doesn't know about them, and DRF would 400 on extras
         # if we ever turn on strict validation.
         payload = {k: v for k, v in request.data.items() if k != "line_items"}
+        assert_period_unlocked(payload.get("business"), payload.get("invoice_date"), "create")
         serializer = self.get_serializer(data=payload)
         serializer.is_valid(raise_exception=True)
 
@@ -967,6 +984,21 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         headers = self.get_success_headers(out.data)
         return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    def perform_update(self, serializer):
+        inst = serializer.instance
+        assert_period_unlocked(inst.business_id, inst.invoice_date, "edit")
+        vd = serializer.validated_data
+        assert_period_unlocked(
+            getattr(vd.get("business"), "id", None) or inst.business_id,
+            vd.get("invoice_date") or inst.invoice_date,
+            "edit",
+        )
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        assert_period_unlocked(instance.business_id, instance.invoice_date, "delete")
+        super().perform_destroy(instance)
+
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
         """
@@ -980,6 +1012,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         audit-log entry.
         """
         invoice = self.get_object()
+        assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
+        _incoming = request.data.get("invoice") or {}
+        assert_period_unlocked(
+            _incoming.get("business") or invoice.business_id,
+            _incoming.get("invoice_date") or invoice.invoice_date,
+            "edit",
+        )
         line_items_data = request.data.get("line_items", [])
         invoice_data = request.data.get("invoice", {})
 
@@ -2416,10 +2455,23 @@ class LineItemViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def perform_update(self, serializer):
+        inv = serializer.instance.invoice
+        assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        inv = instance.invoice
+        assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
+        super().perform_destroy(instance)
+
     def create(self, request, *args, **kwargs):
         # Get invoice_id from URL path if available
         invoice_id = self.kwargs.get("invoice_id")
         if invoice_id:
+            _inv = Invoice.objects.filter(id=invoice_id).only("business_id", "invoice_date").first()
+            if _inv:
+                assert_period_unlocked(_inv.business_id, _inv.invoice_date, "edit")
             try:
                 # Use the LineItem.create_line_item_for_invoice method directly
                 # This method handles all the calculations and validations
@@ -3174,6 +3226,16 @@ class BulkInvoiceImportView(APIView):
                         skipped_count += 1
                         continue
 
+                    # Filed-and-locked month: never silently mutate a filed
+                    # period from a bulk sheet — surface it as a row error.
+                    if locked_period_or_none(business.pk, str(invoice_date)):
+                        skipped_count += 1
+                        errors.append(
+                            f"Invoice {invoice_number}: its month is filed & locked "
+                            f"for {business.name} — unlock on the GST page to import it."
+                        )
+                        continue
+
                     # Build invoice in memory; bulk_create later
                     invoice = Invoice(
                         invoice_number=invoice_number,
@@ -3893,6 +3955,7 @@ class AIInvoiceCreateView(APIView):
                 ).first()
                 if mirror_existing is not None:
                     return mirror_existing.id, True
+                assert_period_unlocked(buyer_business.id, inv_date, "create")
                 mirror = Invoice.objects.create(
                     customer=supplier_cust,
                     business=buyer_business,
@@ -3976,6 +4039,7 @@ class AIInvoiceCreateView(APIView):
                     }
                 )
 
+            assert_period_unlocked(business.id, inv_date, "create")
             invoice = Invoice.objects.create(
                 customer=customer,
                 business=business,
@@ -4473,3 +4537,44 @@ class UserManagementView(APIView):
             "is_active": user.is_active,
             "message": "User updated",
         })
+
+
+class FiledPeriodViewSet(viewsets.ModelViewSet):
+    """Lock/unlock filed months. Every transition is audit-logged —
+    the unlock trail is the whole point."""
+
+    queryset = FiledPeriod.objects.select_related("business").order_by(
+        "business__name", "-year", "-month"
+    )
+    serializer_class = FiledPeriodSerializer
+    permission_classes = [RoleBasedPermission]
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        business_id = self.request.query_params.get("business_id")
+        if business_id:
+            qs = qs.filter(business_id=business_id)
+        year = self.request.query_params.get("year")
+        if year:
+            qs = qs.filter(year=year)
+        return qs
+
+    def perform_create(self, serializer):
+        period = serializer.save(workspace_id=1)
+        AuditLog.objects.create(
+            action="locked", entity="period", entity_id=period.id,
+            entity_name=f"{period.business.name} {period.month:02d}/{period.year}",
+            user=self.request.user if self.request.user.is_authenticated else None,
+            details=f"Month marked as filed & locked. {('Note: ' + period.note) if period.note else ''}".strip(),
+        )
+
+    def perform_destroy(self, instance):
+        label = f"{instance.business.name} {instance.month:02d}/{instance.year}"
+        pid = instance.id
+        instance.delete()
+        AuditLog.objects.create(
+            action="unlocked", entity="period", entity_id=pid, entity_name=label,
+            user=self.request.user if self.request.user.is_authenticated else None,
+            details="Filed month unlocked for corrections — re-lock after editing.",
+        )

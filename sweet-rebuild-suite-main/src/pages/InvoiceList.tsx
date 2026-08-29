@@ -63,6 +63,15 @@ export default function InvoiceList() {
   const emptyFilter = searchParams.get("empty") === "1";
   const noHsnFilter = searchParams.get("no_hsn") === "1";
   const hasHygieneFilter = dupsFilter || emptyFilter || noHsnFilter;
+  // Reconciliation drill-down from the GST page: ?gst_rate=3&start_date=…&
+  // end_date=…&business_id=…&type=outward lands here pre-filtered to the
+  // exact invoices behind a rate-slab figure.
+  const gstRateParam = searchParams.get("gst_rate") || "";
+  const drillStart = searchParams.get("start_date") || "";
+  const drillEnd = searchParams.get("end_date") || "";
+  const drillBiz = searchParams.get("business_id") || "";
+  const drillType = (searchParams.get("type") || "").toUpperCase();
+  const hasSlabDrill = !!gstRateParam;
 
   // Build filters object for the API-driven hook.
   //
@@ -76,16 +85,19 @@ export default function InvoiceList() {
   // count the user came here from.
   const apiFilters: InvoiceFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
-    businessId: bizFilter,
+    businessId: hasSlabDrill && drillBiz ? drillBiz : bizFilter,
     customerId: custFilter,
-    typeFilter,
+    typeFilter: hasSlabDrill && drillType ? drillType : typeFilter,
     paymentFilter,
-    fyFilter: hasHygieneFilter ? "all" : fyFilter,
-    monthFilter: hasHygieneFilter ? "all" : monthFilter,
+    gstRate: gstRateParam || undefined,
+    startDate: hasSlabDrill && drillStart ? drillStart : undefined,
+    endDate: hasSlabDrill && drillEnd ? drillEnd : undefined,
+    fyFilter: hasHygieneFilter || hasSlabDrill ? "all" : fyFilter,
+    monthFilter: hasHygieneFilter || hasSlabDrill ? "all" : monthFilter,
     dups: dupsFilter || undefined,
     empty: emptyFilter || undefined,
     noHsn: noHsnFilter || undefined,
-  }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter]);
+  }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter, hasSlabDrill, gstRateParam, drillStart, drillEnd, drillBiz, drillType]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
@@ -160,6 +172,10 @@ export default function InvoiceList() {
     // Also drop hygiene URL params so "Clear" really does clear everything.
     if (hasHygieneFilter) {
       searchParams.delete("dups"); searchParams.delete("empty"); searchParams.delete("no_hsn");
+      setSearchParams(searchParams, { replace: true });
+    }
+    if (hasSlabDrill) {
+      ["gst_rate", "start_date", "end_date", "business_id", "type"].forEach((k) => searchParams.delete(k));
       setSearchParams(searchParams, { replace: true });
     }
   };
@@ -456,6 +472,20 @@ export default function InvoiceList() {
           );
         })}
       </div>
+
+      {hasSlabDrill && (
+        <div className="flex items-center gap-2 text-[12px]">
+          <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 text-primary border border-primary/25 px-3 py-1.5 font-semibold">
+            Drill-down: {gstRateParam}% slab{drillStart && ` · ${drillStart} → ${drillEnd}`}
+            <button
+              onClick={() => { ["gst_rate", "start_date", "end_date", "business_id", "type"].forEach((k) => searchParams.delete(k)); setSearchParams(searchParams, { replace: true }); }}
+              aria-label="Clear drill-down"
+              className="hover:text-foreground"
+            >✕</button>
+          </span>
+          <span className="text-muted-foreground">Every invoice behind that GST-page figure — nothing more, nothing less.</span>
+        </div>
+      )}
 
       <div className="elevated-card rounded-2xl p-4 space-y-2.5">
         <div className="flex items-center gap-2.5">

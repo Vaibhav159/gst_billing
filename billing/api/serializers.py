@@ -5,7 +5,7 @@ from decimal import Decimal
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from billing.models import Business, Customer, Invoice, ITCReclaimLedger, LineItem, Product
+from billing.models import FiledPeriod, Business, Customer, Invoice, ITCReclaimLedger, LineItem, Product
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -299,3 +299,17 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token["full_name"] = user.get_full_name() or user.username
         token["role"] = get_user_role(user)
         return token
+
+
+class FiledPeriodSerializer(serializers.ModelSerializer):
+    business_name = serializers.CharField(source="business.name", read_only=True)
+
+    class Meta:
+        model = FiledPeriod
+        fields = ["id", "business", "business_name", "year", "month", "note", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_month(self, v):
+        if not 1 <= v <= 12:
+            raise serializers.ValidationError("month must be 1-12")
+        return v

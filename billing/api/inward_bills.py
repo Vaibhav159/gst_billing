@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
+from billing.period_lock import assert_period_unlocked
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.utils import AIInvoiceProcessor
 
@@ -178,6 +179,7 @@ class InwardBillListCreateView(APIView):
         bill_total = Decimal(str(bill_total)) if bill_total not in (None, "") else None
         computed, total = compute_lines(service_lines, intra=intra, bill_total=bill_total)
 
+        assert_period_unlocked(business.id, invoice_date, "create")
         invoice = Invoice.objects.create(
             workspace_id=WORKSPACE_ID, business=business, customer=supplier,
             invoice_number=invoice_number, invoice_date=invoice_date,

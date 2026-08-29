@@ -7,7 +7,7 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2, XCircle, Pencil } from "lucide-react";
+import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2, XCircle, Pencil, Lock } from "lucide-react";
 import { Link as RouterLink } from "react-router-dom";
 import DateRangePicker from "@/components/DateRangePicker";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
@@ -340,6 +340,72 @@ export default function GSTSummary() {
     }
   };
 
+  // ── Filed-period lock: the month the CA filed is the month nobody edits.
+  const periodSelected = portalReady; // one business + one specific month
+  const lockY = monthIdx < 9 ? fyStart : fyStart + 1;
+  const lockM = monthIdx < 9 ? monthIdx + 4 : monthIdx - 8;
+  const [filedPeriods, setFiledPeriods] = useState<any[]>([]);
+  const [lockBusy, setLockBusy] = useState(false);
+  const refreshFiled = useCallback(() => {
+    if (bizFilter === "all") { setFiledPeriods([]); return; }
+    api.get<any>(`filed-periods/?business_id=${bizFilter}`)
+      .then((r) => setFiledPeriods(r.data?.results ?? r.data ?? []))
+      .catch(() => setFiledPeriods([]));
+  }, [bizFilter]);
+  useEffect(() => { refreshFiled(); }, [refreshFiled]);
+  const lockedPeriod = periodSelected
+    ? filedPeriods.find((p) => Number(p.year) === lockY && Number(p.month) === lockM)
+    : undefined;
+
+  const handleLockMonth = async () => {
+    if (!periodSelected || lockBusy) return;
+    setLockBusy(true);
+    try {
+      await api.post("filed-periods/", { business: Number(bizFilter), year: lockY, month: lockM });
+      toast({ title: "Month locked", description: `${selectedMonth} ${lockY} is now filed & locked — edits in it will be refused.` });
+      refreshFiled();
+    } catch (e: any) {
+      toast({ title: "Lock failed", description: e?.response?.data?.detail || "Could not lock the month", variant: "destructive" });
+    } finally { setLockBusy(false); }
+  };
+  const handleUnlockMonth = async () => {
+    if (!lockedPeriod || lockBusy) return;
+    if (!window.confirm(`Unlock ${selectedMonth} ${lockY}? The filed return will no longer be protected from edits. This is audit-logged.`)) return;
+    setLockBusy(true);
+    try {
+      await api.delete(`filed-periods/${lockedPeriod.id}/`);
+      toast({ title: "Month unlocked", description: "Re-lock after making the correction." });
+      refreshFiled();
+    } catch {
+      toast({ title: "Unlock failed", variant: "destructive" });
+    } finally { setLockBusy(false); }
+  };
+
+  // ── CA bundle: the three files the CA actually wants, one click. ──
+  const [bundleBusy, setBundleBusy] = useState(false);
+  const handleCABundle = async () => {
+    if (!periodSelected || bundleBusy) return;
+    setBundleBusy(true);
+    try {
+      const fp = `${String(lockM).padStart(2, "0")}${lockY}`;
+      const dl = (obj: any, name: string) => {
+        const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+        URL.revokeObjectURL(url);
+      };
+      const portal = await api.get<any>(`invoices/gstr1-portal-json/?business_id=${bizFilter}&month=${lockM}&year=${lockY}`);
+      dl(portal.data.file, `CA_${portal.data.meta.gstin}_${fp}_GSTR1_portal.json`);
+      const params = new URLSearchParams({ start_date: startDate, end_date: endDate, business_id: String(bizFilter) });
+      const ex = await api.get<any>(`invoices/gstr_export/?${params.toString()}`);
+      dl(ex.data.gstr3b, `CA_${portal.data.meta.gstin}_${fp}_GSTR3B.json`);
+      handleDownloadCSV();
+      toast({ title: "CA bundle downloaded", description: "GSTR-1 portal JSON, GSTR-3B JSON and the summary CSV — same period, same names." });
+    } catch (e: any) {
+      toast({ title: "Bundle failed", description: e?.response?.data?.error || "Could not build the bundle", variant: "destructive" });
+    } finally { setBundleBusy(false); }
+  };
+
   const TABS: { key: TabKey; label: string }[] = [
     { key: "summary", label: "Summary" },
     { key: "gstr1", label: "GSTR-1 (Outward)" },
@@ -504,6 +570,28 @@ export default function GSTSummary() {
           </div>
         )}
       </motion.div>
+
+      {/* Filed-period lock + CA bundle: exists only at the granularity a
+          return is filed at — one business, one month. */}
+      {periodSelected && (
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          {lockedPeriod ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 text-success border border-success/25 px-3 py-1.5 font-semibold">
+                <Lock className="w-3.5 h-3.5" /> {selectedMonth} {lockY} — filed &amp; locked
+              </span>
+              <button onClick={handleUnlockMonth} disabled={lockBusy} className="premium-btn-ghost h-8 text-[12px] disabled:opacity-50">Unlock…</button>
+            </>
+          ) : (
+            <button onClick={handleLockMonth} disabled={lockBusy} className="premium-btn-ghost h-8 text-[12px] disabled:opacity-50" title="After the CA files this month, lock it so no edit can silently diverge from the filed return">
+              <Lock className="w-3.5 h-3.5" /> Mark {selectedMonth} {lockY} as filed &amp; lock
+            </button>
+          )}
+          <button onClick={handleCABundle} disabled={bundleBusy} className="premium-btn-ghost h-8 text-[12px] disabled:opacity-50" title="GSTR-1 portal JSON + GSTR-3B JSON + summary CSV for this month, consistently named">
+            {bundleBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileJson className="w-3.5 h-3.5" />} CA bundle
+          </button>
+        </div>
+      )}
 
       {/* Stats — compact, dense, and importantly: don't render "₹0" while
           the API is in flight. Show a skeleton dash instead so users don't
@@ -735,7 +823,15 @@ export default function GSTSummary() {
                         <td className="tabular-nums">{formatCurrency(r.igst)}</td>
                         <td className="font-semibold text-foreground tabular-nums">{formatCurrency(r.tax_total)}</td>
                         <td className="tabular-nums text-muted-foreground">{formatCurrency(r.gross_total)}</td>
-                        <td className="text-muted-foreground">{r.invoice_count}</td>
+                        <td>
+                          <RouterLink
+                            to={`/billing/invoice/list?gst_rate=${r.rate}&start_date=${startDate}&end_date=${endDate}${bizFilter !== "all" ? `&business_id=${bizFilter}` : ""}&type=outward`}
+                            className="text-primary hover:underline tabular-nums"
+                            title="See every invoice behind this slab"
+                          >
+                            {r.invoice_count} ↗
+                          </RouterLink>
+                        </td>
                       </motion.tr>
                     ))}
                     {gstr1Rows.length === 0 && <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">{summaryLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</span> : "No data for selected period"}</td></tr>}

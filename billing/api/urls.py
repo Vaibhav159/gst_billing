@@ -11,6 +11,7 @@ from .inward_bills import (
     InwardBillListCreateView,
 )
 from .views import (
+    FiledPeriodViewSet,
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
     AuditLogViewSet,
@@ -36,6 +37,7 @@ router.register(r"invoices", InvoiceViewSet)
 router.register(r"line-items", LineItemViewSet)
 router.register(r"products", ProductViewSet)
 router.register(r"audit-logs", AuditLogViewSet)
+router.register(r"filed-periods", FiledPeriodViewSet)
 
 urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them
