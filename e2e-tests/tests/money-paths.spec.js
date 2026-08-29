@@ -64,6 +64,9 @@ test.describe('Outward invoice — tax heads land correctly', () => {
     const create = page.waitForResponse(
       (r) => r.url().includes('/api/invoices/') && r.request().method() === 'POST');
     await page.getByRole('button', { name: 'Create Invoice' }).click();
+    // The form now opens a review-&-confirm sheet before saving — the POST
+    // fires only from its Confirm button.
+    await page.getByRole('button', { name: /Confirm & Save/ }).click();
     const resp = await create;
     expect(resp.status(), await resp.text()).toBe(201);
     const { id } = await resp.json();
@@ -91,6 +94,9 @@ test.describe('Outward invoice — tax heads land correctly', () => {
     const create = page.waitForResponse(
       (r) => r.url().includes('/api/invoices/') && r.request().method() === 'POST');
     await page.getByRole('button', { name: 'Create Invoice' }).click();
+    // The form now opens a review-&-confirm sheet before saving — the POST
+    // fires only from its Confirm button.
+    await page.getByRole('button', { name: /Confirm & Save/ }).click();
     const resp = await create;
     expect(resp.status(), await resp.text()).toBe(201);
     const { id } = await resp.json();

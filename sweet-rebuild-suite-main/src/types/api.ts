@@ -108,6 +108,8 @@ export interface DashboardStatsResponse {
     tax: number;
     inward_tax: number;
     count: number;
+    outward_count?: number;
+    inward_count?: number;
   };
   monthly: Array<{
     month: number;

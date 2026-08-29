@@ -531,6 +531,7 @@ export default function InvoiceDetail() {
               <div className="elevated-card rounded-2xl p-5 space-y-2.5">
                 <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
                 <Link to={printUrl} className="premium-btn-primary w-full text-[13px]"><Printer className="w-4 h-4" /> Print / PDF</Link>
+                <Link to={`${printUrl}?share=1`} className="premium-btn-outline w-full text-[13px]"><Share2 className="w-4 h-4" /> Share PDF</Link>
                 <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline w-full text-[13px] border-success/30 text-success"><MessageCircle className="w-4 h-4" /> WhatsApp {customer?.mobile_number ? `(${customer.mobile_number})` : ""}</button>
                 <Link to={printUrl} className="premium-btn-ghost w-full text-[13px]"><Download className="w-4 h-4" /> Download PDF</Link>
               </div>
