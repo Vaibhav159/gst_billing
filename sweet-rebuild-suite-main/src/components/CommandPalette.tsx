@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, FileText, Users, Package, Building2, BarChart3, Calculator, Settings, HardDrive, History, LayoutDashboard, ReceiptText } from "lucide-react";
 import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { formatCurrency } from "@/utils/mockData";
 import { cn } from "@/utils/utils";
 import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
+import api from "@/utils/api";
 
 const pages = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard, shortcut: "D" },
@@ -58,17 +59,72 @@ export default function CommandPalette() {
     return () => window.removeEventListener("open-command-palette", handler);
   }, []);
 
+  // Server-backed quick search: the loaded lists only cover the first page,
+  // so "what did we bill him last?" needs the whole database. Debounced one
+  // round trip returning customers WITH their recent bills inline.
+  const [query, setQuery] = useState("");
+  const [quick, setQuick] = useState<{ customers: any[]; invoices: any[]; products: any[] } | null>(null);
+  const quickTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (!open) { setQuick(null); setQuery(""); return; }
+  }, [open]);
+  useEffect(() => {
+    clearTimeout(quickTimer.current);
+    if (query.trim().length < 2) { setQuick(null); return; }
+    quickTimer.current = setTimeout(() => {
+      api.get<any>(`search/quick/?q=${encodeURIComponent(query.trim())}`)
+        .then((r) => setQuick(r.data))
+        .catch(() => setQuick(null));
+    }, 220);
+    return () => clearTimeout(quickTimer.current);
+  }, [query]);
+
   const go = (href: string) => { navigate(href); setOpen(false); };
+  const fmtD = (d: string) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "";
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search invoices products, pages..." />
+      <CommandInput placeholder="Customer, invoice #, product, page…" value={query} onValueChange={setQuery} />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
         {/* `group-data-[selected=true]:*` lets every sub-element flip its
             color when the parent CommandItem is highlighted. Without this
             the yellow row swallows muted-gray icons / kbd / sub-text. The
             `group` class lives on CommandItem (in components/ui/command.tsx). */}
+        {quick && quick.customers.length > 0 && (
+          <CommandGroup heading="Customers · with their latest bills">
+            {quick.customers.map((c) => (
+              <div key={`qc-${c.id}`}>
+                <CommandItem value={`${c.name} qc${c.id}`} onSelect={() => go(`/billing/customer/${c.id}`)} className="gap-3">
+                  <Users className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
+                  <span className="flex-1 font-medium">{c.name}</span>
+                  <span className="text-xs text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">{c.state_name}</span>
+                </CommandItem>
+                {c.recent_invoices.map((i: any) => (
+                  <CommandItem key={`qci-${i.id}`} value={`${c.name} ${i.invoice_number} qci${i.id}`} onSelect={() => go(`/billing/invoice/${i.id}`)} className="gap-3 pl-9">
+                    <span className="text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">↳</span>
+                    <span className="font-medium tabular-nums">{i.invoice_number}</span>
+                    <span className="text-[11px] text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">{fmtD(i.invoice_date)}</span>
+                    <span className={cn("ml-auto text-xs font-semibold tabular-nums", i.type_of_invoice === "outward" ? "text-success" : "text-warning", "group-data-[selected=true]:text-accent-foreground")}>{formatCurrency(Number(i.total_amount))}</span>
+                  </CommandItem>
+                ))}
+              </div>
+            ))}
+          </CommandGroup>
+        )}
+        {quick && quick.invoices.length > 0 && (
+          <CommandGroup heading="Invoices · whole database">
+            {quick.invoices.map((i) => (
+              <CommandItem key={`qi-${i.id}`} value={`${i.invoice_number} qi${i.id}`} onSelect={() => go(`/billing/invoice/${i.id}`)} className="gap-3">
+                <FileText className="w-4 h-4 text-muted-foreground group-data-[selected=true]:text-accent-foreground" />
+                <span className="font-medium tabular-nums">{i.invoice_number}</span>
+                <span className="text-[11px] text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">{fmtD(i.invoice_date)}</span>
+                <span className="flex-1 truncate text-xs text-muted-foreground group-data-[selected=true]:text-accent-foreground/80">{i.customer_name}</span>
+                <span className={cn("text-xs font-semibold tabular-nums", i.type_of_invoice === "outward" ? "text-success" : "text-warning", "group-data-[selected=true]:text-accent-foreground")}>{formatCurrency(Number(i.total_amount))}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
         <CommandGroup heading="Pages">
           {pages.map((p) => (
             <CommandItem key={p.href} onSelect={() => go(p.href)} className="gap-3">

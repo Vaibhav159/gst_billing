@@ -149,3 +149,43 @@ export async function createInwardBill(payload: FormData): Promise<InwardBillDet
   const res = await api.post("inward-bills/", payload);
   return res.data as InwardBillDetail;
 }
+
+
+export interface InwardCaptureRow {
+  id: number;
+  status: string;
+  business: number | null;
+  business_name: string;
+  supplier_hint: string;
+  note: string;
+  image_url: string;
+  invoice: number | null;
+  created_at: string;
+}
+
+export async function listCaptures(): Promise<{ results: InwardCaptureRow[]; count: number }> {
+  const res = await api.get("inward-captures/");
+  return res.data;
+}
+
+export async function getCapture(id: string | number): Promise<InwardCaptureRow> {
+  const res = await api.get(`inward-captures/${id}/`);
+  return res.data as InwardCaptureRow;
+}
+
+export async function createCapture(fd: FormData): Promise<{ id: number }> {
+  const res = await api.post("inward-captures/", fd);
+  return res.data;
+}
+
+export async function deleteCapture(id: number): Promise<void> {
+  await api.delete(`inward-captures/${id}/`);
+}
+
+export async function extractInwardCapture(captureId: string | number, businessId: string): Promise<ExtractResult> {
+  const fd = new FormData();
+  fd.append("capture_id", String(captureId));
+  if (businessId) fd.append("business_id", businessId);
+  const res = await api.post("inward-bills/extract/", fd);
+  return res.data as ExtractResult;
+}

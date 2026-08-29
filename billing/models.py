@@ -839,3 +839,39 @@ class FiledPeriod(AbstractBaseModel):
 
     def __str__(self):
         return f"{self.business.name} — {self.month:02d}/{self.year} (filed)"
+
+
+class InwardCapture(AbstractBaseModel):
+    """A supplier bill photographed in the moment, sorted out later.
+
+    Exhibition workflow: snap the bill on the phone in seconds, keep
+    selling; the capture waits in an inbox until someone fills in the
+    lines on a laptop. Converting attaches the photo to the created
+    inward invoice and marks the capture done.
+    """
+
+    STATUS_CHOICES = [("new", "New"), ("converted", "Converted")]
+
+    business = models.ForeignKey(
+        Business, on_delete=models.SET_NULL, null=True, blank=True,
+        help_text="Best guess at the buying firm; confirmed at conversion.",
+    )
+    image = models.FileField(
+        upload_to="inward_captures/%Y/%m/",
+        help_text="The photographed supplier bill.",
+    )
+    supplier_hint = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Optional supplier name jotted at capture time.",
+    )
+    note = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default="new",
+    )
+    invoice = models.ForeignKey(
+        Invoice, on_delete=models.SET_NULL, null=True, blank=True,
+        help_text="The inward invoice this capture became.",
+    )
+
+    def __str__(self):
+        return f"Capture #{self.pk} ({self.status})"
