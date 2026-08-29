@@ -184,7 +184,7 @@ export default function BusinessDetail() {
               {topCustomers.map((c) => (
                 <Link key={c.id} to={`/billing/customer/${c.id}`} className="flex items-center gap-3 p-3 rounded-xl border border-border/40 hover:bg-secondary/20 group">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-[11px] font-bold shrink-0">{c.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}</div>
-                  <div className="flex-1 min-w-0"><p className="text-[12px] font-semibold text-foreground truncate">{c.name}</p><p className="text-[10px] text-muted-foreground">{c.invCount} inv</p></div>
+                  <div className="flex-1 min-w-0"><p className="text-[12px] font-semibold text-foreground truncate" title={c.name}>{c.name}</p><p className="text-[10px] text-muted-foreground">{c.invCount} inv</p></div>
                   <p className="text-[11px] font-bold text-success tabular-nums">{formatCurrency(c.revenue)}</p>
                 </Link>
               ))}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Package, Save, Hash, Percent, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -50,7 +51,9 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
     setErrors({});
   };
 
-  return (
+  // Portal to <body>: a transformed ancestor (page transition mid-flight)
+  // otherwise becomes the containing block for this fixed overlay.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -117,6 +120,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

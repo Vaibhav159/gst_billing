@@ -468,7 +468,7 @@ export default function Reports() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={cn("text-[12px] font-display font-semibold truncate", l.color)}>{l.label}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{l.desc}</p>
+                      <p className="text-[10px] text-muted-foreground truncate" title={l.desc}>{l.desc}</p>
                     </div>
                     <ExternalLink className="w-3 h-3 text-muted-foreground/60 shrink-0" />
                   </div>

@@ -141,7 +141,7 @@ export default function InwardBills() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-medium truncate">{b.supplier?.name || "—"}</p>
+                      <p className="font-medium truncate" title={b.supplier?.name || undefined}>{b.supplier?.name || "—"}</p>
                       <p className="text-xs text-muted-foreground truncate">
                         #{b.invoice_number} · {formatDate(b.invoice_date)}
                       </p>
@@ -154,7 +154,7 @@ export default function InwardBills() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                    <span className="truncate">{b.business_name}</span>
+                    <span className="truncate" title={b.business_name}>{b.business_name}</span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className="tabular-nums">taxable {formatCurrency(Number(b.taxable))}</span>
                       {b.has_file && <Paperclip className="h-3.5 w-3.5" />}
@@ -214,7 +214,7 @@ export default function InwardBills() {
                   >
                     <TableCell className="font-medium">{b.invoice_number}</TableCell>
                     <TableCell>
-                      <div className="max-w-[220px] truncate">{b.supplier?.name || "—"}</div>
+                      <div className="max-w-[220px] truncate" title={b.supplier?.name || undefined}>{b.supplier?.name || "—"}</div>
                       <div className="text-xs text-muted-foreground">{b.supplier?.gst_number || ""}</div>
                     </TableCell>
                     <TableCell className="text-sm">{b.business_name}</TableCell>
