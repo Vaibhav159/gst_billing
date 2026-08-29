@@ -39,7 +39,10 @@ const dS = (ev: boolean, a: "left"|"center"|"right" = "left") => ({ font: { sz: 
 const plainS = (a: "left"|"center"|"right" = "left") => ({ font: { sz: 9, name: "Arial" }, alignment: { horizontal: a, vertical: "center" as const } });
 
 const NF = "#,##0.00";
-const TC = 17; // columns: S.No thru Total Invoice Value + Payment
+// Payment column + split blocks are opt-in: the plain report keeps the
+// CA-familiar 16-column layout unless the caller asks for the split.
+let PAY = false;
+const tc = () => (PAY ? 17 : 16);
 
 function sc(ws: any, r: number, c: number, v: string|number, s: any, z?: string) {
   const addr = XLSX.utils.encode_cell({ r, c });
@@ -95,30 +98,30 @@ const hdrGstinS = () => ({
 function writeHeader(ws: any, merges: any[], r: number, bizName: string, supplyType: string, monthLabel: string, gstin: string): number {
   // Business name - dark blue bg, white bold text, centered
   sc(ws, r, 0, bizName.toUpperCase(), hdrBizS());
-  fillR(ws, r, TC, hdrBizS());
-  merges.push({ s: { r, c: 0 }, e: { r, c: TC - 1 } });
+  fillR(ws, r, tc(), hdrBizS());
+  merges.push({ s: { r, c: 0 }, e: { r, c: tc() - 1 } });
   r++;
   // Supply type - light blue bg, dark blue bold text, centered
   sc(ws, r, 0, supplyType, hdrSupplyS());
-  fillR(ws, r, TC, hdrSupplyS());
-  merges.push({ s: { r, c: 0 }, e: { r, c: TC - 1 } });
+  fillR(ws, r, tc(), hdrSupplyS());
+  merges.push({ s: { r, c: 0 }, e: { r, c: tc() - 1 } });
   r++;
   // Month - light blue bg, grey text, centered
   sc(ws, r, 0, `Month: ${monthLabel}`, hdrMonthS());
-  fillR(ws, r, TC, hdrMonthS());
-  merges.push({ s: { r, c: 0 }, e: { r, c: TC - 1 } });
+  fillR(ws, r, tc(), hdrMonthS());
+  merges.push({ s: { r, c: 0 }, e: { r, c: tc() - 1 } });
   r++;
   // GSTIN - amber bg, dark blue bold text, centered
   sc(ws, r, 0, `GSTIN: ${gstin}`, hdrGstinS());
-  fillR(ws, r, TC, hdrGstinS());
-  merges.push({ s: { r, c: 0 }, e: { r, c: TC - 1 } });
+  fillR(ws, r, tc(), hdrGstinS());
+  merges.push({ s: { r, c: 0 }, e: { r, c: tc() - 1 } });
   r++;
   return r;
 }
 
 /** Write column header row */
 function writeColHeaders(ws: any, r: number): number {
-  COL_HDRS.forEach((h, c) => sc(ws, r, c, h, hdrS()));
+  COL_HDRS.slice(0, tc()).forEach((h, c) => sc(ws, r, c, h, hdrS()));
   return r + 1;
 }
 
@@ -153,7 +156,7 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
       sc(ws, r, 13, inv.totalIGST > 0 ? r2(inv.totalIGST) : 0, dS(ev, "right"), NF);
       sc(ws, r, 14, r2(ro(inv)), dS(ev, "right"), NF);
       sc(ws, r, 15, r2(inv.total), dS(ev, "right"), NF);
-      sc(ws, r, 16, pm(inv), dS(ev, "center"));
+      if (PAY) sc(ws, r, 16, pm(inv), dS(ev, "center"));
       r++; sno++;
     } else {
       inv.items.forEach((item, idx) => {
@@ -175,7 +178,7 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
         // Round Off + Total Invoice Value only on first item row
         sc(ws, r, 14, idx === 0 ? r2(ro(inv)) : "", dS(re, "right"), idx === 0 ? NF : undefined);
         sc(ws, r, 15, idx === 0 ? r2(inv.total) : "", dS(re, "right"), idx === 0 ? NF : undefined);
-        sc(ws, r, 16, idx === 0 ? pm(inv) : "", dS(re, "center"));
+        if (PAY) sc(ws, r, 16, idx === 0 ? pm(inv) : "", dS(re, "center"));
         r++;
       });
       sno++;
@@ -200,7 +203,43 @@ function writeGrandTotal(ws: any, merges: any[], r: number, invs: Invoice[]): nu
   return r + 1;
 }
 
-export function generateReportExcel({ invoices, businesses, customers }: ReportOptions) {
+/** Per-mode totals block (bank / cash / credit / not-set): the split the
+    CA does by hand. Written only when the toggle asks for it. */
+function writePaymentSplit(ws: any, merges: any[], r: number, invs: Invoice[]): number {
+  const buckets = new Map<string, { gross: number; taxable: number; tax: number; n: number }>();
+  invs.forEach((inv) => {
+    const mode = ((inv as any).paymentMode || "(not set)") as string;
+    const b = buckets.get(mode) || { gross: 0, taxable: 0, tax: 0, n: 0 };
+    b.gross += inv.total; b.taxable += inv.subtotal; b.tax += inv.totalTax; b.n += 1;
+    buckets.set(mode, b);
+  });
+  r += 1;
+  sc(ws, r, 0, "PAYMENT SPLIT (cash / bank)", hdrSupplyS());
+  fillR(ws, r, 6, hdrSupplyS());
+  merges.push({ s: { r, c: 0 }, e: { r, c: 5 } });
+  r += 1;
+  ["MODE", "INVOICES", "GROSS (\u20b9)", "TAXABLE (\u20b9)", "GST (\u20b9)", "SHARE %"].forEach((h, c) => sc(ws, r, c, h, hdrS()));
+  r += 1;
+  const all = [...buckets.entries()].sort((a, b) => b[1].gross - a[1].gross);
+  const totalGross = all.reduce((s2, [, b]) => s2 + b.gross, 0) || 1;
+  let accPct = 0;
+  all.forEach(([mode, b], i) => {
+    const last = i === all.length - 1;
+    const pct = last ? Math.round((100 - accPct) * 10000) / 10000 : Math.round((b.gross / totalGross) * 1000000) / 10000;
+    if (!last) accPct += pct;
+    sc(ws, r, 0, mode.charAt(0).toUpperCase() + mode.slice(1), dS(false, "left"));
+    sc(ws, r, 1, b.n, dS(false, "right"));
+    sc(ws, r, 2, r2(b.gross), dS(false, "right"), NF);
+    sc(ws, r, 3, r2(b.taxable), dS(false, "right"), NF);
+    sc(ws, r, 4, r2(b.tax), dS(false, "right"), NF);
+    sc(ws, r, 5, pct, dS(false, "right"), "0.0000");
+    r += 1;
+  });
+  return r + 1;
+}
+
+export function generateReportExcel({ invoices, businesses, customers, includePayment = false }: ReportOptions & { includePayment?: boolean }) {
+  PAY = includePayment;
   const wb = XLSX.utils.book_new();
 
   const bizMap: Record<string, Business> = {};
@@ -340,6 +379,7 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
         r = writeColHeaders(bws, r);
         r = writeInvoices(bws, r, outInvs, custMap);
         r = writeGrandTotal(bws, merges, r, outInvs);
+        if (PAY) r = writePaymentSplit(bws, merges, r, outInvs);
       }
 
       // ── Inward Supply section ──
@@ -348,6 +388,7 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
         r = writeColHeaders(bws, r);
         r = writeInvoices(bws, r, inInvs, custMap);
         r = writeGrandTotal(bws, merges, r, inInvs);
+        if (PAY) r = writePaymentSplit(bws, merges, r, inInvs);
       }
     });
 
@@ -359,8 +400,8 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
       const summS = () => ({ font: { bold: true, sz: 12, name: "Arial", color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK_BLUE } }, alignment: { horizontal: "center" as const, vertical: "center" as const }, border: bdr() });
       const dateRange = `${ml(mKeys[0])} to ${ml(mKeys[mKeys.length - 1])}`;
       sc(bws, r, 0, `PERIOD SUMMARY (${dateRange})`, summS());
-      fillR(bws, r, TC, summS());
-      merges.push({ s: { r, c: 0 }, e: { r, c: TC - 1 } });
+      fillR(bws, r, tc(), summS());
+      merges.push({ s: { r, c: 0 }, e: { r, c: tc() - 1 } });
       r++;
 
       // Sub-header row for values
@@ -424,9 +465,9 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
       r++;
     }
 
-    bws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: TC - 1 } });
+    bws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: tc() - 1 } });
     bws["!merges"] = merges;
-    bws["!cols"] = COL_W;
+    bws["!cols"] = COL_W.slice(0, tc());
 
     XLSX.utils.book_append_sheet(wb, bws, trunc(bizName));
   });
@@ -435,8 +476,8 @@ export function generateReportExcel({ invoices, businesses, customers }: ReportO
   return new Blob([wbOut], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
-export function downloadReportExcel(options: ReportOptions, filename?: string) {
-  const blob = generateReportExcel(options);
+export function downloadReportExcel(options: ReportOptions, filename?: string, extra?: { includePayment?: boolean }) {
+  const blob = generateReportExcel({ ...options, includePayment: extra?.includePayment ?? false });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

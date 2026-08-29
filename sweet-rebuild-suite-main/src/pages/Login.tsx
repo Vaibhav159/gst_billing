@@ -79,6 +79,7 @@ export default function LoginPage() {
                 <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
                   onFocus={() => setFocused("user")} onBlur={() => setFocused(null)}
                   placeholder="Enter your username"
+                  autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username"
                   className="w-full h-11 px-4 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none" />
               </div>
             </div>

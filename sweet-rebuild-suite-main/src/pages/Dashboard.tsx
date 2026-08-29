@@ -614,7 +614,13 @@ export default function Dashboard() {
               const name = isAudit ? entry.entityName : entry.invoiceNumber;
               const detail = isAudit ? entry.details : `${entry.customerName} · ${formatCurrency(entry.total)}`;
               const time = isAudit ? new Date(entry.timestamp).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : formatDate(entry.invoice_date || "");
-              const link = isAudit && entry.entity !== "settings" && entry.action !== "deleted" ? `/billing/${entry.entity}/${entry.entityId}` : (isAudit ? null : `/billing/invoice/${entry.id}`);
+              // Only entities with a real detail route get a link — audit rows
+              // for periods, settings, etc. would otherwise 404 (the period
+              // lock's "locked/unlocked" rows exposed exactly that).
+              const routable = ["customer", "business", "product", "invoice"];
+              const link = isAudit
+                ? (routable.includes(entry.entity) && entry.action !== "deleted" ? `/billing/${entry.entity}/${entry.entityId}` : entry.entity === "period" ? "/billing/gst-summary" : null)
+                : `/billing/invoice/${entry.id}`;
 
               return (
                 <div key={entry.id} className="flex gap-3 pb-3.5 relative">

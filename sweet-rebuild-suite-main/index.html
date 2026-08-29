@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale=1 stops iOS auto-zoom on <16px input focus (user pinch-zoom
+         still works — iOS ignores the cap for gestures); viewport-fit=cover makes
+         env(safe-area-inset-*) real so the header/nav can pad around the notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <link rel="icon" href="/logo.png" type="image/png" />
     <title>GST Billing Pro Suite</title>
     <meta name="description" content="Professional GST billing and invoicing solution for Indian businesses" />

@@ -86,7 +86,7 @@ export default function TopNavbar({ selectedFY, onFYChange }: TopNavbarProps) {
   const userName = user?.username || "User";
 
   return (
-    <nav className="sticky top-0 z-50 w-full glass-nav">
+    <nav className="sticky top-0 z-50 w-full glass-nav safe-area-top">
       <div className="flex h-16 items-center px-6 gap-4">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-3 mr-6 shrink-0 group">

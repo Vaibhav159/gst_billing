@@ -165,3 +165,46 @@ class RateDrillDownTest(BaseAPITestCase):
         numbers = [i["invoice_number"] for i in r.data["results"]]
         self.assertIn("R3", numbers)
         self.assertNotIn("R5", numbers)
+
+
+class LockCrossFeatureTest(BaseAPITestCase):
+    """Interactions between the lock and features shipped alongside it."""
+
+    def setUp(self):
+        super().setUp()
+        FiledPeriod.objects.create(
+            workspace_id=1, business=self.business, year=2026, month=7)
+
+    def test_capture_convert_into_locked_month_refused_and_capture_survives(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from billing.models import InwardCapture
+        cap = self.client.post(reverse("inward-capture-list"), {
+            "image": SimpleUploadedFile("b.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 32,
+                                        content_type="image/png"),
+        }, format="multipart").data
+        r = self.client.post(reverse("inward-bill-list"), {
+            "business_id": self.business.id,
+            "supplier_name": "LOCKED CAPTURE SUP",
+            "invoice_number": "LCKCAP-1", "invoice_date": "2026-07-10",
+            "capture_id": cap["id"],
+            "lines": json.dumps([{"product_name": "Silver", "hsn_code": "711311",
+                                  "quantity": "10", "rate": "100",
+                                  "gst_tax_rate": "0.03", "unit": "gms"}]),
+        })
+        self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        self.assertFalse(Invoice.objects.filter(invoice_number="LCKCAP-1").exists())
+        capture = InwardCapture.objects.get(id=cap["id"])
+        self.assertEqual(capture.status, "new", "a refused convert must not consume the capture")
+        self.assertIsNone(capture.invoice_id)
+
+    def test_payment_mode_patch_on_locked_invoice_refused(self):
+        inv = Invoice.objects.create(
+            workspace_id=1, business=self.business, customer=self.customer,
+            invoice_number="LCK-PM", invoice_date="2026-07-05",
+            type_of_invoice="outward", total_amount=D("100"), payment_mode="cash")
+        r = self.client.patch(reverse("invoice-detail", args=[inv.id]),
+                              {"payment_mode": "bank"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        inv.refresh_from_db()
+        self.assertEqual(inv.payment_mode, "cash")

@@ -60,7 +60,7 @@ export default function InvoicePrintTally() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <div className={cn("no-print flex items-center gap-2 border-b border-border bg-card sticky top-0 z-10", isMobile ? "px-4 py-3" : "px-8 py-4 gap-3")}>
+      <div className={cn("no-print flex items-center gap-2 border-b border-border bg-card sticky top-0 z-10 safe-area-top", isMobile ? "px-4 py-3" : "px-8 py-4 gap-3")}>
         <Link to={`/billing/invoice/${id}`} className="text-[12px] text-muted-foreground hover:text-foreground flex items-center gap-1">
           <ArrowLeft className="w-4 h-4" /> Back
         </Link>

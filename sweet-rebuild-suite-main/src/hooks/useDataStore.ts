@@ -306,6 +306,7 @@ export interface InvoiceFilters {
   typeFilter?: string;  // "all" | "OUTWARD" | "INWARD"
   paymentFilter?: string; // "all" | "bank" | "cash" | "credit" | "mixed" | "none"
   gstRate?: string;     // reconciliation drill-down: invoices with lines at this % slab
+  segment?: string;     // "b2b" | "b2c" — registered vs unregistered customers
   fyFilter?: string;    // "all" | "2024-25" etc.
   monthFilter?: string; // "all" | "1"-"12"
   startDate?: string;   // "YYYY-MM-DD" explicit date range override
@@ -377,6 +378,9 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       }
       if (f.gstRate) {
         params.set("gst_rate", f.gstRate);
+      }
+      if (f.segment) {
+        params.set("segment", f.segment);
       }
 
       const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
