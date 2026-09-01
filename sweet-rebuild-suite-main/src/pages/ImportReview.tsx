@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
+import { applyRowEdit } from "@/utils/importRowEdit";
 
 interface LocationState {
   parsedInvoices: ImportReadyInvoice[];
@@ -353,19 +354,18 @@ export default function ImportReview() {
     inv.invoice_date = editForm.date;
     inv.customerName = editForm.party;
     inv.customerGST = editForm.gst;
-    if (inv.items.length > 0) {
-      const item = inv.items[0];
-      item.qty = parseFloat(editForm.qty) || 0;
-      item.rate = parseFloat(editForm.rate) || 0;
-      item.amount = roundAmount(item.qty * item.rate);
-      const gstRate = item.gstRate || 3;
-      item.cgst = roundAmount(item.amount * gstRate / 200);
-      item.sgst = roundAmount(item.amount * gstRate / 200);
-    }
-    inv.subtotal = inv.items.reduce((s, i) => s + i.amount, 0);
-    inv.totalCGST = inv.items.reduce((s, i) => s + i.cgst, 0);
-    inv.totalSGST = inv.items.reduce((s, i) => s + i.sgst, 0);
-    inv.total = roundAmount(inv.subtotal + inv.totalCGST + inv.totalSGST + inv.totalIGST);
+    // Money math lives in utils/importRowEdit.ts, under test. Rebuilding it
+    // here by hand is what produced A7: an unchanged save moved the total.
+    const recomputed = applyRowEdit(inv as any, {
+      qty: parseFloat(editForm.qty) || 0,
+      rate: parseFloat(editForm.rate) || 0,
+    });
+    inv.items = recomputed.items as typeof inv.items;
+    inv.subtotal = recomputed.subtotal;
+    inv.totalCGST = recomputed.totalCGST;
+    inv.totalSGST = recomputed.totalSGST;
+    inv.totalIGST = recomputed.totalIGST;
+    inv.total = recomputed.total;
     setEditingIdx(null);
   };
 
