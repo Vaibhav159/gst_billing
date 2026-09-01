@@ -13,6 +13,23 @@ Root conventions: [`../AGENTS.md`](../AGENTS.md).
 - `vaibhav198/gst-billing` — Django/gunicorn, API only. Its SPA route is a
   plain-text fallback (`gst_billing/urls.py`), not the app.
 
+## Where it runs
+
+Production is a **self-hosted Cosmos Cloud** box. Cosmos owns the host and the
+public edge; this repo's compose stack is containers underneath it.
+
+- Cosmos terminates TLS and reverse-proxies `billing.cheq.dpdns.org` to host
+  port **8060**, which `../docker-compose.yml` maps to the nginx container's
+  port 80. nginx listens on **80 only** — the `listen 443 ssl` block in
+  `../nginx/conf.d/app.conf` is commented out on purpose. Don't un-comment it
+  or add certbot; TLS is not this container's job.
+- Changing the public hostname takes **two** edits: Cosmos's proxy rule, and
+  `CSRF_TRUSTED_ORIGINS` in `../docker-compose.yml`. Miss the second and every
+  POST fails CSRF while the site still looks fine.
+- `../DEPLOYMENT.md` §6 describes standalone Let's Encrypt/certbot and editing
+  `server_name` by hand. That predates Cosmos — read it for the compose and
+  rollback mechanics, not for the edge.
+
 ## Config
 
 - `../nginx/conf.d/app.conf` — routing, security headers, upload limits.

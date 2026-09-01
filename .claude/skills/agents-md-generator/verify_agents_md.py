@@ -130,7 +130,15 @@ def resolve(tok: str, base: Path) -> bool:
                 return True
         return False
 
-    if tok.startswith("/"):  # URL route, not a filesystem path
+    if tok.startswith("~"):
+        return True          # user-home path (~/.config/...) - outside the repo
+
+    if tok.startswith("/"):
+        # `/api/`, `/api/token/` are routes this repo serves and must exist.
+        # `/ponytail-review` - one segment, no trailing slash - is an agent
+        # slash command from an external tool, not something we route.
+        if "/" not in tok[1:]:
+            return True
         seg = tok.strip("/").split("/")[0]
         return bool(seg) and seg in haystack()
 
