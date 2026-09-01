@@ -67,6 +67,11 @@ from .serializers import (
     ProductSerializer,
 )
 
+# Money crosses the portal boundary at two decimals. Sums are accumulated as
+# Decimal and quantized once here, rather than with `float +=`, which produced
+# artifacts like 3.0000000000000004 in filing figures (audit A12).
+TWO_PLACES = Decimal("0.01")
+
 logger = logging.getLogger(__name__)
 
 
@@ -1830,7 +1835,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # ITC must be claimed by Nov 30 of the FY *following* the invoice date,
         # else it's forfeit. Bucket inward invoices by days-until-cutoff and
         # surface anything within 60 days as urgent.
-        from datetime import timedelta
+        from datetime import date as _date
         today = timezone.localdate()
         inward_with_dates = (
             queryset.filter(type_of_invoice="inward")
@@ -1986,66 +1991,74 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         b2b = list(b2b_data.values())
 
         # B2CS: Invoices to unregistered (no GSTIN, intra-state, <=2.5L)
-        b2cs = []
+        # B2C (unregistered buyers). One pass, because two independent passes
+        # is how the gap appeared: the B2CS loop skipped every inter-state
+        # invoice ("goes to B2CL") while the B2CL loop skipped everything at or
+        # under B2CL_THRESHOLD — so an inter-state B2C sale below the threshold
+        # was filed in NEITHER table and simply vanished from GSTR-1.
+        #
+        # The rule, matching gstr1_portal_json: inter-state above the threshold
+        # is B2CL; everything else consolidates into B2CS, tagged INTER or
+        # INTRA and carrying the head it was actually taxed under.
+        #
+        # Sums are Decimal and rounded once at the end. Accumulating with
+        # `float +=` produced artifacts like 3.0000000000000004 in figures that
+        # go to the portal.
         b2cs_agg = {}
-        for inv in outward_invoices:
-            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
-            if cust_gst and len(cust_gst) >= 15:
-                continue  # Skip registered
-            # One rule decides direction everywhere (is_interstate compares
-            # like with like: GSTINs when both sides have one, else state
-            # names). The old code read the customer's state off their GSTIN
-            # and fell back to the SELLER's state when they had none — so an
-            # interstate B2C sale was filed here as a local supply.
-            if is_interstate(inv.business, inv.customer):
-                continue  # Inter-state goes to B2CL
-            biz_state = state_code(inv.business)
-            items = inv.lineitem_set.all()
-            for li in items:
-                rate = float(rate_as_percent(li.gst_tax_rate))
-                key = f"{biz_state}-{rate}"
-                if key not in b2cs_agg:
-                    b2cs_agg[key] = {"pos": biz_state, "rt": rate, "txval": 0, "camt": 0, "samt": 0, "typ": "OE"}
-                b2cs_agg[key]["txval"] += float(li.quantity * li.rate)
-                b2cs_agg[key]["camt"] += float(li.cgst)
-                b2cs_agg[key]["samt"] += float(li.sgst)
-        b2cs = list(b2cs_agg.values())
-
-        # B2CL: Large invoices to unregistered (> B2CL_THRESHOLD, inter-state)
         b2cl = []
         for inv in outward_invoices:
-            if float(inv.total_amount) <= B2CL_THRESHOLD:
-                continue
             cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
             if cust_gst and len(cust_gst) >= 15:
-                continue
-            # Every invoice reaching this point has no customer GSTIN, so the
-            # old "GSTIN prefix else seller's state" fallback made the customer
-            # look local every single time — B2CL was structurally unreachable
-            # and these sales silently went to B2CS instead.
-            if not is_interstate(inv.business, inv.customer):
-                continue  # Intra-state goes to B2CS
+                continue  # Registered — belongs in B2B
+
+            inter = is_interstate(inv.business, inv.customer)
             cust_state = state_code(inv.customer)
-            if not cust_state:
-                continue  # No place of supply to report against
+            if inter and not cust_state:
+                # Nothing to report a place of supply against; file as intra
+                # rather than drop the sale (same call as gstr1_portal_json).
+                inter = False
+
             items = inv.lineitem_set.all()
-            inv_items = [{
-                "num": int(li.id),
-                "itm_det": {
-                    "txval": float(li.quantity * li.rate),
-                    "rt": float(rate_as_percent(li.gst_tax_rate)),
-                    "iamt": float(li.igst),
-                },
-            } for li in items]
-            b2cl.append({
-                "pos": cust_state,
-                "inv": [{
-                    "inum": inv.invoice_number,
-                    "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
-                    "val": float(inv.total_amount),
-                    "itms": inv_items,
-                }],
-            })
+
+            if inter and float(inv.total_amount) > B2CL_THRESHOLD:
+                b2cl.append({
+                    "pos": cust_state,
+                    "inv": [{
+                        "inum": inv.invoice_number,
+                        "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                        "val": float(inv.total_amount),
+                        "itms": [{
+                            "num": int(li.id),
+                            "itm_det": {
+                                "txval": float(li.quantity * li.rate),
+                                "rt": float(rate_as_percent(li.gst_tax_rate)),
+                                "iamt": float(li.igst),
+                            },
+                        } for li in items],
+                    }],
+                })
+                continue
+
+            pos = cust_state if inter else state_code(inv.business)
+            sply = "INTER" if inter else "INTRA"
+            for li in items:
+                rate = float(rate_as_percent(li.gst_tax_rate))
+                key = (sply, pos, rate)
+                agg = b2cs_agg.setdefault(key, {
+                    "sply_ty": sply, "pos": pos, "typ": "OE", "rt": rate,
+                    "txval": Decimal("0"), "camt": Decimal("0"),
+                    "samt": Decimal("0"), "iamt": Decimal("0"),
+                })
+                agg["txval"] += (li.quantity or 0) * (li.rate or 0)
+                agg["camt"] += li.cgst or Decimal("0")
+                agg["samt"] += li.sgst or Decimal("0")
+                agg["iamt"] += li.igst or Decimal("0")
+
+        b2cs = [
+            {**row, **{k: float(row[k].quantize(TWO_PLACES))
+                       for k in ("txval", "camt", "samt", "iamt")}}
+            for row in b2cs_agg.values()
+        ]
 
         # HSN Summary
         items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
