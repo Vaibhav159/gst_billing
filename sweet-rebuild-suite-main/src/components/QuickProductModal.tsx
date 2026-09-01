@@ -31,7 +31,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
@@ -44,9 +44,22 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
       description: form.description,
       createdAt: new Date().toISOString(),
     };
-    createProduct(newProduct);
-    toast({ title: "Product Created", description: form.name });
-    onCreated(newProduct);
+    // Was fire-and-forget: the modal closed and reported success before the
+    // POST resolved, so the product could not be selected and a failure was
+    // never surfaced.
+    try {
+      const created = await createProduct(newProduct);
+      const saved = { ...newProduct, id: String((created as any)?.id ?? newProduct.id) };
+      toast({ title: "Product Created", description: form.name });
+      onCreated(saved);
+    } catch (err) {
+      toast({
+        title: "Could not create product",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
     setForm({ name: "", hsn: "", gstRate: "3", description: "" });
     setErrors({});
   };
