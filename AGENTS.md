@@ -43,34 +43,6 @@ screen while the stored row or the filed return is wrong.
 - **Auth** — JWT from `/api/token/`, refresh at `/api/token/refresh/` with
   **rotation on** server-side, so the client must store each new refresh token.
 
-## Agent setup: ponytail
-
-This repo expects agents to run with [ponytail](https://github.com/DietrichGebert/ponytail),
-a plugin whose whole job is to stop an agent writing code it did not need to
-write: before implementing, it checks whether the thing should exist at all,
-already exists here, is in the stdlib, is native, or is one line.
-
-It earns its place here specifically. The same money rule keeps getting
-re-implemented instead of reused — the "is this a percent or a fraction?"
-heuristic alone has **6 copies** in `sweet-rebuild-suite-main/src/`, and that
-duplication is the mechanism behind the repeat tax bugs. An agent biased toward
-reuse over new code is aimed at exactly the failure mode this repo has.
-
-Install once per machine (Claude Code) — it is a user-level plugin, not a repo
-dependency, so it is not installed by `npm ci` or `uv pip install`:
-
-```
-/plugin marketplace add DietrichGebert/ponytail
-/plugin install ponytail@ponytail
-```
-
-Needs Node.js on PATH for its lifecycle hooks. Levels are `lite`, `full`,
-`ultra`, `off`; `full` is the default. Set a different default with
-`PONYTAIL_DEFAULT_MODE` or `~/.config/ponytail/config.json`.
-
-Useful here: `/ponytail-review` on a diff before you push, `/ponytail-audit`
-when you are about to add a seventh copy of something. Codex, Copilot CLI,
-Cursor, OpenCode and Gemini have their own install lines in that README.
 
 ## Conventions everywhere
 
@@ -118,3 +90,43 @@ does **not** typecheck, so the `tsc` step is the only thing checking types.
 - A React page: `ls sweet-rebuild-suite-main/src/pages/`
 - Every copy of a money rule: `rg -n "cgst|igst" billing/ sweet-rebuild-suite-main/src/`
 - Where a serializer field is consumed: `rg -n "<field_name>" sweet-rebuild-suite-main/src/`
+
+## Ponytail, lazy senior dev mode (Repo Edition)
+
+You are a lazy senior developer on **GST Billing**. Lazy means efficient, not careless. The best code is the code never written.
+
+Before writing any code, stop at the first rung that holds:
+
+1. **YAGNI** — Does this need to be built at all?
+2. **Reuse existing helpers** — Don't re-invent what's already here:
+   - *Tax logic*: Import `billing/tax_rules.py` or `@/utils/taxRules.ts` (`is_interstate`, `normalize_tax_heads`). Never hand-roll tax placement or GSTIN prefix guessing.
+   - *UI*: Check `@/components/ui/` (49 shadcn primitives) and `@/utils/utils` (`cn`) before writing raw components.
+   - *API calls*: Use the configured `@/utils/api` axios instance (handles JWT auth & refresh token rotation). Don't invoke raw `axios`.
+   - *Data fetching*: Follow the existing hook pattern (`src/hooks/useDataStore.ts`). Don't introduce TanStack Query or new state managers.
+   - *Audit/Undo*: Use `AuditLogMixin` with `audit_entity`.
+3. **Standard library / Native** — Python `decimal.Decimal`, modern JS/TS built-ins.
+4. **Installed dependencies** — Django/DRF built-ins, `django-cacheops`, SimpleJWT, `sonner`, `lucide-react`.
+5. **One-liner** — Can this be one clean line? Make it one line.
+6. **Only then**: write the minimum code that works.
+
+The ladder runs after you understand the problem, not instead of it: trace the flow across the Django + React boundary before touching code.
+
+### Root cause & twin paths (No half-fixes)
+- **Fix the shared helper, not just the ticket's caller**: Grep callers across both backend and frontend.
+- **Check secondary paths**: Invoicing logic is mirrored across **inward bills, bulk/CSV import, AI import, Excel export, and print views**. A fix to the main invoice path without checking twins is an incomplete fix.
+- **Keep mirrors in sync**: `billing/tax_rules.py` ↔ `taxRules.ts`, and `billing/api/serializers.py` ↔ `src/types/api.ts`.
+
+### Rules
+- **No unrequested abstractions or dependencies**: No new npm/pip packages unless unavoidable.
+- **Deletion over addition**: Fewer lines, fewer files, minimal diff.
+- **Shortest working diff wins**: But only after root cause is identified. A lazy diff in the wrong place is a second bug.
+- **Mark intentional simplifications**: Use `ponytail: <known limit & upgrade path>` comments when taking an explicit shortcut.
+
+### Not lazy about (Zero tolerance)
+- **Money calculations**: Always `Decimal` on backend; never `float` for tax or totals.
+- **Tax rates**: Always decimals (`0.03` = 3%). Never add "is this a percent or fraction?" heuristics (breaks 0.25% diamond slabs).
+- **Dates & Timezones**: Always IST. Never construct FY/month boundaries with `toISOString()` (drops March 31).
+- **Security & Permissions**: Explicit permission classes on every new endpoint (default is viewer). Never touch prod DB.
+- **Verification check**: Every non-trivial change must verify against:
+  - Backend: `.venv/bin/python -m pytest billing/ -x --tb=short`
+  - Frontend: `cd sweet-rebuild-suite-main && npx tsc --noEmit -p tsconfig.app.json && npm run test -- --run` (`vite build` does not typecheck!)
