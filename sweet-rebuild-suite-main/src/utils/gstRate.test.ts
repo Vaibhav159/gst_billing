@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { GST_SLABS, percentToRate, rateToPercent, lineItemPercent } from "./gstRate";
+import { GST_SLABS, percentToRate, rateToPercent, lineItemPercent, lineItemToStoredRate } from "./gstRate";
 
 // The heuristic this replaces, kept here to pin exactly where it disagreed.
 const old = (raw: number) => (raw > 1 ? raw / 100 : raw);
@@ -109,5 +109,41 @@ describe("lineItemPercent — resolve by key, not by magnitude", () => {
 
   it("defaults to zero when neither is present", () => {
     expect(lineItemPercent({})).toBe(0);
+  });
+});
+
+describe("off-slab values above 1 are percents whatever the caller assumed", () => {
+  // A stored fraction can never exceed 1. Before this rule a 40 under
+  // assume="fraction" became 40 (4000%) and rateToPercent(7) became 700.
+  it("percentToRate(40, 'fraction') is 0.4, not 40", () => {
+    expect(percentToRate(40, "fraction")).toBe(0.4);
+    expect(percentToRate(7, "fraction")).toBe(0.07);
+  });
+
+  it("rateToPercent of a verbatim percent is that percent", () => {
+    expect(rateToPercent(7)).toBe(7);
+    expect(rateToPercent(40)).toBe(40);
+  });
+
+  it("the 0.1% and 40% slabs round-trip", () => {
+    expect(percentToRate(0.1)).toBe(0.001);
+    expect(rateToPercent(0.001)).toBe(0.1);
+    expect(percentToRate(40)).toBe(0.4);
+    expect(rateToPercent(0.4)).toBe(40);
+  });
+});
+
+describe("lineItemToStoredRate — one conversion, by key", () => {
+  it("gstRate is a percent", () => {
+    expect(lineItemToStoredRate({ gstRate: 0.25 })).toBe(0.0025);
+    expect(lineItemToStoredRate({ gstRate: 40 })).toBe(0.4);
+  });
+  it("gst_tax_rate is a stored fraction", () => {
+    expect(lineItemToStoredRate({ gst_tax_rate: 0.03 })).toBe(0.03);
+    expect(lineItemToStoredRate({ gst_tax_rate: "0.0025" })).toBe(0.0025);
+  });
+  it("prefers gstRate when both are present; zero when neither", () => {
+    expect(lineItemToStoredRate({ gstRate: 3, gst_tax_rate: 0.18 })).toBe(0.03);
+    expect(lineItemToStoredRate({})).toBe(0);
   });
 });

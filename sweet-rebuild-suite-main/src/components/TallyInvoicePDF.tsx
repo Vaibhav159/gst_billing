@@ -14,6 +14,7 @@ import {
 import type { Invoice } from "@/utils/mockData";
 import type { Business, Customer } from "@/hooks/useDataStore";
 import { amountToWords } from "@/utils/mockData";
+import { storedShowsIGST } from "@/utils/taxRules";
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -412,7 +413,7 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
           ))}
 
           {/* TAX ROWS (IGST or CGST+SGST) */}
-          {invoice.isIGST ? (
+          {storedShowsIGST(invoice) ? (
             <View style={s.row} wrap={false}>
               <Text style={s.colSl}></Text>
               <Text style={[s.colDesc, s.boldItalic, { textAlign: "right" }]}>IGST</Text>
@@ -495,7 +496,7 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
 
           {/* HSN TAX SUMMARY TABLE */}
           <View wrap={false}>
-            {invoice.isIGST ? (
+            {storedShowsIGST(invoice) ? (
               <>
                 <View style={s.taxHeader}>
                   <Text style={[s.taxCell, { width: 65, textAlign: "center" }]}>HSN/SAC</Text>

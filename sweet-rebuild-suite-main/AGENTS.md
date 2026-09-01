@@ -67,10 +67,7 @@ so nothing will fail loudly if you don't.
 - **`vite build` does not typecheck.** A number-vs-string id comparison that
   `tsc` flags plainly is what booked interstate invoices as CGST+SGST for months.
   Run the `tsc --noEmit` line above before you push.
-- **Do not add "percent or fraction?" rate heuristics.** The existing
-  `rawRate > 1 ? rawRate / 100 : rawRate` in `src/hooks/useDataStore.ts:456`
-  and `:497` turns the 0.25% diamond slab into 25%. Rates arrive as decimals
-  (`0.03` = 3%); treat them as decimals and convert once, explicitly.
+- **Do not add "percent or fraction?" rate heuristics.** Rates arrive as decimals (`0.03` = 3%). The only conversion is `src/utils/gstRate.ts` — `rateToPercent` for display, `lineItemToStoredRate` / `percentToRate` for the wire — which resolves by an explicit GST slab allowlist and by *which field* a value came in on, never by magnitude. The old `rawRate > 1 ? rawRate / 100 : rawRate` stored the 0.25% diamond slab as 25% and 1% as 100%.
 - **Render stored tax heads, not predicted ones.** `src/pages/InvoiceDetail.tsx:41`
   shows the pattern: display the cgst/sgst/igst that were saved, not what
   `is_igst_applicable` implies. Print and export paths are the ones that still

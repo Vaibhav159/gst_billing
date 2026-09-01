@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { type Invoice, formatCurrency } from "./mockData";
+import { storedShowsIGST } from "@/utils/taxRules";
 
 /**
  * Generates a single invoice PDF using jsPDF directly (no DOM needed).
@@ -102,7 +103,7 @@ export function generateInvoicePDFDirect(inv: Invoice, biz?: any): Blob {
   pdf.setFontSize(9);
   const totals = [
     ["Subtotal", safeCurrency(inv.subtotal)],
-    ...(inv.isIGST
+    ...(storedShowsIGST(inv)
       ? [["IGST", safeCurrency(inv.totalIGST)]]
       : [["CGST", safeCurrency(inv.totalCGST)], ["SGST", safeCurrency(inv.totalSGST)]]),
     ["Total Tax", safeCurrency(inv.totalTax)],

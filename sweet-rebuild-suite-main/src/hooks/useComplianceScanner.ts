@@ -3,7 +3,7 @@ import { logger } from "@/utils/logger";
 import api from "@/utils/api";
 import { pushNotification } from "@/hooks/useNotifications";
 import { currentFY } from "@/utils/mockData";
-import { todayLocal } from "../utils/localDate";
+import { todayLocal } from "@/utils/localDate";
 
 /**
  * On-demand GST compliance scanner.

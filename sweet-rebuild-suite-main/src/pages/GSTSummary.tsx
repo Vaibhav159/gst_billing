@@ -1038,13 +1038,13 @@ export default function GSTSummary() {
                   ) : <p className="text-[12px] text-muted-foreground">No B2B invoices</p>}
                 </div>
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2CS — Unregistered Intra-State ({pluralize(exGstr1.b2cs?.length || 0, "entry", "entries")})</h4>
+                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">B2CS — Unregistered, consolidated ({pluralize(exGstr1.b2cs?.length || 0, "entry", "entries")})</h4>
                   {(exGstr1.b2cs || []).length > 0 ? (
                     <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
-                      <thead><tr><th>State</th><th>Rate</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th></tr></thead>
+                      <thead><tr><th>Supply</th><th>POS</th><th>Rate</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
                       <tbody>
                         {exGstr1.b2cs.map((row: any, i: number) => (
-                          <tr key={i}><td>{row.pos}</td><td>{row.rt}%</td><td className="text-right">{formatCurrency(row.txval)}</td><td className="text-right">{formatCurrency(row.camt)}</td><td className="text-right">{formatCurrency(row.samt)}</td></tr>
+                          <tr key={i}><td>{row.sply_ty || "INTRA"}</td><td>{row.pos}</td><td>{row.rt}%</td><td className="text-right">{formatCurrency(row.txval)}</td><td className="text-right">{formatCurrency(row.camt)}</td><td className="text-right">{formatCurrency(row.samt)}</td><td className="text-right">{formatCurrency(row.iamt || 0)}</td></tr>
                         ))}
                       </tbody>
                     </table></div>

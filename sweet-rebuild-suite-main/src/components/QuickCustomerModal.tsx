@@ -172,7 +172,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={onClose} className="premium-btn-ghost flex-1 h-10 text-[13px]">Cancel</button>
-                <button type="submit" className="premium-btn-primary flex-1 h-10 text-[13px]">
+                <button type="submit" disabled={submitting} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-60">
                   <Save className="w-4 h-4" /> Create Customer
                 </button>
               </div>

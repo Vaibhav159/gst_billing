@@ -25,7 +25,7 @@ import { useMobileMode } from "@/contexts/MobileModeContext";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
 import { todayLocal } from "@/utils/localDate";
-import { round2 } from "@/utils/money";
+import { round2, halveTax } from "@/utils/money";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -346,6 +346,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const subtotal = round2(items.reduce((s, it) => s + calcItem(it).amount, 0));
   const totalTax = round2(items.reduce((s, it) => s + calcItem(it).tax, 0));
   const total = round2(subtotal + totalTax);
+  // The confirm sheet must show the halves that will be written — summed per
+  // line, paise-exact — not totalTax / 2, which rounded both halves up.
+  const viewCGST = round2(items.reduce((s, it) => s + halveTax(calcItem(it).tax).cgst, 0));
+  const viewSGST = round2(items.reduce((s, it) => s + halveTax(calcItem(it).tax).sgst, 0));
 
   // String(): the API hands back numeric ids while SearchableSelect stores its
   // value as a string, so `c.id === form.customerId` was never true. That made
@@ -436,9 +440,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       // of an odd-paise tax independently loses (or invents) a paisa: 16.49
       // became 8.24 + 8.24 = 16.48, so the line no longer agreed with the
       // invoice total inside a single payload.
-      const cgst = form.isIGST ? 0 : round2(tax / 2);
-      const sgst = form.isIGST ? 0 : round2(tax - cgst);
-      const igst = form.isIGST ? round2(tax) : 0;
+      const { cgst, sgst } = form.isIGST ? { cgst: 0, sgst: 0 } : halveTax(tax);
+      const igst = form.isIGST ? tax : 0;
       // amount stored on line item is GROSS (net + tax) — Invoice.total_amount
       // is sum(LineItem.amount), so this MUST include the tax.
       const amount = round2(netAmount + cgst + sgst + igst);
@@ -809,7 +812,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 {form.isIGST ? (
                   <div className="flex justify-between"><span className="text-muted-foreground">IGST</span><span>{formatCurrency(totalTax)}</span></div>
                 ) : (
-                  <><div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(totalTax / 2)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(totalTax / 2)}</span></div></>
+                  <><div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(viewCGST)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(viewSGST)}</span></div></>
                 )}
                 <div className="border-t border-border/50 pt-3 flex justify-between font-bold">
                   <span className="text-foreground">Grand Total</span>
@@ -947,8 +950,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 <div className="flex justify-between"><span className="text-muted-foreground">IGST</span><span>{formatCurrency(totalTax)}</span></div>
               ) : (
                 <>
-                  <div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(totalTax / 2)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(totalTax / 2)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(viewCGST)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(viewSGST)}</span></div>
                 </>
               )}
               {form.paymentMode && <div className="flex justify-between"><span className="text-muted-foreground">Payment</span><span className="capitalize">{form.paymentMode}</span></div>}

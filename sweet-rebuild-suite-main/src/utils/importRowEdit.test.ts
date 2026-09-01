@@ -122,3 +122,28 @@ describe("A7 — `amount` stays tax-inclusive and totals stay consistent", () =>
     expect(+(it.cgst + it.sgst).toFixed(2)).toBe(16.49);
   });
 });
+
+describe("A7 follow-up — the row shapes the first fix missed", () => {
+  it("keeps the file's tax when the sheet could not resolve a rate", () => {
+    // No GST Rate column and a commodity not in the master: gstRate is 0 but
+    // the file still said CGST 150 / SGST 150. An unchanged save used to zero it.
+    const before = invoice([{ ...line(10000), gstRate: 0 }]);
+    const after = applyRowEdit(before, { qty: 1, rate: 10000 });
+    expect(after.total).toBe(10300);
+    expect(after.items[0].gstRate).toBe(3); // inferred from its own heads
+  });
+
+  it("keeps an amount-only row's taxable value (qty 0, rate 0)", () => {
+    const before = invoice([{ ...line(10000), qty: 0, rate: 0 }]);
+    const after = applyRowEdit(before, { qty: 0, rate: 0 });
+    expect(after.subtotal).toBe(10000);
+    expect(after.total).toBe(10300);
+  });
+
+  it("a genuinely zero-tax line stays zero", () => {
+    const zero = { qty: 1, rate: 5000, gstRate: 0, amount: 5000, cgst: 0, sgst: 0, igst: 0 };
+    const after = applyRowEdit(invoice([zero]), { qty: 1, rate: 5000 });
+    expect(after.total).toBe(5000);
+    expect(after.items[0].gstRate).toBe(0);
+  });
+});

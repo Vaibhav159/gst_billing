@@ -4,8 +4,8 @@ import { logger } from "@/utils/logger";
 import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
-import { rateToPercent, percentToRate, lineItemPercent } from "../utils/gstRate";
-import { fyBounds, fyMonthBounds } from "../utils/localDate";
+import { rateToPercent, lineItemToStoredRate } from "@/utils/gstRate";
+import { fyBounds, fyMonthBounds } from "@/utils/localDate";
 // Re-exported: several pages import { Invoice } from this module because it
 // is where the invoice hooks live.
 export type { Invoice, Product };
@@ -447,7 +447,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
         // gstRate is percent (3), gst_tax_rate is the stored fraction (0.03).
         // Resolve by which key is present, not by magnitude — the magnitude
         // test stored 0.25% as 25% and 1% as 100%.
-        const gstDecimal = percentToRate(lineItemPercent(it), "percent");
+        const gstDecimal = lineItemToStoredRate(it);
         return {
           product_name: it.productName || it.product_name || "",
           hsn_code: it.hsn || it.hsn_code || "",
@@ -487,7 +487,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       const res = await api.post<any>(`invoices/${id}/update_line_items/`, {
         invoice: invoiceFields,
         line_items: updates.items.map((it: any) => {
-          const gstDecimal = percentToRate(lineItemPercent(it), "percent");
+          const gstDecimal = lineItemToStoredRate(it);
           return {
             product_name: it.productName || it.product_name || "",
             hsn_code: it.hsn || it.hsn_code || "",

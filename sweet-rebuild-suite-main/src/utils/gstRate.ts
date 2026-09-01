@@ -17,7 +17,8 @@
  * Mirrors billing/tax_rules.py — keep the two slab lists in step.
  */
 
-export const GST_SLABS = [0, 0.25, 1, 1.5, 3, 5, 12, 18, 28] as const;
+// 0.1% is merchant exports; 40% is the de-merit slab in force since 22 Sep 2025.
+export const GST_SLABS = [0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28, 40] as const;
 
 /** The stored column is numeric(13,4), so 4dp is the full precision. */
 const STORED_DP = 4;
@@ -61,7 +62,10 @@ export function percentToRate(
   if (percent === null) {
     const v = typeof value === "number" ? value : parseFloat(String(value ?? ""));
     if (!Number.isFinite(v)) return 0;
-    percent = assume === "percent" ? v : v * 100;
+    // A stored fraction can never exceed 1, so anything above 1 is a percent
+    // whatever the caller assumed. Without this an off-slab 40 (the de-merit
+    // slab before it was listed) came out as 4000%.
+    percent = v > 1 || assume === "percent" ? v : v * 100;
   }
   const factor = 10 ** STORED_DP;
   return Math.round((percent / 100) * factor) / factor;
@@ -73,7 +77,26 @@ export function rateToPercent(stored: unknown): number {
   if (resolved !== null) return resolved;
   const v = typeof stored === "number" ? stored : parseFloat(String(stored ?? ""));
   if (!Number.isFinite(v)) return 0;
-  return Math.round(v * 100 * 100) / 100;
+  // Above 1 it cannot be a fraction: it is a percent that was stored verbatim.
+  return v > 1 ? v : Math.round(v * 100 * 100) / 100;
+}
+
+/**
+ * Pull the stored fraction out of a line item that may carry either field —
+ * one conversion, by key. (The percent-then-fraction round trip this replaces
+ * rounded twice and lost 4dp precision on the way.)
+ */
+export function lineItemToStoredRate(item: {
+  gstRate?: unknown;
+  gst_tax_rate?: unknown;
+}): number {
+  if (item.gstRate !== undefined && item.gstRate !== null && item.gstRate !== "") {
+    return percentToRate(item.gstRate, "percent");
+  }
+  if (item.gst_tax_rate !== undefined && item.gst_tax_rate !== null) {
+    return percentToRate(item.gst_tax_rate, "fraction");
+  }
+  return 0;
 }
 
 /**
