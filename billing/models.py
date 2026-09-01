@@ -26,7 +26,7 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
-from billing.tax_rules import rate_as_percent
+from billing.tax_rules import is_interstate, rate_as_percent
 
 
 class AbstractBaseModel(models.Model):
@@ -372,11 +372,18 @@ class Invoice(AbstractBaseModel):
 
     @property
     def is_igst_applicable(self):
-        # check if customer and business are from same state using GSTIN
-        return (
-            self.customer.gst_number
-            and self.customer.gst_number[0:2] != self.business.gst_number[0:2]
-        )
+        """Whether this supply is interstate (-> IGST).
+
+        Was a GSTIN-prefix comparison that returned falsy whenever the customer
+        had no GSTIN — so every unregistered interstate buyer was billed
+        CGST+SGST. That is the defect the fix_tax_heads repair pass exists for,
+        and four import paths read this property, so each import re-planted it.
+
+        Delegates to the shared rule, which falls back to state_name for
+        unregistered parties. The invoice form and the inward-bill service
+        already used it; this makes the property agree with them.
+        """
+        return is_interstate(self.business, self.customer)
 
     @classmethod
     def get_next_invoice_number(cls, business_id):

@@ -41,6 +41,7 @@ from billing.tax_rules import (
     normalize_tax_heads,
     rate_as_percent,
     state_code,
+    state_name_from_gstin,
 )
 from billing.period_lock import assert_period_unlocked, locked_period_or_none
 from billing.utils import (
@@ -3104,7 +3105,8 @@ class BulkInvoiceImportView(APIView):
             new_objs = [
                 Customer(
                     name=info["name"], gst_number=info["gst"],
-                    pan_number=info["pan"], state_name="RAJASTHAN",
+                    pan_number=info["pan"],
+                    state_name=state_name_from_gstin(info["gst"]) or None,
                     workspace_id=1,
                 ) for info in needed_new.values()
             ]
@@ -3204,7 +3206,8 @@ class BulkInvoiceImportView(APIView):
                         # everything. Defensive fallback.
                         customer = Customer.objects.create(
                             name=customer_name, gst_number=clean_gst,
-                            pan_number=clean_pan, state_name="RAJASTHAN",
+                            pan_number=clean_pan,
+                            state_name=state_name_from_gstin(clean_gst) or None,
                             workspace_id=1,
                         )
                         from billing.gstin import enrich_customer
@@ -3363,6 +3366,13 @@ class BulkInvoiceImportView(APIView):
                             else:
                                 cgst = tax_amount / 2
                                 sgst = tax_amount / 2
+                        # Heads supplied by the file were taken verbatim, so a
+                        # spreadsheet carrying a local split for an interstate
+                        # party re-planted the exact bug fix_tax_heads repairs.
+                        # Re-file them; the total is preserved either way.
+                        cgst, sgst, igst = normalize_tax_heads(
+                            cgst, sgst, igst, is_igst
+                        )
                         amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
 
                         # Validate per-field DB constraints BEFORE bulk_create so

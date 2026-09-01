@@ -115,6 +115,23 @@ def normalize_tax_heads(cgst, sgst, igst, interstate):
     return half, half, Decimal("0")
 
 
+def state_name_from_gstin(gstin):
+    """The state a GSTIN belongs to, or "" when it cannot be read.
+
+    Import paths used to stamp every auto-created customer with the shop's own
+    state, which made a Mumbai buyer look local forever — the corrected
+    interstate rule would still have said "intra". A GSTIN carries its state in
+    the first two digits, so it can answer this without guessing; without one,
+    blank is honest and is_interstate falls back to intra, the safe default.
+    """
+    from billing.constants import GST_CODE
+
+    g = (gstin or "").strip()
+    if len(g) >= 2 and g[:2].isdigit():
+        return GST_CODE.get(g[:2], "")
+    return ""
+
+
 def state_code(party):
     """Two-digit GST state code for a Business or Customer.
 
