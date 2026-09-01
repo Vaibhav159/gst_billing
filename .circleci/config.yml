@@ -119,44 +119,14 @@ jobs:
           path: test-results/pytest
           destination: test-reports
 
-  build-and-push:
-    docker:
-      - image: cimg/base:stable
-    steps:
-      - checkout
-      - setup_remote_docker
-      - run:
-          name: Install Docker Buildx
-          command: |
-            mkdir -p ~/.docker/cli-plugins/
-            curl -L "https://github.com/docker/buildx/releases/download/v0.11.2/buildx-v0.11.2.linux-amd64" -o ~/.docker/cli-plugins/docker-buildx
-            chmod a+x ~/.docker/cli-plugins/docker-buildx
-      - run:
-          name: Login to Docker Hub
-          command: |
-            if [ -z "$DOCKER_PASSWORD" ]; then
-              echo "Error: DOCKER_PASSWORD is not set"
-              exit 1
-            fi
-            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-      - run:
-          name: Build and Push Multi-arch Image
-          command: |
-            if [ -z "$DOCKER_USERNAME" ]; then
-              echo "Error: DOCKER_USERNAME is not set"
-              exit 1
-            fi
-            docker buildx create --use
-            docker buildx build --platform linux/amd64,linux/arm64 -t $DOCKER_USERNAME/gst-billing:latest --push .
-
+# Tests only. Publishing images is the Release workflow's job
+# (.github/workflows/docker-publish.yml), which fires on a v* tag and builds
+# the matched backend+nginx pair with a version tag to roll back to. This
+# config used to push gst-billing:latest on every merge to main — a
+# backend-only, untagged, half-stack deploy that Watchtower picked up within
+# a minute, silently bypassing that gate.
 workflows:
   version: 2
-  build-test-deploy:
+  test:
     jobs:
       - build-and-test
-      - build-and-push:
-          requires:
-            - build-and-test
-          filters:
-            branches:
-              only: main
