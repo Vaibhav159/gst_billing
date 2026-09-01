@@ -25,6 +25,13 @@ export interface ParsedInvoiceRow {
   igst: number;
   payment?: string;
   totalInvoiceValue: number;
+  /**
+   * The section this row was found under. A sheet can hold both an Outward and
+   * an Inward section (generateReportExcel writes them onto one sheet), so a
+   * single sheet-level supplyType cannot describe every row — reading it that
+   * way re-imported purchases as sales.
+   */
+  supplyType: string;
 }
 
 export interface ParsedFirmSheet {
@@ -173,28 +180,47 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
 
   let firmName = sheetName;
   let gstin = "";
-  let supplyType = "Outward Supply";
+  let supplyType = "";  // first section seen; defaulted at return
   let month = "";
   const invoices: ParsedInvoiceRow[] = [];
   let headerFound = false;
   let colMap: Record<string, number> = {};
+  let currentSupplyType = "Outward Supply";  // until a section header says otherwise
+  // Multi-line invoices blank Bill No./Date/Party/GSTIN on their 2nd..nth rows,
+  // so those rows have to inherit the identity of the row above them.
+  let lastBillNo = "";
+  let lastPartyName = "";
+  let lastInvoiceDate = "";
+  let lastGstNumber = "";
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const first = strVal(row[0]);
 
+    // Section headers are read wherever they appear. These used to sit inside
+    // the `!headerFound` block, so once the first column-header row was seen
+    // every later section kept the first section's type — and since the report
+    // generator writes Outward and Inward onto the same sheet, every purchase
+    // came back as a sale, doubling outward turnover on re-import.
+    const lower = first.toLowerCase();
+    if (lower.includes("outward") || lower.includes("inward")) {
+      currentSupplyType = lower.includes("inward") ? "Inward Supply" : "Outward Supply";
+      if (!supplyType) supplyType = currentSupplyType;
+      // A new section restarts the table: re-detect its columns, and do not
+      // let its first row inherit the previous section's invoice identity.
+      headerFound = false;
+      colMap = {};
+      lastBillNo = "";
+      lastPartyName = "";
+      lastInvoiceDate = "";
+      lastGstNumber = "";
+      continue;
+    }
+
     // Parse header metadata rows
     if (!headerFound) {
       if (first.toLowerCase().startsWith("gstin:")) {
         gstin = first.replace(/^gstin:\s*/i, "").trim();
-        continue;
-      }
-      if (first.toLowerCase().includes("outward")) {
-        supplyType = "Outward Supply";
-        continue;
-      }
-      if (first.toLowerCase().includes("inward")) {
-        supplyType = "Inward Supply";
         continue;
       }
       if (first.toLowerCase().startsWith("month:")) {
@@ -218,8 +244,12 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
     // Skip total rows
     if (isTotalRow(row)) continue;
 
-    // Skip empty rows
-    if (!first && !row[1] && !row[2] && !row[3]) continue;
+    // Skip empty rows. This used to test only columns 0-3 (S.No, Bill No.,
+    // Date, Party) — which are precisely the columns the generator blanks on
+    // rows 2..n of a multi-line invoice, so every continuation row was
+    // discarded here and a 3-line invoice re-imported as a 1-line one. Judge
+    // emptiness on the whole row instead.
+    if (row.every((cell) => strVal(cell) === "")) continue;
 
     // Data row - must have at least a bill number or party name
     if (headerFound) {
@@ -236,10 +266,15 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       // the Rate column as GST Rate when the file has fewer columns than
       // the legacy template.
       const sNo = colMap.sNo !== undefined ? numVal(row[colMap.sNo]) : 0;
-      const billNo = strVal(row[colMap.billNo ?? (hasSNo ? 1 : 0)]);
-      const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]);
-      const partyName = strVal(row[colMap.partyName ?? (hasSNo ? 3 : 2)]);
-      const gstNumber = strVal(row[colMap.gstNumber ?? (hasSNo ? 4 : 3)]);
+      // Rows 2..n of a multi-line invoice carry only the line's own columns —
+      // the generator blanks Bill No./Date/Party/GSTIN on them. Reading those
+      // blanks literally made the row fail the "must have a bill#" guard below,
+      // so a 3-line invoice came back as a 1-line invoice whose taxable value
+      // was the whole bill.
+      const billNo = strVal(row[colMap.billNo ?? (hasSNo ? 1 : 0)]) || lastBillNo;
+      const invoiceDate = strVal(row[colMap.invoiceDate ?? (hasSNo ? 2 : 1)]) || lastInvoiceDate;
+      const partyName = strVal(row[colMap.partyName ?? (hasSNo ? 3 : 2)]) || lastPartyName;
+      const gstNumber = strVal(row[colMap.gstNumber ?? (hasSNo ? 4 : 3)]) || lastGstNumber;
       const commodity = strVal(row[colMap.commodity ?? (hasSNo ? 5 : 4)]);
       const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : numVal(row[hasSNo ? 8 : 7]);
       const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : numVal(row[hasSNo ? 9 : 8]);
@@ -263,7 +298,15 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       if (!billNo || !partyName) continue;
       if ((qty === 0 || rate === 0) && totalInvoiceValue === 0 && taxableValue === 0) continue;
 
+      // Only a row with real monetary content becomes the identity later rows
+      // inherit, so a stray blank line cannot absorb the next invoice.
+      lastBillNo = billNo;
+      lastInvoiceDate = invoiceDate;
+      lastPartyName = partyName;
+      lastGstNumber = gstNumber;
+
       invoices.push({
+        supplyType: currentSupplyType,
         sNo: sNo || invoices.length + 1,
         billNo,
         invoiceDate: invoiceDate ? normalizeDate(invoiceDate) : "",
@@ -284,7 +327,7 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
     }
   }
 
-  return { firmName, gstin, supplyType, month, invoices };
+  return { firmName, gstin, supplyType: supplyType || "Outward Supply", month, invoices };
 }
 
 /**

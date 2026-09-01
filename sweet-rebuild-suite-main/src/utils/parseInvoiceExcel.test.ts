@@ -35,6 +35,7 @@ describe("toImportReadyInvoices — Product master lookup", () => {
         supplyType: "Outward Supply",
         month: "Apr 2026",
         invoices: rows.map((r, i) => ({
+          supplyType: "Outward Supply",
           sNo: i + 1,
           billNo: String(i + 1),
           invoiceDate: "2026-04-01",

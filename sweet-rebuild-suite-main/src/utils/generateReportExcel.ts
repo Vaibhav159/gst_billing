@@ -171,7 +171,13 @@ function writeInvoices(ws: any, r: number, invs: Invoice[], custMap: Record<stri
         sc(ws, r, 7, `${item.gstRate}%`, dS(re, "center"));
         sc(ws, r, 8, item.qty, dS(re, "right"), "#,##0.000");
         sc(ws, r, 9, r2(item.rate), dS(re, "right"), NF);
-        sc(ws, r, 10, r2(item.amount), dS(re, "right"), NF);
+        // Taxable value, not the gross. item.amount is tax-inclusive by design,
+        // so writing it here put GROSS in the "Taxable Value" column: the column
+        // stopped footing against the TOTAL row (which sums net subtotals) and
+        // Taxable + CGST + SGST double-counted the tax on every row. Only the
+        // multi-line branch had it — the single-line branch above writes net —
+        // so it survived earlier checks on a book that was almost all one-liners.
+        sc(ws, r, 10, r2(item.amount - item.cgst - item.sgst - item.igst), dS(re, "right"), NF);
         sc(ws, r, 11, r2(item.cgst), dS(re, "right"), NF);
         sc(ws, r, 12, r2(item.sgst), dS(re, "right"), NF);
         sc(ws, r, 13, item.igst > 0 ? r2(item.igst) : 0, dS(re, "right"), NF);
