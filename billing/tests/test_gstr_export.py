@@ -101,7 +101,7 @@ class B2CPlaceOfSupplyTest(BaseAPITestCase):
         super().setUp()
         self.local_b2c = Customer.objects.create(
             workspace_id=1, name="WALK-IN LOCAL", gst_number="",
-            state_name=self.business.state_name,
+            state_name="CHHATTISGARH"  # the GSTIN-22 state; direction follows the GSTIN like the POS does,
         )
         self.far_b2c = Customer.objects.create(
             workspace_id=1, name="WALK-IN FAR", gst_number="", state_name="KERALA",
@@ -206,9 +206,11 @@ class B2CGapTest(GSTRExportTest):
         self.assertEqual(row["pos"], "32", "Kerala")
 
     def test_local_b2c_still_files_as_intra_with_cgst_sgst(self):
+        # The fixture business carries GSTIN 22 (Chhattisgarh) with a stale
+        # state_name; direction now follows the GSTIN, like the filed POS does.
         local = Customer.objects.create(
             workspace_id=1, name="WALK-IN LOCAL", gst_number="",
-            state_name=self.business.state_name,
+            state_name="CHHATTISGARH",
         )
         local.businesses.add(self.business)
         self._invoice(local, "LOCAL-1", "50000", igst=False)
@@ -248,3 +250,50 @@ class B2CGapTest(GSTRExportTest):
         for row in self._b2cs(self._export()):
             for key in ("txval", "camt", "samt", "iamt"):
                 self.assertEqual(round(row[key], 2), row[key], f"{key}={row[key]!r}")
+
+
+class ExportWarnsOnPreRepairRowsTest(GSTRExportTest):
+    def test_inter_state_row_carrying_cgst_sgst_is_flagged(self):
+        """gstr1_portal_json already said "run fix_tax_heads"; the export
+        handed the same row over silently."""
+        self._invoice(self.b2c_other_state, "PRE-REPAIR", "50000", igst=False)
+        data = self._export()
+        self.assertTrue(any("fix_tax_heads" in w for w in data["warnings"]), data["warnings"])
+
+    def test_a_clean_book_has_no_warnings(self):
+        self._invoice(self.b2c_other_state, "CLEAN", "50000", igst=True)
+        self.assertEqual(self._export()["warnings"], [])
+
+
+class ExportMatchesPortalJsonTest(GSTRExportTest):
+    """A2 happened because two copies of the B2C rule drifted. Both endpoints
+    now call tax_rules.classify_b2c; this pins that they agree."""
+
+    def test_b2cs_and_b2cl_classification_agree_with_the_portal_file(self):
+        self._invoice(self.b2c_other_state, "SMALL", "50000")    # inter, under threshold
+        self._invoice(self.b2c_other_state, "LARGE", "150000")   # inter, B2CL
+        local = Customer.objects.create(
+            workspace_id=1, name="WALK-IN LOCAL", gst_number="", state_name="CHHATTISGARH",
+        )
+        local.businesses.add(self.business)
+        self._invoice(local, "LOCAL", "20000", igst=False)
+
+        export = self._export()["gstr1"]
+        resp = self.client.get(
+            f"/api/invoices/gstr1-portal-json/?business_id={self.business.id}&month=5&year=2026"
+        )
+        self.assertEqual(resp.status_code, 200, getattr(resp, "data", None))
+        portal = resp.data["file"]
+
+        def key(row):
+            return (row["sply_ty"], row["pos"], float(row["rt"]))
+
+        self.assertEqual({key(r) for r in export["b2cs"]}, {key(r) for r in portal["b2cs"]})
+        self.assertEqual(
+            sorted(round(r["txval"], 2) for r in export["b2cs"]),
+            sorted(round(r["txval"], 2) for r in portal["b2cs"]),
+        )
+        self.assertEqual(
+            sum(len(e["inv"]) for e in export["b2cl"]),
+            sum(len(e["inv"]) for e in portal["b2cl"]),
+        )

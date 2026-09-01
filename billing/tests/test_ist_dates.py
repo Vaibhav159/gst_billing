@@ -81,3 +81,12 @@ class InvoiceNumberFinancialYearTests(TestCase):
             # continuing 42 -> 43 from the year that just closed.
             nxt = Invoice.get_next_invoice_number(self.business.id)
         self.assertEqual(str(nxt), "1")
+
+
+class FinancialYearsHelperTests(TestCase):
+    def test_get_financial_years_runs(self):
+        """Went from working to NameError when `timezone` was imported only
+        inside a sibling method. No caller in the repo, so nothing else saw it."""
+        with patch("django.utils.timezone.now", return_value=EARLY_MORNING_IST):
+            years = Invoice.get_financial_years()
+        self.assertIsInstance(years, list)  # empty book -> []; the point is it runs

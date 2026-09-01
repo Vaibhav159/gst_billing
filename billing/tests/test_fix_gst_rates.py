@@ -107,3 +107,17 @@ class FixGstRatesTests(TestCase):
     def test_clean_book_reports_nothing(self):
         self._line("0.03")
         self.assertIn("No mis-stored GST rates found", self._run())
+
+
+class AmountOnlyRowTests(FixGstRatesTests):
+    def test_an_amount_only_row_with_inflated_tax_is_flagged(self):
+        """Bulk import stores qty=rate=0 for amount-only rows; the detector
+        derived net from qty x rate, so these could never be listed."""
+        LineItem.objects.create(
+            invoice=self.invoice, customer=self.customer, product_name="STONE",
+            hsn_code="7102", gst_tax_rate=Decimal("0.25"),
+            quantity=Decimal("0"), rate=Decimal("0"),
+            cgst=Decimal("12500"), sgst=Decimal("12500"), amount=Decimal("125000"),
+        )
+        output = self._run()
+        self.assertIn("computed at the inflated", output)

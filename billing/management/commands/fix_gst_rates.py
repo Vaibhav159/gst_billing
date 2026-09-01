@@ -34,7 +34,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from billing.models import LineItem, Product
-from billing.tax_rules import normalize_rate, rate_as_percent
+from billing.tax_rules import GST_SLABS, normalize_rate, rate_as_percent
 
 
 def _misstored(stored):
@@ -59,9 +59,20 @@ class Command(BaseCommand):
         parser.add_argument("--to", dest="date_to", default=None, help="Invoice date <= YYYY-MM-DD.")
 
     def handle(self, *args, **opts):
-        products = [p for p in Product.objects.all() if _misstored(p.gst_tax_rate)]
+        # Only a value equal to a non-zero slab *percent* can be mis-stored
+        # (0.25 meaning 0.25%, 1 meaning 1%), so let the database narrow the
+        # candidates instead of pulling every line item into Python.
+        suspects = [slab for slab in GST_SLABS if slab]
+        products = [
+            p for p in Product.objects.filter(gst_tax_rate__in=suspects)
+            if _misstored(p.gst_tax_rate)
+        ]
 
-        qs = LineItem.objects.select_related("invoice").order_by("id")
+        qs = (
+            LineItem.objects.filter(gst_tax_rate__in=suspects)
+            .select_related("invoice")
+            .order_by("id")
+        )
         if opts["business"]:
             qs = qs.filter(invoice__business_id=opts["business"])
         if opts["date_from"]:
@@ -88,8 +99,12 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"\n{len(lines)} line item(s):\n"))
             for li in lines:
                 fixed = normalize_rate(li.gst_tax_rate, assume="fraction")
-                net = (li.quantity or 0) * (li.rate or 0)
                 recorded = (li.cgst or 0) + (li.sgst or 0) + (li.igst or 0)
+                net = (li.quantity or 0) * (li.rate or 0)
+                if net == 0:
+                    # Amount-only rows (bulk import stores qty=rate=0 for them):
+                    # the taxable value is whatever is left of the gross.
+                    net = (li.amount or 0) - recorded
                 expected = net * fixed
                 # Tax closer to the inflated rate than the true one means this
                 # line was recomputed while the bug was live.

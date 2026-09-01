@@ -13,6 +13,7 @@ from django.db.models.functions import (
     ExtractMonth,
     ExtractYear,
 )
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
@@ -26,7 +27,7 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
-from billing.tax_rules import is_interstate, rate_as_percent
+from billing.tax_rules import is_interstate, normalize_rate, rate_as_percent
 
 
 class AbstractBaseModel(models.Model):
@@ -387,8 +388,6 @@ class Invoice(AbstractBaseModel):
 
     @classmethod
     def get_next_invoice_number(cls, business_id):
-        from django.utils import timezone
-
         # Naive now() reads the container clock (UTC), so between midnight and
         # 05:30 IST this picked the previous FY and issued a number from the
         # old series.
@@ -546,7 +545,12 @@ class LineItem(AbstractBaseModel):
         product = Product.objects.filter(name=product_name).last()
 
         hsn_code = product.hsn_code if product else HSN_CODE
-        gst_tax_rate_in_decimal = product.gst_tax_rate if product else GST_TAX_RATE
+        # Resolved through the allowlist so a master row still holding a
+        # pre-fix 0.25 does not put 25% tax on a new line.
+        gst_tax_rate_in_decimal = (
+            normalize_rate(product.gst_tax_rate, assume="fraction")
+            if product else GST_TAX_RATE
+        )
 
         line_item = LineItem(
             product_name=product_name,

@@ -596,7 +596,10 @@ def process_invoice_csv(
                         rate = Decimal(str(item_data["rate"]))
                         product = products_by_name.get(item_data["product_name"])
                         hsn_code = product.hsn_code if product else HSN_CODE
-                        gst_rate = product.gst_tax_rate if product else GST_TAX_RATE
+                        gst_rate = (
+                            normalize_rate(product.gst_tax_rate, assume="fraction")
+                            if product else GST_TAX_RATE
+                        )
                         net_amount = quantity * rate
                         tax_amount = net_amount * gst_rate
                         if is_igst:

@@ -98,3 +98,23 @@ class RateAsPercentTests(SimpleTestCase):
         """Decimal.normalize() turns 100 into 1E+2; exports must not print that."""
         for v in ("0.0025", "0.03", "0.25", "1", "1.00", "0.18"):
             self.assertNotIn("E", str(rate_as_percent(Decimal(v))), v)
+
+
+class OffSlabAboveOneTests(SimpleTestCase):
+    """A stored fraction can never exceed 1, so anything above 1 is a percent
+    whatever the caller assumed. The first cut multiplied it by 100 instead."""
+
+    def test_assume_fraction_cannot_turn_a_percent_into_hundreds_of_percent(self):
+        self.assertEqual(normalize_rate("7", assume="fraction"), Decimal("0.07"))
+        self.assertEqual(normalize_rate("7.5", assume="fraction"), Decimal("0.075"))
+
+    def test_rate_as_percent_of_a_verbatim_percent(self):
+        self.assertEqual(rate_as_percent(Decimal("7")), Decimal("7"))
+
+    def test_the_new_slabs(self):
+        self.assertEqual(normalize_rate("0.1"), Decimal("0.001"))
+        self.assertEqual(rate_as_percent(Decimal("0.001")), Decimal("0.1"))
+        self.assertEqual(normalize_rate("40", assume="fraction"), Decimal("0.4"))
+        self.assertEqual(rate_as_percent(Decimal("0.4")), Decimal("40"))
+        self.assertIn(Decimal("40"), GST_SLABS)
+        self.assertIn(Decimal("0.1"), GST_SLABS)

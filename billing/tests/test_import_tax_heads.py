@@ -134,3 +134,96 @@ class BulkImportRefilesSuppliedHeadsTests(TestCase):
             for interstate in (True, False):
                 out = normalize_tax_heads(c, s, i, interstate)
                 self.assertEqual(sum(out), c + s + i, f"{heads} interstate={interstate}")
+
+
+class DirectionKnownTests(TestCase):
+    """is_interstate says "intra" for the unknown case; callers holding file
+    heads need to tell "intra" apart from "no idea"."""
+
+    def setUp(self):
+        self.business = Business.objects.create(
+            name="LODHA JEWELLERS", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN"
+        )
+
+    def test_unknown_when_the_customer_has_neither_gstin_nor_state(self):
+        from billing.tax_rules import direction_known
+
+        ghost = Customer.objects.create(name="GHOST BUYER")
+        self.assertFalse(direction_known(self.business, ghost))
+
+    def test_known_from_a_state_name_alone(self):
+        from billing.tax_rules import direction_known
+
+        c = Customer.objects.create(name="MUMBAI WALK-IN", state_name="MAHARASHTRA")
+        self.assertTrue(direction_known(self.business, c))
+
+    def test_known_from_a_gstin_alone(self):
+        from billing.tax_rules import direction_known
+
+        c = Customer.objects.create(name="MUMBAI LTD", gst_number="27AAAAA0000A1Z5")
+        self.assertTrue(direction_known(self.business, c))
+
+    def test_direction_follows_state_codes_so_head_and_pos_agree(self):
+        """A business whose GSTIN prefix and state_name disagree used to file an
+        inter-state row against its own state code."""
+        from billing.tax_rules import state_code
+
+        odd = Business.objects.create(
+            name="ODD FIRM", gst_number="22AAAAA0000A1Z5", state_name="MAHARASHTRA"
+        )
+        local_to_gstin = Customer.objects.create(name="RAIPUR B2C", state_name="CHHATTISGARH")
+        self.assertEqual(state_code(odd), "22")
+        self.assertFalse(is_interstate(odd, local_to_gstin))
+
+
+class BulkImportKeepsExplicitHeadsTests(TestCase):
+    """The review's most serious regression: re-filing spreadsheet heads through
+    a direction the server cannot know."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from rest_framework.test import APIClient
+
+        self.user = User.objects.create_user(
+            username="importer", password="pw", is_superuser=True, is_staff=True
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        self.business = Business.objects.create(
+            name="LODHA JEWELLERS", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN"
+        )
+
+    def _import(self, customer_name, **heads):
+        from django.urls import reverse
+
+        item = {"productName": "Silver", "hsn": "711311", "qty": 1, "rate": 10000, "gstRate": 3}
+        item.update(heads)
+        payload = {
+            "business_id": self.business.id,
+            "invoices": [{
+                "invoiceNumber": "X-1", "invoice_date": "2026-05-10",
+                "customerName": customer_name, "type": "OUTWARD", "total": 10300,
+                "items": [item],
+            }],
+        }
+        r = self.client.post(reverse("bulk-invoice-import"), payload, format="json")
+        self.assertEqual(r.status_code, 201, getattr(r, "data", None))
+        self.assertEqual(r.data.get("errors") or [], [], r.data)
+        inv = Invoice.objects.get(invoice_number="X-1", business=self.business)
+        return inv.lineitem_set.get()
+
+    def test_explicit_igst_for_an_unknown_customer_is_kept(self):
+        """Auto-created, no GSTIN, no state: the file's heads are the only signal."""
+        li = self._import("GHOST INTERSTATE BUYER", cgst=0, sgst=0, igst=300)
+        self.assertEqual((li.cgst, li.sgst, li.igst), (0, 0, Decimal("300")))
+
+    def test_a_known_interstate_customer_still_gets_refiled(self):
+        """When the direction IS known, a wrong split is still corrected (A3)."""
+        Customer.objects.create(name="KOCHI WALK-IN", state_name="KERALA")
+        li = self._import("KOCHI WALK-IN", cgst=150, sgst=150, igst=0)
+        self.assertEqual((li.cgst, li.sgst, li.igst), (0, 0, Decimal("300")))
+
+    def test_a_known_local_customer_keeps_a_local_split(self):
+        Customer.objects.create(name="JAIPUR WALK-IN", state_name="RAJASTHAN")
+        li = self._import("JAIPUR WALK-IN", cgst=150, sgst=150, igst=0)
+        self.assertEqual((li.cgst, li.sgst, li.igst), (Decimal("150"), Decimal("150"), 0))
