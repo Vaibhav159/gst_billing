@@ -13,6 +13,7 @@
  * Replaces the previous static sample with placeholder text.
  */
 import * as XLSX from "xlsx-js-style";
+import { todayLocal } from "./localDate";
 
 const DARK_BLUE = "1F3864";
 const LIGHT_BLUE = "DCE6F1";
@@ -438,7 +439,7 @@ export function downloadSampleExcel(opts: TemplateOptions = {}) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayLocal();
   a.download = `invoice-import-template-${stamp}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);

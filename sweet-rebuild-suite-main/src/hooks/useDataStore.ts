@@ -5,6 +5,7 @@ import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, 
 
 import { Invoice, Product } from "@/utils/mockData";
 import { rateToPercent, percentToRate, lineItemPercent } from "../utils/gstRate";
+import { fyBounds, fyMonthBounds } from "../utils/localDate";
 // Re-exported: several pages import { Invoice } from this module because it
 // is where the invoice hooks live.
 export type { Invoice, Product };
@@ -329,26 +330,17 @@ function buildDateRange(fyFilter?: string, monthFilter?: string): { start_date?:
   const startYear = parseInt(startYearStr);
   if (isNaN(startYear)) return {};
 
-  // FY 2024-25 → Apr 2024 to Mar 2025
-  const fyStart = new Date(startYear, 3, 1); // April 1
-  const fyEnd = new Date(startYear + 1, 2, 31); // March 31
-
+  // Built as strings. Constructing a local-midnight Date and serializing it
+  // with toISOString() subtracts the UTC offset, so under IST every period
+  // asked for the previous period's closing day and dropped its own —
+  // 2026-03-31..2027-03-30 for FY 2026-27, losing 31 March entirely.
   if (monthFilter && monthFilter !== "all") {
-    const m = parseInt(monthFilter); // 1-12
-    // If month is Jan-Mar (1-3), it falls in the next calendar year of the FY
-    const year = m >= 4 ? startYear : startYear + 1;
-    const monthStart = new Date(year, m - 1, 1);
-    const monthEnd = new Date(year, m, 0); // last day of month
-    return {
-      start_date: monthStart.toISOString().split("T")[0],
-      end_date: monthEnd.toISOString().split("T")[0],
-    };
+    const { start, end } = fyMonthBounds(startYear, parseInt(monthFilter));
+    return { start_date: start, end_date: end };
   }
 
-  return {
-    start_date: fyStart.toISOString().split("T")[0],
-    end_date: fyEnd.toISOString().split("T")[0],
-  };
+  const { start, end } = fyBounds(startYear);
+  return { start_date: start, end_date: end };
 }
 
 export function useInvoices(filters?: InvoiceFilters, enabled = true) {

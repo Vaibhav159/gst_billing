@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger";
 import api from "@/utils/api";
 import { pushNotification } from "@/hooks/useNotifications";
 import { currentFY } from "@/utils/mockData";
+import { todayLocal } from "../utils/localDate";
 
 /**
  * On-demand GST compliance scanner.
@@ -36,7 +37,7 @@ export function useComplianceScanner() {
 
     if (!localStorage.getItem("gst_access_token")) return;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocal();
     const lastScan = localStorage.getItem("gst_compliance_scan_date");
     if (lastScan === today) return;
 

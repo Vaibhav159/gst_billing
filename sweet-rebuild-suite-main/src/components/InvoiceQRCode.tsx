@@ -1,5 +1,6 @@
 import { QRCodeSVG } from "qrcode.react";
 import { QrCode } from "lucide-react";
+import { todayLocal } from "@/utils/localDate";
 
 interface InvoiceQRCodeProps {
   invoiceNumber: string;
@@ -25,7 +26,7 @@ export default function InvoiceQRCode({
         inv: invoiceNumber,
         amt: total,
         biz: businessName,
-        dt: new Date().toISOString().split("T")[0],
+        dt: todayLocal(),
       });
 
   return (

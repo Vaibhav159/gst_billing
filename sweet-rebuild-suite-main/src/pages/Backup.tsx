@@ -13,6 +13,7 @@ import DataImportWizard from "@/components/DataImportWizard";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { downloadReportExcel } from "@/utils/generateReportExcel";
 import api from "@/utils/api";
+import { todayLocal } from "@/utils/localDate";
 
 const LAST_BACKUP_KEY = "gst_last_backup";
 
@@ -100,7 +101,7 @@ export default function Backup() {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `gst-backup-${new Date().toISOString().split("T")[0]}.json`; a.click();
+      a.href = url; a.download = `gst-backup-${todayLocal()}.json`; a.click();
       URL.revokeObjectURL(url);
 
       const backupInfo = `${new Date().toLocaleString("en-IN")} (${data.totalRecords} records, ${(blob.size / 1024).toFixed(0)} KB)`;
@@ -125,7 +126,7 @@ export default function Backup() {
       const fullInvoices = results.map(mapDjangoInvoice);
 
       const includeSplit = (() => { try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; } })();
-      downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${new Date().toISOString().split("T")[0]}.xlsx`, { includePayment: includeSplit });
+      downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${todayLocal()}.xlsx`, { includePayment: includeSplit });
       toast({ title: "Excel Downloaded", description: `${fullInvoices.length} invoices exported.` });
     } catch (err) {
       logger.error("Excel export failed", err);

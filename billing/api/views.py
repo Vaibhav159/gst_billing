@@ -1545,7 +1545,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 target_date = None
         if target_date is None:
-            target_date = datetime.now().date()
+            target_date = timezone.localdate()
         fy_start = datetime(
             target_date.year if target_date.month >= 4 else target_date.year - 1,
             4, 1,
@@ -1830,8 +1830,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # ITC must be claimed by Nov 30 of the FY *following* the invoice date,
         # else it's forfeit. Bucket inward invoices by days-until-cutoff and
         # surface anything within 60 days as urgent.
-        from datetime import date as _date, timedelta
-        today = _date.today()
+        from datetime import timedelta
+        today = timezone.localdate()
         inward_with_dates = (
             queryset.filter(type_of_invoice="inward")
             .values("id", "invoice_number", "invoice_date", "total_amount")
@@ -2363,7 +2363,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except ValueError:
                 ref_date = None
         if not ref_date:
-            ref_date = datetime.now().date()
+            ref_date = timezone.localdate()
         # Get financial year start date (April 1st)
         start_date = (
             datetime(ref_date.year - 1, 4, 1).date()
@@ -3948,7 +3948,7 @@ class AIInvoiceCreateView(APIView):
             # the frontend can still link to it.
             inv_number = invoice_data.get("invoice_number", "") or ""
             inv_date = (
-                invoice_data.get("invoice_date") or datetime.now().date()
+                invoice_data.get("invoice_date") or timezone.localdate()
             )
             # Inter-firm mirror helper — creates (or finds) the INWARD
             # entry for the buyer firm, copying lines from the primary

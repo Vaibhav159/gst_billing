@@ -24,6 +24,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
+import { todayLocal } from "@/utils/localDate";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -44,7 +45,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     businessId: "",
     customerId: "",
     invoiceNumber: "",
-    date: new Date().toISOString().split("T")[0],
+    date: todayLocal(),
     type: "OUTWARD",
     paymentMode: "",
     isIGST: false,
@@ -68,7 +69,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       businessId: String(duplicateFrom.businessId || ""),
       customerId: String(duplicateFrom.customerId || ""),
       invoiceNumber: "", // blank — will auto-fetch next number
-      date: new Date().toISOString().split("T")[0],
+      date: todayLocal(),
       type: duplicateFrom.type || "OUTWARD",
       paymentMode: duplicateFrom.paymentMode || "",
       isIGST: duplicateFrom.isIGST || false,
@@ -103,7 +104,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           businessId: String(inv.business || ""),
           customerId: String(inv.customer || ""),
           invoiceNumber: inv.invoice_number || "",
-          date: inv.invoice_date || new Date().toISOString().split("T")[0],
+          date: inv.invoice_date || todayLocal(),
           type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
           paymentMode: inv.payment_mode || "",
           isIGST: inv.is_igst_applicable || false,

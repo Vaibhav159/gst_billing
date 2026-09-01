@@ -387,9 +387,12 @@ class Invoice(AbstractBaseModel):
 
     @classmethod
     def get_next_invoice_number(cls, business_id):
-        from datetime import datetime
+        from django.utils import timezone
 
-        today = datetime.now().date()
+        # Naive now() reads the container clock (UTC), so between midnight and
+        # 05:30 IST this picked the previous FY and issued a number from the
+        # old series.
+        today = timezone.localdate()
         # Get financial year start date (April 1st)
         start_date = (
             datetime(today.year - 1, 4, 1).date()
@@ -427,10 +430,12 @@ class Invoice(AbstractBaseModel):
         # Get the earliest invoice date or default to current year
         earliest_date = cls.objects.order_by("invoice_date").first()
         start_year = (
-            earliest_date.invoice_date.year if earliest_date else datetime.now().year
+            earliest_date.invoice_date.year
+            if earliest_date
+            else timezone.localdate().year
         )
 
-        current_year = datetime.now().year
+        current_year = timezone.localdate().year
         financial_years = []
 
         for year in range(start_year, current_year):

@@ -4,6 +4,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
 import { formatCurrency } from "@/utils/mockData";
+import { todayLocal } from "@/utils/localDate";
 
 type ExportFormat = "csv" | "json";
 type ExportEntity = "invoices" | "customers" | "products" | "businesses" | "all";
@@ -59,7 +60,7 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
   };
 
   const handleExport = () => {
-    const dateStr = new Date().toISOString().split("T")[0];
+    const dateStr = todayLocal();
 
     if (entity === "all" || entity === "invoices") {
       const invData = invoices.map((i) => ({
