@@ -26,6 +26,31 @@ jobs:
           docker run --rm -v "$PWD/nginx/conf.d":/etc/nginx/conf.d:ro nginx:alpine \
             sh -c "mkdir -p /var/www/static /var/www/media /usr/share/nginx/html && nginx -t"
 
+      # nginx -t only proves the syntax parses; it says nothing about a
+      # directive being absent. The 1MB built-in default silently broke photo
+      # capture on prod for exactly that reason — nothing was misconfigured,
+      # the ceiling was simply never raised. Assert the app's 20MB promise is
+      # actually reachable through nginx. E2E cannot cover this: it runs
+      # Vite -> gunicorn with no nginx in the path.
+      - name: upload ceiling clears the app's 20MB cap
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          conf = open("nginx/conf.d/app.conf").read()
+          # strip comments so a commented-out directive cannot satisfy this
+          live = "\n".join(l.split("#")[0] for l in conf.splitlines())
+          m = re.search(r"client_max_body_size\s+(\d+)([kKmMgG]?)\s*;", live)
+          if not m:
+              sys.exit("FAIL: no client_max_body_size — nginx defaults to 1m and "
+                       "will 413 every phone photo before Django sees it.")
+          mult = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3}[m.group(2).lower()]
+          got = int(m.group(1)) * mult
+          app_cap = 20 * 1024 * 1024  # billing/api/inward_bills.py _MAX_SIZE
+          if got < app_cap:
+              sys.exit(f"FAIL: `{m.group(0).strip()}` is below the app's own 20MB cap.")
+          print(f"OK: {m.group(0).strip()} >= app cap 20MB")
+          EOF
+
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-24.04
