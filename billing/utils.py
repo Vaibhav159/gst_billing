@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pandas as pd
+
+from billing.tax_rules import normalize_rate
 from django.conf import settings
 from django.db import transaction
 # AI extractor uses Google Gemini with multi-key rotation. See
@@ -304,14 +306,18 @@ def process_product_csv(file_content: bytes) -> dict[str, int | list[str]]:
                     # Handle gst_tax_rate - convert from percentage to decimal if needed
                     gst_tax_rate = row.get("gst_tax_rate", 0.03)  # Default to 3%
                     if not pd.isna(gst_tax_rate):
-                        # If it's a string with % sign, convert appropriately
+                        # A "%" suffix declares percent form outright; without
+                        # one the column name (gst_tax_rate) is the contract.
+                        # Either way the slab allowlist gets first say, so a
+                        # 0.25 no longer imports as 25%.
                         if isinstance(gst_tax_rate, str) and "%" in gst_tax_rate:
-                            gst_tax_rate = float(gst_tax_rate.replace("%", "")) / 100
-                        # If it's greater than 1, assume it's a percentage and convert to decimal
-                        elif float(gst_tax_rate) > 1:
-                            gst_tax_rate = float(gst_tax_rate) / 100
+                            gst_tax_rate = normalize_rate(
+                                gst_tax_rate.replace("%", "").strip(), assume="percent"
+                            )
                         else:
-                            gst_tax_rate = float(gst_tax_rate)
+                            gst_tax_rate = normalize_rate(
+                                gst_tax_rate, assume="fraction"
+                            )
                     else:
                         gst_tax_rate = 0.03  # Default to 3%
 

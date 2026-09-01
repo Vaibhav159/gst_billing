@@ -26,6 +26,7 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
+from billing.tax_rules import rate_as_percent
 
 
 class AbstractBaseModel(models.Model):
@@ -514,7 +515,12 @@ class LineItem(AbstractBaseModel):
 
     @property
     def gst_tax_in_percentage(self):
-        return f"{int(self.gst_tax_rate * 100)}%"
+        # int() truncated the two slabs with a fraction in them: 0.25% printed
+        # as "0%" and 1.5% as "1%". Format the resolved percent instead and
+        # drop only trailing zeros, so 3 stays "3%" and 0.25 stays "0.25%".
+        percent = rate_as_percent(self.gst_tax_rate)
+        text = f"{percent:f}".rstrip("0").rstrip(".") or "0"
+        return f"{text}%"
 
     @property
     def amount_without_tax(self):

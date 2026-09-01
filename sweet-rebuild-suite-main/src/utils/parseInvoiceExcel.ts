@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx-js-style";
+import { rateToPercent } from "./gstRate";
 
 /**
  * Parsed invoice row from the user's Excel format.
@@ -395,7 +396,7 @@ function buildProductMap(products?: ProductLookup[]) {
     const hsn = p.hsn || p.hsn_code || "";
     const raw = p.gstRate ?? p.gst_tax_rate ?? 0;
     const num = typeof raw === "number" ? raw : parseFloat(String(raw)) || 0;
-    const gstPercent = num > 1 ? num : num * 100;
+    const gstPercent = rateToPercent(num);
 
     const exactKey = p.name.trim();
     const ciKey = exactKey.toLowerCase();

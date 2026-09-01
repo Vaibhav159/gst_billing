@@ -1,4 +1,5 @@
 import { logger } from "@/utils/logger";
+import { rateToPercent } from "@/utils/gstRate";
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
@@ -117,7 +118,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             id: String(li.product || li.id || ""),
             name: li.product_name || li.item_name || `Product #${li.product || li.id}`,
             hsn: li.hsn_code || "",
-            gstRate: li.gst_tax_rate ? (parseFloat(li.gst_tax_rate) > 1 ? parseFloat(li.gst_tax_rate) : parseFloat(li.gst_tax_rate) * 100) : 0,
+            gstRate: rateToPercent(li.gst_tax_rate),
           })),
         });
 

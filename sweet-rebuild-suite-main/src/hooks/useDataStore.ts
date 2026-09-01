@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
+import { rateToPercent, percentToRate, lineItemPercent } from "../utils/gstRate";
 // Re-exported: several pages import { Invoice } from this module because it
 // is where the invoice hooks live.
 export type { Invoice, Product };
@@ -212,7 +213,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     productId: String(item.product || item.id || ""),
     productName: item.product_name || item.item_name || "",
     hsn: item.hsn_code || "",
-    gstRate: (() => { const r = parseFloat(item.gst_tax_rate) || 0; return Math.round((r > 1 ? r : r * 100) * 100) / 100; })(),
+    gstRate: rateToPercent(item.gst_tax_rate),
     qty: parseFloat(item.quantity) || 0,
     rate: parseFloat(item.rate) || 0,
     unit: item.unit || "gms",
@@ -289,7 +290,7 @@ export function mapDjangoProduct(prod: any): Product {
     id: String(prod.id),
     name: prod.name || "",
     hsn: prod.hsn_code || "",
-    gstRate: (() => { const r = parseFloat(prod.gst_tax_rate) || 0; return Math.round((r > 1 ? r : r * 100) * 100) / 100; })(),
+    gstRate: rateToPercent(prod.gst_tax_rate),
     description: prod.description || "",
     createdAt: prod.created_at || "",
     defaultUnit: (prod.default_unit || "gms") as Product["defaultUnit"],
@@ -451,9 +452,10 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
 
     if (data.items && data.items.length > 0) {
       apiPayload.line_items = data.items.map((it: any) => {
-        // gstRate is percentage (3), gst_tax_rate is decimal (0.03) — normalize to decimal
-        const rawRate = it.gstRate || it.gst_tax_rate || 0;
-        const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+        // gstRate is percent (3), gst_tax_rate is the stored fraction (0.03).
+        // Resolve by which key is present, not by magnitude — the magnitude
+        // test stored 0.25% as 25% and 1% as 100%.
+        const gstDecimal = percentToRate(lineItemPercent(it), "percent");
         return {
           product_name: it.productName || it.product_name || "",
           hsn_code: it.hsn || it.hsn_code || "",
@@ -493,8 +495,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       const res = await api.post<any>(`invoices/${id}/update_line_items/`, {
         invoice: invoiceFields,
         line_items: updates.items.map((it: any) => {
-          const rawRate = it.gstRate || it.gst_tax_rate || 0;
-          const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+          const gstDecimal = percentToRate(lineItemPercent(it), "percent");
           return {
             product_name: it.productName || it.product_name || "",
             hsn_code: it.hsn || it.hsn_code || "",

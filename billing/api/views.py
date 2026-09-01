@@ -35,7 +35,13 @@ from billing.constants import (
     normalize_payment_mode,
 )
 from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
-from billing.tax_rules import is_interstate, normalize_tax_heads, state_code
+from billing.tax_rules import (
+    is_interstate,
+    normalize_rate,
+    normalize_tax_heads,
+    rate_as_percent,
+    state_code,
+)
 from billing.period_lock import assert_period_unlocked, locked_period_or_none
 from billing.utils import (
     AIInvoiceProcessingError,
@@ -1657,7 +1663,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             if inv_type not in rate_slabs:
                 continue
             rate_slabs[inv_type].append({
-                "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
+                "rate": float(rate_as_percent(s["gst_tax_rate"])),
                 "taxable": float(s["taxable"]),
                 "cgst": float(s["cgst"]),
                 "sgst": float(s["sgst"]),
@@ -1959,7 +1965,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     "num": int(li.id),
                     "itm_det": {
                         "txval": float(li.quantity * li.rate),
-                        "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                        "rt": float(rate_as_percent(li.gst_tax_rate)),
                         "camt": float(li.cgst),
                         "samt": float(li.sgst),
                         "iamt": float(li.igst),
@@ -1995,7 +2001,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             biz_state = state_code(inv.business)
             items = inv.lineitem_set.all()
             for li in items:
-                rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
+                rate = float(rate_as_percent(li.gst_tax_rate))
                 key = f"{biz_state}-{rate}"
                 if key not in b2cs_agg:
                     b2cs_agg[key] = {"pos": biz_state, "rt": rate, "txval": 0, "camt": 0, "samt": 0, "typ": "OE"}
@@ -2026,7 +2032,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 "num": int(li.id),
                 "itm_det": {
                     "txval": float(li.quantity * li.rate),
-                    "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                    "rt": float(rate_as_percent(li.gst_tax_rate)),
                     "iamt": float(li.igst),
                 },
             } for li in items]
@@ -2162,7 +2168,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         def rate_pct(li):
             r = li.gst_tax_rate or Decimal(0)
-            return float(r * 100 if r <= 1 else r)
+            return float(rate_as_percent(r))
 
         UQC = {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
                "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM"}
@@ -3320,12 +3326,21 @@ class BulkInvoiceImportView(APIView):
                                     f"Add the product first or include a GST Rate column."
                                 )
                                 continue
-                            gst_rate = Decimal(str(product.gst_tax_rate))
+                            # assume="fraction": this is the stored column. The
+                            # slab allowlist still heals a master row written by
+                            # the old heuristic, so imports stop propagating it.
+                            gst_rate = normalize_rate(
+                                product.gst_tax_rate, assume="fraction"
+                            )
                             if not hsn_code:
                                 hsn_code = product.hsn_code or ""
                         else:
-                            gst_rate_raw = Decimal(str(gst_rate_raw_in))
-                            gst_rate = gst_rate_raw if gst_rate_raw <= 1 else gst_rate_raw / Decimal("100")
+                            # "gstRate" is the parser's percent field
+                            # (parseInvoiceExcel.ts), so percent is the contract
+                            # for anything the allowlist cannot place.
+                            gst_rate = normalize_rate(
+                                gst_rate_raw_in, assume="percent"
+                            )
                             if not hsn_code and product:
                                 hsn_code = product.hsn_code or ""
 
@@ -4107,7 +4122,11 @@ class AIInvoiceCreateView(APIView):
             for item_data in invoice_data.get("line_items", []) or []:
                 qty = _D(str(item_data.get("quantity", 0) or 0))
                 rate = _D(str(item_data.get("rate", 0) or 0))
-                gst_rate = _D(str(item_data.get("gst_tax_rate", 0.03) or 0.03))
+                # The model is not bound by the column's contract: it returns
+                # 3 as often as 0.03. Unnormalized, that billed 300% tax.
+                gst_rate = normalize_rate(
+                    item_data.get("gst_tax_rate", 0.03) or 0.03, assume="fraction"
+                )
                 pre_tax = qty * rate
                 tax = pre_tax * gst_rate
                 amount = pre_tax + tax  # tax-inclusive — matches app contract

@@ -7,6 +7,77 @@ tested without a request.
 
 from decimal import Decimal
 
+# The legal GST rate slabs, as percents. This list is what makes a rate of
+# unknown shape resolvable without guessing: no slab is a slab again when
+# multiplied by 100, so at most one reading of any value is legal.
+#
+# The 0.25% diamond/stone slab is the case that mattered. The old heuristic
+# everywhere was `value > 1 ? value / 100 : value`, which reads 0.25 as
+# "already a fraction" and stores 0.25 — twenty-five percent, a hundred times
+# the intended tax. 1% broke the same way (1 is not > 1, so it stored as 100%).
+# 25% and 100% are not GST slabs at all, which is precisely why the allowlist
+# can recover the intent instead of preserving the corruption.
+GST_SLABS = (
+    Decimal("0"),
+    Decimal("0.25"),
+    Decimal("1"),
+    Decimal("1.5"),
+    Decimal("3"),
+    Decimal("5"),
+    Decimal("12"),
+    Decimal("18"),
+    Decimal("28"),
+)
+
+
+def _resolve_percent(value):
+    """Return the percent this value must mean, or None if it is off-slab.
+
+    Tries both readings and lets the slab list pick. Decimal compares
+    numerically, so 0.030 and 3.000 match their slabs despite the trailing
+    zeros the database hands back.
+    """
+    v = Decimal(str(value))
+    if v == 0:
+        return Decimal("0")
+    for slab in GST_SLABS:
+        if v == slab:
+            return slab  # already a percent: 0.25, 3, 18
+    scaled = v * 100
+    for slab in GST_SLABS:
+        if scaled == slab:
+            return slab  # a stored fraction: 0.0025, 0.03, 0.18
+    return None
+
+
+def normalize_rate(value, assume="percent"):
+    """Resolve a rate of either shape to the fraction form the DB stores.
+
+    `assume` only decides off-slab values ("percent" or "fraction") — every
+    legal slab is resolved by the allowlist regardless of what it says. Pass
+    the shape the call site actually receives.
+
+    Idempotent on all slabs: normalize_rate(normalize_rate(x)) == normalize_rate(x).
+    """
+    percent = _resolve_percent(value)
+    if percent is None:
+        v = Decimal(str(value))
+        percent = v if assume == "percent" else v * 100
+    return percent / 100
+
+
+def rate_as_percent(stored):
+    """Stored rate -> the percent a person, a GSTR table or an export expects.
+
+    Off-slab values are treated as the fraction the column is contracted to
+    hold. On-slab values are resolved by the allowlist, so a row still holding
+    a pre-fix 0.25 reads back as 0.25% rather than 25%.
+    """
+    percent = _resolve_percent(stored)
+    if percent is None:
+        return Decimal(str(stored)) * 100
+    return percent
+
 
 def is_interstate(business, customer):
     """True when the supply crosses state lines (→ IGST), else False (→ CGST+SGST).
