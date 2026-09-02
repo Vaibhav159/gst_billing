@@ -362,7 +362,7 @@ export default function Backup() {
                 </div>
 
                 <div className="flex items-center gap-2 text-[11px] text-warning mt-3">
-                  <Shield className="w-3 h-3" /> <span>Replaces existing local data — you'll be asked to confirm</span>
+                  <Shield className="w-3 h-3" /> <span>Creates missing businesses, products and customers and imports invoices not already on file — nothing is deleted; you'll be asked to confirm</span>
                 </div>
 
                 {/* Restore button uses warning-color, not success-green —

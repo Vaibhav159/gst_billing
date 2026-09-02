@@ -276,12 +276,9 @@ export default function InvoiceList() {
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-border/30">
                 <span className="text-[11px] text-muted-foreground">{pluralize(inv.lineItemCount ?? 0, "item")} · Tax {formatCurrency(inv.totalTax)}</span>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); shareInvoice(inv); }}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
-                  >
-                    <Share2 className="w-3.5 h-3.5" />
-                  </button>
+                  <IconButton label="Share invoice" onClick={(e) => { e.preventDefault(); e.stopPropagation(); shareInvoice(inv); }} className="-my-2 hover:text-primary hover:bg-primary/10">
+                    <Share2 className="w-4 h-4" />
+                  </IconButton>
                   <span className="text-[15px] font-display font-bold text-foreground tabular-nums">{formatCurrency(inv.total)}</span>
                 </div>
               </div>
