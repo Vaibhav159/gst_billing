@@ -115,7 +115,8 @@ class B2CPlaceOfSupplyTest(BaseAPITestCase):
             invoice_number=number, invoice_date="2026-05-01",
             type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount=0,
         )
-        taxable = D(str(taxable)); tax = taxable * D("0.03")
+        taxable = D(str(taxable))
+        tax = taxable * D("0.03")
         LineItem.objects.create(
             workspace_id=1, customer=customer, invoice=inv, product_name="Gold",
             hsn_code="711319", gst_tax_rate=D("0.03"), quantity=D("1"), rate=taxable,

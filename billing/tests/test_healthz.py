@@ -1,7 +1,8 @@
 """/healthz — the uptime monitor's view of the app."""
 
-from django.test import Client, TestCase
 from unittest.mock import patch
+
+from django.test import Client, TestCase
 
 
 class HealthzTest(TestCase):

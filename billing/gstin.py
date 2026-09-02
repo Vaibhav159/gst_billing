@@ -110,7 +110,7 @@ def _fetch_tally(gstin: str) -> dict | None:
     try:
         resp = requests.post(url, data={"gstin": gstin}, timeout=4)
         d = resp.json()
-    except Exception as exc:  # noqa: BLE001 — any transport/parse issue = no enrichment
+    except Exception as exc:
         logger.warning("Tally GSTIN lookup failed for %s: %s", gstin, exc)
         return None
     if not isinstance(d, dict) or d.get("status") != 1 or d.get("validation_status") != "VALID":
@@ -175,7 +175,7 @@ def enrich_customer(customer, save: bool = True) -> bool:
         return False
     try:
         data = lookup(g)
-    except Exception:  # noqa: BLE001 — enrichment must never break a save
+    except Exception:
         return False
     changed = []
     if needs_address and data.get("address"):

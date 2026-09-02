@@ -1,11 +1,10 @@
 import base64
-import mimetypes
 from decimal import Decimal
 
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from billing.models import FiledPeriod, Business, Customer, Invoice, ITCReclaimLedger, LineItem, Product
+from billing.models import Business, Customer, FiledPeriod, Invoice, ITCReclaimLedger, LineItem, Product
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -287,9 +286,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
     def get_can_undo(self, obj):
         if obj.action in ("deleted", "updated") and obj.snapshot:
             return True
-        if obj.action == "created":
-            return True
-        return False
+        return obj.action == "created"
 
 
 class ITCReclaimLedgerSerializer(serializers.ModelSerializer):

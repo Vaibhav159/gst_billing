@@ -8,12 +8,12 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0032_invoice_report_indexes'),
+        ("billing", "0032_invoice_report_indexes"),
     ]
 
     operations = [
         migrations.AddConstraint(
-            model_name='invoice',
-            constraint=models.UniqueConstraint(models.F('business'), models.F('invoice_number'), models.ExpressionWrapper(django.db.models.expressions.CombinedExpression(django.db.models.functions.datetime.ExtractYear('invoice_date'), '-', models.Case(models.When(invoice_date__month__lt=4, then=models.Value(1)), default=models.Value(0), output_field=models.IntegerField())), output_field=models.IntegerField()), condition=models.Q(('type_of_invoice', 'outward'), models.Q(('invoice_number', ''), _negated=True)), name='uniq_outward_number_per_business_fy'),
+            model_name="invoice",
+            constraint=models.UniqueConstraint(models.F("business"), models.F("invoice_number"), models.ExpressionWrapper(django.db.models.expressions.CombinedExpression(django.db.models.functions.datetime.ExtractYear("invoice_date"), "-", models.Case(models.When(invoice_date__month__lt=4, then=models.Value(1)), default=models.Value(0), output_field=models.IntegerField())), output_field=models.IntegerField()), condition=models.Q(("type_of_invoice", "outward"), models.Q(("invoice_number", ""), _negated=True)), name="uniq_outward_number_per_business_fy"),
         ),
     ]

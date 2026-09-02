@@ -43,12 +43,11 @@ Design notes:
 
 from __future__ import annotations
 
-import io
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Iterable
 
 import pandas as pd
 from django.db import transaction

@@ -1,7 +1,7 @@
 import io
 import uuid
 
-from django.contrib.auth.models import User, Group
+from django.contrib.auth.models import Group, User
 from django.test import TransactionTestCase
 from django.urls import reverse
 from freezegun import freeze_time

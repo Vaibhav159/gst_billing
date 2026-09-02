@@ -6,18 +6,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0036_schema_parity'),
+        ("billing", "0036_schema_parity"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='historicalinvoice',
-            name='payment_mode',
-            field=models.CharField(blank=True, choices=[('bank', 'Bank'), ('cash', 'Cash'), ('credit', 'Credit'), ('mixed', 'Mixed')], default='', help_text='How the invoice was settled; blank = not recorded.', max_length=10, verbose_name='Payment Mode'),
+            model_name="historicalinvoice",
+            name="payment_mode",
+            field=models.CharField(blank=True, choices=[("bank", "Bank"), ("cash", "Cash"), ("credit", "Credit"), ("mixed", "Mixed")], default="", help_text="How the invoice was settled; blank = not recorded.", max_length=10, verbose_name="Payment Mode"),
         ),
         migrations.AddField(
-            model_name='invoice',
-            name='payment_mode',
-            field=models.CharField(blank=True, choices=[('bank', 'Bank'), ('cash', 'Cash'), ('credit', 'Credit'), ('mixed', 'Mixed')], default='', help_text='How the invoice was settled; blank = not recorded.', max_length=10, verbose_name='Payment Mode'),
+            model_name="invoice",
+            name="payment_mode",
+            field=models.CharField(blank=True, choices=[("bank", "Bank"), ("cash", "Cash"), ("credit", "Credit"), ("mixed", "Mixed")], default="", help_text="How the invoice was settled; blank = not recorded.", max_length=10, verbose_name="Payment Mode"),
         ),
     ]

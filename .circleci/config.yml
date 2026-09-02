@@ -106,6 +106,9 @@ jobs:
       # Test directory is created in the test run step
 
       - run:
+          name: Lint (ruff)
+          command: uvx ruff@0.16.5 check billing gst_billing
+      - run:
           name: Run Django tests
           command: |
             . .venv/bin/activate

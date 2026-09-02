@@ -10,9 +10,9 @@ from decimal import Decimal as D
 
 from django.urls import reverse
 
-from billing.tax_rules import is_interstate, normalize_tax_heads
 from billing.constants import INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
+from billing.tax_rules import is_interstate, normalize_tax_heads
 from billing.tests.test_base import BaseAPITestCase
 
 
@@ -139,7 +139,8 @@ class DefaultRoleTest(BaseAPITestCase):
         from django.contrib.auth.models import User
         from rest_framework.test import APIClient
         u = User.objects.create_user(username="ungrouped", password="x")
-        c = APIClient(); c.force_authenticate(user=u)
+        c = APIClient()
+        c.force_authenticate(user=u)
         self.assertEqual(c.get(reverse("invoice-list")).status_code, 200)
         resp = c.post(reverse("invoice-list"), {
             "business": self.business.id, "customer": self.customer.id,

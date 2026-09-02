@@ -7,24 +7,24 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0037_historicalinvoice_payment_mode_invoice_payment_mode'),
+        ("billing", "0037_historicalinvoice_payment_mode_invoice_payment_mode"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='FiledPeriod',
+            name="FiledPeriod",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('workspace_id', models.IntegerField(default=1)),
-                ('year', models.IntegerField(help_text='Calendar year of the period (e.g. 2026).')),
-                ('month', models.IntegerField(help_text='Calendar month of the period (1-12).')),
-                ('note', models.CharField(blank=True, default='', help_text='Optional filing reference (ARN, date filed, remarks).', max_length=255)),
-                ('business', models.ForeignKey(help_text='Business whose return was filed.', on_delete=django.db.models.deletion.CASCADE, to='billing.business', verbose_name='Business')),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("workspace_id", models.IntegerField(default=1)),
+                ("year", models.IntegerField(help_text="Calendar year of the period (e.g. 2026).")),
+                ("month", models.IntegerField(help_text="Calendar month of the period (1-12).")),
+                ("note", models.CharField(blank=True, default="", help_text="Optional filing reference (ARN, date filed, remarks).", max_length=255)),
+                ("business", models.ForeignKey(help_text="Business whose return was filed.", on_delete=django.db.models.deletion.CASCADE, to="billing.business", verbose_name="Business")),
             ],
             options={
-                'constraints': [models.UniqueConstraint(fields=('business', 'year', 'month'), name='uniq_filed_period')],
+                "constraints": [models.UniqueConstraint(fields=("business", "year", "month"), name="uniq_filed_period")],
             },
         ),
     ]

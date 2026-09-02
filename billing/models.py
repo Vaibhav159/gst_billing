@@ -27,7 +27,7 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
-from billing.tax_rules import is_interstate, normalize_rate, rate_as_percent
+from billing.tax_rules import is_interstate, rate_as_percent
 
 
 class AbstractBaseModel(models.Model):
@@ -286,7 +286,7 @@ class Invoice(AbstractBaseModel):
         default="",
         choices=[("bank", "Bank"), ("cash", "Cash"), ("credit", "Credit"), ("mixed", "Mixed")],
         verbose_name="Payment Mode",
-        help_text='How the invoice was settled; blank = not recorded.',
+        help_text="How the invoice was settled; blank = not recorded.",
     )
 
     # Source image — primarily populated by AI Import (the original
@@ -542,46 +542,25 @@ class LineItem(AbstractBaseModel):
 
     @classmethod
     def create_line_item_for_invoice(cls, product_name, quantity, rate, invoice_id):
-        quantity, rate = Decimal(str(quantity)), Decimal(str(rate))
-        # gst_tax_rate_in_decimal = Decimal(str(gst_tax_rate)) / 100
+        """One line from the product master, through the shared builder (F1)."""
+        from billing.services.line_items import build_line_items, rate_for_product
 
+        invoice = Invoice.objects.select_related("business", "customer").get(id=invoice_id)
         product = Product.objects.filter(name=product_name).last()
-
-        hsn_code = product.hsn_code if product else HSN_CODE
-        # Resolved through the allowlist so a master row still holding a
-        # pre-fix 0.25 does not put 25% tax on a new line.
-        gst_tax_rate_in_decimal = (
-            normalize_rate(product.gst_tax_rate, assume="fraction")
-            if product else GST_TAX_RATE
+        lines, _total = build_line_items(
+            invoice,
+            [{
+                "product_name": product_name,
+                "quantity": quantity,
+                "rate": rate,
+                "hsn_code": product.hsn_code if product else HSN_CODE,
+                "gst_tax_rate": rate_for_product(product),
+            }],
+            source="api",
         )
-
-        line_item = LineItem(
-            product_name=product_name,
-            quantity=quantity,
-            rate=rate,
-            invoice_id=invoice_id,
-            hsn_code=hsn_code,
-            customer_id=Invoice.objects.get(id=invoice_id).customer_id,
-            gst_tax_rate=gst_tax_rate_in_decimal,
-        )
-
-        net_amount = quantity * rate
-
-        tax_amount = net_amount * gst_tax_rate_in_decimal
-
-        invoice = Invoice.objects.get(id=invoice_id)
-
-        if invoice.is_igst_applicable:
-            line_item.igst = tax_amount
-        else:
-            line_item.cgst = tax_amount / 2
-            line_item.sgst = tax_amount / 2
-
-        line_item.amount = line_item.sgst + line_item.cgst + line_item.igst + net_amount
+        line_item = lines[0]
         line_item.save()
-
         return line_item
-
     @staticmethod
     def custom_round(num: Decimal):
         if num - int(num) < 0.5:

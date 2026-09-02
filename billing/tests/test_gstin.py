@@ -3,7 +3,6 @@
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import override_settings
 from django.urls import reverse
 
 from billing.gstin import _fetch_tally, check_digit, derive, enrich_customer, validate
@@ -177,7 +176,7 @@ class EnrichCustomerTest(BaseAPITestCase):
     def test_registry_down_is_a_noop_not_an_error(self):
         c = self._cust(name="Offline", address="")
         with patch("billing.gstin.requests.post", side_effect=OSError("down")):
-            self.assertFalse(enrich_customer(c) and False or enrich_customer(c) is True)
+            self.assertFalse((enrich_customer(c) and False) or enrich_customer(c) is True)
         c.refresh_from_db()
         self.assertEqual(c.address or "", "")
 

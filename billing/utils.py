@@ -1,4 +1,3 @@
-import base64
 import io
 import json
 import logging
@@ -7,16 +6,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-import pandas as pd
-
-from billing.period_lock import assert_period_unlocked
-from billing.tax_rules import normalize_rate
-from django.conf import settings
-from django.db import transaction
 # AI extractor uses Google Gemini with multi-key rotation. See
 # AIInvoiceProcessor docstring for the routing logic.
 import google.genai as genai
+import pandas as pd
+from django.conf import settings
+from django.db import transaction
 from google.genai import types
+
+from billing.period_lock import assert_period_unlocked
+from billing.services.line_items import build_line_items, rate_for_product
+from billing.tax_rules import normalize_rate
 
 GEMINI_TIMEOUT_MS = 45_000  # extraction of a 10MB photo takes ~10-20s; 45s is generous
 
@@ -373,7 +373,7 @@ def process_invoice_csv(
     2. Validates that customers exist in the database (doesn't create new ones)
     3. Filters customers by business association to ensure data integrity
     """
-    from billing.constants import GST_TAX_RATE, HSN_CODE
+    from billing.constants import HSN_CODE
     from billing.models import Business, Customer, Invoice, LineItem, Product
 
     # Initialize result counters
@@ -591,42 +591,24 @@ def process_invoice_csv(
                 # row — imports are the largest n this code ever sees. Same
                 # math as LineItem.create_line_item_for_invoice, minus its
                 # two per-row SELECTs (product, invoice).
-                is_igst = invoice.is_igst_applicable
                 new_lis = []
                 new_total = Decimal("0")
                 for item_data in line_items_data:
                     try:
-                        quantity = Decimal(str(item_data["quantity"]))
-                        rate = Decimal(str(item_data["rate"]))
                         product = products_by_name.get(item_data["product_name"])
-                        hsn_code = product.hsn_code if product else HSN_CODE
-                        gst_rate = (
-                            normalize_rate(product.gst_tax_rate, assume="fraction")
-                            if product else GST_TAX_RATE
+                        lines, line_total = build_line_items(
+                            invoice,
+                            [{
+                                "product_name": item_data["product_name"],
+                                "quantity": item_data["quantity"],
+                                "rate": item_data["rate"],
+                                "hsn_code": product.hsn_code if product else HSN_CODE,
+                                "gst_tax_rate": rate_for_product(product),
+                            }],
+                            source="csv",
                         )
-                        net_amount = quantity * rate
-                        tax_amount = net_amount * gst_rate
-                        if is_igst:
-                            cgst, sgst, igst = Decimal("0"), Decimal("0"), tax_amount
-                        else:
-                            cgst = sgst = tax_amount / 2
-                            igst = Decimal("0")
-                        new_lis.append(
-                            LineItem(
-                                product_name=item_data["product_name"],
-                                quantity=quantity,
-                                rate=rate,
-                                invoice_id=invoice.id,
-                                hsn_code=hsn_code,
-                                customer_id=invoice.customer_id,
-                                gst_tax_rate=gst_rate,
-                                cgst=cgst,
-                                sgst=sgst,
-                                igst=igst,
-                                amount=net_amount + tax_amount,
-                            )
-                        )
-                        new_total += net_amount + tax_amount
+                        new_lis.extend(lines)
+                        new_total += line_total
                         result["line_items_created"] += 1
                     except Exception as e:
                         logger.warning(
@@ -923,12 +905,7 @@ class AIInvoiceProcessor:
         if any(s in msg for s in ("429", "resource_exhausted", "quota", "rate limit", "ratelimit")):
             return True
         # Per-key auth / access signals
-        if any(s in msg for s in (
-            "403", "permission_denied", "denied access",
-            "401", "unauthenticated", "api_key_invalid", "api key not valid",
-        )):
-            return True
-        return False
+        return bool(any(s in msg for s in ("403", "permission_denied", "denied access", "401", "unauthenticated", "api_key_invalid", "api key not valid")))
 
     @staticmethod
     def _is_quota_error(err: Exception) -> bool:

@@ -6,20 +6,20 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0031_historicalinvoice_source_preview_and_more'),
+        ("billing", "0031_historicalinvoice_source_preview_and_more"),
     ]
 
     operations = [
         migrations.AddIndex(
-            model_name='invoice',
-            index=models.Index(fields=['invoice_date'], name='billing_inv_invoice_2a056e_idx'),
+            model_name="invoice",
+            index=models.Index(fields=["invoice_date"], name="billing_inv_invoice_2a056e_idx"),
         ),
         migrations.AddIndex(
-            model_name='invoice',
-            index=models.Index(fields=['type_of_invoice', 'invoice_date'], name='billing_inv_type_of_7b6282_idx'),
+            model_name="invoice",
+            index=models.Index(fields=["type_of_invoice", "invoice_date"], name="billing_inv_type_of_7b6282_idx"),
         ),
         migrations.AddIndex(
-            model_name='invoice',
-            index=models.Index(fields=['business', 'invoice_number'], name='billing_inv_busines_4f3fc8_idx'),
+            model_name="invoice",
+            index=models.Index(fields=["business", "invoice_number"], name="billing_inv_busines_4f3fc8_idx"),
         ),
     ]

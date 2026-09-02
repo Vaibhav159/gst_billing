@@ -7,18 +7,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0039_inwardcapture'),
+        ("billing", "0039_inwardcapture"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='invoice',
-            name='business',
-            field=models.ForeignKey(help_text='Business of the invoice.', on_delete=django.db.models.deletion.PROTECT, to='billing.business', verbose_name='Business'),
+            model_name="invoice",
+            name="business",
+            field=models.ForeignKey(help_text="Business of the invoice.", on_delete=django.db.models.deletion.PROTECT, to="billing.business", verbose_name="Business"),
         ),
         migrations.AlterField(
-            model_name='invoice',
-            name='customer',
-            field=models.ForeignKey(help_text='Customer of the invoice.', on_delete=django.db.models.deletion.PROTECT, to='billing.customer', verbose_name='Customer'),
+            model_name="invoice",
+            name="customer",
+            field=models.ForeignKey(help_text="Customer of the invoice.", on_delete=django.db.models.deletion.PROTECT, to="billing.customer", verbose_name="Customer"),
         ),
     ]

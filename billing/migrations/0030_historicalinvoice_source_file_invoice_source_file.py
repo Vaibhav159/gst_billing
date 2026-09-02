@@ -6,18 +6,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0029_itcreclaimledger'),
+        ("billing", "0029_itcreclaimledger"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='historicalinvoice',
-            name='source_file',
-            field=models.TextField(blank=True, help_text='Original invoice image/PDF (audit trail for AI imports).', max_length=100, null=True, verbose_name='Source File'),
+            model_name="historicalinvoice",
+            name="source_file",
+            field=models.TextField(blank=True, help_text="Original invoice image/PDF (audit trail for AI imports).", max_length=100, null=True, verbose_name="Source File"),
         ),
         migrations.AddField(
-            model_name='invoice',
-            name='source_file',
-            field=models.FileField(blank=True, help_text='Original invoice image/PDF (audit trail for AI imports).', null=True, upload_to='invoice_sources/%Y/%m/', verbose_name='Source File'),
+            model_name="invoice",
+            name="source_file",
+            field=models.FileField(blank=True, help_text="Original invoice image/PDF (audit trail for AI imports).", null=True, upload_to="invoice_sources/%Y/%m/", verbose_name="Source File"),
         ),
     ]
