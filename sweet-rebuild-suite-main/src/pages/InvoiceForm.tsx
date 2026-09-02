@@ -1,4 +1,5 @@
 import { logger } from "@/utils/logger";
+import { rateToPercent } from "@/utils/gstRate";
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
@@ -23,6 +24,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
+import { todayLocal } from "@/utils/localDate";
+import { round2, halveTax } from "@/utils/money";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -43,7 +46,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     businessId: "",
     customerId: "",
     invoiceNumber: "",
-    date: new Date().toISOString().split("T")[0],
+    date: todayLocal(),
     type: "OUTWARD",
     paymentMode: "",
     isIGST: false,
@@ -67,7 +70,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       businessId: String(duplicateFrom.businessId || ""),
       customerId: String(duplicateFrom.customerId || ""),
       invoiceNumber: "", // blank — will auto-fetch next number
-      date: new Date().toISOString().split("T")[0],
+      date: todayLocal(),
       type: duplicateFrom.type || "OUTWARD",
       paymentMode: duplicateFrom.paymentMode || "",
       isIGST: duplicateFrom.isIGST || false,
@@ -86,7 +89,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   // Fallback names from the invoice API for entities not in the loaded list
   const [fallbackEntities, setFallbackEntities] = useState<{
-    customer?: { id: string; name: string };
+    // gst_number and state_name are carried because isIntraState reads them.
+    // Without them a quick-added customer is a name with no location, and the
+    // auto-IGST switch silently treats every such sale as local.
+    customer?: { id: string; name: string; gst_number?: string; state_name?: string };
     business?: { id: string; name: string };
     products: { id: string; name: string; hsn: string; gstRate: number }[];
   }>({ products: [] });
@@ -102,7 +108,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           businessId: String(inv.business || ""),
           customerId: String(inv.customer || ""),
           invoiceNumber: inv.invoice_number || "",
-          date: inv.invoice_date || new Date().toISOString().split("T")[0],
+          date: inv.invoice_date || todayLocal(),
           type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
           paymentMode: inv.payment_mode || "",
           isIGST: inv.is_igst_applicable || false,
@@ -117,7 +123,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             id: String(li.product || li.id || ""),
             name: li.product_name || li.item_name || `Product #${li.product || li.id}`,
             hsn: li.hsn_code || "",
-            gstRate: li.gst_tax_rate ? (parseFloat(li.gst_tax_rate) > 1 ? parseFloat(li.gst_tax_rate) : parseFloat(li.gst_tax_rate) * 100) : 0,
+            gstRate: rateToPercent(li.gst_tax_rate),
           })),
         });
 
@@ -287,7 +293,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const localCustomers = (() => {
     const list = [...allCustomers];
     if (fallbackEntities.customer && !list.some(c => String(c.id) === fallbackEntities.customer!.id)) {
-      list.push({ id: fallbackEntities.customer.id, name: fallbackEntities.customer.name } as any);
+      list.push({
+        id: fallbackEntities.customer.id,
+        name: fallbackEntities.customer.name,
+        gst_number: fallbackEntities.customer.gst_number || "",
+        state_name: fallbackEntities.customer.state_name || "",
+      } as any);
     }
     return list;
   })();
@@ -326,14 +337,19 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const calcItem = (item: { productId: string; qty: number; rate: number }) => {
     const product = localProducts.find((p) => p.id === item.productId);
-    const amount = Math.round(item.qty * item.rate * 100) / 100;
-    const tax = product ? Math.round((amount * product.gstRate) / 100 * 100) / 100 : 0;
+    const amount = round2(item.qty * item.rate);
+    const tax = product ? round2((amount * product.gstRate) / 100) : 0;
     return { amount, tax, gstRate: product?.gstRate || 0 };
   };
 
-  const subtotal = items.reduce((s, it) => s + calcItem(it).amount, 0);
-  const totalTax = items.reduce((s, it) => s + calcItem(it).tax, 0);
-  const total = subtotal + totalTax;
+  // Quantized once, not carried as a raw float sum into the figures on screen.
+  const subtotal = round2(items.reduce((s, it) => s + calcItem(it).amount, 0));
+  const totalTax = round2(items.reduce((s, it) => s + calcItem(it).tax, 0));
+  const total = round2(subtotal + totalTax);
+  // The confirm sheet must show the halves that will be written — summed per
+  // line, paise-exact — not totalTax / 2, which rounded both halves up.
+  const viewCGST = round2(items.reduce((s, it) => s + halveTax(calcItem(it).tax).cgst, 0));
+  const viewSGST = round2(items.reduce((s, it) => s + halveTax(calcItem(it).tax).sgst, 0));
 
   // String(): the API hands back numeric ids while SearchableSelect stores its
   // value as a string, so `c.id === form.customerId` was never true. That made
@@ -418,14 +434,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     const selectedCust = localCustomers.find(c => String(c.id) === String(form.customerId));
     const invoiceItems = items.map(it => {
       const product = localProducts.find(p => p.id === it.productId);
-      const netAmount = Math.round(it.qty * it.rate * 100) / 100;
-      const tax = product ? Math.round((netAmount * product.gstRate) / 100 * 100) / 100 : 0;
-      const cgst = form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100;
-      const sgst = form.isIGST ? 0 : Math.round(tax / 2 * 100) / 100;
-      const igst = form.isIGST ? Math.round(tax * 100) / 100 : 0;
+      const netAmount = round2(it.qty * it.rate);
+      const tax = product ? round2((netAmount * product.gstRate) / 100) : 0;
+      // Round one half and give the other the remainder. Rounding both halves
+      // of an odd-paise tax independently loses (or invents) a paisa: 16.49
+      // became 8.24 + 8.24 = 16.48, so the line no longer agreed with the
+      // invoice total inside a single payload.
+      const { cgst, sgst } = form.isIGST ? { cgst: 0, sgst: 0 } : halveTax(tax);
+      const igst = form.isIGST ? tax : 0;
       // amount stored on line item is GROSS (net + tax) — Invoice.total_amount
       // is sum(LineItem.amount), so this MUST include the tax.
-      const amount = Math.round((netAmount + cgst + sgst + igst) * 100) / 100;
+      const amount = round2(netAmount + cgst + sgst + igst);
       return {
         productId: it.productId,
         productName: product?.name || "",
@@ -441,9 +460,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       };
     });
 
-    const totalCGST = invoiceItems.reduce((s, it) => s + it.cgst, 0);
-    const totalSGST = invoiceItems.reduce((s, it) => s + it.sgst, 0);
-    const totalIGST = invoiceItems.reduce((s, it) => s + it.igst, 0);
+    // Quantize the aggregate once. A raw float sum serializes as
+    // 30.299999999999997 for 10.10 + 20.20, which a strict DecimalField rejects
+    // outright and which reaches the books as noise when it does not.
+    const totalCGST = round2(invoiceItems.reduce((s, it) => s + it.cgst, 0));
+    const totalSGST = round2(invoiceItems.reduce((s, it) => s + it.sgst, 0));
+    const totalIGST = round2(invoiceItems.reduce((s, it) => s + it.igst, 0));
 
     if (mode === "create") {
       const newId = generateId("inv-");
@@ -790,7 +812,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 {form.isIGST ? (
                   <div className="flex justify-between"><span className="text-muted-foreground">IGST</span><span>{formatCurrency(totalTax)}</span></div>
                 ) : (
-                  <><div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(totalTax / 2)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(totalTax / 2)}</span></div></>
+                  <><div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(viewCGST)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(viewSGST)}</span></div></>
                 )}
                 <div className="border-t border-border/50 pt-3 flex justify-between font-bold">
                   <span className="text-foreground">Grand Total</span>
@@ -827,9 +849,39 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       )}
 
       <QuickCustomerModal open={showQuickCustomer} onClose={() => setShowQuickCustomer(false)}
-        onCreated={(newCust) => { set("customerId", newCust.id); setShowQuickCustomer(false); }} />
+        onCreated={(newCust) => {
+          // The modal creates through its own useCustomers() instance, so this
+          // form's list has never heard of the new party: selectedCustomer
+          // stayed undefined, the auto-IGST effect bailed, and the customer
+          // did not even appear in the picker. Seed the fallback list here.
+          setFallbackEntities((prev) => ({
+            ...prev,
+            customer: {
+              id: String(newCust.id),
+              name: newCust.name,
+              gst_number: newCust.gst || "",
+              state_name: newCust.state || "",
+            },
+          }));
+          set("customerId", String(newCust.id));
+          setShowQuickCustomer(false);
+        }} />
       <QuickProductModal open={showQuickProduct} onClose={() => setShowQuickProduct(false)}
-        onCreated={() => { setShowQuickProduct(false); }} />
+        onCreated={(newProd) => {
+          setFallbackEntities((prev) => ({
+            ...prev,
+            products: [
+              ...prev.products,
+              {
+                id: String(newProd.id),
+                name: newProd.name,
+                hsn: newProd.hsn || "",
+                gstRate: newProd.gstRate || 0,
+              },
+            ],
+          }));
+          setShowQuickProduct(false);
+        }} />
 
       <AnimatePresence>
         {showUnsavedModal && (
@@ -898,8 +950,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 <div className="flex justify-between"><span className="text-muted-foreground">IGST</span><span>{formatCurrency(totalTax)}</span></div>
               ) : (
                 <>
-                  <div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(totalTax / 2)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(totalTax / 2)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">CGST</span><span>{formatCurrency(viewCGST)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">SGST</span><span>{formatCurrency(viewSGST)}</span></div>
                 </>
               )}
               {form.paymentMode && <div className="flex justify-between"><span className="text-muted-foreground">Payment</span><span className="capitalize">{form.paymentMode}</span></div>}

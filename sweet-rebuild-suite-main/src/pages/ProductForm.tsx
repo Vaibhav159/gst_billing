@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
 import { formatApiError, errorTag } from "@/utils/apiError";
+import { GST_SLABS } from "@/utils/gstRate";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 16 },
@@ -274,7 +275,7 @@ export default function ProductForm() {
 
                 <FormField label="GST Rate (%)" icon={Hash} required>
                   <select value={form.gstRate} onChange={(e) => handleChange("gstRate", e.target.value)} className="premium-select w-full">
-                    {["0", "0.25", "3", "5", "12", "18", "28"].map((r) => (
+                    {GST_SLABS.map((r) => String(r)).map((r) => (
                       <option key={r} value={r}>{r}%</option>
                     ))}
                   </select>

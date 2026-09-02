@@ -119,7 +119,12 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+# The books are Indian. With USE_TZ=True nothing stored changes — instants
+# are still persisted in UTC — but timezone.localdate() and __date lookups
+# now answer in IST. Under UTC the server believed it was still yesterday
+# until 05:30 every morning, which shifted the current FY (and so the next
+# invoice number), the AI-import default date, and the ITC-aging cutoffs.
+TIME_ZONE = "Asia/Kolkata"
 USE_I18N = True
 USE_TZ = True
 

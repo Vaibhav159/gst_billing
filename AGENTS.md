@@ -47,8 +47,10 @@ screen while the stored row or the filed return is wrong.
 ## Conventions everywhere
 
 - **Money is `Decimal` on the server.** Never `float` for tax or totals.
-- **Rates are stored as decimals** (`0.03` = 3%). Do not add another
-  "is this a percent or a fraction?" heuristic — see the frontend gotchas.
+- **Rates are stored as decimals** (`0.03` = 3%). Convert only through
+  `billing/tax_rules.py` `normalize_rate()` / `rate_as_percent()` — an explicit GST slab
+  allowlist, mirrored in `src/utils/gstRate.ts`. Never a magnitude test like
+  `value > 1 ? value / 100 : value`: that stored the 0.25% diamond slab as 25%.
 - **Dates are IST.** Do not build financial-year or month boundaries with
   `toISOString()` on a local `Date`; it shifts a day and drops 31 March.
 - A fix to a primary write path usually needs the same fix in the **import, AI,
@@ -124,7 +126,7 @@ The ladder runs after you understand the problem, not instead of it: trace the f
 
 ### Not lazy about (Zero tolerance)
 - **Money calculations**: Always `Decimal` on backend; never `float` for tax or totals.
-- **Tax rates**: Always decimals (`0.03` = 3%). Never add "is this a percent or fraction?" heuristics (breaks 0.25% diamond slabs).
+- **Tax rates**: Always decimals (`0.03` = 3%). Convert through `tax_rules.normalize_rate` / `rate_as_percent` only; never a magnitude test (`> 1`), which broke the 0.25% and 1% slabs.
 - **Dates & Timezones**: Always IST. Never construct FY/month boundaries with `toISOString()` (drops March 31).
 - **Security & Permissions**: Explicit permission classes on every new endpoint (default is viewer). Never touch prod DB.
 - **Verification check**: Every non-trivial change must verify against:

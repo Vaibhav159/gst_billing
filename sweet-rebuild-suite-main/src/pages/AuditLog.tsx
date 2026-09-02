@@ -13,6 +13,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuditLog } from "@/hooks/useAuditLog";
 import type { AuditLogEntry } from "@/hooks/useAuditLog";
 import { useToast } from "@/hooks/use-toast";
+import { todayLocal } from "@/utils/localDate";
 
 type AuditAction = "created" | "updated" | "deleted" | "printed" | "exported" | "duplicated" | "imported" | "merged";
 type AuditEntity = "invoice" | "customer" | "product" | "business" | "settings";
@@ -144,7 +145,7 @@ export default function AuditLog() {
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = `audit-log-${new Date().toISOString().split("T")[0]}.csv`;
+              a.download = `audit-log-${todayLocal()}.csv`;
               a.click();
               URL.revokeObjectURL(url);
               toast({ title: "Exported", description: `${auditLog.length} entries to CSV` });

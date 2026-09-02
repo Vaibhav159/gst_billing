@@ -17,6 +17,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { motion } from "framer-motion";
 import { stagger, fadeUp } from "@/utils/animations";
 import api from "@/utils/api";
+import { toCSV, downloadCSV } from "@/utils/csv";
 
 interface OutletCtx { selectedFY: string }
 const MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
@@ -156,12 +157,11 @@ export default function Reports() {
 
       const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total"];
       const rows = invoices.map((i: any) => [i.invoiceNumber, i.invoice_date, i.customerName, i.businessName, i.type, i.subtotal, i.totalTax, i.total]);
-      const csv = [headers.join(","), ...rows.map((r: any) => r.join(","))].join("\n");
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `report-${selectedFY}.csv`; a.click();
-      URL.revokeObjectURL(url);
+      // A raw join(",") shifts every money column one cell right the moment a
+      // party name contains a comma ("RAMLAL & SONS, JAIPUR"). InvoiceList
+      // already exports through these helpers.
+      const csv = toCSV([headers, ...rows]);
+      downloadCSV(csv, `report-${selectedFY}.csv`);
     } catch (e) {
       logger.error("CSV export failed", e);
     }

@@ -5,6 +5,9 @@ import { X, Package, Save, Hash, Percent, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
 import { useProducts, generateId } from "@/hooks/useDataStore";
+import { formatApiError } from "@/utils/apiError";
+import { GST_SLABS } from "@/utils/gstRate";
+import type { DjangoProduct } from "@/types/api";
 
 interface QuickProductModalProps {
   open: boolean;
@@ -17,6 +20,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
   const { create: createProduct } = useProducts();
   const [form, setForm] = useState({ name: "", hsn: "", gstRate: "3", description: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   const handleChange = (field: string, val: string) => {
     setForm((p) => ({ ...p, [field]: val }));
@@ -31,7 +35,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
     return errs;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
@@ -44,9 +48,26 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
       description: form.description,
       createdAt: new Date().toISOString(),
     };
-    createProduct(newProduct);
-    toast({ title: "Product Created", description: form.name });
-    onCreated(newProduct);
+    // Was fire-and-forget: the modal closed and reported success before the
+    // POST resolved, so the product could not be selected and a failure was
+    // never surfaced.
+    if (submitting) return; // a second Enter during a slow POST created a duplicate
+    setSubmitting(true);
+    try {
+      const created = (await createProduct(newProduct)) as Partial<DjangoProduct> | undefined;
+      const saved = { ...newProduct, id: String(created?.id ?? newProduct.id) };
+      toast({ title: "Product Created", description: form.name });
+      onCreated(saved);
+    } catch (err) {
+      toast({
+        title: "Could not create product",
+        description: formatApiError(err, "Could not create product."),
+        variant: "destructive",
+      });
+      return;
+    } finally {
+      setSubmitting(false);
+    }
     setForm({ name: "", hsn: "", gstRate: "3", description: "" });
     setErrors({});
   };
@@ -100,7 +121,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
                   </label>
                   <select value={form.gstRate} onChange={(e) => handleChange("gstRate", e.target.value)}
                     className={cn("premium-select w-full", errors.gstRate && "border-destructive/50")}>
-                    {[0, 3, 5, 12, 18, 28].map((r) => <option key={r} value={r}>{r}%</option>)}
+                    {GST_SLABS.map((r) => <option key={r} value={r}>{r}%</option>)}
                   </select>
                   {errors.gstRate && <p className="text-[10px] text-destructive">{errors.gstRate}</p>}
                 </div>
@@ -114,7 +135,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={onClose} className="premium-btn-ghost flex-1 h-10 text-[13px]">Cancel</button>
-                <button type="submit" className="premium-btn-primary flex-1 h-10 text-[13px]"><Save className="w-4 h-4" /> Create Product</button>
+                <button type="submit" disabled={submitting} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-60"><Save className="w-4 h-4" /> {submitting ? "Creating…" : "Create Product"}</button>
               </div>
             </form>
           </motion.div>

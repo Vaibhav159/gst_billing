@@ -4,6 +4,8 @@ import { logger } from "@/utils/logger";
 import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
+import { rateToPercent, lineItemToStoredRate } from "@/utils/gstRate";
+import { fyBounds, fyMonthBounds } from "@/utils/localDate";
 // Re-exported: several pages import { Invoice } from this module because it
 // is where the invoice hooks live.
 export type { Invoice, Product };
@@ -212,7 +214,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     productId: String(item.product || item.id || ""),
     productName: item.product_name || item.item_name || "",
     hsn: item.hsn_code || "",
-    gstRate: (() => { const r = parseFloat(item.gst_tax_rate) || 0; return Math.round((r > 1 ? r : r * 100) * 100) / 100; })(),
+    gstRate: rateToPercent(item.gst_tax_rate),
     qty: parseFloat(item.quantity) || 0,
     rate: parseFloat(item.rate) || 0,
     unit: item.unit || "gms",
@@ -289,7 +291,7 @@ export function mapDjangoProduct(prod: any): Product {
     id: String(prod.id),
     name: prod.name || "",
     hsn: prod.hsn_code || "",
-    gstRate: (() => { const r = parseFloat(prod.gst_tax_rate) || 0; return Math.round((r > 1 ? r : r * 100) * 100) / 100; })(),
+    gstRate: rateToPercent(prod.gst_tax_rate),
     description: prod.description || "",
     createdAt: prod.created_at || "",
     defaultUnit: (prod.default_unit || "gms") as Product["defaultUnit"],
@@ -328,26 +330,17 @@ function buildDateRange(fyFilter?: string, monthFilter?: string): { start_date?:
   const startYear = parseInt(startYearStr);
   if (isNaN(startYear)) return {};
 
-  // FY 2024-25 → Apr 2024 to Mar 2025
-  const fyStart = new Date(startYear, 3, 1); // April 1
-  const fyEnd = new Date(startYear + 1, 2, 31); // March 31
-
+  // Built as strings. Constructing a local-midnight Date and serializing it
+  // with toISOString() subtracts the UTC offset, so under IST every period
+  // asked for the previous period's closing day and dropped its own —
+  // 2026-03-31..2027-03-30 for FY 2026-27, losing 31 March entirely.
   if (monthFilter && monthFilter !== "all") {
-    const m = parseInt(monthFilter); // 1-12
-    // If month is Jan-Mar (1-3), it falls in the next calendar year of the FY
-    const year = m >= 4 ? startYear : startYear + 1;
-    const monthStart = new Date(year, m - 1, 1);
-    const monthEnd = new Date(year, m, 0); // last day of month
-    return {
-      start_date: monthStart.toISOString().split("T")[0],
-      end_date: monthEnd.toISOString().split("T")[0],
-    };
+    const { start, end } = fyMonthBounds(startYear, parseInt(monthFilter));
+    return { start_date: start, end_date: end };
   }
 
-  return {
-    start_date: fyStart.toISOString().split("T")[0],
-    end_date: fyEnd.toISOString().split("T")[0],
-  };
+  const { start, end } = fyBounds(startYear);
+  return { start_date: start, end_date: end };
 }
 
 export function useInvoices(filters?: InvoiceFilters, enabled = true) {
@@ -451,9 +444,10 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
 
     if (data.items && data.items.length > 0) {
       apiPayload.line_items = data.items.map((it: any) => {
-        // gstRate is percentage (3), gst_tax_rate is decimal (0.03) — normalize to decimal
-        const rawRate = it.gstRate || it.gst_tax_rate || 0;
-        const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+        // gstRate is percent (3), gst_tax_rate is the stored fraction (0.03).
+        // Resolve by which key is present, not by magnitude — the magnitude
+        // test stored 0.25% as 25% and 1% as 100%.
+        const gstDecimal = lineItemToStoredRate(it);
         return {
           product_name: it.productName || it.product_name || "",
           hsn_code: it.hsn || it.hsn_code || "",
@@ -493,8 +487,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       const res = await api.post<any>(`invoices/${id}/update_line_items/`, {
         invoice: invoiceFields,
         line_items: updates.items.map((it: any) => {
-          const rawRate = it.gstRate || it.gst_tax_rate || 0;
-          const gstDecimal = rawRate > 1 ? rawRate / 100 : rawRate;
+          const gstDecimal = lineItemToStoredRate(it);
           return {
             product_name: it.productName || it.product_name || "",
             hsn_code: it.hsn || it.hsn_code || "",

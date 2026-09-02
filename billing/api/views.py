@@ -35,7 +35,16 @@ from billing.constants import (
     normalize_payment_mode,
 )
 from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
-from billing.tax_rules import is_interstate, normalize_tax_heads, state_code
+from billing.tax_rules import (
+    classify_b2c,
+    direction_known,
+    is_interstate,
+    normalize_rate,
+    normalize_tax_heads,
+    rate_as_percent,
+    state_code,
+    state_name_from_gstin,
+)
 from billing.period_lock import assert_period_unlocked, locked_period_or_none
 from billing.utils import (
     AIInvoiceProcessingError,
@@ -59,6 +68,11 @@ from .serializers import (
     LineItemSerializer,
     ProductSerializer,
 )
+
+# Money crosses the portal boundary at two decimals. Sums are accumulated as
+# Decimal and quantized once here, rather than with `float +=`, which produced
+# artifacts like 3.0000000000000004 in filing figures (audit A12).
+TWO_PLACES = Decimal("0.01")
 
 logger = logging.getLogger(__name__)
 
@@ -1538,7 +1552,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 target_date = None
         if target_date is None:
-            target_date = datetime.now().date()
+            target_date = timezone.localdate()
         fy_start = datetime(
             target_date.year if target_date.month >= 4 else target_date.year - 1,
             4, 1,
@@ -1652,19 +1666,24 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             )
             .order_by("invoice__type_of_invoice", "gst_tax_rate")
         )
-        for s in slab_data:
-            inv_type = s["invoice__type_of_invoice"]
+        # The query groups by the raw stored rate but the label is the resolved
+        # percent, so a book holding pre-repair 0.25 rows next to repaired
+        # 0.0025 rows produced two "0.25%" slabs. Merge on the resolved rate.
+        merged = {}
+        for row in slab_data:
+            inv_type = row["invoice__type_of_invoice"]
             if inv_type not in rate_slabs:
                 continue
-            rate_slabs[inv_type].append({
-                "rate": float(s["gst_tax_rate"]) * 100 if s["gst_tax_rate"] <= 1 else float(s["gst_tax_rate"]),
-                "taxable": float(s["taxable"]),
-                "cgst": float(s["cgst"]),
-                "sgst": float(s["sgst"]),
-                "igst": float(s["igst"]),
-                "total": float(s["total"]),
-                "invoice_count": s["count"],
+            key = (inv_type, float(rate_as_percent(row["gst_tax_rate"])))
+            slab = merged.setdefault(key, {
+                "rate": key[1], "taxable": 0.0, "cgst": 0.0, "sgst": 0.0,
+                "igst": 0.0, "total": 0.0, "invoice_count": 0,
             })
+            for field in ("taxable", "cgst", "sgst", "igst", "total"):
+                slab[field] += float(row[field])
+            slab["invoice_count"] += row["count"]
+        for (inv_type, _rate), slab in merged.items():
+            rate_slabs[inv_type].append(slab)
 
         # 2. HSN-wise breakdown
         hsn_data = (
@@ -1823,8 +1842,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # ITC must be claimed by Nov 30 of the FY *following* the invoice date,
         # else it's forfeit. Bucket inward invoices by days-until-cutoff and
         # surface anything within 60 days as urgent.
-        from datetime import date as _date, timedelta
-        today = _date.today()
+        from datetime import date as _date
+        today = timezone.localdate()
         inward_with_dates = (
             queryset.filter(type_of_invoice="inward")
             .values("id", "invoice_number", "invoice_date", "total_amount")
@@ -1959,7 +1978,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     "num": int(li.id),
                     "itm_det": {
                         "txval": float(li.quantity * li.rate),
-                        "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
+                        "rt": float(rate_as_percent(li.gst_tax_rate)),
                         "camt": float(li.cgst),
                         "samt": float(li.sgst),
                         "iamt": float(li.igst),
@@ -1979,66 +1998,78 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         b2b = list(b2b_data.values())
 
         # B2CS: Invoices to unregistered (no GSTIN, intra-state, <=2.5L)
-        b2cs = []
+        # B2C (unregistered buyers). One pass, because two independent passes
+        # is how the gap appeared: the B2CS loop skipped every inter-state
+        # invoice ("goes to B2CL") while the B2CL loop skipped everything at or
+        # under B2CL_THRESHOLD — so an inter-state B2C sale below the threshold
+        # was filed in NEITHER table and simply vanished from GSTR-1.
+        #
+        # The rule, matching gstr1_portal_json: inter-state above the threshold
+        # is B2CL; everything else consolidates into B2CS, tagged INTER or
+        # INTRA and carrying the head it was actually taxed under.
+        #
+        # Sums are Decimal and rounded once at the end. Accumulating with
+        # `float +=` produced artifacts like 3.0000000000000004 in figures that
+        # go to the portal.
         b2cs_agg = {}
-        for inv in outward_invoices:
-            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
-            if cust_gst and len(cust_gst) >= 15:
-                continue  # Skip registered
-            # One rule decides direction everywhere (is_interstate compares
-            # like with like: GSTINs when both sides have one, else state
-            # names). The old code read the customer's state off their GSTIN
-            # and fell back to the SELLER's state when they had none — so an
-            # interstate B2C sale was filed here as a local supply.
-            if is_interstate(inv.business, inv.customer):
-                continue  # Inter-state goes to B2CL
-            biz_state = state_code(inv.business)
-            items = inv.lineitem_set.all()
-            for li in items:
-                rate = float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate)
-                key = f"{biz_state}-{rate}"
-                if key not in b2cs_agg:
-                    b2cs_agg[key] = {"pos": biz_state, "rt": rate, "txval": 0, "camt": 0, "samt": 0, "typ": "OE"}
-                b2cs_agg[key]["txval"] += float(li.quantity * li.rate)
-                b2cs_agg[key]["camt"] += float(li.cgst)
-                b2cs_agg[key]["samt"] += float(li.sgst)
-        b2cs = list(b2cs_agg.values())
-
-        # B2CL: Large invoices to unregistered (> B2CL_THRESHOLD, inter-state)
         b2cl = []
+        warnings = []
+        flagged = set()
         for inv in outward_invoices:
-            if float(inv.total_amount) <= B2CL_THRESHOLD:
-                continue
-            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
-            if cust_gst and len(cust_gst) >= 15:
-                continue
-            # Every invoice reaching this point has no customer GSTIN, so the
-            # old "GSTIN prefix else seller's state" fallback made the customer
-            # look local every single time — B2CL was structurally unreachable
-            # and these sales silently went to B2CS instead.
-            if not is_interstate(inv.business, inv.customer):
-                continue  # Intra-state goes to B2CS
-            cust_state = state_code(inv.customer)
-            if not cust_state:
-                continue  # No place of supply to report against
+            table, inter, pos, _downgraded = classify_b2c(inv.business, inv)
+            if table == "b2b":
+                continue  # Registered — belongs in B2B
+
             items = inv.lineitem_set.all()
-            inv_items = [{
-                "num": int(li.id),
-                "itm_det": {
-                    "txval": float(li.quantity * li.rate),
-                    "rt": float(li.gst_tax_rate) * 100 if li.gst_tax_rate <= 1 else float(li.gst_tax_rate),
-                    "iamt": float(li.igst),
-                },
-            } for li in items]
-            b2cl.append({
-                "pos": cust_state,
-                "inv": [{
-                    "inum": inv.invoice_number,
-                    "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
-                    "val": float(inv.total_amount),
-                    "itms": inv_items,
-                }],
-            })
+
+            if table == "b2cl":
+                b2cl.append({
+                    "pos": pos,
+                    "inv": [{
+                        "inum": inv.invoice_number,
+                        "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
+                        "val": float(inv.total_amount),
+                        "itms": [{
+                            "num": int(li.id),
+                            "itm_det": {
+                                "txval": float(li.quantity * li.rate),
+                                "rt": float(rate_as_percent(li.gst_tax_rate)),
+                                "iamt": float(li.igst),
+                            },
+                        } for li in items],
+                    }],
+                })
+                continue
+
+            sply = "INTER" if inter else "INTRA"
+            for li in items:
+                rate = float(rate_as_percent(li.gst_tax_rate))
+                key = (sply, pos, rate)
+                agg = b2cs_agg.setdefault(key, {
+                    "sply_ty": sply, "pos": pos, "typ": "OE", "rt": rate,
+                    "txval": Decimal("0"), "camt": Decimal("0"),
+                    "samt": Decimal("0"), "iamt": Decimal("0"),
+                })
+                agg["txval"] += (li.quantity or 0) * (li.rate or 0)
+                agg["camt"] += li.cgst or Decimal("0")
+                agg["samt"] += li.sgst or Decimal("0")
+                agg["iamt"] += li.igst or Decimal("0")
+                # A row tagged one way but taxed the other is a pre-repair
+                # line; say so, as gstr1_portal_json does, instead of handing
+                # over a file the portal will reject.
+                wrong = (sply == "INTER" and (li.cgst or li.sgst)) or (sply == "INTRA" and li.igst)
+                if wrong and inv.id not in flagged:
+                    flagged.add(inv.id)
+                    heads = "CGST/SGST" if sply == "INTER" else "IGST"
+                    warnings.append(
+                        f"{inv.invoice_number}: {sply.lower()}-state supply carries {heads} — run fix_tax_heads"
+                    )
+
+        b2cs = [
+            {**row, **{k: float(row[k].quantize(TWO_PLACES))
+                       for k in ("txval", "camt", "samt", "iamt")}}
+            for row in b2cs_agg.values()
+        ]
 
         # HSN Summary
         items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
@@ -2114,6 +2145,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "gstr1": gstr1,
             "gstr3b": gstr3b,
             "gstr2b": {"inward_invoices": inward_list},
+            "warnings": warnings,
         })
 
     @action(detail=False, methods=["get"], url_path="gstr1-portal-json")
@@ -2155,14 +2187,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 status=400,
             )
 
-        TWO = Decimal("0.01")
-
         def r2(x):
-            return float(Decimal(x or 0).quantize(TWO))
+            return float(Decimal(x or 0).quantize(TWO_PLACES))
 
         def rate_pct(li):
             r = li.gst_tax_rate or Decimal(0)
-            return float(r * 100 if r <= 1 else r)
+            return float(rate_as_percent(r))
 
         UQC = {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
                "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM"}
@@ -2226,14 +2256,11 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 counts["b2b"] += 1
                 continue
 
-            inter = is_interstate(business, inv.customer)
-            cust_pos = state_code(inv.customer)
-
-            if inter and not cust_pos:
+            table, inter, pos, downgraded = classify_b2c(business, inv)
+            if downgraded:
                 warnings.append(f"{label}: inter-state but customer state unknown — filed as intra-state")
-                inter = False
 
-            if inter and float(inv.total_amount) > B2CL_THRESHOLD:
+            if table == "b2cl":
                 itms = [
                     {"num": i + 1, "itm_det": {
                         "txval": r2(s["txval"]), "rt": rt,
@@ -2241,14 +2268,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     }}
                     for i, (rt, s) in enumerate(sorted(agg.items()))
                 ]
-                b2cl_data.setdefault(cust_pos, {"pos": cust_pos, "inv": []})["inv"].append({
+                b2cl_data.setdefault(pos, {"pos": pos, "inv": []})["inv"].append({
                     "inum": inv.invoice_number, "idt": idt, "val": val, "itms": itms,
                 })
                 counts["b2cl"] += 1
                 continue
 
             # Consolidated B2C: intra-state at any value, inter-state <= threshold.
-            pos = cust_pos if inter else (biz_pos or gstin[:2])
             sply = "INTER" if inter else "INTRA"
             for rt, s in agg.items():
                 b = b2cs_agg.setdefault((sply, pos, rt), {
@@ -2356,7 +2382,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except ValueError:
                 ref_date = None
         if not ref_date:
-            ref_date = datetime.now().date()
+            ref_date = timezone.localdate()
         # Get financial year start date (April 1st)
         start_date = (
             datetime(ref_date.year - 1, 4, 1).date()
@@ -3098,7 +3124,8 @@ class BulkInvoiceImportView(APIView):
             new_objs = [
                 Customer(
                     name=info["name"], gst_number=info["gst"],
-                    pan_number=info["pan"], state_name="RAJASTHAN",
+                    pan_number=info["pan"],
+                    state_name=state_name_from_gstin(info["gst"]) or None,
                     workspace_id=1,
                 ) for info in needed_new.values()
             ]
@@ -3198,7 +3225,8 @@ class BulkInvoiceImportView(APIView):
                         # everything. Defensive fallback.
                         customer = Customer.objects.create(
                             name=customer_name, gst_number=clean_gst,
-                            pan_number=clean_pan, state_name="RAJASTHAN",
+                            pan_number=clean_pan,
+                            state_name=state_name_from_gstin(clean_gst) or None,
                             workspace_id=1,
                         )
                         from billing.gstin import enrich_customer
@@ -3320,12 +3348,21 @@ class BulkInvoiceImportView(APIView):
                                     f"Add the product first or include a GST Rate column."
                                 )
                                 continue
-                            gst_rate = Decimal(str(product.gst_tax_rate))
+                            # assume="fraction": this is the stored column. The
+                            # slab allowlist still heals a master row written by
+                            # the old heuristic, so imports stop propagating it.
+                            gst_rate = normalize_rate(
+                                product.gst_tax_rate, assume="fraction"
+                            )
                             if not hsn_code:
                                 hsn_code = product.hsn_code or ""
                         else:
-                            gst_rate_raw = Decimal(str(gst_rate_raw_in))
-                            gst_rate = gst_rate_raw if gst_rate_raw <= 1 else gst_rate_raw / Decimal("100")
+                            # "gstRate" is the parser's percent field
+                            # (parseInvoiceExcel.ts), so percent is the contract
+                            # for anything the allowlist cannot place.
+                            gst_rate = normalize_rate(
+                                gst_rate_raw_in, assume="percent"
+                            )
                             if not hsn_code and product:
                                 hsn_code = product.hsn_code or ""
 
@@ -3348,6 +3385,17 @@ class BulkInvoiceImportView(APIView):
                             else:
                                 cgst = tax_amount / 2
                                 sgst = tax_amount / 2
+                        # Heads supplied by the file were taken verbatim, so a
+                        # spreadsheet carrying a local split for an interstate
+                        # party re-planted the exact bug fix_tax_heads repairs.
+                        # Re-file them when the direction is actually known.
+                        # When the customer has neither GSTIN nor state (every
+                        # auto-created B2C party), the file's heads are the
+                        # only signal there is and must not lose to a default.
+                        if direction_known(invoice.business, invoice.customer):
+                            cgst, sgst, igst = normalize_tax_heads(
+                                cgst, sgst, igst, is_igst
+                            )
                         amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
 
                         # Validate per-field DB constraints BEFORE bulk_create so
@@ -3923,7 +3971,7 @@ class AIInvoiceCreateView(APIView):
             # the frontend can still link to it.
             inv_number = invoice_data.get("invoice_number", "") or ""
             inv_date = (
-                invoice_data.get("invoice_date") or datetime.now().date()
+                invoice_data.get("invoice_date") or timezone.localdate()
             )
             # Inter-firm mirror helper — creates (or finds) the INWARD
             # entry for the buyer firm, copying lines from the primary
@@ -4107,7 +4155,11 @@ class AIInvoiceCreateView(APIView):
             for item_data in invoice_data.get("line_items", []) or []:
                 qty = _D(str(item_data.get("quantity", 0) or 0))
                 rate = _D(str(item_data.get("rate", 0) or 0))
-                gst_rate = _D(str(item_data.get("gst_tax_rate", 0.03) or 0.03))
+                # The model is not bound by the column's contract: it returns
+                # 3 as often as 0.03. Unnormalized, that billed 300% tax.
+                gst_rate = normalize_rate(
+                    item_data.get("gst_tax_rate", 0.03) or 0.03, assume="fraction"
+                )
                 pre_tax = qty * rate
                 tax = pre_tax * gst_rate
                 amount = pre_tax + tax  # tax-inclusive — matches app contract
@@ -4411,7 +4463,7 @@ class ITCReclaimLedgerView(APIView):
         if "opening_as_of" not in request.data and any(
             k in request.data for k in ("opening_cgst", "opening_sgst", "opening_igst")
         ):
-            serializer.save(opening_as_of=timezone.now().date())
+            serializer.save(opening_as_of=timezone.localdate())
         else:
             serializer.save()
         return Response(serializer.data)

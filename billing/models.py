@@ -13,6 +13,7 @@ from django.db.models.functions import (
     ExtractMonth,
     ExtractYear,
 )
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
@@ -26,6 +27,7 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
+from billing.tax_rules import is_interstate, normalize_rate, rate_as_percent
 
 
 class AbstractBaseModel(models.Model):
@@ -371,17 +373,25 @@ class Invoice(AbstractBaseModel):
 
     @property
     def is_igst_applicable(self):
-        # check if customer and business are from same state using GSTIN
-        return (
-            self.customer.gst_number
-            and self.customer.gst_number[0:2] != self.business.gst_number[0:2]
-        )
+        """Whether this supply is interstate (-> IGST).
+
+        Was a GSTIN-prefix comparison that returned falsy whenever the customer
+        had no GSTIN — so every unregistered interstate buyer was billed
+        CGST+SGST. That is the defect the fix_tax_heads repair pass exists for,
+        and four import paths read this property, so each import re-planted it.
+
+        Delegates to the shared rule, which falls back to state_name for
+        unregistered parties. The invoice form and the inward-bill service
+        already used it; this makes the property agree with them.
+        """
+        return is_interstate(self.business, self.customer)
 
     @classmethod
     def get_next_invoice_number(cls, business_id):
-        from datetime import datetime
-
-        today = datetime.now().date()
+        # Naive now() reads the container clock (UTC), so between midnight and
+        # 05:30 IST this picked the previous FY and issued a number from the
+        # old series.
+        today = timezone.localdate()
         # Get financial year start date (April 1st)
         start_date = (
             datetime(today.year - 1, 4, 1).date()
@@ -419,10 +429,12 @@ class Invoice(AbstractBaseModel):
         # Get the earliest invoice date or default to current year
         earliest_date = cls.objects.order_by("invoice_date").first()
         start_year = (
-            earliest_date.invoice_date.year if earliest_date else datetime.now().year
+            earliest_date.invoice_date.year
+            if earliest_date
+            else timezone.localdate().year
         )
 
-        current_year = datetime.now().year
+        current_year = timezone.localdate().year
         financial_years = []
 
         for year in range(start_year, current_year):
@@ -514,7 +526,12 @@ class LineItem(AbstractBaseModel):
 
     @property
     def gst_tax_in_percentage(self):
-        return f"{int(self.gst_tax_rate * 100)}%"
+        # int() truncated the two slabs with a fraction in them: 0.25% printed
+        # as "0%" and 1.5% as "1%". Format the resolved percent instead and
+        # drop only trailing zeros, so 3 stays "3%" and 0.25 stays "0.25%".
+        percent = rate_as_percent(self.gst_tax_rate)
+        text = f"{percent:f}".rstrip("0").rstrip(".") or "0"
+        return f"{text}%"
 
     @property
     def amount_without_tax(self):
@@ -528,7 +545,12 @@ class LineItem(AbstractBaseModel):
         product = Product.objects.filter(name=product_name).last()
 
         hsn_code = product.hsn_code if product else HSN_CODE
-        gst_tax_rate_in_decimal = product.gst_tax_rate if product else GST_TAX_RATE
+        # Resolved through the allowlist so a master row still holding a
+        # pre-fix 0.25 does not put 25% tax on a new line.
+        gst_tax_rate_in_decimal = (
+            normalize_rate(product.gst_tax_rate, assume="fraction")
+            if product else GST_TAX_RATE
+        )
 
         line_item = LineItem(
             product_name=product_name,

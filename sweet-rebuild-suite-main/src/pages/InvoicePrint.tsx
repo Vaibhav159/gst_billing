@@ -8,6 +8,7 @@ import { cn } from "@/utils/utils";
 import { useEffect, useRef, useState } from "react";
 import { downloadInvoicePDF, sharePDFViaWebShare, sharePDFViaWhatsApp } from "@/utils/generatePDF";
 import { useToast } from "@/hooks/use-toast";
+import { storedShowsIGST } from "@/utils/taxRules";
 
 export default function InvoicePrint() {
   const { id } = useParams<{ id: string }>();
@@ -198,7 +199,7 @@ export default function InvoicePrint() {
             </div>
             <div className="bg-gray-50 rounded-lg p-4 space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="tabular-nums">{formatCurrency(inv.subtotal)}</span></div>
-              {inv.isIGST ? (
+              {storedShowsIGST(inv) ? (
                 <div className="flex justify-between"><span className="text-gray-500">IGST</span><span className="tabular-nums">{formatCurrency(inv.totalIGST)}</span></div>
               ) : (
                 <>

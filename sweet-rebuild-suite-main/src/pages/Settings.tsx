@@ -15,6 +15,7 @@ import { resetOnboarding } from "@/components/OnboardingWizard";
 // Invoice template removed — Tally format is the standard
 
 import { fetchPreferences, patchPreferences, SETTINGS_STORAGE_KEY } from "@/hooks/usePreferences";
+import { todayLocal } from "@/utils/localDate";
 
 function getCurrentFinancialYear(): string {
   const now = new Date();
@@ -210,7 +211,7 @@ export default function Settings() {
               const data = { settings, exportedAt: new Date().toISOString() };
               const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
               const url = URL.createObjectURL(blob);
-              const a = document.createElement("a"); a.href = url; a.download = `gst-app-settings-export-${new Date().toISOString().split("T")[0]}.json`; a.click();
+              const a = document.createElement("a"); a.href = url; a.download = `gst-app-settings-export-${todayLocal()}.json`; a.click();
               URL.revokeObjectURL(url);
               toast({ title: "Settings Exported", description: "Settings backup downloaded." });
             }}

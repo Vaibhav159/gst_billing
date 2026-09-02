@@ -4,6 +4,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomers, useProducts, useBusinesses, generateId } from "@/hooks/useDataStore";
 import { motion, AnimatePresence } from "framer-motion";
+import { todayLocal } from "@/utils/localDate";
 
 type ImportStep = "upload" | "preview" | "mapping" | "result";
 type ImportEntity = "customers" | "products" | "businesses";
@@ -181,7 +182,7 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
         }
 
         const id = generateId(entity.slice(0, 3) + "-");
-        const now = new Date().toISOString().split("T")[0];
+        const now = todayLocal();
 
         if (entity === "customers") {
           // API field names. These used to be posted as gst/pan/mobile/state,

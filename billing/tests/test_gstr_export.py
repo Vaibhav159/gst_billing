@@ -101,7 +101,7 @@ class B2CPlaceOfSupplyTest(BaseAPITestCase):
         super().setUp()
         self.local_b2c = Customer.objects.create(
             workspace_id=1, name="WALK-IN LOCAL", gst_number="",
-            state_name=self.business.state_name,
+            state_name="CHHATTISGARH"  # the GSTIN-22 state; direction follows the GSTIN like the POS does,
         )
         self.far_b2c = Customer.objects.create(
             workspace_id=1, name="WALK-IN FAR", gst_number="", state_name="KERALA",
@@ -168,3 +168,132 @@ class ApiNotFoundTest(BaseAPITestCase):
     def test_frontend_routes_still_serve_the_shell(self):
         resp = self.client.get("/billing/invoice/list")
         self.assertEqual(resp.status_code, 200)
+
+
+class B2CGapTest(GSTRExportTest):
+    """Audit A2: interstate B2C at or under the threshold fell through a hole.
+
+    The B2CS loop skipped every inter-state invoice ("goes to B2CL") while the
+    B2CL loop skipped everything at or under B2CL_THRESHOLD, so a sale in that
+    band was written into neither table and vanished from GSTR-1 — understating
+    turnover against the file actually submitted.
+    """
+
+    def _b2cs(self, data):
+        return data["gstr1"]["b2cs"]
+
+    def test_interstate_b2c_under_the_threshold_is_reported_at_all(self):
+        self._invoice(self.b2c_other_state, "GAP-1", "50000")
+        data = self._export()
+        self.assertEqual(len(data["gstr1"]["b2cl"]), 0, "under threshold — not B2CL")
+        self.assertEqual(len(self._b2cs(data)), 1, "must appear in B2CS, not vanish")
+
+    def test_it_is_tagged_as_an_interstate_supply(self):
+        self._invoice(self.b2c_other_state, "GAP-2", "50000")
+        row = self._b2cs(self._export())[0]
+        self.assertEqual(row["sply_ty"], "INTER")
+
+    def test_it_carries_igst_not_cgst_sgst(self):
+        self._invoice(self.b2c_other_state, "GAP-3", "50000")
+        row = self._b2cs(self._export())[0]
+        self.assertEqual(row["iamt"], 1500.0)
+        self.assertEqual(row["camt"], 0.0)
+        self.assertEqual(row["sgst"] if "sgst" in row else row["samt"], 0.0)
+
+    def test_place_of_supply_is_the_customers_state(self):
+        self._invoice(self.b2c_other_state, "GAP-4", "50000")
+        row = self._b2cs(self._export())[0]
+        self.assertEqual(row["pos"], "32", "Kerala")
+
+    def test_local_b2c_still_files_as_intra_with_cgst_sgst(self):
+        # The fixture business carries GSTIN 22 (Chhattisgarh) with a stale
+        # state_name; direction now follows the GSTIN, like the filed POS does.
+        local = Customer.objects.create(
+            workspace_id=1, name="WALK-IN LOCAL", gst_number="",
+            state_name="CHHATTISGARH",
+        )
+        local.businesses.add(self.business)
+        self._invoice(local, "LOCAL-1", "50000", igst=False)
+        row = self._b2cs(self._export())[0]
+        self.assertEqual(row["sply_ty"], "INTRA")
+        self.assertEqual(row["camt"], 750.0)
+        self.assertEqual(row["samt"], 750.0)
+        self.assertEqual(row["iamt"], 0.0)
+
+    def test_nothing_is_double_counted_across_b2cs_and_b2cl(self):
+        self._invoice(self.b2c_other_state, "SMALL", "50000")   # -> B2CS
+        self._invoice(self.b2c_other_state, "LARGE", "150000")  # -> B2CL
+        data = self._export()
+        b2cs_taxable = sum(r["txval"] for r in self._b2cs(data))
+        b2cl_taxable = sum(
+            i["itm_det"]["txval"]
+            for entry in data["gstr1"]["b2cl"] for inv in entry["inv"] for i in inv["itms"]
+        )
+        self.assertEqual(b2cs_taxable, 50000.0)
+        self.assertEqual(b2cl_taxable, 150000.0)
+
+    def test_every_outward_b2c_rupee_reaches_one_table_or_the_other(self):
+        """The invariant the gap broke: nothing silently disappears."""
+        for n, amount in enumerate(["10000", "50000", "99999", "100000", "150000"]):
+            self._invoice(self.b2c_other_state, f"SWEEP-{n}", amount)
+        data = self._export()
+        total = sum(r["txval"] for r in self._b2cs(data)) + sum(
+            i["itm_det"]["txval"]
+            for entry in data["gstr1"]["b2cl"] for inv in entry["inv"] for i in inv["itms"]
+        )
+        self.assertEqual(total, 409999.0)
+
+    def test_figures_are_not_float_dust(self):
+        """A12: `float +=` accumulation produced 3.0000000000000004."""
+        for n in range(3):
+            self._invoice(self.b2c_other_state, f"DUST-{n}", "0.1")
+        for row in self._b2cs(self._export()):
+            for key in ("txval", "camt", "samt", "iamt"):
+                self.assertEqual(round(row[key], 2), row[key], f"{key}={row[key]!r}")
+
+
+class ExportWarnsOnPreRepairRowsTest(GSTRExportTest):
+    def test_inter_state_row_carrying_cgst_sgst_is_flagged(self):
+        """gstr1_portal_json already said "run fix_tax_heads"; the export
+        handed the same row over silently."""
+        self._invoice(self.b2c_other_state, "PRE-REPAIR", "50000", igst=False)
+        data = self._export()
+        self.assertTrue(any("fix_tax_heads" in w for w in data["warnings"]), data["warnings"])
+
+    def test_a_clean_book_has_no_warnings(self):
+        self._invoice(self.b2c_other_state, "CLEAN", "50000", igst=True)
+        self.assertEqual(self._export()["warnings"], [])
+
+
+class ExportMatchesPortalJsonTest(GSTRExportTest):
+    """A2 happened because two copies of the B2C rule drifted. Both endpoints
+    now call tax_rules.classify_b2c; this pins that they agree."""
+
+    def test_b2cs_and_b2cl_classification_agree_with_the_portal_file(self):
+        self._invoice(self.b2c_other_state, "SMALL", "50000")    # inter, under threshold
+        self._invoice(self.b2c_other_state, "LARGE", "150000")   # inter, B2CL
+        local = Customer.objects.create(
+            workspace_id=1, name="WALK-IN LOCAL", gst_number="", state_name="CHHATTISGARH",
+        )
+        local.businesses.add(self.business)
+        self._invoice(local, "LOCAL", "20000", igst=False)
+
+        export = self._export()["gstr1"]
+        resp = self.client.get(
+            f"/api/invoices/gstr1-portal-json/?business_id={self.business.id}&month=5&year=2026"
+        )
+        self.assertEqual(resp.status_code, 200, getattr(resp, "data", None))
+        portal = resp.data["file"]
+
+        def key(row):
+            return (row["sply_ty"], row["pos"], float(row["rt"]))
+
+        self.assertEqual({key(r) for r in export["b2cs"]}, {key(r) for r in portal["b2cs"]})
+        self.assertEqual(
+            sorted(round(r["txval"], 2) for r in export["b2cs"]),
+            sorted(round(r["txval"], 2) for r in portal["b2cs"]),
+        )
+        self.assertEqual(
+            sum(len(e["inv"]) for e in export["b2cl"]),
+            sum(len(e["inv"]) for e in portal["b2cl"]),
+        )
