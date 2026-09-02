@@ -226,7 +226,9 @@ class EditPathTests(BaseAPITestCase):
     def test_cache_invalidation_failure_does_not_fail_the_save(self):
         """#144's CircleCI job has no Redis; the invalidation raised out of the request."""
         from unittest.mock import patch
-        with patch("cacheops.invalidate_model", side_effect=RuntimeError("redis down")):
+        # cacheops is off in test settings; turn it on so the invalidation path runs.
+        with self.settings(CACHEOPS_ENABLED=True, CACHEOPS_FAKE=False), \
+             patch("cacheops.invalidate_model", side_effect=RuntimeError("redis down")):
             resp = self.client.post(reverse("invoice-update-line-items", args=[self.invoice.pk]),
                                     {"line_items": [self._line()]}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)

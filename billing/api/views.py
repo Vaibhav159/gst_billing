@@ -5,6 +5,7 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import (
     Count,
@@ -1150,10 +1151,16 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             # bulk_create and _raw_delete send no signals, so cacheops never
             # heard about the new lines — prod could serve the deleted ones
             # for up to 30 minutes.
+            # Only when cacheops is really on. It defers invalidation inside
+            # atomic() and flushes at commit — outside any try here — so in
+            # FAKE mode (CI) or with cacheops off, the call just booked a Redis
+            # connection failure for later.
+            cacheops_live = getattr(settings, "CACHEOPS_ENABLED", True) and not getattr(settings, "CACHEOPS_FAKE", False)
             try:
-                from cacheops import invalidate_model, invalidate_obj
-                invalidate_model(LineItem)
-                invalidate_obj(invoice)
+                if cacheops_live:
+                    from cacheops import invalidate_model, invalidate_obj
+                    invalidate_model(LineItem)
+                    invalidate_obj(invoice)
             except Exception:  # noqa: BLE001 — a missed cache is not a failed save
                 # cacheops opens a Redis connection to invalidate; without one
                 # (CI's Postgres job, a Redis restart) that raised out of the
