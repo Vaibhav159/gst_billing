@@ -63,7 +63,6 @@ class SignedMediaTest(BaseAPITestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_expired_signature_is_forbidden(self):
-        import billing.api.media as media_mod
         from datetime import timedelta
 
         from django.core import signing

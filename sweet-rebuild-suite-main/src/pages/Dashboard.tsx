@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, TrendingDown, Receipt, FileText,
   Users, Building2, Package, BarChart3, ArrowRight, ArrowUpRight,
-  Sparkles, Activity, Eye, Pencil, Printer, Clock, AlertCircle,
+  Sparkles, Activity, Eye, Pencil, Printer, Clock,
   CalendarDays,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -547,8 +547,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={4} dataKey="value" strokeWidth={0}
-                  onClick={(_, index) => {
-                    const type = index === 0 ? "OUTWARD" : "INWARD";
+                  onClick={(_) => {
                     navigate(`/billing/invoice/list`);
                   }}
                   className="cursor-pointer">

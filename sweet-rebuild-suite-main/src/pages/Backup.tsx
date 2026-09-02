@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, ArrowDownLeft, Database } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, Database } from "lucide-react";
 import { financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
@@ -36,7 +36,6 @@ export default function Backup() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [exportEntity, setExportEntity] = useState<"all" | "invoices" | "customers" | "products" | "businesses">("all");
 
   // Compute date range from FY
   const fyStartYear = parseInt(fyFilter.split("-")[0]);
@@ -363,7 +362,7 @@ export default function Backup() {
                 </div>
 
                 <div className="flex items-center gap-2 text-[11px] text-warning mt-3">
-                  <Shield className="w-3 h-3" /> <span>Replaces existing local data — you'll be asked to confirm</span>
+                  <Shield className="w-3 h-3" /> <span>Creates missing businesses, products and customers and imports invoices not already on file — nothing is deleted; you'll be asked to confirm</span>
                 </div>
 
                 {/* Restore button uses warning-color, not success-green —

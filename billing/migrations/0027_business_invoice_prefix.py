@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0026_business_email_customer_email'),
+        ("billing", "0026_business_email_customer_email"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='business',
-            name='invoice_prefix',
-            field=models.CharField(blank=True, default='', help_text='Prefix for invoice numbers (e.g. SGJ, LJ). Leave blank for plain numbers.', max_length=20, verbose_name='Invoice Prefix'),
+            model_name="business",
+            name="invoice_prefix",
+            field=models.CharField(blank=True, default="", help_text="Prefix for invoice numbers (e.g. SGJ, LJ). Leave blank for plain numbers.", max_length=20, verbose_name="Invoice Prefix"),
         ),
     ]

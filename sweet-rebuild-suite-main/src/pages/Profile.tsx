@@ -22,12 +22,21 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: "Viewer",
 };
 
+interface ProfileForm {
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  timezone: string;
+  language: string;
+}
+
 export default function Profile() {
   const isMobile = useIsMobile();
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [profile, setProfile] = useState(() => {
+  const [profile, setProfile] = useState<ProfileForm>(() => {
     const saved = localStorage.getItem(PROFILE_KEY);
     if (saved) {
       try { return { ...JSON.parse(saved) }; } catch { /* ignore */ }
@@ -42,7 +51,7 @@ export default function Profile() {
     };
   });
 
-  const [notifications, setNotifications] = useState(() => {
+  const [notifications] = useState(() => {
     const saved = localStorage.getItem(NOTIFICATIONS_KEY);
     if (saved) {
       try { return { ...JSON.parse(saved) }; } catch { /* ignore */ }
@@ -84,10 +93,6 @@ export default function Profile() {
   // truthful. Programmatic updates inside the API effect bypass these.
   const setP = (field: string, val: unknown) => {
     setProfile((p) => ({ ...p, [field]: val }));
-    setDirty(true);
-  };
-  const setN = (key: string, val: boolean) => {
-    setNotifications((n) => ({ ...n, [key]: val }));
     setDirty(true);
   };
 

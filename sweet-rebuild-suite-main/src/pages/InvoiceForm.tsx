@@ -3,7 +3,7 @@ import { rateToPercent } from "@/utils/gstRate";
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate, Link, useLocation } from "react-router-dom";
-import { formatCurrency, itemUnits, itemUnitLabels, currentFY } from "@/utils/mockData";
+import { formatCurrency, itemUnits, currentFY } from "@/utils/mockData";
 import DraftRestoreBanner from "@/components/DraftRestoreBanner";
 import type { ItemUnit } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useProducts, generateId } from "@/hooks/useDataStore";
@@ -11,7 +11,7 @@ import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Plus, Trash2, Save, X, Info, AlertTriangle, Building2, User,
-  FileText, Package, Calculator, CheckCircle2, IndianRupee, UserPlus,
+  FileText, Package, Calculator, CheckCircle2, UserPlus,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isIntraState } from "@/utils/taxRules";
@@ -21,7 +21,6 @@ import QuickCustomerModal from "@/components/QuickCustomerModal";
 import SearchableSelect from "@/components/SearchableSelect";
 import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useMobileMode } from "@/contexts/MobileModeContext";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
 import { todayLocal } from "@/utils/localDate";
@@ -36,7 +35,6 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const duplicateFrom = (location.state as any)?.duplicateFrom;
-  const { mobileMode } = useMobileMode();
   const { create: createInvoice, update: updateInvoice } = useInvoices();
   const { items: businesses } = useBusinesses();
   const { items: allCustomers } = useCustomers();
@@ -618,7 +616,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   <SearchableSelect
                     value={form.customerId}
                     onChange={(val) => set("customerId", val)}
-                    options={localCustomers.map((c) => ({ value: String(c.id), label: c.name, sublabel: c.gst_number }))}
+                    options={localCustomers.map((c) => ({ value: String(c.id), label: c.name, sublabel: c.gst_number ?? undefined }))}
                     placeholder="Search Customer"
                   />
                   <div className="flex items-center gap-2 mt-1">
@@ -797,7 +795,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             <div className="elevated-card rounded-2xl p-5 space-y-3">
               <div className="flex items-center gap-2"><Calculator className="w-4 h-4 text-primary" /><h3 className="text-[13px] font-display font-semibold text-foreground">Summary</h3></div>
               <div className="space-y-2 text-[13px]">
-                {items.map((item, i) => {
+                {items.map((item) => {
                   const product = localProducts.find(p => p.id === item.productId);
                   if (item.qty === 0 && item.rate === 0 && !product) return null;
                   return (

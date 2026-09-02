@@ -22,8 +22,8 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from billing.tax_rules import is_interstate, normalize_tax_heads
 from billing.models import Invoice, LineItem
+from billing.tax_rules import is_interstate, normalize_tax_heads
 
 
 class Command(BaseCommand):

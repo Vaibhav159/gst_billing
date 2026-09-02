@@ -2,7 +2,6 @@ import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -60,7 +59,6 @@ const AuditLog = lazy(() => import("@/pages/AuditLog"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-const queryClient = new QueryClient();
 
 /** Single fallback for all lazy routes. Centred spinner keeps the layout
  *  height stable so the sidebar/topnav don't reflow during the chunk
@@ -75,7 +73,6 @@ function RouteFallback() {
 
 const App = () => (
   <ErrorBoundary>
-    <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
           <TooltipProvider>
@@ -170,7 +167,6 @@ const App = () => (
           </TooltipProvider>
         </AuthProvider>
       </ThemeProvider>
-    </QueryClientProvider>
   </ErrorBoundary>
 );
 

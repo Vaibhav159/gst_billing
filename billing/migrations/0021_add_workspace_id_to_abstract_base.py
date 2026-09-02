@@ -6,38 +6,38 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0020_product_gst_tax_rate'),
+        ("billing", "0020_product_gst_tax_rate"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='business',
-            name='workspace_id',
+            model_name="business",
+            name="workspace_id",
             field=models.IntegerField(default=1),
         ),
         migrations.AddField(
-            model_name='customer',
-            name='workspace_id',
+            model_name="customer",
+            name="workspace_id",
             field=models.IntegerField(default=1),
         ),
         migrations.AddField(
-            model_name='historicalinvoice',
-            name='workspace_id',
+            model_name="historicalinvoice",
+            name="workspace_id",
             field=models.IntegerField(default=1),
         ),
         migrations.AddField(
-            model_name='invoice',
-            name='workspace_id',
+            model_name="invoice",
+            name="workspace_id",
             field=models.IntegerField(default=1),
         ),
         migrations.AddField(
-            model_name='lineitem',
-            name='workspace_id',
+            model_name="lineitem",
+            name="workspace_id",
             field=models.IntegerField(default=1),
         ),
         migrations.AddField(
-            model_name='product',
-            name='workspace_id',
+            model_name="product",
+            name="workspace_id",
             field=models.IntegerField(default=1),
         ),
     ]

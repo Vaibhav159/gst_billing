@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildInvoiceParams, mapDjangoInvoice } from "./useDataStore";
 
 describe("mapDjangoInvoice — the server's total, to the paisa (A15)", () => {
-  const base = { id: 1, invoice_number: "7", invoice_date: "2026-04-01", customer_name: "A BUYER", line_items: [], total_tax: "0" };
+  const base: any = { id: 1, invoice_number: "7", invoice_date: "2026-04-01", customer_name: "A BUYER", line_items: [], total_tax: "0" };
 
   it("does not round 566.05 to 566 and invent a round-off", () => {
     const inv = mapDjangoInvoice({ ...base, total_amount: "566.05" });

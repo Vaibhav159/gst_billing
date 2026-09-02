@@ -2,8 +2,8 @@ import { logger } from "@/utils/logger";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Pencil, FileText, Trash2, Plus, Phone, Mail, MapPin,
-  Tag, Building2, TrendingUp, TrendingDown, Activity, Calendar,
-  Eye, Printer, ExternalLink, Copy, CheckCircle2, Download, Loader2, FileArchive,
+  Tag, TrendingUp, TrendingDown, Activity,
+  Eye, Copy, CheckCircle2, Download, Loader2,
   Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -17,11 +17,6 @@ import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } };
-const fadeUp = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" as const } },
-};
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -35,7 +30,7 @@ export default function CustomerDetail() {
   const { item: customer, isLoading } = useCustomer(id);
   const { remove: removeCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
-  const { items: invoices, isLoading: isLoadingInvoices } = useInvoices({ customerId: id });
+  const { items: invoices } = useInvoices({ customerId: id });
 
   // Consistent loading + not-found treatment, mirrors InvoiceDetail.
   if (isLoading) return (
@@ -199,7 +194,7 @@ export default function CustomerDetail() {
               <div key={f.label} className="flex items-center justify-between p-2.5 rounded-xl bg-secondary/15 border border-border/30">
                 <div><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><code className="text-[12px] font-mono text-foreground">{f.value || "—"}</code></div>
                 {f.value && (
-                  <button onClick={() => copyToClipboard(f.value, f.label)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground">
+                  <button onClick={() => copyToClipboard(f.value ?? "", f.label)} className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground">
                     {copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 )}

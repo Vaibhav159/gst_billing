@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, FileText, Users, Truck, ReceiptText } from "lucide-react";
+  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, Users, ReceiptText } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -59,7 +59,7 @@ export default function MobileMoreDrawer({ open, onOpenChange }: Props) {
 
             <div className="flex items-center justify-between px-5 py-3 border-b border-border/30">
               <h2 className="text-base font-display font-semibold text-foreground">More</h2>
-              <button onClick={() => onOpenChange(false)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/40">
+              <button type="button" aria-label="Close" onClick={() => onOpenChange(false)} className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/40">
                 <X className="w-5 h-5" />
               </button>
             </div>

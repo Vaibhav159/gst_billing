@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0022_business_signature_image'),
+        ("billing", "0022_business_signature_image"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='lineitem',
-            name='unit',
-            field=models.CharField(blank=True, default='pcs', help_text='Unit of measurement (e.g., gms, pcs, kg, nos, etc.)', max_length=20, verbose_name='Unit'),
+            model_name="lineitem",
+            name="unit",
+            field=models.CharField(blank=True, default="pcs", help_text="Unit of measurement (e.g., gms, pcs, kg, nos, etc.)", max_length=20, verbose_name="Unit"),
         ),
     ]

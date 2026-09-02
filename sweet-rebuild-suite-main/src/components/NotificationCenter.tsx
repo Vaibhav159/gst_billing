@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Bell, Check, CheckCheck, Trash2, X, Info, AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Bell, CheckCheck, Trash2, Info, AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useNotifications, type AppNotification } from "@/hooks/useNotifications";
+import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/utils/utils";
 
 const typeIcons = {

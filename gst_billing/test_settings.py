@@ -1,5 +1,5 @@
 """Test settings — uses SQLite instead of PostgreSQL for fast local testing."""
-from .settings import *  # noqa: F401, F403
+from .settings import *
 
 DATABASES = {
     "default": {

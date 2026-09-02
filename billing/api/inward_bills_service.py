@@ -4,7 +4,7 @@ Kept free of view/serializer concerns so the tax + validation rules can be
 tested in isolation. Only ``find_duplicate`` touches the DB (read-only).
 """
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from billing.constants import INVOICE_TYPE_INWARD
 
@@ -50,12 +50,12 @@ def compute_lines(lines, intra, bill_total=None):
             {**ln, "taxable": taxable, "rate": rate,
              "cgst": cgst, "sgst": sgst, "igst": igst, "amount": amount}
         )
-    total = sum((l["amount"] for l in out), Decimal("0.00"))
+    total = sum((line["amount"] for line in out), Decimal("0.00"))
     if bill_total is not None and out:
         bill_total = Decimal(bill_total)
         if total != bill_total:
             out[-1]["amount"] = _r(out[-1]["amount"] + (bill_total - total))
-            total = sum((l["amount"] for l in out), Decimal("0.00"))
+            total = sum((line["amount"] for line in out), Decimal("0.00"))
     return out, total
 
 

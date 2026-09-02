@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import { FileText, Plus, Users, Package, Share2, ArrowRight, IndianRupee, Receipt, Upload, BarChart3, FileBarChart2, Loader2 } from "lucide-react";
+import { FileText, Plus, Users, Package, ArrowRight, IndianRupee, Receipt, Upload, BarChart3, FileBarChart2, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatCurrency, formatDate, currentFY } from "@/utils/mockData";
-import { useDashboardStats, useInvoices, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { formatCurrency, formatDate } from "@/utils/mockData";
+import { useDashboardStats, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { cn } from "@/utils/utils";
 import { useMemo } from "react";
 

@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { formatApiError } from "@/utils/apiError";
-import { Upload, FileText, CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, Eye, X } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, X } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomers, useProducts, useBusinesses, generateId } from "@/hooks/useDataStore";

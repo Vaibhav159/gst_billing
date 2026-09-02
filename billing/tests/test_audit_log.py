@@ -1,9 +1,11 @@
 """Tests for the Audit Log system."""
 from decimal import Decimal
+
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from rest_framework.test import APIClient
-from django.contrib.auth.models import User, Group
-from billing.models import AuditLog, Business, Customer, Invoice, Product
+
+from billing.models import AuditLog, Business, Customer, Invoice
 
 
 class AuditLogTestCase(TestCase):

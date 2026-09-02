@@ -142,7 +142,8 @@ class MonthlyTaxTest(BaseAPITestCase):
             type_of_invoice=INVOICE_TYPE_OUTWARD, total_amount=0,
         )
         for qty, rate, gst in lines:
-            taxable = D(str(qty)) * D(str(rate)); tax = taxable * D(str(gst))
+            taxable = D(str(qty)) * D(str(rate))
+            tax = taxable * D(str(gst))
             LineItem.objects.create(
                 workspace_id=1, customer=self.customer, invoice=inv,
                 product_name="Item", hsn_code="711319", gst_tax_rate=D(str(gst)),

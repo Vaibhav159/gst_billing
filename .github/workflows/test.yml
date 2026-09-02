@@ -75,6 +75,9 @@ jobs:
           # (e.g. django-simple-history). Pin <81 because setuptools 81+ removed
           # the vendored `pkg_resources` module.
           uv pip install . pytest pytest-django gunicorn 'setuptools<81'
+      - name: Lint (ruff)
+        run: uvx ruff@0.16.5 check billing gst_billing
+
       - name: Models and migrations agree
         # A model change without its migration ships as a crash-loop on the
         # server's first `migrate`; nothing was checking.

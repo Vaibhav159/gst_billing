@@ -50,7 +50,7 @@ export default function MobileFilterSheet({ open, onOpenChange, filters, onClear
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={onClear} className="text-[12px] text-destructive font-medium">Clear All</button>
-                <button onClick={() => onOpenChange(false)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground">
+                <button type="button" aria-label="Close" onClick={() => onOpenChange(false)} className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground">
                   <X className="w-5 h-5" />
                 </button>
               </div>

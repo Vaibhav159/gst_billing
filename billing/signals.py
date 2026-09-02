@@ -1,3 +1,5 @@
+import contextlib
+
 from django.db.models import Sum
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -29,8 +31,6 @@ def update_invoice_total_on_line_item_save(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=LineItem)
 def update_invoice_total_on_line_item_delete(sender, instance, **kwargs):
-    try:
+    # Cascade delete — the invoice went first.
+    with contextlib.suppress(Invoice.DoesNotExist):
         _resync_invoice_total(instance.invoice)
-    except Invoice.DoesNotExist:
-        # Cascade delete — the invoice went first.
-        pass

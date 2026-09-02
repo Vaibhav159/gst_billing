@@ -17,7 +17,7 @@ class QuickSearchTest(BaseAPITestCase):
         super().setUp()
         self.narendra = Customer.objects.create(
             workspace_id=1, name="NARENDRA JI QS", state_name="RAJASTHAN")
-        for i, (num, dt, amt) in enumerate([
+        for _i, (num, dt, amt) in enumerate([
             ("QS-1", "2026-05-01", "100"), ("QS-2", "2026-06-01", "200"),
             ("QS-3", "2026-07-01", "300"), ("QS-4", "2026-08-01", "400"),
         ]):

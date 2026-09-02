@@ -12,8 +12,9 @@
 #    places cannot represent the 0.25% diamond/stone rate (0.0025), which
 #    silently rounded to 0.003. Widened to numeric(13,4).
 
-import django.core.validators
 from decimal import Decimal
+
+import django.core.validators
 from django.db import migrations, models
 
 
@@ -44,16 +45,16 @@ def _drop_description(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0035_user_preference'),
+        ("billing", "0035_user_preference"),
     ]
 
     operations = [
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.AddField(
-                    model_name='product',
-                    name='description',
-                    field=models.TextField(blank=True, default='', help_text='Free-text note shown on the product page.'),
+                    model_name="product",
+                    name="description",
+                    field=models.TextField(blank=True, default="", help_text="Free-text note shown on the product page."),
                 ),
             ],
             database_operations=[
@@ -61,13 +62,13 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.AlterField(
-            model_name='lineitem',
-            name='gst_tax_rate',
-            field=models.DecimalField(decimal_places=4, default=Decimal('0.03'), help_text='GST Tax Rate of the product.', max_digits=13, verbose_name='GST Tax Rate'),
+            model_name="lineitem",
+            name="gst_tax_rate",
+            field=models.DecimalField(decimal_places=4, default=Decimal("0.03"), help_text="GST Tax Rate of the product.", max_digits=13, verbose_name="GST Tax Rate"),
         ),
         migrations.AlterField(
-            model_name='product',
-            name='gst_tax_rate',
-            field=models.DecimalField(decimal_places=4, default=Decimal('0.03'), help_text='GST Tax Rate of the product.', max_digits=13, validators=[django.core.validators.MinValueValidator(Decimal('0.00')), django.core.validators.MaxValueValidator(Decimal('1.00'))], verbose_name='GST Tax Rate'),
+            model_name="product",
+            name="gst_tax_rate",
+            field=models.DecimalField(decimal_places=4, default=Decimal("0.03"), help_text="GST Tax Rate of the product.", max_digits=13, validators=[django.core.validators.MinValueValidator(Decimal("0.00")), django.core.validators.MaxValueValidator(Decimal("1.00"))], verbose_name="GST Tax Rate"),
         ),
     ]

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Truck, Save, X, Loader2, FileText } from "lucide-react";
+import { Truck, Save, X, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";

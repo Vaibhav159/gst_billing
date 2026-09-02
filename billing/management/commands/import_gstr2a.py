@@ -112,11 +112,11 @@ class Command(BaseCommand):
                         self.stdout.write(f"│  {w}")
 
             if verbose and result.created_detail:
-                self.stdout.write(f"│  Detail:")
+                self.stdout.write("│  Detail:")
                 for d in result.created_detail:
                     self.stdout.write(f"│  {d}")
             if verbose and result.skipped_detail:
-                self.stdout.write(f"│  Skipped rows:")
+                self.stdout.write("│  Skipped rows:")
                 for d in result.skipped_detail[:20]:
                     self.stdout.write(f"│  {d}")
                 if len(result.skipped_detail) > 20:

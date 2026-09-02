@@ -8,11 +8,11 @@ Register (list/detail), AI-assisted extraction (pre-fill only), and create
 
 import json
 import logging
-from types import SimpleNamespace
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.core.files.base import ContentFile
-from django.db import transaction, IntegrityError, transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -20,13 +20,12 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
-from billing.period_lock import assert_period_unlocked
-from billing.models import Business, Customer, Invoice, LineItem, InwardCapture
 from billing.api.media import sign_media_path
-from billing.utils import AIInvoiceProcessor
-
+from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
+from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
+from billing.period_lock import assert_period_unlocked
 from billing.tax_rules import is_interstate
+from billing.utils import AIInvoiceProcessor
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
 from .permissions import RoleBasedPermission

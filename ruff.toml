@@ -63,8 +63,11 @@ ignore = [
     "RUF005", # Consider iterable unpacking instead of concatenation
     "PERF401", # Use a list comprehension instead of a for-loop
     "PERF203", # Try using set comprehension instead of list comprehension
-    "RUF015"  # Prefer next() over iteration
+    "RUF015",  # Prefer next() over iteration
+    "RUF001", "RUF002", "RUF003",  # ₹, ×, — and friends in strings/comments are intentional in an Indian billing app
+    "TRY300",  # return-in-try is the house style (see the TRY ignores above)
 ]
+
 
 # Allow autofix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
@@ -76,3 +79,6 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [lint.mccabe]
 # Unlike Flake8, default to a complexity level of 10.
 max-complexity = 10 
+[lint.per-file-ignores]
+# Settings modules layer on each other with star imports by design.
+"gst_billing/*settings*.py" = ["F405"]

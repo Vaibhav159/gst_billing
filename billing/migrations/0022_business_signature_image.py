@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0021_add_workspace_id_to_abstract_base'),
+        ("billing", "0021_add_workspace_id_to_abstract_base"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='business',
-            name='signature_image',
-            field=models.ImageField(blank=True, help_text='Authorised signatory signature for invoices.', null=True, upload_to='signatures/', verbose_name='Signature Image'),
+            model_name="business",
+            name="signature_image",
+            field=models.ImageField(blank=True, help_text="Authorised signatory signature for invoices.", null=True, upload_to="signatures/", verbose_name="Signature Image"),
         ),
     ]

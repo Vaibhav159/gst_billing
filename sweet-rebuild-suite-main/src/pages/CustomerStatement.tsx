@@ -2,9 +2,9 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { formatCurrency, formatCompactCurrency, formatDate, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { ArrowLeft, Printer, Calendar, FileText, TrendingUp, TrendingDown, Scale, Hash, MapPin, Building2, Receipt, Download, Users } from "lucide-react";
+import { ArrowLeft, Printer, Receipt, Download, Users } from "lucide-react";
 import { downloadStatementPDF } from "@/utils/generateStatementPDF";
-import { motion } from "framer-motion";
+
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useCustomers, useBusinesses, fetchAllInvoices } from "@/hooks/useDataStore";
@@ -12,8 +12,6 @@ import type { Invoice } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import { formatApiError } from "@/utils/apiError";
 
-const fadeUp = { hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" as const } } };
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.07 } } };
 
 export default function CustomerStatement() {
   const { id } = useParams<{ id: string }>();

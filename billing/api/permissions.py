@@ -6,7 +6,7 @@ Three roles:
 - Editor: create, read, update (no delete, no settings, no user management)
 - Viewer: read only (list, retrieve, print, export)
 """
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 
 def get_user_role(user):

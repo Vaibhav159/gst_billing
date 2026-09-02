@@ -49,7 +49,7 @@ class InwardBillsServiceTest(SimpleTestCase):
         ]
         out, total = compute_lines(lines, intra=True, bill_total=D("31533.00"))
         self.assertEqual(total, D("31533.00"))
-        self.assertEqual(sum(l["amount"] for l in out), D("31533.00"))
+        self.assertEqual(sum(line["amount"] for line in out), D("31533.00"))
         self.assertEqual(out[0]["cgst"], D("80.53"))
         self.assertEqual(out[1]["cgst"], D("378.69"))
         self.assertEqual(out[1]["amount"], D("26003.14"))

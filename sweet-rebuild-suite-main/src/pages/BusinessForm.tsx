@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { indianStates } from "@/utils/mockData";
-import { useBusinesses, useBusiness, generateId } from "@/hooks/useDataStore";
+import { useBusinesses, useBusiness } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Save, X, AlertTriangle, Building2, Pencil, Phone, Mail, MapPin,
@@ -36,9 +36,9 @@ export default function BusinessForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { items: businesses, create: createBusiness, update: updateBusiness } = useBusinesses();
+  const { create: createBusiness, update: updateBusiness } = useBusinesses();
   const isEdit = !!id;
-  const { item: existing, isLoading } = useBusiness(isEdit ? id : undefined);
+  const { item: existing } = useBusiness(isEdit ? id : undefined);
 
   const [form, setForm] = useState({
     name: "",

@@ -6,18 +6,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0025_auditlog_snapshot_alter_auditlog_action'),
+        ("billing", "0025_auditlog_snapshot_alter_auditlog_action"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='business',
-            name='email',
-            field=models.EmailField(blank=True, help_text='Email address of the business.', max_length=255, null=True, verbose_name='Email'),
+            model_name="business",
+            name="email",
+            field=models.EmailField(blank=True, help_text="Email address of the business.", max_length=255, null=True, verbose_name="Email"),
         ),
         migrations.AddField(
-            model_name='customer',
-            name='email',
-            field=models.EmailField(blank=True, help_text='Email address of the customer.', max_length=255, null=True, verbose_name='Email'),
+            model_name="customer",
+            name="email",
+            field=models.EmailField(blank=True, help_text="Email address of the customer.", max_length=255, null=True, verbose_name="Email"),
         ),
     ]

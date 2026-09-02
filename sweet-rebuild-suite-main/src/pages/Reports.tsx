@@ -6,7 +6,7 @@ import { useBusinesses, useCustomers, useDashboardStats, mapDjangoInvoice, fetch
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Download, FileSpreadsheet, ExternalLink, TrendingUp, Receipt, ArrowUpRight, ArrowDownLeft, BarChart3, PieChart, FileText, Database, FileDown, Loader2, Package, Clock, Users } from "lucide-react";
-import { downloadReportExcel, generateReportExcel } from "@/utils/generateReportExcel";
+import { downloadReportExcel } from "@/utils/generateReportExcel";
 import ReportPreviewModal from "@/components/ReportPreviewModal";
 import type { Invoice } from "@/hooks/useDataStore";
 import DateRangePicker from "@/components/DateRangePicker";
@@ -464,7 +464,7 @@ export default function Reports() {
               previous vertical sidebar, and consistent across screen sizes. */}
           <motion.div variants={stagger} initial="hidden" animate="visible"
             className={cn("grid gap-3", isMobile ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
-            {quickLinks.map((l, i) => (
+            {quickLinks.map((l) => (
               <motion.div key={l.label} variants={fadeUp}>
                 <Link to={l.href} className="stat-card rounded-2xl p-3.5 block hover:border-primary/30 transition-all">
                   <div className="flex items-center gap-2.5">

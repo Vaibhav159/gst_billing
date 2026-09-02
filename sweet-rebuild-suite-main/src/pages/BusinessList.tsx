@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
-import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
+import { useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -26,8 +26,6 @@ export default function BusinessList() {
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useBusinesses(selectedFY);
-  const { items: customers } = useCustomers(selectedFY);
-  const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -120,7 +118,7 @@ export default function BusinessList() {
         </div>
         <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} className="premium-select text-[13px]">
           <option value="all">All States</option>
-          {allStates.map((s) => <option key={s} value={s}>{s}</option>)}
+          {allStates.map((s) => s ? <option key={s} value={s}>{s}</option> : null)}
         </select>
         {!isMobile && (
           <div className="flex rounded-xl overflow-hidden border border-border/60 text-[13px]">

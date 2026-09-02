@@ -1,5 +1,5 @@
+import contextlib
 import csv
-import json
 import logging
 from calendar import monthrange
 from datetime import datetime
@@ -14,42 +14,32 @@ from django.db.models import (
     Q,
     Sum,
 )
-from django.db.models.functions import Cast, Coalesce, ExtractMonth, ExtractYear
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from num2words import num2words
 from openpyxl import Workbook
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework import permissions
-from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.constants import (
-    B2CL_THRESHOLD,
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
-    normalize_payment_mode,
 )
 from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
-from billing.tax_rules import (
-    check_line_money,
-    classify_b2c,
-    direction_known,
-    is_interstate,
-    normalize_rate,
-    normalize_tax_heads,
-    rate_as_percent,
-    state_code,
-    state_name_from_gstin,
-)
-from billing.period_lock import assert_period_unlocked, locked_period_or_none
+from billing.period_lock import assert_period_unlocked
+from billing.services import gstr1
+from billing.services.ai_import import create_from_ai
+from billing.services.bulk_import import run_bulk_import
+from billing.services.line_items import build_line_items
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -60,12 +50,12 @@ from billing.utils import (
 )
 
 from .mixins import AuditLogMixin, ProtectedDeleteMixin
-from .permissions import RoleBasedPermission, AdminOnlyPermission, get_user_role
+from .permissions import AdminOnlyPermission, RoleBasedPermission, get_user_role
 from .serializers import (
-    FiledPeriodSerializer,
     AuditLogSerializer,
     BusinessSerializer,
     CustomerSerializer,
+    FiledPeriodSerializer,
     InvoiceListSerializer,
     InvoiceSerializer,
     InvoiceSummarySerializer,
@@ -76,7 +66,6 @@ from .serializers import (
 # Money crosses the portal boundary at two decimals. Sums are accumulated as
 # Decimal and quantized once here, rather than with `float +=`, which produced
 # artifacts like 3.0000000000000004 in filing figures (audit A12).
-TWO_PLACES = Decimal("0.01")
 
 logger = logging.getLogger(__name__)
 
@@ -443,7 +432,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             )
 
         # Log export
-        try:
+        with contextlib.suppress(Exception):
             AuditLog.objects.create(
                 action="exported",
                 entity="customer",
@@ -452,8 +441,6 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
                 user=request.user if request.user and request.user.is_authenticated else None,
                 details=f"Exported {customers.count()} customers to CSV",
             )
-        except Exception:
-            pass
 
         return response
 
@@ -508,7 +495,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             source.delete()
 
         # Log merge
-        try:
+        with contextlib.suppress(Exception):
             AuditLog.objects.create(
                 action="merged",
                 entity="customer",
@@ -517,8 +504,6 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
                 user=request.user if request.user and request.user.is_authenticated else None,
                 details=f"Merged '{source_name}' (#{source_id}) into '{target.name}' ({invoices_transferred} invoices transferred)",
             )
-        except Exception:
-            pass
 
         return Response(
             {
@@ -912,7 +897,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # downstream actions that don't reference total_tax / line_item_count
         # don't pay for them at all (Postgres skips uncorrelated
         # subqueries that aren't selected).
-        from django.db.models import OuterRef, Subquery, DecimalField, IntegerField
+        from django.db.models import DecimalField, OuterRef, Subquery
         line_items_per_invoice = LineItem.objects.filter(invoice=OuterRef("pk"))
         tax_sum = (
             line_items_per_invoice
@@ -959,37 +944,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 invoice = serializer.instance
 
                 if line_items_data:
-                    interstate = is_interstate(invoice.business, invoice.customer)
-                    new_total = Decimal("0")
-                    new_lis = []
-                    for item_data in line_items_data:
-                        qty = Decimal(str(item_data.get("quantity", 1)))
-                        rate = Decimal(str(item_data.get("rate", 0)))
-                        amount = Decimal(str(item_data.get("amount", qty * rate)))
-                        check_line_money(item_data, qty, rate, amount)
-                        new_total += amount
-                        n_cgst, n_sgst, n_igst = normalize_tax_heads(
-                            Decimal(str(item_data.get("cgst", 0))),
-                            Decimal(str(item_data.get("sgst", 0))),
-                            Decimal(str(item_data.get("igst", 0))),
-                            interstate,
-                        )
-                        new_lis.append(LineItem(
-                            invoice=invoice,
-                            customer=invoice.customer,
-                            product_name=item_data.get("product_name", ""),
-                            hsn_code=item_data.get("hsn_code", ""),
-                            gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
-                            quantity=qty,
-                            rate=rate,
-                            # Heads re-derived server-side; the client's split is advisory.
-                            cgst=n_cgst,
-                            sgst=n_sgst,
-                            igst=n_igst,
-                            amount=amount,
-                            unit=item_data.get("unit", "gms"),
-                            workspace_id=1,
-                        ))
+                    new_lis, new_total = build_line_items(invoice, line_items_data, source="form")
                     LineItem.objects.bulk_create(new_lis, batch_size=100)
                     # Bypass save()'s sum() roundtrip — we already know the total.
                     invoice.total_amount = new_total
@@ -1083,9 +1038,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
             # 1. Patch invoice-level fields if provided (in-memory only)
             if invoice_data:
-                if "customer" in invoice_data and invoice_data["customer"]:
+                if invoice_data.get("customer"):
                     invoice.customer_id = invoice_data["customer"]
-                if "business" in invoice_data and invoice_data["business"]:
+                if invoice_data.get("business"):
                     invoice.business_id = invoice_data["business"]
                 if "invoice_number" in invoice_data:
                     invoice.invoice_number = invoice_data["invoice_number"]
@@ -1103,37 +1058,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
             # After the in-memory patch above, so a changed customer/business
             # is reflected in the interstate decision.
-            interstate = is_interstate(invoice.business, invoice.customer)
-            new_lis = []
-            new_total = Decimal("0")
-            for item_data in line_items_data:
-                qty = Decimal(str(item_data.get("quantity", 1)))
-                rate = Decimal(str(item_data.get("rate", 0)))
-                amount = Decimal(str(item_data.get("amount", qty * rate)))
-                check_line_money(item_data, qty, rate, amount)
-                new_total += amount
-                n_cgst, n_sgst, n_igst = normalize_tax_heads(
-                    Decimal(str(item_data.get("cgst", 0))),
-                    Decimal(str(item_data.get("sgst", 0))),
-                    Decimal(str(item_data.get("igst", 0))),
-                    interstate,
-                )
-                new_lis.append(LineItem(
-                    invoice=invoice,
-                    customer=invoice.customer,
-                    product_name=item_data.get("product_name", ""),
-                    hsn_code=item_data.get("hsn_code", ""),
-                    gst_tax_rate=Decimal(str(item_data.get("gst_tax_rate", 0))),
-                    quantity=qty,
-                    rate=rate,
-                    # Heads re-derived server-side; the client's split is advisory.
-                    cgst=n_cgst,
-                    sgst=n_sgst,
-                    igst=n_igst,
-                    amount=amount,
-                    unit=item_data.get("unit", "gms"),
-                    workspace_id=1,
-                ))
+            new_lis, new_total = build_line_items(invoice, line_items_data, source="form")
             if new_lis:
                 LineItem.objects.bulk_create(new_lis, batch_size=100)
 
@@ -1167,7 +1092,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     from cacheops import invalidate_model, invalidate_obj
                     invalidate_model(LineItem)
                     invalidate_obj(invoice)
-            except Exception:  # noqa: BLE001 — a missed cache is not a failed save
+            except Exception:
                 # cacheops opens a Redis connection to invalidate; without one
                 # (CI's Postgres job, a Redis restart) that raised out of the
                 # request after the lines were already replaced.
@@ -1241,7 +1166,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         }
 
         # Log print action
-        try:
+        with contextlib.suppress(Exception):
             AuditLog.objects.create(
                 action="printed",
                 entity="invoice",
@@ -1250,8 +1175,6 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 user=request.user if request.user and request.user.is_authenticated else None,
                 details=f"Printed invoice (total: {invoice.total_amount})",
             )
-        except Exception:
-            pass
 
         return Response(data)
 
@@ -1284,15 +1207,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 setattr(invoice, field, request.data[field])
         invoice.save()
 
-        try:
+        with contextlib.suppress(Exception):
             AuditLog.objects.create(
                 action="updated", entity="invoice", entity_id=invoice.pk,
                 entity_name=f"#{invoice.invoice_number} - E-way Bill",
                 user=request.user if request.user.is_authenticated else None,
                 details=f"E-way bill updated: {invoice.eway_bill_number or 'pending'}",
             )
-        except Exception:
-            pass
 
         return Response({"message": "E-way bill details saved", "eway_bill_number": invoice.eway_bill_number})
 
@@ -1690,727 +1611,15 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def gst_summary(self, request):
-        """Server-side GST summary for GSTR-1/3B — grouped by rate slab and HSN."""
-        queryset = self.get_queryset()
-        invoice_ids = list(queryset.values_list("id", flat=True))
-        items = LineItem.objects.filter(invoice_id__in=invoice_ids)
-        # business_id from query string — used for the per-business ECRRS ledger
-        # below. None when querying across all businesses.
-        try:
-            business_id = int(request.query_params.get("business_id") or 0) or None
-        except (TypeError, ValueError):
-            business_id = None
-
-        # 1. Rate-wise breakdown (GSTR-1 style).
-        #
-        # Was: a for-loop over ["outward","inward"] firing two separate
-        # GROUP-BY queries against LineItem. With ~100ms remote-DB round
-        # trip latency that's ~200ms baseline.
-        #
-        # Now: a single GROUP-BY on (type_of_invoice, gst_tax_rate). One
-        # query, bucketed into outward/inward in Python.
-        rate_slabs = {"outward": [], "inward": []}
-        slab_data = (
-            items
-            .values("invoice__type_of_invoice", "gst_tax_rate")
-            .annotate(
-                taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
-                cgst=Coalesce(Sum("cgst"), Decimal("0")),
-                sgst=Coalesce(Sum("sgst"), Decimal("0")),
-                igst=Coalesce(Sum("igst"), Decimal("0")),
-                total=Coalesce(Sum("amount"), Decimal("0")),
-                count=Count("invoice", distinct=True),
-            )
-            .order_by("invoice__type_of_invoice", "gst_tax_rate")
-        )
-        # The query groups by the raw stored rate but the label is the resolved
-        # percent, so a book holding pre-repair 0.25 rows next to repaired
-        # 0.0025 rows produced two "0.25%" slabs. Merge on the resolved rate.
-        merged = {}
-        for row in slab_data:
-            inv_type = row["invoice__type_of_invoice"]
-            if inv_type not in rate_slabs:
-                continue
-            key = (inv_type, float(rate_as_percent(row["gst_tax_rate"])))
-            slab = merged.setdefault(key, {
-                "rate": key[1], "taxable": 0.0, "cgst": 0.0, "sgst": 0.0,
-                "igst": 0.0, "total": 0.0, "invoice_count": 0,
-            })
-            for field in ("taxable", "cgst", "sgst", "igst", "total"):
-                slab[field] += float(row[field])
-            slab["invoice_count"] += row["count"]
-        for (inv_type, _rate), slab in merged.items():
-            rate_slabs[inv_type].append(slab)
-
-        # 2. HSN-wise breakdown
-        hsn_data = (
-            items
-            .values("hsn_code")
-            .annotate(
-                taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
-                cgst=Coalesce(Sum("cgst"), Decimal("0")),
-                sgst=Coalesce(Sum("sgst"), Decimal("0")),
-                igst=Coalesce(Sum("igst"), Decimal("0")),
-                total=Coalesce(Sum("amount"), Decimal("0")),
-                total_qty=Coalesce(Sum("quantity"), Decimal("0")),
-                count=Count("id"),
-            )
-            .order_by("-taxable")
-        )
-        hsn_summary = [
-            {
-                "hsn_code": h["hsn_code"] or "N/A",
-                "taxable": float(h["taxable"]),
-                "cgst": float(h["cgst"]),
-                "sgst": float(h["sgst"]),
-                "igst": float(h["igst"]),
-                "total": float(h["total"]),
-                "qty": float(h["total_qty"]),
-                "count": h["count"],
-            }
-            for h in hsn_data
-        ]
-
-        # 3. GSTR-3B summary (net tax) — one aggregate with Q-filter
-        #    pairs instead of two .filter().aggregate() round-trips.
-        from django.db.models import Q as _Q
-        combined = items.aggregate(
-            outward_cgst=Coalesce(Sum("cgst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
-            outward_sgst=Coalesce(Sum("sgst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
-            outward_igst=Coalesce(Sum("igst", filter=_Q(invoice__type_of_invoice="outward")), Decimal("0")),
-            inward_cgst=Coalesce(Sum("cgst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
-            inward_sgst=Coalesce(Sum("sgst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
-            inward_igst=Coalesce(Sum("igst", filter=_Q(invoice__type_of_invoice="inward")), Decimal("0")),
-        )
-        outward_tax = {"cgst": combined["outward_cgst"], "sgst": combined["outward_sgst"], "igst": combined["outward_igst"]}
-        inward_tax = {"cgst": combined["inward_cgst"], "sgst": combined["inward_sgst"], "igst": combined["inward_igst"]}
-        gstr3b = {
-            "output_tax": {
-                "cgst": float(outward_tax["cgst"]),
-                "sgst": float(outward_tax["sgst"]),
-                "igst": float(outward_tax["igst"]),
-                "total": float(outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"]),
-            },
-            "input_tax_credit": {
-                "cgst": float(inward_tax["cgst"]),
-                "sgst": float(inward_tax["sgst"]),
-                "igst": float(inward_tax["igst"]),
-                "total": float(inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"]),
-            },
-            "net_payable": {
-                "cgst": float(outward_tax["cgst"] - inward_tax["cgst"]),
-                "sgst": float(outward_tax["sgst"] - inward_tax["sgst"]),
-                "igst": float(outward_tax["igst"] - inward_tax["igst"]),
-                "total": float(
-                    (outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"])
-                    - (inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"])
-                ),
-            },
-        }
-
-        # ── GSTR-3B Table 4 (current portal structure as of May 2026) ──
-        # Sub-rows: 4(A)(1) imports, 4(A)(5) all other ITC (= current period
-        # inward tax), 4(B)(1) non-reclaimable reversal, 4(B)(2) reclaimable
-        # reversal, 4(C) Net = 4(A) - 4(B), 4(D)(1) reclaimed, 4(D)(2) ineligible.
-        # The reversal/reclaim rows aren't tracked by line item yet, so they
-        # default to 0 — the frontend lets the user override them per period.
-        # The ECRRS opening balance comes from the ITCReclaimLedger model
-        # (per-business). When the user is viewing "All Businesses" we
-        # aggregate the opening balances across every ledger so the
-        # carry-forward card on the frontend stays accurate — previously this
-        # was just None for the All-Businesses view, which silently hid the
-        # number the user came here looking for.
-        from billing.models import ITCReclaimLedger
-        opening_balance = None
-        if business_id:
-            ledger = ITCReclaimLedger.objects.filter(business_id=business_id).first()
-            if ledger:
-                cgst = float(ledger.opening_cgst or 0)
-                sgst = float(ledger.opening_sgst or 0)
-                igst = float(ledger.opening_igst or 0)
-                opening_balance = {
-                    "cgst": cgst,
-                    "sgst": sgst,
-                    "igst": igst,
-                    "total": cgst + sgst + igst,
-                    "as_of": ledger.opening_as_of.isoformat() if ledger.opening_as_of else None,
-                    "business_count": 1,
-                    "configured": True,
-                }
-        else:
-            agg = ITCReclaimLedger.objects.aggregate(
-                c=Sum("opening_cgst"),
-                s=Sum("opening_sgst"),
-                i=Sum("opening_igst"),
-            )
-            c = float(agg["c"] or 0)
-            s = float(agg["s"] or 0)
-            i = float(agg["i"] or 0)
-            biz_count = ITCReclaimLedger.objects.exclude(
-                Q(opening_cgst=0) & Q(opening_sgst=0) & Q(opening_igst=0)
-            ).count()
-            # Surface even a 0-total response so the frontend can distinguish
-            # "no business has a ledger" from "ledger exists but is zero".
-            opening_balance = {
-                "cgst": c,
-                "sgst": s,
-                "igst": i,
-                "total": c + s + i,
-                "as_of": None,
-                "business_count": biz_count,
-                "configured": biz_count > 0,
-            }
-
-        gstr3b_table4 = {
-            # 4(A) ITC Available
-            "a_1_imports_goods": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "a_2_imports_services": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "a_3_rcm": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "a_4_isd": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "a_5_all_other_itc": {
-                "cgst": float(inward_tax["cgst"]),
-                "sgst": float(inward_tax["sgst"]),
-                "igst": float(inward_tax["igst"]),
-            },
-            "a_total": {
-                "cgst": float(inward_tax["cgst"]),
-                "sgst": float(inward_tax["sgst"]),
-                "igst": float(inward_tax["igst"]),
-            },
-            # 4(B) ITC Reversed — kept at 0 until per-line reversal tracking lands
-            "b_1_non_reclaimable": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "b_2_reclaimable": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "b_total": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            # 4(C) Net ITC available = 4(A) - 4(B)
-            "c_net_itc": {
-                "cgst": float(inward_tax["cgst"]),
-                "sgst": float(inward_tax["sgst"]),
-                "igst": float(inward_tax["igst"]),
-            },
-            # 4(D) Other details
-            "d_1_reclaimed": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            "d_2_ineligible": {"cgst": 0.0, "sgst": 0.0, "igst": 0.0},
-            # ECRRS reclaim ledger context
-            "ecrrs_opening_balance": opening_balance,
-            "ecrrs_closing_balance": opening_balance,  # opening + 4(B)(2) - 4(D)(1); both 0 for now
-        }
-
-        # ── ITC Aging (Sec 16(4) cut-off) ──
-        # ITC must be claimed by Nov 30 of the FY *following* the invoice date,
-        # else it's forfeit. Bucket inward invoices by days-until-cutoff and
-        # surface anything within 60 days as urgent.
-        from datetime import date as _date
-        today = timezone.localdate()
-        inward_with_dates = (
-            queryset.filter(type_of_invoice="inward")
-            .values("id", "invoice_number", "invoice_date", "total_amount")
-            .annotate(
-                tax=Coalesce(
-                    Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")),
-                    Decimal("0"),
-                ),
-            )
-        )
-        aging_buckets = {
-            "fresh": {"label": "≤ 60 days to cutoff", "count": 0, "tax": 0.0},
-            "warning": {"label": "60–180 days", "count": 0, "tax": 0.0},
-            "stale": {"label": "180+ days (still claimable)", "count": 0, "tax": 0.0},
-            "expired": {"label": "Past Sec 16(4) cutoff (forfeit)", "count": 0, "tax": 0.0},
-        }
-        urgent_invoices = []
-        for inv in inward_with_dates:
-            inv_date = inv["invoice_date"]
-            if not inv_date:
-                continue
-            # FY of invoice: Apr-Mar
-            fy_start = inv_date.year if inv_date.month >= 4 else inv_date.year - 1
-            cutoff = _date(fy_start + 1, 11, 30)  # Nov 30 of following FY
-            days_left = (cutoff - today).days
-            tax_amt = float(inv["tax"])
-            if days_left < 0:
-                bucket = "expired"
-            elif days_left <= 60:
-                bucket = "fresh"
-            elif days_left <= 180:
-                bucket = "warning"
-            else:
-                bucket = "stale"
-            aging_buckets[bucket]["count"] += 1
-            aging_buckets[bucket]["tax"] += tax_amt
-            if bucket in ("fresh", "expired") and len(urgent_invoices) < 50:
-                urgent_invoices.append({
-                    "id": inv["id"],
-                    "invoice_number": inv["invoice_number"],
-                    "invoice_date": inv_date.isoformat(),
-                    "total_amount": float(inv["total_amount"]),
-                    "tax": tax_amt,
-                    "cutoff": cutoff.isoformat(),
-                    "days_left": days_left,
-                    "bucket": bucket,
-                })
-        urgent_invoices.sort(key=lambda x: x["days_left"])
-
-        # ── GSTR-1 vs GSTR-3B reconciliation ──
-        # In a clean book, the rate-slab tax (cgst+sgst+igst per rate) should
-        # match GSTR-3B output_tax exactly. Variance != 0 hints at line items
-        # with missing/wrong rate annotations or out-of-band tax adjustments.
-        gstr1_total_tax = sum(
-            r["cgst"] + r["sgst"] + r["igst"]
-            for r in rate_slabs.get("outward", [])
-        )
-        gstr1_3b_recon = {
-            "gstr1_total_tax": gstr1_total_tax,
-            "gstr3b_output_tax": gstr3b["output_tax"]["total"],
-            "variance": gstr3b["output_tax"]["total"] - gstr1_total_tax,
-        }
-
-        # ── Effective ITC + Net Tax including carry-forward ──
-        # The user came looking for "last year's carry-forward GST" on the
-        # main summary, not buried inside Table 4. We compute effective
-        # numbers here so the frontend can show:
-        #     Output Tax            = period output
-        #     Current-period ITC    = period inward tax
-        # +   Carry-forward ITC     = opening balance from ledger
-        # =   Effective ITC         = sum of the two
-        # =   Effective Net Tax     = Output - Effective ITC
-        carry_total = opening_balance["total"] if opening_balance else 0.0
-        current_itc_total = gstr3b["input_tax_credit"]["total"]
-        output_total = gstr3b["output_tax"]["total"]
-        effective = {
-            "carry_forward_itc": carry_total,
-            "current_itc": current_itc_total,
-            "effective_itc": current_itc_total + carry_total,
-            "effective_net_tax": output_total - (current_itc_total + carry_total),
-        }
-
-        return Response({
-            "rate_slabs": rate_slabs,
-            "hsn_summary": hsn_summary,
-            "gstr3b": gstr3b,
-            "gstr3b_table4": gstr3b_table4,
-            "itc_aging": {
-                "buckets": aging_buckets,
-                "urgent_invoices": urgent_invoices,
-            },
-            "gstr1_3b_recon": gstr1_3b_recon,
-            # Promoted to top-level so the Summary view doesn't have to
-            # reach into gstr3b_table4.ecrrs_opening_balance. Keeps the old
-            # nested copy for backwards compat with the GSTR-3B tab.
-            "carry_forward_itc": opening_balance,
-            "effective": effective,
-        })
+        return gstr1.gst_summary(self, request)
 
     @action(detail=False, methods=["get"])
     def gstr_export(self, request):
-        """Export GSTR-1, GSTR-3B, and 2B matching data in GST portal format."""
-        queryset = self.get_queryset()
-        invoice_ids = list(queryset.values_list("id", flat=True))
-
-        # Prefetch line items so the per-invoice loops below don't fire one
-        # query per invoice (the previous N+1 made this endpoint take ~12s
-        # for ~95 invoices over a remote-DB connection).
-        outward_invoices = list(
-            queryset.filter(type_of_invoice="outward")
-            .select_related("customer", "business")
-            .prefetch_related("lineitem_set")
-        )
-        inward_invoices = list(
-            queryset.filter(type_of_invoice="inward")
-            .select_related("customer", "business")
-            .prefetch_related("lineitem_set")
-        )
-
-        # ── GSTR-1 ──
-
-        # B2B: Invoices to registered dealers (customer has GSTIN)
-        b2b_data = {}
-        for inv in outward_invoices:
-            cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
-            if not cust_gst or len(cust_gst) < 15:
-                continue  # Skip unregistered
-            items = inv.lineitem_set.all()
-            inv_items = []
-            for li in items:
-                inv_items.append({
-                    "num": int(li.id),
-                    "itm_det": {
-                        "txval": float(li.quantity * li.rate),
-                        "rt": float(rate_as_percent(li.gst_tax_rate)),
-                        "camt": float(li.cgst),
-                        "samt": float(li.sgst),
-                        "iamt": float(li.igst),
-                    },
-                })
-            if cust_gst not in b2b_data:
-                b2b_data[cust_gst] = {"ctin": cust_gst, "inv": []}
-            b2b_data[cust_gst]["inv"].append({
-                "inum": inv.invoice_number,
-                "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
-                "val": float(inv.total_amount),
-                "pos": inv.customer.gst_number[:2] if inv.customer.gst_number else "",
-                "rchrg": "N",
-                "inv_typ": "R",
-                "itms": inv_items,
-            })
-        b2b = list(b2b_data.values())
-
-        # B2CS: Invoices to unregistered (no GSTIN, intra-state, <=2.5L)
-        # B2C (unregistered buyers). One pass, because two independent passes
-        # is how the gap appeared: the B2CS loop skipped every inter-state
-        # invoice ("goes to B2CL") while the B2CL loop skipped everything at or
-        # under B2CL_THRESHOLD — so an inter-state B2C sale below the threshold
-        # was filed in NEITHER table and simply vanished from GSTR-1.
-        #
-        # The rule, matching gstr1_portal_json: inter-state above the threshold
-        # is B2CL; everything else consolidates into B2CS, tagged INTER or
-        # INTRA and carrying the head it was actually taxed under.
-        #
-        # Sums are Decimal and rounded once at the end. Accumulating with
-        # `float +=` produced artifacts like 3.0000000000000004 in figures that
-        # go to the portal.
-        b2cs_agg = {}
-        b2cl = []
-        warnings = []
-        flagged = set()
-        for inv in outward_invoices:
-            table, inter, pos, _downgraded = classify_b2c(inv.business, inv)
-            if table == "b2b":
-                continue  # Registered — belongs in B2B
-
-            items = inv.lineitem_set.all()
-
-            if table == "b2cl":
-                b2cl.append({
-                    "pos": pos,
-                    "inv": [{
-                        "inum": inv.invoice_number,
-                        "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
-                        "val": float(inv.total_amount),
-                        "itms": [{
-                            "num": int(li.id),
-                            "itm_det": {
-                                "txval": float(li.quantity * li.rate),
-                                "rt": float(rate_as_percent(li.gst_tax_rate)),
-                                "iamt": float(li.igst),
-                            },
-                        } for li in items],
-                    }],
-                })
-                continue
-
-            sply = "INTER" if inter else "INTRA"
-            for li in items:
-                rate = float(rate_as_percent(li.gst_tax_rate))
-                key = (sply, pos, rate)
-                agg = b2cs_agg.setdefault(key, {
-                    "sply_ty": sply, "pos": pos, "typ": "OE", "rt": rate,
-                    "txval": Decimal("0"), "camt": Decimal("0"),
-                    "samt": Decimal("0"), "iamt": Decimal("0"),
-                })
-                agg["txval"] += (li.quantity or 0) * (li.rate or 0)
-                agg["camt"] += li.cgst or Decimal("0")
-                agg["samt"] += li.sgst or Decimal("0")
-                agg["iamt"] += li.igst or Decimal("0")
-                # A row tagged one way but taxed the other is a pre-repair
-                # line; say so, as gstr1_portal_json does, instead of handing
-                # over a file the portal will reject.
-                wrong = (sply == "INTER" and (li.cgst or li.sgst)) or (sply == "INTRA" and li.igst)
-                if wrong and inv.id not in flagged:
-                    flagged.add(inv.id)
-                    heads = "CGST/SGST" if sply == "INTER" else "IGST"
-                    warnings.append(
-                        f"{inv.invoice_number}: {sply.lower()}-state supply carries {heads} — run fix_tax_heads"
-                    )
-
-        b2cs = [
-            {**row, **{k: float(row[k].quantize(TWO_PLACES))
-                       for k in ("txval", "camt", "samt", "iamt")}}
-            for row in b2cs_agg.values()
-        ]
-
-        # HSN Summary
-        items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
-        hsn_agg = {}
-        for li in items_all.filter(invoice__type_of_invoice="outward"):
-            hsn = li.hsn_code or "0"
-            if hsn not in hsn_agg:
-                hsn_agg[hsn] = {"hsn_sc": hsn, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0}
-            hsn_agg[hsn]["qty"] += float(li.quantity)
-            hsn_agg[hsn]["txval"] += float(li.quantity * li.rate)
-            hsn_agg[hsn]["camt"] += float(li.cgst)
-            hsn_agg[hsn]["samt"] += float(li.sgst)
-            hsn_agg[hsn]["iamt"] += float(li.igst)
-        hsn = list(hsn_agg.values())
-
-        gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": {"data": hsn}}
-
-        # ── GSTR-3B ──
-        outward_items = items_all.filter(invoice__type_of_invoice="outward")
-        inward_items = items_all.filter(invoice__type_of_invoice="inward")
-
-        ot = outward_items.aggregate(
-            txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
-            cgst=Coalesce(Sum("cgst"), Decimal("0")),
-            sgst=Coalesce(Sum("sgst"), Decimal("0")),
-            igst=Coalesce(Sum("igst"), Decimal("0")),
-        )
-        it = inward_items.aggregate(
-            txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
-            cgst=Coalesce(Sum("cgst"), Decimal("0")),
-            sgst=Coalesce(Sum("sgst"), Decimal("0")),
-            igst=Coalesce(Sum("igst"), Decimal("0")),
-        )
-
-        gstr3b = {
-            "sup_details": {
-                "osup_det": {"txval": float(ot["txval"]), "camt": float(ot["cgst"]), "samt": float(ot["sgst"]), "iamt": float(ot["igst"])},
-            },
-            "itc_elg": {
-                # "OTH" = all other ITC (GSTR-3B table 4(A)(5)). This used to say
-                # "IMPG" (import of goods), which files every rupee of domestic
-                # purchase tax under imports.
-                "itc_avl": [{"ty": "OTH", "iamt": float(it["igst"]), "camt": float(it["cgst"]), "samt": float(it["sgst"])}],
-            },
-            "intr_ltfee": {
-                "intr_details": {"iamt": 0, "camt": 0, "samt": 0},
-            },
-            "tax_pmt": {
-                "cgst": float(ot["cgst"] - it["cgst"]),
-                "sgst": float(ot["sgst"] - it["sgst"]),
-                "igst": float(ot["igst"] - it["igst"]),
-            },
-        }
-
-        # ── GSTR-2B Matching (basic) ──
-        # Compare inward invoices against expected data
-        inward_list = []
-        for inv in inward_invoices:
-            items = inv.lineitem_set.all()
-            total_tax = sum(float(li.cgst + li.sgst + li.igst) for li in items)
-            total_taxable = sum(float(li.quantity * li.rate) for li in items)
-            inward_list.append({
-                "invoice_number": inv.invoice_number,
-                "invoice_date": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
-                "supplier_name": inv.customer.name,
-                "supplier_gstin": inv.customer.gst_number or "",
-                "taxable_value": total_taxable,
-                "tax_amount": total_tax,
-                "total": float(inv.total_amount),
-            })
-
-        return Response({
-            "gstr1": gstr1,
-            "gstr3b": gstr3b,
-            "gstr2b": {"inward_invoices": inward_list},
-            "warnings": warnings,
-        })
+        return gstr1.gstr_export(self, request)
 
     @action(detail=False, methods=["get"], url_path="gstr1-portal-json")
     def gstr1_portal_json(self, request):
-        """GSTR-1 as the GST portal offline tool's import JSON.
-
-        One business, one month — that's the granularity the portal files at,
-        so unlike gstr_export this endpoint refuses to run without both.
-        Returns {"file": <upload as-is>, "meta": {counts, skipped, warnings}}:
-        only `file` goes to the portal; extra keys inside it break the import,
-        which is why the diagnostics live outside it.
-
-        Differences from the gstr_export shape that the portal cares about:
-        - gstin/fp header present, values quantized to exactly 2 decimals
-          (float artifacts like 0.30000000000000004 fail schema validation)
-        - b2cs carries the mandatory sply_ty, and inter-state B2C sales at or
-          under the B2CL threshold are filed here as INTER rows — previously
-          they fell through both sections and were silently missing
-        - b2cl groups invoices under one entry per place of supply
-        - per-invoice items are aggregated per rate slab with serial nums
-        - HSN summary (table 12, mandatory since 2021) is included
-        """
-        try:
-            business = Business.objects.get(id=int(request.query_params.get("business_id") or 0))
-        except (ValueError, Business.DoesNotExist):
-            return Response({"error": "A valid business_id is required."}, status=400)
-        try:
-            month = int(request.query_params.get("month") or 0)
-            year = int(request.query_params.get("year") or 0)
-            assert 1 <= month <= 12 and 2017 <= year <= 2099
-        except (ValueError, AssertionError):
-            return Response({"error": "month (1-12) and year are required."}, status=400)
-
-        gstin = (business.gst_number or "").strip().upper()
-        if len(gstin) != 15:
-            return Response(
-                {"error": f"Business '{business.name}' has no 15-character GSTIN — "
-                          "set it before generating a portal file."},
-                status=400,
-            )
-
-        def r2(x):
-            return float(Decimal(x or 0).quantize(TWO_PLACES))
-
-        def rate_pct(li):
-            r = li.gst_tax_rate or Decimal(0)
-            return float(rate_as_percent(r))
-
-        UQC = {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
-               "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM"}
-
-        invoices = (
-            Invoice.objects.filter(
-                business=business, type_of_invoice="outward",
-                invoice_date__year=year, invoice_date__month=month,
-            )
-            .select_related("customer")
-            .prefetch_related("lineitem_set")
-            .order_by("invoice_date", "id")
-        )
-
-        skipped, warnings = [], []
-        b2b_data, b2cl_data, b2cs_agg, hsn_agg = {}, {}, {}, {}
-        biz_pos = state_code(business)
-        counts = {"b2b": 0, "b2cl": 0, "b2cs": 0}
-
-        def slabs(items):
-            """Aggregate an invoice's lines into per-rate slabs (portal itms)."""
-            agg = {}
-            for li in items:
-                rt = rate_pct(li)
-                s = agg.setdefault(rt, {"txval": Decimal(0), "camt": Decimal(0),
-                                        "samt": Decimal(0), "iamt": Decimal(0)})
-                s["txval"] += (li.quantity or 0) * (li.rate or 0)
-                s["camt"] += li.cgst or 0
-                s["samt"] += li.sgst or 0
-                s["iamt"] += li.igst or 0
-            return agg
-
-        for inv in invoices:
-            items = list(inv.lineitem_set.all())
-            label = f"{inv.invoice_number or '(no number)'} / {inv.invoice_date}"
-            if not inv.invoice_number or not inv.invoice_date:
-                skipped.append(f"{label}: missing invoice number or date")
-                continue
-            if not items:
-                skipped.append(f"{label}: no line items")
-                continue
-
-            agg = slabs(items)
-            idt = inv.invoice_date.strftime("%d-%m-%Y")
-            val = r2(inv.total_amount)
-            cust_gstin = (inv.customer.gst_number or "").strip().upper()
-
-            if len(cust_gstin) == 15:
-                itms = [
-                    {"num": i + 1, "itm_det": {
-                        "txval": r2(s["txval"]), "rt": rt,
-                        "camt": r2(s["camt"]), "samt": r2(s["samt"]),
-                        "iamt": r2(s["iamt"]), "csamt": 0,
-                    }}
-                    for i, (rt, s) in enumerate(sorted(agg.items()))
-                ]
-                b2b_data.setdefault(cust_gstin, {"ctin": cust_gstin, "inv": []})["inv"].append({
-                    "inum": inv.invoice_number, "idt": idt, "val": val,
-                    "pos": cust_gstin[:2], "rchrg": "N", "inv_typ": "R", "itms": itms,
-                })
-                counts["b2b"] += 1
-                continue
-
-            table, inter, pos, downgraded = classify_b2c(business, inv)
-            if downgraded:
-                warnings.append(f"{label}: inter-state but customer state unknown — filed as intra-state")
-
-            if table == "b2cl":
-                itms = [
-                    {"num": i + 1, "itm_det": {
-                        "txval": r2(s["txval"]), "rt": rt,
-                        "iamt": r2(s["iamt"]), "csamt": 0,
-                    }}
-                    for i, (rt, s) in enumerate(sorted(agg.items()))
-                ]
-                b2cl_data.setdefault(pos, {"pos": pos, "inv": []})["inv"].append({
-                    "inum": inv.invoice_number, "idt": idt, "val": val, "itms": itms,
-                })
-                counts["b2cl"] += 1
-                continue
-
-            # Consolidated B2C: intra-state at any value, inter-state <= threshold.
-            sply = "INTER" if inter else "INTRA"
-            for rt, s in agg.items():
-                b = b2cs_agg.setdefault((sply, pos, rt), {
-                    "sply_ty": sply, "pos": pos, "typ": "OE", "rt": rt,
-                    "txval": Decimal(0), "camt": Decimal(0),
-                    "samt": Decimal(0), "iamt": Decimal(0),
-                })
-                b["txval"] += s["txval"]
-                b["camt"] += s["camt"]
-                b["samt"] += s["samt"]
-                b["iamt"] += s["iamt"]
-                if sply == "INTRA" and s["iamt"]:
-                    warnings.append(f"{label}: intra-state supply carries IGST — run fix_tax_heads")
-                if sply == "INTER" and (s["camt"] or s["samt"]):
-                    warnings.append(f"{label}: inter-state supply carries CGST/SGST — run fix_tax_heads")
-            counts["b2cs"] += 1
-
-        # HSN summary (table 12) over everything that made it into the file.
-        for inv in invoices:
-            if not inv.invoice_number or not inv.invoice_date:
-                continue
-            for li in inv.lineitem_set.all():
-                hsn = (li.hsn_code or "").strip()
-                uqc = UQC.get((li.unit or "").strip().lower(), "OTH")
-                rt = rate_pct(li)
-                h = hsn_agg.setdefault((hsn, uqc, rt), {
-                    "hsn_sc": hsn, "desc": (li.product_name or "")[:30], "uqc": uqc,
-                    "rt": rt, "qty": Decimal(0), "txval": Decimal(0),
-                    "camt": Decimal(0), "samt": Decimal(0), "iamt": Decimal(0),
-                })
-                h["qty"] += li.quantity or 0
-                h["txval"] += (li.quantity or 0) * (li.rate or 0)
-                h["camt"] += li.cgst or 0
-                h["samt"] += li.sgst or 0
-                h["iamt"] += li.igst or 0
-                if not hsn:
-                    warnings.append(f"{inv.invoice_number}: line '{li.product_name}' has no HSN")
-
-        fp = f"{month:02d}{year}"
-        file_obj = {"gstin": gstin, "fp": fp, "version": "GST3.2.1", "hash": "hash"}
-        if b2b_data:
-            file_obj["b2b"] = list(b2b_data.values())
-        if b2cl_data:
-            file_obj["b2cl"] = list(b2cl_data.values())
-        if b2cs_agg:
-            file_obj["b2cs"] = [
-                {"sply_ty": b["sply_ty"], "pos": b["pos"], "typ": b["typ"], "rt": b["rt"],
-                 "txval": r2(b["txval"]),
-                 **({"iamt": r2(b["iamt"])} if b["sply_ty"] == "INTER"
-                    else {"camt": r2(b["camt"]), "samt": r2(b["samt"])}),
-                 "csamt": 0}
-                for b in b2cs_agg.values()
-            ]
-        if hsn_agg:
-            file_obj["hsn"] = {"data": [
-                {"num": i + 1, "hsn_sc": h["hsn_sc"], "desc": h["desc"], "uqc": h["uqc"],
-                 "qty": r2(h["qty"]), "rt": h["rt"], "txval": r2(h["txval"]),
-                 "camt": r2(h["camt"]), "samt": r2(h["samt"]),
-                 "iamt": r2(h["iamt"]), "csamt": 0}
-                for i, h in enumerate(hsn_agg.values())
-            ]}
-
-        total_txval = sum(
-            r2(b["txval"]) for b in b2cs_agg.values()
-        ) + sum(
-            i["itm_det"]["txval"] for g in b2b_data.values() for v in g["inv"] for i in v["itms"]
-        ) + sum(
-            i["itm_det"]["txval"] for g in b2cl_data.values() for v in g["inv"] for i in v["itms"]
-        )
-
-        return Response({
-            "file": file_obj,
-            "meta": {
-                "business": business.name, "gstin": gstin, "fp": fp,
-                "invoice_counts": counts,
-                "taxable_total": round(total_txval, 2),
-                "skipped": skipped, "warnings": warnings,
-            },
-        })
+        return gstr1.gstr1_portal_json(self, request)
 
     @action(detail=False, methods=["get"])
     def next_invoice_number(self, request):
@@ -2459,7 +1668,6 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Scope to the chosen FY (start_date .. start_date + 1 year - 1 day),
         # so a back-dated entry in FY 2024-25 doesn't get its next-number
         # inferred from FY 2025-26 invoices.
-        from datetime import timedelta
         fy_end = datetime(start_date.year + 1, 3, 31).date()
         fy_invoices = Invoice.objects.filter(
             business_id=business_id,
@@ -2518,10 +1726,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 if match:
                     prefix = match.group(1)
 
-        if prefix:
-            next_invoice_number_str = f"{prefix}/{fy_str}/{next_number}"
-        else:
-            next_invoice_number_str = str(next_number)
+        next_invoice_number_str = f"{prefix}/{fy_str}/{next_number}" if prefix else str(next_number)
 
         return Response({"next_invoice_number": next_invoice_number_str})
 
@@ -3105,525 +2310,7 @@ class BulkInvoiceImportView(APIView):
     permission_classes = [RoleBasedPermission]
 
     def post(self, request):
-        invoices_data = request.data.get("invoices", [])
-        business_id = request.data.get("business_id")
-
-        if not invoices_data:
-            return Response(
-                {"error": "No invoices provided"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        created_count = 0
-        skipped_count = 0
-        errors = []
-
-        # ---------- PHASE 1: bulk lookups (one query each) ----------
-
-        # Pre-fetch all businesses (small table, usually <10 rows)
-        all_businesses = list(Business.objects.all())
-        biz_by_id = {b.pk: b for b in all_businesses}
-        biz_by_gstin = {(b.gst_number or "").lower(): b for b in all_businesses if b.gst_number}
-        biz_by_name = {(b.name or "").lower(): b for b in all_businesses}
-
-        forced_business = None
-        if business_id:
-            try:
-                forced_business = biz_by_id.get(int(business_id))
-            except (TypeError, ValueError):
-                pass
-
-        # Build customer lookup dicts in ONE query.
-        # Customer table is small (~few hundred rows); fetching all is cheaper
-        # than per-row .filter() calls.
-        cust_by_gst = {}
-        cust_by_pan = {}
-        cust_by_name = {}
-        for c in Customer.objects.all().only("id", "name", "gst_number", "pan_number"):
-            if c.gst_number:
-                cust_by_gst[c.gst_number.upper()] = c
-            if c.pan_number:
-                cust_by_pan[c.pan_number.upper()] = c
-            if c.name:
-                cust_by_name[c.name.lower()] = c
-
-        # Product master lookup. Two-tier so case-only duplicates in the
-        # master (e.g. "GOLD COIN" 3% AND "gold coin" 12%) don't silently
-        # apply the wrong tax rate based on DB iteration order.
-        # exact-case wins → falls back to lowercase first-seen.
-        product_by_exact = {}
-        product_by_ci = {}
-        for p in Product.objects.all().only("id", "name", "hsn_code", "gst_tax_rate").order_by("name"):
-            if not p.name:
-                continue
-            if p.name not in product_by_exact:
-                product_by_exact[p.name] = p
-            ci_key = p.name.lower()
-            if ci_key not in product_by_ci:
-                product_by_ci[ci_key] = p
-
-        def lookup_product(name):
-            if not name:
-                return None
-            return product_by_exact.get(name) or product_by_ci.get(name.lower())
-
-        # ---------- PRE-PASS: bulk-create new customers in ONE round-trip ----------
-        # Walk all invoices, identify customer names that don't exist yet, dedupe,
-        # bulk_create. Avoids N serial INSERTs when many invoices reference new
-        # customers (saves ~700ms on a 10-new-customer import on Neon Singapore).
-        needed_new = {}  # name_lower -> {name, gst, pan}
-        for inv_data in invoices_data:
-            cn = (inv_data.get("customerName") or "").strip()
-            cg = (inv_data.get("customerGST") or "").strip()
-            if not cn:
-                continue
-            key = cn.lower()
-            # Already in cache (pre-existing)? skip
-            if key in cust_by_name:
-                continue
-            clean_gst = ""
-            clean_pan = ""
-            if cg and cg not in ("-", ""):
-                if "(PAN)" in cg:
-                    clean_pan = cg.replace("(PAN)", "").strip()
-                    if clean_pan.upper() in cust_by_pan:
-                        continue
-                else:
-                    clean_gst = cg
-                    if clean_gst.upper() in cust_by_gst:
-                        continue
-            needed_new[key] = {"name": cn, "gst": clean_gst, "pan": clean_pan}
-
-        if needed_new:
-            new_objs = [
-                Customer(
-                    name=info["name"], gst_number=info["gst"],
-                    pan_number=info["pan"],
-                    state_name=state_name_from_gstin(info["gst"]) or None,
-                    workspace_id=1,
-                ) for info in needed_new.values()
-            ]
-            Customer.objects.bulk_create(new_objs, batch_size=200)
-            # Update caches with the freshly-created customers
-            for c in new_objs:
-                cust_by_name[c.name.lower()] = c
-                if c.gst_number:
-                    cust_by_gst[c.gst_number.upper()] = c
-                if c.pan_number:
-                    cust_by_pan[c.pan_number.upper()] = c
-
-        # Bulk fetch existing invoices (for duplicate detection) keyed by
-        # (business_id, invoice_number, invoice_date)
-        wanted_inv_keys = set()
-        for inv_data in invoices_data:
-            inv_no = str(inv_data.get("invoiceNumber", "") or "")
-            inv_date = inv_data.get("invoice_date", "") or ""
-            wanted_inv_keys.add((inv_no, inv_date))
-        # Dedup key includes type_of_invoice — sales bill #1 and purchase bill #1
-        # are different documents, even with the same number/date/firm.
-        existing_invoice_keys = set()
-        if wanted_inv_keys:
-            inv_no_list = list({k[0] for k in wanted_inv_keys})
-            inv_date_list = list({k[1] for k in wanted_inv_keys if k[1]})
-            for inv in Invoice.objects.filter(
-                invoice_number__in=inv_no_list,
-                invoice_date__in=inv_date_list,
-            ).only("id", "invoice_number", "invoice_date", "business_id", "type_of_invoice"):
-                existing_invoice_keys.add(
-                    (inv.business_id, str(inv.invoice_number), str(inv.invoice_date),
-                     (inv.type_of_invoice or INVOICE_TYPE_OUTWARD).lower())
-                )
-
-        # ---------- PHASE 2: process invoices in a single transaction ----------
-        invoices_to_create = []  # [(Invoice instance, source dict for line items)]
-        line_items_to_create = []
-        audit_logs_to_create = []
-        # Per-invoice audit metadata (pk, display name, item count). Audit logs
-        # are emitted after total_amount is recomputed from line items so the
-        # message reflects the persisted total, not the stale in-memory value.
-        pending_invoice_audits: list[dict] = []
-        new_customers_added_to_biz = []  # (customer, business) pairs
-
-        with transaction.atomic():
-            for inv_data in invoices_data:
-                try:
-                    # Savepoint per row: on Postgres a failed statement aborts the whole
-                    # outer transaction, so the documented "good rows still land"
-                    # only ever worked on SQLite, which is what the tests use.
-                    with transaction.atomic():
-                        firm_name = (inv_data.get("firmName") or "").strip()
-                        firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
-
-                        # Resolve business from cache
-                        business = forced_business
-                        if not business and firm_gstin:
-                            business = biz_by_gstin.get(firm_gstin.lower())
-                        if not business and firm_name:
-                            # icontains substitute: try exact, then any name containing
-                            business = biz_by_name.get(firm_name.lower())
-                            if not business:
-                                for nm, b in biz_by_name.items():
-                                    if firm_name.lower() in nm or nm in firm_name.lower():
-                                        business = b
-                                        break
-
-                        if not business:
-                            errors.append(
-                                f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
-                            )
-                            skipped_count += 1
-                            continue
-
-                        customer_name = (inv_data.get("customerName") or "").strip()
-                        customer_gst = (inv_data.get("customerGST") or "").strip()
-
-                        if not customer_name:
-                            errors.append(
-                                f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
-                            )
-                            skipped_count += 1
-                            continue
-
-                        # Resolve customer from cache
-                        customer = None
-                        clean_gst = ""
-                        clean_pan = ""
-                        if customer_gst and customer_gst not in ("-", ""):
-                            if "(PAN)" in customer_gst:
-                                clean_pan = customer_gst.replace("(PAN)", "").strip()
-                                customer = cust_by_pan.get(clean_pan.upper())
-                            else:
-                                clean_gst = customer_gst
-                                customer = cust_by_gst.get(clean_gst.upper())
-                        if not customer:
-                            customer = cust_by_name.get(customer_name.lower())
-
-                        if not customer:
-                            # Should not happen — pre-pass should have bulk-created
-                            # everything. Defensive fallback.
-                            customer = Customer.objects.create(
-                                name=customer_name, gst_number=clean_gst,
-                                pan_number=clean_pan,
-                                state_name=state_name_from_gstin(clean_gst) or None,
-                                workspace_id=1,
-                            )
-                            from billing.gstin import enrich_customer
-
-                            transaction.on_commit(lambda c=customer: enrich_customer(c))  # not inside the import's transaction
-                            # Update ALL lookup caches so a later row referencing the
-                            # same GST/PAN under a different name resolves to this
-                            # customer instead of creating a duplicate.
-                            cust_by_name[customer_name.lower()] = customer
-                            if clean_gst:
-                                cust_by_gst[clean_gst.upper()] = customer
-                            if clean_pan:
-                                cust_by_pan[clean_pan.upper()] = customer
-
-                        if business and business.pk and customer.pk:
-                            # Track for M2M attach (idempotent — .add() is a no-op if exists)
-                            new_customers_added_to_biz.append((customer, business))
-
-                        # Resolve invoice type first so duplicate key includes it.
-                        invoice_number = str(inv_data.get("invoiceNumber", ""))
-                        invoice_date = inv_data.get("invoice_date", "")
-                        inv_type = inv_data.get("type", "OUTWARD")
-                        type_of_invoice = (
-                            INVOICE_TYPE_INWARD
-                            if inv_type == "INWARD"
-                            else INVOICE_TYPE_OUTWARD
-                        )
-
-                        # Duplicate check — must match on business + bill# + date AND type
-                        dup_key = (business.pk, invoice_number, str(invoice_date), type_of_invoice.lower())
-                        if dup_key in existing_invoice_keys:
-                            skipped_count += 1
-                            continue
-
-                        # Filed-and-locked month: never silently mutate a filed
-                        # period from a bulk sheet — surface it as a row error.
-                        if locked_period_or_none(business.pk, str(invoice_date)):
-                            skipped_count += 1
-                            errors.append(
-                                f"Invoice {invoice_number}: its month is filed & locked "
-                                f"for {business.name} — unlock on the GST page to import it."
-                            )
-                            continue
-
-                        # Build invoice in memory; bulk_create later
-                        invoice = Invoice(
-                            invoice_number=invoice_number,
-                            invoice_date=invoice_date,
-                            customer=customer,
-                            business=business,
-                            type_of_invoice=type_of_invoice,
-                            total_amount=Decimal(str(inv_data.get("total", 0))),
-                            payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
-                            workspace_id=1,
-                        )
-                        invoices_to_create.append((invoice, inv_data))
-                        # Mark as seen so a duplicate row in the same payload is skipped
-                        existing_invoice_keys.add(dup_key)
-                        created_count += 1
-
-                except Exception as e:
-                    logger.error(
-                        f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {e}",
-                        exc_info=True,
-                    )
-                    errors.append(
-                        f"Error importing invoice {inv_data.get('invoiceNumber', '?')}: {str(e)}"
-                    )
-                    skipped_count += 1
-
-            # ---------- PHASE 3: bulk writes ----------
-            # Bulk-create invoices in ONE round-trip. PostgreSQL fills in PKs.
-            # If bulk_create raises for one bad row (e.g. malformed date), we
-            # don't want the whole batch to 500. Try the bulk path first; on
-            # failure, fall back to per-row create so good rows still land
-            # and bad rows surface as per-row errors.
-            if invoices_to_create:
-                invoice_objs = [pair[0] for pair in invoices_to_create]
-                try:
-                    with transaction.atomic():  # savepoint, see above
-                        Invoice.objects.bulk_create(invoice_objs, batch_size=200)
-                except Exception as bulk_err:
-                    logger.warning(
-                        "bulk_create failed (%s); falling back to per-row create", bulk_err
-                    )
-                    surviving = []
-                    for invoice, inv_data in invoices_to_create:
-                        try:
-                            invoice.save()
-                            surviving.append((invoice, inv_data))
-                        except Exception as row_err:
-                            errors.append(
-                                f"Invoice {inv_data.get('invoiceNumber','?')}: "
-                                f"could not create — {row_err}"
-                            )
-                            created_count -= 1
-                            skipped_count += 1
-                    invoices_to_create = surviving
-                    invoice_objs = [pair[0] for pair in surviving]
-                # Now invoice.pk is populated; build line items + audit logs.
-                for invoice, inv_data in invoices_to_create:
-                    items = inv_data.get("items", [])
-                    is_igst = invoice.is_igst_applicable
-                    for item in items:
-                        # Excel cells can come through as numbers (e.g. HSN "711319"
-                        # parsed as int) — coerce to str before .strip() so one
-                        # numeric cell can't AttributeError the whole batch.
-                        product_name = str(item.get("productName") or "").strip()
-                        # Resolve HSN + GST rate from Product master if not supplied.
-                        # Never silently default — if the row has no GST rate AND
-                        # no matching product, fail with a clear message.
-                        product = lookup_product(product_name)
-                        hsn_code = str(item.get("hsn") or "").strip()
-                        gst_rate_raw_in = item.get("gstRate")
-                        if gst_rate_raw_in in (None, "", 0, "0"):
-                            if not product:
-                                errors.append(
-                                    f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
-                                    f"product not found in Product list and no GST rate supplied. "
-                                    f"Add the product first or include a GST Rate column."
-                                )
-                                continue
-                            # assume="fraction": this is the stored column. The
-                            # slab allowlist still heals a master row written by
-                            # the old heuristic, so imports stop propagating it.
-                            gst_rate = normalize_rate(
-                                product.gst_tax_rate, assume="fraction"
-                            )
-                            if not hsn_code:
-                                hsn_code = product.hsn_code or ""
-                        else:
-                            # "gstRate" is the parser's percent field
-                            # (parseInvoiceExcel.ts), so percent is the contract
-                            # for anything the allowlist cannot place.
-                            gst_rate = normalize_rate(
-                                gst_rate_raw_in, assume="percent"
-                            )
-                            if not hsn_code and product:
-                                hsn_code = product.hsn_code or ""
-
-                        qty = Decimal(str(item.get("qty", 0)))
-                        rate = Decimal(str(item.get("rate", 0)))
-                        cgst = Decimal(str(item.get("cgst", 0)))
-                        sgst = Decimal(str(item.get("sgst", 0)))
-                        igst = Decimal(str(item.get("igst", 0)))
-                        # User-supplied gross amount takes precedence — they may not have qty/rate
-                        user_amount = Decimal(str(item.get("amount", 0)))
-                        net_amount = qty * rate
-                        if net_amount == 0 and user_amount > 0:
-                            net_amount = user_amount - cgst - sgst - igst
-                            if net_amount < 0:
-                                net_amount = user_amount / (1 + gst_rate)
-                        tax_amount = net_amount * gst_rate
-                        if cgst == 0 and sgst == 0 and igst == 0:
-                            if is_igst:
-                                igst = tax_amount
-                            else:
-                                cgst = tax_amount / 2
-                                sgst = tax_amount / 2
-                        # Heads supplied by the file were taken verbatim, so a
-                        # spreadsheet carrying a local split for an interstate
-                        # party re-planted the exact bug fix_tax_heads repairs.
-                        # Re-file them when the direction is actually known.
-                        # When the customer has neither GSTIN nor state (every
-                        # auto-created B2C party), the file's heads are the
-                        # only signal there is and must not lose to a default.
-                        if direction_known(invoice.business, invoice.customer):
-                            cgst, sgst, igst = normalize_tax_heads(
-                                cgst, sgst, igst, is_igst
-                            )
-                        amount = user_amount if user_amount > 0 else (net_amount + cgst + sgst + igst)
-
-                        # Validate per-field DB constraints BEFORE bulk_create so
-                        # a single bad row doesn't 500 the whole batch.
-                        # quantity / cgst / sgst / igst are NUMERIC(10,3) → abs < 10^7
-                        # rate / amount / gst_tax_rate are NUMERIC(12,3) → abs < 10^9
-                        OVERFLOW_10 = Decimal("10000000")
-                        OVERFLOW_12 = Decimal("1000000000")
-                        bad = None
-                        if abs(qty) >= OVERFLOW_10: bad = ("quantity", qty)
-                        elif abs(cgst) >= OVERFLOW_10: bad = ("cgst", cgst)
-                        elif abs(sgst) >= OVERFLOW_10: bad = ("sgst", sgst)
-                        elif abs(igst) >= OVERFLOW_10: bad = ("igst", igst)
-                        elif abs(rate) >= OVERFLOW_12: bad = ("rate", rate)
-                        elif abs(amount) >= OVERFLOW_12: bad = ("amount", amount)
-                        if bad:
-                            errors.append(
-                                f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
-                                f"{bad[0]} value {bad[1]} exceeds DB limit. "
-                                f"Likely qty×rate computation error — check input."
-                            )
-                            continue
-
-                        line_items_to_create.append(LineItem(
-                            invoice=invoice, customer=invoice.customer,
-                            product_name=product_name or "Item",
-                            hsn_code=hsn_code or "",
-                            gst_tax_rate=gst_rate,
-                            quantity=qty, rate=rate,
-                            cgst=cgst, sgst=sgst, igst=igst, amount=amount,
-                            workspace_id=1,
-                        ))
-                    # Stash the metadata we need for the audit log; the actual
-                    # AuditLog row is appended below after total_amount has been
-                    # recomputed from line items, so the logged total isn't stale.
-                    pending_invoice_audits.append({
-                        "pk": invoice.pk,
-                        "name": f"#{invoice.invoice_number} - {invoice.customer.name}",
-                        "item_count": len(items),
-                    })
-
-            if line_items_to_create:
-                LineItem.objects.bulk_create(line_items_to_create, batch_size=200)
-
-            # If any invoices ended up with NO line items (all their items errored
-            # out during product/GST resolution), they must be removed — leaving
-            # stub invoices behind would corrupt counters and confuse downstream
-            # reports. (total_amount defaults to 0 so NULL isn't the failure mode.)
-            empty_inv_ids: list[int] = []
-            if invoices_to_create:
-                from django.db.models import OuterRef, Subquery, Sum, DecimalField
-                from django.db.models.functions import Coalesce
-                invoice_ids = [inv.pk for inv, _ in invoices_to_create if inv.pk]
-                if invoice_ids:
-                    # Find invoices with no line items and decrement counters
-                    empty_inv_ids = list(
-                        Invoice.objects.filter(pk__in=invoice_ids, lineitem__isnull=True)
-                        .values_list("pk", flat=True)
-                    )
-                    if empty_inv_ids:
-                        # Roll back stub invoices and adjust counters
-                        Invoice.objects.filter(pk__in=empty_inv_ids).delete()
-                        invoice_ids = [pk for pk in invoice_ids if pk not in empty_inv_ids]
-                        created_count -= len(empty_inv_ids)
-                        skipped_count += len(empty_inv_ids)
-
-                    # Safety net: recompute Invoice.total_amount = SUM(line_items)
-                    # for the surviving invoices. bulk_create skips the post_save
-                    # signal that normally keeps total in sync, so we re-derive.
-                    if invoice_ids:
-                        sub = (LineItem.objects
-                               .filter(invoice=OuterRef("pk"))
-                               .values("invoice")
-                               .annotate(s=Sum("amount"))
-                               .values("s"))
-                        Invoice.objects.filter(pk__in=invoice_ids).update(
-                            total_amount=Coalesce(
-                                Subquery(sub, output_field=DecimalField()),
-                                Decimal("0"),
-                                output_field=DecimalField(),
-                            )
-                        )
-
-            # Emit the deferred per-invoice audit logs now that total_amount
-            # has been recomputed from line items (and dropped invoices that
-            # were rolled back as empty).
-            if pending_invoice_audits:
-                empty_set = set(empty_inv_ids)
-                surviving_pks = [a["pk"] for a in pending_invoice_audits if a["pk"] not in empty_set]
-                live_totals = dict(
-                    Invoice.objects.filter(pk__in=surviving_pks).values_list("pk", "total_amount")
-                )
-                for meta in pending_invoice_audits:
-                    if meta["pk"] in empty_set:
-                        continue
-                    audit_logs_to_create.append(AuditLog(
-                        action="imported", entity="invoice",
-                        entity_id=meta["pk"],
-                        entity_name=meta["name"],
-                        user=request.user if request.user and request.user.is_authenticated else None,
-                        details=(
-                            f"Imported from Excel ({meta['item_count']} items, "
-                            f"total: {live_totals.get(meta['pk'], 0)})"
-                        ),
-                    ))
-
-            # Add per-row error entries to the audit log so failures are
-            # visible in the UI's audit log page (not just Django logs).
-            if errors:
-                for err_msg in errors[:50]:  # cap to avoid runaway
-                    audit_logs_to_create.append(AuditLog(
-                        action="imported", entity="invoice",
-                        entity_id=0, entity_name="(failed row)",
-                        user=request.user if request.user and request.user.is_authenticated else None,
-                        details=f"Import error: {err_msg[:500]}",
-                    ))
-
-            if audit_logs_to_create:
-                AuditLog.objects.bulk_create(audit_logs_to_create, batch_size=200)
-
-            # Link new customers to businesses via M2M — bulk_create the through-table
-            # rows instead of N individual .add() calls (each is its own round-trip).
-            if new_customers_added_to_biz:
-                Through = Customer.businesses.through
-                # Dedupe pairs (customer_id, business_id) — a customer might appear
-                # in multiple invoices for the same business.
-                seen_pairs = set()
-                m2m_rows = []
-                for cust, biz in new_customers_added_to_biz:
-                    if not cust.pk or not biz.pk:
-                        continue
-                    key = (cust.pk, biz.pk)
-                    if key in seen_pairs:
-                        continue
-                    seen_pairs.add(key)
-                    m2m_rows.append(Through(customer_id=cust.pk, business_id=biz.pk))
-                if m2m_rows:
-                    Through.objects.bulk_create(m2m_rows, ignore_conflicts=True, batch_size=200)
-
-        return Response(
-            {
-                "created": created_count,
-                "skipped": skipped_count,
-                "errors": errors[:20],
-                "message": f"Successfully imported {created_count} invoices. {skipped_count} skipped.",
-            },
-            status=status.HTTP_201_CREATED,
-        )
-
+        return run_bulk_import(request)
 
 @method_decorator(csrf_exempt, name="dispatch")
 class AIInvoiceProcessingView(APIView):
@@ -3897,431 +2584,7 @@ class AIInvoiceCreateView(APIView):
     # invoice carrying the AI's total and zero lines.
     @transaction.atomic
     def post(self, request):
-        """Create an invoice from AI-extracted data.
-
-        Three latent bugs in the previous version were fixed here:
-          1. `Customer.objects.get(name=...)` raised DoesNotExist (→ 500)
-             when the AI returned a name that wasn't an exact match.
-             Case-insensitive lookup scoped to the chosen business now,
-             with a clear 400 + customer_name in the response so the
-             frontend can prompt the user to create them first.
-          2. `type_of_invoice` was hardcoded OUTWARD. Now respects the
-             `type_of_invoice` field in the request body (defaulting to
-             OUTWARD), so purchase invoices can be imported too.
-          3. The `customer_data` dict was built but never used — the
-             extracted address/GST/PAN/mobile from OCR was silently
-             dropped. Now we backfill empty customer fields from
-             extracted data (never overwrite curated values; OCR can
-             misread a GSTIN).
-        """
-        try:
-            for field in ("business_id", "invoice_data"):
-                if field not in request.data:
-                    return Response(
-                        {"error": f"Missing required field: {field}"},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            business_id = request.data["business_id"]
-            # When the request comes in as multipart (AI Import sends
-            # the source image alongside), nested JSON fields arrive
-            # as strings. Parse on the way in so the rest of the view
-            # is agnostic to wire format.
-            invoice_data = request.data["invoice_data"]
-            if isinstance(invoice_data, str):
-                try:
-                    invoice_data = json.loads(invoice_data)
-                except json.JSONDecodeError as e:
-                    return Response(
-                        {"error": f"invoice_data is not valid JSON: {e!s}"},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-            # Optional source image — kept as audit trail of what the
-            # AI actually saw. Saved to invoice.source_file after the
-            # Invoice row is created (need invoice.pk first for the
-            # upload path).
-            source_file = request.FILES.get("source_file")
-            type_of_invoice = (
-                request.data.get("type_of_invoice") or INVOICE_TYPE_OUTWARD
-            )
-            if type_of_invoice not in (INVOICE_TYPE_OUTWARD, INVOICE_TYPE_INWARD):
-                return Response(
-                    {"error": "type_of_invoice must be 'outward' or 'inward'"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Inter-firm: both parties on the bill are our businesses.
-            # The primary invoice (business_id/type above — the seller's
-            # OUTWARD) is created as usual; then an INWARD mirror is
-            # written for the buyer firm so the purchase/ITC side lands
-            # from the same upload. Values arrive as strings when the
-            # request is multipart.
-            inter_firm = str(request.data.get("inter_firm", "")).lower() in ("true", "1")
-            inter_firm_buyer_id = request.data.get("inter_firm_buyer_business_id") or None
-
-            try:
-                business = Business.objects.get(id=business_id)
-            except Business.DoesNotExist:
-                return Response(
-                    {"error": "Business not found"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            extracted_name = (invoice_data.get("customer_name") or "").strip()
-            if not extracted_name:
-                return Response(
-                    {"error": "Customer name missing in extracted data."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Match strategy (in priority order):
-            #   1. GSTIN exact match (most reliable — uniquely identifies
-            #      the supplier even if the name varies).
-            #   2. Name case-insensitive match scoped to this business.
-            #   3. Auto-create if extracted GSTIN is present — matches
-            #      the GSTR-2A import behaviour, lower friction than
-            #      forcing the user to bounce out and create manually.
-            #      Name conflicts are disambiguated with state/GSTIN
-            #      suffix (mirror of GSTR-2A's logic).
-            extracted_gstin = (invoice_data.get("customer_gst_number") or "").strip().upper()
-            customer = None
-            if extracted_gstin:
-                customer = Customer.objects.filter(gst_number=extracted_gstin).first()
-            if not customer:
-                customer = (
-                    Customer.objects.filter(
-                        businesses__id=business_id, name__iexact=extracted_name
-                    ).first()
-                )
-            if not customer:
-                if not extracted_gstin:
-                    # No GSTIN to auto-create with — surface a clear error
-                    # so the user creates the customer manually with the
-                    # right details. Better than guessing.
-                    return Response(
-                        {
-                            "error": (
-                                f"Customer '{extracted_name}' not found for this "
-                                "business and no GSTIN was extracted to auto-create. "
-                                "Add the customer manually first."
-                            ),
-                            "customer_name": extracted_name,
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                # Auto-create with disambiguated name if needed.
-                extracted_state = (invoice_data.get("customer_state_name") or "").strip()
-                final_name = extracted_name[:255]
-                if Customer.objects.filter(name=final_name).exists():
-                    if extracted_state:
-                        candidate = f"{final_name} ({extracted_state})"[:255]
-                        if not Customer.objects.filter(name=candidate).exists():
-                            final_name = candidate
-                    if Customer.objects.filter(name=final_name).exists():
-                        final_name = f"{extracted_name[:230]} · {extracted_gstin}"[:255]
-                customer = Customer.objects.create(
-                    name=final_name,
-                    gst_number=extracted_gstin,
-                    address=(invoice_data.get("customer_address") or "").strip(),
-                    pan_number=(invoice_data.get("customer_pan_number") or "").strip(),
-                    mobile_number=(invoice_data.get("customer_mobile_number") or "").strip(),
-                    state_name=extracted_state[:255] if extracted_state else "",
-                )
-                # OCR fills first; the registry completes what it missed.
-                from billing.gstin import enrich_customer
-
-                transaction.on_commit(lambda c=customer: enrich_customer(c))  # AI create is atomic; enrich after commit
-
-            # Backfill empty customer fields — never overwrite curated
-            # data because OCR can misread a GSTIN/PAN by a digit.
-            dirty = False
-            for db_field, extracted_key in (
-                ("address", "customer_address"),
-                ("gst_number", "customer_gst_number"),
-                ("pan_number", "customer_pan_number"),
-                ("mobile_number", "customer_mobile_number"),
-            ):
-                val = (invoice_data.get(extracted_key) or "").strip()
-                if val and not getattr(customer, db_field, ""):
-                    setattr(customer, db_field, val)
-                    dirty = True
-            if dirty:
-                customer.save()
-
-            # Dedup check — same natural key as GSTR-2A import: a given
-            # (business, customer, invoice_number, invoice_date) tuple
-            # uniquely identifies a real-world invoice. Re-uploading
-            # the same image through AI Import should NOT create a
-            # second DB row. Returns the existing invoice instead so
-            # the frontend can still link to it.
-            inv_number = invoice_data.get("invoice_number", "") or ""
-            inv_date = (
-                invoice_data.get("invoice_date") or timezone.localdate()
-            )
-            # Inter-firm mirror helper — creates (or finds) the INWARD
-            # entry for the buyer firm, copying lines from the primary
-            # invoice. Used on both the fresh-create path AND the
-            # primary-duplicate path, so re-uploading a bill whose
-            # outward already exists still completes a missing inward
-            # mirror instead of silently skipping it.
-            def ensure_inward_mirror(primary_invoice):
-                if not (inter_firm and inter_firm_buyer_id):
-                    return None, False
-                buyer_business = Business.objects.filter(id=inter_firm_buyer_id).first()
-                if buyer_business is None:
-                    logger.warning("inter_firm buyer business %s not found", inter_firm_buyer_id)
-                    return None, False
-                supplier_cust = None
-                if business.gst_number:
-                    supplier_cust = Customer.objects.filter(
-                        gst_number=business.gst_number
-                    ).first()
-                if supplier_cust is None:
-                    supplier_cust = Customer.objects.filter(
-                        name__iexact=business.name
-                    ).first()
-                if supplier_cust is None:
-                    supplier_cust = Customer.objects.create(
-                        name=business.name[:255],
-                        gst_number=business.gst_number or "",
-                        state_name=(getattr(business, "state_name", "") or "RAJASTHAN")[:255],
-                        workspace_id=1,
-                    )
-                mirror_existing = Invoice.objects.filter(
-                    business=buyer_business,
-                    invoice_number__iexact=inv_number,
-                    invoice_date=inv_date,
-                    type_of_invoice=INVOICE_TYPE_INWARD,
-                ).first()
-                if mirror_existing is not None:
-                    return mirror_existing.id, True
-                assert_period_unlocked(buyer_business.id, inv_date, "create")
-                mirror = Invoice.objects.create(
-                    customer=supplier_cust,
-                    business=buyer_business,
-                    invoice_number=inv_number,
-                    invoice_date=inv_date,
-                    type_of_invoice=INVOICE_TYPE_INWARD,
-                    total_amount=primary_invoice.total_amount,
-                )
-                # bulk_create: the per-line signal would re-sum the mirror
-                # once per copied line; the total is set explicitly below.
-                LineItem.objects.bulk_create(
-                    [
-                        LineItem(
-                            customer=supplier_cust,
-                            invoice=mirror,
-                            product_name=li.product_name,
-                            hsn_code=li.hsn_code,
-                            gst_tax_rate=li.gst_tax_rate,
-                            quantity=li.quantity,
-                            rate=li.rate,
-                            amount=li.amount,
-                            cgst=li.cgst,
-                            sgst=li.sgst,
-                            igst=li.igst,
-                        )
-                        for li in LineItem.objects.filter(invoice=primary_invoice)
-                    ],
-                    batch_size=100,
-                )
-                mirror.total_amount = primary_invoice.total_amount
-                mirror.save()
-                # Audit image on the mirror too — same physical document.
-                if source_file is not None:
-                    try:
-                        source_file.seek(0)
-                        mirror.source_file.save(
-                            source_file.name, source_file, save=True
-                        )
-                        if primary_invoice.source_preview:
-                            from django.core.files.base import ContentFile
-                            with primary_invoice.source_preview.open("rb") as pf:
-                                mirror.source_preview.save(
-                                    primary_invoice.source_preview.name.rsplit("/", 1)[-1],
-                                    ContentFile(pf.read()),
-                                    save=True,
-                                )
-                    except Exception as e:
-                        logger.warning(
-                            "Could not copy source image to mirror %s: %s",
-                            mirror.pk, e,
-                        )
-                return mirror.id, False
-
-            existing = (
-                Invoice.objects.filter(
-                    business_id=business_id,
-                    customer_id=customer.id,
-                    invoice_number__iexact=inv_number,
-                    invoice_date=inv_date,
-                ).first()
-            )
-            if existing is not None:
-                # Primary already exists — still ensure the inter-firm
-                # inward mirror is present (completes half-done pairs).
-                inward_invoice_id, inward_duplicate = ensure_inward_mirror(existing)
-                return Response(
-                    {
-                        "success": True,
-                        "invoice_id": existing.id,
-                        "invoice_number": existing.invoice_number,
-                        "customer_name": customer.name,
-                        "line_items_created": 0,
-                        "total_amount": existing.total_amount,
-                        "duplicate": True,
-                        "inward_invoice_id": inward_invoice_id,
-                        "inward_duplicate": inward_duplicate,
-                        "message": (
-                            f"Invoice {inv_number} from {customer.name} on "
-                            f"{inv_date} already exists — skipped duplicate."
-                        ),
-                    }
-                )
-
-            assert_period_unlocked(business.id, inv_date, "create")
-            invoice = Invoice.objects.create(
-                customer=customer,
-                business=business,
-                invoice_number=inv_number,
-                invoice_date=inv_date,
-                type_of_invoice=type_of_invoice,
-                total_amount=invoice_data.get("total_amount", 0) or 0,
-            )
-
-            # Persist the source image as audit trail. Done AFTER
-            # Invoice.objects.create() because FileField.save() with
-            # save=True triggers another model save — keeps the upload
-            # path deterministic regardless of pre-save signals.
-            #
-            # Also generate a JPEG preview alongside the original.
-            # Chrome/Firefox can't render HEIC inline so without this
-            # the InvoiceDetail page shows a broken-image fallback.
-            # _normalize_image is the same path AIInvoiceProcessor
-            # uses to prep images for Gemini (PIL + pillow-heif decode
-            # → JPEG q=88), so we get a browser-safe preview for free.
-            # Preview generation is best-effort — if it fails the
-            # original is still there and downloadable.
-            if source_file is not None:
-                invoice.source_file.save(source_file.name, source_file, save=True)
-                try:
-                    source_file.seek(0)
-                    original_bytes = source_file.read()
-                    jpeg_bytes, _ = AIInvoiceProcessor._normalize_image(
-                        original_bytes,
-                        source_file.content_type or "image/jpeg",
-                    )
-                    from django.core.files.base import ContentFile
-                    base = source_file.name.rsplit(".", 1)[0] or "preview"
-                    invoice.source_preview.save(
-                        f"{base}.jpg", ContentFile(jpeg_bytes), save=True
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Could not generate preview for invoice %s: %s",
-                        invoice.pk, e,
-                    )
-
-            # Compute per-line tax breakdown. Previous version created
-            # LineItems with cgst/sgst/igst all defaulting to 0 — the
-            # invoice showed up in the UI with Total Tax: ₹0 even
-            # when the AI correctly extracted gst_tax_rate=0.03.
-            # User flagged this on a SOLANKI inward invoice.
-            #
-            # Also recompute `amount` from qty * rate * (1 + gst_rate)
-            # because the AI sometimes returns the PRE-tax subtotal in
-            # the supposedly-tax-inclusive `amount` slot. Recomputing
-            # ensures Invoice.total_amount = sum(LineItem.amount) =
-            # actual tax-inclusive total, internally consistent.
-            from decimal import Decimal as _D
-            is_igst = invoice.is_igst_applicable
-            new_lis = []
-            running_total = _D("0")
-            for item_data in invoice_data.get("line_items", []) or []:
-                qty = _D(str(item_data.get("quantity", 0) or 0))
-                rate = _D(str(item_data.get("rate", 0) or 0))
-                # The model is not bound by the column's contract: it returns
-                # 3 as often as 0.03. Unnormalized, that billed 300% tax.
-                gst_rate = normalize_rate(
-                    item_data.get("gst_tax_rate", 0.03) or 0.03, assume="fraction"
-                )
-                pre_tax = qty * rate
-                tax = pre_tax * gst_rate
-                amount = pre_tax + tax  # tax-inclusive — matches app contract
-                if is_igst:
-                    igst, cgst, sgst = tax, _D("0"), _D("0")
-                else:
-                    cgst = sgst = tax / _D("2")
-                    igst = _D("0")
-                running_total += amount
-                new_lis.append(LineItem(
-                    customer=customer,
-                    invoice=invoice,
-                    product_name=item_data.get("product_name", "") or "",
-                    hsn_code=item_data.get("hsn_code", "") or "",
-                    gst_tax_rate=gst_rate,
-                    quantity=qty,
-                    rate=rate,
-                    amount=amount,
-                    cgst=cgst,
-                    sgst=sgst,
-                    igst=igst,
-                ))
-            # bulk_create skips the per-line resync signal (which would re-sum
-            # the invoice once per line); the total is the running sum of the
-            # recomputed amounts, so no post-hoc SELECT is needed either.
-            LineItem.objects.bulk_create(new_lis, batch_size=100)
-            line_items_created = len(new_lis)
-
-            # `amount` is the tax-inclusive line subtotal (matches
-            # InvoiceForm's contract), so its sum is the true total even if
-            # the AI's `total_amount` was off.
-            invoice.total_amount = running_total
-            invoice.save()
-
-            # Inter-firm: also write the INWARD mirror for the buyer firm
-            # (no-op unless inter_firm was requested).
-            inward_invoice_id, inward_duplicate = ensure_inward_mirror(invoice)
-
-            return Response(
-                {
-                    "success": True,
-                    "invoice_id": invoice.id,
-                    "invoice_number": invoice.invoice_number,
-                    "customer_name": customer.name,
-                    "line_items_created": line_items_created,
-                    "total_amount": invoice.total_amount,
-                    # Inter-firm mirror info (null when not inter-firm)
-                    "inward_invoice_id": inward_invoice_id,
-                    "inward_duplicate": inward_duplicate,
-                    "message": "Invoice created successfully",
-                }
-            )
-
-        except Exception as e:
-            transaction.set_rollback(True)  # error Responses don't raise, so roll back explicitly
-            # Full traceback to logs (with exc_info) — that's where the
-            # actual exception type, line, and stack live for debugging.
-            # The user sees a generic message; surfacing raw Python
-            # errors like "name 'json' is not defined" is bad UX and a
-            # mild info leak (tells anyone hitting the API what
-            # libraries/functions are in play). The exception class
-            # name is included as a small hint without the message
-            # body so the user can mention it when reporting bugs.
-            logger.error(
-                "Error creating invoice from AI data: %s", e, exc_info=True
-            )
-            return Response(
-                {
-                    "error": (
-                        "Could not create invoice due to an internal error. "
-                        f"(Reference: {type(e).__name__}) "
-                        "Check the server logs or try again."
-                    ),
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
+        return create_from_ai(request)
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only viewset for audit log entries with undo support."""
@@ -4442,7 +2705,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             kwargs[k] = v
                     if model is Invoice:
                         assert_period_unlocked(kwargs.get("business_id"), kwargs.get("invoice_date"), "create")
-                    obj = model.objects.create(**kwargs)
+                    try:
+                        with transaction.atomic():
+                            obj = model.objects.create(**kwargs)
+                    except IntegrityError:
+                        # Undone once already (or the number was reused since):
+                        # the unique outward-number guard fires. A 409, not a 500.
+                        return Response(
+                            {"error": "already_restored", "detail": "A record with this number already exists; the delete was undone before."},
+                            status=status.HTTP_409_CONFLICT,
+                        )
                     for line in snap.get("line_items") or []:
                         LineItem.objects.create(
                             invoice=obj, customer_id=obj.customer_id, workspace_id=1,
@@ -4645,7 +2917,7 @@ class UserManagementView(APIView):
 
     def post(self, request):
         """Create a new user with a role."""
-        from django.contrib.auth.models import User, Group
+        from django.contrib.auth.models import Group, User
         username = request.data.get("username", "").strip()
         password = request.data.get("password", "")
         email = request.data.get("email", "")
@@ -4678,7 +2950,7 @@ class UserManagementView(APIView):
 
     def patch(self, request):
         """Update a user's role or status."""
-        from django.contrib.auth.models import User, Group
+        from django.contrib.auth.models import Group, User
         user_id = request.data.get("user_id")
         if not user_id:
             return Response({"error": "user_id required"}, status=400)
