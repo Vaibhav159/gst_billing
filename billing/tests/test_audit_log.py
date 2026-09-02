@@ -45,10 +45,12 @@ class AuditLogTestCase(TestCase):
             customer=self.customer, business=self.business,
             type_of_invoice="outward", total_amount=Decimal("1000"), workspace_id=1,
         )
-        self.client.patch(f"/api/invoices/{inv.id}/", {"total_amount": "2000.00"})
+        # total_amount is derived from the lines and read-only on the wire
+        # (audit A9); a header field that IS editable must still be logged.
+        self.client.patch(f"/api/invoices/{inv.id}/", {"invoice_number": "1-R"})
         log = AuditLog.objects.filter(action="updated", entity="invoice").first()
         self.assertIsNotNone(log)
-        self.assertIn("total_amount", log.changes or {})
+        self.assertIn("invoice_number", log.changes or {})
 
     def test_delete_invoice_logs_with_snapshot(self):
         """Deleting an invoice should log with a snapshot for undo."""

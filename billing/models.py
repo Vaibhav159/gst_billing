@@ -236,15 +236,18 @@ class Customer(AbstractBaseModel):
 
 
 class Invoice(AbstractBaseModel):
+    # PROTECT, not CASCADE: one admin-role delete of a customer used to destroy
+    # their entire invoice history, filed months included, with only a header
+    # snapshot surviving and the line items unrecoverable.
     customer = models.ForeignKey(
         Customer,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         verbose_name="Customer",
         help_text="Customer of the invoice.",
     )
     business = models.ForeignKey(
         Business,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         verbose_name="Business",
         help_text="Business of the invoice.",
     )
