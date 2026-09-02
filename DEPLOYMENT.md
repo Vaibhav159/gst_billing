@@ -55,6 +55,29 @@ compose command). If one fails, gunicorn never starts, the container crash-loops
 its healthcheck goes red, and Watchtower's notification reports it. Roll back
 with the previous version tag (below) and fix forward.
 
+## First deploy of a non-root image (one-time)
+
+From v2.0.5 the backend image runs as the unprivileged `app` user. The two
+named volumes it writes to — `gst_media_volume` (uploads, capture photos,
+source files) and `gst_static_volume` (`collectstatic` output) — were
+created by earlier images that ran as root, so their contents are
+root-owned. Docker preserves that ownership when a new container mounts an
+existing volume, which means the first non-root start fails at
+`collectstatic` (permission denied) and the container crash-loops.
+
+Fix the ownership once, from the compose directory, using the image's own
+user so no numeric uid has to be guessed:
+
+```bash
+docker compose pull web
+docker compose run --rm --no-deps --user root web chown -R app:app /app/media /app/staticfiles
+docker compose up -d --force-recreate --no-deps web
+```
+
+If Watchtower already swapped the image and `web` is restarting in a loop,
+the same three commands repair it. The ownership sticks; later releases need
+nothing.
+
 ## Releases and automatic deployment
 
 Deploys are **tag-driven**. Merging PRs changes `main` (and runs Tests) but
