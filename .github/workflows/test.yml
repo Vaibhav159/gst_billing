@@ -258,13 +258,21 @@ jobs:
           push: false
           load: true
           tags: gst-billing:ci
-      - name: Backend image starts as non-root and answers /healthz
+      - name: Backend image starts as non-root, migrates a fresh Postgres and answers /healthz
+        # /healthz is a real DB probe (SELECT 1), so the image needs a database
+        # to answer 200 — the first version of this step pointed it at an empty
+        # localhost and read the honest 503 as a broken image.
         run: |
-          docker run -d --name web -e DJANGO_SECRET_KEY=ci -e DB_HOST=localhost -e DB_NAME=x -e DB_USER=x -e DB_PASSWORD=x \
+          docker network create ci
+          docker run -d --name db --network ci -e POSTGRES_DB=gst -e POSTGRES_USER=gst -e POSTGRES_PASSWORD=gst postgres:16-alpine
+          for i in $(seq 1 30); do docker exec db pg_isready -q -U gst && break; sleep 1; done
+          docker run -d --name web --network ci -e DJANGO_SECRET_KEY=ci -e DB_HOST=db -e DB_NAME=gst -e DB_USER=gst -e DB_PASSWORD=gst \
             gst-billing:ci gunicorn --bind 0.0.0.0:8000 gst_billing.wsgi:application
           sleep 6
           test "$(docker exec web id -u)" != "0" || { echo "still running as root"; exit 1; }
-          docker exec web curl -fsS http://127.0.0.1:8000/healthz >/dev/null || { docker logs web; exit 1; }
+          # The deploy runs migrate before gunicorn; prove the image can do that as its non-root user.
+          docker exec web python manage.py migrate --noinput || { docker logs web; exit 1; }
+          docker exec web curl -fsS http://127.0.0.1:8000/healthz || { docker logs web; exit 1; }
       - name: Build nginx image
         uses: docker/build-push-action@v6
         with:
