@@ -19,24 +19,49 @@ services:
     env_file:
       - ./.env
     environment:
+      # Belt and braces with the image's ENV: the production module is chosen
+      # here, in version control, never by a line in .env going missing.
+      - DJANGO_SETTINGS_MODULE=gst_billing.production_settings
       - DJANGO_ALLOWED_HOSTS=*
       # Change this to whatever URL your Cosmos dashboard serves this app under
       - CSRF_TRUSTED_ORIGINS=http://billing.cheq.dpdns.org,https://billing.cheq.dpdns.org,http://localhost:8060
       - REDIS_HOST=redis
       # Note: DB_HOST, DB_USER, etc., will be pulled automatically from your .env file
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    # A failed migrate exits non-zero and gunicorn never starts, so the
+    # container crash-loops instead of serving a half-migrated schema; the
+    # healthcheck below turns that into a visible unhealthy state (and, with
+    # WATCHTOWER_NOTIFICATION_URL set, a message).
     command: >
       bash -c "mkdir -p logs &&
                python manage.py migrate &&
                python manage.py collectstatic --noinput &&
-               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 4 --log-level info"
+               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 4 --timeout 90 --graceful-timeout 30 --log-level info"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - gst_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
 
   nginx:
     # Uses the image built via Github Actions
@@ -45,13 +70,23 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
     ports:
-      # Map to a port Cosmos can reverse proxy (e.g. 8060)
-      - "8060:80"
+      # Loopback only: Cosmos reverse-proxies from this host, and nothing else
+      # should reach the plain-HTTP side door. This used to bind all interfaces.
+      - "127.0.0.1:8060:80"
     volumes:
       - gst_static_volume:/var/www/static:ro
       - gst_media_volume:/var/www/media:ro
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
   # Auto-deploy: polls Docker Hub every 60s and recreates ONLY the services
   # labeled watchtower.enable=true (web + nginx) when their :latest changes —
@@ -62,15 +97,16 @@ services:
   # Note: mounting docker.sock gives this container Docker-level (root)
   # control of the host — standard for Watchtower; it runs no exposed ports.
   watchtower:
-    image: containrrr/watchtower
+    image: containrrr/watchtower:1.7.1
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    # Set WATCHTOWER_NOTIFICATION_URL in .env (shoutrrr format, e.g.
-    # telegram://<bot-token>@telegram?chats=<chat-id>) and every deploy —
-    # or failed pull — announces itself. Empty means no notifications.
+    # WATCHTOWER_NOTIFICATION_URL (shoutrrr format, e.g.
+    # telegram://<bot-token>@telegram?chats=<chat-id>) makes every deploy —
+    # or failed pull — announce itself. It is REQUIRED: an unattended deploy
+    # that can crash-loop a migration must be able to tell someone.
     environment:
-      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
+      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:?Set WATCHTOWER_NOTIFICATION_URL in .env so deploys and failures are reported}
     command: --label-enable --cleanup --interval 60
 
   # Nightly backups: pg_dump of the (external) Postgres + a tar of the media
@@ -78,12 +114,25 @@ services:
   # watchtower-labeled — a backup container should never restart mid-dump.
   # Restore drill: see DEPLOYMENT.md "Backups".
   backup:
-    image: postgres:16-alpine
+    # pg_dump refuses to dump a server NEWER than itself. Neon upgrades majors
+    # on its own schedule, and the day it moved past this client every dump
+    # would have failed silently until the 30-day prune emptied ./backups.
+    # Keep this at or above Neon's major.
+    image: postgres:17-alpine
     restart: unless-stopped
     env_file:
       - ./.env
     environment:
       - PGSSLMODE=require
+      # Optional dead-man switch: a URL that is GET-ed only after a verified
+      # dump (healthchecks.io, Uptime Kuma push, …). Its silence is the alarm.
+      - BACKUP_PING_URL=${BACKUP_PING_URL:-}
+      # Optional off-site sync, run after a verified dump with the backup
+      # directory as its working directory, e.g.
+      #   rclone sync . remote:gst-backups
+      # ./backups lives on the same disk as everything else; a backup on the
+      # failed disk is not a backup.
+      - BACKUP_SYNC_CMD=${BACKUP_SYNC_CMD:-}
     volumes:
       - gst_media_volume:/media:ro
       - ./backups:/backups

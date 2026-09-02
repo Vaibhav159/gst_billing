@@ -192,10 +192,13 @@ class CreationPathEnrichmentTest(BaseAPITestCase):
     def test_api_customer_create_is_enriched(self):
         with patch("billing.gstin.requests.post") as mock_post:
             mock_post.return_value.json.return_value = TALLY_PAYLOAD
-            r = self.client.post(reverse("customer-list"), {
-                "name": "Fresh Party", "gst_number": "08AAGPL3375F1ZO",
-                "businesses": [self.business.id],
-            }, format="json")
+            # Enrichment is deferred to after commit (audit D7); TestCase runs in a
+            # transaction, so the callbacks must be run explicitly.
+            with self.captureOnCommitCallbacks(execute=True):
+                r = self.client.post(reverse("customer-list"), {
+                    "name": "Fresh Party", "gst_number": "08AAGPL3375F1ZO",
+                    "businesses": [self.business.id],
+                }, format="json")
         self.assertEqual(r.status_code, 201, r.data)
         c = Customer.objects.get(id=r.data["id"])
         self.assertIn("Bapu Bazar", c.address or "")
@@ -206,15 +209,18 @@ class CreationPathEnrichmentTest(BaseAPITestCase):
 
         with patch("billing.gstin.requests.post") as mock_post:
             mock_post.return_value.json.return_value = TALLY_PAYLOAD
-            r = self.client.post(reverse("inward-bill-list"), {
-                "business_id": self.business.id,
-                "supplier_name": "ENRICHED SUPPLIER",
-                "supplier_gstin": "08AAGPL3375F1ZO",
-                "invoice_number": "ENR-1", "invoice_date": "2026-08-01",
-                "lines": _json.dumps([{"product_name": "Silver", "hsn_code": "711311",
-                                       "quantity": "10", "rate": "100",
-                                       "gst_tax_rate": "0.03", "unit": "gms"}]),
-            })
+            # Enrichment is deferred to after commit (audit D7); TestCase runs in a
+            # transaction, so the callbacks must be run explicitly.
+            with self.captureOnCommitCallbacks(execute=True):
+                r = self.client.post(reverse("inward-bill-list"), {
+                    "business_id": self.business.id,
+                    "supplier_name": "ENRICHED SUPPLIER",
+                    "supplier_gstin": "08AAGPL3375F1ZO",
+                    "invoice_number": "ENR-1", "invoice_date": "2026-08-01",
+                    "lines": _json.dumps([{"product_name": "Silver", "hsn_code": "711311",
+                                           "quantity": "10", "rate": "100",
+                                           "gst_tax_rate": "0.03", "unit": "gms"}]),
+                })
         self.assertEqual(r.status_code, 201, r.data)
         sup = Customer.objects.get(name="ENRICHED SUPPLIER")
         self.assertIn("Bapu Bazar", sup.address or "")

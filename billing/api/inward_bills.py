@@ -254,7 +254,7 @@ class InwardBillListCreateView(APIView):
             # PAN) — empty fields only, quiet on failure.
             from billing.gstin import enrich_customer
 
-            enrich_customer(supplier)
+            transaction.on_commit(lambda sup=supplier: enrich_customer(sup))
         if not supplier.businesses.filter(id=business.id).exists():
             supplier.businesses.add(business)
         return supplier

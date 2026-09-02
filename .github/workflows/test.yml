@@ -75,6 +75,12 @@ jobs:
           # (e.g. django-simple-history). Pin <81 because setuptools 81+ removed
           # the vendored `pkg_resources` module.
           uv pip install . pytest pytest-django gunicorn 'setuptools<81'
+      - name: Models and migrations agree
+        # A model change without its migration ships as a crash-loop on the
+        # server's first `migrate`; nothing was checking.
+        run: |
+          source .venv/bin/activate
+          python manage.py makemigrations --check --dry-run
       - name: Run tests
         run: |
           source .venv/bin/activate
@@ -207,3 +213,58 @@ jobs:
           name: playwright-report
           path: e2e-tests/playwright-report/
           retention-days: 7
+
+  deps-audit:
+    # Dependabot bumps versions weekly; nothing audited what was already
+    # deployed. Six shipped packages carried published advisories (audit D6).
+    name: Dependency advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: pip-audit the locked Python tree
+        run: |
+          pip install uv pip-audit
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/req.txt
+          pip-audit -r /tmp/req.txt --disable-pip --strict
+      - name: npm audit the shipped frontend deps
+        working-directory: sweet-rebuild-suite-main
+        run: |
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+
+  docker-build:
+    # Nothing built the images before a tag, so a broken Dockerfile (or a
+    # non-root permission mistake) first showed up as a failed release.
+    # Build both, push nothing.
+    name: Docker images build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: gst-billing:ci
+      - name: Backend image starts as non-root and answers /healthz
+        run: |
+          docker run -d --name web -e DJANGO_SECRET_KEY=ci -e DB_HOST=localhost -e DB_NAME=x -e DB_USER=x -e DB_PASSWORD=x \
+            gst-billing:ci gunicorn --bind 0.0.0.0:8000 gst_billing.wsgi:application
+          sleep 6
+          test "$(docker exec web id -u)" != "0" || { echo "still running as root"; exit 1; }
+          docker exec web curl -fsS http://127.0.0.1:8000/healthz >/dev/null || { docker logs web; exit 1; }
+      - name: Build nginx image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./nginx/Dockerfile
+          push: false

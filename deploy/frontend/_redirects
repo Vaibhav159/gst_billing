@@ -1,3 +1,0 @@
-# Cloudflare Pages SPA routing
-# All routes serve index.html (React Router handles routing client-side)
-/*  /index.html  200

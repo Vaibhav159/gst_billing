@@ -49,6 +49,8 @@ dependencies = [
     # Until this, prod exceptions were invisible unless someone tailed the
     # container logs.
     "sentry-sdk[django]>=2.0",
+    "gunicorn>=23",
+    "django-redis>=5.4",
 ]
 
 [project.optional-dependencies]

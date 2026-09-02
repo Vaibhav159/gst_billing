@@ -24,28 +24,60 @@ concurrency:
 
 jobs:
   test:
-    # Release gate: the fast backend suite. E2E already gated every PR on
-    # its way into main; this catches a bad tag (wrong commit, stale branch).
-    name: Backend tests (release gate)
+    # Release gate. This used to run on SQLite only, so a Postgres-only failure
+    # first executed in production — inside the server's unattended `migrate`.
+    # Now the same Postgres major as prod, plus the migrations check, plus the
+    # frontend typecheck (vite build does not typecheck; tsc is the only thing
+    # that does, and it was never run on a tag).
+    name: Release gate (Postgres tests + migrations + typecheck)
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: circleci
+          POSTGRES_PASSWORD: circleci
+          POSTGRES_DB: circle_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U circleci"
+          --health-interval 5s
     env:
-      DJANGO_SETTINGS_MODULE: gst_billing.test_settings
+      DJANGO_SETTINGS_MODULE: gst_billing.ci_settings
+      DATABASE_URL: postgresql://circleci:circleci@localhost/circle_test
       DJANGO_SECRET_KEY: ci-test-key-not-secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
         run: |
           uv venv
-          uv pip install . pytest pytest-django gunicorn 'setuptools<81'
-      - name: Run tests
+          uv pip install . pytest pytest-django 'setuptools<81'
+      - name: Models and migrations agree
+        run: |
+          source .venv/bin/activate
+          python manage.py makemigrations --check --dry-run
+      - name: Migrate against Postgres
+        run: |
+          source .venv/bin/activate
+          python manage.py migrate --noinput
+      - name: Backend tests on Postgres
         run: |
           source .venv/bin/activate
           pytest billing/ -x --tb=short
+      - name: Frontend typecheck
+        working-directory: sweet-rebuild-suite-main
+        run: |
+          npm ci
+          npx tsc --noEmit -p tsconfig.app.json
 
   build-and-push:
     needs: test
