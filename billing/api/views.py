@@ -1152,9 +1152,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             # for up to 30 minutes.
             try:
                 from cacheops import invalidate_model, invalidate_obj
-                invalidate_model(LineItem); invalidate_obj(invoice)
-            except ImportError:
-                pass
+                invalidate_model(LineItem)
+                invalidate_obj(invoice)
+            except Exception:  # noqa: BLE001 — a missed cache is not a failed save
+                # cacheops opens a Redis connection to invalidate; without one
+                # (CI's Postgres job, a Redis restart) that raised out of the
+                # request after the lines were already replaced.
+                logger.warning("cacheops invalidation failed after line-item replace", exc_info=True)
 
             # 4. Single audit log entry
             try:

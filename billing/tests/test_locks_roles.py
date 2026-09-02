@@ -223,6 +223,14 @@ class EditPathTests(BaseAPITestCase):
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertFalse(Invoice.objects.filter(invoice_number="A9-1").exists())
 
+    def test_cache_invalidation_failure_does_not_fail_the_save(self):
+        """#144's CircleCI job has no Redis; the invalidation raised out of the request."""
+        from unittest.mock import patch
+        with patch("cacheops.invalidate_model", side_effect=RuntimeError("redis down")):
+            resp = self.client.post(reverse("invoice-update-line-items", args=[self.invoice.pk]),
+                                    {"line_items": [self._line()]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
     def test_an_honest_line_is_accepted(self):
         payload = {"invoice_number": "A9-2", "invoice_date": "2026-05-10", "type_of_invoice": "outward",
                    "customer": self.customer.id, "business": self.business.id,
