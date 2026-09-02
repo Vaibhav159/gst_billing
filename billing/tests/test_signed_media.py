@@ -119,3 +119,20 @@ class SignedMediaTest(BaseAPITestCase):
         self.assertNotIn("/media/", url.split("?")[0].replace("/api/media/", ""), "no public /media/ leak")
         # And the minted URL actually works, unauthenticated:
         self.assertEqual(self._get(url).status_code, 200)
+
+
+class MediaHardeningTest(SignedMediaTest):
+    """C2: an uploaded file must never run as a document at the app origin."""
+
+    def test_pdf_stays_inline_but_carries_a_no_script_csp(self):
+        resp = self._get(sign_media_path("inward_bills/scan.pdf"))
+        self.assertEqual(resp["Content-Security-Policy"], "default-src 'none'")
+        self.assertEqual(resp["X-Content-Type-Options"], "nosniff")
+        self.assertTrue(resp["Content-Disposition"].startswith("inline;"))
+
+    def test_anything_else_is_a_download(self):
+        (Path(_MEDIA) / "inward_bills" / "evil.html").write_bytes(b"<script>alert(1)</script>")
+        resp = self._get(sign_media_path("inward_bills/evil.html"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp["Content-Disposition"].startswith("attachment;"))
+        self.assertEqual(resp["Content-Security-Policy"], "default-src 'none'")

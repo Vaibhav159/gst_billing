@@ -5,6 +5,7 @@ from calendar import monthrange
 from datetime import datetime
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import (
     Count,
@@ -24,6 +25,8 @@ from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework import permissions
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -36,6 +39,7 @@ from billing.constants import (
 )
 from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
 from billing.tax_rules import (
+    check_line_money,
     classify_b2c,
     direction_known,
     is_interstate,
@@ -55,7 +59,7 @@ from billing.utils import (
     process_product_csv,
 )
 
-from .mixins import AuditLogMixin
+from .mixins import AuditLogMixin, ProtectedDeleteMixin
 from .permissions import RoleBasedPermission, AdminOnlyPermission, get_user_role
 from .serializers import (
     FiledPeriodSerializer,
@@ -93,7 +97,7 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class BusinessViewSet(AuditLogMixin, viewsets.ModelViewSet):
+class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "business"
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
@@ -225,7 +229,7 @@ class BusinessViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
+class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "customer"
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
@@ -450,7 +454,7 @@ class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         return response
 
-    @action(detail=False, methods=["post"])
+    @action(detail=False, methods=["post"], permission_classes=[AdminOnlyPermission])
     def merge(self, request):
         """Merge source customer into target customer.
         Transfers all invoices and line items from source to target, then deletes source.
@@ -479,22 +483,26 @@ class CustomerViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Transfer all invoices from source to target
-        invoices_transferred = Invoice.objects.filter(customer=source).update(
-            customer=target
-        )
+        # Nothing here was transactional: invoice update -> line update ->
+        # delete, and a failure midway left invoices on a customer whose lines
+        # had moved. It also never asked whether any of those invoices sat in
+        # a filed month.
+        for biz_id, inv_date in (
+            Invoice.objects.filter(customer=source)
+            .values_list("business_id", "invoice_date").distinct()
+        ):
+            assert_period_unlocked(biz_id, inv_date, "edit")
 
-        # Transfer all line items from source to target
-        LineItem.objects.filter(customer=source).update(customer=target)
-
-        # Merge business associations
-        for business in source.businesses.all():
-            target.businesses.add(business)
-
-        # Delete the source customer
-        source_name = source.name
-        source_id = source.pk
-        source.delete()
+        with transaction.atomic():
+            invoices_transferred = Invoice.objects.filter(customer=source).update(
+                customer=target
+            )
+            LineItem.objects.filter(customer=source).update(customer=target)
+            for business in source.businesses.all():
+                target.businesses.add(business)
+            source_name = source.name
+            source_id = source.pk
+            source.delete()
 
         # Log merge
         try:
@@ -955,6 +963,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                         qty = Decimal(str(item_data.get("quantity", 1)))
                         rate = Decimal(str(item_data.get("rate", 0)))
                         amount = Decimal(str(item_data.get("amount", qty * rate)))
+                        check_line_money(item_data, qty, rate, amount)
                         new_total += amount
                         n_cgst, n_sgst, n_igst = normalize_tax_heads(
                             Decimal(str(item_data.get("cgst", 0))),
@@ -1020,6 +1029,24 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         assert_period_unlocked(instance.business_id, instance.invoice_date, "delete")
         super().perform_destroy(instance)
 
+    _LINE_SNAPSHOT_FIELDS = (
+        "product_name", "hsn_code", "gst_tax_rate", "quantity", "rate",
+        "cgst", "sgst", "igst", "amount", "unit",
+    )
+
+    def _full_snapshot(self, instance):
+        # The header alone is not an invoice. Line items cascade away on delete
+        # and were never recorded, so undoing a deleted invoice recreated a row
+        # with the old total and zero lines — an "empty invoice" that counted
+        # in dashboards but vanished from GSTR rate and HSN tables.
+        data = super()._full_snapshot(instance)
+        data["line_items"] = [
+            {f: (str(getattr(li, f)) if getattr(li, f) is not None else None)
+             for f in self._LINE_SNAPSHOT_FIELDS}
+            for li in instance.lineitem_set.all()
+        ]
+        return data
+
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
         """
@@ -1048,6 +1075,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         old_inv_date = invoice.invoice_date
 
         with transaction.atomic():
+            # Two concurrent replaces persisted BOTH line sets under one total;
+            # the row lock serialises them.
+            invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
             # 1. Patch invoice-level fields if provided (in-memory only)
             if invoice_data:
                 if "customer" in invoice_data and invoice_data["customer"]:
@@ -1077,6 +1107,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 qty = Decimal(str(item_data.get("quantity", 1)))
                 rate = Decimal(str(item_data.get("rate", 0)))
                 amount = Decimal(str(item_data.get("amount", qty * rate)))
+                check_line_money(item_data, qty, rate, amount)
                 new_total += amount
                 n_cgst, n_sgst, n_igst = normalize_tax_heads(
                     Decimal(str(item_data.get("cgst", 0))),
@@ -1103,19 +1134,38 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             if new_lis:
                 LineItem.objects.bulk_create(new_lis, batch_size=100)
 
-            # 3. Update invoice with the precomputed total — skip the SELECT
-            #    that Invoice.save() would do (sum of line items).
+            # 3. Save the header through save(): a queryset update() skipped
+            #    simple-history (this is the hot edit path, so the history table
+            #    missed most real total changes) and surfaced a duplicate number
+            #    as a raw 500 instead of the create path's clean 409.
             invoice.total_amount = new_total
-            # Use update() to bypass save()'s sum query
-            update_fields = {
-                "total_amount": new_total,
-                "customer_id": invoice.customer_id,
-                "business_id": invoice.business_id,
-                "invoice_number": invoice.invoice_number,
-                "invoice_date": invoice.invoice_date,
-                "type_of_invoice": invoice.type_of_invoice,
-            }
-            Invoice.objects.filter(pk=invoice.pk).update(**update_fields)
+            try:
+                with transaction.atomic():
+                    invoice.save()
+            except IntegrityError:
+                return Response(
+                    {"error": f"Invoice number {invoice.invoice_number} already exists for this business in this financial year.",
+                     "code": "duplicate_invoice_number"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            # bulk_create and _raw_delete send no signals, so cacheops never
+            # heard about the new lines — prod could serve the deleted ones
+            # for up to 30 minutes.
+            # Only when cacheops is really on. It defers invalidation inside
+            # atomic() and flushes at commit — outside any try here — so in
+            # FAKE mode (CI) or with cacheops off, the call just booked a Redis
+            # connection failure for later.
+            cacheops_live = getattr(settings, "CACHEOPS_ENABLED", True) and not getattr(settings, "CACHEOPS_FAKE", False)
+            try:
+                if cacheops_live:
+                    from cacheops import invalidate_model, invalidate_obj
+                    invalidate_model(LineItem)
+                    invalidate_obj(invoice)
+            except Exception:  # noqa: BLE001 — a missed cache is not a failed save
+                # cacheops opens a Redis connection to invalidate; without one
+                # (CI's Postgres job, a Redis restart) that raised out of the
+                # request after the lines were already replaced.
+                logger.warning("cacheops invalidation failed after line-item replace", exc_info=True)
 
             # 4. Single audit log entry
             try:
@@ -1220,6 +1270,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             })
 
         # POST — save e-way bill details
+        assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
         fields = ["eway_bill_number", "transporter_name", "transporter_gstin",
                    "vehicle_number", "vehicle_type", "transport_mode", "distance_km"]
         for field in fields:
@@ -2536,7 +2587,15 @@ class LineItemViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # If no invoice_id is provided, use the default create method
+        # Plain POST /line-items/ with the invoice in the body: the guard above
+        # only ran for URL-kwarg creates, and the post-save signal then rewrote
+        # a filed invoice's total.
+        body_invoice_id = request.data.get("invoice")
+        if body_invoice_id:
+            _inv = Invoice.objects.filter(id=body_invoice_id).only("business_id", "invoice_date").first()
+            if _inv is None:
+                return Response({"error": f"Invoice with ID {body_invoice_id} does not exist"}, status=status.HTTP_404_NOT_FOUND)
+            assert_period_unlocked(_inv.business_id, _inv.invoice_date, "edit")
         return super().create(request, *args, **kwargs)
 
     @action(detail=False, methods=["post"])
@@ -2551,6 +2610,12 @@ class LineItemViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST
             )
+
+        # Had no lock check at all, and a bad id 500ed inside the model helper.
+        target = Invoice.objects.filter(id=invoice_id).only("business_id", "invoice_date").first()
+        if target is None:
+            return Response({"error": f"Invoice with ID {invoice_id} does not exist"}, status=status.HTTP_404_NOT_FOUND)
+        assert_period_unlocked(target.business_id, target.invoice_date, "edit")
 
         line_item = LineItem.create_line_item_for_invoice(
             invoice_id=invoice_id,
@@ -2575,6 +2640,7 @@ class ReportView(APIView):
     Provides functionality to generate Excel reports of invoice data
     filtered by date range and invoice type.
     """
+    permission_classes = [RoleBasedPermission]
 
     def get(self, request, *args, **kwargs):
         # Just return a simple response for API health check
@@ -2941,6 +3007,7 @@ class CSVImportView(APIView):
     API endpoint for importing data from CSV files.
     Supports importing invoices, customers, and products.
     """
+    permission_classes = [RoleBasedPermission]
 
     parser_classes = [MultiPartParser]
 
@@ -3029,6 +3096,7 @@ class BulkInvoiceImportView(APIView):
     bulk_create for line items, dropping ~200 round-trips for a 23-invoice import
     down to ~10. Wrapped in a single transaction for atomicity.
     """
+    permission_classes = [RoleBasedPermission]
 
     def post(self, request):
         invoices_data = request.data.get("invoices", [])
@@ -3173,119 +3241,123 @@ class BulkInvoiceImportView(APIView):
         with transaction.atomic():
             for inv_data in invoices_data:
                 try:
-                    firm_name = (inv_data.get("firmName") or "").strip()
-                    firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
+                    # Savepoint per row: on Postgres a failed statement aborts the whole
+                    # outer transaction, so the documented "good rows still land"
+                    # only ever worked on SQLite, which is what the tests use.
+                    with transaction.atomic():
+                        firm_name = (inv_data.get("firmName") or "").strip()
+                        firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
 
-                    # Resolve business from cache
-                    business = forced_business
-                    if not business and firm_gstin:
-                        business = biz_by_gstin.get(firm_gstin.lower())
-                    if not business and firm_name:
-                        # icontains substitute: try exact, then any name containing
-                        business = biz_by_name.get(firm_name.lower())
+                        # Resolve business from cache
+                        business = forced_business
+                        if not business and firm_gstin:
+                            business = biz_by_gstin.get(firm_gstin.lower())
+                        if not business and firm_name:
+                            # icontains substitute: try exact, then any name containing
+                            business = biz_by_name.get(firm_name.lower())
+                            if not business:
+                                for nm, b in biz_by_name.items():
+                                    if firm_name.lower() in nm or nm in firm_name.lower():
+                                        business = b
+                                        break
+
                         if not business:
-                            for nm, b in biz_by_name.items():
-                                if firm_name.lower() in nm or nm in firm_name.lower():
-                                    business = b
-                                    break
+                            errors.append(
+                                f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
+                            )
+                            skipped_count += 1
+                            continue
 
-                    if not business:
-                        errors.append(
-                            f"Business not found for invoice {inv_data.get('invoiceNumber', '?')}: {firm_name} ({firm_gstin})"
+                        customer_name = (inv_data.get("customerName") or "").strip()
+                        customer_gst = (inv_data.get("customerGST") or "").strip()
+
+                        if not customer_name:
+                            errors.append(
+                                f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
+                            )
+                            skipped_count += 1
+                            continue
+
+                        # Resolve customer from cache
+                        customer = None
+                        clean_gst = ""
+                        clean_pan = ""
+                        if customer_gst and customer_gst not in ("-", ""):
+                            if "(PAN)" in customer_gst:
+                                clean_pan = customer_gst.replace("(PAN)", "").strip()
+                                customer = cust_by_pan.get(clean_pan.upper())
+                            else:
+                                clean_gst = customer_gst
+                                customer = cust_by_gst.get(clean_gst.upper())
+                        if not customer:
+                            customer = cust_by_name.get(customer_name.lower())
+
+                        if not customer:
+                            # Should not happen — pre-pass should have bulk-created
+                            # everything. Defensive fallback.
+                            customer = Customer.objects.create(
+                                name=customer_name, gst_number=clean_gst,
+                                pan_number=clean_pan,
+                                state_name=state_name_from_gstin(clean_gst) or None,
+                                workspace_id=1,
+                            )
+                            from billing.gstin import enrich_customer
+
+                            enrich_customer(customer)
+                            # Update ALL lookup caches so a later row referencing the
+                            # same GST/PAN under a different name resolves to this
+                            # customer instead of creating a duplicate.
+                            cust_by_name[customer_name.lower()] = customer
+                            if clean_gst:
+                                cust_by_gst[clean_gst.upper()] = customer
+                            if clean_pan:
+                                cust_by_pan[clean_pan.upper()] = customer
+
+                        if business and business.pk and customer.pk:
+                            # Track for M2M attach (idempotent — .add() is a no-op if exists)
+                            new_customers_added_to_biz.append((customer, business))
+
+                        # Resolve invoice type first so duplicate key includes it.
+                        invoice_number = str(inv_data.get("invoiceNumber", ""))
+                        invoice_date = inv_data.get("invoice_date", "")
+                        inv_type = inv_data.get("type", "OUTWARD")
+                        type_of_invoice = (
+                            INVOICE_TYPE_INWARD
+                            if inv_type == "INWARD"
+                            else INVOICE_TYPE_OUTWARD
                         )
-                        skipped_count += 1
-                        continue
 
-                    customer_name = (inv_data.get("customerName") or "").strip()
-                    customer_gst = (inv_data.get("customerGST") or "").strip()
+                        # Duplicate check — must match on business + bill# + date AND type
+                        dup_key = (business.pk, invoice_number, str(invoice_date), type_of_invoice.lower())
+                        if dup_key in existing_invoice_keys:
+                            skipped_count += 1
+                            continue
 
-                    if not customer_name:
-                        errors.append(
-                            f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
-                        )
-                        skipped_count += 1
-                        continue
+                        # Filed-and-locked month: never silently mutate a filed
+                        # period from a bulk sheet — surface it as a row error.
+                        if locked_period_or_none(business.pk, str(invoice_date)):
+                            skipped_count += 1
+                            errors.append(
+                                f"Invoice {invoice_number}: its month is filed & locked "
+                                f"for {business.name} — unlock on the GST page to import it."
+                            )
+                            continue
 
-                    # Resolve customer from cache
-                    customer = None
-                    clean_gst = ""
-                    clean_pan = ""
-                    if customer_gst and customer_gst not in ("-", ""):
-                        if "(PAN)" in customer_gst:
-                            clean_pan = customer_gst.replace("(PAN)", "").strip()
-                            customer = cust_by_pan.get(clean_pan.upper())
-                        else:
-                            clean_gst = customer_gst
-                            customer = cust_by_gst.get(clean_gst.upper())
-                    if not customer:
-                        customer = cust_by_name.get(customer_name.lower())
-
-                    if not customer:
-                        # Should not happen — pre-pass should have bulk-created
-                        # everything. Defensive fallback.
-                        customer = Customer.objects.create(
-                            name=customer_name, gst_number=clean_gst,
-                            pan_number=clean_pan,
-                            state_name=state_name_from_gstin(clean_gst) or None,
+                        # Build invoice in memory; bulk_create later
+                        invoice = Invoice(
+                            invoice_number=invoice_number,
+                            invoice_date=invoice_date,
+                            customer=customer,
+                            business=business,
+                            type_of_invoice=type_of_invoice,
+                            total_amount=Decimal(str(inv_data.get("total", 0))),
+                            payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                             workspace_id=1,
                         )
-                        from billing.gstin import enrich_customer
-
-                        enrich_customer(customer)
-                        # Update ALL lookup caches so a later row referencing the
-                        # same GST/PAN under a different name resolves to this
-                        # customer instead of creating a duplicate.
-                        cust_by_name[customer_name.lower()] = customer
-                        if clean_gst:
-                            cust_by_gst[clean_gst.upper()] = customer
-                        if clean_pan:
-                            cust_by_pan[clean_pan.upper()] = customer
-
-                    if business and business.pk and customer.pk:
-                        # Track for M2M attach (idempotent — .add() is a no-op if exists)
-                        new_customers_added_to_biz.append((customer, business))
-
-                    # Resolve invoice type first so duplicate key includes it.
-                    invoice_number = str(inv_data.get("invoiceNumber", ""))
-                    invoice_date = inv_data.get("invoice_date", "")
-                    inv_type = inv_data.get("type", "OUTWARD")
-                    type_of_invoice = (
-                        INVOICE_TYPE_INWARD
-                        if inv_type == "INWARD"
-                        else INVOICE_TYPE_OUTWARD
-                    )
-
-                    # Duplicate check — must match on business + bill# + date AND type
-                    dup_key = (business.pk, invoice_number, str(invoice_date), type_of_invoice.lower())
-                    if dup_key in existing_invoice_keys:
-                        skipped_count += 1
-                        continue
-
-                    # Filed-and-locked month: never silently mutate a filed
-                    # period from a bulk sheet — surface it as a row error.
-                    if locked_period_or_none(business.pk, str(invoice_date)):
-                        skipped_count += 1
-                        errors.append(
-                            f"Invoice {invoice_number}: its month is filed & locked "
-                            f"for {business.name} — unlock on the GST page to import it."
-                        )
-                        continue
-
-                    # Build invoice in memory; bulk_create later
-                    invoice = Invoice(
-                        invoice_number=invoice_number,
-                        invoice_date=invoice_date,
-                        customer=customer,
-                        business=business,
-                        type_of_invoice=type_of_invoice,
-                        total_amount=Decimal(str(inv_data.get("total", 0))),
-                        payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
-                        workspace_id=1,
-                    )
-                    invoices_to_create.append((invoice, inv_data))
-                    # Mark as seen so a duplicate row in the same payload is skipped
-                    existing_invoice_keys.add(dup_key)
-                    created_count += 1
+                        invoices_to_create.append((invoice, inv_data))
+                        # Mark as seen so a duplicate row in the same payload is skipped
+                        existing_invoice_keys.add(dup_key)
+                        created_count += 1
 
                 except Exception as e:
                     logger.error(
@@ -3306,7 +3378,8 @@ class BulkInvoiceImportView(APIView):
             if invoices_to_create:
                 invoice_objs = [pair[0] for pair in invoices_to_create]
                 try:
-                    Invoice.objects.bulk_create(invoice_objs, batch_size=200)
+                    with transaction.atomic():  # savepoint, see above
+                        Invoice.objects.bulk_create(invoice_objs, batch_size=200)
                 except Exception as bulk_err:
                     logger.warning(
                         "bulk_create failed (%s); falling back to per-row create", bulk_err
@@ -3552,6 +3625,7 @@ class AIInvoiceProcessingView(APIView):
     API endpoint for AI-powered invoice processing using Google Gemini.
     Processes invoice images and extracts structured data.
     """
+    permission_classes = [RoleBasedPermission]
 
     parser_classes = [MultiPartParser]
 
@@ -3805,12 +3879,17 @@ class AIInvoiceCreateView(APIView):
     """
     API endpoint for creating invoices from AI-extracted data.
     """
+    permission_classes = [RoleBasedPermission]
 
     # Accept both JSON (legacy / non-AI flows) and multipart (AI Import
     # which now ships the original source image alongside the extracted
     # data so we can store an audit-trail copy).
     parser_classes = [MultiPartParser, JSONParser]
 
+    # One transaction: invoice -> files -> lines -> total -> inter-firm mirror.
+    # A mid-flight failure (a Decimal like "1,250") used to leave a stub
+    # invoice carrying the AI's total and zero lines.
+    @transaction.atomic
     def post(self, request):
         """Create an invoice from AI-extracted data.
 
@@ -4214,6 +4293,7 @@ class AIInvoiceCreateView(APIView):
             )
 
         except Exception as e:
+            transaction.set_rollback(True)  # error Responses don't raise, so roll back explicitly
             # Full traceback to logs (with exc_info) — that's where the
             # actual exception type, line, and stack live for debugging.
             # The user sees a generic message; surfacing raw Python
@@ -4239,6 +4319,7 @@ class AIInvoiceCreateView(APIView):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only viewset for audit log entries with undo support."""
+    permission_classes = [RoleBasedPermission]
 
     queryset = AuditLog.objects.all().select_related("user")
     serializer_class = AuditLogSerializer
@@ -4267,8 +4348,10 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
         return queryset
 
-    @action(detail=False, methods=["post"])
+    @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def log(self, request):
+        # A viewer printing or exporting is a legitimate event to record; the
+        # only write here is the log row itself.
         """Allow frontend to log actions (print, export, batch operations)."""
         action_type = request.data.get("action", "")
         entity = request.data.get("entity", "invoice")
@@ -4293,8 +4376,11 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], permission_classes=[AdminOnlyPermission])
     def undo(self, request, pk=None):
+        # Undo is a full write primitive — undoing a "created" entry deletes the
+        # object — so it is delete-class: admin only. It used to fall through to
+        # bare IsAuthenticated, and a viewer deleted a customer through it.
         """Undo an audit log entry by restoring the previous state."""
         entry = self.get_object()
 
@@ -4329,85 +4415,104 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             return None
 
         try:
-            if entry.action == "deleted" and entry.snapshot:
-                # Recreate the deleted object
-                snap = entry.snapshot
-                field_names = {f.name for f in model._meta.concrete_fields}
-                kwargs = {}
-                for k, v in snap.items():
-                    if k not in field_names or k == "id":
-                        continue
-                    field = model._meta.get_field(k)
-                    if v is None or v == "None":
-                        kwargs[k] = None if field.null else ""
-                    elif hasattr(field, "related_model") and field.related_model:
-                        # FK field — resolve to integer PK (handles new + legacy snapshots)
-                        kwargs[k + "_id"] = _resolve_fk(field, v)
-                    else:
-                        kwargs[k] = v
-                obj = model.objects.create(**kwargs)
-                AuditLog.objects.create(
-                    action="created",
-                    entity=entry.entity,
-                    entity_id=obj.pk,
-                    entity_name=str(obj),
-                    user=request.user if request.user.is_authenticated else None,
-                    details=f"Restored via undo (was #{entry.entity_id})",
-                )
-                return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
-
-            elif entry.action == "updated" and entry.snapshot:
-                # Revert to the snapshot state
-                try:
-                    obj = model.objects.get(pk=entry.entity_id)
-                except model.DoesNotExist:
-                    return Response({"error": "Record no longer exists"}, status=404)
-
-                snap = entry.snapshot
-                field_names = {f.name for f in model._meta.concrete_fields}
-                for k, v in snap.items():
-                    if k not in field_names or k == "id":
-                        continue
-                    field = model._meta.get_field(k)
-                    if hasattr(field, "related_model") and field.related_model:
-                        setattr(obj, k + "_id", _resolve_fk(field, v))
-                    else:
+            # Every branch is one transaction: a restore that recreates the header
+            # and then fails on a line must leave nothing behind.
+            with transaction.atomic():
+                if entry.action == "deleted" and entry.snapshot:
+                    # Recreate the deleted object
+                    snap = entry.snapshot
+                    field_names = {f.name for f in model._meta.concrete_fields}
+                    kwargs = {}
+                    for k, v in snap.items():
+                        if k not in field_names or k == "id":
+                            continue
+                        field = model._meta.get_field(k)
                         if v is None or v == "None":
-                            setattr(obj, k, None if field.null else "")
+                            kwargs[k] = None if field.null else ""
+                        elif hasattr(field, "related_model") and field.related_model:
+                            # FK field — resolve to integer PK (handles new + legacy snapshots)
+                            kwargs[k + "_id"] = _resolve_fk(field, v)
                         else:
-                            setattr(obj, k, v)
-                obj.save()
-                AuditLog.objects.create(
-                    action="updated",
-                    entity=entry.entity,
-                    entity_id=obj.pk,
-                    entity_name=str(obj),
-                    user=request.user if request.user.is_authenticated else None,
-                    details=f"Reverted via undo to state before: {entry.details}",
-                )
-                return Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"})
-
-            elif entry.action == "created":
-                # Delete the created object
-                try:
-                    obj = model.objects.get(pk=entry.entity_id)
-                    name = str(obj)
-                    obj.delete()
+                            kwargs[k] = v
+                    if model is Invoice:
+                        assert_period_unlocked(kwargs.get("business_id"), kwargs.get("invoice_date"), "create")
+                    obj = model.objects.create(**kwargs)
+                    for line in snap.get("line_items") or []:
+                        LineItem.objects.create(
+                            invoice=obj, customer_id=obj.customer_id, workspace_id=1,
+                            **{k: (None if v in (None, "None") else v) for k, v in line.items()},
+                        )
+                    if snap.get("line_items"):
+                        obj.save()  # re-sums total_amount from the restored lines
                     AuditLog.objects.create(
-                        action="deleted",
+                        action="created",
                         entity=entry.entity,
-                        entity_id=entry.entity_id,
-                        entity_name=name,
+                        entity_id=obj.pk,
+                        entity_name=str(obj),
                         user=request.user if request.user.is_authenticated else None,
-                        details=f"Deleted via undo (was created at {entry.timestamp})",
+                        details=f"Restored via undo (was #{entry.entity_id})",
                     )
-                    return Response({"message": f"Deleted {entry.entity}: {name}"})
-                except model.DoesNotExist:
-                    return Response({"error": "Record already deleted"}, status=404)
+                    return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
 
-            else:
-                return Response({"error": "Cannot undo this action (no snapshot available)"}, status=400)
+                elif entry.action == "updated" and entry.snapshot:
+                    # Revert to the snapshot state
+                    try:
+                        obj = model.objects.get(pk=entry.entity_id)
+                    except model.DoesNotExist:
+                        return Response({"error": "Record no longer exists"}, status=404)
 
+                    snap = entry.snapshot
+                    if model is Invoice:
+                        assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
+                        assert_period_unlocked(snap.get("business"), snap.get("invoice_date"), "edit")
+                    field_names = {f.name for f in model._meta.concrete_fields}
+                    for k, v in snap.items():
+                        if k not in field_names or k == "id":
+                            continue
+                        field = model._meta.get_field(k)
+                        if hasattr(field, "related_model") and field.related_model:
+                            setattr(obj, k + "_id", _resolve_fk(field, v))
+                        else:
+                            if v is None or v == "None":
+                                setattr(obj, k, None if field.null else "")
+                            else:
+                                setattr(obj, k, v)
+                    obj.save()
+                    AuditLog.objects.create(
+                        action="updated",
+                        entity=entry.entity,
+                        entity_id=obj.pk,
+                        entity_name=str(obj),
+                        user=request.user if request.user.is_authenticated else None,
+                        details=f"Reverted via undo to state before: {entry.details}",
+                    )
+                    return Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"})
+
+                elif entry.action == "created":
+                    # Delete the created object
+                    try:
+                        obj = model.objects.get(pk=entry.entity_id)
+                        if model is Invoice:
+                            assert_period_unlocked(obj.business_id, obj.invoice_date, "delete")
+                        name = str(obj)
+                        obj.delete()
+                        AuditLog.objects.create(
+                            action="deleted",
+                            entity=entry.entity,
+                            entity_id=entry.entity_id,
+                            entity_name=name,
+                            user=request.user if request.user.is_authenticated else None,
+                            details=f"Deleted via undo (was created at {entry.timestamp})",
+                        )
+                        return Response({"message": f"Deleted {entry.entity}: {name}"})
+                    except model.DoesNotExist:
+                        return Response({"error": "Record already deleted"}, status=404)
+
+                else:
+                    return Response({"error": "Cannot undo this action (no snapshot available)"}, status=400)
+
+        except APIException:
+            raise  # a filed-period refusal is a 4xx, not an undo failure
         except Exception as e:
             logger.exception(f"Undo failed for audit entry {pk}")
             return Response({"error": str(e)}, status=500)
@@ -4472,6 +4577,10 @@ class ITCReclaimLedgerView(APIView):
 @method_decorator(csrf_exempt, name="dispatch")
 class ProfileView(APIView):
     """Get/update user profile."""
+    # Self-scoped writes (a user editing their own profile) must stay open to
+    # viewers, so this is IsAuthenticated on purpose — explicitly, not by
+    # falling through to the default.
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         user = request.user

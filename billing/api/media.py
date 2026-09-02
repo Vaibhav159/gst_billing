@@ -63,12 +63,25 @@ class SignedMediaView(APIView):
             return HttpResponseForbidden("Invalid media path.")
 
         content_type = mimetypes.guess_type(subpath)[0] or "application/octet-stream"
+        # Nothing served from here may run as a document at the app origin.
+        # Images and PDFs stay inline (they embed as subresources); anything
+        # else is a download, and every response carries a CSP that forbids
+        # script even if a browser sniffs its way to text/html.
+        inline = content_type.startswith("image/") or content_type == "application/pdf"
+        disposition = f'{"inline" if inline else "attachment"}; filename="{subpath.rsplit("/", 1)[-1]}"'
+        hardening = {
+            "Content-Disposition": disposition,
+            "Content-Security-Policy": "default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+        }
 
         if getattr(settings, "MEDIA_ACCEL_REDIRECT", False):
             # nginx serves the bytes from the `internal` location.
             resp = HttpResponse(content_type=content_type)
             resp["X-Accel-Redirect"] = quote(f"/protected-media/{subpath}")
             resp["Cache-Control"] = "private, max-age=3600"
+            for k, v in hardening.items():
+                resp[k] = v
             return resp
 
         # Dev / tests: stream directly.
@@ -79,4 +92,6 @@ class SignedMediaView(APIView):
             return HttpResponse(status=404)
         resp = FileResponse(f, content_type=content_type)
         resp["Cache-Control"] = "private, max-age=3600"
+        for k, v in hardening.items():
+            resp[k] = v
         return resp

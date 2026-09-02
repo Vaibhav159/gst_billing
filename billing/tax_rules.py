@@ -195,3 +195,30 @@ def state_code(party):
         return ""
     code = get_state_code_from_state_name(name)
     return f"{int(code):02d}" if code not in ("", None) else ""
+
+
+# A line may disagree with itself by rounding, never by more than this.
+LINE_MONEY_TOLERANCE = Decimal("1.00")
+
+
+def check_line_money(item_data, qty, rate, amount):
+    """Refuse a line whose amount is not its own taxable plus its own tax.
+
+    The server re-derived the head *direction* but took the magnitudes from
+    the browser verbatim, so a float artifact — or a PATCH with any number at
+    all — became a durable record. Amount-only rows (qty x rate of 0, the
+    importer's shape) carry no taxable to check against and are left alone.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    taxable = qty * rate
+    if taxable == 0:
+        return
+    heads = sum(Decimal(str(item_data.get(k, 0) or 0)) for k in ("cgst", "sgst", "igst"))
+    if abs(amount - (taxable + heads)) > LINE_MONEY_TOLERANCE:
+        raise ValidationError({
+            "line_items": (
+                f"'{item_data.get('product_name', '')}': amount {amount} is not "
+                f"quantity x rate ({taxable}) plus tax ({heads})."
+            )
+        })

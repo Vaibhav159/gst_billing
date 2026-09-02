@@ -14,6 +14,7 @@ import { useAuditLog } from "@/hooks/useAuditLog";
 import type { AuditLogEntry } from "@/hooks/useAuditLog";
 import { useToast } from "@/hooks/use-toast";
 import { todayLocal } from "@/utils/localDate";
+import { usePermission } from "@/hooks/usePermission";
 
 type AuditAction = "created" | "updated" | "deleted" | "printed" | "exported" | "duplicated" | "imported" | "merged";
 type AuditEntity = "invoice" | "customer" | "product" | "business" | "settings";
@@ -73,6 +74,8 @@ function prettyValue(field: string, val: string | null): string {
 }
 
 export default function AuditLog() {
+  // Undo is admin-only server-side now (audit C1); don't show a button that 403s.
+  const { canDelete } = usePermission();
   const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 400);
@@ -256,7 +259,7 @@ export default function AuditLog() {
                         )}
 
                         {/* Undo button */}
-                        {entry.canUndo && (
+                        {entry.canUndo && canDelete && (
                           confirmUndoId === entry.id ? (
                             <div className="mt-2 flex items-center gap-2">
                               <span className="text-[10px] text-muted-foreground">Are you sure?</span>

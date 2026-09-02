@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from decimal import Decimal
 
 from django.core.files.base import ContentFile
-from django.db import IntegrityError, transaction
+from django.db import transaction, IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -211,21 +211,24 @@ class InwardBillListCreateView(APIView):
         # source file and retire the capture from the inbox.
         capture_id = request.data.get("capture_id")
         if capture_id:
-            cap = InwardCapture.objects.filter(id=capture_id, status="new").first()
-            if cap and cap.image and not request.FILES.get("file"):
-                class _StoredUpload:
-                    def __init__(self, f, name):
-                        self._f = f
-                        self.name = name.rsplit("/", 1)[-1]
-                        self.content_type = "image/jpeg"
-                    def read(self, *a): return self._f.read(*a)
-                    def seek(self, *a): return self._f.seek(*a)
-                with cap.image.open("rb") as fh:
-                    _store_file_and_preview(invoice, _StoredUpload(fh, cap.image.name))
-            if cap:
-                cap.status = "converted"
-                cap.invoice = invoice
-                cap.save(update_fields=["status", "invoice", "updated_at"])
+          # Row-locked: two concurrent converts of the same capture both read
+          # status="new" and created two inward invoices for one bill.
+          with transaction.atomic():
+              cap = InwardCapture.objects.select_for_update().filter(id=capture_id, status="new").first()
+              if cap and cap.image and not request.FILES.get("file"):
+                  class _StoredUpload:
+                      def __init__(self, f, name):
+                          self._f = f
+                          self.name = name.rsplit("/", 1)[-1]
+                          self.content_type = "image/jpeg"
+                      def read(self, *a): return self._f.read(*a)
+                      def seek(self, *a): return self._f.seek(*a)
+                  with cap.image.open("rb") as fh:
+                      _store_file_and_preview(invoice, _StoredUpload(fh, cap.image.name))
+              if cap:
+                  cap.status = "converted"
+                  cap.invoice = invoice
+                  cap.save(update_fields=["status", "invoice", "updated_at"])
         invoice.refresh_from_db()
         return Response(
             InwardBillSerializer(invoice, context={"request": request}).data,
@@ -386,6 +389,16 @@ class InwardCaptureListCreateView(APIView):
         image = request.FILES.get("image") or request.FILES.get("file")
         if image is None:
             return Response({"error": "No image provided."}, status=status.HTTP_400_BAD_REQUEST)
+        # The same allowlist the extract endpoint enforces. This one took any
+        # file: upload evil.html, open its signed URL, and the script ran at
+        # the app origin where the JWT lives.
+        if image.content_type not in _ALLOWED_TYPES:
+            return Response(
+                {"error": f"Unsupported file type '{image.content_type}'. Upload PDF, JPEG, PNG, or HEIC."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if image.size > _MAX_SIZE:
+            return Response({"error": "File too large. Maximum size is 20MB."}, status=status.HTTP_400_BAD_REQUEST)
         business = None
         biz_id = request.data.get("business_id")
         if biz_id:

@@ -77,6 +77,18 @@ class LineItemSerializer(serializers.ModelSerializer):
         model = LineItem
         fields = "__all__"
 
+    def validate(self, attrs):
+        from billing.tax_rules import check_line_money
+
+        qty = attrs.get("quantity", getattr(self.instance, "quantity", 1) or 1)
+        rate = attrs.get("rate", getattr(self.instance, "rate", 0) or 0)
+        amount = attrs.get("amount", getattr(self.instance, "amount", None))
+        if amount is not None:
+            merged = {k: attrs.get(k, getattr(self.instance, k, 0) if self.instance else 0) for k in ("cgst", "sgst", "igst")}
+            merged["product_name"] = attrs.get("product_name", getattr(self.instance, "product_name", ""))
+            check_line_money(merged, qty, rate, amount)
+        return attrs
+
     def to_representation(self, instance):
         # Ensure product_name is always included in the response
         ret = super().to_representation(instance)
@@ -95,6 +107,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invoice
         fields = "__all__"
+        # The total is derived from the lines; a PATCH used to persist any
+        # figure at all, breaking the invariant every export and GSTR table
+        # depends on.
+        read_only_fields = ("total_amount", "workspace_id")
 
 
 class InvoiceListSerializer(serializers.ModelSerializer):

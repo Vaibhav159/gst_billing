@@ -201,8 +201,22 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-EXPLORER_CONNECTIONS = {"Default": "default"}
-EXPLORER_DEFAULT_CONNECTION = "default"
+# SQL Explorer ran on the app's own read-write connection: any staff session
+# could UPDATE the books outside every lock, audit row and signal. Same DSN,
+# but Postgres is told every transaction is read-only, so a stray write is
+# refused by the server rather than trusted to restraint. SQLite (dev/tests)
+# has no such switch and keeps the default.
+if "postgresql" in DATABASES["default"].get("ENGINE", ""):
+    _ro_opts = dict(DATABASES["default"].get("OPTIONS", {}))
+    _ro_opts["options"] = (_ro_opts.get("options", "") + " -c default_transaction_read_only=on").strip()
+    DATABASES["readonly"] = {**DATABASES["default"], "OPTIONS": _ro_opts}
+    EXPLORER_CONNECTIONS = {"Read-only": "readonly"}
+    EXPLORER_DEFAULT_CONNECTION = "readonly"
+else:
+    EXPLORER_CONNECTIONS = {"Default": "default"}
+    EXPLORER_DEFAULT_CONNECTION = "default"
+EXPLORER_PERMISSION_VIEW = lambda r: r.user.is_superuser  # noqa: E731
+EXPLORER_PERMISSION_CHANGE = lambda r: r.user.is_superuser  # noqa: E731
 
 # REST Framework settings
 REST_FRAMEWORK = {

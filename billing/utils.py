@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pandas as pd
 
+from billing.period_lock import assert_period_unlocked
 from billing.tax_rules import normalize_rate
 from django.conf import settings
 from django.db import transaction
@@ -569,6 +570,7 @@ def process_invoice_csv(
                     continue
 
                 # Create invoice with the customer (already validated)
+                assert_period_unlocked(business.id, invoice_date, "create")
                 invoice = Invoice.objects.create(
                     business=business,
                     customer=invoice_info["customer"],

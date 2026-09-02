@@ -1,7 +1,7 @@
 from django.urls import reverse
 from rest_framework import status
 
-from billing.models import Business, Customer
+from billing.models import Business, Customer, Invoice
 from billing.tests.test_base import BaseAPITestCase
 
 
@@ -79,10 +79,15 @@ class CustomerAPITestCase(BaseAPITestCase):
         self.assertEqual(self.customer.gst_number, "22BBBBB0000B1Z5")  # Unchanged
 
     def test_delete_customer(self):
-        """Test deleting a customer."""
+        """A customer with invoices is protected (audit C3); an empty one deletes."""
         url = reverse("customer-detail", args=[self.customer.id])
         response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(Customer.objects.count(), 1)
+        self.assertTrue(Invoice.objects.filter(pk=self.invoice.pk).exists(), "invoice history must survive")
 
+        self.invoice.delete()
+        response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(Customer.objects.count(), 0)
 

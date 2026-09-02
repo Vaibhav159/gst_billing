@@ -80,10 +80,14 @@ class BusinessAPITestCase(BaseAPITestCase):
         self.assertEqual(self.business.gst_number, "22AAAAA0000A1Z5")  # Unchanged
 
     def test_delete_business(self):
-        """Test deleting a business."""
+        """A business with invoices is protected (audit C3); an empty one deletes."""
         url = reverse("business-detail", args=[self.business.id])
         response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(Business.objects.count(), 1)
 
+        self.invoice.delete()
+        response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(Business.objects.count(), 0)
 

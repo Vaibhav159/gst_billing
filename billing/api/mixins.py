@@ -1,4 +1,9 @@
 import logging
+
+from django.db.models import ProtectedError
+from rest_framework import status
+from rest_framework.response import Response
+
 from billing.models import AuditLog
 
 logger = logging.getLogger(__name__)
@@ -113,3 +118,18 @@ class AuditLogMixin:
             )
         except Exception:
             logger.exception("Failed to write audit log entry for delete")
+
+
+class ProtectedDeleteMixin:
+    """Turn a PROTECT refusal into a 409 the UI can explain, not a 500."""
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as e:
+            n = len(e.protected_objects)
+            return Response(
+                {"error": f"Cannot delete: {n} invoice(s) still reference this record. "
+                          "Reassign or delete them first.", "protected": n},
+                status=status.HTTP_409_CONFLICT,
+            )
