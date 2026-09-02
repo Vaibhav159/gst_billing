@@ -2705,7 +2705,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             kwargs[k] = v
                     if model is Invoice:
                         assert_period_unlocked(kwargs.get("business_id"), kwargs.get("invoice_date"), "create")
-                    obj = model.objects.create(**kwargs)
+                    try:
+                        with transaction.atomic():
+                            obj = model.objects.create(**kwargs)
+                    except IntegrityError:
+                        # Undone once already (or the number was reused since):
+                        # the unique outward-number guard fires. A 409, not a 500.
+                        return Response(
+                            {"error": "already_restored", "detail": "A record with this number already exists; the delete was undone before."},
+                            status=status.HTTP_409_CONFLICT,
+                        )
                     for line in snap.get("line_items") or []:
                         LineItem.objects.create(
                             invoice=obj, customer_id=obj.customer_id, workspace_id=1,

@@ -373,9 +373,16 @@ def run_bulk_import(request):
                     user_amount = Decimal(str(item.get("amount", 0)))
                     net_amount = qty * rate
                     if net_amount == 0 and user_amount > 0:
-                        net_amount = user_amount - cgst - sgst - igst
-                        if net_amount < 0:
+                        if cgst == 0 and sgst == 0 and igst == 0:
+                            # Gross only: back the taxable value out at the
+                            # row's rate. This branch used to treat the gross
+                            # as the net and tax it again — Rs 309 of tax on a
+                            # Rs 10,300 line that carried Rs 300.
                             net_amount = user_amount / (1 + gst_rate)
+                        else:
+                            net_amount = user_amount - cgst - sgst - igst
+                            if net_amount < 0:
+                                net_amount = user_amount / (1 + gst_rate)
                     tax_amount = net_amount * gst_rate
                     if cgst == 0 and sgst == 0 and igst == 0:
                         if is_igst:
