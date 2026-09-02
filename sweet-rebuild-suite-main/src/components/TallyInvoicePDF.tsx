@@ -15,30 +15,11 @@ import type { Invoice } from "@/utils/mockData";
 import type { Business, Customer } from "@/hooks/useDataStore";
 import { amountToWords } from "@/utils/mockData";
 import { storedShowsIGST } from "@/utils/taxRules";
+import { stateInfo } from "@/utils/taxRules";
+import { documentTitle, partyLabels, declarationText } from "@/utils/printDocument";
 
 // ── Helpers ──────────────────────────────────────────────
 
-const STATE_CODES: Record<string, string> = {
-  "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
-  "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
-  "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
-  "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
-  "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
-  "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
-  "25": "Daman & Diu", "26": "Dadra & Nagar Haveli", "27": "Maharashtra",
-  "29": "Karnataka", "30": "Goa", "32": "Kerala", "33": "Tamil Nadu",
-  "34": "Puducherry", "35": "Andaman & Nicobar Islands", "36": "Telangana",
-  "37": "Andhra Pradesh", "38": "Ladakh",
-};
-
-function getStateInfo(gst: string | undefined, stateName: string): { name: string; code: string } {
-  if (gst && gst.length >= 2) {
-    const code = gst.slice(0, 2);
-    const name = STATE_CODES[code] || stateName;
-    return { name, code };
-  }
-  return { name: stateName, code: "" };
-}
 
 function formatINR(n: number): string {
   const fixed = Math.abs(n).toFixed(2);
@@ -223,18 +204,22 @@ function InfoBlock({ invoice, business, customer, bizState, custState, shipState
           {business.email && <Text>E-Mail : {business.email}</Text>}
         </View>
         <View style={s.shipBlock}>
-          <Text style={s.small}>Consignee (Ship to)</Text>
+          <Text style={s.small}>{partyLabels(invoice).shipTo}</Text>
           <Text style={[s.bold, { marginTop: 1 }]}>{invoice.shippingName || customer.name}</Text>
           <Text>{invoice.shippingAddress || customer.address}</Text>
           <Text style={s.bold}>GSTIN/UIN : {invoice.shippingGst || customer.gst_number || "-"}</Text>
           {shipState.code && <Text>State Name : {shipState.name}, Code : {shipState.code}</Text>}
         </View>
         <View style={s.billBlock}>
-          <Text style={s.small}>Buyer (Bill to)</Text>
+          <Text style={s.small}>{partyLabels(invoice).billTo}</Text>
           <Text style={[s.bold, { marginTop: 1 }]}>{customer.name}</Text>
           <Text>{customer.address}</Text>
           <Text style={s.bold}>GSTIN/UIN : {customer.gst_number || "-"}</Text>
-          {custState.code && <Text>State Name : {custState.name}, Code : {custState.code}</Text>}
+          {custState.code ? <Text>State Name : {custState.name}, Code : {custState.code}</Text> : null}
+          {/* CGST Rule 46: place of supply and the reverse-charge position are
+              mandatory particulars; neither was printed anywhere before. */}
+          <Text>Place of Supply : {(shipState.code ? shipState : custState).name || "-"}{(shipState.code ? shipState : custState).code ? ` (${(shipState.code ? shipState : custState).code})` : ""}</Text>
+          <Text>Reverse Charge : No</Text>
         </View>
       </View>
 
@@ -312,8 +297,10 @@ function InfoBlock({ invoice, business, customer, bizState, custState, shipState
 }
 
 function TableHeader() {
+  // `fixed` repeats the column headings on every page a long invoice spills
+  // onto; page 2+ used to carry rows with no headings at all.
   return (
-    <View style={s.tableHeader}>
+    <View style={s.tableHeader} fixed>
       <Text style={[s.colSl, s.bold]}>Sl{"\n"}No.</Text>
       <Text style={[s.colDesc, s.bold]}>Description of Goods</Text>
       <Text style={[s.colHSN, s.bold]}>HSN/SAC</Text>
@@ -331,10 +318,10 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
   const hsnSummary = buildHSNSummary(invoice);
   const totalHSNTax = hsnSummary.reduce((a, h) => a + h.totalTax, 0);
   const totalHSNTaxable = hsnSummary.reduce((a, h) => a + h.taxableValue, 0);
-  const bizState = getStateInfo(business.gst_number, business.state_name);
-  const custState = getStateInfo(customer.gst_number, customer.state_name);
+  const bizState = stateInfo(business.gst_number, business.state_name);
+  const custState = stateInfo(customer.gst_number, customer.state_name);
   const shipState = invoice.shippingGst
-    ? getStateInfo(invoice.shippingGst, invoice.shippingState || customer.state_name)
+    ? stateInfo(invoice.shippingGst, invoice.shippingState || customer.state_name)
     : custState;
 
   const units = [...new Set(invoice.items.map((i) => i.unit || "pcs"))];
@@ -350,7 +337,7 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
         <View style={s.outer}>
           {/* TITLE */}
           <View style={s.titleRow}>
-            <Text style={s.titleText}>TAX INVOICE</Text>
+            <Text style={s.titleText}>{documentTitle(invoice)}</Text>
             {(qrDataUrl || invoice.irn) && (
               <View style={s.eInvoiceBox}>
                 {invoice.irn && <Text style={{ fontSize: 8, fontFamily: "Times-Bold" }}>e-Invoice</Text>}
@@ -494,8 +481,9 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
             </Text>
           </View>
 
-          {/* HSN TAX SUMMARY TABLE */}
-          <View wrap={false}>
+          {/* HSN TAX SUMMARY TABLE — allowed to break across pages; wrap={false}
+              on the whole block cannot render a summary taller than a page. */}
+          <View>
             {storedShowsIGST(invoice) ? (
               <>
                 <View style={s.taxHeader}>
@@ -576,13 +564,12 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
             <View style={[s.declaration, { fontSize: 6.5 }]}>
               <Text style={[s.bold, { marginBottom: 1 }]}>Declaration</Text>
               <Text>
-                {invoice.declaration ||
-                  "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."}
+                {declarationText(invoice, invoice.declaration)}
               </Text>
             </View>
             <View style={s.signatory}>
               <Text style={[s.bold, { fontSize: 7 }]}>for {business.name}</Text>
-              {business.signature_image && (
+              {business.signature_image && String(business.signature_image).startsWith("data:") && (
                 <Image src={business.signature_image} style={{ width: 80, height: 30, marginTop: 3, alignSelf: "flex-end" }} />
               )}
               <Text style={{ marginTop: business.signature_image ? 3 : 20, fontSize: 7 }}>Authorised Signatory</Text>

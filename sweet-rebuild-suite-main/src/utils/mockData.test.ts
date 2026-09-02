@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { financialYears, currentFY, formatCurrency } from "./mockData";
+import { financialYears, currentFY, formatCurrency, amountToWords } from "./mockData";
 
 describe("financialYears", () => {
   it("returns an array of FY strings", () => {
@@ -40,5 +40,23 @@ describe("formatCurrency", () => {
   it("formats small numbers", () => {
     const result = formatCurrency(42);
     expect(result).toContain("42");
+  });
+});
+
+describe("amountToWords — paise carry and sign (audit B7)", () => {
+  it("carries paise that round to 100 into the rupees", () => {
+    // 22.996 rounds to 23.00, not "Twenty Two Rupees and One Hundred Paise"
+    expect(amountToWords(22.996)).toBe("Twenty Three Rupees Only");
+  });
+  it("reads ordinary paise", () => {
+    expect(amountToWords(23.45)).toBe("Twenty Three Rupees and Forty Five Paise Only");
+  });
+  it("does not print 'undefined Rupees' for a negative amount", () => {
+    expect(amountToWords(-5)).toBe("Minus Five Rupees Only");
+    expect(amountToWords(-0.5)).toBe("Minus Zero Rupees and Fifty Paise Only");
+  });
+  it("treats junk as zero", () => {
+    expect(amountToWords(NaN)).toBe("Zero Rupees Only");
+    expect(amountToWords(0.004)).toBe("Zero Rupees Only");
   });
 });

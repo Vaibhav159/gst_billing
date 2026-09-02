@@ -595,4 +595,9 @@
 @media print {
   .no-print { display: none !important; }
   body { background: white !important; color: black !important; }
+  /* Paper is white whatever the screen theme: the dark palette put near-white
+     text on the page (audit B10). Chrome that survives the .no-print sweep —
+     nav, drawers, floating buttons — goes too. */
+  html.dark, html.dark * { color: #000 !important; background-color: #fff !important; border-color: #bbb !important; }
+  nav, aside, header.sticky, .safe-area-top, [data-mobile-nav], .fixed { display: none !important; }
 }

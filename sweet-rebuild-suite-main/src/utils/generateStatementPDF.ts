@@ -62,9 +62,13 @@ export function generateStatementPDF(opts: StatementOptions): Blob {
   pdf.setTextColor(255, 255, 255);
   pdf.setFontSize(7);
   pdf.setFont("helvetica", "bold");
+  // Header x positions mirror exactly where the row values are drawn below.
+  // The old loop read cols[i + 1], which is undefined for the last column, so
+  // "Balance" was drawn at NaN (it vanished) and "Amount" sat over the
+  // balance figures.
+  const headerX = [cols[0], cols[1], cols[2], cols[3], cols[5] - 2, cols[6] - 30, cols[6] - 2];
   headers.forEach((h, i) => {
-    const align = i >= 4 ? "right" : "left";
-    pdf.text(h, i >= 4 ? cols[i + 1] - 2 : cols[i], y, { align: align as any });
+    pdf.text(h, headerX[i], y, { align: (i >= 4 ? "right" : "left") as any });
   });
   y += 6;
   pdf.setTextColor(0, 0, 0);
@@ -88,7 +92,9 @@ export function generateStatementPDF(opts: StatementOptions): Blob {
     pdf.text(`${fmt(inv.amount)}`, cols[6] - 30, y, { align: "right" });
 
     pdf.setTextColor(0, 0, 0);
-    pdf.text(`${fmt(inv.balance)}`, cols[6] - 2, y, { align: "right" });
+    // The on-screen statement marks every balance Dr/Cr; without it a payable
+    // and a receivable balance looked identical on paper.
+    pdf.text(`${fmt(inv.balance)} ${inv.balance >= 0 ? "Dr" : "Cr"}`, cols[6] - 2, y, { align: "right" });
     y += 5;
   });
 
@@ -102,7 +108,7 @@ export function generateStatementPDF(opts: StatementOptions): Blob {
   const totals = [
     ["Total Outward (Sales)", `${fmt(opts.totals.outward)}`],
     ["Total Inward (Purchases)", `${fmt(opts.totals.inward)}`],
-    ["Net Balance", `${fmt(opts.totals.net)}`],
+    ["Net Balance", `${fmt(opts.totals.net)} ${opts.totals.net >= 0 ? "Dr" : "Cr"}`],
   ];
   totals.forEach(([label, value], i) => {
     pdf.setFont("helvetica", i === 2 ? "bold" : "normal");

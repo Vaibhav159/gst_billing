@@ -260,7 +260,8 @@ export function amountToWords(amount: number): string {
     "Eighteen", "Nineteen"];
   const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
 
-  if (amount === 0) return "Zero Rupees Only";
+  if (!Number.isFinite(amount) || Math.round(amount * 100) === 0) return "Zero Rupees Only";
+  if (amount < 0) return "Minus " + amountToWords(-amount);
 
   function convert(n: number): string {
     if (n < 20) return ones[n];
@@ -271,9 +272,13 @@ export function amountToWords(amount: number): string {
     return convert(Math.floor(n / 10000000)) + " Crore" + (n % 10000000 ? " " + convert(n % 10000000) : "");
   }
 
-  const intPart = Math.floor(amount);
-  const decPart = Math.round((amount - intPart) * 100);
-  let result = convert(intPart) + " Rupees";
+  // Quantize to paise FIRST, then split. Rounding the fractional part on its
+  // own turned 22.996 into "Twenty Two Rupees and One Hundred Paise" — the
+  // paise rounded up to 100 instead of carrying into the rupees.
+  const paise = Math.round(amount * 100);
+  const intPart = Math.floor(paise / 100);
+  const decPart = paise % 100;
+  let result = (intPart === 0 ? "Zero" : convert(intPart)) + " Rupees";
   if (decPart > 0) result += " and " + convert(decPart) + " Paise";
   return result + " Only";
 }
