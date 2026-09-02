@@ -4,7 +4,8 @@ import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Pac
 import { financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
-import { useCustomers, useProducts, useBusinesses, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { useCustomers, useProducts, useBusinesses, mapDjangoInvoice, fetchAllPages } from "@/hooks/useDataStore";
+import { restoreBackup } from "@/utils/restoreBackup";
 import { cn } from "@/utils/utils";
 import { motion } from "framer-motion";
 import { stagger, fadeUp } from "@/utils/animations";
@@ -45,7 +46,7 @@ export default function Backup() {
   // Build common API params
   const buildParams = useCallback(() => {
     const params = new URLSearchParams();
-    params.set("page_size", "5000");
+    params.set("page_size", "200"); // paged; every caller below walks all pages
     params.set("include_items", "true");
     params.set("start_date", fyStartDate);
     params.set("end_date", fyEndDate);
@@ -83,10 +84,10 @@ export default function Backup() {
     try {
       const params = buildParams();
       const [invRes] = await Promise.all([
-        api.get(`invoices/?${params.toString()}`),
+        fetchAllPages<any>(`invoices/?${params.toString()}`).then((results) => ({ data: results })),
       ]);
       const invData = invRes.data;
-      const allInvoices = Array.isArray(invData) ? invData : (invData.results || []);
+      const allInvoices: any[] = invData;
 
       const data = {
         businesses,
@@ -121,8 +122,7 @@ export default function Backup() {
     setExporting(true);
     try {
       const params = buildParams();
-      const res = await api.get(`invoices/?${params.toString()}`);
-      const results = Array.isArray(res.data) ? res.data : (res.data.results || []);
+      const results = await fetchAllPages<any>(`invoices/?${params.toString()}`);
       const fullInvoices = results.map(mapDjangoInvoice);
 
       const includeSplit = (() => { try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; } })();
@@ -137,11 +137,9 @@ export default function Backup() {
 
   const handleImport = async () => {
     if (!file) return;
-    // Restore is destructive — replaces existing local data. Surface a
-    // confirm with current vs incoming counts (parsed below). Previously
-    // the only friction was a `text-warning` line below the button, which
-    // is easy to miss next to a green CTA.
-    if (!confirm(`Restore from "${file.name}"?\n\nThis replaces your current data:\n  ${customers.length.toLocaleString("en-IN")} customers\n  ${products.length.toLocaleString("en-IN")} products\n  ${businesses.length.toLocaleString("en-IN")} businesses\n  ${totalInvoices.toLocaleString("en-IN")} invoices`)) return;
+    // Restore is additive: missing masters are created and invoices whose
+    // numbers are already on file are skipped by the server. Say so.
+    if (!confirm(`Restore from "${file.name}"?\n\nMissing businesses, products and customers will be created, and invoices whose numbers are not already on file will be imported. Nothing is deleted.\n\nOn file now: ${customers.length.toLocaleString("en-IN")} customers, ${products.length.toLocaleString("en-IN")} products, ${businesses.length.toLocaleString("en-IN")} businesses, ${totalInvoices.toLocaleString("en-IN")} invoices`)) return;
     setImporting(true);
     try {
       const text = await file.text();
@@ -158,14 +156,18 @@ export default function Backup() {
       const summary = `${data.businesses.length} businesses, ${data.customers.length} customers, ${data.products.length} products, ${data.invoices.length} invoices`;
       toast({ title: "Backup Loaded", description: `Found: ${summary}. Restoring...` });
 
-      // TODO: When backend bulk-import endpoint exists, use that instead
-      localStorage.setItem("gst_data_businesses", JSON.stringify(data.businesses));
-      localStorage.setItem("gst_data_customers", JSON.stringify(data.customers));
-      localStorage.setItem("gst_data_products", JSON.stringify(data.products));
-      localStorage.setItem("gst_data_invoices", JSON.stringify(data.invoices));
-
-      toast({ title: "Restore Complete", description: `${summary} restored from ${file.name}` });
-      window.location.reload();
+      // Through the real API. This used to write the arrays into localStorage
+      // keys nothing reads, toast "Restore Complete" and reload (E1).
+      const report = await restoreBackup(data, api);
+      const failed = report.invoices.errors;
+      toast({
+        title: failed.length ? "Restore finished with errors" : "Restore Complete",
+        description: `Created ${report.businesses} businesses, ${report.products} products, ${report.customers} customers · ${report.invoices.created} invoices imported, ${report.invoices.skipped} already on file${failed.length ? ` · ${failed.length} failed: ${failed.slice(0, 3).join(" | ")}` : ""}`,
+        variant: failed.length ? "destructive" : undefined,
+      });
+      setImporting(false);
+      // Leave the result on screen long enough to read before the lists refresh.
+      window.setTimeout(() => window.location.reload(), failed.length ? 12000 : 5000);
     } catch (err) {
       setImporting(false);
       toast({

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DataError from "@/components/DataError";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
@@ -24,7 +25,7 @@ export default function BusinessList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
-  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore } = useBusinesses(selectedFY);
+  const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useBusinesses(selectedFY);
   const { items: customers } = useCustomers(selectedFY);
   const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
@@ -202,7 +203,7 @@ export default function BusinessList() {
               {filtered.length === 0 && (
                 <tr><td colSpan={8} className="text-center py-16">
                   <Building2 className="w-10 h-10 opacity-30 mx-auto mb-2" />
-                  <p className="text-sm font-medium text-foreground/70">No businesses found</p>
+                  {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No businesses found</p>}
                   {(search || stateFilter !== "all") ? (
                     <button onClick={() => { setSearch(""); setStateFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium mt-2 inline-block">Clear filters</button>
                   ) : (
@@ -253,7 +254,7 @@ export default function BusinessList() {
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Building2 className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium text-foreground/70">No businesses found</p>
+              {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No businesses found</p>}
               {(search || stateFilter !== "all") ? (
                 <button onClick={() => { setSearch(""); setStateFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
               ) : (

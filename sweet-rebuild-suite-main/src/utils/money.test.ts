@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { round2, halveTax } from "./money";
+import { round2, halveTax, formatMoney } from "./money";
 
 describe("round2", () => {
   it("quantizes a raw float sum to paise", () => {
@@ -51,5 +51,23 @@ describe("halveTax", () => {
       // round2 the difference too — subtracting two floats reintroduces dust.
       expect(round2(Math.abs(cgst - sgst))).toBeLessThanOrEqual(0.01);
     }
+  });
+});
+
+describe("formatMoney — paise by default (E6)", () => {
+  it("keeps the paise the server stored", () => {
+    // formatCurrency rounds to the rupee: Rs 57,596 for an invoice saved as 57,595.50.
+    expect(formatMoney(57595.5)).toBe("₹57,595.50");
+    expect(formatMoney(566.05)).toBe("₹566.05");
+  });
+  it("uses Indian grouping", () => {
+    expect(formatMoney(1234567.89)).toBe("₹12,34,567.89");
+  });
+  it("can be asked for whole rupees where a dashboard tile wants them", () => {
+    expect(formatMoney(57595.5, { paise: false })).toBe("₹57,596");
+  });
+  it("treats junk as zero", () => {
+    expect(formatMoney(NaN)).toBe("₹0.00");
+    expect(formatMoney(undefined as unknown as number)).toBe("₹0.00");
   });
 });

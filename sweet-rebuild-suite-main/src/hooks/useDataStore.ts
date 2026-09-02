@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import api from "@/utils/api";
 import { logger } from "@/utils/logger";
+import { formatApiError } from "@/utils/apiError";
 import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
@@ -29,7 +30,7 @@ function parseNextUrl(absoluteUrl: string | null): string | null {
  * Fetches all pages from a DRF paginated endpoint (opt-in only).
  * Use sparingly — only for pages that truly need aggregated data (e.g. Dashboard).
  */
-async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
+export async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
   const allResults: T[] = [];
   let url: string | null = endpoint;
   while (url) {
@@ -247,9 +248,12 @@ export function mapDjangoInvoice(inv: any): Invoice {
   // Prefer the API-provided total_amount (always accurate), fall back to calculated
   const apiTotal = parseFloat(inv.total_amount) || 0;
   const calculatedTotal = subtotal + totalTax;
-  const rawTotal = apiTotal > 0 ? apiTotal : calculatedTotal;
-  const roundedTotal = Math.round(rawTotal);
-  const roundedOff = +(roundedTotal - rawTotal).toFixed(2);
+  // The server's figure, to the paisa. This used to round every total to the
+  // rupee and invent a "round-off" the server never stored: printed bills and
+  // statements showed Rs 566 where the books held 566.05, statement sums
+  // drifted by up to 50p per invoice, and re-importing an export adopted the
+  // rounded figure as truth — permanent paise drift on every round trip.
+  const rawTotal = Math.round((apiTotal > 0 ? apiTotal : calculatedTotal) * 100) / 100;
 
   // Also fix subtotal: if line items are missing, derive from total - tax
   if (subtotal === 0 && apiTotal > 0) {
@@ -272,8 +276,8 @@ export function mapDjangoInvoice(inv: any): Invoice {
     totalSGST,
     totalIGST,
     totalTax,
-    total: roundedTotal,
-    roundedOff: roundedOff !== 0 ? roundedOff : undefined,
+    total: rawTotal,
+    roundedOff: undefined,
     paymentMode: inv.payment_mode || "",
     financialYear: getFinancialYear(inv.invoice_date),
     createdAt: inv.created_at || "",
@@ -343,8 +347,52 @@ function buildDateRange(fyFilter?: string, monthFilter?: string): { start_date?:
   return { start_date: start, end_date: end };
 }
 
+export function buildInvoiceParams(f: InvoiceFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
+
+  if (f.search) params.set("search", f.search);
+  if (f.businessId && f.businessId !== "all") params.set("business_id", f.businessId);
+  if (f.customerId && f.customerId !== "all") params.set("customer_id", f.customerId);
+  if (f.typeFilter && f.typeFilter !== "all") {
+    params.set("type_of_invoice", f.typeFilter.toLowerCase());
+  }
+  if (f.paymentFilter && f.paymentFilter !== "all") {
+    params.set("payment_mode", f.paymentFilter);
+  }
+  if (f.gstRate) {
+    params.set("gst_rate", f.gstRate);
+  }
+  if (f.segment) {
+    params.set("segment", f.segment);
+  }
+
+  const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
+  if (dateRange.start_date) params.set("start_date", dateRange.start_date);
+  if (dateRange.end_date) params.set("end_date", dateRange.end_date);
+
+  // Data-hygiene drill-downs (DataQualityBanner)
+  if (f.dups) params.set("dups", "1");
+  if (f.empty) params.set("empty", "1");
+  if (f.noHsn) params.set("no_hsn", "1");
+  return params;
+}
+
+/**
+ * Every invoice matching the filters, all pages, mapped. Exports, statements,
+ * backups and duplicate checks used the first page (50) while their headers
+ * claimed the full count; a fetchAllPages helper existed and nothing used it.
+ */
+export async function fetchAllInvoices(filters?: InvoiceFilters, opts: { withItems?: boolean } = {}): Promise<Invoice[]> {
+  const params = buildInvoiceParams(filters || {});
+  params.set("page_size", "200");
+  if (opts.withItems) params.set("include_items", "true");
+  const rows = await fetchAllPages<any>(`invoices/?${params.toString()}`);
+  return rows.map(mapDjangoInvoice);
+}
+
 export function useInvoices(filters?: InvoiceFilters, enabled = true) {
   const [items, setItems] = useState<Invoice[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
@@ -356,35 +404,9 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
   const fetchInvoices = useCallback(async () => {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
-      const params = new URLSearchParams();
-      const f = filters || {};
-
-      if (f.search) params.set("search", f.search);
-      if (f.businessId && f.businessId !== "all") params.set("business_id", f.businessId);
-      if (f.customerId && f.customerId !== "all") params.set("customer_id", f.customerId);
-      if (f.typeFilter && f.typeFilter !== "all") {
-        params.set("type_of_invoice", f.typeFilter.toLowerCase());
-      }
-      if (f.paymentFilter && f.paymentFilter !== "all") {
-        params.set("payment_mode", f.paymentFilter);
-      }
-      if (f.gstRate) {
-        params.set("gst_rate", f.gstRate);
-      }
-      if (f.segment) {
-        params.set("segment", f.segment);
-      }
-
-      const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
-      if (dateRange.start_date) params.set("start_date", dateRange.start_date);
-      if (dateRange.end_date) params.set("end_date", dateRange.end_date);
-
-      // Data-hygiene drill-downs (DataQualityBanner)
-      if (f.dups) params.set("dups", "1");
-      if (f.empty) params.set("empty", "1");
-      if (f.noHsn) params.set("no_hsn", "1");
-
+      const params = buildInvoiceParams(filters || {});
       // Increase page size to get more results
       params.set("page_size", "50");
 
@@ -398,6 +420,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       setTotalCount(data.count ?? results.length);
     } catch (e) {
       logger.error("Failed to fetch invoices", e);
+      setError(formatApiError(e, "Could not load invoices."));
     } finally {
       setIsLoading(false);
     }
@@ -415,6 +438,7 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
       logger.error("Failed to load more invoices", e);
+      setError(formatApiError(e, "Could not load more invoices."));
     } finally {
       setIsLoadingMore(false);
     }
@@ -516,11 +540,12 @@ export function useInvoices(filters?: InvoiceFilters, enabled = true) {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchInvoices };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchInvoices, error };
 }
 
 export function useCustomers(fy?: string, businessId?: string, enabled = true) {
   const [items, setItems] = useState<Customer[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
@@ -529,6 +554,7 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
   const fetchCustomers = useCallback(async () => {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams();
       if (fy && fy !== "all") {
@@ -548,6 +574,7 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
       setTotalCount(data.count ?? results.length);
     } catch (e) {
       logger.error("Failed to fetch", e);
+      setError(formatApiError(e, "Could not load."));
     } finally {
       setIsLoading(false);
     }
@@ -563,6 +590,7 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
       logger.error("Failed to load more customers", e);
+      setError(formatApiError(e, "Could not load more customers."));
     } finally {
       setIsLoadingMore(false);
     }
@@ -592,11 +620,12 @@ export function useCustomers(fy?: string, businessId?: string, enabled = true) {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchCustomers };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchCustomers, error };
 }
 
 export function useProducts(fy?: string, businessId?: string, enabled = true) {
   const [items, setItems] = useState<Product[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
@@ -605,6 +634,7 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
   const fetchProducts = useCallback(async () => {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams();
       if (fy && fy !== "all") {
@@ -624,6 +654,7 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
       setTotalCount(data.count ?? results.length);
     } catch (e) {
       logger.error("Failed to fetch products", e);
+      setError(formatApiError(e, "Could not load products."));
     } finally {
       setIsLoading(false);
     }
@@ -640,6 +671,7 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
       logger.error("Failed to load more products", e);
+      setError(formatApiError(e, "Could not load more products."));
     } finally {
       setIsLoadingMore(false);
     }
@@ -676,21 +708,24 @@ export function useProducts(fy?: string, businessId?: string, enabled = true) {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchProducts };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchProducts, error };
 }
 
 export function useProduct(id: string | undefined) {
   const [item, setItem] = useState<Product | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchProduct = useCallback(async () => {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const res = await api.get(`products/${id}/`);
       setItem(mapDjangoProduct(res.data));
     } catch (e) {
       logger.error("Failed to fetch product", e);
+      setError(formatApiError(e, "Could not load product."));
     } finally {
       setIsLoading(false);
     }
@@ -700,21 +735,24 @@ export function useProduct(id: string | undefined) {
     fetchProduct();
   }, [fetchProduct]);
 
-  return { item, isLoading, refetch: fetchProduct };
+  return { item, isLoading, refetch: fetchProduct, error };
 }
 
 export function useCustomer(id: string | undefined) {
   const [item, setItem] = useState<Customer | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchCustomer = useCallback(async () => {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const res = await api.get(`customers/${id}/`);
       setItem(res.data);
     } catch (e) {
       logger.error("Failed to fetch customer", e);
+      setError(formatApiError(e, "Could not load customer."));
     } finally {
       setIsLoading(false);
     }
@@ -724,7 +762,7 @@ export function useCustomer(id: string | undefined) {
     fetchCustomer();
   }, [fetchCustomer]);
 
-  return { item, isLoading, refetch: fetchCustomer };
+  return { item, isLoading, refetch: fetchCustomer, error };
 }
 
 export interface InvoiceCandidate {
@@ -781,6 +819,7 @@ function fyFromDate(isoDate: string): string {
  */
 export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: string) {
   const [item, setItem] = useState<Invoice | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<InvoiceCandidate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -794,6 +833,7 @@ export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: stri
   const fetchInvoice = useCallback(async () => {
     if (!slug || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     setCandidates([]);
     try {
       if (/^\d+$/.test(slug) && !bizSlug && !fy) {
@@ -868,6 +908,7 @@ export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: stri
       }
     } catch (e) {
       logger.error("Failed to fetch invoice", e);
+      setError(formatApiError(e, "Could not load invoice."));
     } finally {
       setIsLoading(false);
     }
@@ -877,16 +918,18 @@ export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: stri
     fetchInvoice();
   }, [fetchInvoice]);
 
-  return { item, isLoading, candidates, refetch: fetchInvoice };
+  return { item, isLoading, candidates, refetch: fetchInvoice, error };
 }
 
 export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
   const [data, setData] = useState<DashboardStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchStats = useCallback(async () => {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams();
       // Explicit date range takes priority over FY filter
@@ -919,6 +962,7 @@ export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
       setData(res.data);
     } catch (e) {
       logger.error("Failed to fetch dashboard stats", e);
+      setError(formatApiError(e, "Could not load dashboard stats."));
     } finally {
       setIsLoading(false);
     }
@@ -928,21 +972,24 @@ export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
     fetchStats();
   }, [fetchStats]);
 
-  return { data, isLoading, refetch: fetchStats };
+  return { data, isLoading, refetch: fetchStats, error };
 }
 
 export function useBusiness(id: string | undefined) {
   const [item, setItem] = useState<Business | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchBusiness = useCallback(async () => {
     if (!id || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const res = await api.get(`businesses/${id}/`);
       setItem(res.data);
     } catch (e) {
       logger.error("Failed to fetch business", e);
+      setError(formatApiError(e, "Could not load business."));
     } finally {
       setIsLoading(false);
     }
@@ -952,11 +999,12 @@ export function useBusiness(id: string | undefined) {
     fetchBusiness();
   }, [fetchBusiness]);
 
-  return { item, isLoading, refetch: fetchBusiness };
+  return { item, isLoading, refetch: fetchBusiness, error };
 }
 
 export function useBusinesses(fy?: string, enabled = true) {
   const [items, setItems] = useState<Business[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
@@ -965,6 +1013,7 @@ export function useBusinesses(fy?: string, enabled = true) {
   const fetchBusinesses = useCallback(async () => {
     if (!enabled || !localStorage.getItem("gst_access_token")) return;
     setIsLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams();
       if (fy && fy !== "all") {
@@ -981,6 +1030,7 @@ export function useBusinesses(fy?: string, enabled = true) {
       setTotalCount(data.count ?? results.length);
     } catch (e) {
       logger.error("Failed to fetch", e);
+      setError(formatApiError(e, "Could not load."));
     } finally {
       setIsLoading(false);
     }
@@ -996,6 +1046,7 @@ export function useBusinesses(fy?: string, enabled = true) {
       setNextUrl(parseNextUrl(data.next || null));
     } catch (e) {
       logger.error("Failed to load more businesses", e);
+      setError(formatApiError(e, "Could not load more businesses."));
     } finally {
       setIsLoadingMore(false);
     }
@@ -1025,7 +1076,7 @@ export function useBusinesses(fy?: string, enabled = true) {
     setItems((prev) => prev.filter((it) => String(it.id) !== String(id)));
   };
 
-  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchBusinesses };
+  return { items, create, update, remove, getById, isLoading, isLoadingMore, hasMore: !!nextUrl, totalCount, loadMore, refetch: fetchBusinesses, error };
 }
 
 export function generateId(prefix: string = "") {

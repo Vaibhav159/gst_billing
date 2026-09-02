@@ -1,4 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import IconButton from "@/components/ui/IconButton";
+import DataError from "@/components/DataError";
+import { formatApiError } from "@/utils/apiError";
+import type { Invoice } from "@/hooks/useDataStore";
+import { fetchAllInvoices } from "@/hooks/useDataStore";
 import { toCSV, downloadCSV } from "@/utils/csv";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Link, useOutletContext, useNavigate, useSearchParams } from "react-router-dom";
@@ -109,7 +114,7 @@ export default function InvoiceList() {
     noHsn: noHsnFilter || undefined,
   }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter, hasSlabDrill, gstRateParam, segParam, drillStart, drillEnd, drillBiz, drillType]);
 
-  const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount } = useInvoices(apiFilters);
+  const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount, error: loadError, refetch: retryLoad } = useInvoices(apiFilters);
   const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
 
   // Only client-side sorting (filtering is done server-side)
@@ -150,11 +155,17 @@ export default function InvoiceList() {
   const toggleAll = useCallback(() => selected.size === filtered.length ? setSelected(new Set()) : setSelected(new Set(filtered.map((i) => i.id))), [selected.size, filtered]);
   const toggle = useCallback((id: string) => { setSelected(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
+    // Every page that matches the filters, not the 50 currently loaded (A16).
+    let all: Invoice[];
+    try { all = await fetchAllInvoices(apiFilters); } catch (e) {
+      toast({ title: "Export failed", description: formatApiError(e, "Could not load invoices."), variant: "destructive" });
+      return;
+    }
     const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Payment", "Subtotal", "Tax", "Total", "GST Type"];
-    const rows = filtered.map((inv) => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.paymentMode || "", inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
+    const rows = all.map((inv) => [inv.invoiceNumber, inv.invoice_date, inv.customerName, inv.businessName, inv.type, inv.paymentMode || "", inv.subtotal, inv.totalTax, inv.total, inv.isIGST ? "IGST" : "CGST/SGST"]);
     downloadCSV(toCSV([headers, ...rows]), "invoices-export.csv");
-    toast({ title: "Exported", description: `${filtered.length} invoices exported to CSV` });
+    toast({ title: "Exported", description: `${all.length} invoices exported to CSV` });
   };
 
   // Stat cards — match the GST/Reports visual idiom: compact currency on
@@ -279,7 +290,7 @@ export default function InvoiceList() {
           {filtered.length === 0 && !isLoading && (
             <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
               <Receipt className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No invoices found</p>
+              {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium">No invoices found</p>}
             </div>
           )}
           {isLoading && (
@@ -417,9 +428,14 @@ export default function InvoiceList() {
               <DropdownMenuItem onClick={handleExportCSV}>
                 <Download className="w-4 h-4 mr-2" /> Export to CSV
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                downloadReportExcel({ invoices: filtered, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`, { includePayment: includeSplit });
-                toast({ title: "Excel Exported", description: `${filtered.length} invoices${includeSplit ? " · with cash/bank split" : ""}` });
+              <DropdownMenuItem onClick={async () => {
+                let all: Invoice[];
+                try { all = await fetchAllInvoices(apiFilters, { withItems: true }); } catch (e) {
+                  toast({ title: "Export failed", description: formatApiError(e, "Could not load invoices."), variant: "destructive" });
+                  return;
+                }
+                downloadReportExcel({ invoices: all, businesses, customers }, `GST Invoices ${fyFilter}.xlsx`, { includePayment: includeSplit });
+                toast({ title: "Excel Exported", description: `${all.length} invoices${includeSplit ? " · with cash/bank split" : ""}` });
               }}>
                 <FileSpreadsheet className="w-4 h-4 mr-2" /> Export to Excel
               </DropdownMenuItem>
@@ -623,7 +639,7 @@ export default function InvoiceList() {
               {filtered.length === 0 && !isLoading && (
                 <tr><td colSpan={10} className="text-center text-muted-foreground py-16">
                   <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-[13px] font-medium text-foreground/70">No invoices found</p>
+                  {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-[13px] font-medium text-foreground/70">No invoices found</p>}
                   {(search || bizFilter !== "all" || custFilter !== "all" || typeFilter !== "all" || monthFilter !== "all" || hasHygieneFilter) ? (
                     <button onClick={clearFilters} className="text-[12px] text-primary hover:underline mt-2 font-medium">Clear filters</button>
                   ) : (
@@ -666,12 +682,15 @@ export default function InvoiceList() {
                     <span className="text-primary font-display font-bold text-[15px]">{formatCurrency(inv.total)}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border/20 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Link to={`/billing/invoice/${inv.id}`} aria-label="View" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></Link>
-                  <Link to={`/billing/invoice/edit/${inv.id}`} aria-label="Edit" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></Link>
-                  <Link to={`/billing/invoice/${inv.id}/print`} aria-label="Print" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-success"><Printer className="w-3.5 h-3.5" /></Link>
-                  <button onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} aria-label="Duplicate" className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive ml-auto"><Trash2 className="w-3.5 h-3.5" /></button>
+                {/* Always visible: the opacity-0/group-hover reveal made these
+                    unreachable on a phone, 26px targets sat well under the 44px
+                    minimum, and Delete had no accessible name (E5). */}
+                <div className="flex items-center mt-2 pt-1 border-t border-border/20">
+                  <IconButton to={`/billing/invoice/${inv.id}`} label="View invoice"><Eye className="w-4 h-4" /></IconButton>
+                  <IconButton to={`/billing/invoice/edit/${inv.id}`} label="Edit invoice" className="hover:text-primary"><Pencil className="w-4 h-4" /></IconButton>
+                  <IconButton to={`/billing/invoice/${inv.id}/print`} label="Print invoice" className="hover:text-success"><Printer className="w-4 h-4" /></IconButton>
+                  <IconButton onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} label="Duplicate invoice"><Copy className="w-4 h-4" /></IconButton>
+                  <IconButton onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} label="Delete invoice" className="hover:bg-destructive/10 hover:text-destructive ml-auto"><Trash2 className="w-4 h-4" /></IconButton>
                 </div>
               </motion.div>
             ))}

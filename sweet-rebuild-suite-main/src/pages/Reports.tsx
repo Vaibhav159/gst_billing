@@ -2,7 +2,7 @@ import { logger } from "@/utils/logger";
 import { useState, useMemo, useEffect } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { formatCurrency, formatCompactCurrency, formatChartK } from "@/utils/mockData";
-import { useBusinesses, useCustomers, useDashboardStats, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers, useDashboardStats, mapDjangoInvoice, fetchAllPages } from "@/hooks/useDataStore";
 import type { InvoiceFilters } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Download, FileSpreadsheet, ExternalLink, TrendingUp, Receipt, ArrowUpRight, ArrowDownLeft, BarChart3, PieChart, FileText, Database, FileDown, Loader2, Package, Clock, Users } from "lucide-react";
@@ -144,15 +144,14 @@ export default function Reports() {
   const handleExportCSV = async () => {
     try {
       const params = new URLSearchParams();
-      params.set("page_size", "1000");
+      params.set("page_size", "200");
       params.set("start_date", format(startDate, "yyyy-MM-dd"));
       params.set("end_date", format(endDate, "yyyy-MM-dd"));
       if (bizFilter !== "all") params.set("business_id", bizFilter);
       if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
 
-      const res = await api.get<any>(`invoices/?${params.toString()}`);
-      const data = res.data;
-      const results = Array.isArray(data) ? data : (data.results || []);
+      // Every page, not the first 1000 rows (A16).
+      const results = await fetchAllPages<any>(`invoices/?${params.toString()}`);
       const invoices = results.map(mapDjangoInvoice);
 
       const headers = ["Invoice #", "Date", "Customer", "Business", "Type", "Subtotal", "Tax", "Total"];
@@ -176,15 +175,13 @@ export default function Reports() {
     try {
       const params = new URLSearchParams();
       params.set("include_items", "true");
-      params.set("page_size", "1000");
+      params.set("page_size", "200");
       params.set("start_date", format(startDate, "yyyy-MM-dd"));
       params.set("end_date", format(endDate, "yyyy-MM-dd"));
       if (bizFilter !== "all") params.set("business_id", bizFilter);
       if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
 
-      const res = await api.get<any>(`invoices/?${params.toString()}`);
-      const data = res.data;
-      const results = Array.isArray(data) ? data : (data.results || []);
+      const results = await fetchAllPages<any>(`invoices/?${params.toString()}`);
       const fullInvoices = results.map(mapDjangoInvoice);
 
       setPreviewInvoices(fullInvoices);
@@ -252,7 +249,7 @@ export default function Reports() {
               className="flex items-center gap-2.5">
               <button onClick={handlePreviewExcel} disabled={exporting} className="premium-btn-outline text-[13px] border-success/30 text-success">{exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />} {exporting ? "Loading..." : "Excel Report"}</button>
               <button onClick={handleExportCSV} className="premium-btn-outline text-[13px]"><FileSpreadsheet className="w-4 h-4" /> CSV</button>
-              <button className="premium-btn-outline text-[13px] border-success/30 text-success"><Download className="w-4 h-4" /> GSTR-1</button>
+              <Link to="/billing/gst-summary" className="premium-btn-outline text-[13px] border-success/30 text-success"><Download className="w-4 h-4" /> GSTR-1</Link>
             </motion.div>
           ) : (
             <div className="grid grid-cols-2 gap-2">

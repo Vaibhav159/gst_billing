@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Settings, LogOut, X, Wrench, User, ReceiptText } from "lucide-react";
+import { Settings, LogOut, X, Wrench, User, ReceiptText, Building2, Database, History, Users } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -88,6 +88,86 @@ export default function EasyMoreDrawer({ open, onOpenChange }: Props) {
                   <User className="w-4.5 h-4.5" />
                 </div>
                 <span className="text-[14px] font-medium">Profile</span>
+              </Link>
+
+              {/* Businesses */}
+              <Link
+                to="/billing/business/list"
+                onClick={() => onOpenChange(false)}
+                className={cn(
+                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
+                  location.pathname.startsWith("/billing/business")
+                    ? "bg-primary/10 text-primary"
+                    : "text-foreground hover:bg-secondary/30"
+                )}
+              >
+                <div className={cn(
+                  "w-9 h-9 rounded-xl flex items-center justify-center",
+                  location.pathname.startsWith("/billing/business") ? "bg-primary/15" : "bg-secondary/40"
+                )}>
+                  <Building2 className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[14px] font-medium">Businesses</span>
+              </Link>
+
+              {/* Backup & Restore */}
+              <Link
+                to="/billing/backup"
+                onClick={() => onOpenChange(false)}
+                className={cn(
+                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
+                  location.pathname.startsWith("/billing/backup")
+                    ? "bg-primary/10 text-primary"
+                    : "text-foreground hover:bg-secondary/30"
+                )}
+              >
+                <div className={cn(
+                  "w-9 h-9 rounded-xl flex items-center justify-center",
+                  location.pathname.startsWith("/billing/backup") ? "bg-primary/15" : "bg-secondary/40"
+                )}>
+                  <Database className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[14px] font-medium">Backup & Restore</span>
+              </Link>
+
+              {/* Audit Log */}
+              <Link
+                to="/billing/audit-log"
+                onClick={() => onOpenChange(false)}
+                className={cn(
+                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
+                  location.pathname.startsWith("/billing/audit-log")
+                    ? "bg-primary/10 text-primary"
+                    : "text-foreground hover:bg-secondary/30"
+                )}
+              >
+                <div className={cn(
+                  "w-9 h-9 rounded-xl flex items-center justify-center",
+                  location.pathname.startsWith("/billing/audit-log") ? "bg-primary/15" : "bg-secondary/40"
+                )}>
+                  <History className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[14px] font-medium">Audit Log</span>
+              </Link>
+
+              {/* Users */}
+              <Link
+                to="/billing/users"
+                onClick={() => onOpenChange(false)}
+                className={cn(
+                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
+                  location.pathname.startsWith("/billing/users")
+                    ? "bg-primary/10 text-primary"
+                    : "text-foreground hover:bg-secondary/30"
+                )}
+              >
+                <div className={cn(
+                  "w-9 h-9 rounded-xl flex items-center justify-center",
+                  location.pathname.startsWith("/billing/users") ? "bg-primary/15" : "bg-secondary/40"
+                )}>
+                  <Users className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[14px] font-medium">Users</span>
               </Link>
 
               {/* Settings */}

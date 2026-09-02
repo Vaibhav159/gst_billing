@@ -5,9 +5,9 @@ import {
   FileSpreadsheet, Info, Package, Users, Receipt, Hash, Building2, Eye,
   UserPlus, X, Plus, AlertCircle, Check, Copy, Pencil, Save,
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
-import { useBusinesses, useCustomers, useInvoices, useProducts } from "@/hooks/useDataStore";
-import type { Business, Customer } from "@/hooks/useDataStore";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useBusinesses, useCustomers, useProducts, fetchAllInvoices } from "@/hooks/useDataStore";
+import type { Business, Customer, Invoice } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -388,7 +388,15 @@ export default function ImportPage({ type }: ImportPageProps) {
   const navigate = useNavigate();
   const { items: businesses } = useBusinesses();
   const { items: customers, refetch: refetchCustomers } = useCustomers();
-  const { items: existingInvoices, refetch: refetchInvoices } = useInvoices(undefined, type === "invoice");
+  // Duplicate detection against every invoice on file, not the first page of
+  // 50 — with more than 50 invoices a re-import sailed through unflagged (A16).
+  const [existingInvoices, setExistingInvoices] = useState<Invoice[]>([]);
+  const refetchInvoices = useCallback(async () => {
+    if (type !== "invoice") return;
+    try { setExistingInvoices(await fetchAllInvoices()); }
+    catch (e) { logger.error("Could not load existing invoices for the duplicate check", e); }
+  }, [type]);
+  useEffect(() => { void refetchInvoices(); }, [refetchInvoices]);
   // Products fetched only when generating the import template (invoice flow)
   const { items: productsForTemplate } = useProducts(undefined, undefined, type === "invoice");
   const [dragOver, setDragOver] = useState(false);

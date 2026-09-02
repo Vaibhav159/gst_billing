@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DataError from "@/components/DataError";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
@@ -22,7 +23,7 @@ export default function CustomerList() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
-  const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore } = useCustomers(selectedFY);
+  const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useCustomers(selectedFY);
   const { items: businesses } = useBusinesses(selectedFY);
   const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
@@ -159,7 +160,7 @@ export default function CustomerList() {
           {filtered.length === 0 && (
             <div className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Users className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium text-foreground/70">No customers found</p>
+              {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No customers found</p>}
               {(search || bizFilter !== "all") ? (
                 <button onClick={() => { setSearch(""); setBizFilter("all"); resetPage(); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
               ) : (
@@ -417,7 +418,7 @@ export default function CustomerList() {
                   <td colSpan={8} className="text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Users className="w-10 h-10 opacity-30" />
-                      <p className="text-sm font-medium text-foreground/70">No customers found</p>
+                      {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No customers found</p>}
                       {(search || bizFilter !== "all") ? (
                         <button onClick={() => { setSearch(""); setBizFilter("all"); resetPage(); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
                       ) : (
@@ -498,7 +499,7 @@ export default function CustomerList() {
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Users className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium text-foreground/70">No customers found</p>
+              {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No customers found</p>}
               {(search || bizFilter !== "all") ? (
                 <button onClick={() => { setSearch(""); setBizFilter("all"); resetPage(); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
               ) : (

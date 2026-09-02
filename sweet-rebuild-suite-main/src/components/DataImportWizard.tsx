@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { formatApiError } from "@/utils/apiError";
 import { Upload, FileText, CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, Eye, X } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -160,27 +161,33 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
     setStep("preview");
   }, [entity, columns, toast]);
 
-  const handleImport = () => {
+  const handleImport = async () => {
     let success = 0;
     let errors = 0;
     const errorRows: number[] = [];
+    const failures: string[] = [];
 
-    rows.forEach((row, idx) => {
+    // One row at a time, each create awaited. This used to fire every request
+    // without waiting and count `success++` unconditionally, so "42 records
+    // imported" appeared before a single response came back — including when
+    // all 42 had been rejected (E2).
+    for (const [idx, row] of rows.entries()) {
+      const mapped: any = {};
+      columns.forEach((col) => {
+        const csvCol = mapping[col.key];
+        mapped[col.key] = csvCol ? row[csvCol] || "" : "";
+      });
+
+      // Validate required fields
+      const missingRequired = columns.filter((c) => c.required && !mapped[c.key]);
+      if (missingRequired.length > 0) {
+        errors++;
+        errorRows.push(idx + 2); // +2 for header + 1-based
+        failures.push(`Row ${idx + 2}: missing ${missingRequired.map((c) => c.label).join(", ")}`);
+        continue;
+      }
+
       try {
-        const mapped: any = {};
-        columns.forEach((col) => {
-          const csvCol = mapping[col.key];
-          mapped[col.key] = csvCol ? row[csvCol] || "" : "";
-        });
-
-        // Validate required fields
-        const missingRequired = columns.filter((c) => c.required && !mapped[c.key]);
-        if (missingRequired.length > 0) {
-          errors++;
-          errorRows.push(idx + 2); // +2 for header + 1-based
-          return;
-        }
-
         const id = generateId(entity.slice(0, 3) + "-");
         const now = todayLocal();
 
@@ -188,7 +195,7 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
           // API field names. These used to be posted as gst/pan/mobile/state,
           // which the serializer ignores — every imported customer arrived with
           // a name and nothing else, silently.
-          createCustomer({
+          await createCustomer({
             name: mapped.name,
             gst_number: mapped.gst || "",
             pan_number: mapped.pan || "",
@@ -198,12 +205,12 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
             address: mapped.address || "",
           });
         } else if (entity === "products") {
-          createProduct({
+          await createProduct({
             id, name: mapped.name, hsn: mapped.hsn, gstRate: parseFloat(mapped.gstRate) || 0,
             description: mapped.description || "", createdAt: now,
           });
         } else if (entity === "businesses") {
-          createBusiness({
+          await createBusiness({
             name: mapped.name,
             gst_number: mapped.gst || "",
             pan_number: mapped.pan || "",
@@ -218,15 +225,20 @@ export default function DataImportWizard({ entity, onComplete }: DataImportWizar
           });
         }
         success++;
-      } catch {
+      } catch (e) {
         errors++;
         errorRows.push(idx + 2);
+        failures.push(`Row ${idx + 2}: ${formatApiError(e, "rejected by the server")}`);
       }
-    });
+    }
 
     setImportResult({ success, errors, errorRows });
     setStep("result");
-    toast({ title: "Import Complete", description: `${success} records imported, ${errors} errors` });
+    toast({
+      title: errors ? "Import finished with errors" : "Import Complete",
+      description: `${success} of ${rows.length} records imported${errors ? `, ${errors} failed. ${failures.slice(0, 3).join(" · ")}` : ""}`,
+      variant: errors ? "destructive" : undefined,
+    });
   };
 
   return (

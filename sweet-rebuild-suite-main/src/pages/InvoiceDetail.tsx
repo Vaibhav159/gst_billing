@@ -1,5 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatDate } from "@/utils/mockData";
+import { formatDate } from "@/utils/mockData";
+import { formatMoney } from "@/utils/money";
 import { useInvoice, useInvoices, useBusiness, useCustomer, businessSlug } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 // Tally format is the only invoice print format
@@ -110,7 +111,7 @@ export default function InvoiceDetail() {
   useEffect(() => {
     if (inv?.invoiceNumber) {
       const prev = document.title;
-      document.title = `Invoice ${inv.invoiceNumber} · ${formatCurrency(inv.total)} — GST Billing`;
+      document.title = `Invoice ${inv.invoiceNumber} · ${formatMoney(inv.total)} — GST Billing`;
       return () => { document.title = prev; };
     }
   }, [inv?.invoiceNumber, inv?.total]);
@@ -179,7 +180,7 @@ export default function InvoiceDetail() {
                   <span className={cn("premium-badge text-[9px]", c.type_of_invoice === "outward" ? "bg-success/12 text-success" : "bg-warning/12 text-warning")}>{(c.type_of_invoice || "").toUpperCase()}</span>
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                  {c.customer_name} · {formatDate(c.invoice_date)} · {formatCurrency(c.total)}
+                  {c.customer_name} · {formatDate(c.invoice_date)} · {formatMoney(c.total)}
                 </p>
               </div>
               <ArrowLeft className="w-4 h-4 text-muted-foreground rotate-180 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -248,9 +249,9 @@ export default function InvoiceDetail() {
   const customerInvoices = invoices.filter((i) => String(i.customerId) === String(inv.customerId) && String(i.id) !== String(inv.id)).slice(0, 5);
 
   const summaryCards = [
-    { label: "Subtotal", value: formatCurrency(inv.subtotal), icon: Package, color: "text-foreground" },
-    { label: "Total Tax", value: formatCurrency(inv.totalTax), icon: Receipt, color: "text-chart-3" },
-    { label: "Grand Total", value: formatCurrency(inv.total), icon: IndianRupee, color: "text-primary" },
+    { label: "Subtotal", value: formatMoney(inv.subtotal), icon: Package, color: "text-foreground" },
+    { label: "Total Tax", value: formatMoney(inv.totalTax), icon: Receipt, color: "text-chart-3" },
+    { label: "Grand Total", value: formatMoney(inv.total), icon: IndianRupee, color: "text-primary" },
     { label: "Items", value: pluralize(inv.items.length, "product"), icon: TrendingUp, color: "text-success" },
   ];
 
@@ -411,11 +412,11 @@ export default function InvoiceDetail() {
                       <span className="premium-badge bg-success/12 text-success text-[10px]">{item.gstRate}%</span>
                     </div>
                     <div className="flex items-center justify-between text-[12px]">
-                      <span className="text-muted-foreground">{item.qty} × {formatCurrency(item.rate)}</span>
-                      <span className="font-bold text-foreground">{formatCurrency(item.amount)}</span>
+                      <span className="text-muted-foreground">{item.qty} × {formatMoney(item.rate)}</span>
+                      <span className="font-bold text-foreground">{formatMoney(item.amount)}</span>
                     </div>
                     <div className="text-[11px] text-muted-foreground text-right">
-                      Tax: {showIGST ? formatCurrency(item.igst) : `${formatCurrency(item.cgst)} + ${formatCurrency(item.sgst)}`}
+                      Tax: {showIGST ? formatMoney(item.igst) : `${formatMoney(item.cgst)} + ${formatMoney(item.sgst)}`}
                     </div>
                   </div>
                 ))}
@@ -432,9 +433,9 @@ export default function InvoiceDetail() {
                     <td className="font-mono text-muted-foreground text-[11px]">{item.hsn}</td>
                     <td><span className="premium-badge bg-success/12 text-success">{item.gstRate}%</span></td>
                     <td className="text-foreground font-medium">{item.qty}</td>
-                    <td className="text-foreground">{formatCurrency(item.rate)}</td>
-                    <td className="font-bold text-foreground">{formatCurrency(item.amount)}</td>
-                    <td className="text-muted-foreground">{showIGST ? formatCurrency(item.igst) : `${formatCurrency(item.cgst)} + ${formatCurrency(item.sgst)}`}</td>
+                    <td className="text-foreground">{formatMoney(item.rate)}</td>
+                    <td className="font-bold text-foreground">{formatMoney(item.amount)}</td>
+                    <td className="text-muted-foreground">{showIGST ? formatMoney(item.igst) : `${formatMoney(item.cgst)} + ${formatMoney(item.sgst)}`}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -450,7 +451,7 @@ export default function InvoiceDetail() {
                   <BarChart data={itemChartData}>
                     <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} width={50} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "12px", fontSize: "12px" }} formatter={(value: number) => formatCurrency(value)} />
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "12px", fontSize: "12px" }} formatter={(value: number) => formatMoney(value)} />
                     <Bar dataKey="amount" radius={[6, 6, 0, 0]} fill="hsl(var(--primary))" />
                     <Bar dataKey="tax" radius={[6, 6, 0, 0]} fill="hsl(var(--chart-3))" />
                   </BarChart>
@@ -516,17 +517,17 @@ export default function InvoiceDetail() {
             <h2 className="text-[13px] font-display font-semibold text-foreground">Financial Summary</h2>
             <div className="space-y-2 text-[13px]">
               {[
-                { label: "Subtotal", value: formatCurrency(inv.subtotal) },
-                showIGST ? { label: "IGST", value: formatCurrency(inv.totalIGST) } : null,
-                !showIGST ? { label: "CGST", value: formatCurrency(inv.totalCGST) } : null,
-                !showIGST ? { label: "SGST", value: formatCurrency(inv.totalSGST) } : null,
-                { label: "Total Tax", value: formatCurrency(inv.totalTax) },
+                { label: "Subtotal", value: formatMoney(inv.subtotal) },
+                showIGST ? { label: "IGST", value: formatMoney(inv.totalIGST) } : null,
+                !showIGST ? { label: "CGST", value: formatMoney(inv.totalCGST) } : null,
+                !showIGST ? { label: "SGST", value: formatMoney(inv.totalSGST) } : null,
+                { label: "Total Tax", value: formatMoney(inv.totalTax) },
               ].filter(Boolean).map((row) => row && (
                 <div key={row.label} className="flex justify-between"><span className="text-muted-foreground">{row.label}</span><span className="text-foreground">{row.value}</span></div>
               ))}
               <div className="border-t border-border/50 pt-3 flex justify-between font-bold">
                 <span className="text-foreground">Grand Total</span>
-                <span className="text-primary text-lg font-display">{formatCurrency(inv.total)}</span>
+                <span className="text-primary text-lg font-display">{formatMoney(inv.total)}</span>
               </div>
             </div>
           </div>
@@ -566,7 +567,7 @@ export default function InvoiceDetail() {
                       <p className="text-[12px] font-semibold text-primary group-hover:underline">{ci.invoiceNumber}</p>
                       <p className="text-[10px] text-muted-foreground">{formatDate(ci.invoice_date || "")}</p>
                     </div>
-                    <span className="text-[12px] font-bold text-foreground">{formatCurrency(ci.total)}</span>
+                    <span className="text-[12px] font-bold text-foreground">{formatMoney(ci.total)}</span>
                   </Link>
                 ))}
               </div>
