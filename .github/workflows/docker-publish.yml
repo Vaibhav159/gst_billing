@@ -48,7 +48,7 @@ jobs:
       DATABASE_URL: postgresql://circleci:circleci@localhost/circle_test
       DJANGO_SECRET_KEY: ci-test-key-not-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -93,7 +93,7 @@ jobs:
             file: ./nginx/Dockerfile
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

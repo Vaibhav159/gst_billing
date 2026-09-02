@@ -20,7 +20,7 @@ jobs:
     name: nginx config validates
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: nginx -t against the shipped conf.d
         run: |
           docker run --rm -v "$PWD/nginx/conf.d":/etc/nginx/conf.d:ro nginx:alpine \
@@ -61,7 +61,7 @@ jobs:
       DJANGO_SETTINGS_MODULE: gst_billing.test_settings
       DJANGO_SECRET_KEY: ci-test-key-not-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -115,7 +115,7 @@ jobs:
       DEBUG: "False"
       DJANGO_ALLOWED_HOSTS: "*"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -223,7 +223,7 @@ jobs:
     name: Dependency advisories
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -248,7 +248,7 @@ jobs:
     name: Docker images build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - name: Build backend image
         uses: docker/build-push-action@v6
