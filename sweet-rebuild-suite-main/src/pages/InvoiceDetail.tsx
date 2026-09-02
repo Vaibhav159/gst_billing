@@ -82,8 +82,13 @@ export default function InvoiceDetail() {
     );
     const isUnique = candidates.length <= 1 || (distinctBusinesses.size === 1 && distinctFysWithinBiz.size === 1);
 
+    // An all-digit number is indistinguishable from a database id in
+    // /billing/invoice/:id — the loader treats it as a pk — so "108" opened
+    // (and printed) invoice pk 108 on reload. Numeric numbers always get the
+    // disambiguated form, which the loader resolves by number.
+    const looksLikeDbId = /^\d+$/.test(num);
     let target: string;
-    if (isUnique) {
+    if (isUnique && !looksLikeDbId) {
       target = `/billing/invoice/${num}`;
     } else {
       const bSlug = businessSlug(biz?.name || "") || String(inv.businessId);

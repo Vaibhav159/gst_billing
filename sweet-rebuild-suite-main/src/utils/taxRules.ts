@@ -51,3 +51,35 @@ export function storedShowsIGST(inv: {
   const storedSplit = items.some((it) => Number(it.cgst) > 0 || Number(it.sgst) > 0);
   return storedIGST || (!storedSplit && !!inv.isIGST);
 }
+
+
+/** GST state codes -> names. Single copy; the templates all read this one. */
+export const STATE_CODES: Record<string, string> = {
+  "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+  "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
+  "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+  "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+  "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
+  "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+  "25": "Daman & Diu", "26": "Dadra & Nagar Haveli", "27": "Maharashtra",
+  "29": "Karnataka", "30": "Goa", "32": "Kerala", "33": "Tamil Nadu",
+  "34": "Puducherry", "35": "Andaman & Nicobar Islands", "36": "Telangana",
+  "37": "Andhra Pradesh", "38": "Ladakh",
+};
+
+/**
+ * A party's state name and two-digit code. GSTIN prefix first; otherwise the
+ * name is looked up in the table — the Tally template used to return an empty
+ * code for every unregistered buyer, which is precisely the B2C case where a
+ * printed place of supply is legally required (CGST Rule 46).
+ */
+export function stateInfo(gstin: string | null | undefined, stateName: string | null | undefined): { name: string; code: string } {
+  const g = (gstin || "").trim();
+  if (g.length >= 2 && STATE_CODES[g.slice(0, 2)]) {
+    const code = g.slice(0, 2);
+    return { name: STATE_CODES[code] || (stateName || ""), code };
+  }
+  const wanted = (stateName || "").trim().toUpperCase();
+  const hit = wanted ? Object.entries(STATE_CODES).find(([, n]) => n.toUpperCase() === wanted) : undefined;
+  return { name: stateName || "", code: hit ? hit[0] : "" };
+}

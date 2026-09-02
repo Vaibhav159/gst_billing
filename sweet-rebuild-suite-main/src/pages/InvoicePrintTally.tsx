@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useInvoice, useBusinesses, useCustomers } from "@/hooks/useDataStore";
 import { ArrowLeft, Download, Loader2, Printer, Share2, MessageCircle } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -6,13 +6,21 @@ import { cn } from "@/utils/utils";
 import { BlobProvider } from "@react-pdf/renderer";
 import TallyInvoicePDF from "@/components/TallyInvoicePDF";
 import InvoiceHTMLPreview from "@/components/InvoiceHTMLPreview";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
 import { useToast } from "@/hooks/use-toast";
+import { withSignatureForPdf } from "@/utils/printDocument";
+import { whatsappNumber } from "@/utils/shareInvoice";
 
 export default function InvoicePrintTally() {
   const { id } = useParams<{ id: string }>();
   const isMobile = useIsMobile();
+  // ?share=1 — arriving straight from "Confirm & Save" on the phone. All three
+  // "Share PDF" buttons navigate to /print?share=1, but /print serves THIS
+  // page, which never read the param; the auto-share lived on /print-classic,
+  // which nothing links to. Consumed on first use so a reload never re-fires.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const wantAutoShare = searchParams.get("share") === "1";
   const { item: inv, isLoading: isLoadingInvoice } = useInvoice(id);
   const { items: businesses, isLoading: isLoadingBiz } = useBusinesses();
   const { items: customers, isLoading: isLoadingCust } = useCustomers();
@@ -42,7 +50,7 @@ export default function InvoicePrintTally() {
   if (!biz || !customer) return <div className="p-8 text-muted-foreground">Business or customer not found.</div>;
 
   const fileName = `${inv.invoiceNumber.replace(/\//g, "-")}.pdf`;
-  const bizWithSig = biz ? { ...biz, signature_image: biz.signature_image_base64 || null } : biz;
+  const bizWithSig = withSignatureForPdf(biz);
   const document = <TallyInvoicePDF invoice={inv} business={bizWithSig} customer={customer} qrDataUrl={qrDataUrl} />;
 
   const handleDownload = (blob: Blob | null) => {
@@ -70,6 +78,12 @@ export default function InvoicePrintTally() {
           <BlobProvider document={document}>
             {({ blob, loading }) => (
               <>
+                <AutoShare
+                  blob={wantAutoShare ? blob : null}
+                  fileName={fileName}
+                  title={inv.invoiceNumber}
+                  onDone={() => setSearchParams({}, { replace: true })}
+                />
                 <button
                   onClick={() => {
                     if (!blob) return;
@@ -97,11 +111,9 @@ export default function InvoicePrintTally() {
                   onClick={async () => {
                     if (!blob) return;
                     handleDownload(blob);
-                    const phone = customer?.mobile_number?.replace(/\D/g, "") || "";
+                    const phone = whatsappNumber(customer?.mobile_number);
                     const msg = encodeURIComponent(`Invoice ${inv.invoiceNumber} - ₹${inv.total.toLocaleString("en-IN")} — Please find the PDF attached.`);
-                    const waUrl = phone
-                      ? `https://wa.me/${phone.startsWith("91") ? phone : "91" + phone}?text=${msg}`
-                      : `https://wa.me/?text=${msg}`;
+                    const waUrl = phone ? `https://wa.me/${phone}?text=${msg}` : `https://wa.me/?text=${msg}`;
                     window.open(waUrl, "_blank");
                     toast({ title: "PDF downloaded", description: "Attach the PDF in WhatsApp" });
                   }}
@@ -193,4 +205,22 @@ export default function InvoicePrintTally() {
       </div>
     </div>
   );
+}
+
+
+/** Opens the native share sheet once the PDF exists, exactly once. */
+function AutoShare({ blob, fileName, title, onDone }: { blob: Blob | null; fileName: string; title: string; onDone: () => void }) {
+  const fired = useRef(false);
+  useEffect(() => {
+    if (!blob || fired.current) return;
+    fired.current = true;
+    onDone();
+    const file = new File([blob], fileName, { type: "application/pdf" });
+    const t = setTimeout(() => {
+      if (navigator.share) navigator.share({ files: [file], title }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blob]);
+  return null;
 }

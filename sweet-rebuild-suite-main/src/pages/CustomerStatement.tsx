@@ -56,10 +56,10 @@ export default function CustomerStatement() {
 
   return (
     <div className={cn("space-y-5 max-w-[1440px] mx-auto", isMobile ? "p-4 pb-24" : "p-6 lg:p-10 space-y-7")}>
-      <Breadcrumbs items={[{ label: "Customers", href: "/billing/customer/list" }, { label: customer.name, href: `/billing/customer/${id}` }, { label: "Statement" }]} />
+      <div className="no-print"><Breadcrumbs items={[{ label: "Customers", href: "/billing/customer/list" }, { label: customer.name, href: `/billing/customer/${id}` }, { label: "Statement" }]} /></div>
 
-      {/* Header */}
-      <div className="flex flex-col gap-3">
+      {/* Header — the buttons and breadcrumb are app chrome, not statement */}
+      <div className="flex flex-col gap-3 print:hidden">
         <div className="flex items-center gap-3">
           <div className={cn("rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center text-primary font-display font-bold", isMobile ? "w-10 h-10 text-xs" : "w-12 h-12 text-sm")}>
             {customer.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}

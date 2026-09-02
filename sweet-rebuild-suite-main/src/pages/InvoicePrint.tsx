@@ -1,5 +1,5 @@
 import { useParams, useSearchParams } from "react-router-dom";
-import { formatCurrency, amountToWords, formatDate } from "@/utils/mockData";
+import { amountToWords, formatDate } from "@/utils/mockData";
 import { useInvoices, useBusinesses, useCustomers, useInvoice } from "@/hooks/useDataStore";
 import { Printer, Download, Share2, ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from "react";
 import { downloadInvoicePDF, sharePDFViaWebShare, sharePDFViaWhatsApp } from "@/utils/generatePDF";
 import { useToast } from "@/hooks/use-toast";
 import { storedShowsIGST } from "@/utils/taxRules";
+import { documentTitle, partyLabels } from "@/utils/printDocument";
+import { stateInfo } from "@/utils/taxRules";
 
 export default function InvoicePrint() {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +20,10 @@ export default function InvoicePrint() {
   const [generating, setGenerating] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const { item: inv, isLoading: isLoadingInvoice } = useInvoice(id);
+  // Paise on a legal document. formatCurrency rounds to whole rupees, which
+  // made rows visibly fail to add up (100 + 9 + 9 vs a total of 119) and
+  // disagree with the Tally print of the same invoice.
+  const money = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
 
   // ?share=1 — arriving straight from "Confirm & Save" on the phone: once the
   // printable bill is on screen, open the native share sheet by itself so
@@ -57,6 +63,7 @@ export default function InvoicePrint() {
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
   const biz = businesses.find((b) => String(b.id) === String(inv.businessId));
   const customer = customers.find((c) => String(c.id) === String(inv.customerId));
+  const placeOfSupply = stateInfo(customer?.gst_number, customer?.state_name);
 
   const handleDownloadPDF = async () => {
     if (!printRef.current) return;
@@ -136,7 +143,7 @@ export default function InvoicePrint() {
             </div>
             <div className={cn(isMobile ? "" : "text-right")}>
               <div className={cn("inline-block border-2 border-gray-800 px-4 py-2 rounded", isMobile ? "text-sm" : "")}>
-                <p className="font-bold tracking-[0.2em] text-sm" style={{ fontFamily: "'Helvetica Neue', sans-serif" }}>TAX INVOICE</p>
+                <p className="font-bold tracking-[0.2em] text-sm" style={{ fontFamily: "'Helvetica Neue', sans-serif" }}>{documentTitle(inv)}</p>
               </div>
               <div className="mt-3 text-xs space-y-1" style={{ fontFamily: "'Helvetica Neue', sans-serif" }}>
                 <p><span className="font-semibold text-gray-500">Invoice No:</span> <span className="font-bold text-gray-900">{inv.invoiceNumber}</span></p>
@@ -148,9 +155,13 @@ export default function InvoicePrint() {
           {/* Bill To */}
           <div className="px-6 pt-4 pb-3">
             <div className="bg-gray-50 rounded-lg p-4" style={{ fontFamily: "'Helvetica Neue', sans-serif" }}>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em] mb-1.5">Bill To</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em] mb-1.5">{partyLabels(inv).billTo}</p>
               <p className="text-sm font-bold text-gray-900">{inv.customerName}</p>
-              {customer && <p className="text-xs text-gray-600 mt-1">GSTIN: {customer.gst_number} · {customer.state_name}</p>}
+              {/* CGST Rule 46 particulars the classic layout never printed:
+                  recipient address, place of supply, reverse-charge position. */}
+              {customer?.address && <p className="text-xs text-gray-600 mt-1">{customer.address}</p>}
+              {customer && <p className="text-xs text-gray-600 mt-1">GSTIN: {customer.gst_number || "-"} · {customer.state_name}</p>}
+              <p className="text-xs text-gray-600 mt-1">Place of Supply: {placeOfSupply.name || "-"}{placeOfSupply.code ? ` (${placeOfSupply.code})` : ""} · Reverse Charge: No</p>
             </div>
           </div>
 
@@ -161,7 +172,7 @@ export default function InvoicePrint() {
                 {inv.items.map((item, i) => (
                   <div key={i} className="py-2.5 space-y-1">
                     <div className="flex justify-between"><span className="text-xs font-medium">{item.productName}</span><span className="text-xs font-mono text-gray-500">HSN: {item.hsn}</span></div>
-                    <div className="flex justify-between text-xs text-gray-600"><span>{item.qty} × {formatCurrency(item.rate)}</span><span className="font-semibold text-gray-900">{formatCurrency(item.amount)}</span></div>
+                    <div className="flex justify-between text-xs text-gray-600"><span>{item.qty} × {money(item.rate)} = {money(item.qty * item.rate)}</span><span className="font-semibold text-gray-900">+ tax {money((item.cgst || 0) + (item.sgst || 0) + (item.igst || 0))} = {money(item.amount)}</span></div>
                   </div>
                 ))}
               </div>
@@ -169,7 +180,7 @@ export default function InvoicePrint() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-gray-800 text-white">
-                    {["#", "Description", "HSN", "GST%", "Qty", "Rate", "Amount"].map((h, i) => (
+                    {["#", "Description", "HSN", "GST%", "Qty", "Rate", "Taxable", "Tax", "Amount"].map((h, i) => (
                       <th key={h} className={`px-3 py-2.5 font-medium text-[11px] uppercase tracking-wider ${i > 3 ? "text-right" : i > 2 ? "text-center" : "text-left"}`}>{h}</th>
                     ))}
                   </tr>
@@ -182,8 +193,12 @@ export default function InvoicePrint() {
                       <td className="px-3 py-2.5 font-mono text-gray-500 text-xs">{item.hsn}</td>
                       <td className="px-3 py-2.5 text-center text-gray-600">{item.gstRate}%</td>
                       <td className="px-3 py-2.5 text-right">{item.qty}</td>
-                      <td className="px-3 py-2.5 text-right">{formatCurrency(item.rate)}</td>
-                      <td className="px-3 py-2.5 text-right font-semibold">{formatCurrency(item.amount)}</td>
+                      <td className="px-3 py-2.5 text-right">{money(item.rate)}</td>
+                      {/* "Amount" was the gross under a Qty | Rate header, so qty x rate
+                          never equalled it. Show the taxable value and the line's tax. */}
+                      <td className="px-3 py-2.5 text-right">{money(item.qty * item.rate)}</td>
+                      <td className="px-3 py-2.5 text-right text-gray-600">{money((item.cgst || 0) + (item.sgst || 0) + (item.igst || 0))}</td>
+                      <td className="px-3 py-2.5 text-right font-semibold">{money(item.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -198,18 +213,18 @@ export default function InvoicePrint() {
               <p className="text-xs text-gray-700 italic leading-relaxed" style={{ fontFamily: "'Georgia', serif" }}>{amountToWords(inv.total)}</p>
             </div>
             <div className="bg-gray-50 rounded-lg p-4 space-y-1.5 text-sm">
-              <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="tabular-nums">{formatCurrency(inv.subtotal)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="tabular-nums">{money(inv.subtotal)}</span></div>
               {storedShowsIGST(inv) ? (
-                <div className="flex justify-between"><span className="text-gray-500">IGST</span><span className="tabular-nums">{formatCurrency(inv.totalIGST)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">IGST</span><span className="tabular-nums">{money(inv.totalIGST)}</span></div>
               ) : (
                 <>
-                  <div className="flex justify-between"><span className="text-gray-500">CGST</span><span className="tabular-nums">{formatCurrency(inv.totalCGST)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">SGST</span><span className="tabular-nums">{formatCurrency(inv.totalSGST)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">CGST</span><span className="tabular-nums">{money(inv.totalCGST)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">SGST</span><span className="tabular-nums">{money(inv.totalSGST)}</span></div>
                 </>
               )}
               <div className="border-t-2 border-gray-800 pt-2 flex justify-between font-bold text-base">
                 <span>Grand Total</span>
-                <span className="tabular-nums">{formatCurrency(inv.total)}</span>
+                <span className="tabular-nums">{money(inv.total)}</span>
               </div>
             </div>
           </div>

@@ -18,6 +18,7 @@ import TallyInvoicePDF from "@/components/TallyInvoicePDF";
 import { PDFDocument } from "pdf-lib";
 import JSZip from "jszip";
 import QRCode from "qrcode";
+import { withSignatureForPdf } from "@/utils/printDocument";
 
 export default function BulkPDF() {
   const { toast } = useToast();
@@ -447,7 +448,7 @@ export default function BulkPDF() {
               <BlobProviderWrapper
                 key={inv.id}
                 invoice={inv}
-                business={biz}
+                business={withSignatureForPdf(biz)}
                 customer={cust}
                 onBlob={handleBlobReady}
               />

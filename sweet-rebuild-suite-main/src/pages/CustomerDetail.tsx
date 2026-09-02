@@ -82,6 +82,7 @@ export default function CustomerDetail() {
       const zipBlob = await generateBulkPDFZip(
         custInvoices,
         businesses,
+        [customer],
         (current, total) => setDlProgress({ current, total })
       );
       const url = window.URL.createObjectURL(zipBlob);

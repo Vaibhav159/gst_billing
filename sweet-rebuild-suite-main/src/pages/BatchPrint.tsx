@@ -13,6 +13,7 @@ import api from "@/utils/api";
 import { PDFDocument } from "pdf-lib";
 import type { Invoice } from "@/utils/mockData";
 import type { Business, Customer } from "@/hooks/useDataStore";
+import { withSignatureForPdf } from "@/utils/printDocument";
 
 /** Fetch a single invoice with full line items from the API */
 async function fetchFullInvoice(id: string): Promise<Invoice> {
@@ -96,7 +97,7 @@ export default function BatchPrint() {
         try {
           if (biz && cust) {
             const qrDataUrl = await generateQR(inv, biz);
-            return { invoice: inv, business: biz, customer: cust, qrDataUrl };
+            return { invoice: inv, business: withSignatureForPdf(biz), customer: cust, qrDataUrl };
           }
           logger.warn(`Invoice ${inv.id}: biz=${inv.businessId} cust=${inv.customerId} not found in loaded lists, fetching...`);
           const [bizRes, custRes] = await Promise.all([
@@ -104,7 +105,7 @@ export default function BatchPrint() {
             cust ? Promise.resolve({ data: cust }) : api.get<any>(`customers/${inv.customerId}/`),
           ]);
           const qrDataUrl = await generateQR(inv, bizRes.data);
-          return { invoice: inv, business: bizRes.data, customer: custRes.data, qrDataUrl };
+          return { invoice: inv, business: withSignatureForPdf(bizRes.data), customer: custRes.data, qrDataUrl };
         } catch (e) {
           logger.error(`Failed to fetch biz/customer for invoice ${inv.id}`, e);
           skipped++;
