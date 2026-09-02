@@ -79,7 +79,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { mobileMode } = useMobileMode();
-  const { data: statsData, isLoading: isStatsLoading } = useDashboardStats({ fyFilter: selectedFY, businessId: selectedBusiness });
+  const { data: statsData, isLoading: isStatsLoading, error: statsError } = useDashboardStats({ fyFilter: selectedFY, businessId: selectedBusiness });
   const { items: businesses } = useBusinesses();
 
   const totals = statsData?.totals || { inward: 0, outward: 0, net: 0, tax: 0, inward_tax: 0, count: 0 };
@@ -795,7 +795,7 @@ export default function Dashboard() {
               </motion.tr>
             ))}
             {recentInvoices.length === 0 && (
-              <tr><td colSpan={7} className="text-center text-muted-foreground py-16 text-sm">No invoices found for this period</td></tr>
+              <tr><td colSpan={7} className="text-center text-muted-foreground py-16 text-sm">{statsError ? `Couldn't load invoices: ${statsError}` : "No invoices found for this period"}</td></tr>
             )}
           </tbody>
         </table>

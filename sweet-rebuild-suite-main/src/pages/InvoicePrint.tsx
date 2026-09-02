@@ -242,7 +242,7 @@ export default function InvoicePrint() {
             </div>
           )}
 
-          {/* Authorized Signatory */}
+          {/* Authorised Signatory */}
           <div className={cn("px-6 py-5 border-t border-gray-200", isMobile ? "" : "flex items-end justify-between")} style={{ fontFamily: "'Helvetica Neue', sans-serif" }}>
             <div className="text-[10px] text-gray-400">
               <p>This is a computer-generated invoice.</p>
@@ -251,7 +251,7 @@ export default function InvoicePrint() {
             <div className={cn("text-right", isMobile ? "mt-6" : "")}>
               <div className="w-40 border-b border-gray-400 mb-2 ml-auto" />
               <p className="text-xs font-bold text-gray-900">For {biz?.name}</p>
-              <p className="text-[10px] text-gray-500 mt-0.5">Authorized Signatory</p>
+              <p className="text-[10px] text-gray-500 mt-0.5">Authorised Signatory</p>
             </div>
           </div>
         </div>

@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { useGstinLookup } from "@/hooks/useGstinLookup";
 import { validateGstin } from "@/utils/gstin";
 import GstinStatus from "@/components/GstinStatus";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, UserPlus, Phone, Mail, MapPin, Hash, CreditCard, Save } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { UserPlus, Phone, Mail, MapPin, Hash, CreditCard, Save } from "lucide-react";
 import { indianStates } from "@/utils/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
@@ -108,34 +107,21 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
     setSubmitting(false);
   };
 
-  // Portal to <body>: a transformed ancestor (page transition mid-flight)
-  // otherwise becomes the containing block for this fixed overlay.
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 16 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 16 }}
-            transition={{ duration: 0.2 }}
-            className="glass-panel rounded-2xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] overflow-y-auto"
-          >
+  // Radix Dialog: focus trap, Escape, outside-click, aria-modal and a named
+  // close control for free. The hand-rolled overlay had none of them (E7).
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="glass-panel rounded-2xl sm:rounded-2xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] overflow-y-auto z-[60]">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
                   <UserPlus className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <h2 className="text-base font-display font-bold text-foreground">Quick Add Customer</h2>
-                  <p className="text-[12px] text-muted-foreground">Create without leaving the invoice</p>
+                  <DialogTitle className="text-base font-display font-bold text-foreground">Quick Add Customer</DialogTitle>
+                  <DialogDescription className="text-[12px] text-muted-foreground">Create without leaving the invoice</DialogDescription>
                 </div>
               </div>
-              <button type="button" onClick={onClose}
-                className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors">
-                <X className="w-4 h-4" />
-              </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -177,11 +163,8 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
                 </button>
               </div>
             </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }
 

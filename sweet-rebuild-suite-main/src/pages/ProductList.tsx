@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import DataError from "@/components/DataError";
 import { toCSV, downloadCSV } from "@/utils/csv";
 import { Link, useOutletContext } from "react-router-dom";
 import {
@@ -22,7 +23,7 @@ export default function ProductList() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
-  const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore } = useProducts(selectedFY);
+  const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useProducts(selectedFY);
   const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [gstFilter, setGstFilter] = useState("all");
@@ -181,7 +182,7 @@ export default function ProductList() {
           {filtered.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
               <Package className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium">No products found</p>
+              {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium">No products found</p>}
             </div>
           )}
         </div>
@@ -396,7 +397,7 @@ export default function ProductList() {
                   <td colSpan={8} className="text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Package className="w-10 h-10 opacity-30" />
-                      <p className="text-sm font-medium text-foreground/70">No products found</p>
+                      {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No products found</p>}
                       {(search || gstFilter !== "all") ? (
                         <button onClick={() => { setSearch(""); setGstFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
                       ) : (
@@ -463,7 +464,7 @@ export default function ProductList() {
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center gap-2 py-16 text-muted-foreground">
               <Package className="w-10 h-10 opacity-30" />
-              <p className="text-sm font-medium text-foreground/70">No products found</p>
+              {loadError ? <DataError message={loadError} onRetry={retryLoad} /> : <p className="text-sm font-medium text-foreground/70">No products found</p>}
               {(search || gstFilter !== "all") ? (
                 <button onClick={() => { setSearch(""); setGstFilter("all"); }} className="text-[12px] text-primary hover:underline font-medium">Clear filters</button>
               ) : (

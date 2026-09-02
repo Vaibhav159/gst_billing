@@ -20,3 +20,17 @@ export function halveTax(tax: number): { cgst: number; sgst: number } {
   const cgst = round2(tax / 2);
   return { cgst, sgst: round2(tax - cgst) };
 }
+
+/**
+ * Rupees for people to read. Paise are ON by default: the canonical
+ * formatCurrency rounds to whole rupees, which is right for a dashboard tile
+ * and wrong for a confirmation sheet, a detail page or a printed bill — the
+ * "eyeball every figure" gate showed Rs 57,596 for an invoice saved as 57,595.50.
+ */
+export function formatMoney(n: number, opts: { paise?: boolean } = {}): string {
+  const paise = opts.paise ?? true;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency", currency: "INR",
+    minimumFractionDigits: paise ? 2 : 0, maximumFractionDigits: paise ? 2 : 0,
+  }).format(Number(n) || 0);
+}

@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Package, Save, Hash, Percent, FileText } from "lucide-react";
+import { Package, Save, Hash, Percent, FileText } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/utils";
 import { useProducts, generateId } from "@/hooks/useDataStore";
@@ -72,29 +71,21 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
     setErrors({});
   };
 
-  // Portal to <body>: a transformed ancestor (page transition mid-flight)
-  // otherwise becomes the containing block for this fixed overlay.
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <motion.div initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 16 }} transition={{ duration: 0.2 }}
-            className="glass-panel rounded-2xl w-full max-w-md p-6 space-y-5">
+  // Radix Dialog: focus trap, Escape, outside-click, aria-modal and a named
+  // close control for free. The hand-rolled overlay had none of them (E7).
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="glass-panel rounded-2xl sm:rounded-2xl w-full max-w-md p-6 space-y-5 z-[60]">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-chart-3/10 flex items-center justify-center">
                   <Package className="w-5 h-5 text-chart-3" />
                 </div>
                 <div>
-                  <h2 className="text-base font-display font-bold text-foreground">Quick Add Product</h2>
-                  <p className="text-[12px] text-muted-foreground">Create without leaving the invoice</p>
+                  <DialogTitle className="text-base font-display font-bold text-foreground">Quick Add Product</DialogTitle>
+                  <DialogDescription className="text-[12px] text-muted-foreground">Create without leaving the invoice</DialogDescription>
                 </div>
               </div>
-              <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors">
-                <X className="w-4 h-4" />
-              </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -138,10 +129,7 @@ export default function QuickProductModal({ open, onClose, onCreated }: QuickPro
                 <button type="submit" disabled={submitting} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-60"><Save className="w-4 h-4" /> {submitting ? "Creating…" : "Create Product"}</button>
               </div>
             </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }

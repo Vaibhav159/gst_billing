@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { formatCurrency, formatCompactCurrency, formatDate, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -7,14 +7,26 @@ import { downloadStatementPDF } from "@/utils/generateStatementPDF";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useInvoices, useCustomers, useBusinesses } from "@/hooks/useDataStore";
+import { useCustomers, useBusinesses, fetchAllInvoices } from "@/hooks/useDataStore";
+import type { Invoice } from "@/hooks/useDataStore";
+import { useToast } from "@/hooks/use-toast";
+import { formatApiError } from "@/utils/apiError";
 
 const fadeUp = { hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" as const } } };
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.07 } } };
 
 export default function CustomerStatement() {
   const { id } = useParams<{ id: string }>();
-  const { items: invoices } = useInvoices({ customerId: id });
+  // Every invoice for the customer, not the first page of 50: a statement
+  // with a silently truncated ledger is wrong in the way that costs money (A16).
+  const { toast } = useToast();
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  useEffect(() => {
+    if (!id) return;
+    fetchAllInvoices({ customerId: id })
+      .then(setInvoices)
+      .catch((e) => toast({ title: "Could not load invoices", description: formatApiError(e, "The statement may be incomplete."), variant: "destructive" }));
+  }, [id, toast]);
   const { items: customers } = useCustomers();
   const { items: businesses } = useBusinesses();
   const isMobile = useIsMobile();

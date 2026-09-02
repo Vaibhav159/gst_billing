@@ -181,8 +181,8 @@ export default function Profile() {
                 <link.icon className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-foreground truncate">{link.label}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{link.desc}</p>
+                <p className="text-[13px] font-semibold text-foreground truncate" title={link.label}>{link.label}</p>
+                <p className="text-[10px] text-muted-foreground truncate" title={link.desc}>{link.desc}</p>
               </div>
             </Link>
           </motion.div>
@@ -258,23 +258,23 @@ export default function Profile() {
         <div className="flex items-center gap-2 flex-wrap">
           <Bell className="w-4 h-4 text-primary" />
           <h2 className="text-[13px] font-display font-semibold text-foreground">Notifications</h2>
-          <span className="text-[9px] text-muted-foreground bg-secondary/30 px-1.5 py-0.5 rounded">Preferences saved locally</span>
+          <span className="text-[9px] text-muted-foreground bg-secondary/30 px-1.5 py-0.5 rounded">Not available yet</span>
         </div>
         <div className="space-y-3">
           {[
-            { key: "invoiceCreated" as const, label: "Invoice Created", desc: "Get notified when a new invoice is generated" },
-            { key: "dailySummary" as const, label: "Daily Summary", desc: "Receive a daily sales summary report" },
-            { key: "backupReminder" as const, label: "Backup Reminder", desc: "Weekly reminder to backup your data" },
+            { key: "invoiceCreated" as const, label: "Invoice Created", desc: "Coming soon — nothing is sent today" },
+            { key: "dailySummary" as const, label: "Daily Summary", desc: "Coming soon — no report is sent today" },
+            { key: "backupReminder" as const, label: "Backup Reminder", desc: "Coming soon — no reminder is sent today" },
           ].map((item) => (
             <div key={item.key} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-secondary/20">
               <div className="min-w-0">
                 <p className="text-[13px] font-medium text-foreground">{item.label}</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">{item.desc}</p>
               </div>
-              <Switch
-                checked={notifications[item.key]}
-                onCheckedChange={(checked) => setN(item.key, checked)}
-              />
+              {/* Disabled until something actually sends them: a live toggle that
+                  persists to localStorage and nothing else is a promise the app
+                  does not keep (E4). */}
+              <Switch checked={false} disabled aria-label={`${item.label} — not available yet`} />
             </div>
           ))}
         </div>
