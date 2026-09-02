@@ -258,20 +258,26 @@ jobs:
           push: false
           load: true
           tags: gst-billing:ci
-      - name: Backend image starts as non-root, migrates a fresh Postgres and answers /healthz
-        # /healthz is a real DB probe (SELECT 1), so the image needs a database
-        # to answer 200 — the first version of this step pointed it at an empty
-        # localhost and read the honest 503 as a broken image.
+      - name: Backend image fixes root-owned volumes, runs as non-root, migrates and answers /healthz
+        # Reproduces the production situation exactly: the media and static
+        # volumes were written by images that ran as root (through v2.0.4).
+        # The entrypoint must repair their ownership and drop to `app`, and
+        # /healthz is a real DB probe (SELECT 1), so a Postgres sits behind it.
         run: |
           docker network create ci
           docker run -d --name db --network ci -e POSTGRES_DB=gst -e POSTGRES_USER=gst -e POSTGRES_PASSWORD=gst postgres:16-alpine
           for i in $(seq 1 30); do docker exec db pg_isready -q -U gst && break; sleep 1; done
-          docker run -d --name web --network ci -e DJANGO_SECRET_KEY=ci -e DB_HOST=db -e DB_NAME=gst -e DB_USER=gst -e DB_PASSWORD=gst \
+          docker volume create ci_media && docker volume create ci_static
+          docker run --rm -v ci_media:/m -v ci_static:/s alpine sh -c 'mkdir -p /m/captures && touch /m/captures/old.jpg /s/admin.css'   # root-owned, like prod
+          docker run -d --name web --network ci -v ci_media:/app/media -v ci_static:/app/staticfiles \
+            -e DJANGO_SECRET_KEY=ci -e DB_HOST=db -e DB_NAME=gst -e DB_USER=gst -e DB_PASSWORD=gst \
             gst-billing:ci gunicorn --bind 0.0.0.0:8000 gst_billing.wsgi:application
           sleep 6
-          test "$(docker exec web id -u)" != "0" || { echo "still running as root"; exit 1; }
-          # The deploy runs migrate before gunicorn; prove the image can do that as its non-root user.
-          docker exec web python manage.py migrate --noinput || { docker logs web; exit 1; }
+          test "$(docker exec web awk '/^Uid:/{print $2}' /proc/1/status)" != "0" || { echo "gunicorn is running as root"; docker logs web; exit 1; }
+          test "$(docker exec web stat -c %U /app/media/captures/old.jpg)" = "app" || { echo "entrypoint did not repair the media volume"; exit 1; }
+          # The deploy's own start path, as the unprivileged user, into the repaired static volume.
+          docker exec --user app web python manage.py migrate --noinput || { docker logs web; exit 1; }
+          docker exec --user app web python manage.py collectstatic --noinput >/dev/null || { echo "collectstatic cannot write the static volume"; exit 1; }
           docker exec web curl -fsS http://127.0.0.1:8000/healthz || { docker logs web; exit 1; }
       - name: Build nginx image
         uses: docker/build-push-action@v6

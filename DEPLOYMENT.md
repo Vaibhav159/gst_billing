@@ -55,9 +55,12 @@ compose command). If one fails, gunicorn never starts, the container crash-loops
 its healthcheck goes red, and Watchtower's notification reports it. Roll back
 with the previous version tag (below) and fix forward.
 
-## First deploy of a non-root image (one-time)
+## v2.0.5 only: volume ownership after the first non-root image
 
-From v2.0.5 the backend image runs as the unprivileged `app` user. The two
+From v2.0.6 the image repairs this itself at start (the entrypoint runs as
+root, chowns the volumes, then drops to `app`), so nothing below is needed
+for later releases. v2.0.5 was the first image to run as the unprivileged
+`app` user without that repair. The two
 named volumes it writes to — `gst_media_volume` (uploads, capture photos,
 source files) and `gst_static_volume` (`collectstatic` output) — were
 created by earlier images that ran as root, so their contents are

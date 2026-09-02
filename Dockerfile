@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     curl \
+    gosu \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -52,8 +53,12 @@ COPY . /app/
 # that ownership on first use.
 RUN groupadd --system app && useradd --system --gid app --home /app app \
     && mkdir -p /app/media /app/staticfiles /app/logs \
-    && chown -R app:app /app
-USER app
+    && chown -R app:app /app \
+    && cp /app/deploy/entrypoint.sh /usr/local/bin/entrypoint.sh && chmod 755 /usr/local/bin/entrypoint.sh
+# No USER here on purpose: the entrypoint starts as root, fixes the ownership
+# of the mounted volumes, then execs the command as `app` through gosu. The CI
+# docker-build job asserts that PID 1 is not root.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
