@@ -108,7 +108,7 @@ def _fetch_tally(gstin: str) -> dict | None:
     url = getattr(settings, "GSTIN_TALLY_URL",
                   "https://tallysolutions.com/wp-content/themes/tally/api/gstin-serach-api.php")
     try:
-        resp = requests.post(url, data={"gstin": gstin}, timeout=8)
+        resp = requests.post(url, data={"gstin": gstin}, timeout=4)
         d = resp.json()
     except Exception as exc:  # noqa: BLE001 — any transport/parse issue = no enrichment
         logger.warning("Tally GSTIN lookup failed for %s: %s", gstin, exc)

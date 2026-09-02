@@ -18,6 +18,8 @@ from django.db import transaction
 import google.genai as genai
 from google.genai import types
 
+GEMINI_TIMEOUT_MS = 45_000  # extraction of a 10MB photo takes ~10-20s; 45s is generous
+
 # Register HEIC / HEIF opener on Pillow so iPhone photos can be decoded
 # in the same code path as JPEG/PNG. Without this, Image.open() on a
 # .heic file raises UnidentifiedImageError. Imported lazily inside a
@@ -857,7 +859,10 @@ class AIInvoiceProcessor:
         key would marginally help under concurrent load but adds state
         management we don't need yet.
         """
-        client = genai.Client(api_key=key)
+        # A budget, not a hope: with none, a Gemini brownout during month-end
+        # held gunicorn threads until nginx's own 60s cut them — and with all
+        # threads gone, logins and invoice saves timed out too.
+        client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
         try:
             response = client.models.generate_content(
                 model=self.gemini_model,

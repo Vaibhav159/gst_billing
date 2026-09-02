@@ -243,7 +243,10 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         # anything the user skipped. Empty fields only; quiet on failure.
         from billing.gstin import enrich_customer
 
-        enrich_customer(serializer.instance)
+        # After commit, not inside the request's transaction: the lookup is a
+        # blocking network call and used to hold the row open for its
+        # duration on every customer create.
+        transaction.on_commit(lambda inst=serializer.instance: enrich_customer(inst))
 
     def get_entity_name(self, instance):
         return instance.name
@@ -1143,6 +1146,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 with transaction.atomic():
                     invoice.save()
             except IntegrityError:
+                # The lines were already replaced above; a 409 must undo that
+                # too, or the invoice keeps the new lines under the old number.
+                transaction.set_rollback(True)
                 return Response(
                     {"error": f"Invoice number {invoice.invoice_number} already exists for this business in this financial year.",
                      "code": "duplicate_invoice_number"},
@@ -3303,7 +3309,7 @@ class BulkInvoiceImportView(APIView):
                             )
                             from billing.gstin import enrich_customer
 
-                            enrich_customer(customer)
+                            transaction.on_commit(lambda c=customer: enrich_customer(c))  # not inside the import's transaction
                             # Update ALL lookup caches so a later row referencing the
                             # same GST/PAN under a different name resolves to this
                             # customer instead of creating a duplicate.
@@ -4024,7 +4030,7 @@ class AIInvoiceCreateView(APIView):
                 # OCR fills first; the registry completes what it missed.
                 from billing.gstin import enrich_customer
 
-                enrich_customer(customer)
+                transaction.on_commit(lambda c=customer: enrich_customer(c))  # AI create is atomic; enrich after commit
 
             # Backfill empty customer fields — never overwrite curated
             # data because OCR can misread a GSTIN/PAN by a digit.

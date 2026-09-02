@@ -22,13 +22,20 @@ while true; do
     echo "[backup] $ts starting"
 
     export PGPASSWORD="$DB_PASSWORD"
+    verified=0
     if pg_dump -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" \
         --no-owner --format=custom -f "/backups/db-$ts.dump"; then
         # A dump that pg_restore cannot even list is not a backup.
-        entries=$(pg_restore --list "/backups/db-$ts.dump" | wc -l)
-        echo "[backup] db-$ts.dump ok ($entries archive entries)"
+        entries=$(pg_restore --list "/backups/db-$ts.dump" 2>/dev/null | wc -l)
+        if [ "$entries" -gt 0 ]; then
+            echo "[backup] db-$ts.dump ok ($entries archive entries)"
+            verified=1
+        else
+            echo "[backup] ERROR: db-$ts.dump is not a readable archive" >&2
+            rm -f "/backups/db-$ts.dump"
+        fi
     else
-        echo "[backup] ERROR: pg_dump failed" >&2
+        echo "[backup] ERROR: pg_dump failed (client $(pg_dump --version | awk '{print $3}') — is Neon on a newer major?)" >&2
         rm -f "/backups/db-$ts.dump"
     fi
 
@@ -38,7 +45,18 @@ while true; do
         echo "[backup] ERROR: media tar failed" >&2
     fi
 
-    find /backups -type f -mtime +30 -delete
+    if [ "$verified" = 1 ]; then
+        # Prune ONLY behind a verified dump. Unconditional pruning meant 31
+        # unnoticed bad nights ended at zero backups; now a broken pipeline
+        # keeps the last good ones forever and the ping stays silent.
+        find /backups -type f -mtime +30 -delete
+        [ -n "${BACKUP_PING_URL:-}" ] && { wget -qO- --timeout=15 "$BACKUP_PING_URL" >/dev/null 2>&1 || curl -fsS -m 15 "$BACKUP_PING_URL" >/dev/null 2>&1 || echo "[backup] WARN: ping failed" >&2; }
+        if [ -n "${BACKUP_SYNC_CMD:-}" ]; then
+            ( cd /backups && sh -c "$BACKUP_SYNC_CMD" ) && echo "[backup] off-site sync ok" || echo "[backup] ERROR: off-site sync failed" >&2
+        fi
+    else
+        echo "[backup] no verified dump tonight — nothing pruned, no ping sent" >&2
+    fi
     echo "[backup] done; sleeping 24h"
     sleep 86400
 done

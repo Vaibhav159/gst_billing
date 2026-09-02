@@ -194,7 +194,15 @@ REST_FRAMEWORK = {
     # Production previously had NO throttling — the login endpoint accepted
     # unlimited password attempts (verified live 19 Aug 2026). With REDIS_HOST
     # set (prod compose), throttle state is shared across all gunicorn workers.
+    # The default classes were dev-only, so AI extraction, GSTIN lookup, search,
+    # bulk import and reports were unlimited in prod (audit D9).
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/day",
+        "user": "5000/day",
         "login": "10/min",
         "token_refresh": "60/min",
     },

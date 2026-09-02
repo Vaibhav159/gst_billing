@@ -65,3 +65,10 @@ yarn-error.log
 .ruff_cache/
 .cursor/
 gst_bill.bak
+
+# Never bake these into a public image
+backups/
+e2e-tests/
+sweet-rebuild-suite-main/node_modules/
+sweet-rebuild-suite-main/ios/
+*.dump

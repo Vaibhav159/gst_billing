@@ -23,7 +23,11 @@ rm -f .env.bak
 
 # Restart the web container
 echo "🔄 Restarting the web container..."
-$DOCKER_COMPOSE restart web
+# `restart` reuses the container's ORIGINAL environment — env_file changes are
+# only read on (re)creation — so these scripts printed success while nothing
+# changed. `up -d` recreates the container with the new .env.
+$DOCKER_COMPOSE up -d --force-recreate --no-deps web
+echo "   effective DEBUG in the container: $($DOCKER_COMPOSE exec -T web python -c 'from django.conf import settings; print(settings.DEBUG)' 2>/dev/null || echo '?')"
 
 echo "✅ DEBUG mode enabled. The application will now log more detailed information."
 echo "📝 To view logs, run:"
