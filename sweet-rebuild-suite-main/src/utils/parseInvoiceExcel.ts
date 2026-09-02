@@ -122,20 +122,6 @@ function isTotalRow(row: any[]): boolean {
 /**
  * Detect if a row is a firm header row (business name, GSTIN, supply type, month)
  */
-function isMergedHeaderRow(row: any[]): boolean {
-  // These rows typically have data only in the first cell, rest are null
-  const nonNull = row.filter(c => c !== null && c !== undefined && strVal(c) !== "");
-  if (nonNull.length > 2) return false;
-  const first = strVal(row[0]);
-  if (!first) return false;
-  // Check for known patterns
-  if (first.toLowerCase().startsWith("gstin:")) return true;
-  if (first.toLowerCase().includes("outward") || first.toLowerCase().includes("inward")) return true;
-  if (first.toLowerCase().startsWith("month:")) return true;
-  // Business name (all uppercase, length > 3)
-  if (first === first.toUpperCase() && first.length > 3 && !first.match(/^\d/)) return true;
-  return false;
-}
 
 /**
  * Detect column mapping from header row. Returns a map of logical field -> column index.
@@ -265,7 +251,6 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
     if (headerFound) {
       // Use detected column map, with fallbacks to positional
       const hasSNo = colMap.sNo !== undefined;
-      const offset = hasSNo ? 0 : -1; // If no S.No column, all columns shift left by 1
 
       // CORE columns (Bill, Date, Party, GST, Commodity, Qty, Rate) keep a
       // positional fallback for files without recognizable headers — those

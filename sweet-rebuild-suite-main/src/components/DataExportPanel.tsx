@@ -3,7 +3,7 @@ import { Download, FileJson, FileSpreadsheet, CheckCircle2 } from "lucide-react"
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
-import { formatCurrency } from "@/utils/mockData";
+
 import { todayLocal } from "@/utils/localDate";
 
 type ExportFormat = "csv" | "json";

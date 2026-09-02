@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import api from "@/utils/api";
 import { jwtDecode } from "jwt-decode";
-import { useToast } from "@/hooks/use-toast";
 
 export type UserRole = "admin" | "editor" | "viewer";
 
@@ -26,7 +25,6 @@ const REFRESH_KEY = "gst_refresh_token";
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const { toast } = useToast();
 
   useEffect(() => {
     // Attempt to hydrate user from token on startup

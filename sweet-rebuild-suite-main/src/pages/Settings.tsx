@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { Settings as SettingsIcon, Save, Building2, Calendar, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Database, Download, Trash2, HardDrive, Info, AlertTriangle, Check } from "lucide-react";
+import { Settings as SettingsIcon, Save, Building2, FileText, Calculator, Keyboard, Sparkles, RotateCcw, Database, Download, Trash2, HardDrive, AlertTriangle, Check } from "lucide-react";
 import { financialYears } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import api from "@/utils/api";
@@ -27,7 +27,19 @@ function getCurrentFinancialYear(): string {
   return `${startYear}-${String(endYear).slice(-2)}`;
 }
 
-function loadSettings(fallbackBusinessId: string) {
+interface SettingsForm {
+  defaultBusinessId: string;
+  defaultFinancialYear: string;
+  invoicePrefix: string;
+  invoiceStartNumber: number;
+  defaultGstRate: number;
+  currency: string;
+  autoDetectIGST: boolean;
+  showHSN: boolean;
+  amountInWords: boolean;
+}
+
+function loadSettings(fallbackBusinessId: string): SettingsForm {
   const defaults = {
     defaultBusinessId: fallbackBusinessId,
     defaultFinancialYear: getCurrentFinancialYear(),

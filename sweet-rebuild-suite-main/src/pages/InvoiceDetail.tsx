@@ -8,7 +8,7 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 import { useState, useEffect } from "react";
 import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
-  Receipt, TrendingUp, Building2, User, MapPin, Phone, Mail, Hash,
+  Receipt, TrendingUp, Building2, User, MapPin, Hash,
   FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check, Loader2,
   Image as ImageIcon,
 } from "lucide-react";
@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { shareInvoice, shareViaWhatsApp } from "@/utils/shareInvoice";
+import { shareViaWhatsApp } from "@/utils/shareInvoice";
 
 export default function InvoiceDetail() {
   // Route can be either /billing/invoice/:id  OR  /billing/invoice/:bizSlug/:fy/:slug
@@ -538,7 +538,7 @@ export default function InvoiceDetail() {
                 <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
                 <Link to={printUrl} className="premium-btn-primary w-full text-[13px]"><Printer className="w-4 h-4" /> Print / PDF</Link>
                 <Link to={`${printUrl}?share=1`} className="premium-btn-outline w-full text-[13px]"><Share2 className="w-4 h-4" /> Share PDF</Link>
-                <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline w-full text-[13px] border-success/30 text-success"><MessageCircle className="w-4 h-4" /> WhatsApp {customer?.mobile_number ? `(${customer.mobile_number})` : ""}</button>
+                <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number ?? undefined)} className="premium-btn-outline w-full text-[13px] border-success/30 text-success"><MessageCircle className="w-4 h-4" /> WhatsApp {customer?.mobile_number ? `(${customer.mobile_number})` : ""}</button>
                 <Link to={printUrl} className="premium-btn-ghost w-full text-[13px]"><Download className="w-4 h-4" /> Download PDF</Link>
               </div>
 
@@ -583,7 +583,7 @@ export default function InvoiceDetail() {
             <Link to={`/billing/invoice/edit/${dbId}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
             <Link to={printUrl} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
             <button onClick={() => setShowEway(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-chart-2/30 text-chart-2" title="E-way Bill"><Truck className="w-3.5 h-3.5" /></button>
-            <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>
+            <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number ?? undefined)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>
           </div>
         </div>
       )}

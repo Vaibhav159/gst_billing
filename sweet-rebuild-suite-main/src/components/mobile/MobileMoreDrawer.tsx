@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, FileText, Users, Truck, ReceiptText } from "lucide-react";
+  Building2, BarChart3, Calculator, HardDrive, Settings, History, LogOut, X, User, Users, ReceiptText } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useAuth } from "@/contexts/AuthContext";
 

@@ -1,11 +1,11 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { formatCurrency, formatCompactCurrency, formatChartK, formatDate } from "@/utils/mockData";
+import { formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { useBusiness, useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
-  ArrowLeft, Pencil, Trash2, Phone, Mail, Building2, CreditCard,
-  Plus, MapPin, Hash, TrendingUp, TrendingDown, Scale, Receipt,
-  Copy, CheckCircle2, Eye, Users, FileText, Landmark, Loader2,
+  ArrowLeft, Pencil, Trash2, Building2,
+  MapPin,
+  Copy, CheckCircle2, Eye, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -15,8 +15,6 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-const fadeUp = { hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" as const } } };
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } };
 
 export default function BusinessDetail() {
   const { id } = useParams<{ id: string }>();
@@ -26,7 +24,7 @@ export default function BusinessDetail() {
   const { item: biz, isLoading } = useBusiness(id);
   const { remove: removeBusiness } = useBusinesses();
   const { items: customers } = useCustomers();
-  const { items: invoices, isLoading: isLoadingInvoices } = useInvoices({ businessId: id });
+  const { items: invoices } = useInvoices({ businessId: id });
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -137,7 +135,7 @@ export default function BusinessDetail() {
             ].map((f) => (
               <div key={f.label} className="flex items-start justify-between">
                 <div><p className="text-[10px] text-muted-foreground uppercase">{f.label}</p><p className="text-[13px] text-foreground">{f.value || "—"}</p></div>
-                {f.copyable && f.value && <button onClick={() => copyToClipboard(f.value, f.label)} className="mt-2 text-muted-foreground hover:text-foreground">{copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}</button>}
+                {f.copyable && f.value && <button onClick={() => copyToClipboard(f.value ?? "", f.label)} className="mt-2 text-muted-foreground hover:text-foreground">{copiedField === f.label ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}</button>}
               </div>
             ))}
           </div>

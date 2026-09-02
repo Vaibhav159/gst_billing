@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { formatCurrency, formatCompactCurrency, formatDate, financialYears, currentFY } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
-  Download, FileArchive, ArrowLeft, Calendar, Building2, Filter,
+  Download, FileArchive, ArrowLeft, Calendar, Building2,
   FileText, CheckSquare, Square, Printer, Package, Search, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -44,12 +44,6 @@ export default function BulkPDF() {
     setPdfBlobs(prev => { const next = new Map(prev); next.set(invoiceId, blob); return next; });
   }, []);
 
-  async function generateQR(inv: Invoice, biz: any): Promise<string> {
-    try {
-      const data = JSON.stringify({ inv: inv.invoiceNumber, biz: biz?.name, total: inv.total });
-      return await QRCode.toDataURL(data, { width: 100, margin: 1 });
-    } catch { return ""; }
-  }
 
   // Parse FY into date range: "2025-26" → Apr 2025 to Mar 2026
   const fyStartYear = parseInt(selectedFY.split("-")[0], 10);

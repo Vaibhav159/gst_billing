@@ -4,7 +4,7 @@ import { useBusinesses, useCustomers } from "@/hooks/useDataStore";
 import type { Customer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
-  Upload, Bot, CheckCircle, ArrowRight, Image as ImageIcon, Sparkles,
+  Bot, CheckCircle, Image as ImageIcon, Sparkles,
   Clock, Shield, FileText, ArrowLeft, Zap, Loader2, AlertTriangle,
   Plus, Trash2, RefreshCw, X, ChevronDown, ChevronUp,
 } from "lucide-react";

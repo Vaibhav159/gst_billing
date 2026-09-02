@@ -1,13 +1,13 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, FileSpreadsheet, Plus, Pencil,
-  Check, X, UserPlus, Receipt, Upload, AlertCircle,
+  Check, X, UserPlus, AlertCircle,
 } from "lucide-react";
 import { useBusinesses, useCustomers, useInvoices } from "@/hooks/useDataStore";
 import type { Business, Customer } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
@@ -198,7 +198,7 @@ export default function ImportReview() {
   const [importing, setImporting] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ date: "", party: "", gst: "", qty: "", rate: "" });
-  const [newlyCreatedCustomers, setNewlyCreatedCustomers] = useState<string[]>([]);
+  const [newlyCreatedCustomers] = useState<string[]>([]);
   const [bizFilter] = useState(state?.bizFilter || "all");
   // Bumped when a fuzzy suggestion is adopted (mutates excelPreview in
   // place) — forces the validation memo to recompute against the new name.

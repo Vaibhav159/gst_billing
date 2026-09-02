@@ -16,12 +16,17 @@ export interface DjangoInvoice {
   id: number;
   invoice_number: string;
   invoice_date: string;
-  customer: number;
+  // The list endpoint sends FK ids; detail and export payloads can nest the party.
+  customer: number | { id: number; name: string };
   customer_name?: string;
-  business: number;
+  business: number | { id: number; name: string };
   business_name?: string;
   type_of_invoice: string;
   total_amount: string;
+  is_igst_applicable?: boolean;
+  payment_mode?: string | null;
+  source_file?: string | null;
+  source_preview?: string | null;
   line_items?: DjangoLineItem[];
   line_item_count?: number;
   total_tax?: string;
@@ -97,6 +102,11 @@ export interface DjangoProduct {
   hsn_code: string;
   gst_tax_rate: string;
   description?: string;
+  created_at?: string;
+  // annotations from the product list endpoint
+  total_revenue?: number | string;
+  qty_sold?: number | string;
+  usage_count?: number | string;
 }
 
 // ── Dashboard Stats ──

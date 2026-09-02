@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import type { DjangoInvoice, DjangoProduct } from "@/types/api";
 import api from "@/utils/api";
 import { logger } from "@/utils/logger";
 import { formatApiError } from "@/utils/apiError";
-import type { PaginatedResponse, DjangoInvoice, DjangoBusiness, DjangoCustomer, DjangoProduct, DashboardStatsResponse } from "@/types/api";
 
 import { Invoice, Product } from "@/utils/mockData";
 import { rateToPercent, lineItemToStoredRate } from "@/utils/gstRate";
@@ -121,81 +121,10 @@ export interface DashboardStats {
   recent_invoices: any[];
 }
 
-const STORE_KEYS = {
-  invoices: "gst_data_invoices",
-  products: "gst_data_products",
-  seeded: "gst_data_seeded",
-};
 
-function loadOrSeed<T>(key: string, seedData: T[]): T[] {
-  const seeded = localStorage.getItem(STORE_KEYS.seeded);
-  const stored = localStorage.getItem(key);
-  if (stored) {
-    try { return JSON.parse(stored); } catch { /* fall through */ }
-  }
-  if (!seeded) {
-    localStorage.setItem(key, JSON.stringify(seedData));
-    return [...seedData];
-  }
-  return [];
-}
 
-function persist<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
 
-function markSeeded() {
-  if (!localStorage.getItem(STORE_KEYS.seeded)) {
-    localStorage.setItem(STORE_KEYS.seeded, "1");
-  }
-}
 
-function useCRUD<T extends { id: string }>(key: string, seedData: T[]) {
-  const [items, setItems] = useState<T[]>(() => loadOrSeed(key, seedData));
-  useEffect(() => { markSeeded(); }, []);
-
-  const save = useCallback((updated: T[]) => {
-    setItems(updated);
-    persist(key, updated);
-    window.dispatchEvent(new CustomEvent("datastore-update", { detail: { key } }));
-  }, [key]);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.key === key) {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          try { setItems(JSON.parse(stored)); } catch { /* ignore */ }
-        }
-      }
-    };
-    window.addEventListener("datastore-update", handler);
-    return () => window.removeEventListener("datastore-update", handler);
-  }, [key]);
-
-  const create = useCallback((item: T) => {
-    const updated = [...items, item];
-    save(updated);
-    return item;
-  }, [items, save]);
-
-  const update = useCallback((id: string, updates: Partial<T>) => {
-    const updated = items.map(it => it.id === id ? { ...it, ...updates } : it);
-    save(updated);
-  }, [items, save]);
-
-  const remove = useCallback((id: string) => {
-    const updated = items.filter(it => it.id !== id);
-    save(updated);
-  }, [items, save]);
-
-  const getById = useCallback((id: string) => {
-    return items.find(it => it.id === id) || null;
-  }, [items]);
-
-  return { items, create, update, remove, getById, setAll: save };
-}
 
 // ── Typed hooks ──
 
@@ -208,7 +137,7 @@ function getFinancialYear(date: string) {
   return `${y}-${(y + 1).toString().slice(-2)}`;
 }
 
-export function mapDjangoInvoice(inv: any): Invoice {
+export function mapDjangoInvoice(inv: DjangoInvoice): Invoice {
   const hasItems = Array.isArray(inv.line_items) && inv.line_items.length > 0;
   
   const items = (inv.line_items || []).map((item: any) => ({
@@ -232,7 +161,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
   
   // Use annotated total_tax if line_items is empty/missing
   const itemBasedTax = totalCGST + totalSGST + totalIGST;
-  const totalTax = itemBasedTax > 0 ? itemBasedTax : (parseFloat(inv.total_tax) || 0);
+  const totalTax = itemBasedTax > 0 ? itemBasedTax : (parseFloat(inv.total_tax || "0") || 0);
   
   // If line items didn't have cgst/sgst/igst breakdown, infer from totalTax + isIGST flag
   if (itemBasedTax === 0 && totalTax > 0) {
@@ -268,7 +197,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
     customerName: inv.customer_name || (typeof inv.customer === 'object' ? inv.customer.name : ""),
     businessId: String(typeof inv.business === 'object' ? inv.business.id : (inv.business || "")),
     businessName: inv.business_name || (typeof inv.business === 'object' ? inv.business.name : ""),
-    type: (inv.type_of_invoice || "OUTWARD").toUpperCase(),
+    type: (inv.type_of_invoice || "OUTWARD").toUpperCase() as Invoice["type"],
     isIGST: inv.is_igst_applicable || false,
     items,
     subtotal,
@@ -290,7 +219,7 @@ export function mapDjangoInvoice(inv: any): Invoice {
   };
 }
 
-export function mapDjangoProduct(prod: any): Product {
+export function mapDjangoProduct(prod: DjangoProduct): Product {
   return {
     id: String(prod.id),
     name: prod.name || "",

@@ -1,4 +1,4 @@
-import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
 import { CheckCircle2, ArrowLeft, FileText, TrendingUp, TrendingDown, Receipt } from "lucide-react";
 import { motion } from "framer-motion";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -23,7 +23,6 @@ function fmt(n: number) {
 
 export default function ImportPreview() {
   const location = useLocation();
-  const navigate = useNavigate();
   const state = location.state as ImportPreviewState | null;
 
   const { outward, inward, grandTotals } = useMemo(() => {

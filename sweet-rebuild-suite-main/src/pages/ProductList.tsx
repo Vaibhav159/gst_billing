@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
-import { useProducts, useInvoices } from "@/hooks/useDataStore";
+import { useProducts } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -24,7 +24,6 @@ export default function ProductList() {
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useProducts(selectedFY);
-  const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [gstFilter, setGstFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);

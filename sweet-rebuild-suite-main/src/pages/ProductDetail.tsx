@@ -4,8 +4,8 @@ import { useInvoices, useCustomers, useProduct } from "@/hooks/useDataStore";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
-  ArrowLeft, Pencil, Trash2, Package, Hash, TrendingUp, BarChart3,
-  Receipt, Eye, Printer, Copy, CheckCircle2, Users, ShoppingCart, Scale, Loader2,
+  ArrowLeft, Pencil, Trash2, Package,
+  Eye, Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
@@ -15,11 +15,6 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recha
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" as const } },
-};
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } };
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -29,7 +24,6 @@ export default function ProductDetail() {
   const { item: product, isLoading: productLoading } = useProduct(id);
   const { items: invoices } = useInvoices();
   const { items: customers } = useCustomers();
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   type HsnVariant = { hsn_code: string; lines: number; quantity: string; amount: string; first_used: string; last_used: string; matches_catalog: boolean };
   const [hsnUsage, setHsnUsage] = useState<{ catalog_hsn: string; variants: HsnVariant[] } | null>(null);
@@ -76,11 +70,6 @@ export default function ProductDetail() {
   const avgRate = totalQty > 0 ? totalRevenue / totalQty : 0;
   const initials = product.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(label);
-    setTimeout(() => setCopiedField(null), 1500);
-  };
 
   // Build monthly data based on FY (Apr-Mar). Product has no `financialYear`
   // field on the model — fall back to current FY based on today's date.

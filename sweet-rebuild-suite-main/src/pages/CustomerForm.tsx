@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { indianStates, formatCurrency } from "@/utils/mockData";
-import { useCustomers, useCustomer, useBusinesses, useInvoices, generateId } from "@/hooks/useDataStore";
+import { useCustomers, useCustomer, useBusinesses, useInvoices } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   Save, X, AlertTriangle, UserPlus, Pencil, Phone, Mail, MapPin,
   Building2, Hash, CreditCard, FileText, CheckCircle2, Info,
-  Search, Users, GitMerge, ChevronDown, ArrowRight, CheckCheck,
+  Search, Users, GitMerge, ArrowRight, CheckCheck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
@@ -107,15 +107,6 @@ export default function CustomerForm() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  const toggleBiz = (bid: string) => {
-    setForm((p) => ({
-      ...p,
-      businesses: p.businesses.includes(String(bid))
-        ? p.businesses.filter((b) => b !== String(bid))
-        : [...p.businesses, String(bid)],
-    }));
-    setDirty(true);
-  };
 
   const selectAllBiz = () => {
     const allIds = businesses.map((b) => String(b.id));
@@ -222,7 +213,7 @@ export default function CustomerForm() {
   const mergeFilteredCustomers = customers.filter((c) => {
     if (isEdit && String(c.id) === String(id)) return false;
     const q = mergeSearch.toLowerCase();
-    return !q || c.name.toLowerCase().includes(q) || c.gst_number.toLowerCase().includes(q) || c.mobile_number.includes(q);
+    return !q || c.name.toLowerCase().includes(q) || (c.gst_number ?? "").toLowerCase().includes(q) || (c.mobile_number ?? "").includes(q);
   });
 
   const handleMerge = async () => {

@@ -7,7 +7,7 @@ import { type Invoice, formatCurrency } from "./mockData";
  */
 export async function generateInvoicePDF(
   element: HTMLElement,
-  invoice: Invoice
+  _invoice: Invoice
 ): Promise<Blob> {
   const canvas = await html2canvas(element, {
     scale: 2,

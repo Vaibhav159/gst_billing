@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import * as XLSX from "xlsx-js-style";
 import { normalizeDate, toImportReadyInvoices, parseInvoiceExcel } from "./parseInvoiceExcel";
 import type { ParsedExcelResult } from "./parseInvoiceExcel";
 import { generateSampleExcelBytes } from "./generateSampleExcel";

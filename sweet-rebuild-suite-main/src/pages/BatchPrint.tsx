@@ -1,8 +1,8 @@
 import { logger } from "@/utils/logger";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Printer, FileText, Check } from "lucide-react";
-import { useBusinesses, useCustomers, useInvoice, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers, mapDjangoInvoice } from "@/hooks/useDataStore";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";

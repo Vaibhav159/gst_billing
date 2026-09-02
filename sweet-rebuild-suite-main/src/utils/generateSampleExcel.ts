@@ -20,7 +20,6 @@ const LIGHT_BLUE = "DCE6F1";
 const WHITE = "FFFFFF";
 const AMBER = "FFC000";
 const GREY_TEXT = "666666";
-const SUCCESS_GREEN = "4F8C5A";
 
 export interface TemplateBusiness {
   id?: number | string;

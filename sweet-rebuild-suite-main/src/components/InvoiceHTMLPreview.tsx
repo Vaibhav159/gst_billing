@@ -1,4 +1,5 @@
-import { amountToWords, formatDate, type Business, type Customer, type Invoice } from "@/utils/mockData";
+import { amountToWords, formatDate, type Business, type Invoice } from "@/utils/mockData";
+import type { Customer } from "@/hooks/useDataStore";
 
 /**
  * Compact HTML facsimile of the Tally invoice, for surfaces where the PDF

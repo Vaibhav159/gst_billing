@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx-js-style";
-import type { Invoice, Business, Customer } from "./mockData";
+import type { Invoice, Business } from "./mockData";
+import type { Customer } from "@/hooks/useDataStore";
 import { format } from "date-fns";
 
 interface ReportOptions {
@@ -36,7 +37,6 @@ const titleS = (sz = 14) => ({ font: { bold: true, sz, name: "Arial", color: { r
 const hdrS = () => ({ font: { bold: true, sz: 10, name: "Arial", color: { rgb: WHITE } }, fill: { fgColor: { rgb: DARK_BLUE } }, alignment: { horizontal: "center" as const, vertical: "center" as const, wrapText: true }, border: bdr() });
 const totS = () => ({ font: { bold: true, sz: 10, name: "Arial" }, fill: { fgColor: { rgb: AMBER } }, border: bdr() });
 const dS = (ev: boolean, a: "left"|"center"|"right" = "left") => ({ font: { sz: 9, name: "Arial" }, fill: ev ? { fgColor: { rgb: LIGHT_BLUE } } : undefined, border: bdr(), alignment: { horizontal: a, vertical: "center" as const } });
-const plainS = (a: "left"|"center"|"right" = "left") => ({ font: { sz: 9, name: "Arial" }, alignment: { horizontal: a, vertical: "center" as const } });
 
 const NF = "#,##0.00";
 // Payment column + split blocks are opt-in: the plain report keeps the

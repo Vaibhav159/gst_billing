@@ -27,7 +27,7 @@ async function existingNames(api: AxiosInstance, path: string): Promise<Set<stri
   const names = new Set<string>();
   let url: string | null = `${path}?page_size=500`;
   while (url) {
-    const res = await api.get(url);
+    const res: { data: any } = await api.get(url);
     const rows = Array.isArray(res.data) ? res.data : res.data?.results || [];
     for (const r of rows) names.add(lower(r.name));
     url = res.data?.next ? String(res.data.next).replace(/^.*\/api\//, "") : null;

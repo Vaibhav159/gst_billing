@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Users, Building2, Package, FileText,
   BarChart3, Calculator, HardDrive, LogOut, ChevronDown,
-  Moon, Sun, Flame, Gem, Menu, X, TreePine, Settings, History, User, Search, ReceiptText
+  Moon, Sun, Flame, Gem, Menu, X, TreePine, Settings, History, Search, ReceiptText,
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";

@@ -1,6 +1,6 @@
 import { useParams, useSearchParams } from "react-router-dom";
 import { amountToWords, formatDate } from "@/utils/mockData";
-import { useInvoices, useBusinesses, useCustomers, useInvoice } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers, useInvoice } from "@/hooks/useDataStore";
 import { Printer, Download, Share2, ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -88,7 +88,7 @@ export default function InvoicePrint() {
     if (!printRef.current) return;
     setGenerating(true);
     try {
-      await sharePDFViaWhatsApp(printRef.current, inv, customer?.mobile_number);
+      await sharePDFViaWhatsApp(printRef.current, inv, customer?.mobile_number ?? undefined);
       toast({ title: "PDF ready", description: "Attach the downloaded PDF in WhatsApp" });
     } catch { toast({ title: "Error", variant: "destructive" }); }
     setGenerating(false);

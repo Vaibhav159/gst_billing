@@ -1,10 +1,10 @@
 import { logger } from "@/utils/logger";
 import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Html5Qrcode } from "html5-qrcode";
 import {
-  QrCode, Camera, CameraOff, CheckCircle2, XCircle, ArrowLeft,
-  FileText, Search, Loader2, RefreshCw,
+  QrCode, Camera, CameraOff, CheckCircle2, XCircle,
+  FileText, Loader2, RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -31,7 +31,6 @@ type VerifyState =
 
 export default function QRScanner() {
   const isMobile = useIsMobile();
-  const navigate = useNavigate();
   const [cameraActive, setCameraActive] = useState(false);
   const [verifyState, setVerifyState] = useState<VerifyState>({ status: "idle" });
   const scannerRef = useRef<Html5Qrcode | null>(null);

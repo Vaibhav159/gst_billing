@@ -3,12 +3,12 @@ import DataError from "@/components/DataError";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import {
   Search, Plus, Download, Upload, Eye, Pencil, Trash2,
-  Building2, Users, TrendingUp, Filter, ChevronDown, Phone, MapPin, Star,
+  Building2, Users, TrendingUp, Phone, MapPin, Star,
   GitMerge, CheckCircle2, ArrowRight, SlidersHorizontal, Loader2, ArrowUpDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatCurrency, formatCompactCurrency } from "@/utils/mockData";
-import { useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
+import { useCustomers, useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -25,7 +25,6 @@ export default function CustomerList() {
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { items: customers, remove: removeCustomer, totalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useCustomers(selectedFY);
   const { items: businesses } = useBusinesses(selectedFY);
-  const { items: invoices } = useInvoices({ fyFilter: selectedFY }, false);
   const [search, setSearch] = useState("");
   const [bizFilter, setBizFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");

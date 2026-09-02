@@ -17,7 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
+
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
@@ -115,7 +115,7 @@ export default function InvoiceList() {
   }), [debouncedSearch, bizFilter, custFilter, typeFilter, paymentFilter, fyFilter, monthFilter, dupsFilter, emptyFilter, noHsnFilter, hasHygieneFilter, hasSlabDrill, gstRateParam, segParam, drillStart, drillEnd, drillBiz, drillType]);
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount, error: loadError, refetch: retryLoad } = useInvoices(apiFilters);
-  const { data: statsData, isLoading: isStatsLoading } = useDashboardStats(apiFilters);
+  const { data: statsData } = useDashboardStats(apiFilters);
 
   // Only client-side sorting (filtering is done server-side)
   const filtered = [...invoices].sort((a, b) => {
@@ -274,7 +274,7 @@ export default function InvoiceList() {
                 </div>
               </div>
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-border/30">
-                <span className="text-[11px] text-muted-foreground">{pluralize(inv.lineItemCount, "item")} · Tax {formatCurrency(inv.totalTax)}</span>
+                <span className="text-[11px] text-muted-foreground">{pluralize(inv.lineItemCount ?? 0, "item")} · Tax {formatCurrency(inv.totalTax)}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); shareInvoice(inv); }}
