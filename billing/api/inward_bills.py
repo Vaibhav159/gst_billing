@@ -24,7 +24,7 @@ from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
 from billing.period_lock import assert_period_unlocked
-from billing.tax_rules import is_interstate
+from billing.tax_rules import is_interstate, normalize_rate
 from billing.utils import AIInvoiceProcessor
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
@@ -117,6 +117,33 @@ class InwardBillListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        try:
+            lines_in = json.loads(request.data.get("lines") or "[]")
+        except (ValueError, TypeError):
+            return Response({"error": "lines must be valid JSON."}, status=status.HTTP_400_BAD_REQUEST)
+        if not lines_in:
+            return Response({"error": "At least one line item is required."}, status=status.HTTP_400_BAD_REQUEST)
+        # A line's GST rate is its input credit, so it is never guessed. A
+        # blank or 0 rate used to become 3%: every manually entered purchase
+        # (the form had no rate field) and every AI-read 0 claimed 3% ITC,
+        # diamonds at 0.25% included. The slab allowlist resolves either shape,
+        # so an AI-read 0.25 is 0.25%, not 25%. Checked before the supplier is
+        # resolved, so a refused bill creates nothing.
+        rates, unrated = [], []
+        for n, ln in enumerate(lines_in, start=1):
+            try:
+                rate = normalize_rate(ln.get("gst_tax_rate"), "fraction")
+            except (ArithmeticError, ValueError, TypeError):  # missing, blank or not a number
+                rate = None
+            if rate is None or not rate.is_finite() or rate < 0:
+                unrated.append(str(n))
+            rates.append(rate)
+        if unrated:
+            return Response(
+                {"error": f"Pick a GST rate for line {', '.join(unrated)} (0% if the bill charges no GST)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         supplier_gstin = (request.data.get("supplier_gstin") or "").strip().upper()
         supplier_name = (request.data.get("supplier_name") or "").strip()
         if not supplier_name and not supplier_gstin:
@@ -145,13 +172,6 @@ class InwardBillListCreateView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        try:
-            lines_in = json.loads(request.data.get("lines") or "[]")
-        except (ValueError, TypeError):
-            return Response({"error": "lines must be valid JSON."}, status=status.HTTP_400_BAD_REQUEST)
-        if not lines_in:
-            return Response({"error": "At least one line item is required."}, status=status.HTTP_400_BAD_REQUEST)
-
         # Shared rule with the invoice write paths. The old inline check was
         # `bool(supplier_gstin) and codes match`, so a supplier with no GSTIN
         # fell through to interstate and the whole bill was taxed IGST.
@@ -161,7 +181,7 @@ class InwardBillListCreateView(APIView):
         )
         intra = not is_interstate(business, supplier_for_rule)
         service_lines = []
-        for ln in lines_in:
+        for ln, gst_rate in zip(lines_in, rates, strict=True):
             qty = Decimal(str(ln.get("quantity") or "0"))
             price = Decimal(str(ln.get("rate") or "0"))
             taxable = Decimal(str(ln["taxable"])) if ln.get("taxable") not in (None, "") else qty * price
@@ -171,9 +191,9 @@ class InwardBillListCreateView(APIView):
                 "unit": (ln.get("unit") or "pcs").strip() or "pcs",
                 "quantity": qty,
                 "price_rate": price,
-                "gst_tax_rate": Decimal(str(ln.get("gst_tax_rate") or "0.03")),
+                "gst_tax_rate": gst_rate,
                 "taxable": taxable,
-                "rate": Decimal(str(ln.get("gst_tax_rate") or "0.03")),
+                "rate": gst_rate,
             })
         bill_total = request.data.get("bill_total")
         bill_total = Decimal(str(bill_total)) if bill_total not in (None, "") else None

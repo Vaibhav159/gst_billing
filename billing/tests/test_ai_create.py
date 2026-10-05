@@ -64,6 +64,16 @@ class AICreateTests(TestCase):
         self.assertEqual(li.gst_tax_rate, Decimal("0.0025"))
         self.assertEqual(li.igst, Decimal("250"))
 
+    def test_an_inward_line_read_at_0_books_no_itc(self):
+        """C1, the AI Import door: Gemini answers 0 when the bill prints no
+        per-line rate, and the default turned that into 3% input credit."""
+        data = self._post(type_of_invoice="inward", invoice_data={
+            **self._payload()["invoice_data"], "invoice_number": "AI-IN-0",
+            "line_items": [{"product_name": "Making Charges", "hsn_code": "998892", "quantity": 1, "rate": 1500, "gst_tax_rate": 0}],
+        })
+        li = Invoice.objects.get(id=data["invoice_id"]).lineitem_set.get()
+        self.assertEqual((li.gst_tax_rate, li.cgst + li.sgst + li.igst), (Decimal("0"), Decimal("0")))
+
     def test_re_uploading_the_same_bill_returns_the_existing_invoice(self):
         first = self._post()
         second = self._post()

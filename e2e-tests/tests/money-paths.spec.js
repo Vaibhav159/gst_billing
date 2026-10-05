@@ -113,11 +113,12 @@ test.describe('Outward invoice — tax heads land correctly', () => {
 test.describe('Inward bill — capture to register', () => {
   const BILL_NO = `E2E-${RUN}`;
 
-  async function fillLine(page, { product, hsn, qty, rate }) {
+  async function fillLine(page, { product, hsn, qty, rate, gst }) {
     await page.getByPlaceholder('Product').fill(product);
     await page.getByPlaceholder('HSN').fill(hsn);
     await page.getByPlaceholder('Qty').fill(qty);
     await page.getByPlaceholder('Rate').fill(rate);
+    if (gst) await page.getByRole('combobox', { name: 'GST rate' }).selectOption(gst);
   }
 
   test('manual capture saves with intra-state heads and appears in the register', async ({ page }) => {
@@ -137,6 +138,12 @@ test.describe('Inward bill — capture to register', () => {
     await field('Invoice #').fill(BILL_NO);
     await field('Invoice date').fill('2026-08-12');
     await fillLine(page, { product: 'Silver Payal', hsn: '711311', qty: '100', rate: '95' });
+
+    // No GST rate picked: the form refuses instead of booking a guessed 3%
+    // input credit, which it silently did before the slab picker (C1).
+    await page.getByRole('button', { name: 'Save inward bill' }).click();
+    await expect(page.getByText('Pick the GST rate').first()).toBeVisible();
+    await page.getByRole('combobox', { name: 'GST rate' }).selectOption('3');
 
     const create = page.waitForResponse(
       (r) => r.url().endsWith('/api/inward-bills/') && r.request().method() === 'POST');
@@ -172,7 +179,7 @@ test.describe('Inward bill — capture to register', () => {
     await field('Supplier name').fill('E2E LOCAL SUPPLIER');
     await field('Invoice #').fill(BILL_NO);               // the number just used
     await field('Invoice date').fill('2026-08-13');
-    await fillLine(page, { product: 'Silver Payal', hsn: '711311', qty: '1', rate: '95' });
+    await fillLine(page, { product: 'Silver Payal', hsn: '711311', qty: '1', rate: '95', gst: '3' });
 
     const create = page.waitForResponse(
       (r) => r.url().endsWith('/api/inward-bills/') && r.request().method() === 'POST');

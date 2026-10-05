@@ -359,8 +359,12 @@ def create_from_ai(request):
         # the supposedly-tax-inclusive `amount` slot. Recomputing
         # ensures Invoice.total_amount = sum(LineItem.amount) =
         # actual tax-inclusive total, internally consistent.
+        # No 3% fallback on a purchase: the rate is the input credit claimed,
+        # and Gemini answers 0 when a bill prints no per-line rate (C1). The
+        # review screen shows that 0, so 0 is what gets booked.
         new_lis, running_total = build_line_items(
-            invoice, invoice_data.get("line_items", []) or [], source="ai", default_rate=Decimal("0.03"),
+            invoice, invoice_data.get("line_items", []) or [], source="ai",
+            default_rate=None if type_of_invoice == INVOICE_TYPE_INWARD else Decimal("0.03"),
         )
         # bulk_create skips the per-line resync signal (which would re-sum
         # the invoice once per line); the total is the running sum of the

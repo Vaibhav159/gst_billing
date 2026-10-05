@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { GST_SLABS, percentToRate, rateToPercent, lineItemPercent, lineItemToStoredRate } from "./gstRate";
+import { GST_SLABS, aiRateChoice, percentToRate, rateToPercent, lineItemPercent, lineItemToStoredRate } from "./gstRate";
 
 // The heuristic this replaces, kept here to pin exactly where it disagreed.
 const old = (raw: number) => (raw > 1 ? raw / 100 : raw);
@@ -145,5 +145,31 @@ describe("lineItemToStoredRate — one conversion, by key", () => {
   it("prefers gstRate when both are present; zero when neither", () => {
     expect(lineItemToStoredRate({ gstRate: 3, gst_tax_rate: 0.18 })).toBe(0.03);
     expect(lineItemToStoredRate({})).toBe(0);
+  });
+});
+
+describe("aiRateChoice — where the inward slab picker starts for an AI-read rate (C1)", () => {
+  it("preselects a slab the AI read, in either shape", () => {
+    expect(aiRateChoice(0.0025)).toBe("0.25");
+    expect(aiRateChoice(0.25)).toBe("0.25"); // Gemini's reading of 0.25%: never 25%
+    expect(aiRateChoice(0.03)).toBe("3");
+    expect(aiRateChoice(18)).toBe("18");
+  });
+
+  it("leaves the line unchosen when the AI read 0 or nothing, instead of booking 3%", () => {
+    for (const raw of [0, "0", null, undefined, ""]) {
+      expect(aiRateChoice(raw)).toBe("");
+    }
+  });
+
+  it("leaves an off-slab reading unchosen rather than inventing an option", () => {
+    expect(aiRateChoice(0.07)).toBe("");
+    expect(aiRateChoice("abc")).toBe("");
+  });
+
+  it("every choice is an option the picker has", () => {
+    for (const slab of GST_SLABS.filter((s) => s > 0)) {
+      expect(aiRateChoice(percentToRate(slab))).toBe(String(slab));
+    }
   });
 });

@@ -263,3 +263,54 @@ class InwardBillAPITest(BaseAPITestCase):
         self.assertEqual(two.status_code, 201, two.data)
         self.assertEqual(Invoice.objects.filter(invoice_number="001",
                          type_of_invoice=INVOICE_TYPE_INWARD).count(), 2)
+
+
+class InwardBillRateTest(BaseAPITestCase):
+    """C1: the capture form had no GST-rate field and the server turned a
+    blank or 0 rate into 3%, so every manually entered purchase booked 3%
+    ITC; an AI-read "0.25" went in verbatim and was taxed at 25%."""
+
+    def _post(self, number, rate, **line):
+        ln = {"product_name": "Cut & Polished Diamonds", "hsn_code": "710239",
+              "quantity": "2", "rate": "500000", "unit": "ct", **line}
+        if rate is not ...:
+            ln["gst_tax_rate"] = rate
+        return self.client.post(reverse("inward-bill-list"), {
+            "business_id": self.business.id, "supplier_name": "GEM HOUSE",
+            "supplier_gstin": "22CCCCC0000C1Z5",
+            "invoice_number": number, "invoice_date": "2026-05-05",
+            "lines": json.dumps([ln]),
+        })
+
+    def test_every_rate_shape_is_stored_as_the_slab_it_means(self):
+        # (what arrives, stored fraction, CGST on a 10,00,000 taxable line)
+        cases = [
+            ("0.25", D("0.0025"), D("1250.00")),   # Gemini's reading of 0.25%
+            ("0.0025", D("0.0025"), D("1250.00")),
+            ("3", D("0.03"), D("15000.00")),       # a percent on the wire
+            ("0.03", D("0.03"), D("15000.00")),
+            (0.05, D("0.05"), D("25000.00")),
+        ]
+        for i, (sent, stored, cgst) in enumerate(cases):
+            with self.subTest(sent=sent):
+                resp = self._post(f"R-{i}", sent)
+                self.assertEqual(resp.status_code, 201, resp.data)
+                li = Invoice.objects.get(invoice_number=f"R-{i}").lineitem_set.get()
+                self.assertEqual(li.gst_tax_rate, stored)
+                self.assertEqual((li.cgst, li.sgst, li.igst), (cgst, cgst, D("0")))
+
+    def test_an_explicit_zero_rate_books_no_tax(self):
+        resp = self._post("Z-1", 0)
+        self.assertEqual(resp.status_code, 201, resp.data)
+        li = Invoice.objects.get(invoice_number="Z-1").lineitem_set.get()
+        self.assertEqual((li.gst_tax_rate, li.cgst + li.sgst + li.igst), (D("0"), D("0")))
+
+    def test_a_line_without_a_rate_is_refused_not_booked_at_3pct(self):
+        suppliers = Customer.objects.count()
+        for i, rate in enumerate([..., None, "", "three"]):
+            with self.subTest(rate=rate):
+                resp = self._post(f"N-{i}", rate)
+                self.assertEqual(resp.status_code, 400)
+                self.assertIn("GST rate", resp.data["error"])
+        self.assertFalse(Invoice.objects.filter(invoice_number__startswith="N-").exists())
+        self.assertEqual(Customer.objects.count(), suppliers, "a refused bill must not create its supplier")
