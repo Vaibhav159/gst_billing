@@ -64,6 +64,7 @@ export default function InvoiceList() {
   const [fyFilter, setFyFilter] = useState(selectedFY);
   useEffect(() => { setFyFilter(selectedFY); }, [selectedFY]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [sortBy, setSortBy] = useState<"date" | "total" | "invoiceNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -391,14 +392,21 @@ export default function InvoiceList() {
                 <Download className="w-4 h-4" /> Export
               </button>
               {canDelete && (
-                <button onClick={async () => {
+                <button disabled={bulkDeleting} onClick={async () => {
                   if (confirm(`Delete ${selected.size} selected invoices? This cannot be undone.`)) {
-                    const result = await deleteEach(Array.from(selected), removeInvoice);
-                    toast(bulkDeleteToast(result, "invoice"));
-                    // What the server refused stays on screen, still selected.
-                    setSelected(new Set(result.refused.map((r) => r.id)));
+                    // One batch at a time: a second click used to send every
+                    // DELETE again and report the 404s as refusals.
+                    setBulkDeleting(true);
+                    try {
+                      const result = await deleteEach(Array.from(selected), removeInvoice);
+                      toast(bulkDeleteToast(result, "invoice"));
+                      // What the server refused stays on screen, still selected.
+                      setSelected(new Set(result.refused.map((r) => r.id)));
+                    } finally {
+                      setBulkDeleting(false);
+                    }
                   }
-                }} className="premium-btn-ghost text-[13px] text-destructive">
+                }} className="premium-btn-ghost text-[13px] text-destructive disabled:opacity-50">
                   <Trash2 className="w-4 h-4" /> Delete
                 </button>
               )}
