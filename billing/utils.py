@@ -1165,7 +1165,10 @@ Rules:
                     "quantity": qty,
                     "rate": rate,
                     "hsn_code": _s(item.get("hsn_code")),
-                    "gst_tax_rate": _f(item.get("gst_tax_rate"), 0.03),
+                    # None when the model gave none: unknown, not a guessed
+                    # 3%. The inward form leaves such a line unchosen and a
+                    # purchase books 0 (C1); sales keep their own default.
+                    "gst_tax_rate": _f(item.get("gst_tax_rate"), None),
                     "amount": amount,
                 }
             )

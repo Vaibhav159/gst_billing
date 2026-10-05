@@ -381,3 +381,23 @@ class InwardBillNoGstinTest(BaseAPITestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
         sup.refresh_from_db()
         self.assertEqual(sup.gst_number, "22AAAAA1111A1Z5")
+
+
+class AIReadRateTest(SimpleTestCase):
+    """C1: a rate the model didn't give is unknown, not 3%. The extractor's
+    0.03 fallback made the inward form preselect 3% and AI Import book 3% ITC."""
+
+    def _rates(self, *items):
+        from billing.utils import AIInvoiceProcessor
+
+        out = AIInvoiceProcessor._convert_to_dict({"line_items": [
+            {"product_name": "x", "quantity": 1, "rate": 100, **item} for item in items
+        ]})
+        return [li["gst_tax_rate"] for li in out["line_items"]]
+
+    def test_a_missing_rate_stays_unknown(self):
+        self.assertEqual(self._rates({}, {"gst_tax_rate": None}, {"gst_tax_rate": ""}, {"gst_tax_rate": "n/a"}),
+                         [None, None, None, None])
+
+    def test_a_rate_the_model_gave_is_kept_as_read(self):
+        self.assertEqual(self._rates({"gst_tax_rate": 0}, {"gst_tax_rate": 0.25}, {"gst_tax_rate": "0.03"}), [0.0, 0.25, 0.03])

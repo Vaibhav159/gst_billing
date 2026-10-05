@@ -21,7 +21,7 @@ type LineItem = {
   quantity: number;
   rate: number;
   hsn_code: string;
-  gst_tax_rate: number; // decimal: 0.03 for 3%
+  gst_tax_rate: number | null; // decimal: 0.03 for 3%; null when the model read none
   amount: number;       // tax-inclusive line subtotal
 };
 
