@@ -79,7 +79,7 @@ and a user with no group.
 | | Production | Sandbox |
 |---|---|---|
 | Database | Neon (external) | `postgres:17-alpine` container, synthetic data |
-| Settings | `production_settings` | `sandbox_settings` = production + DB guard, localhost origins, `GEMINI_*` read from env |
+| Settings | `production_settings` | `sandbox_settings` = production + DB guard, localhost origins |
 | gunicorn | 4 workers × 4 threads | 2 × 4, `--reload`, backend source mounted read-only |
 | Edge | Cosmos TLS → nginx | SSH tunnel → nginx |
 | Watchtower, backup sidecar | yes | no |

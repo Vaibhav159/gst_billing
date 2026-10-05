@@ -1,4 +1,8 @@
+import importlib.util
+import os
 from decimal import Decimal
+from pathlib import Path
+from unittest import mock
 
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
@@ -6,6 +10,28 @@ from rest_framework.test import APIClient
 
 from billing.constants import INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem, Product
+
+PRODUCTION_SETTINGS = Path(__file__).resolve().parents[2] / "gst_billing" / "production_settings.py"
+
+
+def load_production_settings(**env):
+    """A fresh copy of gst_billing.production_settings, evaluated under `env`.
+
+    The suite runs under test_settings, which imports the dev settings and
+    switches throttling off, so nothing exercised what the image actually
+    runs. Pass env vars as the container would see them; None unsets one.
+    """
+    env = {"DJANGO_SECRET_KEY": "test-only-not-secret", **env}
+    with mock.patch.dict(os.environ):
+        for key, value in env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        spec = importlib.util.spec_from_file_location("production_settings_under_test", PRODUCTION_SETTINGS)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return module
 
 
 class BaseAPITestCase(TestCase):

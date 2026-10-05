@@ -28,11 +28,3 @@ CSRF_TRUSTED_ORIGINS = [
     *CSRF_TRUSTED_ORIGINS,
     *(o.strip() for o in os.environ.get("SANDBOX_TRUSTED_ORIGINS", "").split(",") if o.strip()),
 ]
-
-# production_settings never defines these, and AIInvoiceProcessor reads them
-# from settings, not the environment — so on the live site AI extraction finds
-# no key whatever .env holds. Read here so the sandbox can exercise the flow.
-GEMINI_API_KEYS = os.environ.get("GEMINI_API_KEYS", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-if os.environ.get("GEMINI_VISION_MODEL"):
-    GEMINI_VISION_MODEL = os.environ["GEMINI_VISION_MODEL"]
