@@ -5,6 +5,8 @@ import { format } from "date-fns";
 import { formatCurrency, formatCompactCurrency, formatChartK } from "@/utils/mockData";
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { formatApiError } from "@/utils/apiError";
 import api from "@/utils/api";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { Download, FileJson, BarChart3, Loader2, AlertTriangle, Save, Clock, CheckCircle2, XCircle, Pencil, Lock } from "lucide-react";
@@ -158,6 +160,8 @@ export default function GSTSummary() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const isMobile = useIsMobile();
   const { toast } = useToast();
+  // Unlocking is a DELETE on the filed period, which the API allows admins only.
+  const { canDelete } = usePermission();
   const { items: businesses } = useBusinesses();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -394,8 +398,8 @@ export default function GSTSummary() {
       await api.delete(`filed-periods/${lockedPeriod.id}/`);
       toast({ title: "Month unlocked", description: "Re-lock after making the correction." });
       refreshFiled();
-    } catch {
-      toast({ title: "Unlock failed", variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Unlock failed", description: formatApiError(e, "Could not unlock the month."), variant: "destructive" });
     } finally { setLockBusy(false); }
   };
 
@@ -632,7 +636,7 @@ export default function GSTSummary() {
               <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 text-success border border-success/25 px-3 py-1.5 font-semibold">
                 <Lock className="w-3.5 h-3.5" /> {selectedMonth} {lockY} — filed &amp; locked
               </span>
-              <button onClick={handleUnlockMonth} disabled={lockBusy} className="premium-btn-ghost h-8 text-[12px] disabled:opacity-50">Unlock…</button>
+              {canDelete && <button onClick={handleUnlockMonth} disabled={lockBusy} className="premium-btn-ghost h-8 text-[12px] disabled:opacity-50">Unlock…</button>}
             </>
           ) : (
             <button onClick={handleLockMonth} disabled={lockBusy} className="premium-btn-ghost h-8 text-[12px] disabled:opacity-50" title="After the CA files this month, lock it so no edit can silently diverge from the filed return">
