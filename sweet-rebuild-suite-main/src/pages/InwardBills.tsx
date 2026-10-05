@@ -16,9 +16,15 @@ import { listCaptures, deleteCapture, type InwardCaptureRow, useInwardBills } fr
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { formatCurrency, formatDate } from "@/utils/mockData";
+import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback } from "@/utils/deleteFeedback";
 
 export default function InwardBills() {
   const navigate = useNavigate();
+  const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const [captures, setCaptures] = useState<InwardCaptureRow[]>([]);
   useEffect(() => {
     let alive = true;
@@ -119,11 +125,18 @@ export default function InwardBills() {
                   </p>
                 </div>
                 <button onClick={() => navigate(`/billing/inward-bills/add?capture=${c.id}`)} className="premium-btn-ghost h-8 text-[12px]" title="Fill in the bill from this photo"><Pencil className="w-3.5 h-3.5" /> Fill in</button>
-                <button
-                  onClick={async () => { if (window.confirm("Discard this capture? The photo is deleted.")) { await deleteCapture(c.id); setCaptures((p) => p.filter((x) => x.id !== c.id)); } }}
-                  className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  aria-label="Discard capture"
-                ><Trash2 className="w-3.5 h-3.5" /></button>
+                {canDelete && (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm("Discard this capture? The photo is deleted.")) return;
+                      if (await deleteWithFeedback(() => deleteCapture(c.id), toast, { label: "Capture" })) {
+                        setCaptures((p) => p.filter((x) => x.id !== c.id));
+                      }
+                    }}
+                    className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    aria-label="Discard capture"
+                  ><Trash2 className="w-3.5 h-3.5" /></button>
+                )}
               </div>
             ))}
           </div>

@@ -10,6 +10,8 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import { useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
@@ -20,6 +22,8 @@ export default function BusinessDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const isMobile = useIsMobile();
   const { item: biz, isLoading } = useBusiness(id);
   const { remove: removeBusiness } = useBusinesses();
@@ -101,7 +105,7 @@ export default function BusinessDetail() {
           <div className="flex items-center gap-2.5">
             <button onClick={() => navigate(-1)} className="premium-btn-ghost text-[13px] h-9"><ArrowLeft className="w-4 h-4" /> Back</button>
             <Link to={`/billing/business/edit/${id}`} className="premium-btn-outline text-[13px] h-9 border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
-            <button onClick={() => setDeleteOpen(true)} className="premium-btn-outline text-[13px] h-9 border-destructive/30 text-destructive"><Trash2 className="w-4 h-4" /> Delete</button>
+            {canDelete && <button onClick={() => setDeleteOpen(true)} className="premium-btn-outline text-[13px] h-9 border-destructive/30 text-destructive"><Trash2 className="w-4 h-4" /> Delete</button>}
           </div>
         )}
       </motion.div>
@@ -234,13 +238,13 @@ export default function BusinessDetail() {
         <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
           <div className="flex items-center gap-2">
             <Link to={`/billing/business/edit/${id}`} className="premium-btn-outline flex-1 text-[12px] h-10 border-primary/30 text-primary"><Pencil className="w-3.5 h-3.5" /> Edit</Link>
-            <button onClick={() => setDeleteOpen(true)} className="premium-btn-outline flex-1 text-[12px] h-10 border-destructive/30 text-destructive"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+            {canDelete && <button onClick={() => setDeleteOpen(true)} className="premium-btn-outline flex-1 text-[12px] h-10 border-destructive/30 text-destructive"><Trash2 className="w-3.5 h-3.5" /> Delete</button>}
           </div>
         </div>
       )}
 
       <DeleteConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} itemName={biz.name} itemType="Business"
-        onConfirm={() => { removeBusiness(id!); toast({ title: "Business Deleted", variant: "destructive" }); navigate("/billing/business/list"); }} />
+        onConfirm={async () => { if (await deleteWithFeedback(() => removeBusiness(id!), toast, { label: "Business", name: biz.name })) navigate("/billing/business/list"); }} />
     </div>
   );
 }

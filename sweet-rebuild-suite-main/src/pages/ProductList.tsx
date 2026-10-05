@@ -14,6 +14,8 @@ import { useProducts } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
@@ -21,6 +23,8 @@ import { stagger, fadeUp } from "@/utils/animations";
 
 export default function ProductList() {
   const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { items: products, remove: removeProduct, totalCount: productTotalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useProducts(selectedFY);
@@ -208,7 +212,7 @@ export default function ProductList() {
           onOpenChange={(open) => !open && setDeleteTarget(null)}
           itemName={deleteTarget?.name || ""}
           itemType="Product"
-          onConfirm={() => { removeProduct(deleteTarget!.id); toast({ title: "Product Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+          onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeProduct(t.id), toast, { label: "Product", name: t.name }); }}
         />
       </div>
     );
@@ -383,9 +387,9 @@ export default function ProductList() {
                         <Link to={`/billing/product/edit/${p.id}`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors" title="Edit">
                           <Pencil className="w-4 h-4" />
                         </Link>
-                        <button onClick={() => setDeleteTarget({ id: p.id, name: p.name })} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Delete">
+                        {canDelete && (<button onClick={() => setDeleteTarget({ id: p.id, name: p.name })} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Delete">
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </button>)}
                       </div>
                     </td>
                   </motion.tr>
@@ -491,7 +495,7 @@ export default function ProductList() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         itemName={deleteTarget?.name || ""}
         itemType="Product"
-        onConfirm={() => { removeProduct(deleteTarget!.id); toast({ title: "Product Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+        onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeProduct(t.id), toast, { label: "Product", name: t.name }); }}
       />
     </div>
   );

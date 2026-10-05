@@ -12,6 +12,8 @@ import { useCustomers, useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
@@ -20,6 +22,8 @@ import { formatApiError, errorTag } from "@/utils/apiError";
 
 export default function CustomerList() {
   const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
@@ -216,7 +220,7 @@ export default function CustomerList() {
           onOpenChange={(open) => !open && setDeleteTarget(null)}
           itemName={deleteTarget?.name || ""}
           itemType="Customer"
-          onConfirm={() => { removeCustomer(deleteTarget!.id); toast({ title: "Customer Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+          onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeCustomer(t.id), toast, { label: "Customer", name: t.name }); }}
         />
       </div>
     );
@@ -406,7 +410,7 @@ export default function CustomerList() {
                       <div className="flex items-center gap-0.5">
                         <Link to={`/billing/customer/${c.id}`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors" title="View"><Eye className="w-4 h-4" /></Link>
                         <Link to={`/billing/customer/edit/${c.id}`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors" title="Edit"><Pencil className="w-4 h-4" /></Link>
-                        <button onClick={() => setDeleteTarget({ id: c.id, name: c.name })} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        {canDelete && (<button onClick={() => setDeleteTarget({ id: c.id, name: c.name })} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>)}
                       </div>
                     </td>
                   </motion.tr>
@@ -554,7 +558,7 @@ export default function CustomerList() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         itemName={deleteTarget?.name || ""}
         itemType="Customer"
-        onConfirm={() => { removeCustomer(deleteTarget!.id); toast({ title: "Customer Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+        onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeCustomer(t.id), toast, { label: "Customer", name: t.name }); }}
       />
 
       {/* ── Merge Customers Modal ── */}

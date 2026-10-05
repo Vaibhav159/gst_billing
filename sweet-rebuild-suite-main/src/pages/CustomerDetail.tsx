@@ -13,6 +13,8 @@ import { useCustomer, useCustomers, useBusinesses, useInvoices } from "@/hooks/u
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -22,6 +24,8 @@ export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const isMobile = useIsMobile();
   const [showDelete, setShowDelete] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -143,7 +147,7 @@ export default function CustomerDetail() {
               {downloading ? <><Loader2 className="w-4 h-4 animate-spin" /> {dlProgress.current}/{dlProgress.total}</> : <><Download className="w-4 h-4" /> Download All PDFs</>}
             </button>
             <Link to={`/billing/customer/edit/${id}`} className="premium-btn-outline text-[13px] h-9 border-primary/30 text-primary"><Pencil className="w-4 h-4" /> Edit</Link>
-            <button onClick={() => setShowDelete(true)} className="premium-btn-outline text-[13px] h-9 border-destructive/30 text-destructive"><Trash2 className="w-4 h-4" /> Delete</button>
+            {canDelete && <button onClick={() => setShowDelete(true)} className="premium-btn-outline text-[13px] h-9 border-destructive/30 text-destructive"><Trash2 className="w-4 h-4" /> Delete</button>}
           </div>
         )}
       </motion.div>
@@ -288,13 +292,13 @@ export default function CustomerDetail() {
               {downloading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {dlProgress.current}/{dlProgress.total}</> : <><Download className="w-3.5 h-3.5" /> PDFs</>}
             </button>
             <Link to={`/billing/customer/${id}/statement`} className="premium-btn-primary flex-1 text-[12px] h-10"><FileText className="w-3.5 h-3.5" /> Statement</Link>
-            <button onClick={() => setShowDelete(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-destructive/30 text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
+            {canDelete && <button onClick={() => setShowDelete(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-destructive/30 text-destructive" aria-label="Delete customer"><Trash2 className="w-3.5 h-3.5" /></button>}
           </div>
         </div>
       )}
 
       <DeleteConfirmDialog open={showDelete} onOpenChange={setShowDelete} itemName={customer.name} itemType="Customer"
-        onConfirm={() => { removeCustomer(id!); toast({ title: "Customer Deleted", variant: "destructive" }); navigate("/billing/customer/list"); }} />
+        onConfirm={async () => { if (await deleteWithFeedback(() => removeCustomer(id!), toast, { label: "Customer", name: customer.name })) navigate("/billing/customer/list"); }} />
     </div>
   );
 }

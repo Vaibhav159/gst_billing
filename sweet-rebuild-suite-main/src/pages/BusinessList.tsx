@@ -12,6 +12,8 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -23,6 +25,8 @@ const fadeUp = {
 
 export default function BusinessList() {
   const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const isMobile = useIsMobile();
   const { selectedFY } = useOutletContext<{ selectedFY: string }>();
   const { items: businesses, remove: removeBusiness, totalCount: bizTotalCount, hasMore, loadMore, isLoadingMore, error: loadError, refetch: retryLoad } = useBusinesses(selectedFY);
@@ -192,7 +196,7 @@ export default function BusinessList() {
                       <div className="flex items-center gap-0.5">
                         <Link to={`/billing/business/${b.id}`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"><Eye className="w-4 h-4" /></Link>
                         <Link to={`/billing/business/edit/${b.id}`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-secondary/50 text-muted-foreground hover:text-primary transition-colors"><Pencil className="w-4 h-4" /></Link>
-                        <button onClick={() => setDeleteTarget({ id: b.id, name: b.name })} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>
+                        {canDelete && (<button onClick={() => setDeleteTarget({ id: b.id, name: b.name })} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-4 h-4" /></button>)}
                       </div>
                     </td>
                   </motion.tr>
@@ -285,7 +289,7 @@ export default function BusinessList() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         itemName={deleteTarget?.name || ""}
         itemType="Business"
-        onConfirm={() => { removeBusiness(deleteTarget!.id); toast({ title: "Business Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+        onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeBusiness(t.id), toast, { label: "Business", name: t.name }); }}
       />
     </div>
   );
