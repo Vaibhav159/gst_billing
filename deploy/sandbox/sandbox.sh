@@ -76,8 +76,17 @@ case "$cmd" in
         umask 077
         flag=()
         [ "$cmd" = reseed ] && flag=(--reset)
-        dc exec -T web python manage.py seed_sandbox "${flag[@]}" --print-credentials > "$ENV_DIR/logins.txt"
-        echo "Sandbox logins written to $ENV_DIR/logins.txt (0600)."
+        # Into a temp file first: the seed is atomic, so when it fails the
+        # existing users keep their passwords, and logins.txt is the only copy.
+        tmp="$(mktemp "$ENV_DIR/logins.XXXXXX")"
+        if dc exec -T web python manage.py seed_sandbox "${flag[@]}" --print-credentials > "$tmp"; then
+            mv "$tmp" "$ENV_DIR/logins.txt"
+            echo "Sandbox logins written to $ENV_DIR/logins.txt (0600)."
+        else
+            rm -f "$tmp"
+            echo "Seeding failed; $ENV_DIR/logins.txt is unchanged." >&2
+            exit 1
+        fi
         ;;
     manage)
         need_env
