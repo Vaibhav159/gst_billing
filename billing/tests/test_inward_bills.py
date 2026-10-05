@@ -299,6 +299,17 @@ class InwardBillRateTest(BaseAPITestCase):
                 self.assertEqual(li.gst_tax_rate, stored)
                 self.assertEqual((li.cgst, li.sgst, li.igst), (cgst, cgst, D("0")))
 
+    def test_a_rate_off_the_slab_list_is_refused(self):
+        """No GST slab is 50%, 12.5%, 100% or 7%: "0.5" was stored as 50%, and
+        "0.125" (the CGST half of 0.25%) as 12.5%. The picker can't send these;
+        an API client could."""
+        for i, rate in enumerate(["0.5", "0.125", "100", "7", "-0.03"]):
+            with self.subTest(rate=rate):
+                resp = self._post(f"OFF-{i}", rate)
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertIn("GST rate", resp.data["error"])
+        self.assertFalse(Invoice.objects.filter(invoice_number__startswith="OFF-").exists())
+
     def test_an_explicit_zero_rate_books_no_tax(self):
         resp = self._post("Z-1", 0)
         self.assertEqual(resp.status_code, 201, resp.data)

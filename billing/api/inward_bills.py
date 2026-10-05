@@ -24,7 +24,7 @@ from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
 from billing.period_lock import assert_period_unlocked
-from billing.tax_rules import has_gstin, is_interstate, itc_refusal, normalize_rate
+from billing.tax_rules import GST_SLABS, has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
@@ -127,20 +127,23 @@ class InwardBillListCreateView(APIView):
         # blank or 0 rate used to become 3%: every manually entered purchase
         # (the form had no rate field) and every AI-read 0 claimed 3% ITC,
         # diamonds at 0.25% included. The slab allowlist resolves either shape,
-        # so an AI-read 0.25 is 0.25%, not 25%. Checked before the supplier is
-        # resolved, so a refused bill creates nothing.
+        # so an AI-read 0.25 is 0.25%, not 25%, and anything off the list is
+        # refused: "0.5" was stored as 50%, "0.125" (half of 0.25%) as 12.5%.
+        # Checked before the supplier is resolved, so a refused bill creates
+        # nothing.
         rates, unrated = [], []
         for n, ln in enumerate(lines_in, start=1):
             try:
                 rate = normalize_rate(ln.get("gst_tax_rate"), "fraction")
             except (ArithmeticError, ValueError, TypeError):  # missing, blank or not a number
                 rate = None
-            if rate is None or not rate.is_finite() or rate < 0:
+            if rate is None or not rate.is_finite() or rate * 100 not in GST_SLABS:
                 unrated.append(str(n))
             rates.append(rate)
         if unrated:
             return Response(
-                {"error": f"Pick a GST rate for line {', '.join(unrated)} (0% if the bill charges no GST)."},
+                {"error": f"Pick a GST rate from the slab list for line {', '.join(unrated)} "
+                          "(0% if the bill charges no GST)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
