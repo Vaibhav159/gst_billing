@@ -62,6 +62,8 @@ export interface Business {
   bank_branch_name?: string | null;
   state_name?: string | null;
   primary_color_theme?: string;
+  // Never returned by the API (upload-only). withSignatureForPdf sets it to
+  // the signature_image_base64 data URI for the PDF renderer.
   signature_image?: string | null;
   signature_image_url?: string | null;
   signature_image_base64?: string | null;

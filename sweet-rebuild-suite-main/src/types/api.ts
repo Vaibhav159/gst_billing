@@ -74,8 +74,10 @@ export interface DjangoBusiness {
   bank_ifsc_code?: string;
   bank_branch_name?: string;
   invoice_prefix?: string;
-  signature_image?: string;
+  // Upload-only: the API never returns signature_image. Read the signed
+  // signature_image_url, or signature_image_base64 for PDFs.
   signature_image_url?: string | null;
+  signature_image_base64?: string | null;
   primary_color_theme?: string;
   total_revenue?: string;
   total_purchases?: string;
