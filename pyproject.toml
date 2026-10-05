@@ -21,11 +21,8 @@ dependencies = [
     "django-sql-explorer>=5.3",
     "djangorestframework>=3.16",
     "djangorestframework-simplejwt>=5.5",
-    "freezegun>=1.5.1",
-    "ipython>=8.14.0",
     "num2words>=0.5.14",
     "openpyxl>=3.1",
-    "pre-commit>=2.19.0",
     # psycopg 3 — Django 5.x's preferred driver (psycopg2-binary has no clean
     # build on newer Pythons here). ENGINE stays django.db.backends.postgresql,
     # which auto-detects the installed driver.
@@ -91,7 +88,13 @@ include = '\.pyi?$'
 profile = "black"
 line_length = 88
 
+# Tooling the image never runs. `uv sync` installs this group locally;
+# the image (`--no-dev`) and the CI advisory gate (`uv export --no-dev`) leave
+# it out, so the gate judges what actually ships.
 [dependency-groups]
 dev = [
     "ruff==0.16.5",
+    "freezegun>=1.5.1",
+    "ipython>=8.14.0",
+    "pre-commit>=2.19.0",
 ]

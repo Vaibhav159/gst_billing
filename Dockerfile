@@ -36,8 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install dependencies using uv
 COPY pyproject.toml uv.lock ./
-# Sync dependencies from lockfile
-RUN uv sync --frozen --no-cache --no-install-project
+# Sync dependencies from lockfile. --no-dev: the dev group (ruff, pre-commit,
+# ipython, freezegun) is tooling, not part of what production runs.
+RUN uv sync --frozen --no-cache --no-install-project --no-dev
 
 # gunicorn and django-redis are project dependencies now (pyproject + uv.lock),
 # so they are pinned by the lockfile like everything else instead of floating.
