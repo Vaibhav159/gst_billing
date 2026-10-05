@@ -92,3 +92,22 @@ class LoginThrottleBehindProxiesTest(BaseAPITestCase):
             other_client = self._attempt(f"203.0.113.8, {self.COSMOS}")
             same_client = self._attempt(f"203.0.113.7, {self.COSMOS}")
         self.assertEqual((other_client, same_client), (401, 429))
+
+    def _login_as(self, username, xff=None):
+        extra = {"HTTP_X_FORWARDED_FOR": xff} if xff is not None else {}
+        return APIClient().post(
+            reverse("token_obtain_pair"), {"username": username, "password": "wrong"},
+            REMOTE_ADDR=self.NGINX, **extra,
+        ).status_code
+
+    def test_if_the_edge_stops_naming_the_client_one_person_cannot_lock_everyone_out(self):
+        """With fewer X-Forwarded-For hops than proxies (Cosmos not adding the
+        client), DRF's key would be the edge's own address: one login bucket for
+        everybody. The throttle falls back to the username instead."""
+        for xff in (self.COSMOS, None):   # only nginx's hop / no header at all
+            with self.subTest(xff=xff), production_throttling() as prod:
+                for _ in range(self._budget(prod)):
+                    self._login_as("testuser", xff)
+                same_account = self._login_as("testuser", xff)
+                other_account = self._login_as("someone-else", xff)
+                self.assertEqual((same_account, other_account), (429, 401))
