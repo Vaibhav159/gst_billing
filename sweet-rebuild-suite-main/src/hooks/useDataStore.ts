@@ -63,6 +63,7 @@ export interface Business {
   state_name?: string | null;
   primary_color_theme?: string;
   signature_image?: string | null;
+  signature_image_url?: string | null;
   signature_image_base64?: string | null;
   email?: string | null;
   created_at?: string;
@@ -212,10 +213,10 @@ export function mapDjangoInvoice(inv: DjangoInvoice): Invoice {
     createdAt: inv.created_at || "",
     updatedAt: inv.updated_at || "",
     lineItemCount: hasItems ? items.length : (inv.line_item_count || 0),
-    // Audit-trail source image (populated by AI Import). URL from
-    // Django's FileField default serialization — relative to MEDIA_URL.
-    sourceFile: inv.source_file || null,
-    sourcePreview: inv.source_preview || null,
+    // Audit-trail source image (populated by AI Import): signed, expiring
+    // /api/media/ links. The plain /media/ path is a 404 behind nginx.
+    sourceFile: inv.source_file_url || null,
+    sourcePreview: inv.source_preview_url || null,
   };
 }
 

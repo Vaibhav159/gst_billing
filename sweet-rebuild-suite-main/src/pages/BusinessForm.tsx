@@ -85,8 +85,8 @@ export default function BusinessForm() {
 
   // Load existing signature preview
   useEffect(() => {
-    if (isEdit && existing?.signature_image) {
-      setSignaturePreview(existing.signature_image);
+    if (isEdit && existing?.signature_image_url) {
+      setSignaturePreview(existing.signature_image_url);
     }
   }, [existing, isEdit]);
 

@@ -25,8 +25,9 @@ export interface DjangoInvoice {
   total_amount: string;
   is_igst_applicable?: boolean;
   payment_mode?: string | null;
-  source_file?: string | null;
-  source_preview?: string | null;
+  // Signed /api/media/ links to the AI-import scan; the raw fields are write-only.
+  source_file_url?: string | null;
+  source_preview_url?: string | null;
   line_items?: DjangoLineItem[];
   line_item_count?: number;
   total_tax?: string;
@@ -74,6 +75,7 @@ export interface DjangoBusiness {
   bank_branch_name?: string;
   invoice_prefix?: string;
   signature_image?: string;
+  signature_image_url?: string | null;
   primary_color_theme?: string;
   total_revenue?: string;
   total_purchases?: string;

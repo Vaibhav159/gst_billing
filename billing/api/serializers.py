@@ -4,7 +4,17 @@ from decimal import Decimal
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from billing.api.media import sign_media_path
 from billing.models import Business, Customer, FiledPeriod, Invoice, ITCReclaimLedger, LineItem, Product
+
+
+def signed_url(file):
+    """A stored file -> its signed, expiring /api/media/ URL (or None).
+
+    Never the FileField's own /media/ path: production nginx answers 404 for
+    it, since bill scans became private.
+    """
+    return sign_media_path(file.name) if file else None
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -17,10 +27,16 @@ class BusinessSerializer(serializers.ModelSerializer):
     customer_count = serializers.IntegerField(read_only=True)
     invoice_count = serializers.IntegerField(read_only=True)
     signature_image_base64 = serializers.SerializerMethodField()
+    signature_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
         fields = "__all__"
+        # Upload-only: read it back through signature_image_url.
+        extra_kwargs = {"signature_image": {"write_only": True}}
+
+    def get_signature_image_url(self, obj):
+        return signed_url(obj.signature_image)
 
     def get_signature_image_base64(self, obj):
         if not obj.signature_image:
@@ -102,6 +118,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     business_name = serializers.CharField(source="business.name", read_only=True)
     is_igst_applicable = serializers.BooleanField(read_only=True)
+    # The AI-import scan, read back through signed links (the raw fields are
+    # write-only), as InwardBillSerializer does.
+    source_file_url = serializers.SerializerMethodField()
+    source_preview_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -110,6 +130,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
         # figure at all, breaking the invariant every export and GSTR table
         # depends on.
         read_only_fields = ("total_amount", "workspace_id")
+        extra_kwargs = {"source_file": {"write_only": True}, "source_preview": {"write_only": True}}
+
+    def get_source_file_url(self, obj):
+        return signed_url(obj.source_file)
+
+    def get_source_preview_url(self, obj):
+        return signed_url(obj.source_preview)
 
 
 class InvoiceListSerializer(serializers.ModelSerializer):
@@ -220,10 +247,7 @@ class InwardBillListSerializer(serializers.ModelSerializer):
         return url
 
     def get_source_preview_url(self, obj):
-        # Signed, expiring URL — /media/ is no longer publicly served.
-        from billing.api.media import sign_media_path
-
-        return sign_media_path(obj.source_preview.name) if obj.source_preview else None
+        return signed_url(obj.source_preview)
 
 
 class InwardBillSerializer(InwardBillListSerializer):
@@ -239,9 +263,7 @@ class InwardBillSerializer(InwardBillListSerializer):
         ]
 
     def get_source_file_url(self, obj):
-        from billing.api.media import sign_media_path
-
-        return sign_media_path(obj.source_file.name) if obj.source_file else None
+        return signed_url(obj.source_file)
 
 
 class InvoiceSummarySerializer(serializers.Serializer):

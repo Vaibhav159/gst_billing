@@ -4,10 +4,13 @@ The signature is the credential (img/iframe tags can't carry JWT headers),
 so the tests pin exactly what the signature must and must not allow.
 """
 
+import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import reverse
@@ -180,3 +183,46 @@ class SignedMediaThrottleTest(SimpleTestCase):
         # The anonymous limit still holds for everything else, and the image
         # fetches above spent none of it.
         self.assertEqual(other, [200] * budget + [429])
+
+
+@override_settings(MEDIA_ROOT=_MEDIA)
+class SignedDocumentLinksTest(BaseAPITestCase):
+    """M8: the invoice and business serializers emitted FileField paths under
+    /media/, which production nginx answers with 404. AI-imported invoices
+    showed "Preview unavailable" and a dead download link, and the business
+    form showed a broken signature, so people uploaded it again."""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def _assert_signed_and_served(self, url):
+        self.assertTrue(url and url.startswith("/api/media/") and "?s=" in url, url)
+        # Fetched the way an <img> fetches it: no JWT, no session.
+        self.assertEqual(APIClient().get(url).status_code, 200, url)
+
+    def _assert_no_public_media_links(self, data):
+        self.assertEqual(re.findall(r"(?<!/api)/media/[^\"]*", json.dumps(data)), [])
+
+    def test_ai_imported_invoice_links_are_signed(self):
+        inv = self.invoice
+        inv.source_file.save("bill.heic", SimpleUploadedFile("bill.heic", b"heic-bytes"), save=True)
+        inv.source_preview.save("bill.jpg", SimpleUploadedFile("bill.jpg", b"\xff\xd8\xff"), save=True)
+        resp = self.client.get(reverse("invoice-detail", args=[inv.id]))
+        self.assertEqual(resp.status_code, 200)
+        self._assert_signed_and_served(resp.data.get("source_file_url"))
+        self._assert_signed_and_served(resp.data.get("source_preview_url"))
+        self._assert_no_public_media_links(resp.data)
+
+    def test_business_signature_link_is_signed(self):
+        self.business.signature_image.save("sig.png", SimpleUploadedFile("sig.png", b"\x89PNG\r\n\x1a\n"), save=True)
+        resp = self.client.get(reverse("business-detail", args=[self.business.id]))
+        self.assertEqual(resp.status_code, 200)
+        self._assert_signed_and_served(resp.data.get("signature_image_url"))
+        self._assert_no_public_media_links(resp.data)
+
+    def test_documents_without_files_have_no_links(self):
+        inv = self.client.get(reverse("invoice-detail", args=[self.invoice.id])).data
+        biz = self.client.get(reverse("business-detail", args=[self.business.id])).data
+        self.assertEqual((inv["source_file_url"], inv["source_preview_url"], biz["signature_image_url"]), (None, None, None))
