@@ -6,7 +6,7 @@ from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from billing.tests.test_base import BaseAPITestCase
+from billing.tests.test_base import BaseAPITestCase, production_throttling
 
 TIGHT = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -56,3 +56,39 @@ class LoginThrottleTest(BaseAPITestCase):
         for _ in range(4):
             seen.append(self.anon.post(url, {"refresh": refresh}).status_code)
         self.assertEqual(seen[-1], 429, seen)
+
+
+class LoginThrottleBehindProxiesTest(BaseAPITestCase):
+    """H3: production sits behind two proxies, Cosmos then nginx, and each
+    appends to X-Forwarded-For. With NUM_PROXIES unset DRF keyed the login
+    throttle on the whole header, which the client starts: a new made-up
+    first entry on each attempt was a fresh 10-a-minute bucket, so password
+    guessing was unlimited."""
+
+    NGINX = "172.18.0.5"    # REMOTE_ADDR as gunicorn sees it: the nginx container
+    COSMOS = "172.18.0.1"   # what nginx appends: the Cosmos proxy, as nginx sees it
+
+    def _attempt(self, xff):
+        return APIClient().post(
+            reverse("token_obtain_pair"), {"username": "testuser", "password": "wrong"},
+            REMOTE_ADDR=self.NGINX, HTTP_X_FORWARDED_FOR=xff,
+        ).status_code
+
+    def _budget(self, prod):
+        return int(prod.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"].split("/")[0])
+
+    def test_rotating_x_forwarded_for_does_not_reset_the_login_limit(self):
+        with production_throttling() as prod:
+            budget = self._budget(prod)
+            # A forged first hop on every attempt; Cosmos appends the real
+            # client (203.0.113.7), nginx appends Cosmos.
+            codes = [self._attempt(f"198.51.100.{i}, 203.0.113.7, {self.COSMOS}") for i in range(budget + 1)]
+        self.assertEqual(codes, [401] * budget + [429])
+
+    def test_each_real_client_keeps_its_own_budget(self):
+        with production_throttling() as prod:
+            for _ in range(self._budget(prod)):
+                self._attempt(f"203.0.113.7, {self.COSMOS}")
+            other_client = self._attempt(f"203.0.113.8, {self.COSMOS}")
+            same_client = self._attempt(f"203.0.113.7, {self.COSMOS}")
+        self.assertEqual((other_client, same_client), (401, 429))

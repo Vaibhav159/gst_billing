@@ -28,3 +28,8 @@ CSRF_TRUSTED_ORIGINS = [
     *CSRF_TRUSTED_ORIGINS,
     *(o.strip() for o in os.environ.get("SANDBOX_TRUSTED_ORIGINS", "").split(",") if o.strip()),
 ]
+
+# No Cosmos in front here (SSH tunnel -> nginx), so nginx is the only proxy
+# appending to X-Forwarded-For. Production's 2 would key throttles on a hop
+# the client wrote.
+REST_FRAMEWORK = {**REST_FRAMEWORK, "NUM_PROXIES": 1}

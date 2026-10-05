@@ -2891,6 +2891,22 @@ class ProfileView(APIView):
         })
 
 
+def _password_problem(password, user):
+    """AUTH_PASSWORD_VALIDATORS' verdict on a new password, or None if it passes.
+
+    Users created or reset through this API skipped the validators entirely;
+    only Django's own forms ran them.
+    """
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+
+    try:
+        validate_password(password, user)
+    except ValidationError as e:
+        return " ".join(e.messages)
+    return None
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class UserManagementView(APIView):
     """Admin-only endpoint to list, create, and manage users with roles."""
@@ -2934,6 +2950,12 @@ class UserManagementView(APIView):
         if role not in ("admin", "editor", "viewer"):
             return Response({"error": "Role must be admin, editor, or viewer"}, status=400)
 
+        problem = _password_problem(
+            password, User(username=username, email=email, first_name=first_name, last_name=last_name)
+        )
+        if problem:
+            return Response({"error": problem}, status=400)
+
         user = User.objects.create_user(
             username=username, password=password, email=email,
             first_name=first_name, last_name=last_name,
@@ -2959,6 +2981,11 @@ class UserManagementView(APIView):
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
+
+        # Before any change, so a refused password leaves the role and status as they were.
+        problem = request.data.get("password") and _password_problem(request.data["password"], user)
+        if problem:
+            return Response({"error": problem}, status=400)
 
         # Update role
         new_role = request.data.get("role")

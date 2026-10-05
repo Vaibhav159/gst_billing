@@ -206,6 +206,12 @@ REST_FRAMEWORK = {
         "login": "10/min",
         "token_refresh": "60/min",
     },
+    # Throttles key on the client IP. Requests reach gunicorn through two
+    # proxies, Cosmos (TLS edge) then nginx, and each appends the address it
+    # was connected from to X-Forwarded-For, so the real client is second
+    # from the right. Unset, DRF keyed on the whole header, which the client
+    # starts: a made-up first entry per attempt was a fresh login bucket.
+    "NUM_PROXIES": 2,
 }
 
 # JWT settings
