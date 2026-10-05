@@ -1,0 +1,146 @@
+# Private development copy of the production stack (../../docker-compose.yml):
+# the same Dockerfiles, nginx conf, production settings, Redis 7 and gunicorn,
+# with a Postgres container standing in for Neon. The database is new and holds
+# synthetic data only (manage.py seed_sandbox). Nothing binds beyond 127.0.0.1;
+# reach it through an SSH tunnel. No Watchtower, no backup sidecar.
+#
+# Run it through ./sandbox.sh, which supplies --env-file with the secrets that
+# live outside the repo. See README.md in this directory.
+name: gst-sandbox
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "5m", max-file: "2" }
+
+services:
+  # Stands in for Neon. Major version matches the backup client in the
+  # production compose file ("keep at or above Neon's major").
+  db:
+    <<: *defaults
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: gst_sandbox
+      POSTGRES_USER: gst_sandbox
+      POSTGRES_PASSWORD: ${SANDBOX_DB_PASSWORD:?run through sandbox.sh so the env file is loaded}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gst_sandbox -d gst_sandbox"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 768m
+    cpus: 0.5
+
+  redis:
+    <<: *defaults
+    image: redis:7-alpine
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.25
+
+  web:
+    <<: *defaults
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: gst-sandbox-web:dev
+    environment:
+      DJANGO_SETTINGS_MODULE: gst_billing.sandbox_settings
+      GST_SANDBOX: "1"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?run through sandbox.sh so the env file is loaded}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: gst_sandbox
+      DB_USER: gst_sandbox
+      DB_PASSWORD: ${SANDBOX_DB_PASSWORD}
+      REDIS_HOST: redis
+      GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SANDBOX_TRUSTED_ORIGINS: http://localhost:8060,http://127.0.0.1:8060,http://localhost:5174,http://127.0.0.1:5174
+    volumes:
+      - static:/app/staticfiles
+      - media:/app/media
+      # Backend source mounted read-only over the image's copy, so a synced
+      # Python edit reloads gunicorn instead of needing an image rebuild.
+      # Dependency changes (pyproject/uv.lock) still need ./sandbox.sh build.
+      - ../../billing:/app/billing:ro
+      - ../../gst_billing:/app/gst_billing:ro
+    # The production start command, with fewer workers (this VM also runs
+    # Bahikhata) and --reload for the mounted source.
+    command: >
+      bash -c "mkdir -p logs &&
+               python manage.py migrate --noinput &&
+               python manage.py collectstatic --noinput &&
+               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 90 --graceful-timeout 30 --log-level info --reload"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+    mem_limit: 1536m
+    cpus: 1.0
+
+  nginx:
+    <<: *defaults
+    build:
+      context: ../..
+      dockerfile: nginx/Dockerfile
+    image: gst-sandbox-nginx:dev
+    ports:
+      - "127.0.0.1:8060:80"
+    volumes:
+      - static:/var/www/static:ro
+      - media:/var/www/media:ro
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 128m
+    cpus: 0.25
+
+  # Fast UI loop (./sandbox.sh dev): Vite with hot reload over the synced
+  # frontend source. /api goes through the sandbox nginx, so uploads, signed
+  # media and headers behave exactly as they do behind the built app.
+  vite:
+    <<: *defaults
+    profiles: ["dev"]
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      VITE_DEV_PORT: "5174"
+      VITE_API_TARGET: http://nginx:80
+    volumes:
+      - ../../sweet-rebuild-suite-main:/app
+      - node_modules:/app/node_modules
+    command: >
+      sh -c "if ! cmp -s package-lock.json node_modules/.sandbox-lock; then
+               npm ci --no-audit --no-fund && cp package-lock.json node_modules/.sandbox-lock;
+             fi &&
+             exec npx vite --host 0.0.0.0 --port 5174 --strictPort"
+    ports:
+      - "127.0.0.1:5174:5174"
+    depends_on:
+      - nginx
+    mem_limit: 1g
+    cpus: 1.0
+
+volumes:
+  pgdata: {}
+  redis: {}
+  static: {}
+  media: {}
+  node_modules: {}
