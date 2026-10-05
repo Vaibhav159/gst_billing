@@ -5,9 +5,11 @@ from unittest import mock
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connections
 from django.test import TestCase, override_settings
 
 from billing.constants import B2CL_THRESHOLD
+from billing.management.commands.seed_sandbox import Command
 from billing.models import Business, FiledPeriod, Invoice, InwardCapture, LineItem
 from billing.tax_rules import is_interstate
 
@@ -15,8 +17,12 @@ from billing.tax_rules import is_interstate
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="seed-sandbox-"))
 class SeedSandboxTest(TestCase):
     def _seed(self, *args):
+        # The guard admits SQLite or the sandbox's own Postgres. CircleCI and
+        # the release gate run pytest on Postgres, whose test database
+        # (test_circle_test) is neither, so these tests step past it; the
+        # guard has tests of its own below.
         out = StringIO()
-        with mock.patch.dict(os.environ, {"GST_SANDBOX": "1"}):
+        with mock.patch.object(Command, "_assert_sandbox"):
             call_command("seed_sandbox", "--scale", "0.1", *args, stdout=out, stderr=StringIO())
         return out.getvalue()
 
@@ -24,6 +30,17 @@ class SeedSandboxTest(TestCase):
         with mock.patch.dict(os.environ, {"GST_SANDBOX": ""}), self.assertRaises(CommandError):
             call_command("seed_sandbox", stdout=StringIO(), stderr=StringIO())
         self.assertFalse(Business.objects.exists())
+
+    def test_refuses_any_postgres_but_the_sandbox_database(self):
+        db = connections["default"]
+        with mock.patch.dict(os.environ, {"GST_SANDBOX": "1"}), mock.patch.object(db, "vendor", "postgresql"):
+            for name, host in (("neondb", "ep-cool-dew.neon.tech"), ("gst_billing", "db"), ("gst_sandbox", "10.0.0.5")):
+                with self.subTest(name=name, host=host), \
+                        mock.patch.dict(db.settings_dict, {"NAME": name, "HOST": host}), \
+                        self.assertRaises(CommandError):
+                    Command()._assert_sandbox()
+            with mock.patch.dict(db.settings_dict, {"NAME": "gst_sandbox", "HOST": "db"}):
+                Command()._assert_sandbox()  # the sandbox's own database is admitted
 
     def test_books_are_internally_consistent(self):
         logins = self._seed("--print-credentials").strip().splitlines()
