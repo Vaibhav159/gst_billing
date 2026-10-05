@@ -160,6 +160,45 @@ def normalize_tax_heads(cgst, sgst, igst, interstate):
     return half, half, Decimal("0")
 
 
+def has_gstin(value):
+    """True when `value` is a GSTIN at all: 15 characters once trimmed.
+
+    "NA", "URP" (unregistered person) and blanks are what people type for a
+    party with no registration; none of them is a GSTIN. Mirrored by
+    hasGstin in src/utils/gstin.ts.
+    """
+    return len((value or "").strip()) == 15
+
+
+NO_GSTIN_NO_ITC = (
+    "the supplier has no GSTIN, so this purchase carries no input tax credit. "
+    "Add the supplier's GSTIN to claim GST, or set the line to 0%."
+)
+
+
+def itc_refusal(supplier_gstin, items):
+    """The 400 message for a purchase that charges GST without a supplier GSTIN, or None.
+
+    With no GSTIN there is no input tax credit to claim, whatever rate the
+    bill shows (C1b), and every write path for purchases asks this before
+    anything is written. A line charges GST when its rate or any tax head is
+    non-zero; a rate that won't parse counts, since it can't be shown to be 0.
+    """
+    if has_gstin(supplier_gstin):
+        return None
+    taxed = [str(n) for n, item in enumerate(items, start=1) if _charges_gst(item)]
+    return f"Line {', '.join(taxed)}: {NO_GSTIN_NO_ITC}" if taxed else None
+
+
+def _charges_gst(item):
+    try:
+        if normalize_rate(item.get("gst_tax_rate") or 0, assume="fraction"):
+            return True
+        return any(Decimal(str(item.get(head) or 0)) for head in ("cgst", "sgst", "igst"))
+    except (ArithmeticError, ValueError, TypeError, AttributeError):
+        return True
+
+
 def state_name_from_gstin(gstin):
     """The state a GSTIN belongs to, or "" when it cannot be read.
 

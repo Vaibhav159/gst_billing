@@ -40,6 +40,7 @@ from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
+from billing.tax_rules import itc_refusal
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -937,6 +938,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         assert_period_unlocked(payload.get("business"), payload.get("invoice_date"), "create")
         serializer = self.get_serializer(data=payload)
         serializer.is_valid(raise_exception=True)
+        # C1b: a purchase from a supplier with no GSTIN carries no input tax.
+        if serializer.validated_data.get("type_of_invoice") == INVOICE_TYPE_INWARD:
+            supplier = serializer.validated_data.get("customer")
+            problem = itc_refusal(getattr(supplier, "gst_number", ""), line_items_data)
+            if problem:
+                return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             with transaction.atomic():
@@ -1048,6 +1055,14 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     invoice.invoice_date = invoice_data["invoice_date"]
                 if "type_of_invoice" in invoice_data:
                     invoice.type_of_invoice = invoice_data["type_of_invoice"]
+
+            # C1b, as on create, against the supplier as patched. Nothing has
+            # been written yet, so returning here leaves the invoice as it was.
+            if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
+                supplier_gstin = invoice.customer.gst_number if invoice.customer_id else ""
+                problem = itc_refusal(supplier_gstin, line_items_data)
+                if problem:
+                    return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
 
             # 2. Delete old line items + bulk-create new ones.
             # _raw_delete bypasses the post_delete signal in billing/signals.py

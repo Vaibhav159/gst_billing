@@ -24,7 +24,7 @@ from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
 from billing.period_lock import assert_period_unlocked
-from billing.tax_rules import is_interstate, normalize_rate
+from billing.tax_rules import has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
@@ -145,12 +145,21 @@ class InwardBillListCreateView(APIView):
             )
 
         supplier_gstin = (request.data.get("supplier_gstin") or "").strip().upper()
+        if not has_gstin(supplier_gstin):
+            # "NA", "URP" and the like: not a GSTIN to store on the supplier,
+            # or to look one up by.
+            supplier_gstin = ""
         supplier_name = (request.data.get("supplier_name") or "").strip()
         if not supplier_name and not supplier_gstin:
             return Response(
                 {"error": "A supplier name or GSTIN is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # No GSTIN on the bill, no input tax on it (C1b). Before the supplier
+        # is resolved, so a refused bill creates nothing.
+        problem = itc_refusal(supplier_gstin, lines_in)
+        if problem:
+            return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         try:
             supplier = self._resolve_supplier(business, supplier_gstin, supplier_name, request.data)
         except IntegrityError:

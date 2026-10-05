@@ -56,6 +56,23 @@ class CheckInwardRatesTest(TestCase):
         self.assertIn("3250.00", out)
         self.assertIn("52050.00", out)
 
+    def test_lists_tax_claimed_on_purchases_from_suppliers_without_a_gstin(self):
+        karigar = Customer.objects.create(name="LOCAL KARIGAR", gst_number="URP")
+        walk_in = Customer.objects.create(name="CASH SUPPLIER", gst_number=None)
+        self.supplier = karigar
+        self._line("K-1", "711319", "0.03", "1", "100000")   # 3,000 claimed, none allowed
+        self._line("K-0", "711319", "0", "1", "5000")        # no tax claimed: fine
+        self.supplier = walk_in
+        self._line("W-1", "998892", "0.05", "1", "10000")    # 500 claimed, none allowed
+
+        out = self._report()
+
+        self.assertIn("#K-1", out)
+        self.assertIn("#W-1", out)
+        self.assertNotIn("#K-0", out)
+        self.assertIn("no GSTIN", out)
+        self.assertIn("3500.00 on file, 0.00 at the suggested rates", out)
+
     def test_never_writes(self):
         li = self._line("D-1", "710239", "0.03", "2", "500000")
         self._report()

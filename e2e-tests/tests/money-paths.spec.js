@@ -13,6 +13,8 @@ const { test, expect } = require('@playwright/test');
 // A checksum-valid Maharashtra GSTIN (GSTN's own documented example) so these
 // tests keep passing if stricter validation ever lands server-side.
 const MH_GSTIN = '27AAPFU0939F1ZV';
+// The same PAN registered in Rajasthan (state 08, the test firm's state).
+const RJ_GSTIN = '08AAPFU0939F1ZV';
 const RUN = Date.now().toString().slice(-7); // unique numbers on persistent local DBs
 
 async function apiToken(page) {
@@ -139,11 +141,19 @@ test.describe('Inward bill — capture to register', () => {
     await field('Invoice date').fill('2026-08-12');
     await fillLine(page, { product: 'Silver Payal', hsn: '711311', qty: '100', rate: '95' });
 
-    // No GST rate picked: the form refuses instead of booking a guessed 3%
-    // input credit, which it silently did before the slab picker (C1).
+    // No supplier GSTIN: the bill carries no input tax, so the picker offers
+    // 0% only and says why (C1b).
+    const gst = page.getByRole('combobox', { name: 'GST rate' });
+    await expect(gst).toHaveValue('0');
+    await expect(page.getByText("Add the supplier's GSTIN to claim GST")).toBeVisible();
+
+    // A local GSTIN opens the picker, and the form refuses to save until a
+    // rate is picked instead of booking a guessed 3% input credit (C1).
+    await field('Supplier GSTIN').fill(RJ_GSTIN);
+    await expect(page.getByText('Intra-state · CGST + SGST')).toBeVisible();
     await page.getByRole('button', { name: 'Save inward bill' }).click();
     await expect(page.getByText('Pick the GST rate').first()).toBeVisible();
-    await page.getByRole('combobox', { name: 'GST rate' }).selectOption('3');
+    await gst.selectOption('3');
 
     const create = page.waitForResponse(
       (r) => r.url().endsWith('/api/inward-bills/') && r.request().method() === 'POST');
@@ -177,6 +187,7 @@ test.describe('Inward bill — capture to register', () => {
     const field = (label) =>
       page.locator('label', { hasText: label }).locator('..').locator('input');
     await field('Supplier name').fill('E2E LOCAL SUPPLIER');
+    await field('Supplier GSTIN').fill(RJ_GSTIN);
     await field('Invoice #').fill(BILL_NO);               // the number just used
     await field('Invoice date').fill('2026-08-13');
     await fillLine(page, { product: 'Silver Payal', hsn: '711311', qty: '1', rate: '95', gst: '3' });

@@ -74,6 +74,41 @@ class AICreateTests(TestCase):
         li = Invoice.objects.get(id=data["invoice_id"]).lineitem_set.get()
         self.assertEqual((li.gst_tax_rate, li.cgst + li.sgst + li.igst), (Decimal("0"), Decimal("0")))
 
+    def _supplier(self, name, gstin):
+        sup = Customer.objects.create(name=name, gst_number=gstin)
+        sup.businesses.add(self.seller)
+        return sup
+
+    def _purchase(self, number, supplier, gstin_on_bill, rate):
+        return self.client.post(reverse("ai-invoice-create"), self._payload(
+            type_of_invoice="inward",
+            invoice_data={"customer_name": supplier, "customer_gst_number": gstin_on_bill,
+                          "invoice_number": number, "invoice_date": "2026-05-10",
+                          "line_items": [{"product_name": "Gold Ornaments", "hsn_code": "711319",
+                                          "quantity": 1, "rate": 10000, "gst_tax_rate": rate}]},
+        ), format="json")
+
+    def test_gst_on_a_purchase_from_a_supplier_without_a_gstin_is_refused(self):
+        """C1b on the AI Import door: no GSTIN on the bill or on file, no ITC."""
+        self._supplier("LOCAL KARIGAR", None)
+        for i, gstin in enumerate(["", "URP", "NA"]):
+            with self.subTest(gstin=gstin):
+                r = self._purchase(f"AI-U-{i}", "LOCAL KARIGAR", gstin, 0.03)
+                self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+                self.assertIn("Line 1", r.data["error"])
+                self.assertIn("GSTIN", r.data["error"])
+        self.assertFalse(Invoice.objects.filter(invoice_number__startswith="AI-U-").exists())
+        r = self._purchase("AI-U-ZERO", "LOCAL KARIGAR", "URP", 0)
+        self.assertEqual(r.status_code, 200, getattr(r, "data", None))
+        self.assertIn(Customer.objects.get(name="LOCAL KARIGAR").gst_number, (None, ""), "URP is not a GSTIN")
+
+    def test_a_registered_supplier_on_file_keeps_its_itc_when_the_scan_missed_the_gstin(self):
+        self._supplier("SURAT DIAMOND EXCHANGE", "24AABCS1234A1Z5")
+        r = self._purchase("AI-R-1", "SURAT DIAMOND EXCHANGE", "", 0.03)
+        self.assertEqual(r.status_code, 200, getattr(r, "data", None))
+        li = Invoice.objects.get(invoice_number="AI-R-1").lineitem_set.get()
+        self.assertEqual(li.igst, Decimal("300"))
+
     def test_re_uploading_the_same_bill_returns_the_existing_invoice(self):
         first = self._post()
         second = self._post()

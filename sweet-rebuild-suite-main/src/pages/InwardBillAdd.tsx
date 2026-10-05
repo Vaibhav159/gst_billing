@@ -17,6 +17,7 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/utils/mockData";
 import { GST_SLABS, aiRateChoice, percentToRate } from "@/utils/gstRate";
+import { hasGstin } from "@/utils/gstin";
 import { cn } from "@/utils/utils";
 import {
   extractInwardBill, createInwardBill, extractInwardCapture, getCapture,
@@ -82,19 +83,26 @@ export default function InwardBillAdd() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gstinState]);
 
-  const intra = isIntraState(supplierGstin, firmGstin);
+  // A bill without the supplier's GSTIN carries no input tax credit (C1b),
+  // so until one is entered every line is 0%. The line keeps its own pick for
+  // when a GSTIN arrives.
+  const registered = hasGstin(supplierGstin);
+  // "URP" is no state code: the server drops placeholders before deciding the
+  // head, so the preview does too.
+  const intra = isIntraState(registered ? supplierGstin : "", firmGstin);
+  const lineRate = (l: FormLine) => (registered ? l.gst_percent : "0");
 
   const computed = useMemo(() => {
     let taxable = 0, cgst = 0, sgst = 0, igst = 0;
     for (const l of lines) {
       const t = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
-      const r = percentToRate(l.gst_percent);
+      const r = percentToRate(lineRate(l));
       taxable += t;
       if (intra) { cgst += t * r / 2; sgst += t * r / 2; }
       else { igst += t * r; }
     }
     return { taxable, cgst, sgst, igst, total: taxable + cgst + sgst + igst };
-  }, [lines, intra]);
+  }, [lines, intra, registered]);
 
   // Converting a phone capture: pull the stored photo through the same AI
   // extract the upload path uses, and carry capture_id into the save so the
@@ -188,7 +196,7 @@ export default function InwardBillAdd() {
       toast({ title: "GSTIN doesn't match this firm", description: "Tick 'Record anyway' to save a bill not addressed to your firm's GSTIN.", variant: "destructive" });
       return;
     }
-    const unrated = lines.flatMap((l, i) => (l.gst_percent ? [] : [i + 1]));
+    const unrated = lines.flatMap((l, i) => (lineRate(l) ? [] : [i + 1]));
     if (unrated.length) {
       toast({ title: "Pick the GST rate", description: `Line ${unrated.join(", ")} has no GST rate. Choose 0% if the bill charges no GST.`, variant: "destructive" });
       return;
@@ -212,7 +220,7 @@ export default function InwardBillAdd() {
             hsn_code: l.hsn_code,
             quantity: l.quantity || "0",
             rate: l.rate || "0",
-            gst_tax_rate: percentToRate(l.gst_percent),
+            gst_tax_rate: percentToRate(lineRate(l)),
             unit: l.unit || "gms",
           })),
         ),
@@ -383,12 +391,12 @@ export default function InwardBillAdd() {
                       <Label className="text-[11px] text-muted-foreground sm:hidden">GST</Label>
                       <select
                         aria-label="GST rate"
-                        value={l.gst_percent}
+                        value={lineRate(l)}
                         onChange={(e) => setLine(i, { gst_percent: e.target.value })}
-                        className={cn("premium-select w-full", !l.gst_percent && "text-muted-foreground")}
+                        className={cn("premium-select w-full", !lineRate(l) && "text-muted-foreground")}
                       >
                         <option value="" disabled>GST %</option>
-                        {GST_SLABS.map((r) => <option key={r} value={String(r)}>{r}%</option>)}
+                        {GST_SLABS.map((r) => <option key={r} value={String(r)} disabled={!registered && r !== 0}>{r}%</option>)}
                       </select>
                     </div>
                   </div>
@@ -403,6 +411,11 @@ export default function InwardBillAdd() {
                   </div>
                 </div>
               ))}
+              {!registered && (
+                <p className="text-[12px] text-muted-foreground">
+                  No supplier GSTIN, so this bill carries no input tax credit and every line is 0%. Add the supplier's GSTIN to claim GST.
+                </p>
+              )}
               <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, { ...emptyLine }])}>
                 <Plus className="h-4 w-4 mr-1" /> Add line
               </Button>

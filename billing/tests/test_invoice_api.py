@@ -580,3 +580,43 @@ class InvoiceAPITestCase(BaseAPITestCase):
             gst_number="22DDDDD0000D1Z5",
             state_name="KARNATAKA",
         )
+
+
+class InwardInvoiceWithoutSupplierGstinTest(BaseAPITestCase):
+    """C1b on the main invoice form's Inward (Purchase) door: the supplier
+    is a saved customer, so its GSTIN on file decides."""
+
+    def setUp(self):
+        super().setUp()
+        self.karigar = Customer.objects.create(name="LOCAL KARIGAR", gst_number="NA", state_name="MAHARASHTRA")
+        self.karigar.businesses.add(self.business)
+
+    def _line(self, rate, tax):
+        return {"product_name": "Gold Ornaments", "hsn_code": "711319", "gst_tax_rate": rate,
+                "quantity": "1", "rate": "10000", "cgst": tax, "sgst": tax, "igst": "0",
+                "amount": str(Decimal("10000") + 2 * Decimal(tax)), "unit": "gms"}
+
+    def test_create_refuses_gst_naming_the_line(self):
+        resp = self.client.post(reverse("invoice-list"), {
+            "invoice_number": "P-NA-1", "invoice_date": "2026-05-01",
+            "business": self.business.id, "customer": self.karigar.id,
+            "type_of_invoice": INVOICE_TYPE_INWARD,
+            "line_items": [self._line("0", "0"), self._line("0.03", "150")],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Line 2", resp.data["error"])
+        self.assertFalse(Invoice.objects.filter(invoice_number="P-NA-1").exists())
+
+    def test_edit_refuses_gst_and_keeps_the_lines(self):
+        inv = Invoice.objects.create(
+            invoice_number="P-NA-2", invoice_date="2026-05-01", business=self.business,
+            customer=self.karigar, type_of_invoice=INVOICE_TYPE_INWARD,
+        )
+        LineItem.objects.create(invoice=inv, customer=self.karigar, product_name="Gold Ornaments",
+                                hsn_code="711319", gst_tax_rate=Decimal("0"), quantity=Decimal("1"),
+                                rate=Decimal("10000"), amount=Decimal("10000"))
+        resp = self.client.post(reverse("invoice-update-line-items", args=[inv.id]),
+                                {"line_items": [self._line("0.03", "150")]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Line 1", resp.data["error"])
+        self.assertEqual([li.gst_tax_rate for li in inv.lineitem_set.all()], [Decimal("0")])

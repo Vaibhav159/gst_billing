@@ -14,7 +14,9 @@ A line is listed when
     slab (0.25 is 25%);
   * it carries GST and the product master taxes its HSN code at another
     rate; or, with no master row for the code, it is at 3% under HSN 7102
-    or 7103 (diamonds and precious stones are 0.25%).
+    or 7103 (diamonds and precious stones are 0.25%);
+  * it carries tax although the supplier has no GSTIN ("NA", "URP", blank):
+    a purchase from an unregistered supplier has no input tax credit (C1b).
 Each line shows the ITC on file and the ITC at the suggested rate. There is
 no --apply: what a filed bill says is for a person with the bill in hand to
 decide, by editing that bill.
@@ -27,7 +29,7 @@ from django.core.management.base import BaseCommand
 
 from billing.constants import INVOICE_TYPE_INWARD
 from billing.models import LineItem, Product
-from billing.tax_rules import GST_SLABS, normalize_rate
+from billing.tax_rules import GST_SLABS, has_gstin, normalize_rate
 
 CENT = Decimal("0.01")
 THREE = Decimal("0.03")
@@ -119,9 +121,14 @@ class Command(BaseCommand):
         elif not known and stored == THREE and hsn.startswith(STONES):
             reasons.append(f"3% on HSN {hsn}: diamonds and precious stones are taxed at 0.25%")
             suggested = QUARTER
+        on_file = (li.cgst or 0) + (li.sgst or 0) + (li.igst or 0)
+        supplier_gstin = (getattr(li.invoice.customer, "gst_number", "") or "").strip()
+        if on_file and not has_gstin(supplier_gstin):
+            # Last, because it settles the question: no GSTIN, no credit.
+            reasons.append(f"the supplier has no GSTIN ({supplier_gstin or 'blank'}): no input tax credit")
+            suggested = Decimal("0")
         if not reasons:
             return None
-        on_file = (li.cgst or 0) + (li.sgst or 0) + (li.igst or 0)
         taxable = (li.quantity or 0) * (li.rate or 0)
         if taxable == 0:  # amount-only rows: the taxable value is what the tax leaves
             taxable = (li.amount or 0) - on_file

@@ -314,3 +314,40 @@ class InwardBillRateTest(BaseAPITestCase):
                 self.assertIn("GST rate", resp.data["error"])
         self.assertFalse(Invoice.objects.filter(invoice_number__startswith="N-").exists())
         self.assertEqual(Customer.objects.count(), suppliers, "a refused bill must not create its supplier")
+
+
+class InwardBillNoGstinTest(BaseAPITestCase):
+    """C1b: a purchase from a supplier without a GSTIN carries no input tax.
+    Without one on the bill there is no ITC to claim, whatever rate it shows."""
+
+    def _post(self, number, gstin, rates):
+        data = {
+            "business_id": self.business.id, "supplier_name": "LOCAL KARIGAR",
+            "invoice_number": number, "invoice_date": "2026-05-05",
+            "lines": json.dumps([
+                {"product_name": f"item {i}", "hsn_code": "711319", "quantity": "1",
+                 "rate": "10000", "gst_tax_rate": rate}
+                for i, rate in enumerate(rates)
+            ]),
+        }
+        if gstin is not None:
+            data["supplier_gstin"] = gstin
+        return self.client.post(reverse("inward-bill-list"), data)
+
+    def test_gst_on_a_bill_without_a_supplier_gstin_is_refused_naming_the_line(self):
+        suppliers = Customer.objects.count()
+        for i, gstin in enumerate([None, "", "NA", "URP", " urp ", "22AAAAA0000A1Z"]):  # last: 14 characters
+            with self.subTest(gstin=gstin):
+                resp = self._post(f"U-{i}", gstin, ["0", "0.03"])
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertIn("Line 2", resp.data["error"])
+                self.assertIn("GSTIN", resp.data["error"])
+        self.assertFalse(Invoice.objects.filter(invoice_number__startswith="U-").exists())
+        self.assertEqual(Customer.objects.count(), suppliers, "a refused bill must not create its supplier")
+
+    def test_a_zero_rated_bill_without_a_gstin_is_recorded_and_the_placeholder_is_not_kept(self):
+        resp = self._post("U-OK", "URP", ["0", "0"])
+        self.assertEqual(resp.status_code, 201, resp.data)
+        inv = Invoice.objects.get(invoice_number="U-OK")
+        self.assertEqual(sum(li.cgst + li.sgst + li.igst for li in inv.lineitem_set.all()), 0)
+        self.assertIn(inv.customer.gst_number, (None, ""), "URP is not a GSTIN")

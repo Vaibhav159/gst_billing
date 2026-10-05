@@ -82,6 +82,7 @@ class InwardCaptureTest(BaseAPITestCase):
         r = self.client.post(reverse("inward-bill-list"), {
             "business_id": self.business.id,
             "supplier_name": "PAYMENT SUPPLIER",
+            "supplier_gstin": "22ZZZZZ0000Z1Z5",
             "invoice_number": "PMI-1", "invoice_date": "2026-08-01",
             "payment_mode": "Bank",
             "lines": json.dumps([{"product_name": "Silver", "hsn_code": "711311",
