@@ -9,11 +9,16 @@ import tempfile
 from pathlib import Path
 
 from django.core.signing import TimestampSigner
-from django.test import override_settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import reverse
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.test import APIClient
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.views import APIView
 
 from billing.api.media import sign_media_path
-from billing.tests.test_base import BaseAPITestCase
+from billing.tests.test_base import BaseAPITestCase, production_throttling
 
 _MEDIA = tempfile.mkdtemp(prefix="signed_media_test_")
 
@@ -135,3 +140,43 @@ class MediaHardeningTest(SignedMediaTest):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp["Content-Disposition"].startswith("attachment;"))
         self.assertEqual(resp["Content-Security-Policy"], "default-src 'none'")
+
+
+class _PlainAnonymousView(APIView):
+    """Any other unauthenticated endpoint: what the anonymous limit is for."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response({})
+
+
+@override_settings(MEDIA_ROOT=_MEDIA)
+class SignedMediaThrottleTest(SimpleTestCase):
+    """H2: production's AnonRateThrottle (100 a day) applied to signed media,
+    so after about 100 thumbnails and previews every bill image answered 429
+    for a rolling 24 hours. The signature is the credential here."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        (Path(_MEDIA) / "captures").mkdir(parents=True, exist_ok=True)
+        (Path(_MEDIA) / "captures" / "bill.jpg").write_bytes(b"\xff\xd8\xff jpeg-bytes")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def test_bill_images_do_not_spend_the_anonymous_daily_budget(self):
+        url = sign_media_path("captures/bill.jpg")
+        with production_throttling():
+            budget = AnonRateThrottle().num_requests  # production: 100 a day
+            media = [APIClient().get(url).status_code for _ in range(budget + 5)]
+            plain = _PlainAnonymousView.as_view()
+            other = [plain(RequestFactory().get("/other")).status_code for _ in range(budget + 1)]
+        self.assertEqual(media, [200] * (budget + 5))
+        # The anonymous limit still holds for everything else, and the image
+        # fetches above spent none of it.
+        self.assertEqual(other, [200] * budget + [429])

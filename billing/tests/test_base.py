@@ -1,12 +1,17 @@
 import importlib.util
 import os
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
 from django.contrib.auth.models import Group, User
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
+from django.utils.module_loading import import_string
 from rest_framework.test import APIClient
+from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.views import APIView
 
 from billing.constants import INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem, Product
@@ -32,6 +37,28 @@ def load_production_settings(**env):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return module
+
+
+@contextmanager
+def production_throttling(**env):
+    """Serve requests under production's REST_FRAMEWORK throttling.
+
+    override_settings alone can't do it: DRF binds APIView.throttle_classes
+    and SimpleRateThrottle.THROTTLE_RATES when it is first imported (under
+    test settings, where throttling is off), so both are patched as well.
+    Throttle history lives in the cache, which is cleared on the way in and out.
+    """
+    prod = load_production_settings(**env)
+    rf = prod.REST_FRAMEWORK
+    classes = [import_string(path) for path in rf["DEFAULT_THROTTLE_CLASSES"]]
+    cache.clear()
+    try:
+        with override_settings(REST_FRAMEWORK=rf), \
+                mock.patch.object(APIView, "throttle_classes", classes), \
+                mock.patch.object(SimpleRateThrottle, "THROTTLE_RATES", rf["DEFAULT_THROTTLE_RATES"]):
+            yield prod
+    finally:
+        cache.clear()
 
 
 class BaseAPITestCase(TestCase):
