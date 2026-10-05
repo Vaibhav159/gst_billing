@@ -23,7 +23,7 @@ from num2words import num2words
 from openpyxl import Workbook
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -988,6 +988,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             vd.get("invoice_date") or inst.invoice_date,
             "edit",
         )
+        # C1b on a header-only edit (the plain PATCH the SPA sends when no line
+        # changed): making the bill a purchase, or changing its supplier, puts
+        # the lines on file under a new supplier's GSTIN. Other edits to a bill
+        # recorded before C1b go through; check_inward_rates lists those.
+        new_type = vd.get("type_of_invoice", inst.type_of_invoice)
+        supplier = vd.get("customer", inst.customer)
+        if new_type == INVOICE_TYPE_INWARD and (
+            new_type != inst.type_of_invoice or getattr(supplier, "pk", None) != inst.customer_id
+        ):
+            lines = inst.lineitem_set.values("gst_tax_rate", "cgst", "sgst", "igst")
+            problem = itc_refusal(getattr(supplier, "gst_number", ""), list(lines))
+            if problem:
+                raise ValidationError({"error": problem})
         super().perform_update(serializer)
 
     def perform_destroy(self, instance):

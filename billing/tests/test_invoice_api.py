@@ -620,3 +620,33 @@ class InwardInvoiceWithoutSupplierGstinTest(BaseAPITestCase):
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertIn("Line 1", resp.data["error"])
         self.assertEqual([li.gst_tax_rate for li in inv.lineitem_set.all()], [Decimal("0")])
+
+    def _bill(self, number, customer, kind=INVOICE_TYPE_INWARD):
+        inv = Invoice.objects.create(invoice_number=number, invoice_date="2026-05-01", business=self.business,
+                                     customer=customer, type_of_invoice=kind)
+        LineItem.objects.create(invoice=inv, customer=customer, product_name="Gold Ornaments", hsn_code="711319",
+                                gst_tax_rate=Decimal("0.03"), quantity=Decimal("1"), rate=Decimal("10000"),
+                                cgst=Decimal("150"), sgst=Decimal("150"), amount=Decimal("10300"))
+        return inv
+
+    def test_a_header_edit_cannot_move_gst_onto_a_supplier_without_a_gstin(self):
+        """The SPA saves a header-only edit with a plain PATCH, which skipped C1b."""
+        inv = self._bill("P-REG-1", self.customer)          # registered supplier, 3% ITC
+        resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"customer": self.karigar.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Line 1", resp.data["error"])
+        inv.refresh_from_db()
+        self.assertEqual(inv.customer_id, self.customer.id)
+
+    def test_turning_a_sale_into_a_purchase_without_a_supplier_gstin_is_refused(self):
+        inv = self._bill("S-NA-1", self.karigar, kind=INVOICE_TYPE_OUTWARD)
+        resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"type_of_invoice": INVOICE_TYPE_INWARD}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        inv.refresh_from_db()
+        self.assertEqual(inv.type_of_invoice, INVOICE_TYPE_OUTWARD)
+
+    def test_other_header_edits_on_an_old_bill_still_save(self):
+        """Bills recorded before C1b are for check_inward_rates to list, not to freeze."""
+        inv = self._bill("P-NA-OLD", self.karigar)
+        resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"payment_mode": "cash"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
