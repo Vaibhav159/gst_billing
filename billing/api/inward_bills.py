@@ -272,6 +272,13 @@ class InwardBillListCreateView(APIView):
             supplier = Customer.objects.filter(gst_number=gstin).first()
         if supplier is None and name:
             supplier = Customer.objects.filter(name=name).first()
+            # The bill carries a GSTIN the supplier on file lacks (the no-GSTIN
+            # hint asks for exactly this): keep it there too, or later edits
+            # and GSTR-2B matching see no GSTIN behind a bill claiming credit.
+            # A GSTIN already on file is never overwritten.
+            if supplier is not None and gstin and not has_gstin(supplier.gst_number):
+                supplier.gst_number = gstin
+                supplier.save(update_fields=["gst_number"])
         if supplier is None:
             supplier = Customer.objects.create(
                 workspace_id=WORKSPACE_ID, name=name or gstin,

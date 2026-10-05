@@ -362,3 +362,22 @@ class InwardBillNoGstinTest(BaseAPITestCase):
         inv = Invoice.objects.get(invoice_number="U-OK")
         self.assertEqual(sum(li.cgst + li.sgst + li.igst for li in inv.lineitem_set.all()), 0)
         self.assertIn(inv.customer.gst_number, (None, ""), "URP is not a GSTIN")
+
+    def test_a_gstin_typed_for_a_supplier_on_file_without_one_is_kept_on_the_supplier(self):
+        """The no-GSTIN hint asks for the supplier's GSTIN. Matched by name, the
+        supplier on file kept its blank GSTIN while the bill claimed credit on
+        the typed one: later edits (which check the stored GSTIN) were refused,
+        and GSTR-2B matching showed no supplier GSTIN."""
+        sup = Customer.objects.create(name="LOCAL KARIGAR", gst_number="URP")
+        resp = self._post("G-1", "22KKKKK0000K1Z5", ["0.03"])
+        self.assertEqual(resp.status_code, 201, resp.data)
+        sup.refresh_from_db()
+        self.assertEqual(sup.gst_number, "22KKKKK0000K1Z5")
+        self.assertEqual(Invoice.objects.get(invoice_number="G-1").customer_id, sup.id)
+
+    def test_a_supplier_gstin_on_file_is_never_overwritten(self):
+        sup = Customer.objects.create(name="LOCAL KARIGAR", gst_number="22AAAAA1111A1Z5")
+        resp = self._post("G-2", "22KKKKK0000K1Z5", ["0.03"])
+        self.assertEqual(resp.status_code, 201, resp.data)
+        sup.refresh_from_db()
+        self.assertEqual(sup.gst_number, "22AAAAA1111A1Z5")
