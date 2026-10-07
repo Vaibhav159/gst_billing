@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
@@ -413,6 +414,10 @@ def create_from_ai(request):
             }
         )
 
+    except APIException:
+        # A refusal the API means to give (a filed month, say) is a 4xx with
+        # its own reason. Raising also rolls the view's transaction back.
+        raise
     except Exception as e:
         transaction.set_rollback(True)  # error Responses don't raise, so roll back explicitly
         # Full traceback to logs (with exc_info) — that's where the

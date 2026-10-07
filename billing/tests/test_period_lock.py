@@ -212,3 +212,87 @@ class LockCrossFeatureTest(BaseAPITestCase):
         self.assertEqual(r.status_code, 400)
         inv.refresh_from_db()
         self.assertEqual(inv.payment_mode, "cash")
+
+
+class CompactDateLockTest(BaseAPITestCase):
+    """H4: the lock read dates by splitting on "-", and anything it couldn't
+    split counted as unlocked. DRF and the model both parse with
+    date.fromisoformat, which (Python 3.11+) also takes 20260715 and
+    2026-W29-3, so those wrote straight into a filed July."""
+
+    COMPACT = "20260715"
+    ISO_WEEK = "2026-W29-3"  # Wednesday 15 July 2026
+
+    def setUp(self):
+        super().setUp()
+        FiledPeriod.objects.create(workspace_id=1, business=self.business, year=2026, month=7)
+
+    def _create(self, date, number):
+        return self.client.post(reverse("invoice-list"), {
+            "invoice_number": number, "invoice_date": date, "type_of_invoice": "outward",
+            "customer": self.customer.id, "business": self.business.id,
+        }, format="json")
+
+    def test_a_compact_date_in_a_locked_month_is_refused(self):
+        r = self._create(self.COMPACT, "CMP-1")
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertFalse(Invoice.objects.filter(invoice_number="CMP-1").exists())
+
+    def test_an_iso_week_date_in_a_locked_month_is_refused(self):
+        r = self._create(self.ISO_WEEK, "WK-1")
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertFalse(Invoice.objects.filter(invoice_number="WK-1").exists())
+
+    def test_line_replace_cannot_redate_into_a_locked_month(self):
+        aug = Invoice.objects.create(
+            workspace_id=1, business=self.business, customer=self.customer,
+            invoice_number="AUG-CMP", invoice_date=AUG, type_of_invoice="outward")
+        r = self.client.post(reverse("invoice-update-line-items", args=[aug.id]), {
+            "invoice": {"invoice_date": self.COMPACT}, "line_items": [],
+        }, format="json")
+        self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        aug.refresh_from_db()
+        self.assertEqual(str(aug.invoice_date), AUG)
+
+    def test_an_inward_bill_with_a_compact_date_is_refused(self):
+        r = self.client.post(reverse("inward-bill-list"), {
+            "business_id": self.business.id, "supplier_name": "LOCKED SUPPLIER",
+            "supplier_gstin": "22ZZZZZ0000Z1Z5", "invoice_number": "CMP-IN-1",
+            "invoice_date": self.COMPACT,
+            "lines": json.dumps([{"product_name": "Silver", "hsn_code": "711311", "quantity": "10",
+                                  "rate": "100", "gst_tax_rate": "0.03", "unit": "gms"}]),
+        })
+        self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        self.assertFalse(Invoice.objects.filter(invoice_number="CMP-IN-1").exists())
+
+    def test_a_bulk_import_row_with_a_compact_date_is_skipped(self):
+        r = self.client.post(reverse("bulk-invoice-import"), {"business_id": self.business.id, "invoices": [{
+            "invoiceNumber": "BLK-CMP", "invoice_date": self.COMPACT, "customerName": self.customer.name,
+            "type": "OUTWARD", "total": 103,
+            "items": [{"productName": "Silver", "hsn": "711311", "qty": 10, "rate": 10, "gstRate": 3}],
+        }]}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["created"], 0, r.data)
+        self.assertFalse(Invoice.objects.filter(invoice_number="BLK-CMP").exists())
+
+    def test_an_ai_import_with_a_compact_date_is_refused(self):
+        r = self.client.post(reverse("ai-invoice-create"), {
+            "business_id": self.business.id, "type_of_invoice": "outward",
+            "invoice_data": {
+                "customer_name": self.customer.name, "customer_gst_number": self.customer.gst_number,
+                "invoice_number": "AI-CMP", "invoice_date": self.COMPACT,
+                "line_items": [{"product_name": "Silver", "hsn_code": "711311", "quantity": 1,
+                                "rate": 100, "gst_tax_rate": 0.03}],
+            },
+        }, format="json")
+        self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        self.assertFalse(Invoice.objects.filter(invoice_number="AI-CMP").exists())
+
+    def test_a_date_that_does_not_parse_fails_closed(self):
+        from rest_framework.exceptions import ValidationError
+
+        from billing.period_lock import locked_period_or_none
+
+        for junk in ("15/07/2026", "July 15", "2026-13-01"):
+            with self.subTest(junk=junk), self.assertRaises(ValidationError):
+                locked_period_or_none(self.business.id, junk)
