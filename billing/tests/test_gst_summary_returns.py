@@ -18,9 +18,10 @@ class GstSummaryCase(APITestCase):
         self.supplier = Customer.objects.create(name="SUPPLIER LTD", gst_number="08AAECD1234K1Z2", state_name="RAJASTHAN")
         self.mumbai = Customer.objects.create(name="MUMBAI BUYER", gst_number="27ABCDE1234A1Z5", state_name="MAHARASHTRA")
 
-    def _bill(self, party, kind, number, taxable, cgst=0, sgst=0, igst=0, hsn="711319", business=None):
+    def _bill(self, party, kind, number, taxable, cgst=0, sgst=0, igst=0, hsn="711319", business=None,
+              date="2026-07-10"):
         inv = Invoice.objects.create(
-            business=business or self.business, customer=party, invoice_number=number, invoice_date="2026-07-10",
+            business=business or self.business, customer=party, invoice_number=number, invoice_date=date,
             type_of_invoice=kind, total_amount=D(taxable) + D(cgst) + D(sgst) + D(igst))
         LineItem.objects.create(
             invoice=inv, customer=party, product_name="Gold", hsn_code=hsn, gst_tax_rate=D("0.03"),
@@ -106,3 +107,30 @@ class Rule88AUtilisationTest(GstSummaryCase):
         r = self.client.get(reverse("invoice-gstr-export"), {
             "business_id": self.business.id, "start_date": "2026-07-01", "end_date": "2026-07-31"})
         self.assertEqual(r.data["gstr3b"]["tax_pmt"], {"cgst": 0.0, "sgst": 6000.0, "igst": 0.0})
+
+
+class MonthByMonthTest(GstSummaryCase):
+    """Review of M29: GSTR-3B is filed month by month, but over a range (the
+    page defaults to the FY) the credit order ran once over the totals, so
+    August's credit paid July's tax and the cash due came out short."""
+
+    def test_a_later_months_credit_does_not_pay_an_earlier_months_tax(self):
+        self._bill(self.buyer, "outward", "S-1", "1200000", cgst="18000", sgst="18000", date="2026-07-10")
+        self._bill(self.mumbai, "inward", "P-1", "1000000", igst="30000", date="2026-08-10")
+        data = self._summary(start_date="2026-07-01", end_date="2026-08-31")
+        self.assertEqual(data["gstr3b"]["net_payable"], {"cgst": 18000.0, "sgst": 18000.0, "igst": 0.0, "total": 36000.0})
+        self.assertEqual(data["gstr3b"]["itc_carry_forward"]["igst"], 30000.0)
+
+    def test_an_earlier_months_credit_carries_into_the_next(self):
+        self._bill(self.mumbai, "inward", "P-1", "1000000", igst="30000", date="2026-07-10")
+        self._bill(self.buyer, "outward", "S-1", "1200000", cgst="18000", sgst="18000", date="2026-08-10")
+        data = self._summary(start_date="2026-07-01", end_date="2026-08-31")
+        self.assertEqual(data["gstr3b"]["net_payable"]["total"], 6000.0)
+        self.assertEqual(data["effective"]["effective_net_tax"], 6000.0)
+
+    def test_the_3b_export_goes_month_by_month_too(self):
+        self._bill(self.buyer, "outward", "S-1", "1200000", cgst="18000", sgst="18000", date="2026-07-10")
+        self._bill(self.mumbai, "inward", "P-1", "1000000", igst="30000", date="2026-08-10")
+        r = self.client.get(reverse("invoice-gstr-export"), {
+            "business_id": self.business.id, "start_date": "2026-07-01", "end_date": "2026-08-31"})
+        self.assertEqual(r.data["gstr3b"]["tax_pmt"], {"cgst": 18000.0, "sgst": 18000.0, "igst": 0.0})

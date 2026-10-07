@@ -11,12 +11,12 @@ from datetime import date
 from decimal import Decimal
 
 from django.db.models import Count, F, Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.utils import timezone
 from rest_framework.response import Response
 
 from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_itc
+from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_by_month
 
 TWO_PLACES = Decimal("0.01")
 
@@ -98,6 +98,25 @@ def document_series(numbers, elsewhere=()):
     for number in sorted(singles):
         rows.append({"from": number, "to": number, "totnum": 1, "cancel": 0, "net_issue": 1})
     return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
+
+
+def _months(items):
+    """[(output tax, input credit), ...] per calendar month of `items`, in order.
+
+    GSTR-3B pays each month from the credit on hand then (utilise_by_month).
+    """
+    rows = (
+        items.annotate(y=ExtractYear("invoice__invoice_date"), m=ExtractMonth("invoice__invoice_date"))
+        .values("y", "m", "invoice__type_of_invoice")
+        .annotate(cgst=Coalesce(Sum("cgst"), Decimal("0")), sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                  igst=Coalesce(Sum("igst"), Decimal("0")))
+        .order_by()
+    )
+    months = {}
+    for r in rows:
+        side = 0 if r["invoice__type_of_invoice"] == "outward" else 1
+        months.setdefault((r["y"], r["m"]), ({}, {}))[side].update({h: r[h] for h in HEADS})
+    return [months[k] for k in sorted(months)]
 
 
 def gst_summary(view, request):
@@ -217,7 +236,8 @@ def gst_summary(view, request):
         "itc_carry_forward": None,
     }
     if business_id:
-        period = utilise_itc(outward_tax, inward_tax)
+        months = _months(items)
+        period = utilise_by_month(months)
         gstr3b["net_payable"] = {k: float(v) for k, v in period["cash"].items()}
         gstr3b["itc_carry_forward"] = {k: float(v) for k, v in period["carry_forward"].items()}
 
@@ -388,7 +408,7 @@ def gst_summary(view, request):
     }
     if business_id:
         opening = {h: Decimal(str((opening_balance or {}).get(h) or 0)) for h in HEADS}
-        both = utilise_itc(outward_tax, {h: inward_tax[h] + opening[h] for h in HEADS})
+        both = utilise_by_month(months, opening)
         effective["effective_net_tax"] = float(both["cash"]["total"])
         effective["effective_cash"] = {k: float(v) for k, v in both["cash"].items()}
         effective["effective_carry_forward"] = {k: float(v) for k, v in both["carry_forward"].items()}
@@ -595,7 +615,7 @@ def gstr_export(view, request):
         "tax_pmt": None,
     }
     if request.query_params.get("business_id"):
-        cash = utilise_itc(ot, it)["cash"]
+        cash = utilise_by_month(_months(items_all))["cash"]
         gstr3b["tax_pmt"] = {h: float(cash[h]) for h in ("cgst", "sgst", "igst")}
 
     # ── GSTR-2B Matching (basic) ──

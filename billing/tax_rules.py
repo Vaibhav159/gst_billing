@@ -379,7 +379,28 @@ def utilise_itc(liability, credit):
         pay(head, head)
         pay(head, "igst")
 
-    def with_total(heads):
-        return {**heads, "total": sum(heads.values(), Decimal("0"))}
+    return {"cash": _with_total(due), "carry_forward": _with_total(left)}
 
-    return {"cash": with_total(due), "carry_forward": with_total(left)}
+
+def _with_total(heads):
+    return {**heads, "total": sum(heads.values(), Decimal("0"))}
+
+
+def utilise_by_month(months, opening=None):
+    """Rule 88A month by month, as GSTR-3B is filed (review of M29).
+
+    `months` is [(liability, credit), ...] in date order. Each month's tax is
+    paid from the credit on hand then: what earlier months carried forward
+    plus its own. Over a range run once on the totals, a later month's credit
+    paid an earlier month's tax and the cash due came out short. `opening` is
+    credit carried into the first month. Returns the range's cash and the
+    credit left after its last month, as utilise_itc does.
+    """
+    carry = {h: Decimal(str((opening or {}).get(h) or 0)) for h in HEADS}
+    cash = {h: Decimal("0") for h in HEADS}
+    for liability, credit in months:
+        month = utilise_itc(liability, {h: carry[h] + Decimal(str(credit.get(h) or 0)) for h in HEADS})
+        for h in HEADS:
+            cash[h] += month["cash"][h]
+            carry[h] = month["carry_forward"][h]
+    return {"cash": _with_total(cash), "carry_forward": _with_total(carry)}
