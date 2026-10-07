@@ -174,6 +174,16 @@ def run_bulk_import(request):
                  (inv.type_of_invoice or INVOICE_TYPE_OUTWARD).lower())
             )
 
+    # Outward numbers already used in each FY (the database refuses a second
+    # one, uniq_outward_number_per_business_fy). A row reusing one on another
+    # date passed the duplicate check and failed the whole batch (M11).
+    numbers_used = {
+        (inv.business_id, inv.invoice_number, fy_start(inv.invoice_date))
+        for inv in Invoice.objects.filter(
+            type_of_invoice=INVOICE_TYPE_OUTWARD, invoice_number__in={k[0] for k in wanted_inv_keys if k[0]},
+        ).only("business_id", "invoice_number", "invoice_date")
+    }
+
     # Purchases already on file, by the one inward rule (M28), one query per
     # firm: "SJ-101" from the inward form is this sheet's "SJ/101". Each with
     # what it was, so a row skipped as a duplicate says which bill it matched.
@@ -300,6 +310,14 @@ def run_bulk_import(request):
                     if dup_key in existing_invoice_keys:
                         skipped_count += 1
                         continue
+                    number_key = (business.pk, invoice_number, fy_start(str(invoice_date)))
+                    if type_of_invoice == INVOICE_TYPE_OUTWARD and invoice_number and number_key in numbers_used:
+                        errors.append(
+                            f"Invoice {invoice_number}: {business.name} already used this number in the "
+                            "same financial year, on another date. Renumber it in the sheet."
+                        )
+                        skipped_count += 1
+                        continue
                     inward_ident = None
                     if type_of_invoice == INVOICE_TYPE_INWARD:
                         inward_ident = _inward_identity(business.pk, customer, invoice_number, str(invoice_date))
@@ -334,6 +352,8 @@ def run_bulk_import(request):
                     invoices_to_create.append((invoice, inv_data))
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
+                    if type_of_invoice == INVOICE_TYPE_OUTWARD and invoice_number:
+                        numbers_used.add(number_key)
                     if inward_ident:
                         inward_on_file(business.pk)[inward_ident] = (
                             f"{invoice_number} of {invoice_date} from {customer.name}, earlier in this import")
@@ -367,7 +387,11 @@ def run_bulk_import(request):
                 surviving = []
                 for invoice, inv_data in invoices_to_create:
                     try:
-                        invoice.save()
+                        # A savepoint each: without one, the first failure
+                        # aborted the outer transaction on Postgres, and the
+                        # import was a 500 with nothing saved (M11).
+                        with transaction.atomic():
+                            invoice.save()
                         surviving.append((invoice, inv_data))
                     except Exception as row_err:
                         errors.append(

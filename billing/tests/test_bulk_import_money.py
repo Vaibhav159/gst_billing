@@ -81,3 +81,33 @@ class FileHeadsTest(BulkImportMoneyCase):
                                        "taxable": 549.67, "cgst": 8.25, "sgst": 8.24, "igst": 0, "amount": 566.16}))
         li = self._line("H-2")
         self.assertEqual((li.cgst, li.sgst, li.amount), (D("8.25"), D("8.24"), D("566.16")))
+
+
+class OneBadRowTest(BulkImportMoneyCase):
+    """M11: a row reusing an outward number already used earlier in the FY
+    (another date, so the duplicate check let it by) failed bulk_create; the
+    per-row fallback save had no savepoint, and on Postgres that first
+    IntegrityError aborted the whole transaction: a 500, nothing imported.
+    Backup restore sends 100 invoices per request, so one bad row lost the
+    chunk. SQLite doesn't abort, which is how the tests missed it."""
+
+    def test_a_number_already_used_in_the_fy_is_one_row_error(self):
+        Invoice.objects.create(business=self.biz, customer=self.buyer, invoice_number="101",
+                               invoice_date="2026-05-01", type_of_invoice="outward")
+        item = {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 1, "rate": 10000,
+                "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300}
+        data = self._import(self._row("101", item, date="2026-05-15"), self._row("102", item, date="2026-05-15"))
+        self.assertTrue(Invoice.objects.filter(invoice_number="102").exists())
+        self.assertEqual(Invoice.objects.filter(invoice_number="101").count(), 1)
+        self.assertTrue(any("101" in e for e in data["errors"]), data["errors"])
+        self.assertEqual(data["created"], 1)
+
+    def test_a_row_the_database_refuses_costs_only_that_row(self):
+        # Postgres refuses a total over numeric(12,3); SQLite stores it, so this
+        # proves nothing there. The bulk insert fails and each row is retried.
+        item = {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 1, "rate": 10000,
+                "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300}
+        huge = self._row("201", item)
+        huge["total"] = 10 ** 12
+        data = self._import(huge, self._row("202", item))
+        self.assertTrue(Invoice.objects.filter(invoice_number="202").exists(), data)
