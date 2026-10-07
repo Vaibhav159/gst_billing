@@ -93,7 +93,7 @@ line_length = 88
 # it out, so the gate judges what actually ships.
 [dependency-groups]
 dev = [
-    "ruff==0.16.5",
+    "ruff==0.16.10",
     "freezegun>=1.5.1",
     "ipython>=8.14.0",
     "pre-commit>=2.19.0",
