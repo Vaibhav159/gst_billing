@@ -194,6 +194,10 @@ def has_gstin(value):
     return len(v) == 15 and v[:2].isdigit()
 
 
+# has_gstin for a database filter, matched against the trimmed value.
+GSTIN_SHAPE = r"^[0-9]{2}.{13}$"
+
+
 def clean_gstin(value):
     """The GSTIN to store: upper-cased, or "" for a placeholder (H12)."""
     return (value or "").strip().upper() if has_gstin(value) else ""

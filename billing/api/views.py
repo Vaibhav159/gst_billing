@@ -19,7 +19,7 @@ from django.db.models import (
     Sum,
     Value,
 )
-from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear
+from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear, Trim
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -45,7 +45,7 @@ from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
-from billing.tax_rules import itc_refusal
+from billing.tax_rules import GSTIN_SHAPE, itc_refusal
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -847,12 +847,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except Exception:
                 pass
 
-        # Reconciliation drill-down: B2B (customer holds a GSTIN) vs B2C.
+        # Reconciliation drill-down: B2B (customer holds a GSTIN) vs B2C, by
+        # the rollup's own test (has_gstin): "NA" or "URP" isn't a GSTIN.
         segment = self.request.query_params.get("segment")
-        if segment == "b2b":
-            queryset = queryset.exclude(customer__gst_number__isnull=True).exclude(customer__gst_number="")
-        elif segment == "b2c":
-            queryset = queryset.filter(Q(customer__gst_number__isnull=True) | Q(customer__gst_number=""))
+        if segment in ("b2b", "b2c"):
+            queryset = queryset.annotate(segment_gstin=Coalesce(Trim("customer__gst_number"), Value("")))
+            registered = Q(segment_gstin__regex=GSTIN_SHAPE)
+            queryset = queryset.filter(registered) if segment == "b2b" else queryset.exclude(registered)
 
         # Filter by payment mode; "none" selects rows where it was never set.
         payment_mode = self.request.query_params.get("payment_mode")
