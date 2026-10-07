@@ -398,7 +398,7 @@ class Invoice(AbstractBaseModel):
                 li.cgst, li.sgst, li.igst = heads
                 changed += ["cgst", "sgst", "igst"]
             if changed:
-                li.save(update_fields=changed)
+                li.save(update_fields=[*changed, "updated_at"])
 
     def save(self, *args, **kwargs):
         # The post_save / post_delete signals on LineItem keep self.total_amount

@@ -61,7 +61,23 @@ class LineCustomerTest(BaseAPITestCase):
         r = self.client.delete(reverse("customer-detail", args=[self.customer.id]))
         self.assertEqual(r.status_code, 409, getattr(r, "data", None))
         self.assertIn("1 invoice", r.data["error"])
+        # The invoice is someone else's now: say it is its lines (review of H6).
+        self.assertIn("lines", r.data["error"])
         self.assertTrue(LineItem.objects.filter(pk=self.line_item.pk).exists())
+
+    def test_a_line_that_follows_a_move_is_marked_updated(self):
+        # Review of H6: saved with update_fields of the moved columns only,
+        # the line kept its old updated_at.
+        from datetime import datetime
+        from datetime import timezone as tz
+
+        from freezegun import freeze_time
+
+        with freeze_time("2030-01-02 03:04:05"):
+            self.client.patch(reverse("invoice-detail", args=[self.invoice.id]), {"customer": self.other.id},
+                              format="json")
+        self.line_item.refresh_from_db()
+        self.assertEqual(self.line_item.updated_at, datetime(2030, 1, 2, 3, 4, 5, tzinfo=tz.utc))
 
     def test_merging_customers_moves_lines_with_their_invoices(self):
         third = Customer.objects.create(name="Third Buyer", state_name="CHHATTISGARH")
