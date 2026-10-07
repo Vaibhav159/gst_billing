@@ -1,0 +1,51 @@
+import { describe, expect, it } from "vitest";
+import { draftFromDuplicate, draftFromStored, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
+
+// H17: line items have no product link, and the form used each line's own id
+// as its "product id". Where that id matched a catalog product, saving the
+// invoice (even to change the payment mode) rewrote the line's name, HSN and
+// rate from that product. Duplicates came out as "Item" at 0%, and editing an
+// amount-only line zeroed it.
+
+const stored = {
+  id: 7, product_name: "Ruby (Cut)", hsn_code: "710391", gst_tax_rate: "0.0025",
+  quantity: "2.000", rate: "20000.000", amount: "40100.000", cgst: "50.000", sgst: "50.000", igst: "0.000", unit: "ct",
+};
+// The catalog product that happens to share the line's id.
+const catalog7 = { id: "7", name: "Gold Ornaments 22K", hsn: "711319", gstRate: 3 };
+
+describe("invoice drafts carry each line's own product (H17)", () => {
+  it("keys a stored line apart from every catalog product", () => {
+    expect(storedLineKey(7)).not.toBe(catalog7.id);
+  });
+
+  it("keeps a stored line's name, HSN and rate however its id collides", () => {
+    const draft = draftFromStored(stored, "k1");
+    expect(draft).toMatchObject({ productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: 2, rate: 20000, unit: "ct" });
+    expect(lineToSave(draft, false)).toMatchObject({
+      productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, amount: 40100, cgst: 50, sgst: 50, igst: 0,
+    });
+  });
+
+  it("keeps a duplicate's names and rates", () => {
+    const item = { productId: "7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: 2, rate: 20000, unit: "ct",
+                   amount: 40100, cgst: 50, sgst: 50, igst: 0 };
+    expect(lineToSave(draftFromDuplicate(item, "k2"), false)).toMatchObject({ productName: "Ruby (Cut)", gstRate: 0.25, amount: 40100 });
+  });
+
+  it("loads an amount-only line as one unit at its taxable value, so saving keeps its amount", () => {
+    const amountOnly = { ...stored, quantity: "0.000", rate: "0.000", amount: "10300.000", cgst: "150.000", sgst: "150.000", gst_tax_rate: "0.03" };
+    const draft = draftFromStored(amountOnly, "k3");
+    expect([draft.qty, draft.rate]).toEqual([1, 10000]);
+    expect(lineToSave(draft, false).amount).toBe(10300);
+  });
+
+  it("takes name, HSN and rate from a product the user picks", () => {
+    const draft = withProduct(draftFromStored(stored, "k4"), { ...catalog7, defaultUnit: "gms" });
+    expect(draft).toMatchObject({ productId: "7", productName: "Gold Ornaments 22K", hsn: "711319", gstRate: 3, unit: "gms" });
+  });
+
+  it("files the tax under IGST when the invoice is inter-state", () => {
+    expect(lineToSave(draftFromStored(stored, "k5"), true)).toMatchObject({ cgst: 0, sgst: 0, igst: 100, amount: 40100 });
+  });
+});
