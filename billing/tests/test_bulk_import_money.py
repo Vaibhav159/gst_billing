@@ -227,3 +227,20 @@ class ExplicitZeroRateTest(BulkImportMoneyCase):
                                        "rate": 10000}))
         li = self._line("Z-3")
         self.assertEqual((li.gst_tax_rate, li.cgst, li.sgst), (D("0.03"), D("150"), D("150")))
+
+
+class UnreadableNumberTest(BulkImportMoneyCase):
+    """Review of M11: a line value that isn't a number raised in the import's
+    write phase, a 500 that lost the good rows too. It is now one row's
+    error, saying which value; a rate written "3%" is read as 3%."""
+
+    GOOD = {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 1, "rate": 10000}
+
+    def test_a_value_that_isnt_a_number_is_its_rows_error_and_says_which(self):
+        data = self._import(self._row("N-1", self.GOOD | {"qty": "ten"}), self._row("N-2", self.GOOD))
+        self.assertEqual((data["created"], data["skipped"]), (1, 1), data)
+        self.assertTrue(any("N-1" in e and "qty" in e and "'ten'" in e for e in data["errors"]), data["errors"])
+
+    def test_a_rate_written_with_a_percent_sign_is_read(self):
+        self._import(self._row("N-3", self.GOOD | {"gstRate": "3%"}))
+        self.assertEqual(self._line("N-3").gst_tax_rate, D("0.03"))

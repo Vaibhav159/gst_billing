@@ -8,7 +8,7 @@ contract.
 
 import contextlib
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from rest_framework import status
@@ -34,6 +34,29 @@ from billing.tax_rules import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _figure(item, key):
+    """A line's figure as a Decimal ("1,00,000" reads as 100000), or a ValueError
+    naming it. A value that isn't a number used to raise in the write phase: a
+    500 that lost the good rows too (review of M11)."""
+    raw = item.get(key)
+    if raw in (None, ""):
+        return Decimal("0")
+    try:
+        return Decimal(str(raw).strip().replace(",", ""))
+    except InvalidOperation:
+        raise ValueError(f"{key} {raw!r} isn't a number") from None
+
+
+def _rate_in(raw):
+    """A line's gstRate, the parser's percent field, as the stored fraction.
+    "3%" is 3%; anything that isn't a rate is a ValueError naming it."""
+    text = str(raw).strip()
+    try:
+        return normalize_rate(text[:-1].strip() if text.endswith("%") else raw, assume="percent")
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError(f"gstRate {raw!r} isn't a rate") from None
 
 
 def _inward_identity(business_id, supplier, number, day):
@@ -246,20 +269,21 @@ def run_bulk_import(request):
                 # "gstRate" is the parser's percent field
                 # (parseInvoiceExcel.ts), so percent is the contract
                 # for anything the allowlist cannot place.
-                gst_rate = normalize_rate(
-                    gst_rate_raw_in, assume="percent"
-                )
+                try:
+                    gst_rate = _rate_in(gst_rate_raw_in)
+                except ValueError as unreadable:
+                    problems.append(f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': {unreadable}.")
+                    continue
                 if not hsn_code and product:
                     hsn_code = product.hsn_code or ""
 
-            qty = Decimal(str(item.get("qty", 0)))
-            rate = Decimal(str(item.get("rate", 0)))
-            cgst = Decimal(str(item.get("cgst", 0)))
-            sgst = Decimal(str(item.get("sgst", 0)))
-            igst = Decimal(str(item.get("igst", 0)))
             # User-supplied gross amount takes precedence — they may not have qty/rate
-            user_amount = Decimal(str(item.get("amount", 0)))
-            taxable_in = Decimal(str(item.get("taxable") or 0))
+            try:
+                qty, rate, cgst, sgst, igst, user_amount, taxable_in = (
+                    _figure(item, key) for key in ("qty", "rate", "cgst", "sgst", "igst", "amount", "taxable"))
+            except ValueError as unreadable:
+                problems.append(f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': {unreadable}.")
+                continue
             net_amount = qty * rate
             # Quantity x rate must be the line's taxable value. A register
             # with no Qty/Rate columns came in as 60,000 x 900 for a
@@ -478,7 +502,7 @@ def run_bulk_import(request):
                         def booked_rate(item):
                             raw = item.get("gstRate")
                             if raw not in (None, ""):  # a 0% line is 0%, not "no rate"
-                                return normalize_rate(raw, assume="percent")
+                                return _rate_in(raw)
                             product = lookup_product(str(item.get("productName") or "").strip())
                             return normalize_rate(product.gst_tax_rate, assume="fraction") if product else 0
                         problem = itc_refusal(
