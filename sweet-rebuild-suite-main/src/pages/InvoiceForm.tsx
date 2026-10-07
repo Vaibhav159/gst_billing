@@ -25,7 +25,7 @@ import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
 import { todayLocal, invoiceDateWarning } from "@/utils/localDate";
 import { round2, halveTax } from "@/utils/money";
-import { draftFromDuplicate, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -259,7 +259,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           // Re-key restored items — drafts saved before _key existed
           // won't have the field, and re-generating is harmless either
           // way since it's client-only.
-          setItems(draft.items.map((it: any) => ({ ...it, _key: it._key || newItemKey() })));
+          // A line saved before H17 carries only its product id: fill it from the catalog.
+          setItems(draft.items.map((it: any) => draftFromSaved({ ...it, _key: it._key || newItemKey() }, allProducts) as DraftLine));
         }
         setDirty(true);
         toast({ title: "Draft Restored", description: "Your unsaved invoice has been restored." });

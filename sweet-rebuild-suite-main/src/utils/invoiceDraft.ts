@@ -84,11 +84,25 @@ export function draftFromDuplicate(it: DuplicateItem, key: string): DraftLine {
   };
 }
 
+type CatalogProduct = { id: string; name: string; hsn: string; gstRate: number; defaultUnit?: ItemUnit };
+
+/**
+ * A line of a draft the form saved locally, back for editing. Drafts saved
+ * before H17 held only each line's product id (the form looked the rest up
+ * when it saved); restored as they were, they were saved as "Item", no HSN,
+ * 0%. Such a line takes its product's name, HSN and rate (review of H17).
+ */
+export function draftFromSaved<T extends Partial<DraftLine> & { productId?: string }>(
+  line: T,
+  catalog: CatalogProduct[],
+): T | DraftLine {
+  if (line.productName) return line;
+  const product = catalog.find((p) => p.id === line.productId);
+  return product ? withProduct(line as unknown as DraftLine, product) : line;
+}
+
 /** The line once the user picks a product: its name, HSN, rate and unit. */
-export function withProduct(
-  draft: DraftLine,
-  product: { id: string; name: string; hsn: string; gstRate: number; defaultUnit?: ItemUnit },
-): DraftLine {
+export function withProduct(draft: DraftLine, product: CatalogProduct): DraftLine {
   return { ...draft, productId: product.id, productName: product.name, hsn: product.hsn, gstRate: product.gstRate,
            unit: product.defaultUnit || draft.unit };
 }

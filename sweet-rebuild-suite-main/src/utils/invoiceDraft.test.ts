@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftFromDuplicate, draftFromStored, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
 
 // H17: line items have no product link, and the form used each line's own id
 // as its "product id". Where that id matched a catalog product, saving the
@@ -55,5 +55,21 @@ describe("invoice drafts carry each line's own product (H17)", () => {
 
   it("files the tax under IGST when the invoice is inter-state", () => {
     expect(lineToSave(draftFromStored(stored, "k5"), true)).toMatchObject({ cgst: 0, sgst: 0, igst: 100, amount: 40100 });
+  });
+});
+
+describe("a draft saved before H17 (review of H17)", () => {
+  // Saved drafts held only each line's product id; the form looked the rest
+  // up when it saved. Restored after H17, they were saved as "Item", no HSN, 0%.
+  it("takes its name, HSN and rate from the product it names", () => {
+    const old = { _key: "k1", productId: "7", qty: 2, rate: 6000, unit: "gms" as const };
+    expect(draftFromSaved(old, [catalog7])).toMatchObject({
+      productId: "7", productName: "Gold Ornaments 22K", hsn: "711319", gstRate: 3, qty: 2, rate: 6000,
+    });
+  });
+
+  it("keeps a line that carries its own", () => {
+    const line = { _key: "k2", productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: 1, rate: 20000, unit: "gms" as const };
+    expect(draftFromSaved(line, [catalog7])).toEqual(line);
   });
 });
