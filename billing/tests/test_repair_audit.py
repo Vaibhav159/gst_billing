@@ -7,8 +7,10 @@ stops the app, not a deliberate repair), and left no trace in its log.
 
 from decimal import Decimal as D
 from io import StringIO
+from unittest import mock
 
 from django.core.management import call_command
+from django.test import override_settings
 
 from billing.models import AuditLog, Customer, Invoice, LineItem
 from billing.tests.test_base import BaseAPITestCase
@@ -56,3 +58,15 @@ class RepairApplyIsAuditedTest(BaseAPITestCase):
                 self.assertEqual(row.entity, entity)
                 self.assertIn(command, row.details)
                 self.assertTrue(any(ids for key, ids in row.changes.items() if key != "command"), row.changes)
+
+    @override_settings(CACHEOPS_ENABLED=True, CACHEOPS_FAKE=False)
+    def test_each_apply_drops_the_cached_rows_it_changed(self):
+        # update() sends no signal: without this the app serves the old rows
+        # for up to 30 minutes after a repair. fix_tax_heads and fix_gst_rates
+        # never did it.
+        changed = {"fix_tax_splits": LineItem, "fix_placeholder_gstins": Customer, "fix_line_customers": LineItem,
+                   "fix_invoice_totals": Invoice, "fix_tax_heads": LineItem, "fix_gst_rates": LineItem}
+        for command, model in changed.items():
+            with self.subTest(command=command), mock.patch("cacheops.invalidate_model") as dropped:
+                call_command(command, "--apply", stdout=StringIO())
+                self.assertIn(model, [c.args[0] for c in dropped.call_args_list])

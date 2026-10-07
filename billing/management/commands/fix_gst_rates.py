@@ -33,7 +33,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from billing.management.commands._repair import log_repair
+from billing.management.commands._repair import invalidate, log_repair
 from billing.models import LineItem, Product
 from billing.tax_rules import GST_SLABS, normalize_rate, rate_as_percent
 
@@ -152,6 +152,7 @@ class Command(BaseCommand):
             log_repair("fix_gst_rates", "product",
                        f"repaired the rate of {len(products)} product(s) and {len(lines)} line(s)",
                        products=[p.pk for p in products], lines=[li.pk for li in lines])
+        invalidate(Product, LineItem)  # update() sends no signal: the app served the old rates for hours
         self.stdout.write(self.style.SUCCESS(
             f"\nRepaired {len(products)} product(s) and {len(lines)} line item(s)."
         ))
