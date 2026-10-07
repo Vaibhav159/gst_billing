@@ -26,6 +26,7 @@ READS = {
     "check_inward_rates": {Product, LineItem},
     "fix_gst_rates": {Product, LineItem},
     "check_inward_duplicates": {Invoice},
+    "fix_amount_only_lines": {LineItem},
 }
 
 

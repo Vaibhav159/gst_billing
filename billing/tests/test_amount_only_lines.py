@@ -67,3 +67,49 @@ class FixAmountOnlyLinesTest(BaseAPITestCase):
         li.refresh_from_db()
         self.assertEqual((li.quantity, li.rate, li.amount), (D("1"), D("10000"), D("10300")))
         self.assertIn("No amount-only", self._run())
+
+
+class FixAmountOnlyLinesReviewTest(BaseAPITestCase):
+    """Review of H8: the report matched only 0 x 0. The old import kept a row's
+    own quantity when it had no rate, so a weighed line stored as 10 x 0 filed
+    Rs 0 of taxable too, and was missed. A line whose amount is all tax has
+    no taxable value to restore."""
+
+    def _run(self, *args):
+        out = StringIO()
+        call_command("fix_amount_only_lines", *args, stdout=out)
+        return out.getvalue()
+
+    def _line(self, number, quantity, rate, amount, cgst, sgst):
+        inv = Invoice.objects.create(business=self.business, customer=self.customer, invoice_number=number,
+                                     invoice_date="2026-07-10", type_of_invoice="outward", total_amount=D(amount))
+        return LineItem.objects.create(invoice=inv, customer=self.customer, product_name="Silver", hsn_code="711311",
+                                       gst_tax_rate=D("0.03"), quantity=D(quantity), rate=D(rate), cgst=D(cgst),
+                                       sgst=D(sgst), igst=0, amount=D(amount))
+
+    def test_a_weighed_line_with_no_rate_is_found_and_keeps_its_weight(self):
+        li = self._line("AO-2", "10", "0", "10300", "150", "150")
+        self.assertIn("AO-2", self._run())
+        self._run("--apply")
+        li.refresh_from_db()
+        self.assertEqual((li.quantity, li.rate, li.amount), (D("10"), D("1000"), D("10300")))
+
+    def test_a_weight_that_doesnt_divide_to_the_paisa_becomes_one_unit(self):
+        li = self._line("AO-3", "30", "0", "10300", "150", "150")  # 30 x 333.333 = 9,999.99, not 10,000.00
+        self._run("--apply")
+        li.refresh_from_db()
+        self.assertEqual((li.quantity, li.rate), (D("1"), D("10000")))
+
+    def test_a_line_whose_amount_is_all_tax_is_listed_not_repaired(self):
+        li = self._line("AO-4", "0", "0", "300", "150", "150")
+        output = self._run("--apply")
+        self.assertIn("AO-4", output)
+        li.refresh_from_db()
+        self.assertEqual((li.quantity, li.rate), (D("0"), D("0")))
+
+    def test_its_apply_leaves_a_row_in_the_audit_log(self):
+        from billing.models import AuditLog
+
+        self._line("AO-5", "0", "0", "10300", "150", "150")
+        self._run("--apply")
+        self.assertTrue(AuditLog.objects.filter(entity_name="(repair) fix_amount_only_lines").exists())
