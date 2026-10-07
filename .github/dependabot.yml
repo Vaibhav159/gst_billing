@@ -1,42 +1,35 @@
 # Dependency updates. This exists because the app sat on Django 4.2.2 — a
 # June-2023 patch of a line that later went EOL — on the public internet for
-# three years. Weekly, grouped, so it's one digestible PR per ecosystem
-# instead of a flood.
+# three years.
+#
+# Once a month, everything arrives in one PR: Python, the frontend, the E2E
+# tests and the CI actions together, major versions included. That is one PR
+# to check and merge on the 1st instead of a stream of them. CI, including the
+# "Dependency advisories" job, decides whether it can go in.
 version: 2
+
+multi-ecosystem-groups:
+  monthly:
+    schedule:
+      interval: "monthly"
+
 updates:
   - package-ecosystem: "uv"
     directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    groups:
-      python-minor-and-patch:
-        update-types: ["minor", "patch"]
-    open-pull-requests-limit: 5
+    patterns: ["*"]
+    multi-ecosystem-group: "monthly"
 
   - package-ecosystem: "npm"
     directory: "/sweet-rebuild-suite-main"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    groups:
-      frontend-minor-and-patch:
-        update-types: ["minor", "patch"]
-    open-pull-requests-limit: 5
+    patterns: ["*"]
+    multi-ecosystem-group: "monthly"
 
   - package-ecosystem: "npm"
     directory: "/e2e-tests"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    groups:
-      e2e-minor-and-patch:
-        update-types: ["minor", "patch"]
-    open-pull-requests-limit: 2
+    patterns: ["*"]
+    multi-ecosystem-group: "monthly"
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 2
+    patterns: ["*"]
+    multi-ecosystem-group: "monthly"

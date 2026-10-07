@@ -219,7 +219,7 @@ jobs:
           retention-days: 7
 
   deps-audit:
-    # Dependabot bumps versions weekly; nothing audited what was already
+    # Dependabot bumps versions monthly; nothing audited what was already
     # deployed. Six shipped packages carried published advisories (audit D6).
     name: Dependency advisories
     runs-on: ubuntu-24.04
