@@ -30,13 +30,22 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-# Liveness for uptime monitors and Watchtower sanity: 200 when the DB
-# answers, 503 when it doesn't. Registered before the SPA fallback so the
-# catch-all never swallows it. No auth — it leaks nothing but "up".
+# Liveness for Docker's healthchecks and uptime monitors: 200 while Django
+# answers. It leaves the database alone. Docker probes this every 30 seconds
+# (the image's, the web container's and nginx's checks), and as SELECT 1 it
+# kept production's Neon compute from ever reaching the 5 idle minutes it
+# needs to scale to zero: it ran around the clock from the 2 Sep deploy and
+# used up the free plan's monthly compute by about the 20th.
+# ?db=1 adds the database check (200, or 503 when it doesn't answer), for a
+# person or a rare check; anything that polls it keeps Neon awake.
+# Registered before the SPA fallback so the catch-all never swallows it.
+# No auth: it leaks nothing but "up".
 def healthz(request):
     from django.db import connection
     from django.http import JsonResponse
 
+    if request.GET.get("db") != "1":
+        return JsonResponse({"ok": True})
     try:
         with connection.cursor() as c:
             c.execute("SELECT 1")

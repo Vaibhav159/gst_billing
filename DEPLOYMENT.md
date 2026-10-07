@@ -179,10 +179,17 @@ Media check: `tar -tzf /backups/media-<stamp>.tar.gz | head`.
 
 ## Health checks and alerts
 
-`GET /healthz` (no auth) answers `200 {"ok": true, "db": true}` when Django
-can reach the database, `503` otherwise. Point a free uptime monitor
-(UptimeRobot, Better Stack, …) at `https://<your-domain>/healthz` and you'll
-hear about outages before anyone else does.
+`GET /healthz` (no auth) answers `200 {"ok": true}` while Django is serving,
+without touching the database. That is what Docker's healthchecks call every
+30 seconds, and what an uptime monitor (UptimeRobot, Better Stack, …) should
+call at `https://<your-domain>/healthz`.
+
+`GET /healthz?db=1` also asks the database: `200 {"ok": true, "db": true}`, or
+`503` when it doesn't answer. Use it by hand, or from a monitor that checks
+rarely. **Don't poll it:** Neon scales its compute to zero only after 5
+minutes without a query, and on the free plan the month's compute hours are
+the limit. Until this changed, the healthchecks queried the database every 15
+seconds, Neon never slept, and September's allowance ran out on about the 20th.
 
 Deploy notifications: set `WATCHTOWER_NOTIFICATION_URL` in `.env` using any
 [shoutrrr](https://containrrr.dev/shoutrrr/) URL — e.g.
