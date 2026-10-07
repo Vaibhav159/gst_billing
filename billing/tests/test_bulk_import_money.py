@@ -142,3 +142,33 @@ class NoGstinNoItcTest(BulkImportMoneyCase):
                                         "rate": 10000, "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300},
                                kind="INWARD", customer="SJ GOLD"))
         self.assertEqual(self._line("NG-3").cgst, D("150"))
+
+
+class RefusedLineTest(BulkImportMoneyCase):
+    """Review of H9: a refused line was skipped after its invoice had been
+    written, so a two-line invoice was stored with one line and counted as
+    created, and re-importing the corrected sheet was then skipped as a
+    duplicate: the missing line could never come in."""
+
+    GOOD = {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 10, "rate": 6000, "taxable": 60000,
+            "cgst": 900, "sgst": 900, "igst": 0, "amount": 61800}
+    BAD = {**GOOD, "productName": "Silver", "qty": 11}  # 11 x 6,000 is not its 60,000 of taxable
+
+    def _two_lines(self, number, second):
+        row = self._row(number, self.GOOD)
+        row["items"] = [self.GOOD, second]
+        row["total"] = 123600
+        return row
+
+    def test_one_refused_line_refuses_its_whole_invoice(self):
+        data = self._import(self._two_lines("R-1", self.BAD))
+        self.assertEqual((data["created"], data["skipped"]), (0, 1), data)
+        self.assertFalse(Invoice.objects.filter(invoice_number="R-1").exists())
+        self.assertTrue(any("R-1" in e and "Silver" in e for e in data["errors"]), data["errors"])
+
+    def test_the_corrected_sheet_then_comes_in_whole(self):
+        self._import(self._two_lines("R-2", self.BAD))
+        data = self._import(self._two_lines("R-2", self.GOOD | {"productName": "Silver"}))
+        self.assertEqual(data["created"], 1, data)
+        inv = Invoice.objects.get(invoice_number="R-2")
+        self.assertEqual((inv.lineitem_set.count(), inv.total_amount), (2, D("123600")))

@@ -201,6 +201,168 @@ def run_bulk_import(request):
             }
         return inward_seen[biz_id]
 
+    def build_lines(invoice, inv_data):
+        """The invoice's lines as LineItem fields, and why any can't be booked.
+
+        Run before the invoice is written: a line refused after its invoice had
+        been created left a partial invoice counted as created, and the
+        corrected sheet was then skipped as a duplicate (review of H9).
+        """
+        lines, problems, notes = [], [], []
+        items = inv_data.get("items", [])
+        if not items:
+            problems.append(f"Invoice {inv_data.get('invoiceNumber', '?')}: it has no items.")
+        is_igst = invoice.is_igst_applicable
+        for item in items:
+            # Excel cells can come through as numbers (e.g. HSN "711319"
+            # parsed as int) — coerce to str before .strip() so one
+            # numeric cell can't AttributeError the whole batch.
+            product_name = str(item.get("productName") or "").strip()
+            # Resolve HSN + GST rate from Product master if not supplied.
+            # Never silently default — if the row has no GST rate AND
+            # no matching product, fail with a clear message.
+            product = lookup_product(product_name)
+            hsn_code = str(item.get("hsn") or "").strip()
+            gst_rate_raw_in = item.get("gstRate")
+            if gst_rate_raw_in in (None, "", 0, "0"):
+                if not product:
+                    problems.append(
+                        f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
+                        f"product not found in Product list and no GST rate supplied. "
+                        f"Add the product first or include a GST Rate column."
+                    )
+                    continue
+                # assume="fraction": this is the stored column. The
+                # slab allowlist still heals a master row written by
+                # the old heuristic, so imports stop propagating it.
+                gst_rate = normalize_rate(
+                    product.gst_tax_rate, assume="fraction"
+                )
+                if not hsn_code:
+                    hsn_code = product.hsn_code or ""
+            else:
+                # "gstRate" is the parser's percent field
+                # (parseInvoiceExcel.ts), so percent is the contract
+                # for anything the allowlist cannot place.
+                gst_rate = normalize_rate(
+                    gst_rate_raw_in, assume="percent"
+                )
+                if not hsn_code and product:
+                    hsn_code = product.hsn_code or ""
+
+            qty = Decimal(str(item.get("qty", 0)))
+            rate = Decimal(str(item.get("rate", 0)))
+            cgst = Decimal(str(item.get("cgst", 0)))
+            sgst = Decimal(str(item.get("sgst", 0)))
+            igst = Decimal(str(item.get("igst", 0)))
+            # User-supplied gross amount takes precedence — they may not have qty/rate
+            user_amount = Decimal(str(item.get("amount", 0)))
+            taxable_in = Decimal(str(item.get("taxable") or 0))
+            net_amount = qty * rate
+            # Quantity x rate must be the line's taxable value. A register
+            # with no Qty/Rate columns came in as 60,000 x 900 for a
+            # taxable value of 60,000, and the review screen, which shows
+            # the file's taxable, looked right (H9).
+            if net_amount > 0 and (taxable_in > 0 or user_amount > 0):
+                if taxable_in > 0:
+                    expected, what = taxable_in, f"its taxable value ({taxable_in})"
+                else:
+                    heads_in = cgst + sgst + igst
+                    expected = user_amount - (heads_in if heads_in else user_amount * gst_rate / (1 + gst_rate))
+                    what = f"its amount less tax ({to_paise(expected)})"
+                if abs(net_amount - expected) > LINE_MONEY_TOLERANCE:
+                    problems.append(
+                        f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': "
+                        f"quantity x rate ({net_amount}) is not {what}. Check the Qty and Rate columns."
+                    )
+                    continue
+            if net_amount == 0 and taxable_in > 0:
+                net_amount = to_paise(taxable_in)
+                qty, rate = Decimal("1"), net_amount
+            elif net_amount == 0 and user_amount > 0:
+                if cgst == 0 and sgst == 0 and igst == 0:
+                    # Gross only: back the taxable value out at the
+                    # row's rate. This branch used to treat the gross
+                    # as the net and tax it again — Rs 309 of tax on a
+                    # Rs 10,300 line that carried Rs 300.
+                    net_amount = user_amount / (1 + gst_rate)
+                else:
+                    net_amount = user_amount - cgst - sgst - igst
+                    if net_amount < 0:
+                        net_amount = user_amount / (1 + gst_rate)
+                # Stored as one unit at the taxable value. Kept as 0 x
+                # 0, the line filed Rs 0 of taxable in GSTR-1 (B2CS,
+                # HSN), the GST summary and 3B, since all of them read
+                # quantity x rate (H8). As the GSTR-2A import stores it.
+                net_amount = to_paise(net_amount)
+                qty, rate = Decimal("1"), net_amount
+            tax_amount = net_amount * gst_rate
+            heads_recomputed = False
+            if cgst == 0 and sgst == 0 and igst == 0:
+                cgst, sgst, igst = split_tax(tax_amount, is_igst)
+            elif abs((cgst + sgst + igst) - to_paise(tax_amount)) > LINE_MONEY_TOLERANCE:
+                # The file's heads aren't its own rate: a cell shown as
+                # "3%" read as 0.03% put Rs 18 of tax on Rs 60,000 of a 3%
+                # line (H10). The rate was normalised, the heads kept.
+                file_tax = cgst + sgst + igst
+                cgst, sgst, igst = split_tax(tax_amount, igst > 0)
+                heads_recomputed = True
+                notes.append(
+                    f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': the file's tax "
+                    f"{file_tax} isn't {rate_as_percent(gst_rate)}% of {to_paise(net_amount)}; "
+                    f"booked {cgst + sgst + igst}."
+                )
+            # Heads supplied by the file were taken verbatim, so a
+            # spreadsheet carrying a local split for an interstate
+            # party re-planted the exact bug fix_tax_heads repairs.
+            # Re-file them when the direction is actually known.
+            # When the customer has neither GSTIN nor state (every
+            # auto-created B2C party), the file's heads are the
+            # only signal there is and must not lose to a default.
+            if direction_known(invoice.business, invoice.customer):
+                cgst, sgst, igst = normalize_tax_heads(
+                    cgst, sgst, igst, is_igst
+                )
+            amount = (
+                user_amount if user_amount > 0 and not heads_recomputed
+                else to_paise(net_amount) + cgst + sgst + igst
+            )
+
+            # Validate per-field DB constraints BEFORE bulk_create so
+            # a single bad row doesn't 500 the whole batch.
+            # quantity / cgst / sgst / igst are NUMERIC(10,3) → abs < 10^7
+            # rate / amount / gst_tax_rate are NUMERIC(12,3) → abs < 10^9
+            OVERFLOW_10 = Decimal("10000000")
+            OVERFLOW_12 = Decimal("1000000000")
+            bad = next(
+                (
+                    (name, value)
+                    for name, value, limit in (
+                        ("quantity", qty, OVERFLOW_10), ("cgst", cgst, OVERFLOW_10), ("sgst", sgst, OVERFLOW_10),
+                        ("igst", igst, OVERFLOW_10), ("rate", rate, OVERFLOW_12), ("amount", amount, OVERFLOW_12),
+                    )
+                    if abs(value) >= limit
+                ),
+                None,
+            )
+            if bad:
+                problems.append(
+                    f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
+                    f"{bad[0]} value {bad[1]} exceeds DB limit. "
+                    f"Likely qty×rate computation error — check input."
+                )
+                continue
+
+            lines.append({
+                "product_name": product_name or "Item",
+                "hsn_code": hsn_code or "",
+                "gst_tax_rate": gst_rate,
+                "quantity": qty, "rate": rate,
+                "cgst": cgst, "sgst": sgst, "igst": igst, "amount": amount,
+                "workspace_id": 1,
+            })
+        return lines, problems, notes
+
     # ---------- PHASE 2: process invoices in a single transaction ----------
     invoices_to_create = []  # [(Invoice instance, source dict for line items)]
     line_items_to_create = []
@@ -369,7 +531,13 @@ def run_bulk_import(request):
                         payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                         workspace_id=1,
                     )
-                    invoices_to_create.append((invoice, inv_data))
+                    lines, problems, notes = build_lines(invoice, inv_data)
+                    if problems:
+                        errors.extend(problems)
+                        skipped_count += 1
+                        continue
+                    errors.extend(notes)
+                    invoices_to_create.append((invoice, inv_data, lines))
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
                     if type_of_invoice == INVOICE_TYPE_OUTWARD and invoice_number:
@@ -396,7 +564,7 @@ def run_bulk_import(request):
         # failure, fall back to per-row create so good rows still land
         # and bad rows surface as per-row errors.
         if invoices_to_create:
-            invoice_objs = [pair[0] for pair in invoices_to_create]
+            invoice_objs = [entry[0] for entry in invoices_to_create]
             try:
                 with transaction.atomic():  # savepoint, see above
                     Invoice.objects.bulk_create(invoice_objs, batch_size=200)
@@ -405,14 +573,14 @@ def run_bulk_import(request):
                     "bulk_create failed (%s); falling back to per-row create", bulk_err
                 )
                 surviving = []
-                for invoice, inv_data in invoices_to_create:
+                for invoice, inv_data, lines in invoices_to_create:
                     try:
                         # A savepoint each: without one, the first failure
                         # aborted the outer transaction on Postgres, and the
                         # import was a 500 with nothing saved (M11).
                         with transaction.atomic():
                             invoice.save()
-                        surviving.append((invoice, inv_data))
+                        surviving.append((invoice, inv_data, lines))
                     except Exception as row_err:
                         errors.append(
                             f"Invoice {inv_data.get('invoiceNumber','?')}: "
@@ -421,167 +589,18 @@ def run_bulk_import(request):
                         created_count -= 1
                         skipped_count += 1
                 invoices_to_create = surviving
-                invoice_objs = [pair[0] for pair in surviving]
-            # Now invoice.pk is populated; build line items + audit logs.
-            for invoice, inv_data in invoices_to_create:
-                items = inv_data.get("items", [])
-                is_igst = invoice.is_igst_applicable
-                for item in items:
-                    # Excel cells can come through as numbers (e.g. HSN "711319"
-                    # parsed as int) — coerce to str before .strip() so one
-                    # numeric cell can't AttributeError the whole batch.
-                    product_name = str(item.get("productName") or "").strip()
-                    # Resolve HSN + GST rate from Product master if not supplied.
-                    # Never silently default — if the row has no GST rate AND
-                    # no matching product, fail with a clear message.
-                    product = lookup_product(product_name)
-                    hsn_code = str(item.get("hsn") or "").strip()
-                    gst_rate_raw_in = item.get("gstRate")
-                    if gst_rate_raw_in in (None, "", 0, "0"):
-                        if not product:
-                            errors.append(
-                                f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
-                                f"product not found in Product list and no GST rate supplied. "
-                                f"Add the product first or include a GST Rate column."
-                            )
-                            continue
-                        # assume="fraction": this is the stored column. The
-                        # slab allowlist still heals a master row written by
-                        # the old heuristic, so imports stop propagating it.
-                        gst_rate = normalize_rate(
-                            product.gst_tax_rate, assume="fraction"
-                        )
-                        if not hsn_code:
-                            hsn_code = product.hsn_code or ""
-                    else:
-                        # "gstRate" is the parser's percent field
-                        # (parseInvoiceExcel.ts), so percent is the contract
-                        # for anything the allowlist cannot place.
-                        gst_rate = normalize_rate(
-                            gst_rate_raw_in, assume="percent"
-                        )
-                        if not hsn_code and product:
-                            hsn_code = product.hsn_code or ""
-
-                    qty = Decimal(str(item.get("qty", 0)))
-                    rate = Decimal(str(item.get("rate", 0)))
-                    cgst = Decimal(str(item.get("cgst", 0)))
-                    sgst = Decimal(str(item.get("sgst", 0)))
-                    igst = Decimal(str(item.get("igst", 0)))
-                    # User-supplied gross amount takes precedence — they may not have qty/rate
-                    user_amount = Decimal(str(item.get("amount", 0)))
-                    taxable_in = Decimal(str(item.get("taxable") or 0))
-                    net_amount = qty * rate
-                    # Quantity x rate must be the line's taxable value. A register
-                    # with no Qty/Rate columns came in as 60,000 x 900 for a
-                    # taxable value of 60,000, and the review screen, which shows
-                    # the file's taxable, looked right (H9).
-                    if net_amount > 0 and (taxable_in > 0 or user_amount > 0):
-                        if taxable_in > 0:
-                            expected, what = taxable_in, f"its taxable value ({taxable_in})"
-                        else:
-                            heads_in = cgst + sgst + igst
-                            expected = user_amount - (heads_in if heads_in else user_amount * gst_rate / (1 + gst_rate))
-                            what = f"its amount less tax ({to_paise(expected)})"
-                        if abs(net_amount - expected) > LINE_MONEY_TOLERANCE:
-                            errors.append(
-                                f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': "
-                                f"quantity x rate ({net_amount}) is not {what}. Check the Qty and Rate columns."
-                            )
-                            continue
-                    if net_amount == 0 and taxable_in > 0:
-                        net_amount = to_paise(taxable_in)
-                        qty, rate = Decimal("1"), net_amount
-                    elif net_amount == 0 and user_amount > 0:
-                        if cgst == 0 and sgst == 0 and igst == 0:
-                            # Gross only: back the taxable value out at the
-                            # row's rate. This branch used to treat the gross
-                            # as the net and tax it again — Rs 309 of tax on a
-                            # Rs 10,300 line that carried Rs 300.
-                            net_amount = user_amount / (1 + gst_rate)
-                        else:
-                            net_amount = user_amount - cgst - sgst - igst
-                            if net_amount < 0:
-                                net_amount = user_amount / (1 + gst_rate)
-                        # Stored as one unit at the taxable value. Kept as 0 x
-                        # 0, the line filed Rs 0 of taxable in GSTR-1 (B2CS,
-                        # HSN), the GST summary and 3B, since all of them read
-                        # quantity x rate (H8). As the GSTR-2A import stores it.
-                        net_amount = to_paise(net_amount)
-                        qty, rate = Decimal("1"), net_amount
-                    tax_amount = net_amount * gst_rate
-                    heads_recomputed = False
-                    if cgst == 0 and sgst == 0 and igst == 0:
-                        cgst, sgst, igst = split_tax(tax_amount, is_igst)
-                    elif abs((cgst + sgst + igst) - to_paise(tax_amount)) > LINE_MONEY_TOLERANCE:
-                        # The file's heads aren't its own rate: a cell shown as
-                        # "3%" read as 0.03% put Rs 18 of tax on Rs 60,000 of a 3%
-                        # line (H10). The rate was normalised, the heads kept.
-                        file_tax = cgst + sgst + igst
-                        cgst, sgst, igst = split_tax(tax_amount, igst > 0)
-                        heads_recomputed = True
-                        errors.append(
-                            f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': the file's tax "
-                            f"{file_tax} isn't {rate_as_percent(gst_rate)}% of {to_paise(net_amount)}; "
-                            f"booked {cgst + sgst + igst}."
-                        )
-                    # Heads supplied by the file were taken verbatim, so a
-                    # spreadsheet carrying a local split for an interstate
-                    # party re-planted the exact bug fix_tax_heads repairs.
-                    # Re-file them when the direction is actually known.
-                    # When the customer has neither GSTIN nor state (every
-                    # auto-created B2C party), the file's heads are the
-                    # only signal there is and must not lose to a default.
-                    if direction_known(invoice.business, invoice.customer):
-                        cgst, sgst, igst = normalize_tax_heads(
-                            cgst, sgst, igst, is_igst
-                        )
-                    amount = (
-                        user_amount if user_amount > 0 and not heads_recomputed
-                        else to_paise(net_amount) + cgst + sgst + igst
-                    )
-
-                    # Validate per-field DB constraints BEFORE bulk_create so
-                    # a single bad row doesn't 500 the whole batch.
-                    # quantity / cgst / sgst / igst are NUMERIC(10,3) → abs < 10^7
-                    # rate / amount / gst_tax_rate are NUMERIC(12,3) → abs < 10^9
-                    OVERFLOW_10 = Decimal("10000000")
-                    OVERFLOW_12 = Decimal("1000000000")
-                    bad = next(
-                        (
-                            (name, value)
-                            for name, value, limit in (
-                                ("quantity", qty, OVERFLOW_10), ("cgst", cgst, OVERFLOW_10), ("sgst", sgst, OVERFLOW_10),
-                                ("igst", igst, OVERFLOW_10), ("rate", rate, OVERFLOW_12), ("amount", amount, OVERFLOW_12),
-                            )
-                            if abs(value) >= limit
-                        ),
-                        None,
-                    )
-                    if bad:
-                        errors.append(
-                            f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
-                            f"{bad[0]} value {bad[1]} exceeds DB limit. "
-                            f"Likely qty×rate computation error — check input."
-                        )
-                        continue
-
-                    line_items_to_create.append(LineItem(
-                        invoice=invoice, customer=invoice.customer,
-                        product_name=product_name or "Item",
-                        hsn_code=hsn_code or "",
-                        gst_tax_rate=gst_rate,
-                        quantity=qty, rate=rate,
-                        cgst=cgst, sgst=sgst, igst=igst, amount=amount,
-                        workspace_id=1,
-                    ))
+                invoice_objs = [entry[0] for entry in surviving]
+            # Now invoice.pk is populated; its lines were built in phase 2.
+            for invoice, _inv_data, lines in invoices_to_create:
+                line_items_to_create.extend(
+                    LineItem(invoice=invoice, customer=invoice.customer, **fields) for fields in lines)
                 # Stash the metadata we need for the audit log; the actual
                 # AuditLog row is appended below after total_amount has been
                 # recomputed from line items, so the logged total isn't stale.
                 pending_invoice_audits.append({
                     "pk": invoice.pk,
                     "name": f"#{invoice.invoice_number} - {invoice.customer.name}",
-                    "item_count": len(items),
+                    "item_count": len(lines),
                 })
 
         if line_items_to_create:
@@ -595,7 +614,7 @@ def run_bulk_import(request):
         if invoices_to_create:
             from django.db.models import DecimalField, OuterRef, Subquery, Sum
             from django.db.models.functions import Coalesce
-            invoice_ids = [inv.pk for inv, _ in invoices_to_create if inv.pk]
+            invoice_ids = [inv.pk for inv, *_ in invoices_to_create if inv.pk]
             if invoice_ids:
                 # Find invoices with no line items and decrement counters
                 empty_inv_ids = list(
