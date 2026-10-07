@@ -8,15 +8,18 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import (
+    CharField,
     Count,
+    Exists,
     F,
     IntegerField,
     OuterRef,
     Q,
     Subquery,
     Sum,
+    Value,
 )
-from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
+from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -2653,6 +2656,16 @@ class AIInvoiceCreateView(APIView):
     def post(self, request):
         return create_from_ai(request)
 
+def _restore_logs(entity, entity_id):
+    """The log an undo of a delete writes for the record it restores.
+
+    Undos run before H7's marker existed left only this, so it is how they
+    are told apart from deletes nobody has undone yet.
+    """
+    detail = Concat(Value("Restored via undo (was #"), Cast(entity_id, CharField()), Value(")"))
+    return AuditLog.objects.filter(entity=entity, action="created", details=detail)
+
+
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only viewset for audit log entries with undo support."""
     permission_classes = [RoleBasedPermission]
@@ -2662,7 +2675,9 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().annotate(
+            restored_before=Exists(_restore_logs(OuterRef("entity"), OuterRef("entity_id")))
+        )
 
         action_filter = self.request.query_params.get("action")
         if action_filter and action_filter != "all":
@@ -2771,6 +2786,11 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                 if used:
                     return Response(
                         {"error": "already_undone", "detail": f"This change was already undone ({used['at'][:16]})."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if entry.action == "deleted" and _restore_logs(entry.entity, Value(entry.entity_id)).exists():
+                    return Response(
+                        {"error": "already_undone", "detail": "This delete was already undone."},
                         status=status.HTTP_409_CONFLICT,
                     )
                 if entry.action == "deleted" and entry.snapshot:

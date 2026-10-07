@@ -98,6 +98,38 @@ class UndoOnceTests(UndoTestBase):
         self.assertFalse(listed()["can_undo"])
 
 
+class UndoneBeforeTheMarkerTests(UndoTestBase):
+    """Review of H7: an undo run before this change left no marker on its
+    entry, only the restore's own log ("Restored via undo (was #N)"). So a
+    deleted purchase restored then could be restored once more, doubling its
+    ITC, which is H7 again."""
+
+    def _undone_the_old_way(self, number):
+        entry = self._deleted_entry(number, "inward")
+        self.assertEqual(self._undo(entry).status_code, 200)
+        entry.refresh_from_db()
+        entry.snapshot.pop("_undo")
+        entry.save(update_fields=["snapshot"])
+        return entry
+
+    def test_it_is_not_undone_again(self):
+        entry = self._undone_the_old_way("SJ-201")
+        second = self._undo(entry)
+        self.assertEqual(second.status_code, 409, getattr(second, "data", None))
+        self.assertEqual(Invoice.objects.filter(invoice_number="SJ-201").count(), 1)
+
+    def test_the_log_does_not_offer_it(self):
+        entry = self._undone_the_old_way("SJ-202")
+        listed = next(e for e in self.client.get(reverse("auditlog-list")).data["results"] if e["id"] == entry.pk)
+        self.assertFalse(listed["can_undo"])
+
+    def test_another_deletes_undo_is_still_offered(self):
+        self._undone_the_old_way("SJ-203")
+        other = self._deleted_entry("SJ-204", "inward")
+        listed = next(e for e in self.client.get(reverse("auditlog-list")).data["results"] if e["id"] == other.pk)
+        self.assertTrue(listed["can_undo"])
+
+
 class UndoResumsTheTotalTests(UndoTestBase):
     """M9: undo of an "updated" invoice copied every field back, total
     included, over lines that had changed since: the header said 1,030 while

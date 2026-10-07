@@ -328,6 +328,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
     def get_can_undo(self, obj):
         if (obj.snapshot or {}).get("_undo"):
             return False  # used already (H7)
+        if obj.action == "deleted" and getattr(obj, "restored_before", False):
+            return False  # undone before the marker existed
         if obj.action in ("deleted", "updated") and obj.snapshot:
             return True
         return obj.action == "created"
