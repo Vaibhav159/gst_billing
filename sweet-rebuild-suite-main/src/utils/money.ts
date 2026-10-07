@@ -7,14 +7,25 @@
  * produces for 10.10 + 20.20, and what a strict DecimalField rejects.
  */
 
-/** Round to paise. */
+/**
+ * Round to paise, half-up on the decimal digits, as the server's
+ * ROUND_HALF_UP does. `Math.round(x * 100)` rounds the binary value instead:
+ * 8.245 is 8.24499… as a float, so it gave 8.24 where the server gives 8.25.
+ * Shifting through the decimal string ("8.245e2" is exactly 824.5) avoids that.
+ */
 export function round2(value: number): number {
-  return Math.round((Number(value) || 0) * 100) / 100;
+  const v = Number(value) || 0;
+  const abs = Math.abs(v);
+  const text = String(abs);
+  const cents = text.includes("e") ? Math.round(abs * 100) : Math.round(Number(`${text}e2`));
+  return (Math.sign(v) || 1) * (cents / 100);
 }
 
 /**
  * Split a tax into its CGST and SGST halves without losing or inventing a
  * paisa. Rounding both halves independently makes 16.49 into 8.24 + 8.24.
+ * CGST takes the half rounded up, SGST the rest: tax_rules.split_tax on the
+ * server does the same, so the preview is what gets stored.
  */
 export function halveTax(tax: number): { cgst: number; sgst: number } {
   const cgst = round2(tax / 2);

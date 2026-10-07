@@ -5,7 +5,15 @@ inward-bills module decide this the same way, and so the rules can be unit
 tested without a request.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+
+PAISA = Decimal("0.01")
+
+
+def to_paise(value):
+    """Round to the paisa, half-up (the GST convention)."""
+    return Decimal(str(value or 0)).quantize(PAISA, rounding=ROUND_HALF_UP)
+
 
 # The legal GST rate slabs, as percents. This list is what makes a rate of
 # unknown shape resolvable without guessing: no slab is a slab again when
@@ -153,11 +161,22 @@ def normalize_tax_heads(cgst, sgst, igst, interstate):
     GSTR-3B report the wrong heads. Keep the amount the user saw, move it to
     the right column.
     """
-    total = (cgst or 0) + (sgst or 0) + (igst or 0)
+    return split_tax((cgst or 0) + (sgst or 0) + (igst or 0), interstate)
+
+
+def split_tax(tax, interstate):
+    """(cgst, sgst, igst) for one line's tax, every head in whole paise.
+
+    Halving 16.49 gave 8.245 + 8.245, and each document rounded the half-paise
+    its own way: 8.25 + 8.25 on the classic print, 8.24 + 8.24 in GSTR-1, beside
+    a total of 16.49 (H13). CGST takes the half rounded up and SGST the rest, as
+    halveTax in money.ts does, so the preview and the stored line agree.
+    """
+    tax = to_paise(tax)
     if interstate:
-        return Decimal("0"), Decimal("0"), Decimal(total)
-    half = Decimal(total) / 2
-    return half, half, Decimal("0")
+        return Decimal("0"), Decimal("0"), tax
+    cgst = to_paise(tax / 2)
+    return cgst, tax - cgst, Decimal("0")
 
 
 def has_gstin(value):

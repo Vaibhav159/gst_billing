@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.period_lock import locked_period_or_none
-from billing.tax_rules import direction_known, normalize_rate, normalize_tax_heads, state_name_from_gstin
+from billing.tax_rules import direction_known, normalize_rate, normalize_tax_heads, split_tax, state_name_from_gstin
 
 logger = logging.getLogger(__name__)
 
@@ -385,11 +385,7 @@ def run_bulk_import(request):
                                 net_amount = user_amount / (1 + gst_rate)
                     tax_amount = net_amount * gst_rate
                     if cgst == 0 and sgst == 0 and igst == 0:
-                        if is_igst:
-                            igst = tax_amount
-                        else:
-                            cgst = tax_amount / 2
-                            sgst = tax_amount / 2
+                        cgst, sgst, igst = split_tax(tax_amount, is_igst)
                     # Heads supplied by the file were taken verbatim, so a
                     # spreadsheet carrying a local split for an interstate
                     # party re-planted the exact bug fix_tax_heads repairs.

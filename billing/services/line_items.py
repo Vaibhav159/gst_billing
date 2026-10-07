@@ -15,7 +15,8 @@ There is now one contract:
 * ``source="form"`` trusts the client's tax-inclusive ``amount`` (checked
   against qty x rate within ``LINE_MONEY_TOLERANCE``) and re-files the
   client's heads on the correct side — the split is advisory;
-* every other source derives tax = qty x rate x rate and splits it itself.
+* every other source derives tax = qty x rate x rate and splits it itself,
+  in whole paise as the form does (``split_tax``).
 
 Instances are returned unsaved so callers can ``bulk_create`` them and skip the
 per-line resync signal; the running total comes back with them.
@@ -33,6 +34,8 @@ from billing.tax_rules import (
     is_interstate,
     normalize_rate,
     normalize_tax_heads,
+    split_tax,
+    to_paise,
 )
 
 Source = Literal["form", "ai", "csv", "api"]
@@ -85,13 +88,11 @@ def build_line_items(
                 _dec(item.get("cgst")), _dec(item.get("sgst")), _dec(item.get("igst")), interstate
             )
         else:
-            tax = net * gst_rate
-            if interstate:
-                cgst, sgst, igst = ZERO, ZERO, tax
-            else:
-                cgst = sgst = tax / 2
-                igst = ZERO
-            amount = net + tax
+            # The form's arithmetic, so every door books the same paise: the
+            # taxable and the tax rounded to the paisa, the tax split exactly.
+            net = to_paise(net)
+            cgst, sgst, igst = split_tax(net * gst_rate, interstate)
+            amount = net + cgst + sgst + igst
 
         total += amount
         lines.append(

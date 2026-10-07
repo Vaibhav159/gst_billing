@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx-js-style";
 import { lineItemPercent } from "./gstRate";
+import { halveTax, round2 } from "./money";
 
 /**
  * Parsed invoice row from the user's Excel format.
@@ -521,12 +522,11 @@ export function toImportReadyInvoices(
         // Compute taxes if not in file
         let cgst = row.cgst, sgst = row.sgst, igst = row.igst;
         if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent > 0) {
-          if (useIGST) {
-            igst = Math.round(taxable * gstPercent / 100 * 100) / 100;
-          } else {
-            cgst = Math.round(taxable * gstPercent / 200 * 100) / 100; // half rate
-            sgst = cgst;
-          }
+          const tax = round2(taxable * gstPercent / 100);
+          // One tax, split exactly: rounding each half-rate head on its own
+          // turned 16.49 into 8.25 + 8.25 (H13).
+          if (useIGST) igst = tax;
+          else ({ cgst, sgst } = halveTax(tax));
         }
 
         return {

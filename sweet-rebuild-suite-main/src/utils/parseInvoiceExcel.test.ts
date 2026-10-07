@@ -161,3 +161,24 @@ describe("parseInvoiceExcel — regression: smart template (no HSN/GST Rate colu
     }
   });
 });
+
+describe("toImportReadyInvoices — paise-exact split (H13)", () => {
+  it("splits an odd-paise tax into whole paise instead of inventing one", () => {
+    const parsed: ParsedExcelResult = {
+      firms: [{
+        firmName: "Test Firm", gstin: "08AAGPL3375F1ZO", supplyType: "Outward Supply", month: "Apr 2026",
+        invoices: [{
+          supplyType: "Outward Supply", sNo: 1, billNo: "1", invoiceDate: "2026-04-01",
+          partyName: "Party 1", gstNumber: "", commodity: "SILVER", hsnCode: "711311",
+          gstRate: 3, qty: 1, rate: 549.67, taxableValue: 0, cgst: 0, sgst: 0, igst: 0,
+          totalInvoiceValue: 0,
+        }],
+      }],
+      summary: [],
+    };
+    const [inv] = toImportReadyInvoices(parsed, []);
+    // 549.67 at 3% is 16.49 of tax. Each half rounded on its own was 8.25 + 8.25.
+    expect(inv.items[0]).toMatchObject({ cgst: 8.25, sgst: 8.24, igst: 0, amount: 566.16 });
+    expect(inv.total).toBe(566.16);
+  });
+});
