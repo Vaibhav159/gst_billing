@@ -2,18 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "sweet-rebuild-suite-main",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev"
-      ],
-      "port": 5001,
-      "cwd": "/Users/lakshya/projects/gst/gst_billing/sweet-rebuild-suite-main",
-      "env": {
-        "VITE_DEV_PORT": "5001",
-        "VITE_API_TARGET": "http://127.0.0.1:5002"
-      }
+      "name": "gst-sandbox-vite",
+      "url": "http://localhost:5174",
+      "port": 5174
+    },
+    {
+      "name": "gst-sandbox-nginx",
+      "url": "http://localhost:8060",
+      "port": 8060
     }
   ]
 }
