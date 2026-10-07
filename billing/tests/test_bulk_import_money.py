@@ -263,3 +263,44 @@ class AmountTest(BulkImportMoneyCase):
     def test_an_amount_within_a_rupee_is_kept(self):
         self._import(self._row("AM-2", self.LINE | {"amount": 61800.40}))
         self.assertEqual(self._line("AM-2").amount, D("61800.40"))
+
+
+class PartyGstinTest(BulkImportMoneyCase):
+    """Review of C1b: C1b passed on the row's GSTIN, but the bill was booked on
+    the party matched by name, whose GSTIN on file stayed empty (the inward
+    form and AI import keep the bill's), or was another one (review of M26)."""
+
+    PURCHASE = {"productName": "Gold bar", "hsn": "710813", "gstRate": 3, "qty": 1, "rate": 10000,
+                "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300}
+
+    def test_the_rows_gstin_is_kept_on_a_party_that_had_none(self):
+        karigar = Customer.objects.create(name="KARIGAR", state_name="RAJASTHAN")
+        self._import(self._row("PG-1", self.PURCHASE, kind="INWARD", customer="KARIGAR", gst="08AAECD1234K1Z2"))
+        karigar.refresh_from_db()
+        self.assertEqual(karigar.gst_number, "08AAECD1234K1Z2")
+        self.assertEqual(Invoice.objects.get(invoice_number="PG-1").customer_id, karigar.id)
+
+    def test_the_rows_gstin_decides_the_head(self):
+        # Nothing on file says where KARIGAR is; the bill's 27... GSTIN does.
+        Customer.objects.create(name="KARIGAR", state_name="")
+        self._import(self._row("PG-3", self.PURCHASE, kind="INWARD", customer="KARIGAR", gst="27ABCDE1234A1Z5"))
+        li = self._line("PG-3")
+        self.assertEqual((li.cgst, li.sgst, li.igst), (D("0"), D("0"), D("300")))
+
+    def test_a_refused_row_leaves_the_party_as_it_was(self):
+        karigar = Customer.objects.create(name="KARIGAR", state_name="RAJASTHAN")
+        self._import(self._row("PG-4", self.PURCHASE | {"amount": 99999}, kind="INWARD", customer="KARIGAR",
+                               gst="08AAECD1234K1Z2"))
+        karigar.refresh_from_db()
+        self.assertFalse(karigar.gst_number)
+
+    def test_a_party_on_file_under_another_gstin_refuses_the_row(self):
+        for kind in ("INWARD", "OUTWARD"):
+            with self.subTest(kind=kind):
+                Customer.objects.get_or_create(name="BRANCH GOLD", defaults={"gst_number": "08AAAAA0000A1Z5"})
+                number = f"PG-2-{kind}"
+                data = self._import(self._row(number, self.PURCHASE, kind=kind, customer="BRANCH GOLD",
+                                              gst="08AAECD1234K1Z2"))
+                self.assertFalse(Invoice.objects.filter(invoice_number=number).exists())
+                self.assertTrue(any(number in e and "08AAAAA0000A1Z5" in e for e in data["errors"]), data["errors"])
+        self.assertEqual(Customer.objects.get(name="BRANCH GOLD").gst_number, "08AAAAA0000A1Z5")

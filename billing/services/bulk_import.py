@@ -14,7 +14,7 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 
-from billing.api.inward_bills_service import fy_start, inward_number_key, supplier_key
+from billing.api.inward_bills_service import fy_start, gstin_conflict, inward_number_key, supplier_key
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.period_lock import locked_period_or_none
@@ -452,6 +452,7 @@ def run_bulk_import(request):
 
                     # Resolve customer from cache
                     customer = None
+                    backfill_gstin = ""
                     clean_gst = ""
                     clean_pan = ""
                     if customer_gst and customer_gst not in ("-", ""):
@@ -463,6 +464,16 @@ def run_bulk_import(request):
                             customer = cust_by_gst.get(clean_gst) if clean_gst else None
                     if not customer:
                         customer = cust_by_name.get(customer_name.lower())
+                        # Matched by name: under another GSTIN it is another
+                        # registration (review of M26); without one, it takes
+                        # the row's, as the inward form and AI import keep it.
+                        if customer is not None and clean_gst:
+                            if problem := gstin_conflict(customer, clean_gst):
+                                errors.append(f"Invoice {inv_data.get('invoiceNumber', '?')}: {problem}")
+                                skipped_count += 1
+                                continue
+                            if not has_gstin(customer.gst_number):
+                                backfill_gstin = clean_gst  # once the row is accepted, below
 
                     if not customer:
                         # Should not happen — pre-pass should have bulk-created
@@ -562,12 +573,21 @@ def run_bulk_import(request):
                         payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                         workspace_id=1,
                     )
+                    # The bill's GSTIN decides the head too, so the party carries
+                    # it while the lines are built; it is saved only if they are.
+                    on_file = customer.gst_number
+                    if backfill_gstin:
+                        customer.gst_number = backfill_gstin
                     lines, problems = build_lines(invoice, inv_data)
                     if problems:
+                        customer.gst_number = on_file
                         errors.extend(problems)
                         skipped_count += 1
                         continue
                     invoices_to_create.append((invoice, inv_data, lines))
+                    if backfill_gstin:
+                        customer.save(update_fields=["gst_number"])
+                        cust_by_gst[backfill_gstin] = customer
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
                     if type_of_invoice == INVOICE_TYPE_OUTWARD and invoice_number:
