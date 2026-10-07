@@ -365,6 +365,13 @@ def process_product_csv(file_content: bytes) -> dict[str, int | list[str]]:
     return result
 
 
+def _csv_cell(value):
+    """A CSV cell as stripped text, or "" when pandas read it as blank (NaN)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value).strip()
+
+
 def process_invoice_csv(
     file_content: bytes, business_id: int
 ) -> dict[str, int | list[str]]:
@@ -407,7 +414,9 @@ def process_invoice_csv(
         # Read CSV with pandas
         csv_file = io.BytesIO(file_content)
         try:
-            df = pd.read_csv(csv_file)
+            # Numbers and HSN codes as text: one blank cell made pandas read the
+            # column as floats, so bill "101" was stored as "101.0" (M27).
+            df = pd.read_csv(csv_file, dtype={"invoice_number": str, "hsn_code": str})
         except Exception as e:
             raise CSVImportError(f"Error reading CSV file: {e}")
 
@@ -604,14 +613,20 @@ def process_invoice_csv(
                 for item_data in line_items_data:
                     try:
                         product = products_by_name.get(item_data["product_name"])
+                        # The row's own rate and HSN first, the product master
+                        # only for what the row leaves blank: a 0.0025 diamond
+                        # not in the master was booked at 3% under 711319 (M27).
+                        row_rate = _csv_cell(item_data.get("gst_tax_rate"))
                         lines, line_total = build_line_items(
                             invoice,
                             [{
                                 "product_name": item_data["product_name"],
                                 "quantity": item_data["quantity"],
                                 "rate": item_data["rate"],
-                                "hsn_code": product.hsn_code if product else HSN_CODE,
-                                "gst_tax_rate": rate_for_product(product),
+                                "hsn_code": _csv_cell(item_data.get("hsn_code"))
+                                or (product.hsn_code if product else HSN_CODE),
+                                "gst_tax_rate": normalize_rate(row_rate, assume="fraction")
+                                if row_rate else rate_for_product(product),
                             }],
                             source="csv",
                         )
@@ -626,6 +641,15 @@ def process_invoice_csv(
                             f"Error creating line item for invoice {invoice_number}: {e!s}"
                         )
 
+                if not new_lis:
+                    # Every line failed: an empty invoice would count in the
+                    # dashboards and file nothing (M27).
+                    invoice.delete()
+                    result["invoices_created"] -= 1
+                    result["errors"].append(
+                        f"Invoice {invoice_number}: no line could be imported, so it wasn't created."
+                    )
+                    continue
                 LineItem.objects.bulk_create(new_lis, batch_size=100)
                 invoice.total_amount = new_total
                 Invoice.objects.filter(pk=invoice.pk).update(total_amount=new_total)
