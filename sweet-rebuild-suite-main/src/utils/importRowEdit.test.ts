@@ -147,3 +147,14 @@ describe("A7 follow-up — the row shapes the first fix missed", () => {
     expect(after.items[0].gstRate).toBe(0);
   });
 });
+
+describe("review of H9 — an edit sends the taxable value it made", () => {
+  // The parser sends each line's taxable value and the server checks qty x
+  // rate against it. The pencil edit kept the sheet's, so a corrected Qty was
+  // refused: "quantity x rate (66000) is not its taxable value (60000)".
+  it("replaces the sheet's taxable value with the edited qty x rate", () => {
+    const before = invoice([{ ...line(60000), qty: 10, rate: 6000, taxable: 60000 } as ReturnType<typeof line>]);
+    const after = applyRowEdit(before, { qty: 11, rate: 6000 });
+    expect(after.items[0]).toMatchObject({ qty: 11, rate: 6000, taxable: 66000, amount: 67980 });
+  });
+});

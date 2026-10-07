@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { parseInvoiceExcel, toImportReadyInvoices } from "@/utils/parseInvoiceExcel";
+import { applyRowEdit } from "@/utils/importRowEdit";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { indianStates } from "@/utils/mockData";
 import { downloadSampleExcel } from "@/utils/generateSampleExcel";
@@ -444,21 +445,9 @@ export default function ImportPage({ type }: ImportPageProps) {
     const newQty = parseFloat(editForm.qty) || 0;
     const newRate = parseFloat(editForm.rate) || 0;
     if (inv.items.length > 0) {
-      const item = { ...inv.items[0] };
-      item.qty = newQty;
-      item.rate = newRate;
-      item.amount = Math.round(newQty * newRate * 100) / 100;
-      const gstRate = item.gstRate || 0;
-      const halfRate = gstRate / 2;
-      item.cgst = Math.round(item.amount * halfRate / 100 * 100) / 100;
-      item.sgst = Math.round(item.amount * halfRate / 100 * 100) / 100;
-      item.igst = 0;
-      inv.items = [item, ...inv.items.slice(1)];
-      inv.subtotal = inv.items.reduce((s, i) => s + i.amount, 0);
-      inv.totalCGST = inv.items.reduce((s, i) => s + i.cgst, 0);
-      inv.totalSGST = inv.items.reduce((s, i) => s + i.sgst, 0);
-      inv.totalIGST = inv.items.reduce((s, i) => s + i.igst, 0);
-      inv.total = Math.round((inv.subtotal + inv.totalCGST + inv.totalSGST + inv.totalIGST) * 100) / 100;
+      // The review page's edit (ImportReview), not a copy of it: this one put
+      // the net in the gross amount and rounded each half of the tax (H13).
+      Object.assign(inv, applyRowEdit(inv as any, { qty: newQty, rate: newRate }));
     }
     updated[editingIdx] = inv;
     setExcelPreview(updated);
