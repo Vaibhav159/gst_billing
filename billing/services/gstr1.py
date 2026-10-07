@@ -5,6 +5,7 @@ decorators and delegates here. ``view`` is the ViewSet instance (the summary
 and export use its queryset helpers).
 """
 
+import re
 from decimal import Decimal
 
 from django.db.models import Count, F, Q, Sum
@@ -16,6 +17,47 @@ from billing.models import Business, Invoice, LineItem
 from billing.tax_rules import classify_b2c, clean_gstin, rate_as_percent
 
 TWO_PLACES = Decimal("0.01")
+
+
+def _hsn_tab(customer):
+    """Table 12's tab for a line: supplies to a GSTIN are B2B, the rest B2C (H11)."""
+    return "hsn_b2b" if clean_gstin(getattr(customer, "gst_number", "")) else "hsn_b2c"
+
+
+def _is_service(hsn):
+    """SAC codes start 99. The portal wants UQC "NA" and no quantity for them."""
+    return (hsn or "").startswith("99")
+
+
+_NUMBER_SERIES = re.compile(r"^(.*?)(\d+)$")
+
+
+def document_series(numbers):
+    """Table 13 rows for one kind of document: one per number series.
+
+    A series is the text before the trailing digits ("INV/2026-27/" in
+    "INV/2026-27/101"). totnum runs from the lowest number to the highest; a
+    number missing in between was deleted or never issued, so it counts as
+    cancelled. A number with no trailing digits is a series of one.
+    """
+    series = {}
+    for number in numbers:
+        m = _NUMBER_SERIES.match(number)
+        if m:
+            series.setdefault(m.group(1), {}).setdefault(int(m.group(2)), number)
+        else:
+            series.setdefault(number, {})[None] = number
+    rows = []
+    for prefix in sorted(series):
+        issued = series[prefix]
+        if None in issued:
+            rows.append({"from": issued[None], "to": issued[None], "totnum": 1, "cancel": 0, "net_issue": 1})
+            continue
+        lo, hi = min(issued), max(issued)
+        total = hi - lo + 1
+        rows.append({"from": issued[lo], "to": issued[hi], "totnum": total,
+                     "cancel": total - len(issued), "net_issue": len(issued)})
+    return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
 
 
 def gst_summary(view, request):
@@ -458,21 +500,22 @@ def gstr_export(view, request):
         for row in b2cs_agg.values()
     ]
 
-    # HSN Summary
+    # HSN Summary, in Table 12's two tabs (H11), as the portal file files it.
     items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
-    hsn_agg = {}
-    for li in items_all.filter(invoice__type_of_invoice="outward"):
-        hsn = li.hsn_code or "0"
-        if hsn not in hsn_agg:
-            hsn_agg[hsn] = {"hsn_sc": hsn, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0}
-        hsn_agg[hsn]["qty"] += float(li.quantity)
-        hsn_agg[hsn]["txval"] += float(li.quantity * li.rate)
-        hsn_agg[hsn]["camt"] += float(li.cgst)
-        hsn_agg[hsn]["samt"] += float(li.sgst)
-        hsn_agg[hsn]["iamt"] += float(li.igst)
-    hsn = list(hsn_agg.values())
+    hsn_agg = {"hsn_b2b": {}, "hsn_b2c": {}}
+    for inv in outward_invoices:
+        tab = hsn_agg[_hsn_tab(inv.customer)]
+        for li in inv.lineitem_set.all():
+            code = li.hsn_code or "0"
+            h = tab.setdefault(code, {"hsn_sc": code, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0})
+            h["qty"] += float(li.quantity)
+            h["txval"] += float(li.quantity * li.rate)
+            h["camt"] += float(li.cgst)
+            h["samt"] += float(li.sgst)
+            h["iamt"] += float(li.igst)
+    hsn = {tab: list(rows.values()) for tab, rows in hsn_agg.items()}
 
-    gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": {"data": hsn}}
+    gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": hsn}
 
     # ── GSTR-3B ──
     outward_items = items_all.filter(invoice__type_of_invoice="outward")
@@ -596,7 +639,8 @@ def gstr1_portal_json(view, request):
     )
 
     skipped, warnings = [], []
-    b2b_data, b2cl_data, b2cs_agg, hsn_agg = {}, {}, {}, {}
+    b2b_data, b2cl_data, b2cs_agg = {}, {}, {}
+    hsn_agg = {"hsn_b2b": {}, "hsn_b2c": {}}
     counts = {"b2b": 0, "b2cl": 0, "b2cs": 0}
 
     def slabs(items):
@@ -679,20 +723,24 @@ def gstr1_portal_json(view, request):
                 warnings.append(f"{label}: inter-state supply carries CGST/SGST — run fix_tax_heads")
         counts["b2cs"] += 1
 
-    # HSN summary (table 12) over everything that made it into the file.
+    # HSN summary (table 12) over everything that made it into the file, in
+    # its B2B and B2C tabs: since the April/May 2025 periods the portal takes
+    # them separately and ties each tab to its own sections (H11).
     for inv in invoices:
         if not inv.invoice_number or not inv.invoice_date:
             continue
+        tab = hsn_agg[_hsn_tab(inv.customer)]
         for li in inv.lineitem_set.all():
             hsn = (li.hsn_code or "").strip()
-            uqc = UQC.get((li.unit or "").strip().lower(), "OTH")
+            service = _is_service(hsn)
+            uqc = "NA" if service else UQC.get((li.unit or "").strip().lower(), "OTH")
             rt = rate_pct(li)
-            h = hsn_agg.setdefault((hsn, uqc, rt), {
+            h = tab.setdefault((hsn, uqc, rt), {
                 "hsn_sc": hsn, "desc": (li.product_name or "")[:30], "uqc": uqc,
                 "rt": rt, "qty": Decimal(0), "txval": Decimal(0),
                 "camt": Decimal(0), "samt": Decimal(0), "iamt": Decimal(0),
             })
-            h["qty"] += li.quantity or 0
+            h["qty"] += 0 if service else (li.quantity or 0)
             h["txval"] += (li.quantity or 0) * (li.rate or 0)
             h["camt"] += li.cgst or 0
             h["samt"] += li.sgst or 0
@@ -715,14 +763,23 @@ def gstr1_portal_json(view, request):
              "csamt": 0}
             for b in b2cs_agg.values()
         ]
-    if hsn_agg:
-        file_obj["hsn"] = {"data": [
+    hsn_tabs = {
+        tab: [
             {"num": i + 1, "hsn_sc": h["hsn_sc"], "desc": h["desc"], "uqc": h["uqc"],
              "qty": r2(h["qty"]), "rt": h["rt"], "txval": r2(h["txval"]),
              "camt": r2(h["camt"]), "samt": r2(h["samt"]),
              "iamt": r2(h["iamt"]), "csamt": 0}
-            for i, h in enumerate(hsn_agg.values())
-        ]}
+            for i, h in enumerate(rows.values())
+        ]
+        for tab, rows in hsn_agg.items() if rows
+    }
+    if hsn_tabs:
+        file_obj["hsn"] = hsn_tabs
+    # Table 13, documents issued (mandatory): doc_num 1 is "invoices for
+    # outward supply"; one row per number series of the month (H11).
+    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number])
+    if docs:
+        file_obj["doc_issue"] = {"doc_det": [{"doc_num": 1, "docs": docs}]}
 
     total_txval = sum(
         r2(b["txval"]) for b in b2cs_agg.values()

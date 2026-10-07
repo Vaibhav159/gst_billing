@@ -1055,17 +1055,24 @@ export default function GSTSummary() {
                   ) : <p className="text-[12px] text-muted-foreground">No B2CS invoices</p>}
                 </div>
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({pluralize(exGstr1.hsn?.data?.length || 0, "code")})</h4>
-                  {(exGstr1.hsn?.data || []).length > 0 ? (
-                    <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
-                      <thead><tr><th>HSN</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
-                      <tbody>
-                        {exGstr1.hsn.data.map((h: any) => (
-                          <tr key={h.hsn_sc}><td className="font-mono">{h.hsn_sc}</td><td className="text-right">{h.qty.toFixed(3)}</td><td className="text-right">{formatCurrency(h.txval)}</td><td className="text-right">{formatCurrency(h.camt)}</td><td className="text-right">{formatCurrency(h.samt)}</td><td className="text-right">{formatCurrency(h.iamt)}</td></tr>
-                        ))}
-                      </tbody>
-                    </table></div>
-                  ) : <p className="text-[12px] text-muted-foreground">No HSN data</p>}
+                  {/* Table 12 files B2B and B2C supplies separately (H11). */}
+                  {(() => {
+                    const hsnTabs: [string, any[]][] = [["B2B", exGstr1.hsn?.hsn_b2b || []], ["B2C", exGstr1.hsn?.hsn_b2c || []]];
+                    const rows = hsnTabs.flatMap(([tab, list]) => list.map((h) => ({ tab, ...h })));
+                    return (<>
+                      <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({pluralize(rows.length, "row")})</h4>
+                      {rows.length > 0 ? (
+                        <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
+                          <thead><tr><th>Tab</th><th>HSN</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
+                          <tbody>
+                            {rows.map((h) => (
+                              <tr key={`${h.tab}-${h.hsn_sc}`}><td>{h.tab}</td><td className="font-mono">{h.hsn_sc}</td><td className="text-right">{h.qty.toFixed(3)}</td><td className="text-right">{formatCurrency(h.txval)}</td><td className="text-right">{formatCurrency(h.camt)}</td><td className="text-right">{formatCurrency(h.samt)}</td><td className="text-right">{formatCurrency(h.iamt)}</td></tr>
+                            ))}
+                          </tbody>
+                        </table></div>
+                      ) : <p className="text-[12px] text-muted-foreground">No HSN data</p>}
+                    </>);
+                  })()}
                 </div>
               </div>
             )}
