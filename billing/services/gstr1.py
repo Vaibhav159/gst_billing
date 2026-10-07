@@ -5,7 +5,9 @@ decorators and delegates here. ``view`` is the ViewSet instance (the summary
 and export use its queryset helpers).
 """
 
+import bisect
 import re
+from datetime import date
 from decimal import Decimal
 
 from django.db.models import Count, F, Q, Sum
@@ -29,34 +31,72 @@ def _is_service(hsn):
     return (hsn or "").startswith("99")
 
 
-_NUMBER_SERIES = re.compile(r"^(.*?)(\d+)$")
+_DIGITS = re.compile(r"\d+")
 
 
-def document_series(numbers):
-    """Table 13 rows for one kind of document: one per number series.
+def _readings(number):
+    """Each way to read `number` as a series and a counter, one per run of
+    digits: (series key, counter, is the last run)."""
+    runs = list(_DIGITS.finditer(number))
+    return [(number[:m.start()] + "\0" + number[m.end():], int(m.group()), i == len(runs) - 1)
+            for i, m in enumerate(runs)]
 
-    A series is the text before the trailing digits ("INV/2026-27/" in
-    "INV/2026-27/101"). totnum runs from the lowest number to the highest; a
-    number missing in between was deleted or never issued, so it counts as
-    cancelled. A number with no trailing digits is a series of one.
+
+def document_series(numbers, elsewhere=()):
+    """Table 13 rows for one kind of document: the month's number series.
+
+    The counter is the run of digits that runs through the FY's numbers: in
+    "INV/2026-27/101" the last, in "101/2026-27" the first. Within a series,
+    a number missing between two of the month's numbers was deleted or never
+    issued, so it counts as cancelled, unless another month of the FY used it
+    (`elsewhere`: a back-dated invoice); the range then splits into two rows
+    there instead of counting phantom cancellations in both months (review of
+    H11). A number with no digits is a series of one.
     """
-    series = {}
+    numbers = list(dict.fromkeys(numbers))
+    elsewhere = [n for n in dict.fromkeys(elsewhere) if n not in set(numbers)]
+    shared = {}
+    for number in numbers + elsewhere:
+        for key, _, _ in _readings(number):
+            shared[key] = shared.get(key, 0) + 1
+    used_elsewhere = {}
+    for number in elsewhere:
+        for key, counter, _ in _readings(number):
+            used_elsewhere.setdefault(key, []).append(counter)
+
+    series, singles = {}, []
     for number in numbers:
-        m = _NUMBER_SERIES.match(number)
-        if m:
-            series.setdefault(m.group(1), {}).setdefault(int(m.group(2)), number)
-        else:
-            series.setdefault(number, {})[None] = number
-    rows = []
-    for prefix in sorted(series):
-        issued = series[prefix]
-        if None in issued:
-            rows.append({"from": issued[None], "to": issued[None], "totnum": 1, "cancel": 0, "net_issue": 1})
+        readings = _readings(number)
+        if not readings:
+            singles.append(number)
             continue
-        lo, hi = min(issued), max(issued)
-        total = hi - lo + 1
-        rows.append({"from": issued[lo], "to": issued[hi], "totnum": total,
-                     "cancel": total - len(issued), "net_issue": len(issued)})
+        # The reading most numbers share; a tie goes to the last run of digits.
+        key, counter, _ = max(readings, key=lambda r: (shared[r[0]], r[2], readings.index(r)))
+        issued = series.setdefault(key, {})
+        if counter in issued:
+            singles.append(number)  # "INV/001" beside "INV/0001": keep both documents
+        else:
+            issued[counter] = number
+
+    rows = []
+    for key in sorted(series):
+        issued = series[key]
+        others = sorted(used_elsewhere.get(key, ()))
+        counters = sorted(issued)
+        runs, start = [], 0
+        for i in range(1, len(counters)):
+            lo, hi = counters[i - 1], counters[i]
+            j = bisect.bisect_right(others, lo)
+            if j < len(others) and others[j] < hi:
+                runs.append(counters[start:i])
+                start = i
+        runs.append(counters[start:])
+        for run in runs:
+            total = run[-1] - run[0] + 1
+            rows.append({"from": issued[run[0]], "to": issued[run[-1]], "totnum": total,
+                         "cancel": total - len(run), "net_issue": len(run)})
+    for number in sorted(singles):
+        rows.append({"from": number, "to": number, "totnum": 1, "cancel": 0, "net_issue": 1})
     return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
 
 
@@ -778,9 +818,23 @@ def gstr1_portal_json(view, request):
         file_obj["hsn"] = hsn_tabs
     # Table 13, documents issued (mandatory): doc_num 1 is "invoices for
     # outward supply"; one row per number series of the month (H11).
-    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number])
+    fy_from = date(year if month >= 4 else year - 1, 4, 1)
+    elsewhere = (
+        Invoice.objects.filter(business=business, type_of_invoice="outward",
+                               invoice_date__gte=fy_from, invoice_date__lt=date(fy_from.year + 1, 4, 1))
+        .exclude(invoice_date__year=year, invoice_date__month=month)
+        .exclude(invoice_number="")
+        .values_list("invoice_number", flat=True)
+    )
+    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number], elsewhere)
     if docs:
         file_obj["doc_issue"] = {"doc_det": [{"doc_num": 1, "docs": docs}]}
+    for d in docs:
+        if d["cancel"] > max(10, d["net_issue"]):
+            warnings.append(
+                f"Table 13: {d['from']} to {d['to']} leaves {d['cancel']} numbers unused, filed as cancelled. "
+                "If an invoice number was mistyped, correct it before filing."
+            )
 
     total_txval = sum(
         r2(b["txval"]) for b in b2cs_agg.values()

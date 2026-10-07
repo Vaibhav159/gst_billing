@@ -8,9 +8,11 @@ the B2CL threshold, which must land in b2cs as an INTER row.
 import json
 from decimal import Decimal as D
 
+from django.test import SimpleTestCase
 from django.urls import reverse
 
 from billing.models import Customer, Invoice, LineItem
+from billing.services.gstr1 import document_series
 from billing.tests.test_base import BaseAPITestCase
 
 
@@ -175,6 +177,18 @@ class Gstr1PortalJsonTest(BaseAPITestCase):
             {"num": 2, "from": "R-1", "to": "R-2", "totnum": 2, "cancel": 0, "net_issue": 2},
         ]}]})
 
+    def test_table_13_leaves_other_months_numbers_alone_and_flags_a_jump(self):
+        """Review of H11: C-3, issued in August, isn't a cancelled July number,
+        and a mistyped C-9000 is flagged instead of filed quietly."""
+        for number in ("C-1", "C-2", "C-4", "C-9000"):
+            self._invoice(self.b2c_intra, number, "100", cgst="1.50", sgst="1.50")
+        self._invoice(self.b2c_intra, "C-3", "100", cgst="1.50", sgst="1.50", date="2026-08-02")
+        data = self._get().data
+        docs = data["file"]["doc_issue"]["doc_det"][0]["docs"]
+        self.assertEqual([(d["from"], d["to"], d["totnum"], d["cancel"], d["net_issue"]) for d in docs],
+                         [("C-1", "C-2", 2, 0, 2), ("C-4", "C-9000", 8997, 8995, 2)])
+        self.assertTrue(any("C-9000" in w and "8995" in w for w in data["meta"]["warnings"]), data["meta"]["warnings"])
+
     def test_the_gst_page_export_splits_hsn_the_same_way(self):
         self._standard_fixture()
         resp = self.client.get(reverse("invoice-gstr-export"), {
@@ -214,3 +228,34 @@ class Gstr1PortalJsonTest(BaseAPITestCase):
         resp = self.client.get(reverse("invoice-gstr1-portal-json"),
                                {"business_id": self.business.id})
         self.assertEqual(resp.status_code, 400)
+
+
+class DocumentSeriesTest(SimpleTestCase):
+    """Table 13's series (review of H11)."""
+
+    def _rows(self, numbers, elsewhere=()):
+        return [(r["from"], r["to"], r["totnum"], r["cancel"], r["net_issue"])
+                for r in document_series(numbers, elsewhere)]
+
+    def test_the_counter_is_the_part_that_runs(self):
+        # "101/2026-27": the trailing 27 is the FY, not the counter.
+        self.assertEqual(self._rows(["101/2026-27", "102/2026-27", "104/2026-27"]),
+                         [("101/2026-27", "104/2026-27", 4, 1, 3)])
+
+    def test_a_trailing_counter_still_works(self):
+        self.assertEqual(self._rows(["INV/2026-27/101", "INV/2026-27/103"]),
+                         [("INV/2026-27/101", "INV/2026-27/103", 3, 1, 2)])
+
+    def test_a_number_issued_in_another_month_splits_the_range(self):
+        self.assertEqual(self._rows(["48", "49", "51", "52"], elsewhere=["50"]),
+                         [("48", "49", 2, 0, 2), ("51", "52", 2, 0, 2)])
+
+    def test_a_back_dated_number_is_a_row_of_its_own(self):
+        self.assertEqual(self._rows(["40", "41", "50"], elsewhere=[str(n) for n in range(42, 50)]),
+                         [("40", "41", 2, 0, 2), ("50", "50", 1, 0, 1)])
+
+    def test_a_gap_nobody_used_counts_as_cancelled(self):
+        self.assertEqual(self._rows(["A/1", "A/2", "A/5"], elsewhere=["B/3"]), [("A/1", "A/5", 5, 2, 3)])
+
+    def test_a_number_without_digits_is_a_series_of_one(self):
+        self.assertEqual(self._rows(["CASH"]), [("CASH", "CASH", 1, 0, 1)])
