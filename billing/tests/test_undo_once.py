@@ -6,7 +6,11 @@ came back once per click, each copy with its lines, doubling the ITC. And
 can_undo never cleared.
 """
 
+from decimal import Decimal
+from io import StringIO
+
 from django.contrib.auth.models import Group, User
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -14,7 +18,7 @@ from rest_framework.test import APIClient
 from billing.models import AuditLog, Business, Customer, Invoice
 
 
-class UndoOnceTests(TestCase):
+class UndoTestBase(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="admin_undo_once", password="pw")
         self.user.groups.add(Group.objects.get_or_create(name="admin")[0])
@@ -44,6 +48,8 @@ class UndoOnceTests(TestCase):
         self.client.delete(reverse("invoice-detail", args=[inv.id]))
         return self._entry("deleted", inv.id)
 
+
+class UndoOnceTests(UndoTestBase):
     def test_a_deleted_purchase_comes_back_once(self):
         entry = self._deleted_entry("SJ-101", "inward")
         self.assertEqual(self._undo(entry).status_code, 200)
@@ -90,3 +96,54 @@ class UndoOnceTests(TestCase):
         self.assertTrue(listed()["can_undo"])
         self._undo(entry)
         self.assertFalse(listed()["can_undo"])
+
+
+class UndoResumsTheTotalTests(UndoTestBase):
+    """M9: undo of an "updated" invoice copied every field back, total
+    included, over lines that had changed since: the header said 1,030 while
+    its lines summed to 2,060. Dashboards read the header, GSTR tables the
+    lines."""
+
+    def test_undoing_a_header_edit_keeps_the_total_of_the_lines(self):
+        inv = self._invoice("9", "outward")  # one line, 10,300
+        self.client.patch(reverse("invoice-detail", args=[inv.id]), {"invoice_number": "99"}, format="json")
+        header_edit = self._entry("updated", inv.id)
+        r = self.client.post(reverse("invoice-update-line-items", args=[inv.id]), {"line_items": [
+            {"product_name": "Silver", "hsn_code": "711311", "gst_tax_rate": "0.03", "quantity": "2", "rate": "10000",
+             "cgst": "300", "sgst": "300", "igst": "0", "amount": "20600"}]}, format="json")
+        self.assertEqual(r.status_code, 200, getattr(r, "data", None))
+        self.assertEqual(self._undo(header_edit).status_code, 200)
+        inv.refresh_from_db()
+        self.assertEqual(inv.invoice_number, "9")
+        self.assertEqual(inv.total_amount, Decimal("20600"))
+
+
+class FixInvoiceTotalsTests(UndoTestBase):
+    def _run(self, *args):
+        out = StringIO()
+        call_command("fix_invoice_totals", *args, stdout=out)
+        return out.getvalue()
+
+    def test_reports_then_resums_a_stale_header(self):
+        inv = self._invoice("10", "outward")
+        Invoice.objects.filter(pk=inv.pk).update(total_amount=Decimal("1030"))
+        output = self._run()
+        self.assertIn("#10", output)
+        self.assertIn("1030", output)
+        self.assertIn("10300", output)
+        self.assertIn("Dry run", output)
+        inv.refresh_from_db()
+        self.assertEqual(inv.total_amount, Decimal("1030"))
+
+        self._run("--apply")
+        inv.refresh_from_db()
+        self.assertEqual(inv.total_amount, Decimal("10300"))
+        self.assertIn("No invoice totals", self._run())
+
+    def test_an_invoice_without_lines_is_listed_not_zeroed(self):
+        empty = Invoice.objects.create(business=self.biz, customer=self.supplier, invoice_number="11",
+                                       invoice_date="2026-05-10", type_of_invoice="outward", total_amount=Decimal("500"))
+        output = self._run("--apply")
+        self.assertIn("#11", output)
+        empty.refresh_from_db()
+        self.assertEqual(empty.total_amount, Decimal("500"))

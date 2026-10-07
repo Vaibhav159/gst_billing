@@ -2814,8 +2814,12 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
                         assert_period_unlocked(snap.get("business"), snap.get("invoice_date"), "edit")
                     field_names = {f.name for f in model._meta.concrete_fields}
+                    # The total is the lines' sum, and the lines may have
+                    # changed since the snapshot: copying it back left a header
+                    # of 1,030 over lines of 2,060 (M9). Re-summed below.
+                    skip = {"id", "total_amount"} if model is Invoice else {"id"}
                     for k, v in snap.items():
-                        if k not in field_names or k == "id":
+                        if k not in field_names or k in skip:
                             continue
                         field = model._meta.get_field(k)
                         if hasattr(field, "related_model") and field.related_model:
@@ -2825,7 +2829,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                                 setattr(obj, k, None if field.null else "")
                             else:
                                 setattr(obj, k, v)
-                    obj.save()
+                    obj.save(**({"recalc_total": True} if model is Invoice else {}))
                     log = AuditLog.objects.create(
                         action="updated",
                         entity=entry.entity,
