@@ -416,7 +416,8 @@ class Invoice(AbstractBaseModel):
             )
         parties = (self.business_id, self.customer_id)
         loaded = getattr(self, "_loaded_parties", None)
-        moved = bool(self.pk) and loaded is not None and loaded != parties
+        # As text: an id assigned from a request ("5") is the 5 loaded, not a move.
+        moved = bool(self.pk) and loaded is not None and tuple(map(str, loaded)) != tuple(map(str, parties))
         super().save(*args, **kwargs)
         self._loaded_parties = parties
         if moved:

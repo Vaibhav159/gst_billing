@@ -6,6 +6,8 @@ it was sent.
 
 from decimal import Decimal as D
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from billing.models import Customer, FiledPeriod, Invoice, LineItem
@@ -134,3 +136,45 @@ class LineItemBuilderRulesTest(BaseAPITestCase):
         inv.save()
         self.line_item.refresh_from_db()
         self.assertEqual(self.line_item.igst, D("180"))
+
+
+class PartiesSentAsStringsTest(BaseAPITestCase):
+    """The SPA sends an edit's parties as strings ("5"). Compared with the ints
+    the invoice was loaded with, every edit looked like a move, so each line
+    was saved once more and the total re-summed after each: 18 queries became
+    61 on a 10-line edit (review of M14/H6)."""
+
+    def _lines(self, n):
+        return [{"product_name": f"Gold {i}", "hsn_code": "711319", "gst_tax_rate": "0.03", "quantity": "1",
+                 "rate": "1000", "unit": "gms", "cgst": "15", "sgst": "15", "igst": "0", "amount": "1030"}
+                for i in range(n)]
+
+    def _edit(self, parties, n=10):
+        return self.client.post(reverse("invoice-update-line-items", args=[self.invoice.id]),
+                                {"invoice": parties, "line_items": self._lines(n)}, format="json")
+
+    @staticmethod
+    def _line_updates(ctx):
+        return [q["sql"] for q in ctx.captured_queries if q["sql"].startswith('UPDATE "billing_lineitem"')]
+
+    def test_an_edit_that_keeps_its_parties_saves_no_line_again(self):
+        with CaptureQueriesContext(connection) as ctx:
+            r = self._edit({"customer": str(self.customer.id), "business": str(self.business.id)})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self._line_updates(ctx), [])
+        self.assertEqual(LineItem.objects.filter(invoice=self.invoice).count(), 10)
+
+    def test_a_party_that_is_not_an_id_is_a_400(self):
+        for bad in ("abc", "999999"):
+            with self.subTest(customer=bad):
+                r = self._edit({"customer": bad}, n=1)
+                self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+                self.invoice.refresh_from_db()
+                self.assertEqual(self.invoice.customer_id, self.customer.id)
+
+    def test_a_save_with_the_same_parties_as_strings_is_not_a_move(self):
+        inv = Invoice.objects.get(pk=self.invoice.pk)
+        inv.customer_id, inv.business_id = str(inv.customer_id), str(inv.business_id)
+        with CaptureQueriesContext(connection) as ctx:
+            inv.save()
+        self.assertEqual(self._line_updates(ctx), [])

@@ -73,6 +73,14 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+def _party(model, value, field):
+    """The firm or customer a request names by id, or a 400."""
+    try:
+        return model.objects.get(pk=int(value))
+    except (TypeError, ValueError, model.DoesNotExist):
+        raise ValidationError({field: f"{value!r} is not a {field} on file."}) from None
+
+
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 15
     page_size_query_param = "page_size"
@@ -1047,8 +1055,16 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         invoice = self.get_object()
         assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
         _incoming = request.data.get("invoice") or {}
+        # The SPA sends the parties as strings. Assigned raw, "5" never equalled
+        # the 5 the invoice was loaded with, so every edit looked like a move
+        # and re-saved each line; a bad id was a 500.
+        parties = {
+            field: _party(model, _incoming[field], field)
+            for field, model in (("customer", Customer), ("business", Business))
+            if _incoming.get(field)
+        }
         assert_period_unlocked(
-            _incoming.get("business") or invoice.business_id,
+            parties["business"].pk if "business" in parties else invoice.business_id,
             _incoming.get("invoice_date") or invoice.invoice_date,
             "edit",
         )
@@ -1065,10 +1081,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
             # 1. Patch invoice-level fields if provided (in-memory only)
             if invoice_data:
-                if invoice_data.get("customer"):
-                    invoice.customer_id = invoice_data["customer"]
-                if invoice_data.get("business"):
-                    invoice.business_id = invoice_data["business"]
+                if "customer" in parties:
+                    invoice.customer = parties["customer"]
+                if "business" in parties:
+                    invoice.business = parties["business"]
                 if "invoice_number" in invoice_data:
                     invoice.invoice_number = invoice_data["invoice_number"]
                 if "invoice_date" in invoice_data:
