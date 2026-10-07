@@ -24,7 +24,7 @@ from django.db import transaction
 from django.db.models import Count, DecimalField, F, OuterRef, Subquery, Sum
 from django.db.models.functions import Coalesce
 
-from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, scope
+from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, log_repair, scope
 from billing.models import Invoice, LineItem
 
 
@@ -76,5 +76,7 @@ class Command(BaseCommand):
                 total_amount=Coalesce(Subquery(line_sum, output_field=DecimalField()), Decimal("0"),
                                       output_field=DecimalField())
             )
+            log_repair("fix_invoice_totals", "invoice", f"re-summed {len(fixable)} invoice total(s)",
+                       invoices=[inv.pk for inv in fixable])
         invalidate(Invoice)
         self.stdout.write(self.style.SUCCESS(f"\nRe-summed {len(fixable)} invoice total(s)."))

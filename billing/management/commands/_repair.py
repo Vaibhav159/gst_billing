@@ -9,7 +9,7 @@ told which filed returns a fix would move.
 from django.db.models import Prefetch
 
 from billing.cache import invalidate  # noqa: F401  (the commands import it from here)
-from billing.models import FiledPeriod, LineItem
+from billing.models import AuditLog, FiledPeriod, LineItem
 
 
 def add_scope_arguments(parser, what="the fix"):
@@ -38,6 +38,20 @@ def scope(qs, opts, prefix=""):
 def fresh_lines():
     """An invoice's lines to prefetch, read past cacheops like the invoices."""
     return Prefetch("lineitem_set", queryset=LineItem.objects.nocache())
+
+
+def log_repair(command, entity, summary, **ids):
+    """One row in the app's audit log for a repair's --apply, in its transaction.
+
+    A repair changes rows outside the app, filed months included, and left no
+    trace in its log. The row has no snapshot, so it offers no undo. `ids` are
+    the rows changed, by kind (lines=[...], customers=[...]).
+    """
+    AuditLog.objects.create(
+        action="updated", entity=entity, entity_id=0, entity_name=f"(repair) {command}",
+        details=f"manage.py {command} --apply: {summary}",
+        changes={"command": command, **{kind: list(rows) for kind, rows in ids.items()}},
+    )
 
 
 def filed_months():

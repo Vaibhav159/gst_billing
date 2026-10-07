@@ -26,7 +26,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
 
-from billing.management.commands._repair import fresh_lines, invalidate
+from billing.management.commands._repair import fresh_lines, invalidate, log_repair
 from billing.models import Business, Customer, Invoice
 from billing.tax_rules import gstin_problem, has_gstin, is_interstate
 
@@ -116,6 +116,10 @@ class Command(BaseCommand):
         if placeholders:
             with transaction.atomic():
                 Customer.objects.filter(pk__in=[c.pk for c in placeholders]).update(gst_number="")
+                log_repair("fix_placeholder_gstins", "customer",
+                           f"blanked {len(placeholders)} placeholder GSTIN(s): "
+                           + ", ".join(f"{c.name} ({c.gst_number!r})" for c in placeholders[:20]),
+                           customers=[c.pk for c in placeholders])
             invalidate(Customer, Invoice)
         self.stdout.write(self.style.SUCCESS(f"\nBlanked {len(placeholders)} customer GSTIN(s)."))
         if len(placeholders) < len(bad_customers):

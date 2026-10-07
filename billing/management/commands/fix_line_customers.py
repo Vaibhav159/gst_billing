@@ -25,7 +25,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import F, OuterRef, Subquery
 
-from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, scope
+from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, log_repair, scope
 from billing.models import Invoice, LineItem
 
 
@@ -63,6 +63,8 @@ class Command(BaseCommand):
             LineItem.objects.filter(pk__in=[li.pk for li in lines]).update(
                 customer_id=Subquery(Invoice.objects.filter(pk=OuterRef("invoice_id")).values("customer_id")[:1])
             )
+            log_repair("fix_line_customers", "invoice",
+                       f"re-pointed {len(lines)} line(s) to their invoice's customer", lines=[li.pk for li in lines])
         invalidate(LineItem)
         self.stdout.write(self.style.SUCCESS(f"\nRe-pointed {len(lines)} line item(s)."))
 

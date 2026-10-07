@@ -26,7 +26,7 @@ from collections import Counter
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, scope
+from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, log_repair, scope
 from billing.models import LineItem
 from billing.tax_rules import split_tax, to_paise
 
@@ -102,5 +102,7 @@ class Command(BaseCommand):
         # transaction against a remote database.
         with transaction.atomic():
             LineItem.objects.bulk_update([li for li, _ in fixes], ["cgst", "sgst", "igst"], batch_size=500)
+            log_repair("fix_tax_splits", "invoice", f"re-split {len(fixes)} line(s) in whole paise",
+                       lines=[li.pk for li, _ in fixes])
         invalidate(LineItem)
         self.stdout.write(self.style.SUCCESS(f"\nRe-split {len(fixes)} line(s)."))
