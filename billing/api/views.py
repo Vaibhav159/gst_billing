@@ -1778,10 +1778,13 @@ class LineItemViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def perform_create(self, serializer):
+        serializer.save(customer=serializer.validated_data["invoice"].customer)
+
     def perform_update(self, serializer):
         inv = serializer.instance.invoice
         assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
-        super().perform_update(serializer)
+        serializer.save(customer=inv.customer)
 
     def perform_destroy(self, instance):
         inv = instance.invoice

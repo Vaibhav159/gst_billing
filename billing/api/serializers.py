@@ -99,6 +99,18 @@ class LineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = LineItem
         fields = "__all__"
+        # The invoice's, always (the views set it). A line filed under another
+        # party stays behind when the invoice changes hands (H5, H6).
+        read_only_fields = ("customer",)
+
+    def validate_invoice(self, invoice):
+        # Moving a line doubled a filed month's total and left the source
+        # invoice's stale; the lock only ever looked at the source (H5).
+        if self.instance is not None and invoice != self.instance.invoice:
+            raise serializers.ValidationError(
+                "A line can't move to another invoice. Delete it here and add it there."
+            )
+        return invoice
 
     def validate(self, attrs):
         from billing.tax_rules import check_line_money
