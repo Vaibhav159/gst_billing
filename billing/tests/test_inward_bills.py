@@ -401,3 +401,34 @@ class AIReadRateTest(SimpleTestCase):
 
     def test_a_rate_the_model_gave_is_kept_as_read(self):
         self.assertEqual(self._rates({"gst_tax_rate": 0}, {"gst_tax_rate": 0.25}, {"gst_tax_rate": "0.03"}), [0.0, 0.25, 0.03])
+
+
+class InwardBillSavedSupplierHeadTest(BaseAPITestCase):
+    """M26: the head came from the GSTIN and state typed on the form, but the
+    bill is booked on the supplier the server resolves. A supplier on file
+    from Maharashtra, matched by name while the form carried another GSTIN,
+    got CGST+SGST, and is_igst_applicable (read from the saved supplier) then
+    disagreed with the heads stored."""
+
+    def setUp(self):
+        super().setUp()
+        # The base business is 22 (Chhattisgarh).
+        self.mh = Customer.objects.create(name="MH BULLION", gst_number="27AABCR1718E1ZP", state_name="")
+        self.mh.businesses.add(self.business)
+
+    def _post(self, number, **over):
+        data = {"business_id": self.business.id, "supplier_name": "MH BULLION",
+                "supplier_gstin": "22DDDDD0000D1Z5", "invoice_number": number, "invoice_date": "2026-05-05",
+                "lines": json.dumps([{"product_name": "Gold bar", "hsn_code": "710813", "quantity": "1",
+                                      "rate": "100000", "gst_tax_rate": "0.03", "unit": "gms"}])}
+        data.update(over)
+        return self.client.post(reverse("inward-bill-list"), data)
+
+    def test_the_head_follows_the_supplier_the_bill_is_booked_on(self):
+        resp = self._post("MH-1")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        inv = Invoice.objects.get(invoice_number="MH-1")
+        self.assertEqual(inv.customer_id, self.mh.id)
+        li = inv.lineitem_set.get()
+        self.assertEqual((li.cgst, li.sgst, li.igst), (D("0"), D("0"), D("3000")))
+        self.assertTrue(inv.is_igst_applicable)

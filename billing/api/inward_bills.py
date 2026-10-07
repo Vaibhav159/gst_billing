@@ -186,10 +186,13 @@ class InwardBillListCreateView(APIView):
 
         # Shared rule with the invoice write paths. The old inline check was
         # `bool(supplier_gstin) and codes match`, so a supplier with no GSTIN
-        # fell through to interstate and the whole bill was taxed IGST.
+        # fell through to interstate and the whole bill was taxed IGST. The
+        # supplier is the one the bill is booked on, as is_igst_applicable
+        # reads it: the GSTIN typed on the form could differ from it (M26).
+        # The bill's state only stands in when the record has neither.
         supplier_for_rule = SimpleNamespace(
-            gst_number=supplier_gstin,
-            state_name=(request.data.get("supplier_state") or getattr(supplier, "state_name", "") or ""),
+            gst_number=supplier.gst_number or "",
+            state_name=supplier.state_name or request.data.get("supplier_state") or "",
         )
         intra = not is_interstate(business, supplier_for_rule)
         service_lines = []
