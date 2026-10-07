@@ -92,3 +92,18 @@ class FixLineCustomersTest(BaseAPITestCase):
         self.line_item.refresh_from_db()
         self.assertEqual(self.line_item.customer_id, other.id)
         self.assertIn("No line items", self._run())
+
+    def test_lists_invoices_the_cascade_already_emptied(self):
+        # What H6 left behind: the lines deleted with a customer, and the
+        # total re-summed to 0 by the line signals, so no total looks wrong.
+        LineItem.objects.filter(invoice=self.invoice).delete()
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.total_amount, D("0"))
+        output = self._run()
+        self.assertIn("1 invoice(s) have no lines", output)
+        self.assertIn("INV-001", output)
+        self._run("--apply")
+        self.assertTrue(Invoice.objects.filter(pk=self.invoice.pk).exists())
+
+    def test_says_nothing_of_empty_invoices_when_there_are_none(self):
+        self.assertNotIn("no lines", self._run())

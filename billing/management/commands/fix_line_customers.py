@@ -14,6 +14,11 @@ Read-only by default. Nothing is written without --apply.
     python manage.py fix_line_customers --apply           # re-point the lines
 
 Only the line's customer changes. No amount, tax head or total moves.
+
+It also lists invoices with no lines at all, which is what the cascade left
+behind: the lines went with the customer and the line signals re-summed the
+total to 0, so no total looks wrong. Those lines can only come back from a
+backup taken before the delete; the command never touches those invoices.
 """
 
 from django.core.management.base import BaseCommand
@@ -34,11 +39,12 @@ class Command(BaseCommand):
         qs = scope(LineItem.objects.exclude(customer_id=F("invoice__customer_id")), opts, "invoice__")
         qs = qs.select_related("invoice", "invoice__customer", "customer").order_by("invoice__invoice_date", "id")
         lines = list(qs)
+        filed = filed_months()
+        self._report_empty_invoices(opts, filed)
         if not lines:
             self.stdout.write(self.style.SUCCESS("No line items name a customer other than their invoice's."))
             return
 
-        filed = filed_months()
         invoices = {li.invoice_id for li in lines}
         self.stdout.write(self.style.WARNING(f"\n{len(lines)} line item(s) on {len(invoices)} invoice(s):\n"))
         for li in lines:
@@ -59,3 +65,25 @@ class Command(BaseCommand):
             )
         invalidate(LineItem)
         self.stdout.write(self.style.SUCCESS(f"\nRe-pointed {len(lines)} line item(s)."))
+
+    def _report_empty_invoices(self, opts, filed):
+        empty = list(
+            scope(Invoice.objects.filter(lineitem__isnull=True), opts)
+            .select_related("business", "customer")
+            .order_by("invoice_date", "id")
+        )
+        if not empty:
+            return
+        self.stdout.write(
+            self.style.ERROR(
+                f"\n{len(empty)} invoice(s) have no lines. Deleting a customer used to take the lines of "
+                "invoices that had moved to another party, leaving them like this; only a backup from "
+                "before the delete has those lines. They are listed, never changed:"
+            )
+        )
+        for inv in empty:
+            mark = "  FILED" if (inv.business_id, inv.invoice_date.year, inv.invoice_date.month) in filed else ""
+            self.stdout.write(
+                f"  #{str(inv.invoice_number)[:14]:<14} {inv.invoice_date}  {inv.type_of_invoice:<7} "
+                f"{inv.business.name[:24]:<24} {inv.customer.name[:24]!r}  total {inv.total_amount}{mark}"
+            )
