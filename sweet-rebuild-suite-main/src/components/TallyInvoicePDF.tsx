@@ -5,6 +5,7 @@
  */
 import {
   Document,
+  Font,
   Page,
   Text,
   View,
@@ -17,6 +18,12 @@ import { amountToWords } from "@/utils/mockData";
 import { storedShowsIGST } from "@/utils/taxRules";
 import { stateInfo } from "@/utils/taxRules";
 import { documentTitle, partyLabels, declarationText } from "@/utils/printDocument";
+import rupeeSignFont from "@/assets/fonts/rupeeSignFont";
+
+// The built-in Times fonts are WinAnsi-encoded and have no ₹: the PDF writer
+// cut U+20B9 down to the byte 0xB9, which printed as "¹". This font is Tinos
+// Bold (Times metrics) reduced to that one glyph, as a data: URL.
+Font.register({ family: "RupeeSign", src: rupeeSignFont });
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -467,7 +474,9 @@ export default function TallyInvoicePDF({ invoice, business, customer, qrDataUrl
             </Text>
             <Text style={s.colRate}></Text>
             <Text style={s.colPer}></Text>
-            <Text style={[s.colAmt, s.bold]}>{"\u20B9"} {formatINR(invoice.total)}</Text>
+            <Text style={[s.colAmt, s.bold]}>
+              <Text style={{ fontFamily: "RupeeSign" }}>{"\u20B9"}</Text> {formatINR(invoice.total)}
+            </Text>
           </View>
 
           {/* AMOUNT CHARGEABLE (in words) */}
