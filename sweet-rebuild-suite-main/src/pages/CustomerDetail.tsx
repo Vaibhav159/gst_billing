@@ -16,7 +16,9 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import api from "@/utils/api";
+import { customerInvoicesForPdf } from "@/utils/pdfInvoices";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 
@@ -34,7 +36,15 @@ export default function CustomerDetail() {
   const { item: customer, isLoading } = useCustomer(id);
   const { remove: removeCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
-  const { items: invoices } = useInvoices({ customerId: id });
+  const { items: invoices, totalCount } = useInvoices({ customerId: id });
+  // The cards count every invoice, not the first page of the list (H18).
+  const [totals, setTotals] = useState<{ outward_total: number; inward_total: number } | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    api.get(`invoices/totals/?customer_id=${id}`)
+      .then((res) => setTotals({ outward_total: Number(res.data.outward_total) || 0, inward_total: Number(res.data.inward_total) || 0 }))
+      .catch((e) => logger.warn("Customer totals failed", e));
+  }, [id]);
 
   // Consistent loading + not-found treatment, mirrors InvoiceDetail.
   if (isLoading) return (
@@ -59,8 +69,9 @@ export default function CustomerDetail() {
   );
 
   const custInvoices = invoices.filter((inv) => String(inv.customerId) === String(id));
-  const totalSales = custInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const totalPurchases = custInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
+  const totalSales = totals ? totals.outward_total : custInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
+  const totalPurchases = totals ? totals.inward_total : custInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
+  const invoiceCount = Math.max(totalCount || 0, custInvoices.length);
   const netAmount = totalSales - totalPurchases;
   const sortedInvoices = [...custInvoices].sort((a, b) => new Date(b.invoice_date || "").getTime() - new Date(a.invoice_date || "").getTime());
 
@@ -74,12 +85,15 @@ export default function CustomerDetail() {
   const handleDownloadAll = async () => {
     if (custInvoices.length === 0) return;
     setDownloading(true);
-    setDlProgress({ current: 0, total: custInvoices.length });
-    toast({ title: "Generating PDFs", description: `Creating ${custInvoices.length} invoice PDFs...` });
     try {
+      // Every invoice, with its lines: page 1 of the list had at most 50 and
+      // no line items, so each PDF printed an empty item table (H18).
+      const all = await customerInvoicesForPdf(String(id));
+      setDlProgress({ current: 0, total: all.length });
+      toast({ title: "Generating PDFs", description: `Creating ${all.length} invoice PDFs...` });
       const { generateBulkPDFZip } = await import("@/utils/generateBulkPDF");
       const zipBlob = await generateBulkPDFZip(
-        custInvoices,
+        all,
         businesses,
         [customer],
         (current, total) => setDlProgress({ current, total })
@@ -92,7 +106,7 @@ export default function CustomerDetail() {
       a.click();
       window.URL.revokeObjectURL(url);
       a.remove();
-      toast({ title: "Download Complete", description: `${custInvoices.length} PDFs downloaded as ZIP.` });
+      toast({ title: "Download Complete", description: `${all.length} PDFs downloaded as ZIP.` });
     } catch (err) {
       logger.error("Bulk PDF failed", err);
       toast({ title: "Download Failed", description: "Could not generate PDFs.", variant: "destructive" });
@@ -158,7 +172,7 @@ export default function CustomerDetail() {
           { label: "Sales", value: formatCompactCurrency(totalSales), full: formatCurrency(totalSales), icon: TrendingUp, color: "text-success" },
           { label: "Purchases", value: formatCompactCurrency(totalPurchases), full: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-warning" },
           { label: "Net", value: formatCompactCurrency(netAmount), full: formatCurrency(netAmount), icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive" },
-          { label: "Invoices", value: custInvoices.length.toLocaleString("en-IN"), full: `${custInvoices.length} invoices`, icon: FileText, color: "text-chart-4" },
+          { label: "Invoices", value: invoiceCount.toLocaleString("en-IN"), full: `${invoiceCount} invoices`, icon: FileText, color: "text-chart-4" },
         ].map((stat) => {
           const Icon = stat.icon;
           return (

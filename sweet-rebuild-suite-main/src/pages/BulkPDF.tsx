@@ -10,7 +10,8 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useBusinesses, useCustomers, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { fyInvoicesForPdf } from "@/utils/pdfInvoices";
 import type { Invoice } from "@/utils/mockData";
 import api from "@/utils/api";
 import { BlobProvider } from "@react-pdf/renderer";
@@ -45,34 +46,19 @@ export default function BulkPDF() {
   }, []);
 
 
-  // Parse FY into date range: "2025-26" → Apr 2025 to Mar 2026
-  const fyStartYear = parseInt(selectedFY.split("-")[0], 10);
-  const fyStartDate = `${fyStartYear}-04-01`;
-  const fyEndDate = `${fyStartYear + 1}-03-31`;
-
   // Fetch ALL invoices for the selected FY/business/type
   const fetchAllInvoices = useCallback(async () => {
     if (!localStorage.getItem("gst_access_token")) return;
     setLoadingInvoices(true);
     try {
-      const params = new URLSearchParams();
-      params.set("page_size", "1000");
-      params.set("include_items", "true");
-      params.set("start_date", fyStartDate);
-      params.set("end_date", fyEndDate);
-      if (bizFilter !== "all") params.set("business_id", bizFilter);
-      if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
-
-      const res = await api.get<any>(`invoices/?${params.toString()}`);
-      const data = res.data;
-      const results = Array.isArray(data) ? data : (data.results || []);
-      setInvoices(results.map(mapDjangoInvoice));
+      // Every page: one 1,000-row request stopped there (H18).
+      setInvoices(await fyInvoicesForPdf(selectedFY, bizFilter, typeFilter));
     } catch (e) {
       logger.error("Failed to fetch invoices for bulk PDF", e);
     } finally {
       setLoadingInvoices(false);
     }
-  }, [fyStartDate, fyEndDate, bizFilter, typeFilter]);
+  }, [selectedFY, bizFilter, typeFilter]);
 
   useEffect(() => { fetchAllInvoices(); }, [fetchAllInvoices]);
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
