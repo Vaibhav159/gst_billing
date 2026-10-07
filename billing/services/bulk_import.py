@@ -19,6 +19,7 @@ from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normali
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.period_lock import locked_period_or_none
 from billing.tax_rules import (
+    LINE_MONEY_TOLERANCE,
     clean_gstin,
     direction_known,
     gstin_problem,
@@ -424,8 +425,29 @@ def run_bulk_import(request):
                     igst = Decimal(str(item.get("igst", 0)))
                     # User-supplied gross amount takes precedence — they may not have qty/rate
                     user_amount = Decimal(str(item.get("amount", 0)))
+                    taxable_in = Decimal(str(item.get("taxable") or 0))
                     net_amount = qty * rate
-                    if net_amount == 0 and user_amount > 0:
+                    # Quantity x rate must be the line's taxable value. A register
+                    # with no Qty/Rate columns came in as 60,000 x 900 for a
+                    # taxable value of 60,000, and the review screen, which shows
+                    # the file's taxable, looked right (H9).
+                    if net_amount > 0 and (taxable_in > 0 or user_amount > 0):
+                        if taxable_in > 0:
+                            expected, what = taxable_in, f"its taxable value ({taxable_in})"
+                        else:
+                            heads_in = cgst + sgst + igst
+                            expected = user_amount - (heads_in if heads_in else user_amount * gst_rate / (1 + gst_rate))
+                            what = f"its amount less tax ({to_paise(expected)})"
+                        if abs(net_amount - expected) > LINE_MONEY_TOLERANCE:
+                            errors.append(
+                                f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': "
+                                f"quantity x rate ({net_amount}) is not {what}. Check the Qty and Rate columns."
+                            )
+                            continue
+                    if net_amount == 0 and taxable_in > 0:
+                        net_amount = to_paise(taxable_in)
+                        qty, rate = Decimal("1"), net_amount
+                    elif net_amount == 0 and user_amount > 0:
                         if cgst == 0 and sgst == 0 and igst == 0:
                             # Gross only: back the taxable value out at the
                             # row's rate. This branch used to treat the gross

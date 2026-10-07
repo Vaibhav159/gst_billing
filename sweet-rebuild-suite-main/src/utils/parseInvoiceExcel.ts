@@ -139,9 +139,12 @@ function detectColumnMap(row: any[]): Record<string, number> {
     if (val.includes("gst number") || val.includes("gstin") || val === "gst no") map.gstNumber = idx;
     if (val.includes("commodity") || val.includes("product") || val.includes("item") || val.includes("description")) map.commodity = idx;
     if (val.includes("hsn")) map.hsnCode = idx;
-    if (val.includes("gst rate") || val === "rate %" || val === "tax rate") map.gstRate = idx;
+    // A rate in percent ("Rate%", "Rate (%)") is the GST rate, never the price
+    // per unit: taken as the price, a register's Rate% 3 became rate 3 (H9).
+    const percent = val.includes("%");
+    if (val.includes("gst rate") || val === "tax rate" || (val.includes("rate") && percent)) map.gstRate = idx;
     if (val.includes("qty") || val.includes("quantity") || val.includes("weight")) map.qty = idx;
-    if ((val.includes("rate") && !val.includes("gst") && !val.includes("tax")) || val.includes("price") || val.includes("rate (")) map.rate = idx;
+    if (!percent && ((val.includes("rate") && !val.includes("gst") && !val.includes("tax")) || val.includes("price"))) map.rate = idx;
     if (val.includes("taxable")) map.taxableValue = idx;
     if (val === "cgst" || val.includes("cgst")) map.cgst = idx;
     if (val === "sgst" || val.includes("sgst")) map.sgst = idx;
@@ -284,8 +287,12 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const invoiceDate = continuation ? lastInvoiceDate : rawDate;
       const partyName = continuation ? lastPartyName : rawParty;
       const gstNumber = continuation ? lastGstNumber : rawGstin;
-      const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : numVal(row[hasSNo ? 8 : 7]);
-      const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : numVal(row[hasSNo ? 9 : 8]);
+      // Read only from a column the header names. The old positional fallback
+      // took a register's Taxable Value column as the quantity: 60,000 x 900
+      // instead of 60,000 of taxable (H9). Without them the taxable value or
+      // the total carries the line, and the server stores 1 x taxable.
+      const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : 0;
+      const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : 0;
 
       // OPTIONAL columns — only read if the header explicitly maps them.
       // If they're missing, leave blank (parser/backend resolves from Product master).
@@ -401,6 +408,8 @@ export interface ImportReadyInvoice {
     qty: number;
     rate: number;
     unit: string;
+    /** The taxable value the file gave or the parser worked out (H9). */
+    taxable?: number;
     amount: number;
     cgst: number;
     sgst: number;
@@ -568,6 +577,9 @@ export function toImportReadyInvoices(
         items: items.map((i: any) => ({
           productName: i.productName, hsn: i.hsn, gstRate: i.gstRate,
           qty: i.qty, rate: i.rate, unit: i.unit,
+          // The taxable value the parser worked out (H9): the server checks
+          // qty x rate against it and stores 1 x taxable when there is none.
+          taxable: i.taxable,
           amount: i.amount, cgst: i.cgst, sgst: i.sgst, igst: i.igst,
         })),
         subtotal: Math.round(subtotal * 100) / 100,

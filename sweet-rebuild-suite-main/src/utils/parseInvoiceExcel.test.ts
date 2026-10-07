@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as XLSX from "xlsx-js-style";
 import { normalizeDate, toImportReadyInvoices, parseInvoiceExcel } from "./parseInvoiceExcel";
 import type { ParsedExcelResult } from "./parseInvoiceExcel";
 import { generateSampleExcelBytes } from "./generateSampleExcel";
@@ -199,5 +200,32 @@ describe("toImportReadyInvoices — placeholder GSTINs (H12)", () => {
     };
     const [inv] = toImportReadyInvoices(parsed, []);
     expect(inv.items[0]).toMatchObject({ cgst: 150, sgst: 150, igst: 0 });
+  });
+});
+
+describe("parseInvoiceExcel — a register without Qty/Rate columns (H9)", () => {
+  // A CA-style register: taxable value and tax, no quantity or price. With no
+  // Qty/Rate headers the parser read fixed column positions, and "Rate%" was
+  // taken as the price: Taxable 60,000 + CGST 900 imported as 60,000 x 900.
+  function register(): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "Rate%", "Taxable Value", "CGST", "SGST", "Total"],
+      [1, "101", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", 3, 60000, 900, 900, 61800],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+
+  it("reads no quantity or price, and the Rate% column as the GST rate", () => {
+    const [row] = parseInvoiceExcel(register()).firms[0].invoices;
+    expect(row).toMatchObject({ qty: 0, rate: 0, gstRate: 3, taxableValue: 60000, cgst: 900, sgst: 900 });
+  });
+
+  it("sends the taxable value it read", () => {
+    const [inv] = toImportReadyInvoices(parseInvoiceExcel(register()), []);
+    expect(inv.items[0]).toMatchObject({ qty: 0, rate: 0, taxable: 60000, cgst: 900, sgst: 900, amount: 61800 });
   });
 });
