@@ -27,7 +27,7 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
-from billing.tax_rules import is_interstate, rate_as_percent
+from billing.tax_rules import is_interstate, normalize_state_name, rate_as_percent
 
 
 class AbstractBaseModel(models.Model):
@@ -40,11 +40,13 @@ class AbstractBaseModel(models.Model):
 
 
 def get_state_code_from_state_name(state_name):
-    # invert the GST_CODE dict
-    if not state_name:
+    # invert the GST_CODE dict, on one spelling per name ("&" as "AND",
+    # whitespace collapsed) so "JAMMU & KASHMIR" is a state too (M16)
+    wanted = normalize_state_name(state_name)
+    if not wanted:
         return ""
 
-    state_code = [k for k, v in GST_CODE.items() if v == state_name]
+    state_code = [k for k, v in GST_CODE.items() if normalize_state_name(v) == wanted]
 
     return int(state_code[0]) if state_code else ""
 

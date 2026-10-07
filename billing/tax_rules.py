@@ -245,6 +245,14 @@ def state_name_from_gstin(gstin):
     return derive(g)["state_name"]
 
 
+def normalize_state_name(name):
+    """One spelling per state name: upper-case, "&" read as "AND", whitespace
+    collapsed. Party records and imports carry "JAMMU & KASHMIR" as often as
+    "JAMMU AND KASHMIR". Mirrored by normalizeStateName in taxRules.ts (M16).
+    """
+    return " ".join((name or "").upper().replace("&", " AND ").split())
+
+
 def state_code(party):
     """Two-digit GST state code for a Business or Customer.
 

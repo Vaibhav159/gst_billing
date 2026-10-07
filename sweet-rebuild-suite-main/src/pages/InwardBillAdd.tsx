@@ -68,10 +68,8 @@ export default function InwardBillAdd() {
   });
   const [ackMismatch, setAckMismatch] = useState(false);
 
-  const firmGstin = useMemo(
-    () => businesses.find((b) => String(b.id) === business)?.gst_number || "",
-    [businesses, business],
-  );
+  const firm = useMemo(() => businesses.find((b) => String(b.id) === business), [businesses, business]);
+  const firmGstin = firm?.gst_number || "";
   // Same rule as billing/tax_rules.py, so this preview and the saved bill agree.
   const gstinState = useGstinLookup(supplierGstin);
   useEffect(() => {
@@ -89,7 +87,8 @@ export default function InwardBillAdd() {
   const registered = hasGstin(supplierGstin);
   // "URP" is no state code: the server drops placeholders before deciding the
   // head, so the preview does too.
-  const intra = isIntraState(registered ? supplierGstin : "", firmGstin);
+  // The firm's state name too, as the server reads it (M16).
+  const intra = isIntraState(registered ? supplierGstin : "", firmGstin, "", firm?.state_name);
   const lineRate = (l: FormLine) => (registered ? l.gst_percent : "0");
 
   const computed = useMemo(() => {
