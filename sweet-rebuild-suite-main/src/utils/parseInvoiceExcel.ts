@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx-js-style";
-import { lineItemPercent, rateToPercent } from "./gstRate";
+import { lineItemPercent } from "./gstRate";
 import { halveTax, round2 } from "./money";
 import { stateCode } from "./taxRules";
 
@@ -71,6 +71,25 @@ function numVal(cell: any): number {
 function strVal(cell: any): string {
   if (cell === null || cell === undefined) return "";
   return String(cell).trim();
+}
+
+/**
+ * A GST-rate cell as a percent, or null when the sheet gives none.
+ *
+ * The column holds percents. Text such as "0.8%" (the app's own report writes
+ * rates that way) is the percent written, and so is a bare number: a slab reads
+ * either way (0.03 and 3 are both 3%), an off-slab one as a percent. A cell
+ * formatted as a percentage shows "3%" but holds 0.03, so its value is the
+ * fraction. Read as a fraction whenever it was 1 or less, a blended 0.8% came
+ * back as 80% (review of H10). `shown` is the cell's formatted text.
+ */
+export function gstPercentOf(value: unknown, shown = ""): number | null {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  if (typeof value === "number") {
+    return lineItemPercent({ gstRate: shown.includes("%") ? value * 100 : value });
+  }
+  const n = parseFloat(String(value).replace(/[%\s]/g, ""));
+  return Number.isFinite(n) ? lineItemPercent({ gstRate: n }) : null;
 }
 
 /**
@@ -161,15 +180,21 @@ function detectColumnMap(row: any[]): Record<string, number> {
 function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
   const rows: any[][] = [];
+  // Each cell's formatted text, beside its value: a GST rate formatted as a
+  // percentage is told apart by it (gstPercentOf).
+  const shown: string[][] = [];
 
   for (let r = range.s.r; r <= range.e.r; r++) {
     const row: any[] = [];
+    const text: string[] = [];
     for (let c = range.s.c; c <= Math.min(range.e.c, 20); c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
       const cell = ws[addr];
       row.push(cell ? cell.v : null);
+      text.push(cell?.w ?? "");
     }
     rows.push(row);
+    shown.push(text);
   }
 
   let firmName = sheetName;
@@ -297,10 +322,10 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       // OPTIONAL columns — only read if the header explicitly maps them.
       // If they're missing, leave blank (parser/backend resolves from Product master).
       const hsnCode = colMap.hsnCode !== undefined ? strVal(row[colMap.hsnCode]) : "";
-      // A cell formatted "3%" holds 0.03. The slab list reads 0.03, 3 and "3%"
-      // alike as 3%; taken as a percent, 0.03 taxed 60,000 at 0.03% (H10).
+      // A cell formatted "3%" holds 0.03: taken as a percent, 0.03 taxed
+      // 60,000 at 0.03% (H10). gstPercentOf reads the column as percents.
       const gstRate = colMap.gstRate !== undefined
-        ? rateToPercent(numVal(strVal(row[colMap.gstRate]).replace("%", "")))
+        ? (gstPercentOf(row[colMap.gstRate], shown[i][colMap.gstRate]) ?? 0)
         : 0;
       const taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : 0;
       const cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : 0;

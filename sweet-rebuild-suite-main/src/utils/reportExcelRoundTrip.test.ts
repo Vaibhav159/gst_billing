@@ -207,3 +207,14 @@ describe("review follow-ups — the trip all the way to the importer's payload",
     for (const r of rows) expect(r.partyName).toBe("Test Party");
   });
 });
+
+describe("review of H10 — a rate under 1% survives export and re-import", () => {
+  it("brings a 0.8% line back at 0.8%, with its own tax", async () => {
+    // A GSTR-2A purchase is stored at its blended rate; the export writes it as "0.8%".
+    const inv = multiLine("8", 1, 100000);
+    inv.items[0] = { ...inv.items[0], gstRate: 0.8, cgst: 400, sgst: 400, amount: 100800 };
+    Object.assign(inv, { totalCGST: 400, totalSGST: 400, totalTax: 800, total: 100800, roundedOff: undefined });
+    const [back] = toImportReadyInvoices(await roundTrip([inv]), []);
+    expect(back.items[0]).toMatchObject({ gstRate: 0.8, cgst: 400, sgst: 400 });
+  });
+});

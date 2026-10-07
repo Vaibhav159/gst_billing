@@ -257,3 +257,42 @@ describe("parseInvoiceExcel — a cell formatted as a percent (H10)", () => {
     expect(toImportReadyInvoices(parseInvoiceExcel(sheet(0.0025)), [])[0].items[0].gstRate).toBe(0.25);
   });
 });
+
+describe("parseInvoiceExcel — a GST rate under 1% (review of H10)", () => {
+  // The column holds percents. Read through rateToPercent, any off-slab value
+  // up to 1 was taken for a fraction: the app's own export writes a blended
+  // 0.8% (a GSTR-2A purchase) as the text "0.8%", and it came back as 80%.
+  function sheet(rateCell: number | string, format?: string): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "GST Rate", "Qty", "Rate", "Total"],
+      [1, "103", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", rateCell, 10, 6000, 0],
+    ]);
+    if (format) ws["H4"].z = format;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+  const rateOf = (rateCell: number | string, format?: string) =>
+    toImportReadyInvoices(parseInvoiceExcel(sheet(rateCell, format)), [])[0].items[0];
+
+  it("reads the text 0.8% as 0.8% and taxes at it", () => {
+    expect(rateOf("0.8%")).toMatchObject({ gstRate: 0.8, cgst: 240, sgst: 240 });
+  });
+
+  it("reads a bare off-slab 0.5 as 0.5%, not 50%", () => {
+    expect(rateOf(0.5).gstRate).toBe(0.5);
+  });
+
+  it("reads a cell formatted as a percentage by its value: 0.008 shown as 0.8% is 0.8%", () => {
+    expect(rateOf(0.008, "0.0%").gstRate).toBe(0.8);
+    expect(rateOf(0.03, "0%").gstRate).toBe(3);
+  });
+
+  it("still reads every slab either way", () => {
+    for (const [cell, pct] of [[0.03, 3], [3, 3], ["3%", 3], [0.0025, 0.25], [0.25, 0.25], [18, 18]] as const) {
+      expect(rateOf(cell).gstRate).toBe(pct);
+    }
+  });
+});
