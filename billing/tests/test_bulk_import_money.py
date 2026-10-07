@@ -65,16 +65,34 @@ class TaxableValueTest(BulkImportMoneyCase):
 
 class FileHeadsTest(BulkImportMoneyCase):
     """H10: the server normalised the rate to 3% but kept the file's heads, so
-    the line said 3% while carrying Rs 18 of tax on Rs 60,000."""
+    the line said 3% while carrying Rs 18 of tax on Rs 60,000.
 
-    def test_heads_that_are_not_the_rate_are_recomputed_and_said_so(self):
+    Review: H10 then recomputed such heads from the rate. With the rate wrong
+    and the tax right, that booked tax the bill never charged (on a purchase,
+    ITC on neither the bill nor 2B), and a gross-only row was taxed again on
+    top of its gross. Heads that aren't the rate are refused instead."""
+
+    def test_heads_that_are_not_the_rate_are_refused(self):
         data = self._import(self._row("H-1", {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 10,
                                               "rate": 6000, "taxable": 60000, "cgst": 9, "sgst": 9, "igst": 0,
                                               "amount": 60018}))
-        li = self._line("H-1")
-        self.assertEqual((li.gst_tax_rate, li.cgst, li.sgst, li.igst, li.amount),
-                         (D("0.03"), D("900"), D("900"), D("0"), D("61800")))
+        self.assertFalse(Invoice.objects.filter(invoice_number="H-1").exists())
         self.assertTrue(any("H-1" in e and "1800" in e for e in data["errors"]), data["errors"])
+
+    def test_a_wrong_rate_does_not_rewrite_the_files_tax(self):
+        data = self._import(self._row("H-3", {"productName": "Gold", "hsn": "711319", "gstRate": 18, "qty": 10,
+                                              "rate": 6000, "taxable": 60000, "cgst": 900, "sgst": 900, "igst": 0,
+                                              "amount": 61800}, kind="INWARD", customer="SUPPLIER",
+                                       gst="08AAECD1234K1Z2"))
+        self.assertFalse(Invoice.objects.filter(invoice_number="H-3").exists())
+        self.assertTrue(any("H-3" in e and "18%" in e for e in data["errors"]), data["errors"])
+
+    def test_a_gross_only_row_with_heads_off_its_rate_is_refused_not_taxed_again(self):
+        # It was stored as 1 x 10,282 with 308.46 of tax: an amount of 10,590.46.
+        data = self._import(self._row("H-4", {"productName": "Gold", "hsn": "711319", "gstRate": 3,
+                                              "cgst": 9, "sgst": 9, "igst": 0, "amount": 10300}))
+        self.assertFalse(Invoice.objects.filter(invoice_number="H-4").exists())
+        self.assertTrue(any("H-4" in e for e in data["errors"]), data["errors"])
 
     def test_heads_within_a_rupee_of_the_rate_are_kept(self):
         self._import(self._row("H-2", {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 1, "rate": 549.67,

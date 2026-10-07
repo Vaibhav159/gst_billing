@@ -208,7 +208,7 @@ def run_bulk_import(request):
         been created left a partial invoice counted as created, and the
         corrected sheet was then skipped as a duplicate (review of H9).
         """
-        lines, problems, notes = [], [], []
+        lines, problems = [], []
         items = inv_data.get("items", [])
         if not items:
             problems.append(f"Invoice {inv_data.get('invoiceNumber', '?')}: it has no items.")
@@ -297,21 +297,20 @@ def run_bulk_import(request):
                 net_amount = to_paise(net_amount)
                 qty, rate = Decimal("1"), net_amount
             tax_amount = net_amount * gst_rate
-            heads_recomputed = False
             if cgst == 0 and sgst == 0 and igst == 0:
                 cgst, sgst, igst = split_tax(tax_amount, is_igst)
             elif abs((cgst + sgst + igst) - to_paise(tax_amount)) > LINE_MONEY_TOLERANCE:
-                # The file's heads aren't its own rate: a cell shown as
-                # "3%" read as 0.03% put Rs 18 of tax on Rs 60,000 of a 3%
-                # line (H10). The rate was normalised, the heads kept.
-                file_tax = cgst + sgst + igst
-                cgst, sgst, igst = split_tax(tax_amount, igst > 0)
-                heads_recomputed = True
-                notes.append(
+                # The file's heads aren't its own rate: a cell shown as "3%"
+                # read as 0.03% put Rs 18 of tax on Rs 60,000 of a 3% line
+                # (H10). Recomputed from the rate, a wrong rate rewrote the
+                # bill's own tax, and a gross-only row was taxed again on top
+                # of its gross, so the line is refused for a person to check.
+                problems.append(
                     f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': the file's tax "
-                    f"{file_tax} isn't {rate_as_percent(gst_rate)}% of {to_paise(net_amount)}; "
-                    f"booked {cgst + sgst + igst}."
+                    f"{cgst + sgst + igst} isn't {rate_as_percent(gst_rate)}% of {to_paise(net_amount)} "
+                    f"({to_paise(tax_amount)}). Check the GST rate and tax columns."
                 )
+                continue
             # Heads supplied by the file were taken verbatim, so a
             # spreadsheet carrying a local split for an interstate
             # party re-planted the exact bug fix_tax_heads repairs.
@@ -323,10 +322,7 @@ def run_bulk_import(request):
                 cgst, sgst, igst = normalize_tax_heads(
                     cgst, sgst, igst, is_igst
                 )
-            amount = (
-                user_amount if user_amount > 0 and not heads_recomputed
-                else to_paise(net_amount) + cgst + sgst + igst
-            )
+            amount = user_amount if user_amount > 0 else to_paise(net_amount) + cgst + sgst + igst
 
             # Validate per-field DB constraints BEFORE bulk_create so
             # a single bad row doesn't 500 the whole batch.
@@ -361,7 +357,7 @@ def run_bulk_import(request):
                 "cgst": cgst, "sgst": sgst, "igst": igst, "amount": amount,
                 "workspace_id": 1,
             })
-        return lines, problems, notes
+        return lines, problems
 
     # ---------- PHASE 2: process invoices in a single transaction ----------
     invoices_to_create = []  # [(Invoice instance, source dict for line items)]
@@ -531,12 +527,11 @@ def run_bulk_import(request):
                         payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                         workspace_id=1,
                     )
-                    lines, problems, notes = build_lines(invoice, inv_data)
+                    lines, problems = build_lines(invoice, inv_data)
                     if problems:
                         errors.extend(problems)
                         skipped_count += 1
                         continue
-                    errors.extend(notes)
                     invoices_to_create.append((invoice, inv_data, lines))
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
