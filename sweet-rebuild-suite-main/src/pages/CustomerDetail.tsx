@@ -10,13 +10,14 @@ import { motion } from "framer-motion";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
 import { formatCurrency, formatCompactCurrency, formatDate } from "@/utils/mockData";
 import { useCustomer, useCustomers, useBusinesses, useInvoices } from "@/hooks/useDataStore";
+import { useLatest } from "@/hooks/useLatest";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/hooks/usePermission";
 import { deleteWithFeedback } from "@/utils/deleteFeedback";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import api from "@/utils/api";
 import { customerInvoicesForPdf } from "@/utils/pdfInvoices";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -37,14 +38,13 @@ export default function CustomerDetail() {
   const { remove: removeCustomer } = useCustomers();
   const { items: businesses } = useBusinesses();
   const { items: invoices, totalCount } = useInvoices({ customerId: id });
-  // The cards count every invoice, not the first page of the list (H18).
-  const [totals, setTotals] = useState<{ outward_total: number; inward_total: number } | null>(null);
-  useEffect(() => {
-    if (!id) return;
-    api.get(`invoices/totals/?customer_id=${id}`)
-      .then((res) => setTotals({ outward_total: Number(res.data.outward_total) || 0, inward_total: Number(res.data.inward_total) || 0 }))
-      .catch((e) => logger.warn("Customer totals failed", e));
-  }, [id]);
+  // The cards count every invoice, not the first page of the list (H18), and
+  // only this customer's: a slow answer for the last one is dropped.
+  const { data: totals } = useLatest(
+    () => api.get(`invoices/totals/?customer_id=${id}`).then((res) => ({
+      outward_total: Number(res.data.outward_total) || 0, inward_total: Number(res.data.inward_total) || 0 })),
+    [id],
+  );
 
   // Consistent loading + not-found treatment, mirrors InvoiceDetail.
   if (isLoading) return (
@@ -69,10 +69,13 @@ export default function CustomerDetail() {
   );
 
   const custInvoices = invoices.filter((inv) => String(inv.customerId) === String(id));
-  const totalSales = totals ? totals.outward_total : custInvoices.filter((i) => i.type === "OUTWARD").reduce((s, i) => s + i.total, 0);
-  const totalPurchases = totals ? totals.inward_total : custInvoices.filter((i) => i.type === "INWARD").reduce((s, i) => s + i.total, 0);
+  // "—" until the totals come (or if they don't): the first page's sums
+  // looked like the customer's totals and weren't.
+  const totalSales = totals ? totals.outward_total : null;
+  const totalPurchases = totals ? totals.inward_total : null;
   const invoiceCount = Math.max(totalCount || 0, custInvoices.length);
-  const netAmount = totalSales - totalPurchases;
+  const netAmount = totals ? totals.outward_total - totals.inward_total : null;
+  const money = (v: number | null, f: (n: number) => string) => (v === null ? "—" : f(v));
   const sortedInvoices = [...custInvoices].sort((a, b) => new Date(b.invoice_date || "").getTime() - new Date(a.invoice_date || "").getTime());
 
   const monthlyMap: Record<string, number> = {};
@@ -169,9 +172,9 @@ export default function CustomerDetail() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Sales", value: formatCompactCurrency(totalSales), full: formatCurrency(totalSales), icon: TrendingUp, color: "text-success" },
-          { label: "Purchases", value: formatCompactCurrency(totalPurchases), full: formatCurrency(totalPurchases), icon: TrendingDown, color: "text-warning" },
-          { label: "Net", value: formatCompactCurrency(netAmount), full: formatCurrency(netAmount), icon: Activity, color: netAmount >= 0 ? "text-success" : "text-destructive" },
+          { label: "Sales", value: money(totalSales, formatCompactCurrency), full: money(totalSales, formatCurrency), icon: TrendingUp, color: "text-success" },
+          { label: "Purchases", value: money(totalPurchases, formatCompactCurrency), full: money(totalPurchases, formatCurrency), icon: TrendingDown, color: "text-warning" },
+          { label: "Net", value: money(netAmount, formatCompactCurrency), full: money(netAmount, formatCurrency), icon: Activity, color: (netAmount ?? 0) >= 0 ? "text-success" : "text-destructive" },
           { label: "Invoices", value: invoiceCount.toLocaleString("en-IN"), full: `${invoiceCount} invoices`, icon: FileText, color: "text-chart-4" },
         ].map((stat) => {
           const Icon = stat.icon;

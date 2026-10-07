@@ -12,6 +12,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useBusinesses, useCustomers } from "@/hooks/useDataStore";
 import { fyInvoicesForPdf } from "@/utils/pdfInvoices";
+import { useLatest } from "@/hooks/useLatest";
 import type { Invoice } from "@/utils/mockData";
 import api from "@/utils/api";
 import { BlobProvider } from "@react-pdf/renderer";
@@ -32,8 +33,6 @@ export default function BulkPDF() {
   const [typeFilter, setTypeFilter] = useState("all");
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loadingInvoices, setLoadingInvoices] = useState(false);
 
   // For Tally PDF generation
   const [pdfQueue, setPdfQueue] = useState<Invoice[]>([]);
@@ -46,21 +45,18 @@ export default function BulkPDF() {
   }, []);
 
 
-  // Fetch ALL invoices for the selected FY/business/type
-  const fetchAllInvoices = useCallback(async () => {
-    if (!localStorage.getItem("gst_access_token")) return;
-    setLoadingInvoices(true);
-    try {
-      // Every page: one 1,000-row request stopped there (H18).
-      setInvoices(await fyInvoicesForPdf(selectedFY, bizFilter, typeFilter));
-    } catch (e) {
-      logger.error("Failed to fetch invoices for bulk PDF", e);
-    } finally {
-      setLoadingInvoices(false);
-    }
-  }, [selectedFY, bizFilter, typeFilter]);
-
-  useEffect(() => { fetchAllInvoices(); }, [fetchAllInvoices]);
+  // Every invoice of the selected FY/business/type, every page (one 1,000-row
+  // request stopped there, H18). Only the latest selection's answer counts,
+  // and a failed fetch empties the list rather than keep the last FY's.
+  const fyList = useLatest(
+    () => (localStorage.getItem("gst_access_token") ? fyInvoicesForPdf(selectedFY, bizFilter, typeFilter) : Promise.resolve([])),
+    [selectedFY, bizFilter, typeFilter],
+  );
+  const invoices: Invoice[] = fyList.data ?? [];
+  const loadingInvoices = fyList.loading;
+  useEffect(() => {
+    if (fyList.failed) toast({ title: "Couldn't load the invoices", description: "Check the connection and pick the FY again.", variant: "destructive" });
+  }, [fyList.failed, toast]);
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
   const [invoiceFrom, setInvoiceFrom] = useState("");
   const [invoiceTo, setInvoiceTo] = useState("");
