@@ -56,3 +56,29 @@ class CsvImportMoneyTest(TestCase):
         self.assertEqual(result["errors"], [])
         self.assertEqual(Invoice.objects.get(invoice_number="P-1").lineitem_set.get().gst_tax_rate, D("0.03"))
         self.assertEqual(Invoice.objects.get(invoice_number="P-2").lineitem_set.get().gst_tax_rate, D("0.0025"))
+
+
+class CsvImportScreenTypeTest(TestCase):
+    """Review of M27: the import screen sends what it imports as `type`, but
+    the view read `import_type`, defaulting to "invoice". A product or
+    customer CSV uploaded from the app was processed as invoices: a 400 for
+    want of a business, or rows of errors once one was picked."""
+
+    def test_the_type_the_screen_sends_is_the_type_imported(self):
+        from django.contrib.auth.models import Group, User
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.urls import reverse
+        from rest_framework.test import APIClient
+
+        from billing.models import Product
+
+        user = User.objects.create_user(username="csv_editor", password="pw")
+        user.groups.add(Group.objects.get_or_create(name="editor")[0])
+        client = APIClient()
+        client.force_authenticate(user=user)
+        csv = b"name,hsn_code,gst_tax_rate,description\nCSV PRODUCT,711319,0.03,ok\n"
+        r = client.post(reverse("csv-import"), {"type": "product",
+                                               "file": SimpleUploadedFile("p.csv", csv, content_type="text/csv")},
+                        format="multipart")
+        self.assertEqual(r.status_code, 201, getattr(r, "data", None))
+        self.assertTrue(Product.objects.filter(name="CSV PRODUCT").exists())
