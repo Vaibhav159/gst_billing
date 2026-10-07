@@ -27,7 +27,13 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
-from billing.tax_rules import is_interstate, normalize_state_name, rate_as_percent
+from billing.tax_rules import (
+    direction_known,
+    is_interstate,
+    normalize_state_name,
+    normalize_tax_heads,
+    rate_as_percent,
+)
 
 
 class AbstractBaseModel(models.Model):
@@ -360,6 +366,33 @@ class Invoice(AbstractBaseModel):
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        loaded = instance.__dict__
+        if "business_id" in loaded and "customer_id" in loaded:
+            instance._loaded_parties = (loaded["business_id"], loaded["customer_id"])
+        return instance
+
+    def _follow_parties(self):
+        """The lines' heads follow a new firm or customer (M14).
+
+        A header PATCH, the Django admin and undo all change the parties
+        without touching the lines, which kept the old direction's heads:
+        moving a sale to an out-of-state buyer left it CGST+SGST. Totals don't
+        move. When nothing says where the supply goes, the heads on file stay,
+        as bulk import keeps a file's heads for an unknown direction. save(),
+        not update(), so cacheops drops the cached lines.
+        """
+        if not direction_known(self.business, self.customer):
+            return
+        interstate = is_interstate(self.business, self.customer)
+        for li in LineItem.objects.filter(invoice=self):
+            heads = normalize_tax_heads(li.cgst, li.sgst, li.igst, interstate)
+            if heads != (li.cgst, li.sgst, li.igst):
+                li.cgst, li.sgst, li.igst = heads
+                li.save(update_fields=["cgst", "sgst", "igst"])
+
     def save(self, *args, **kwargs):
         # The post_save / post_delete signals on LineItem keep self.total_amount
         # in sync (see billing/signals.py). Re-summing on every Invoice.save()
@@ -374,7 +407,13 @@ class Invoice(AbstractBaseModel):
             self.total_amount = sum(
                 LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
             )
+        parties = (self.business_id, self.customer_id)
+        loaded = getattr(self, "_loaded_parties", None)
+        moved = bool(self.pk) and loaded is not None and loaded != parties
         super().save(*args, **kwargs)
+        self._loaded_parties = parties
+        if moved:
+            self._follow_parties()
 
     @property
     def is_igst_applicable(self):

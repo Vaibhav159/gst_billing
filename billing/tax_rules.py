@@ -300,3 +300,25 @@ def check_line_money(item_data, qty, rate, amount):
                 f"quantity x rate ({taxable}) plus tax ({heads})."
             )
         })
+
+
+def check_tax_rate(item_data, taxable, gst_rate):
+    """Refuse a line whose tax isn't its taxable value at its own rate.
+
+    check_line_money ties the amount to the taxable plus the tax, but nothing
+    tied the tax to the rate: a 3% line carrying no tax on Rs 1,00,000 went in
+    and filed as 3% with Rs 0 (M14). Amount-only rows have no taxable to test.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    if taxable == 0:
+        return
+    heads = sum(Decimal(str(item_data.get(k, 0) or 0)) for k in ("cgst", "sgst", "igst"))
+    expected = to_paise(taxable * gst_rate)
+    if abs(heads - expected) > LINE_MONEY_TOLERANCE:
+        raise ValidationError({
+            "line_items": (
+                f"'{item_data.get('product_name', '')}': tax {heads} is not "
+                f"{rate_as_percent(gst_rate)}% of {to_paise(taxable)} ({expected})."
+            )
+        })

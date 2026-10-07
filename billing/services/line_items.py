@@ -13,8 +13,9 @@ There is now one contract:
 * the rate goes through the slab allowlist (``normalize_rate``), so a stray
   percent or a pre-fix ``0.25`` cannot bill 25%;
 * ``source="form"`` trusts the client's tax-inclusive ``amount`` (checked
-  against qty x rate within ``LINE_MONEY_TOLERANCE``) and re-files the
-  client's heads on the correct side — the split is advisory;
+  against qty x rate within ``LINE_MONEY_TOLERANCE``, and the tax against the
+  rate) and re-files the client's heads on the correct side — the split is
+  advisory;
 * every other source derives tax = qty x rate x rate and splits it itself,
   in whole paise as the form does (``split_tax``).
 
@@ -31,6 +32,7 @@ from typing import Literal
 from billing.constants import GST_TAX_RATE
 from billing.tax_rules import (
     check_line_money,
+    check_tax_rate,
     is_interstate,
     normalize_rate,
     normalize_tax_heads,
@@ -84,6 +86,7 @@ def build_line_items(
         if source == "form":
             amount = _dec(item.get("amount"), str(net))
             check_line_money(item, qty, rate, amount)
+            check_tax_rate(item, net, gst_rate)
             cgst, sgst, igst = normalize_tax_heads(
                 _dec(item.get("cgst")), _dec(item.get("sgst")), _dec(item.get("igst")), interstate
             )

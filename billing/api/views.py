@@ -1778,13 +1778,26 @@ class LineItemViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    _BUILT_FIELDS = ("gst_tax_rate", "cgst", "sgst", "igst", "amount")
+
+    @staticmethod
+    def _built(invoice, data, instance=None):
+        """The money fields as the invoice paths would write them (M14): rate
+        through the slab allowlist, heads by direction in whole paise, the
+        amount and the tax checked against qty x rate and the rate."""
+        fields = ("product_name", "hsn_code", "gst_tax_rate", "quantity", "rate", "cgst", "sgst", "igst", "amount", "unit")
+        item = {f: data[f] if f in data else getattr(instance, f, None) for f in fields}
+        (line,), _ = build_line_items(invoice, [item], source="form")
+        return {f: getattr(line, f) for f in LineItemViewSet._BUILT_FIELDS}
+
     def perform_create(self, serializer):
-        serializer.save(customer=serializer.validated_data["invoice"].customer)
+        invoice = serializer.validated_data["invoice"]
+        serializer.save(customer=invoice.customer, **self._built(invoice, serializer.validated_data))
 
     def perform_update(self, serializer):
         inv = serializer.instance.invoice
         assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
-        serializer.save(customer=inv.customer)
+        serializer.save(customer=inv.customer, **self._built(inv, serializer.validated_data, serializer.instance))
 
     def perform_destroy(self, instance):
         inv = instance.invoice

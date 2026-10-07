@@ -69,3 +69,68 @@ class LineItemMoveTest(BaseAPITestCase):
         }, format="json")
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(LineItem.objects.get(id=r.data["id"]).customer_id, self.customer.id)
+
+
+class LineItemBuilderRulesTest(BaseAPITestCase):
+    """M14: /line-items/ writes skipped the builder, so IGST on an intra-state
+    invoice and a raw rate of "3" were stored as sent; nowhere was tax
+    compared with the rate, and moving an invoice to another party left its
+    heads where they were."""
+
+    def setUp(self):
+        super().setUp()
+        # The base business and customer share state code 22: intra-state.
+        self.mumbai = Customer.objects.create(name="MUMBAI BUYER", gst_number="27ABCDE1234A1Z5", state_name="MAHARASHTRA")
+
+    def _post(self, **over):
+        data = {"invoice": self.invoice.id, "product_name": "Gold", "hsn_code": "711319", "quantity": "10",
+                "rate": "1000", "gst_tax_rate": "0.03", "cgst": "150", "sgst": "150", "igst": "0", "amount": "10300"}
+        data.update(over)
+        return self.client.post(reverse("lineitem-list"), data, format="json")
+
+    def test_igst_on_an_intra_state_invoice_is_refiled(self):
+        r = self._post(cgst="0", sgst="0", igst="300")
+        self.assertEqual(r.status_code, 201, r.data)
+        li = LineItem.objects.get(id=r.data["id"])
+        self.assertEqual((li.cgst, li.sgst, li.igst), (D("150"), D("150"), D("0")))
+
+    def test_a_rate_sent_as_a_percent_is_stored_as_a_fraction(self):
+        r = self._post(gst_tax_rate="3")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(LineItem.objects.get(id=r.data["id"]).gst_tax_rate, D("0.03"))
+
+    def test_tax_that_is_not_the_rate_is_refused(self):
+        r = self._post(quantity="100", rate="1000", cgst="0", sgst="0", igst="0", amount="100000")
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertFalse(LineItem.objects.filter(amount=D("100000")).exists())
+
+    def test_a_patch_that_changes_the_rate_without_the_tax_is_refused(self):
+        r = self.client.patch(reverse("lineitem-detail", args=[self.line_item.id]), {"gst_tax_rate": "0.03"}, format="json")
+        self.assertEqual(r.status_code, 400, r.data)
+
+    def test_an_invoice_create_with_untaxed_three_percent_lines_is_refused(self):
+        r = self.client.post(reverse("invoice-list"), {
+            "business": self.business.id, "customer": self.customer.id, "invoice_number": "M14-1",
+            "invoice_date": "2026-08-05", "type_of_invoice": "outward",
+            "line_items": [{"product_name": "Gold", "hsn_code": "711319", "gst_tax_rate": "0.03", "quantity": "100",
+                            "rate": "1000", "unit": "gms", "cgst": "0", "sgst": "0", "igst": "0", "amount": "100000"}],
+        }, format="json")
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertFalse(Invoice.objects.filter(invoice_number="M14-1").exists())
+
+    def test_moving_an_invoice_to_an_out_of_state_party_refiles_its_heads(self):
+        r = self.client.patch(reverse("invoice-detail", args=[self.invoice.id]), {"customer": self.mumbai.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.line_item.refresh_from_db()
+        self.assertEqual((self.line_item.cgst, self.line_item.sgst, self.line_item.igst), (D("0"), D("0"), D("180")))
+        self.assertEqual(self.line_item.amount, D("1180"))
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.total_amount, D("1180"))
+
+    def test_a_save_outside_the_api_refiles_too(self):
+        # Django admin and undo save the header without the API's help.
+        inv = Invoice.objects.get(pk=self.invoice.pk)
+        inv.customer = self.mumbai
+        inv.save()
+        self.line_item.refresh_from_db()
+        self.assertEqual(self.line_item.igst, D("180"))
