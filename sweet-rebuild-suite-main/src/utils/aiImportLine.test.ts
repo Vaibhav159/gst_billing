@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookedAmount, fromAiReading, linesWithoutRate, rateChoice, rateFromChoice } from "./aiImportLine";
+import { bookedAmount, bookedTax, fromAiReading, linesWithoutRate, rateChoice, rateFromChoice } from "./aiImportLine";
 
 describe("AI import review lines (M19)", () => {
   it("shows a stored rate as its slab, not rounded to one decimal", () => {
@@ -41,5 +41,19 @@ describe("rates the AI read (review of M19)", () => {
 
   it("counts the lines still waiting for a rate; a picked 0% isn't one", () => {
     expect(linesWithoutRate([{ gst_tax_rate: null }, { gst_tax_rate: 0 }, { gst_tax_rate: 0.03 }])).toBe(1);
+  });
+});
+
+describe("the review's figures are the server's (review of M19)", () => {
+  // The server reads a line's rate through the slab list (normalize_rate,
+  // "fraction"): 0.25 is 0.25%, 1 is 1%, 3 is 3%. Taken raw, a Rs 1,00,000
+  // line showed Rs 1,25,000, Rs 2,00,000 and Rs 4,00,000.
+  it("books a rate the way the server reads it", () => {
+    const at = (gst_tax_rate: number) => bookedAmount({ quantity: 1, rate: 100000, gst_tax_rate }, "outward");
+    expect([at(0.25), at(1), at(3), at(0.0025), at(0.03)]).toEqual([100250, 101000, 103000, 100250, 103000]);
+  });
+
+  it("gives the tax the server will book", () => {
+    expect(bookedTax({ quantity: 2, rate: 549.67, gst_tax_rate: 0.03 }, "outward")).toBe(32.98);
   });
 });

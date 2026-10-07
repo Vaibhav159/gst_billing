@@ -46,12 +46,24 @@ export function rateFromChoice(value: string): number | null {
 }
 
 /**
- * The amount the server will store: taxable and tax in paise, as
- * build_line_items does for AI lines. An unread rate is 3% on a sale (the
- * server's default) and nothing on a purchase.
+ * A line's rate as the server books it: through the slab list, read as a
+ * fraction (normalize_rate), so 0.25 is 0.25% and 3 is 3%. Taken raw, a
+ * Rs 1,00,000 line at "3" showed Rs 4,00,000 (review of M19). An unread rate
+ * is 3% on a sale (the server's default) and nothing on a purchase.
  */
+function bookedRate(li: Line, type: "inward" | "outward"): number {
+  if (li.gst_tax_rate === null || li.gst_tax_rate === undefined) return type === "inward" ? 0 : 0.03;
+  return percentToRate(li.gst_tax_rate, "fraction");
+}
+
+/** The tax the server will book on a line, in paise, as build_line_items does for AI lines. */
+export function bookedTax(li: Line, type: "inward" | "outward"): number {
+  const net = round2((Number(li.quantity) || 0) * (Number(li.rate) || 0));
+  return round2(net * bookedRate(li, type));
+}
+
+/** The amount the server will store: taxable and tax in paise. */
 export function bookedAmount(li: Line, type: "inward" | "outward"): number {
   const net = round2((Number(li.quantity) || 0) * (Number(li.rate) || 0));
-  const rate = li.gst_tax_rate ?? (type === "inward" ? 0 : 0.03);
-  return round2(net + round2(net * rate));
+  return round2(net + bookedTax(li, type));
 }

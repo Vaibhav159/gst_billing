@@ -13,7 +13,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import { formatCurrency } from "@/utils/mockData";
-import { bookedAmount, fromAiReading, linesWithoutRate, rateChoice, rateFromChoice } from "@/utils/aiImportLine";
+import { bookedAmount, bookedTax, fromAiReading, linesWithoutRate, rateChoice, rateFromChoice } from "@/utils/aiImportLine";
 import { GST_SLABS } from "@/utils/gstRate";
 import { formatMoney } from "@/utils/money";
 
@@ -590,10 +590,11 @@ function FileCard({ entry, businesses, onRemove, onProcess, onCreate, onUpdate, 
     duplicate: "bg-chart-3/15 text-chart-3",
   };
 
+  // What will be stored, as the review's footer says, not the AI's figures.
   const lineItemsTotal = useMemo(() => {
     if (!entry.extracted) return 0;
-    return entry.extracted.line_items.reduce((s, li) => s + (li.amount || 0), 0);
-  }, [entry.extracted]);
+    return entry.extracted.line_items.reduce((s, li) => s + bookedAmount(li, entry.type), 0);
+  }, [entry.extracted, entry.type]);
 
   return (
     <motion.div
@@ -746,6 +747,8 @@ function ReviewForm({
   // What the server will store, not the amounts the AI read: it recomputes
   // every AI line from quantity x rate x (1 + r) (M19).
   const lineItemsTotal = ex.line_items.reduce((s, li) => s + bookedAmount(li, entry.type), 0);
+  const taxBooked = ex.line_items.reduce((s, li) => s + bookedTax(li, entry.type), 0);
+  const taxOnBill = (ex.cgst_total || 0) + (ex.sgst_total || 0) + (ex.igst_total || 0);
   const unrated = linesWithoutRate(ex.line_items);
 
   return (
@@ -891,9 +894,14 @@ function ReviewForm({
       <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/40">
         <div className="text-[11px] text-muted-foreground">
           Total: <span className="font-semibold text-foreground tabular-nums">{formatCurrency(lineItemsTotal)}</span>
-          {ex.cgst_total > 0 && <span className="ml-3">CGST: {formatCurrency(ex.cgst_total)}</span>}
-          {ex.sgst_total > 0 && <span className="ml-1.5">· SGST: {formatCurrency(ex.sgst_total)}</span>}
-          {ex.igst_total > 0 && <span className="ml-1.5">· IGST: {formatCurrency(ex.igst_total)}</span>}
+          {/* The tax that will be booked; the bill's own heads only where they differ. */}
+          <span className="ml-3">GST: {formatCurrency(taxBooked)}</span>
+          {taxOnBill > 0 && Math.abs(taxOnBill - taxBooked) > 1 && (
+            <span className="ml-1.5 text-warning">
+              (bill shows {[["CGST", ex.cgst_total], ["SGST", ex.sgst_total], ["IGST", ex.igst_total]]
+                .filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k} ${formatCurrency(Number(v))}`).join(" · ")})
+            </span>
+          )}
         </div>
         {unrated > 0 && (
           <span className="text-[11px] text-warning">Pick a GST rate for {unrated} line{unrated === 1 ? "" : "s"}</span>
