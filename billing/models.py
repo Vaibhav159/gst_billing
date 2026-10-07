@@ -27,7 +27,13 @@ from billing.constants import (
     UNIT_CHOICES,
     UNIT_GMS,
 )
-from billing.tax_rules import is_interstate, rate_as_percent
+from billing.tax_rules import (
+    direction_known,
+    is_interstate,
+    normalize_state_name,
+    normalize_tax_heads,
+    rate_as_percent,
+)
 
 
 class AbstractBaseModel(models.Model):
@@ -40,11 +46,13 @@ class AbstractBaseModel(models.Model):
 
 
 def get_state_code_from_state_name(state_name):
-    # invert the GST_CODE dict
-    if not state_name:
+    # invert the GST_CODE dict, on one spelling per name ("&" as "AND",
+    # whitespace collapsed) so "JAMMU & KASHMIR" is a state too (M16)
+    wanted = normalize_state_name(state_name)
+    if not wanted:
         return ""
 
-    state_code = [k for k, v in GST_CODE.items() if v == state_name]
+    state_code = [k for k, v in GST_CODE.items() if normalize_state_name(v) == wanted]
 
     return int(state_code[0]) if state_code else ""
 
@@ -358,6 +366,40 @@ class Invoice(AbstractBaseModel):
     def __str__(self):
         return f"{self.invoice_number}_{self.customer.name}"
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        loaded = instance.__dict__
+        if "business_id" in loaded and "customer_id" in loaded:
+            instance._loaded_parties = (loaded["business_id"], loaded["customer_id"])
+        return instance
+
+    def _follow_parties(self):
+        """The lines follow a new firm or customer.
+
+        A header PATCH, the Django admin and undo all change the parties
+        without touching the lines. Each line now names the invoice's customer
+        (H6: a line left on the old one was deleted with it). Its heads are
+        re-filed for the new direction (M14: a sale moved to an out-of-state
+        buyer stayed CGST+SGST), totals unchanged; when nothing says where the
+        supply goes, the heads on file stay, as bulk import keeps a file's
+        heads for an unknown direction. save(), not update(), so cacheops
+        drops the cached lines.
+        """
+        known = direction_known(self.business, self.customer)
+        interstate = is_interstate(self.business, self.customer)
+        for li in self.lineitem_set.all():
+            changed = []
+            if li.customer_id != self.customer_id:
+                li.customer_id = self.customer_id
+                changed.append("customer")
+            heads = normalize_tax_heads(li.cgst, li.sgst, li.igst, interstate)
+            if known and heads != (li.cgst, li.sgst, li.igst):
+                li.cgst, li.sgst, li.igst = heads
+                changed += ["cgst", "sgst", "igst"]
+            if changed:
+                li.save(update_fields=[*changed, "updated_at"])
+
     def save(self, *args, **kwargs):
         # The post_save / post_delete signals on LineItem keep self.total_amount
         # in sync (see billing/signals.py). Re-summing on every Invoice.save()
@@ -372,7 +414,14 @@ class Invoice(AbstractBaseModel):
             self.total_amount = sum(
                 LineItem.objects.filter(invoice=self).values_list("amount", flat=True)
             )
+        parties = (self.business_id, self.customer_id)
+        loaded = getattr(self, "_loaded_parties", None)
+        # As text: an id assigned from a request ("5") is the 5 loaded, not a move.
+        moved = bool(self.pk) and loaded is not None and tuple(map(str, loaded)) != tuple(map(str, parties))
         super().save(*args, **kwargs)
+        self._loaded_parties = parties
+        if moved:
+            self._follow_parties()
 
     @property
     def is_igst_applicable(self):
@@ -448,9 +497,13 @@ class Invoice(AbstractBaseModel):
 
 
 class LineItem(AbstractBaseModel):
+    # PROTECT, like Invoice.customer, and always the invoice's customer
+    # (Invoice.save re-points the lines). As CASCADE, deleting a customer whose
+    # invoices had moved to someone else deleted those invoices' lines, filed
+    # months included, with no snapshot of them (H6).
     customer = models.ForeignKey(
         Customer,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         verbose_name="Customer",
         help_text="Customer of the line item.",
     )
@@ -526,6 +579,13 @@ class LineItem(AbstractBaseModel):
 
     def __str__(self):
         return self.product_name
+
+    def save(self, *args, **kwargs):
+        # A line's customer is its invoice's, whoever saves it: the API, the
+        # Django admin, undo (H6). update_fields saves leave it to the caller.
+        if self.invoice_id and not kwargs.get("update_fields"):
+            self.customer_id = self.invoice.customer_id
+        super().save(*args, **kwargs)
 
     @property
     def gst_tax_in_percentage(self):

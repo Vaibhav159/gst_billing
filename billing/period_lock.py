@@ -7,29 +7,32 @@ corrections under explicit permission stay possible; the lock exists to
 stop *casual* edits from silently diverging from a filed return.
 """
 
+from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
 
 def locked_period_or_none(business_id, invoice_date):
     """Return the FiledPeriod covering (business, date), or None.
 
-    `invoice_date` may be a date or an ISO "YYYY-MM-DD" string (write
-    payloads arrive as strings before serializer validation).
+    `invoice_date` may be a date or a string (write payloads arrive as strings
+    before serializer validation). Strings are read with the parser DRF and the
+    model use, so the month checked is the month that gets stored: splitting on
+    "-" let 20260715 and 2026-W29-3, which both store as 15 July, into a filed
+    July (H4). A string that won't parse is refused, never waved through.
     """
     from billing.models import FiledPeriod
 
     if not business_id or not invoice_date:
         return None
     if isinstance(invoice_date, str):
-        parts = invoice_date.split("-")
-        if len(parts) < 2:
-            return None
         try:
-            year, month = int(parts[0]), int(parts[1])
+            parsed = parse_date(invoice_date.strip())
         except ValueError:
-            return None
-    else:
-        year, month = invoice_date.year, invoice_date.month
+            parsed = None
+        if parsed is None:
+            raise ValidationError({"invoice_date": f"{invoice_date!r} is not a date (expected YYYY-MM-DD)."})
+        invoice_date = parsed
+    year, month = invoice_date.year, invoice_date.month
     return FiledPeriod.objects.filter(
         business_id=business_id, year=year, month=month
     ).first()

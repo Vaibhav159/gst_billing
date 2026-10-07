@@ -33,6 +33,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from billing.management.commands._repair import invalidate, log_repair
 from billing.models import LineItem, Product
 from billing.tax_rules import GST_SLABS, normalize_rate, rate_as_percent
 
@@ -64,12 +65,13 @@ class Command(BaseCommand):
         # candidates instead of pulling every line item into Python.
         suspects = [slab for slab in GST_SLABS if slab]
         products = [
-            p for p in Product.objects.filter(gst_tax_rate__in=suspects)
+            # Past cacheops, as every repair reads (_repair.scope).
+            p for p in Product.objects.nocache().filter(gst_tax_rate__in=suspects)
             if _misstored(p.gst_tax_rate)
         ]
 
         qs = (
-            LineItem.objects.filter(gst_tax_rate__in=suspects)
+            LineItem.objects.nocache().filter(gst_tax_rate__in=suspects)
             .select_related("invoice")
             .order_by("id")
         )
@@ -147,6 +149,10 @@ class Command(BaseCommand):
                 LineItem.objects.filter(pk=li.pk).update(
                     gst_tax_rate=normalize_rate(li.gst_tax_rate, assume="fraction")
                 )
+            log_repair("fix_gst_rates", "product",
+                       f"repaired the rate of {len(products)} product(s) and {len(lines)} line(s)",
+                       products=[p.pk for p in products], lines=[li.pk for li in lines])
+        invalidate(Product, LineItem)  # update() sends no signal: the app served the old rates for hours
         self.stdout.write(self.style.SUCCESS(
             f"\nRepaired {len(products)} product(s) and {len(lines)} line item(s)."
         ))

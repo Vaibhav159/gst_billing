@@ -16,13 +16,16 @@ export function gstinCheckDigit(first14: string): string {
 }
 
 /**
- * Whether a party has a GSTIN at all: 15 characters once trimmed. "NA", "URP"
- * and blanks are what people type for an unregistered party, and a purchase
- * from one carries no input tax (C1b). Mirrors billing/tax_rules.py has_gstin;
- * validateGstin is the stricter check for what was typed.
+ * Whether a party has a GSTIN at all: 15 characters once trimmed, the first
+ * two a state code's digits. "NA", "URP" and blanks are what people type for
+ * an unregistered party: none makes it registered, gives it a state (H12) or
+ * lets a purchase from it carry input tax (C1b). Mirrors
+ * billing/tax_rules.py has_gstin; validateGstin is the stricter check for what
+ * was typed.
  */
 export function hasGstin(raw: string | null | undefined): boolean {
-  return (raw || "").trim().length === 15;
+  const g = (raw || "").trim();
+  return g.length === 15 && /^\d\d/.test(g);
 }
 
 export function validateGstin(raw: string): { ok: boolean; reason: string } {

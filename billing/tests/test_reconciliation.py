@@ -46,10 +46,10 @@ class ServiceMathTest(BaseAPITestCase):
 
     def _fixture(self):
         return [
-            row(1, date(2025, 5, 1), "27X", "bank", [line("100000")]),
+            row(1, date(2025, 5, 1), "27ABCDE1234A1Z5", "bank", [line("100000")]),
             row(2, date(2025, 8, 1), "", "cash", [line("200000")]),
             row(3, date(2025, 11, 1), "", "bank", [line("300000")]),
-            row(4, date(2026, 2, 1), "27X", "", [line("400000")]),
+            row(4, date(2026, 2, 1), "27ABCDE1234A1Z5", "", [line("400000")]),
         ]
 
     def test_rollup_identities_all_pass(self):
@@ -163,10 +163,23 @@ class SegmentFilterTest(BaseAPITestCase):
         self.assertNotIn("SEG-B2B", nums)
 
 
+    def test_a_placeholder_gstin_is_b2c_in_the_drill_down_as_in_the_rollup(self):
+        # The rollup asks has_gstin (H12); the filter still meant "non-empty",
+        # so the drill-down listed under B2B what the rollup counted as B2C.
+        for gst, num in (("NA", "SEG-NA"), (" 27AAPFU0939F1ZV ", "SEG-PAD"), ("URP", "SEG-URP")):
+            c = Customer.objects.create(workspace_id=1, name=f"SEG {num}", gst_number=gst)
+            Invoice.objects.create(workspace_id=1, business=self.business, customer=c, invoice_number=num,
+                                   invoice_date="2025-06-01", type_of_invoice="outward", total_amount=D("100"))
+        listed = lambda seg: {i["invoice_number"] for i in self.client.get(  # noqa: E731
+            reverse("invoice-list"), {"segment": seg}).data["results"]}
+        self.assertEqual(listed("b2b") & {"SEG-NA", "SEG-PAD", "SEG-URP"}, {"SEG-PAD"})
+        self.assertEqual(listed("b2c") & {"SEG-NA", "SEG-PAD", "SEG-URP"}, {"SEG-NA", "SEG-URP"})
+
+
 class InterstateReconTest(BaseAPITestCase):
     def test_igst_rows_flow_and_checks_pass(self):
         rows = [
-            row(1, date(2025, 5, 1), "27X", "bank", [line("100000", igst=True)]),
+            row(1, date(2025, 5, 1), "27ABCDE1234A1Z5", "bank", [line("100000", igst=True)]),
             row(2, date(2025, 8, 1), "", "cash", [line("50000")]),
         ]
         res = reconcile("2025-26", rows)

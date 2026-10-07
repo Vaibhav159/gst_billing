@@ -11,13 +11,15 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 
+from billing.api.inward_bills_service import find_duplicate, gstin_conflict
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.period_lock import assert_period_unlocked
 from billing.services.line_items import build_line_items
-from billing.tax_rules import has_gstin, itc_refusal
+from billing.tax_rules import clean_gstin, gstin_problem, itc_refusal
 from billing.utils import AIInvoiceProcessor
 
 logger = logging.getLogger(__name__)
@@ -110,10 +112,13 @@ def create_from_ai(request):
         #      forcing the user to bounce out and create manually.
         #      Name conflicts are disambiguated with state/GSTIN
         #      suffix (mirror of GSTR-2A's logic).
-        extracted_gstin = (invoice_data.get("customer_gst_number") or "").strip().upper()
-        if type_of_invoice == INVOICE_TYPE_INWARD and not has_gstin(extracted_gstin):
-            # "NA", "URP": not a GSTIN to match, create or backfill a supplier with.
-            extracted_gstin = ""
+        # A misread GSTIN isn't "no GSTIN": correct it in review (review of H12).
+        if problem := gstin_problem(invoice_data.get("customer_gst_number")):
+            return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
+        extracted_gstin = clean_gstin(invoice_data.get("customer_gst_number"))
+        if not extracted_gstin:
+            # "NA", "URP": not a GSTIN to match, create or backfill a party
+            # with, on a sale (H12) as on a purchase (C1b).
             invoice_data = {**invoice_data, "customer_gst_number": ""}
         customer = None
         if extracted_gstin:
@@ -124,6 +129,10 @@ def create_from_ai(request):
                     businesses__id=business_id, name__iexact=extracted_name
                 ).first()
             )
+            # Matched by name under another GSTIN: another branch, or a misread
+            # GSTIN. Booked there, the bill followed the record's GSTIN.
+            if customer is not None and (problem := gstin_conflict(customer, extracted_gstin)):
+                return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         # C1b: no GSTIN, no input tax. The bill's GSTIN as reviewed, else the
         # supplier's on file, so a scan that missed it doesn't cost a
         # registered supplier its credit. Before anything is written.
@@ -229,12 +238,8 @@ def create_from_ai(request):
                     state_name=(getattr(business, "state_name", "") or "RAJASTHAN")[:255],
                     workspace_id=1,
                 )
-            mirror_existing = Invoice.objects.filter(
-                business=buyer_business,
-                invoice_number__iexact=inv_number,
-                invoice_date=inv_date,
-                type_of_invoice=INVOICE_TYPE_INWARD,
-            ).first()
+            # The buyer's purchase, by the one inward rule (M28).
+            mirror_existing = find_duplicate(buyer_business, inv_number, supplier_cust, inv_date)
             if mirror_existing is not None:
                 return mirror_existing.id, True
             assert_period_unlocked(buyer_business.id, inv_date, "create")
@@ -291,14 +296,19 @@ def create_from_ai(request):
                     )
             return mirror.id, False
 
-        existing = (
-            Invoice.objects.filter(
-                business_id=business_id,
-                customer_id=customer.id,
-                invoice_number__iexact=inv_number,
-                invoice_date=inv_date,
-            ).first()
-        )
+        if type_of_invoice == INVOICE_TYPE_INWARD:
+            # A purchase already entered through another door ("SJ-101" on
+            # the inward form, "SJ/101" here) is the same bill (M28).
+            existing = find_duplicate(business, inv_number, customer, inv_date)
+        else:
+            existing = (
+                Invoice.objects.filter(
+                    business_id=business_id,
+                    customer_id=customer.id,
+                    invoice_number__iexact=inv_number,
+                    invoice_date=inv_date,
+                ).first()
+            )
         if existing is not None:
             # Primary already exists — still ensure the inter-firm
             # inward mirror is present (completes half-done pairs).
@@ -413,6 +423,10 @@ def create_from_ai(request):
             }
         )
 
+    except APIException:
+        # A refusal the API means to give (a filed month, say) is a 4xx with
+        # its own reason. Raising also rolls the view's transaction back.
+        raise
     except Exception as e:
         transaction.set_rollback(True)  # error Responses don't raise, so roll back explicitly
         # Full traceback to logs (with exc_info) — that's where the

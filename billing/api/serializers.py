@@ -17,6 +17,15 @@ def signed_url(file):
     return sign_media_path(file.name) if file else None
 
 
+def _gst_number(value):
+    """A party's or firm's GSTIN as stored: refused if mistyped, blank for a placeholder."""
+    from billing.tax_rules import clean_gstin, gstin_problem
+
+    if problem := gstin_problem(value):
+        raise serializers.ValidationError(problem)
+    return clean_gstin(value) if value else value
+
+
 class BusinessSerializer(serializers.ModelSerializer):
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
@@ -57,6 +66,10 @@ class BusinessSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
+    def validate_gst_number(self, value):
+        # The firm's own GSTIN, by the rule the parties' follow.
+        return _gst_number(value)
+
 
 class CustomerSerializer(serializers.ModelSerializer):
     total_revenue = serializers.DecimalField(
@@ -70,6 +83,13 @@ class CustomerSerializer(serializers.ModelSerializer):
         # M2M to Business is optional on create — many customers are added
         # without immediately linking to a business
         extra_kwargs = {"businesses": {"required": False}}
+
+    def validate_gst_number(self, value):
+        # "NA", "URP" and the like are stored as no GSTIN: kept, they were
+        # read as a state code and as B2B (H12). A typo is refused: stored
+        # blank, the buyer turned B2C. The forms already refuse anything that
+        # isn't GSTIN-shaped; this covers the API.
+        return _gst_number(value)
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -91,6 +111,18 @@ class LineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = LineItem
         fields = "__all__"
+        # The invoice's, always (the views set it). A line filed under another
+        # party stays behind when the invoice changes hands (H5, H6).
+        read_only_fields = ("customer",)
+
+    def validate_invoice(self, invoice):
+        # Moving a line doubled a filed month's total and left the source
+        # invoice's stale; the lock only ever looked at the source (H5).
+        if self.instance is not None and invoice != self.instance.invoice:
+            raise serializers.ValidationError(
+                "A line can't move to another invoice. Delete it here and add it there."
+            )
+        return invoice
 
     def validate(self, attrs):
         from billing.tax_rules import check_line_money
@@ -306,6 +338,10 @@ class AuditLogSerializer(serializers.ModelSerializer):
         return "System"
 
     def get_can_undo(self, obj):
+        if (obj.snapshot or {}).get("_undo"):
+            return False  # used already (H7)
+        if obj.action == "deleted" and getattr(obj, "restored_before", False):
+            return False  # undone before the marker existed
         if obj.action in ("deleted", "updated") and obj.snapshot:
             return True
         return obj.action == "created"

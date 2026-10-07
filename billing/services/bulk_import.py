@@ -14,12 +14,28 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 
+from billing.api.inward_bills_service import fy_start, inward_number_key, supplier_key
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.period_lock import locked_period_or_none
-from billing.tax_rules import direction_known, normalize_rate, normalize_tax_heads, state_name_from_gstin
+from billing.tax_rules import (
+    clean_gstin,
+    direction_known,
+    gstin_problem,
+    has_gstin,
+    normalize_rate,
+    normalize_tax_heads,
+    split_tax,
+    state_name_from_gstin,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _inward_identity(business_id, supplier, number, day):
+    """A purchase as find_duplicate sees it (M28), or None when it can't say."""
+    key, start = inward_number_key(number), fy_start(day)
+    return (business_id, supplier_key(supplier), start, key) if key and start else None
 
 
 
@@ -44,7 +60,7 @@ def run_bulk_import(request):
     # Pre-fetch all businesses (small table, usually <10 rows)
     all_businesses = list(Business.objects.all())
     biz_by_id = {b.pk: b for b in all_businesses}
-    biz_by_gstin = {(b.gst_number or "").lower(): b for b in all_businesses if b.gst_number}
+    biz_by_gstin = {b.gst_number.strip().lower(): b for b in all_businesses if has_gstin(b.gst_number)}
     biz_by_name = {(b.name or "").lower(): b for b in all_businesses}
 
     forced_business = None
@@ -59,8 +75,10 @@ def run_bulk_import(request):
     cust_by_pan = {}
     cust_by_name = {}
     for c in Customer.objects.all().only("id", "name", "gst_number", "pan_number"):
-        if c.gst_number:
-            cust_by_gst[c.gst_number.upper()] = c
+        # Only real GSTINs are keys: "URP" on file would have claimed every
+        # walk-in a sheet typed "URP" for (H12).
+        if has_gstin(c.gst_number):
+            cust_by_gst[clean_gstin(c.gst_number)] = c
         if c.pan_number:
             cust_by_pan[c.pan_number.upper()] = c
         if c.name:
@@ -94,8 +112,8 @@ def run_bulk_import(request):
     for inv_data in invoices_data:
         cn = (inv_data.get("customerName") or "").strip()
         cg = (inv_data.get("customerGST") or "").strip()
-        if not cn:
-            continue
+        if not cn or ("(PAN)" not in cg and gstin_problem(cg)):
+            continue  # a mistyped GSTIN refuses the row below; no party for it
         key = cn.lower()
         # Already in cache (pre-existing)? skip
         if key in cust_by_name:
@@ -108,8 +126,8 @@ def run_bulk_import(request):
                 if clean_pan.upper() in cust_by_pan:
                     continue
             else:
-                clean_gst = cg
-                if clean_gst.upper() in cust_by_gst:
+                clean_gst = clean_gstin(cg)
+                if clean_gst in cust_by_gst:
                     continue
         needed_new[key] = {"name": cn, "gst": clean_gst, "pan": clean_pan}
 
@@ -127,7 +145,7 @@ def run_bulk_import(request):
         for c in new_objs:
             cust_by_name[c.name.lower()] = c
             if c.gst_number:
-                cust_by_gst[c.gst_number.upper()] = c
+                cust_by_gst[c.gst_number] = c
             if c.pan_number:
                 cust_by_pan[c.pan_number.upper()] = c
 
@@ -152,6 +170,22 @@ def run_bulk_import(request):
                 (inv.business_id, str(inv.invoice_number), str(inv.invoice_date),
                  (inv.type_of_invoice or INVOICE_TYPE_OUTWARD).lower())
             )
+
+    # Purchases already on file, by the one inward rule (M28), one query per
+    # firm: "SJ-101" from the inward form is this sheet's "SJ/101". Each with
+    # what it was, so a row skipped as a duplicate says which bill it matched.
+    inward_seen = {}
+
+    def inward_on_file(biz_id):
+        if biz_id not in inward_seen:
+            inward_seen[biz_id] = {
+                ident: f"{inv.invoice_number} of {inv.invoice_date} from {inv.customer.name}"
+                for inv in Invoice.objects.filter(business_id=biz_id, type_of_invoice=INVOICE_TYPE_INWARD)
+                .select_related("customer").only("invoice_number", "invoice_date", "customer__name",
+                                                 "customer__gst_number")
+                if (ident := _inward_identity(biz_id, inv.customer, inv.invoice_number, inv.invoice_date))
+            }
+        return inward_seen[biz_id]
 
     # ---------- PHASE 2: process invoices in a single transaction ----------
     invoices_to_create = []  # [(Invoice instance, source dict for line items)]
@@ -202,6 +236,12 @@ def run_bulk_import(request):
                         )
                         skipped_count += 1
                         continue
+                    # A typo isn't "no GSTIN": booked as one, a registered party
+                    # turned B2C (review of H12).
+                    if "(PAN)" not in customer_gst and (problem := gstin_problem(customer_gst)):
+                        errors.append(f"Invoice {inv_data.get('invoiceNumber', '?')}: {problem}")
+                        skipped_count += 1
+                        continue
 
                     # Resolve customer from cache
                     customer = None
@@ -212,8 +252,8 @@ def run_bulk_import(request):
                             clean_pan = customer_gst.replace("(PAN)", "").strip()
                             customer = cust_by_pan.get(clean_pan.upper())
                         else:
-                            clean_gst = customer_gst
-                            customer = cust_by_gst.get(clean_gst.upper())
+                            clean_gst = clean_gstin(customer_gst)
+                            customer = cust_by_gst.get(clean_gst) if clean_gst else None
                     if not customer:
                         customer = cust_by_name.get(customer_name.lower())
 
@@ -234,7 +274,7 @@ def run_bulk_import(request):
                         # customer instead of creating a duplicate.
                         cust_by_name[customer_name.lower()] = customer
                         if clean_gst:
-                            cust_by_gst[clean_gst.upper()] = customer
+                            cust_by_gst[clean_gst] = customer
                         if clean_pan:
                             cust_by_pan[clean_pan.upper()] = customer
 
@@ -257,6 +297,15 @@ def run_bulk_import(request):
                     if dup_key in existing_invoice_keys:
                         skipped_count += 1
                         continue
+                    inward_ident = None
+                    if type_of_invoice == INVOICE_TYPE_INWARD:
+                        inward_ident = _inward_identity(business.pk, customer, invoice_number, str(invoice_date))
+                        if inward_ident and (matched := inward_on_file(business.pk).get(inward_ident)):
+                            # Said, not silent: a number read as another bill's
+                            # would otherwise lose its credit without a trace.
+                            errors.append(f"Invoice {invoice_number}: skipped, already on file as {matched}.")
+                            skipped_count += 1
+                            continue
 
                     # Filed-and-locked month: never silently mutate a filed
                     # period from a bulk sheet — surface it as a row error.
@@ -282,6 +331,9 @@ def run_bulk_import(request):
                     invoices_to_create.append((invoice, inv_data))
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
+                    if inward_ident:
+                        inward_on_file(business.pk)[inward_ident] = (
+                            f"{invoice_number} of {invoice_date} from {customer.name}, earlier in this import")
                     created_count += 1
 
             except Exception as e:
@@ -385,11 +437,7 @@ def run_bulk_import(request):
                                 net_amount = user_amount / (1 + gst_rate)
                     tax_amount = net_amount * gst_rate
                     if cgst == 0 and sgst == 0 and igst == 0:
-                        if is_igst:
-                            igst = tax_amount
-                        else:
-                            cgst = tax_amount / 2
-                            sgst = tax_amount / 2
+                        cgst, sgst, igst = split_tax(tax_amount, is_igst)
                     # Heads supplied by the file were taken verbatim, so a
                     # spreadsheet carrying a local split for an interstate
                     # party re-planted the exact bug fix_tax_heads repairs.

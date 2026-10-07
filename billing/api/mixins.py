@@ -127,9 +127,12 @@ class ProtectedDeleteMixin:
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError as e:
-            n = len(e.protected_objects)
-            return Response(
-                {"error": f"Cannot delete: {n} invoice(s) still reference this record. "
-                          "Reassign or delete them first.", "protected": n},
-                status=status.HTTP_409_CONFLICT,
-            )
+            # Invoices, and since H6 invoice lines: count the invoices either way.
+            n = len({getattr(o, "invoice_id", o.pk) for o in e.protected_objects})
+            if all(hasattr(o, "invoice_id") for o in e.protected_objects):
+                # Only lines: their invoices belong to someone else now.
+                message = (f"Cannot delete: lines on {n} invoice(s) of other parties still name this record. "
+                           "An administrator re-points them with manage.py fix_line_customers.")
+            else:
+                message = f"Cannot delete: {n} invoice(s) still reference this record. Reassign or delete them first."
+            return Response({"error": message, "protected": n}, status=status.HTTP_409_CONFLICT)

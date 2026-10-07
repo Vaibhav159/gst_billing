@@ -3,19 +3,45 @@
  * preview a user sees and the row that gets written agree.
  */
 
-/** Two-digit GST state code, or "" when the GSTIN is missing/too short. */
+import { hasGstin } from "./gstin";
+
+/**
+ * Two-digit GST state code, or "" when there is no GSTIN. A placeholder ("NA",
+ * "URP") is none: its first two letters read as a state made a local walk-in
+ * inter-state (H12). Mirrors the GSTIN half of tax_rules.state_code.
+ */
 export function stateCode(gstin?: string | null): string {
-  const g = (gstin || "").trim();
-  return g.length >= 2 ? g.slice(0, 2) : "";
+  return hasGstin(gstin) ? (gstin || "").trim().slice(0, 2) : "";
+}
+
+/**
+ * One spelling per state name: upper-case, "&" read as "AND", whitespace
+ * collapsed. Mirrors tax_rules.normalize_state_name.
+ */
+export function normalizeStateName(name?: string | null): string {
+  return (name || "").toUpperCase().replace(/&/g, " AND ").split(/\s+/).filter(Boolean).join(" ");
+}
+
+/**
+ * A party's two-digit state code: its GSTIN's, else its state name's, else "".
+ * Mirrors tax_rules.state_code, side by side, so the preview and the stored
+ * heads agree (M16).
+ */
+export function stateCodeOf(gstin?: string | null, stateName?: string | null): string {
+  return stateCode(gstin) || CODE_BY_NAME[normalizeStateName(stateName)] || "";
 }
 
 /**
  * True when both parties are in the same state (CGST + SGST).
  *
- * GSTIN state codes decide it when both sides have one. State names are the
- * fallback for unregistered parties. When neither is known we assume local —
- * defaulting to inter-state meant a blank capture form opened on "IGST" and an
- * unregistered local supplier's bill was taxed that way unless someone noticed.
+ * Each side resolves to a state code the way the server does — GSTIN first,
+ * then state name — and the codes are compared. Comparing raw names whenever
+ * either GSTIN was missing disagreed with the server for a firm with a GSTIN
+ * and a stale state name, a party with a GSTIN and no state, and
+ * "JAMMU & KASHMIR" against "JAMMU AND KASHMIR" (M16). When either side is
+ * unknown we assume local: defaulting to inter-state meant a blank capture form
+ * opened on "IGST" and an unregistered local supplier's bill was taxed that way.
+ * src/test/fixtures/tax-placement.json holds the cases both sides must agree on.
  */
 export function isIntraState(
   partyGstin?: string | null,
@@ -23,15 +49,9 @@ export function isIntraState(
   partyState?: string | null,
   firmState?: string | null,
 ): boolean {
-  const a = stateCode(partyGstin);
-  const b = stateCode(firmGstin);
-  if (a && b) return a === b;
-
-  const ps = (partyState || "").trim().toUpperCase();
-  const fs = (firmState || "").trim().toUpperCase();
-  if (ps && fs) return ps === fs;
-
-  return true;
+  const a = stateCodeOf(partyGstin, partyState);
+  const b = stateCodeOf(firmGstin, firmState);
+  return a && b ? a === b : true;
 }
 
 
@@ -63,9 +83,13 @@ export const STATE_CODES: Record<string, string> = {
   "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
   "25": "Daman & Diu", "26": "Dadra & Nagar Haveli", "27": "Maharashtra",
   "29": "Karnataka", "30": "Goa", "32": "Kerala", "33": "Tamil Nadu",
-  "34": "Puducherry", "35": "Andaman & Nicobar Islands", "36": "Telangana",
-  "37": "Andhra Pradesh", "38": "Ladakh",
+  "31": "Lakshadweep", "34": "Puducherry", "35": "Andaman & Nicobar Islands", "36": "Telangana",
+  "37": "Andhra Pradesh", "38": "Ladakh", "97": "Other Territory", "99": "Centre Jurisdiction",
 };
+
+const CODE_BY_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(STATE_CODES).map(([code, name]) => [normalizeStateName(name), code]),
+);
 
 /**
  * A party's state name and two-digit code. GSTIN prefix first; otherwise the
@@ -74,12 +98,7 @@ export const STATE_CODES: Record<string, string> = {
  * printed place of supply is legally required (CGST Rule 46).
  */
 export function stateInfo(gstin: string | null | undefined, stateName: string | null | undefined): { name: string; code: string } {
-  const g = (gstin || "").trim();
-  if (g.length >= 2 && STATE_CODES[g.slice(0, 2)]) {
-    const code = g.slice(0, 2);
-    return { name: STATE_CODES[code] || (stateName || ""), code };
-  }
-  const wanted = (stateName || "").trim().toUpperCase();
-  const hit = wanted ? Object.entries(STATE_CODES).find(([, n]) => n.toUpperCase() === wanted) : undefined;
-  return { name: stateName || "", code: hit ? hit[0] : "" };
+  const fromGstin = stateCode(gstin);
+  if (fromGstin && STATE_CODES[fromGstin]) return { name: STATE_CODES[fromGstin], code: fromGstin };
+  return { name: stateName || "", code: stateCodeOf("", stateName) };
 }

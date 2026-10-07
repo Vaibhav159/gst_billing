@@ -16,9 +16,9 @@ import { todayLocal } from "@/utils/localDate";
  *                                       cutoff (ITC will be forfeit if not
  *                                       claimed)
  *   - itc-aging-expired-{YYYY-MM-DD}  — N invoices already past cutoff
- *   - gstr1-3b-mismatch-{YYYY-MM-DD}  — variance > ₹0.50 between rate-slab
- *                                       tax and Output Tax (Rule 88C / DRC-01B
- *                                       blocker if it grows past ₹25L)
+ *
+ * (A "GSTR-1 vs 3B mismatch" alert used to sit here. Its variance compared
+ * the same sales with themselves, so it could never fire: M29.)
  *
  * The scanner skips silently when:
  *   - user is logged out
@@ -51,7 +51,6 @@ export function useComplianceScanner() {
       .then((res) => {
         const data = res.data || {};
         const aging = data.itc_aging?.buckets || {};
-        const recon = data.gstr1_3b_recon || {};
 
         // ITC aging — urgent (≤60 days)
         const urgentCount = aging.fresh?.count || 0;
@@ -72,20 +71,6 @@ export function useComplianceScanner() {
             type: "error",
             title: `${expiredCount} invoice${expiredCount === 1 ? "" : "s"} past ITC cutoff`,
             message: `ITC of ₹${(aging.expired?.tax || 0).toLocaleString("en-IN")} is forfeit per Sec 16(4). Review in GST → ITC Aging.`,
-          });
-        }
-
-        // GSTR-1 vs GSTR-3B variance
-        const variance = Math.abs(recon.variance || 0);
-        if (variance > 0.5) {
-          const severe = variance > 2_500_000;  // Rule 88C / DRC-01B threshold
-          pushNotification({
-            stableId: `gstr1-3b-mismatch-${today}`,
-            type: severe ? "error" : "warning",
-            title: severe ? "GSTR-1 vs 3B mismatch — filing risk" : "GSTR-1 vs 3B mismatch",
-            message: severe
-              ? `Variance of ₹${variance.toLocaleString("en-IN")} exceeds the Rule 88C / DRC-01B threshold (₹25L). This can block your next-period GSTR-3B.`
-              : `Rate-slab tax differs from GSTR-3B Output Tax by ₹${variance.toLocaleString("en-IN")}. Open GST to investigate.`,
           });
         }
 

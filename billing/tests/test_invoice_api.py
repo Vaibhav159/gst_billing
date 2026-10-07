@@ -81,10 +81,10 @@ class InvoiceAPITestCase(BaseAPITestCase):
                     "gst_tax_rate": "0.18",
                     "quantity": "2",
                     "rate": "100",
-                    "cgst": "9",
-                    "sgst": "9",
+                    "cgst": "18",
+                    "sgst": "18",
                     "igst": "0",
-                    "amount": "218",
+                    "amount": "236",
                     "unit": "pcs",
                 },
                 {
@@ -110,7 +110,7 @@ class InvoiceAPITestCase(BaseAPITestCase):
         self.assertEqual(items[0].product_name, "Widget A")
         self.assertEqual(items[1].product_name, "Widget B")
         # total_amount should reflect SUM(amounts), not the "0.00" we sent.
-        self.assertEqual(new_invoice.total_amount, Decimal("572"))
+        self.assertEqual(new_invoice.total_amount, Decimal("590"))
 
     def test_create_invoice_without_line_items_still_works(self):
         """Backwards-compat: creating without `line_items` behaves like before."""

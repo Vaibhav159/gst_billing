@@ -22,6 +22,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from billing.management.commands._repair import fresh_lines, invalidate, log_repair
 from billing.models import Invoice, LineItem
 from billing.tax_rules import is_interstate, normalize_tax_heads
 
@@ -37,7 +38,8 @@ class Command(BaseCommand):
         parser.add_argument("--to", dest="date_to", default=None, help="Invoice date <= YYYY-MM-DD.")
 
     def handle(self, *args, **opts):
-        qs = Invoice.objects.select_related("business", "customer").prefetch_related("lineitem_set")
+        # Past cacheops, as every repair reads (_repair.scope).
+        qs = Invoice.objects.nocache().select_related("business", "customer").prefetch_related(fresh_lines())
         if opts["business"]:
             qs = qs.filter(business_id=opts["business"])
         if opts["date_from"]:
@@ -91,4 +93,7 @@ class Command(BaseCommand):
                 LineItem.objects.filter(pk=li.pk).update(
                     cgst=li.cgst, sgst=li.sgst, igst=li.igst
                 )
+            log_repair("fix_tax_heads", "invoice", f"re-filed {len(wrong)} line(s) under the head for their direction",
+                       lines=[li.pk for _inv, li, _inter, _total in wrong])
+        invalidate(LineItem)  # update() sends no signal: the app served the old heads for 30 minutes
         self.stdout.write(self.style.SUCCESS(f"\nRepaired {len(wrong)} line item(s)."))

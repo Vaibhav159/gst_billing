@@ -1,5 +1,7 @@
 import * as XLSX from "xlsx-js-style";
 import { lineItemPercent } from "./gstRate";
+import { halveTax, round2 } from "./money";
+import { stateCode } from "./taxRules";
 
 /**
  * Parsed invoice row from the user's Excel format.
@@ -496,8 +498,9 @@ export function toImportReadyInvoices(
       const firstRow = rows[0];
       // Inter-state when first 2 chars of customer GSTIN differ from firm GSTIN.
       // Used to decide CGST+SGST split vs IGST. Defaults to intra-state.
-      const custStateCode = (firstRow.gstNumber || "").slice(0, 2);
-      const firmStateCode = (firm.gstin || "").slice(0, 2);
+      // A placeholder ("URP", "NA") has no state code (H12).
+      const custStateCode = stateCode(firstRow.gstNumber);
+      const firmStateCode = stateCode(firm.gstin);
       const useIGST = isInterState && custStateCode && firmStateCode && custStateCode !== firmStateCode;
 
       const items = rows.map(row => {
@@ -521,12 +524,11 @@ export function toImportReadyInvoices(
         // Compute taxes if not in file
         let cgst = row.cgst, sgst = row.sgst, igst = row.igst;
         if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent > 0) {
-          if (useIGST) {
-            igst = Math.round(taxable * gstPercent / 100 * 100) / 100;
-          } else {
-            cgst = Math.round(taxable * gstPercent / 200 * 100) / 100; // half rate
-            sgst = cgst;
-          }
+          const tax = round2(taxable * gstPercent / 100);
+          // One tax, split exactly: rounding each half-rate head on its own
+          // turned 16.49 into 8.25 + 8.25 (H13).
+          if (useIGST) igst = tax;
+          else ({ cgst, sgst } = halveTax(tax));
         }
 
         return {

@@ -8,13 +8,18 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import (
+    CharField,
     Count,
+    Exists,
     F,
     IntegerField,
+    OuterRef,
     Q,
+    Subquery,
     Sum,
+    Value,
 )
-from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
+from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear, Trim
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -29,6 +34,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.cache import invalidate
 from billing.constants import (
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
@@ -40,7 +46,7 @@ from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
-from billing.tax_rules import itc_refusal
+from billing.tax_rules import GSTIN_SHAPE, itc_refusal
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -69,6 +75,14 @@ from .serializers import (
 # artifacts like 3.0000000000000004 in filing figures (audit A12).
 
 logger = logging.getLogger(__name__)
+
+
+def _party(model, value, field):
+    """The firm or customer a request names by id, or a 400."""
+    try:
+        return model.objects.get(pk=int(value))
+    except (TypeError, ValueError, model.DoesNotExist):
+        raise ValidationError({field: f"{value!r} is not a {field} on file."}) from None
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -485,15 +499,26 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             assert_period_unlocked(biz_id, inv_date, "edit")
 
         with transaction.atomic():
-            invoices_transferred = Invoice.objects.filter(customer=source).update(
-                customer=target
+            # Through save(), so each invoice's lines follow it and are re-filed
+            # for the target's state (M14). A queryset update skipped that: a
+            # local sale merged into an out-of-state record kept CGST + SGST.
+            moving = list(Invoice.objects.filter(customer=source).select_related("business"))
+            for invoice in moving:
+                invoice.customer = target
+                invoice.save()
+            invoices_transferred = len(moving)
+            # Every line follows its own invoice (H6). Moving lines by their
+            # customer field left a drifted line on the source's invoice behind
+            # and dragged another invoice's stray line along.
+            LineItem.objects.filter(Q(customer=source) | Q(invoice__customer=target)).update(
+                customer_id=Subquery(Invoice.objects.filter(pk=OuterRef("invoice_id")).values("customer_id")[:1])
             )
-            LineItem.objects.filter(customer=source).update(customer=target)
             for business in source.businesses.all():
                 target.businesses.add(business)
             source_name = source.name
             source_id = source.pk
             source.delete()
+        invalidate(LineItem)  # the line update above sends no signal
 
         # Log merge
         with contextlib.suppress(Exception):
@@ -829,12 +854,13 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             except Exception:
                 pass
 
-        # Reconciliation drill-down: B2B (customer holds a GSTIN) vs B2C.
+        # Reconciliation drill-down: B2B (customer holds a GSTIN) vs B2C, by
+        # the rollup's own test (has_gstin): "NA" or "URP" isn't a GSTIN.
         segment = self.request.query_params.get("segment")
-        if segment == "b2b":
-            queryset = queryset.exclude(customer__gst_number__isnull=True).exclude(customer__gst_number="")
-        elif segment == "b2c":
-            queryset = queryset.filter(Q(customer__gst_number__isnull=True) | Q(customer__gst_number=""))
+        if segment in ("b2b", "b2c"):
+            queryset = queryset.annotate(segment_gstin=Coalesce(Trim("customer__gst_number"), Value("")))
+            registered = Q(segment_gstin__regex=GSTIN_SHAPE)
+            queryset = queryset.filter(registered) if segment == "b2b" else queryset.exclude(registered)
 
         # Filter by payment mode; "none" selects rows where it was never set.
         payment_mode = self.request.query_params.get("payment_mode")
@@ -1040,8 +1066,16 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         invoice = self.get_object()
         assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
         _incoming = request.data.get("invoice") or {}
+        # The SPA sends the parties as strings. Assigned raw, "5" never equalled
+        # the 5 the invoice was loaded with, so every edit looked like a move
+        # and re-saved each line; a bad id was a 500.
+        parties = {
+            field: _party(model, _incoming[field], field)
+            for field, model in (("customer", Customer), ("business", Business))
+            if _incoming.get(field)
+        }
         assert_period_unlocked(
-            _incoming.get("business") or invoice.business_id,
+            parties["business"].pk if "business" in parties else invoice.business_id,
             _incoming.get("invoice_date") or invoice.invoice_date,
             "edit",
         )
@@ -1058,10 +1092,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
             # 1. Patch invoice-level fields if provided (in-memory only)
             if invoice_data:
-                if invoice_data.get("customer"):
-                    invoice.customer_id = invoice_data["customer"]
-                if invoice_data.get("business"):
-                    invoice.business_id = invoice_data["business"]
+                if "customer" in parties:
+                    invoice.customer = parties["customer"]
+                if "business" in parties:
+                    invoice.business = parties["business"]
                 if "invoice_number" in invoice_data:
                     invoice.invoice_number = invoice_data["invoice_number"]
                 if "invoice_date" in invoice_data:
@@ -1778,10 +1812,26 @@ class LineItemViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    _BUILT_FIELDS = ("gst_tax_rate", "cgst", "sgst", "igst", "amount")
+
+    @staticmethod
+    def _built(invoice, data, instance=None):
+        """The money fields as the invoice paths would write them (M14): rate
+        through the slab allowlist, heads by direction in whole paise, the
+        amount and the tax checked against qty x rate and the rate."""
+        fields = ("product_name", "hsn_code", "gst_tax_rate", "quantity", "rate", "cgst", "sgst", "igst", "amount", "unit")
+        item = {f: data[f] if f in data else getattr(instance, f, None) for f in fields}
+        (line,), _ = build_line_items(invoice, [item], source="form")
+        return {f: getattr(line, f) for f in LineItemViewSet._BUILT_FIELDS}
+
+    def perform_create(self, serializer):
+        invoice = serializer.validated_data["invoice"]
+        serializer.save(customer=invoice.customer, **self._built(invoice, serializer.validated_data))
+
     def perform_update(self, serializer):
         inv = serializer.instance.invoice
         assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
-        super().perform_update(serializer)
+        serializer.save(customer=inv.customer, **self._built(inv, serializer.validated_data, serializer.instance))
 
     def perform_destroy(self, instance):
         inv = instance.invoice
@@ -2614,6 +2664,16 @@ class AIInvoiceCreateView(APIView):
     def post(self, request):
         return create_from_ai(request)
 
+def _restore_logs(entity, entity_id):
+    """The log an undo of a delete writes for the record it restores.
+
+    Undos run before H7's marker existed left only this, so it is how they
+    are told apart from deletes nobody has undone yet.
+    """
+    detail = Concat(Value("Restored via undo (was #"), Cast(entity_id, CharField()), Value(")"))
+    return AuditLog.objects.filter(entity=entity, action="created", details=detail)
+
+
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only viewset for audit log entries with undo support."""
     permission_classes = [RoleBasedPermission]
@@ -2623,7 +2683,9 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().annotate(
+            restored_before=Exists(_restore_logs(OuterRef("entity"), OuterRef("entity_id")))
+        )
 
         action_filter = self.request.query_params.get("action")
         if action_filter and action_filter != "all":
@@ -2711,10 +2773,34 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         return obj.pk
             return None
 
+        def _undone(response, log):
+            # Recorded on the entry, in the same transaction, so the undo can't
+            # be used twice (H7). In the snapshot, which the browser never sees,
+            # under a key no model field has, so the restore loops skip it.
+            entry.snapshot = {**(entry.snapshot or {}), "_undo": {
+                "at": timezone.localtime().isoformat(), "by": request.user.pk, "log": log.pk}}
+            entry.save(update_fields=["snapshot"])
+            return response
+
         try:
             # Every branch is one transaction: a restore that recreates the header
             # and then fails on a line must leave nothing behind.
             with transaction.atomic():
+                # Locked, so two clicks at once can't both pass the check. Only
+                # the outward-number constraint used to stop a repeat: a deleted
+                # purchase or a blank-number draft came back once per click.
+                entry = AuditLog.objects.select_for_update().get(pk=entry.pk)
+                used = (entry.snapshot or {}).get("_undo")
+                if used:
+                    return Response(
+                        {"error": "already_undone", "detail": f"This change was already undone ({used['at'][:16]})."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if entry.action == "deleted" and _restore_logs(entry.entity, Value(entry.entity_id)).exists():
+                    return Response(
+                        {"error": "already_undone", "detail": "This delete was already undone."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
                 if entry.action == "deleted" and entry.snapshot:
                     # Recreate the deleted object
                     snap = entry.snapshot
@@ -2750,7 +2836,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         )
                     if snap.get("line_items"):
                         obj.save()  # re-sums total_amount from the restored lines
-                    AuditLog.objects.create(
+                    log = AuditLog.objects.create(
                         action="created",
                         entity=entry.entity,
                         entity_id=obj.pk,
@@ -2758,7 +2844,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         user=request.user if request.user.is_authenticated else None,
                         details=f"Restored via undo (was #{entry.entity_id})",
                     )
-                    return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
+                    return _undone(Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk}), log)
 
                 elif entry.action == "updated" and entry.snapshot:
                     # Revert to the snapshot state
@@ -2772,8 +2858,12 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
                         assert_period_unlocked(snap.get("business"), snap.get("invoice_date"), "edit")
                     field_names = {f.name for f in model._meta.concrete_fields}
+                    # The total is the lines' sum, and the lines may have
+                    # changed since the snapshot: copying it back left a header
+                    # of 1,030 over lines of 2,060 (M9). Re-summed below.
+                    skip = {"id", "total_amount"} if model is Invoice else {"id"}
                     for k, v in snap.items():
-                        if k not in field_names or k == "id":
+                        if k not in field_names or k in skip:
                             continue
                         field = model._meta.get_field(k)
                         if hasattr(field, "related_model") and field.related_model:
@@ -2783,8 +2873,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                                 setattr(obj, k, None if field.null else "")
                             else:
                                 setattr(obj, k, v)
-                    obj.save()
-                    AuditLog.objects.create(
+                    obj.save(**({"recalc_total": True} if model is Invoice else {}))
+                    log = AuditLog.objects.create(
                         action="updated",
                         entity=entry.entity,
                         entity_id=obj.pk,
@@ -2792,7 +2882,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         user=request.user if request.user.is_authenticated else None,
                         details=f"Reverted via undo to state before: {entry.details}",
                     )
-                    return Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"})
+                    return _undone(Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"}), log)
 
                 elif entry.action == "created":
                     # Delete the created object
@@ -2802,7 +2892,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             assert_period_unlocked(obj.business_id, obj.invoice_date, "delete")
                         name = str(obj)
                         obj.delete()
-                        AuditLog.objects.create(
+                        log = AuditLog.objects.create(
                             action="deleted",
                             entity=entry.entity,
                             entity_id=entry.entity_id,
@@ -2810,7 +2900,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             user=request.user if request.user.is_authenticated else None,
                             details=f"Deleted via undo (was created at {entry.timestamp})",
                         )
-                        return Response({"message": f"Deleted {entry.entity}: {name}"})
+                        return _undone(Response({"message": f"Deleted {entry.entity}: {name}"}), log)
                     except model.DoesNotExist:
                         return Response({"error": "Record already deleted"}, status=404)
 

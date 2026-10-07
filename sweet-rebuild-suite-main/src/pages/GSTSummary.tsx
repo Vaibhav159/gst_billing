@@ -240,11 +240,15 @@ export default function GSTSummary() {
   // "ledger exists but is zero" so we can show a helpful CTA in the first
   // case rather than implying the user is up-to-date.
   const carryFwd = gstData?.carry_forward_itc || { cgst: 0, sgst: 0, igst: 0, total: 0, as_of: null, configured: false };
-  const effective = gstData?.effective || { carry_forward_itc: 0, current_itc: totalITC, effective_itc: totalITC, effective_net_tax: gstr3b.net_payable.total };
+  const effective = gstData?.effective || { carry_forward_itc: 0, current_itc: totalITC, effective_itc: totalITC, effective_net_tax: gstr3b.net_payable?.total ?? null, effective_cash: gstr3b.net_payable, effective_carry_forward: null };
   const carryFwdTotal = Number(carryFwd.total || 0);
-  // Net Tax now reflects carry-forward: Output - (current ITC + carry-fwd).
-  // This is what the user actually owes / can carry forward further.
-  const netTax = effective.effective_net_tax;
+  // Cash due after using this period's ITC and the carry-forward in the legal
+  // order (Rule 88A, worked out by the server). Null with "All firms": it is
+  // per GSTIN, and subtracting head by head netted one firm against another
+  // and showed CGST/SGST payable beside unused IGST credit (M29).
+  const netTax: number | null = effective.effective_net_tax;
+  const cash = effective.effective_cash as { cgst: number; sgst: number; igst: number; total: number } | null;
+  const carriedOn = Number(effective.effective_carry_forward?.total || 0);
   // True while gstData is still in flight — used to gate stat cards and the
   // readiness card so they don't flash "₹0" / "No data" before the API
   // resolves.
@@ -499,8 +503,6 @@ export default function GSTSummary() {
   // GSTR-3B Table 4 + reconciliation + aging from gstData (server-side)
   const table4 = gstData?.gstr3b_table4;
   const aging = gstData?.itc_aging;
-  const recon = gstData?.gstr1_3b_recon;
-  const reconHasIssue = recon && Math.abs(recon.variance || 0) > 0.5;
 
   // Filing-readiness scoreboard. Four signals derived from data already on
   // the page — no extra round-trip. Each check is either pass / warn / fail,
@@ -514,7 +516,6 @@ export default function GSTSummary() {
   // is just slow). The card stays the same shape so layout doesn't jump.
   const readiness = useMemo(() => {
     const hasData = gstr1Rows.length > 0 || (gstr3b.output_tax.total || 0) > 0 || (gstr3b.input_tax_credit.total || 0) > 0;
-    const reconOk = !recon || Math.abs(recon.variance || 0) <= 0.5;
     const expiredCount = aging?.buckets?.expired?.count || 0;
     const warningCount = aging?.buckets?.warning?.count || 0;
     const itcSafe = expiredCount === 0 && warningCount === 0;
@@ -526,7 +527,6 @@ export default function GSTSummary() {
       });
       const checks = [
         placeholder("data", "Filing data"),
-        placeholder("recon", "GSTR-1 ↔ 3B sync"),
         placeholder("itc", "ITC cutoff"),
         placeholder("balance", "Tax ledger"),
       ];
@@ -539,12 +539,6 @@ export default function GSTSummary() {
         ok: hasData,
         label: hasData ? "Has filing data" : "No data in period",
         detail: hasData ? `${gstr1Rows.length} rate slab${gstr1Rows.length === 1 ? "" : "s"}` : "Select a period with activity",
-      },
-      {
-        key: "recon",
-        ok: reconOk,
-        label: reconOk ? "GSTR-1 ↔ 3B in sync" : "GSTR-1 ↔ 3B mismatch",
-        detail: reconOk ? "Variance < ₹0.50" : `Off by ${formatCurrency(Math.abs(recon?.variance || 0))}`,
       },
       {
         key: "itc",
@@ -568,7 +562,7 @@ export default function GSTSummary() {
     const passed = checks.filter((c) => c.ok).length;
     const total = checks.length;
     return { checks, passed, total, ready: passed === total, hydrating: false };
-  }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, recon, aging, isHydrating]);
+  }, [gstr1Rows.length, gstr3b.output_tax.total, gstr3b.input_tax_credit.total, aging, isHydrating]);
 
   return (
     <div className={cn("space-y-4", isMobile ? "p-4 pb-24" : "p-6 lg:p-8 space-y-5")}>
@@ -675,7 +669,10 @@ export default function GSTSummary() {
               : "Set in ITC Ledger →",
             interactive: true,
           },
-          { key: "net", label: "Net Tax", raw: Math.abs(netTax), color: netTax >= 0 ? "text-destructive" : "text-success", sub: netTax >= 0 ? "Payable (incl. carry-fwd)" : "Refund / Carry to next FY" },
+          netTax === null
+            ? { key: "net", label: "Net Tax", raw: null, color: "text-muted-foreground", sub: "Pick one firm: it's per GSTIN" }
+            : { key: "net", label: "Net Tax", raw: netTax, color: netTax > 0 ? "text-destructive" : "text-success",
+                sub: carriedOn > 0 ? `Payable · ${formatCurrency(carriedOn)} ITC carried on` : "Payable after ITC (Rule 88A)" },
         ].map((s) => {
           const Cmp: any = s.interactive ? "button" : "div";
           return (
@@ -686,14 +683,14 @@ export default function GSTSummary() {
                   "stat-card rounded-2xl p-4 w-full text-left transition-all",
                   s.interactive && "hover:bg-secondary/30 hover:border-primary/30 cursor-pointer"
                 )}
-                title={isHydrating ? "Loading" : formatCurrency(s.raw)}
+                title={isHydrating ? "Loading" : s.raw === null ? s.sub : formatCurrency(s.raw)}
               >
                 <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</p>
                 {isHydrating ? (
                   <div className="mt-1.5 h-6 w-16 rounded bg-muted/40 animate-pulse" />
                 ) : (
                   <p className={cn("font-display font-bold mt-1 tabular-nums", s.color, isMobile ? "text-base" : "text-xl")}>
-                    {formatCompactCurrency(s.raw)}
+                    {s.raw === null ? "—" : formatCompactCurrency(s.raw)}
                   </p>
                 )}
                 <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">{s.sub}</p>
@@ -786,20 +783,6 @@ export default function GSTSummary() {
         </div>
       </motion.div>
 
-      {/* GSTR-1 vs GSTR-3B reconciliation banner — only shown when there's a real variance */}
-      {reconHasIssue && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-2xl p-4 bg-warning/5 border border-warning/20">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-semibold text-foreground">GSTR-1 vs 3B Mismatch</p>
-              <p className="text-[12px] text-muted-foreground mt-0.5">
-                GSTR-1 rate-slab tax sums to <span className="font-semibold text-foreground">{formatCurrency(recon.gstr1_total_tax || 0)}</span> but GSTR-3B Output Tax shows <span className="font-semibold text-foreground">{formatCurrency(recon.gstr3b_output_tax || 0)}</span> (variance <span className={cn("font-semibold", (recon.variance || 0) > 0 ? "text-destructive" : "text-warning")}>{formatCurrency(Math.abs(recon.variance || 0))}</span>). Per Rule 88C / DRC-01B, persistent variance &gt; ₹25L can block your next-period filing.
-              </p>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
       {/* Monthly tax trend — compact header with YTD totals so a flat chart
           (e.g. early in the FY when only Apr has data) still conveys useful
@@ -948,29 +931,33 @@ export default function GSTSummary() {
                     </tr>
                     <tr className="border-t-2 border-border">
                       <td className="font-bold">Net Tax Payable</td>
-                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.cgst - gstr3b.input_tax_credit.cgst - Number(carryFwd.cgst || 0)) >= 0 ? "text-destructive" : "text-success")}>
-                        {formatCurrency(gstr3b.output_tax.cgst - gstr3b.input_tax_credit.cgst - Number(carryFwd.cgst || 0))}
-                      </td>
-                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.sgst - gstr3b.input_tax_credit.sgst - Number(carryFwd.sgst || 0)) >= 0 ? "text-destructive" : "text-success")}>
-                        {formatCurrency(gstr3b.output_tax.sgst - gstr3b.input_tax_credit.sgst - Number(carryFwd.sgst || 0))}
-                      </td>
-                      <td className={cn("text-right font-bold tabular-nums", (gstr3b.output_tax.igst - gstr3b.input_tax_credit.igst - Number(carryFwd.igst || 0)) >= 0 ? "text-destructive" : "text-success")}>
-                        {formatCurrency(gstr3b.output_tax.igst - gstr3b.input_tax_credit.igst - Number(carryFwd.igst || 0))}
-                      </td>
-                      <td className={cn("text-right font-bold text-lg tabular-nums", netTax >= 0 ? "text-destructive" : "text-success")}>
-                        {formatCurrency(Math.abs(netTax))}
+                      {(["cgst", "sgst", "igst"] as const).map((h) => (
+                        <td key={h} className={cn("text-right font-bold tabular-nums", cash && cash[h] > 0 ? "text-destructive" : "text-success")}>
+                          {cash ? formatCurrency(cash[h]) : "—"}
+                        </td>
+                      ))}
+                      <td className={cn("text-right font-bold text-lg tabular-nums", netTax !== null && netTax > 0 ? "text-destructive" : "text-success")}>
+                        {netTax === null ? "—" : formatCurrency(netTax)}
                       </td>
                     </tr>
+                    {carriedOn > 0 && effective.effective_carry_forward && (
+                      <tr>
+                        <td className="font-medium text-success">ITC carried on</td>
+                        {(["cgst", "sgst", "igst"] as const).map((h) => (
+                          <td key={h} className="text-right text-success tabular-nums">{formatCurrency(effective.effective_carry_forward[h])}</td>
+                        ))}
+                        <td className="text-right font-semibold text-success tabular-nums">{formatCurrency(carriedOn)}</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
-              {/* When carry-fwd is non-zero, an inline footnote spelling out
-                  the math so the user can sanity-check against their books. */}
-              {carryFwdTotal > 0 && (
-                <p className="text-[11px] text-muted-foreground px-1">
-                  Net Tax = Output Tax {formatCurrency(gstr3b.output_tax.total)} − Period ITC {formatCurrency(gstr3b.input_tax_credit.total)} − Carry-fwd {formatCurrency(carryFwdTotal)} = <span className={cn("font-semibold", netTax >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(netTax))}</span> {netTax < 0 && "carry-fwd to next period"}
-                </p>
-              )}
+              {/* How the payable was reached, so it can be checked against the books. */}
+              <p className="text-[11px] text-muted-foreground px-1">
+                {netTax === null
+                  ? (gstData?.net_payable_note || "Pick one firm to see its net payable.")
+                  : "Payable is the cash due after ITC is used in the legal order (Rule 88A): IGST credit first, against IGST, then CGST and SGST; CGST and SGST credit after that, never against each other."}
+              </p>
             </div>
 
             {/* HSN summary — "Total Value" (gross = taxable + tax) is the
@@ -1055,17 +1042,24 @@ export default function GSTSummary() {
                   ) : <p className="text-[12px] text-muted-foreground">No B2CS invoices</p>}
                 </div>
                 <div className="space-y-2">
-                  <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({pluralize(exGstr1.hsn?.data?.length || 0, "code")})</h4>
-                  {(exGstr1.hsn?.data || []).length > 0 ? (
-                    <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
-                      <thead><tr><th>HSN</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
-                      <tbody>
-                        {exGstr1.hsn.data.map((h: any) => (
-                          <tr key={h.hsn_sc}><td className="font-mono">{h.hsn_sc}</td><td className="text-right">{h.qty.toFixed(3)}</td><td className="text-right">{formatCurrency(h.txval)}</td><td className="text-right">{formatCurrency(h.camt)}</td><td className="text-right">{formatCurrency(h.samt)}</td><td className="text-right">{formatCurrency(h.iamt)}</td></tr>
-                        ))}
-                      </tbody>
-                    </table></div>
-                  ) : <p className="text-[12px] text-muted-foreground">No HSN data</p>}
+                  {/* Table 12 files B2B and B2C supplies separately (H11). */}
+                  {(() => {
+                    const hsnTabs: [string, any[]][] = [["B2B", exGstr1.hsn?.hsn_b2b || []], ["B2C", exGstr1.hsn?.hsn_b2c || []]];
+                    const rows = hsnTabs.flatMap(([tab, list]) => list.map((h) => ({ tab, ...h })));
+                    return (<>
+                      <h4 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">HSN Summary ({pluralize(rows.length, "row")})</h4>
+                      {rows.length > 0 ? (
+                        <div className="overflow-x-auto"><table className="table-premium text-[12px] min-w-[480px]">
+                          <thead><tr><th>Tab</th><th>HSN</th><th className="text-right">Qty</th><th className="text-right">Taxable</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="text-right">IGST</th></tr></thead>
+                          <tbody>
+                            {rows.map((h) => (
+                              <tr key={`${h.tab}-${h.hsn_sc}`}><td>{h.tab}</td><td className="font-mono">{h.hsn_sc}</td><td className="text-right">{h.qty.toFixed(3)}</td><td className="text-right">{formatCurrency(h.txval)}</td><td className="text-right">{formatCurrency(h.camt)}</td><td className="text-right">{formatCurrency(h.samt)}</td><td className="text-right">{formatCurrency(h.iamt)}</td></tr>
+                            ))}
+                          </tbody>
+                        </table></div>
+                      ) : <p className="text-[12px] text-muted-foreground">No HSN data</p>}
+                    </>);
+                  })()}
                 </div>
               </div>
             )}
@@ -1100,9 +1094,12 @@ export default function GSTSummary() {
                     </tr>
                     <tr className="border-t-2 border-border font-bold">
                       <td>6.1 — Net Tax Payable</td>
-                      <td className={cn("text-right", (exGstr3b.tax_pmt?.cgst || 0) >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(exGstr3b.tax_pmt?.cgst || 0))}</td>
-                      <td className={cn("text-right", (exGstr3b.tax_pmt?.sgst || 0) >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(exGstr3b.tax_pmt?.sgst || 0))}</td>
-                      <td className={cn("text-right", (exGstr3b.tax_pmt?.igst || 0) >= 0 ? "text-destructive" : "text-success")}>{formatCurrency(Math.abs(exGstr3b.tax_pmt?.igst || 0))}</td>
+                      {/* Cash after Rule 88A credit use, per GSTIN; null for all firms (M29). */}
+                      {(["cgst", "sgst", "igst"] as const).map((h) => (
+                        <td key={h} className={cn("text-right", (exGstr3b.tax_pmt?.[h] || 0) > 0 ? "text-destructive" : "text-success")}>
+                          {exGstr3b.tax_pmt ? formatCurrency(exGstr3b.tax_pmt[h]) : "Pick one firm"}
+                        </td>
+                      ))}
                     </tr>
                   </tbody>
                 </table></div>

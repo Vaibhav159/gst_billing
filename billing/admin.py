@@ -71,6 +71,13 @@ class CustomerAdmin(admin.ModelAdmin):
 
 @admin.register(LineItem)
 class LineItemAdmin(PeriodLockAdminMixin, admin.ModelAdmin):
+    # The customer is the invoice's (LineItem.save), and a line stays on its
+    # invoice (H5): editable here, they made the drift H6 removed.
+    readonly_fields = ("customer",)
+
+    def get_readonly_fields(self, request, obj=None):
+        return (*super().get_readonly_fields(request, obj), *(("invoice",) if obj else ()))
+
     list_display = (
         "customer",
         "product_name",
@@ -116,6 +123,7 @@ class LineItemAdmin(PeriodLockAdminMixin, admin.ModelAdmin):
 class LineInline(admin.TabularInline):
     model = LineItem
     extra = 1
+    readonly_fields = ("customer",)  # the invoice's (LineItem.save)
 
 
 @admin.register(Invoice)

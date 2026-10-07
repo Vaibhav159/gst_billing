@@ -347,12 +347,16 @@ class InwardBillNoGstinTest(BaseAPITestCase):
 
     def test_gst_on_a_bill_without_a_supplier_gstin_is_refused_naming_the_line(self):
         suppliers = Customer.objects.count()
-        for i, gstin in enumerate([None, "", "NA", "URP", " urp ", "22AAAAA0000A1Z"]):  # last: 14 characters
+        for i, gstin in enumerate([None, "", "NA", "URP", " urp "]):
             with self.subTest(gstin=gstin):
                 resp = self._post(f"U-{i}", gstin, ["0", "0.03"])
                 self.assertEqual(resp.status_code, 400, resp.data)
                 self.assertIn("Line 2", resp.data["error"])
                 self.assertIn("GSTIN", resp.data["error"])
+        # 14 characters: a typo, refused as one rather than as "no GSTIN" (review of H12).
+        resp = self._post("U-T", "22AAAAA0000A1Z", ["0", "0.03"])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("isn't a GSTIN", resp.data["error"])
         self.assertFalse(Invoice.objects.filter(invoice_number__startswith="U-").exists())
         self.assertEqual(Customer.objects.count(), suppliers, "a refused bill must not create its supplier")
 
@@ -376,11 +380,15 @@ class InwardBillNoGstinTest(BaseAPITestCase):
         self.assertEqual(Invoice.objects.get(invoice_number="G-1").customer_id, sup.id)
 
     def test_a_supplier_gstin_on_file_is_never_overwritten(self):
+        # Nor is the bill booked there under the other GSTIN: it is refused
+        # until the GSTIN or the name is corrected (review of M26).
         sup = Customer.objects.create(name="LOCAL KARIGAR", gst_number="22AAAAA1111A1Z5")
         resp = self._post("G-2", "22KKKKK0000K1Z5", ["0.03"])
-        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data["error"], "supplier_gstin_conflict")
         sup.refresh_from_db()
         self.assertEqual(sup.gst_number, "22AAAAA1111A1Z5")
+        self.assertFalse(Invoice.objects.filter(invoice_number="G-2").exists())
 
 
 class AIReadRateTest(SimpleTestCase):
@@ -401,3 +409,50 @@ class AIReadRateTest(SimpleTestCase):
 
     def test_a_rate_the_model_gave_is_kept_as_read(self):
         self.assertEqual(self._rates({"gst_tax_rate": 0}, {"gst_tax_rate": 0.25}, {"gst_tax_rate": "0.03"}), [0.0, 0.25, 0.03])
+
+
+class InwardBillSavedSupplierHeadTest(BaseAPITestCase):
+    """M26: the head came from the GSTIN and state typed on the form, but the
+    bill is booked on the supplier the server resolves. A supplier on file
+    from Maharashtra, matched by name while the form carried another GSTIN,
+    got CGST+SGST, and is_igst_applicable (read from the saved supplier) then
+    disagreed with the heads stored.
+
+    Review: when the bill's GSTIN and the record's are both real and differ,
+    M26 booked the bill on the record, under the record's head. A trade name
+    can hold a registration in each state, so that record is another supplier,
+    and the credit followed the wrong GSTIN. Such a bill is refused until the
+    GSTIN or the name is corrected."""
+
+    def setUp(self):
+        super().setUp()
+        # The base business is 22 (Chhattisgarh).
+        self.mh = Customer.objects.create(name="MH BULLION", gst_number="27AABCR1718E1ZP", state_name="")
+        self.mh.businesses.add(self.business)
+
+    def _post(self, number, **over):
+        data = {"business_id": self.business.id, "supplier_name": "MH BULLION",
+                "supplier_gstin": "22DDDDD0000D1Z5", "invoice_number": number, "invoice_date": "2026-05-05",
+                "lines": json.dumps([{"product_name": "Gold bar", "hsn_code": "710813", "quantity": "1",
+                                      "rate": "100000", "gst_tax_rate": "0.03", "unit": "gms"}])}
+        data.update(over)
+        return self.client.post(reverse("inward-bill-list"), data)
+
+    def test_a_bill_from_another_gstin_than_the_named_supplier_is_refused(self):
+        resp = self._post("MH-1")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data["error"], "supplier_gstin_conflict")
+        self.assertIn("27AABCR1718E1ZP", resp.data["detail"])
+        self.assertIn("22DDDDD0000D1Z5", resp.data["detail"])
+        self.assertFalse(Invoice.objects.filter(invoice_number="MH-1").exists())
+        self.mh.refresh_from_db()
+        self.assertEqual(self.mh.gst_number, "27AABCR1718E1ZP")
+
+    def test_the_head_follows_the_supplier_the_bill_is_booked_on(self):
+        resp = self._post("MH-1", supplier_gstin="27AABCR1718E1ZP")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        inv = Invoice.objects.get(invoice_number="MH-1")
+        self.assertEqual(inv.customer_id, self.mh.id)
+        li = inv.lineitem_set.get()
+        self.assertEqual((li.cgst, li.sgst, li.igst), (D("0"), D("0"), D("3000")))
+        self.assertTrue(inv.is_igst_applicable)

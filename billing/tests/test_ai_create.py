@@ -109,6 +109,18 @@ class AICreateTests(TestCase):
         li = Invoice.objects.get(invoice_number="AI-R-1").lineitem_set.get()
         self.assertEqual(li.igst, Decimal("300"))
 
+    def test_a_scan_whose_gstin_differs_from_the_named_party_on_file_is_refused(self):
+        # Another registration of the same trade name, or a misread GSTIN:
+        # booked on the record, the sale (or the credit) followed its GSTIN.
+        on_file = Customer.objects.create(name="MUMBAI BUYER", gst_number="27AAAAA0000A1Z5", state_name="MAHARASHTRA")
+        on_file.businesses.add(self.seller)
+        for kind in ("outward", "inward"):
+            with self.subTest(kind=kind):
+                r = self.client.post(reverse("ai-invoice-create"), self._payload(type_of_invoice=kind), format="json")
+                self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+                self.assertIn("27AAAAA0000A1Z5", r.data["error"])
+                self.assertFalse(Invoice.objects.filter(invoice_number="AI-1").exists())
+
     def test_re_uploading_the_same_bill_returns_the_existing_invoice(self):
         first = self._post()
         second = self._post()

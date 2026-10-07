@@ -54,3 +54,15 @@ describe("stateInfo — place of supply for unregistered parties (audit B3)", ()
     expect(stateInfo("08ABCDE1234A1Z5", "Maharashtra").code).toBe("08");
   });
 });
+
+describe("placeholder GSTINs (H12)", () => {
+  it("gives a placeholder no state code", () => {
+    expect(stateCode("NA")).toBe("");
+    expect(stateCode("URP")).toBe("");
+  });
+
+  it("keeps a local walk-in saved with NA intra-state", () => {
+    expect(isIntraState("NA", "08AAGPL3375F1ZO", "RAJASTHAN", "RAJASTHAN")).toBe(true);
+    expect(isIntraState("URP", "08AAGPL3375F1ZO")).toBe(true);
+  });
+});

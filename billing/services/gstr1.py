@@ -5,17 +5,118 @@ decorators and delegates here. ``view`` is the ViewSet instance (the summary
 and export use its queryset helpers).
 """
 
+import bisect
+import re
+from datetime import date
 from decimal import Decimal
 
 from django.db.models import Count, F, Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.utils import timezone
 from rest_framework.response import Response
 
 from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import classify_b2c, rate_as_percent
+from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_by_month
 
 TWO_PLACES = Decimal("0.01")
+
+
+def _hsn_tab(customer):
+    """Table 12's tab for a line: supplies to a GSTIN are B2B, the rest B2C (H11)."""
+    return "hsn_b2b" if clean_gstin(getattr(customer, "gst_number", "")) else "hsn_b2c"
+
+
+def _is_service(hsn):
+    """SAC codes start 99. The portal wants UQC "NA" and no quantity for them."""
+    return (hsn or "").startswith("99")
+
+
+_DIGITS = re.compile(r"\d+")
+
+
+def _readings(number):
+    """Each way to read `number` as a series and a counter, one per run of
+    digits: (series key, counter, is the last run)."""
+    runs = list(_DIGITS.finditer(number))
+    return [(number[:m.start()] + "\0" + number[m.end():], int(m.group()), i == len(runs) - 1)
+            for i, m in enumerate(runs)]
+
+
+def document_series(numbers, elsewhere=()):
+    """Table 13 rows for one kind of document: the month's number series.
+
+    The counter is the run of digits that runs through the FY's numbers: in
+    "INV/2026-27/101" the last, in "101/2026-27" the first. Within a series,
+    a number missing between two of the month's numbers was deleted or never
+    issued, so it counts as cancelled, unless another month of the FY used it
+    (`elsewhere`: a back-dated invoice); the range then splits into two rows
+    there instead of counting phantom cancellations in both months (review of
+    H11). A number with no digits is a series of one.
+    """
+    numbers = list(dict.fromkeys(numbers))
+    elsewhere = [n for n in dict.fromkeys(elsewhere) if n not in set(numbers)]
+    shared = {}
+    for number in numbers + elsewhere:
+        for key, _, _ in _readings(number):
+            shared[key] = shared.get(key, 0) + 1
+    used_elsewhere = {}
+    for number in elsewhere:
+        for key, counter, _ in _readings(number):
+            used_elsewhere.setdefault(key, []).append(counter)
+
+    series, singles = {}, []
+    for number in numbers:
+        readings = _readings(number)
+        if not readings:
+            singles.append(number)
+            continue
+        # The reading most numbers share; a tie goes to the last run of digits.
+        key, counter, _ = max(readings, key=lambda r: (shared[r[0]], r[2], readings.index(r)))
+        issued = series.setdefault(key, {})
+        if counter in issued:
+            singles.append(number)  # "INV/001" beside "INV/0001": keep both documents
+        else:
+            issued[counter] = number
+
+    rows = []
+    for key in sorted(series):
+        issued = series[key]
+        others = sorted(used_elsewhere.get(key, ()))
+        counters = sorted(issued)
+        runs, start = [], 0
+        for i in range(1, len(counters)):
+            lo, hi = counters[i - 1], counters[i]
+            j = bisect.bisect_right(others, lo)
+            if j < len(others) and others[j] < hi:
+                runs.append(counters[start:i])
+                start = i
+        runs.append(counters[start:])
+        for run in runs:
+            total = run[-1] - run[0] + 1
+            rows.append({"from": issued[run[0]], "to": issued[run[-1]], "totnum": total,
+                         "cancel": total - len(run), "net_issue": len(run)})
+    for number in sorted(singles):
+        rows.append({"from": number, "to": number, "totnum": 1, "cancel": 0, "net_issue": 1})
+    return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
+
+
+def _months(items):
+    """[(output tax, input credit), ...] per calendar month of `items`, in order.
+
+    GSTR-3B pays each month from the credit on hand then (utilise_by_month).
+    """
+    rows = (
+        items.annotate(y=ExtractYear("invoice__invoice_date"), m=ExtractMonth("invoice__invoice_date"))
+        .values("y", "m", "invoice__type_of_invoice")
+        .annotate(cgst=Coalesce(Sum("cgst"), Decimal("0")), sgst=Coalesce(Sum("sgst"), Decimal("0")),
+                  igst=Coalesce(Sum("igst"), Decimal("0")))
+        .order_by()
+    )
+    months = {}
+    for r in rows:
+        side = 0 if r["invoice__type_of_invoice"] == "outward" else 1
+        months.setdefault((r["y"], r["m"]), ({}, {}))[side].update({h: r[h] for h in HEADS})
+    return [months[k] for k in sorted(months)]
 
 
 def gst_summary(view, request):
@@ -71,9 +172,11 @@ def gst_summary(view, request):
     for (inv_type, _rate), slab in merged.items():
         rate_slabs[inv_type].append(slab)
 
-    # 2. HSN-wise breakdown
+    # 2. HSN-wise breakdown of sales: it is GSTR-1's Table 12, and with
+    #    purchases mixed in, 10 lakh sold and 8 lakh bought showed 18 (M18).
     hsn_data = (
         items
+        .filter(invoice__type_of_invoice="outward")
         .values("hsn_code")
         .annotate(
             taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
@@ -126,16 +229,17 @@ def gst_summary(view, request):
             "igst": float(inward_tax["igst"]),
             "total": float(inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"]),
         },
-        "net_payable": {
-            "cgst": float(outward_tax["cgst"] - inward_tax["cgst"]),
-            "sgst": float(outward_tax["sgst"] - inward_tax["sgst"]),
-            "igst": float(outward_tax["igst"] - inward_tax["igst"]),
-            "total": float(
-                (outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"])
-                - (inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"])
-            ),
-        },
+        # Cash due once the period's credit is used in the legal order (Rule
+        # 88A), and the credit left over. Per GSTIN only: across firms it
+        # netted one firm's credit against another's tax (M29).
+        "net_payable": None,
+        "itc_carry_forward": None,
     }
+    if business_id:
+        months = _months(items)
+        period = utilise_by_month(months)
+        gstr3b["net_payable"] = {k: float(v) for k, v in period["cash"].items()}
+        gstr3b["itc_carry_forward"] = {k: float(v) for k, v in period["carry_forward"].items()}
 
     # ── GSTR-3B Table 4 (current portal structure as of May 2026) ──
     # Sub-rows: 4(A)(1) imports, 4(A)(5) all other ITC (= current period
@@ -279,19 +383,8 @@ def gst_summary(view, request):
             })
     urgent_invoices.sort(key=lambda x: x["days_left"])
 
-    # ── GSTR-1 vs GSTR-3B reconciliation ──
-    # In a clean book, the rate-slab tax (cgst+sgst+igst per rate) should
-    # match GSTR-3B output_tax exactly. Variance != 0 hints at line items
-    # with missing/wrong rate annotations or out-of-band tax adjustments.
-    gstr1_total_tax = sum(
-        r["cgst"] + r["sgst"] + r["igst"]
-        for r in rate_slabs.get("outward", [])
-    )
-    gstr1_3b_recon = {
-        "gstr1_total_tax": gstr1_total_tax,
-        "gstr3b_output_tax": gstr3b["output_tax"]["total"],
-        "variance": gstr3b["output_tax"]["total"] - gstr1_total_tax,
-    }
+    # (A "GSTR-1 vs 3B" variance used to sit here. Both sides summed the same
+    # outward lines, so it was always about 0 and could detect nothing: M29.)
 
     # ── Effective ITC + Net Tax including carry-forward ──
     # The user came looking for "last year's carry-forward GST" on the
@@ -304,13 +397,21 @@ def gst_summary(view, request):
     # =   Effective Net Tax     = Output - Effective ITC
     carry_total = opening_balance["total"] if opening_balance else 0.0
     current_itc_total = gstr3b["input_tax_credit"]["total"]
-    output_total = gstr3b["output_tax"]["total"]
     effective = {
         "carry_forward_itc": carry_total,
         "current_itc": current_itc_total,
         "effective_itc": current_itc_total + carry_total,
-        "effective_net_tax": output_total - (current_itc_total + carry_total),
+        # Rule 88A over the period's credit plus the carry-forward, per head.
+        "effective_net_tax": None,
+        "effective_cash": None,
+        "effective_carry_forward": None,
     }
+    if business_id:
+        opening = {h: Decimal(str((opening_balance or {}).get(h) or 0)) for h in HEADS}
+        both = utilise_by_month(months, opening)
+        effective["effective_net_tax"] = float(both["cash"]["total"])
+        effective["effective_cash"] = {k: float(v) for k, v in both["cash"].items()}
+        effective["effective_carry_forward"] = {k: float(v) for k, v in both["carry_forward"].items()}
 
     return Response({
         "rate_slabs": rate_slabs,
@@ -321,7 +422,9 @@ def gst_summary(view, request):
             "buckets": aging_buckets,
             "urgent_invoices": urgent_invoices,
         },
-        "gstr1_3b_recon": gstr1_3b_recon,
+        "net_payable_note": None if business_id else (
+            "Net payable is worked out per GSTIN: pick one firm to see it."
+        ),
         # Promoted to top-level so the Summary view doesn't have to
         # reach into gstr3b_table4.ecrrs_opening_balance. Keeps the old
         # nested copy for backwards compat with the GSTR-3B tab.
@@ -355,9 +458,9 @@ def gstr_export(view, request):
     # B2B: Invoices to registered dealers (customer has GSTIN)
     b2b_data = {}
     for inv in outward_invoices:
-        cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
-        if not cust_gst or len(cust_gst) < 15:
-            continue  # Skip unregistered
+        cust_gst = clean_gstin(inv.customer.gst_number)
+        if not cust_gst:
+            continue  # Unregistered, or a placeholder like "NA"/"URP"
         items = inv.lineitem_set.all()
         inv_items = []
         for li in items:
@@ -377,7 +480,7 @@ def gstr_export(view, request):
             "inum": inv.invoice_number,
             "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
             "val": float(inv.total_amount),
-            "pos": inv.customer.gst_number[:2] if inv.customer.gst_number else "",
+            "pos": cust_gst[:2],
             "rchrg": "N",
             "inv_typ": "R",
             "itms": inv_items,
@@ -406,6 +509,9 @@ def gstr_export(view, request):
         table, inter, pos, _downgraded = classify_b2c(inv.business, inv)
         if table == "b2b":
             continue  # Registered — belongs in B2B
+        if gstin_problem(inv.customer.gst_number):
+            warnings.append(f"{inv.invoice_number}: {inv.customer.name}'s GSTIN {inv.customer.gst_number.strip()} "
+                            "isn't a GSTIN, so the sale is filed as B2C. Correct it on the customer.")
 
         items = inv.lineitem_set.all()
 
@@ -458,21 +564,22 @@ def gstr_export(view, request):
         for row in b2cs_agg.values()
     ]
 
-    # HSN Summary
+    # HSN Summary, in Table 12's two tabs (H11), as the portal file files it.
     items_all = LineItem.objects.filter(invoice_id__in=invoice_ids)
-    hsn_agg = {}
-    for li in items_all.filter(invoice__type_of_invoice="outward"):
-        hsn = li.hsn_code or "0"
-        if hsn not in hsn_agg:
-            hsn_agg[hsn] = {"hsn_sc": hsn, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0}
-        hsn_agg[hsn]["qty"] += float(li.quantity)
-        hsn_agg[hsn]["txval"] += float(li.quantity * li.rate)
-        hsn_agg[hsn]["camt"] += float(li.cgst)
-        hsn_agg[hsn]["samt"] += float(li.sgst)
-        hsn_agg[hsn]["iamt"] += float(li.igst)
-    hsn = list(hsn_agg.values())
+    hsn_agg = {"hsn_b2b": {}, "hsn_b2c": {}}
+    for inv in outward_invoices:
+        tab = hsn_agg[_hsn_tab(inv.customer)]
+        for li in inv.lineitem_set.all():
+            code = li.hsn_code or "0"
+            h = tab.setdefault(code, {"hsn_sc": code, "qty": 0, "txval": 0, "camt": 0, "samt": 0, "iamt": 0})
+            h["qty"] += float(li.quantity)
+            h["txval"] += float(li.quantity * li.rate)
+            h["camt"] += float(li.cgst)
+            h["samt"] += float(li.sgst)
+            h["iamt"] += float(li.igst)
+    hsn = {tab: list(rows.values()) for tab, rows in hsn_agg.items()}
 
-    gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": {"data": hsn}}
+    gstr1 = {"b2b": b2b, "b2cs": b2cs, "b2cl": b2cl, "hsn": hsn}
 
     # ── GSTR-3B ──
     outward_items = items_all.filter(invoice__type_of_invoice="outward")
@@ -504,12 +611,12 @@ def gstr_export(view, request):
         "intr_ltfee": {
             "intr_details": {"iamt": 0, "camt": 0, "samt": 0},
         },
-        "tax_pmt": {
-            "cgst": float(ot["cgst"] - it["cgst"]),
-            "sgst": float(ot["sgst"] - it["sgst"]),
-            "igst": float(ot["igst"] - it["igst"]),
-        },
+        # Cash per head after Rule 88A, for one GSTIN (M29); none across firms.
+        "tax_pmt": None,
     }
+    if request.query_params.get("business_id"):
+        cash = utilise_by_month(_months(items_all))["cash"]
+        gstr3b["tax_pmt"] = {h: float(cash[h]) for h in ("cgst", "sgst", "igst")}
 
     # ── GSTR-2B Matching (basic) ──
     # Compare inward invoices against expected data
@@ -567,8 +674,8 @@ def gstr1_portal_json(view, request):
     except (ValueError, AssertionError):
         return Response({"error": "month (1-12) and year are required."}, status=400)
 
-    gstin = (business.gst_number or "").strip().upper()
-    if len(gstin) != 15:
+    gstin = clean_gstin(business.gst_number)
+    if not gstin:
         return Response(
             {"error": f"Business '{business.name}' has no 15-character GSTIN — "
                       "set it before generating a portal file."},
@@ -596,7 +703,8 @@ def gstr1_portal_json(view, request):
     )
 
     skipped, warnings = [], []
-    b2b_data, b2cl_data, b2cs_agg, hsn_agg = {}, {}, {}, {}
+    b2b_data, b2cl_data, b2cs_agg = {}, {}, {}
+    hsn_agg = {"hsn_b2b": {}, "hsn_b2c": {}}
     counts = {"b2b": 0, "b2cl": 0, "b2cs": 0}
 
     def slabs(items):
@@ -625,9 +733,14 @@ def gstr1_portal_json(view, request):
         agg = slabs(items)
         idt = inv.invoice_date.strftime("%d-%m-%Y")
         val = r2(inv.total_amount)
-        cust_gstin = (inv.customer.gst_number or "").strip().upper()
+        cust_gstin = clean_gstin(inv.customer.gst_number)
+        if gstin_problem(inv.customer.gst_number):
+            # On file from before the API refused typos: filed as B2C, the
+            # buyer gets no credit, so say so before it goes up.
+            warnings.append(f"{label}: {inv.customer.name}'s GSTIN {inv.customer.gst_number.strip()} isn't a GSTIN, "
+                            "so the sale is filed as B2C. Correct it on the customer and download again.")
 
-        if len(cust_gstin) == 15:
+        if cust_gstin:
             itms = [
                 {"num": i + 1, "itm_det": {
                     "txval": r2(s["txval"]), "rt": rt,
@@ -679,20 +792,24 @@ def gstr1_portal_json(view, request):
                 warnings.append(f"{label}: inter-state supply carries CGST/SGST — run fix_tax_heads")
         counts["b2cs"] += 1
 
-    # HSN summary (table 12) over everything that made it into the file.
+    # HSN summary (table 12) over everything that made it into the file, in
+    # its B2B and B2C tabs: since the April/May 2025 periods the portal takes
+    # them separately and ties each tab to its own sections (H11).
     for inv in invoices:
         if not inv.invoice_number or not inv.invoice_date:
             continue
+        tab = hsn_agg[_hsn_tab(inv.customer)]
         for li in inv.lineitem_set.all():
             hsn = (li.hsn_code or "").strip()
-            uqc = UQC.get((li.unit or "").strip().lower(), "OTH")
+            service = _is_service(hsn)
+            uqc = "NA" if service else UQC.get((li.unit or "").strip().lower(), "OTH")
             rt = rate_pct(li)
-            h = hsn_agg.setdefault((hsn, uqc, rt), {
+            h = tab.setdefault((hsn, uqc, rt), {
                 "hsn_sc": hsn, "desc": (li.product_name or "")[:30], "uqc": uqc,
                 "rt": rt, "qty": Decimal(0), "txval": Decimal(0),
                 "camt": Decimal(0), "samt": Decimal(0), "iamt": Decimal(0),
             })
-            h["qty"] += li.quantity or 0
+            h["qty"] += 0 if service else (li.quantity or 0)
             h["txval"] += (li.quantity or 0) * (li.rate or 0)
             h["camt"] += li.cgst or 0
             h["samt"] += li.sgst or 0
@@ -715,14 +832,37 @@ def gstr1_portal_json(view, request):
              "csamt": 0}
             for b in b2cs_agg.values()
         ]
-    if hsn_agg:
-        file_obj["hsn"] = {"data": [
+    hsn_tabs = {
+        tab: [
             {"num": i + 1, "hsn_sc": h["hsn_sc"], "desc": h["desc"], "uqc": h["uqc"],
              "qty": r2(h["qty"]), "rt": h["rt"], "txval": r2(h["txval"]),
              "camt": r2(h["camt"]), "samt": r2(h["samt"]),
              "iamt": r2(h["iamt"]), "csamt": 0}
-            for i, h in enumerate(hsn_agg.values())
-        ]}
+            for i, h in enumerate(rows.values())
+        ]
+        for tab, rows in hsn_agg.items() if rows
+    }
+    if hsn_tabs:
+        file_obj["hsn"] = hsn_tabs
+    # Table 13, documents issued (mandatory): doc_num 1 is "invoices for
+    # outward supply"; one row per number series of the month (H11).
+    fy_from = date(year if month >= 4 else year - 1, 4, 1)
+    elsewhere = (
+        Invoice.objects.filter(business=business, type_of_invoice="outward",
+                               invoice_date__gte=fy_from, invoice_date__lt=date(fy_from.year + 1, 4, 1))
+        .exclude(invoice_date__year=year, invoice_date__month=month)
+        .exclude(invoice_number="")
+        .values_list("invoice_number", flat=True)
+    )
+    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number], elsewhere)
+    if docs:
+        file_obj["doc_issue"] = {"doc_det": [{"doc_num": 1, "docs": docs}]}
+    for d in docs:
+        if d["cancel"] > max(10, d["net_issue"]):
+            warnings.append(
+                f"Table 13: {d['from']} to {d['to']} leaves {d['cancel']} numbers unused, filed as cancelled. "
+                "If an invoice number was mistyped, correct it before filing."
+            )
 
     total_txval = sum(
         r2(b["txval"]) for b in b2cs_agg.values()

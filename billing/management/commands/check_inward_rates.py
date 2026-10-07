@@ -51,12 +51,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         master = defaultdict(set)
-        for hsn, rate in Product.objects.values_list("hsn_code", "gst_tax_rate"):
+        # Past cacheops, as every repair reads (_repair.scope).
+        for hsn, rate in Product.objects.nocache().values_list("hsn_code", "gst_tax_rate"):
             if hsn and rate is not None:
                 master[hsn.strip()].add(normalize_rate(rate, assume="fraction"))
 
         qs = (
-            LineItem.objects.filter(invoice__type_of_invoice=INVOICE_TYPE_INWARD)
+            LineItem.objects.nocache().filter(invoice__type_of_invoice=INVOICE_TYPE_INWARD)
             .select_related("invoice__business", "invoice__customer")
             .order_by("invoice__invoice_date", "invoice_id", "id")
         )

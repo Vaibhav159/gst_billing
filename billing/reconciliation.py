@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from billing.tax_rules import has_gstin
+
 TWO = Decimal("0.01")
 Z = Decimal("0")
 
@@ -113,7 +115,7 @@ def rollup(rows) -> ReconResult:
 
     for row in rows:
         q = quarter_of(row["invoice_date"])
-        seg = "b2b" if (row.get("customer_gstin") or "").strip() else "b2c"
+        seg = "b2b" if has_gstin(row.get("customer_gstin")) else "b2c"
         for p in (q, "FY"):
             counts[p]["in"] += 1
         if not row["lines"]:

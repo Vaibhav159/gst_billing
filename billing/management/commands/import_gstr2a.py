@@ -1,7 +1,10 @@
-"""`python manage.py import_gstr2a [--dry-run] file1.xls file2.xls ...`
+"""`python manage.py import_gstr2a [--apply] file1.xls file2.xls ...`
 
 Thin wrapper around `billing.services.gstr2a_import.import_file` for
-operator-driven bulk imports. The frontend page uses the same service.
+operator-driven bulk imports.
+
+Dry by default (M28): it reports what it would book and writes nothing
+without --apply. --dry-run is still accepted and changes nothing.
 """
 
 from __future__ import annotations
@@ -19,9 +22,14 @@ class Command(BaseCommand):
             "files", nargs="+", help="Paths to one or more GSTR-2A .xls files."
         )
         parser.add_argument(
+            "--apply",
+            action="store_true",
+            help="Write the invoices. Without this, only shows what WOULD happen.",
+        )
+        parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="Parse + count + show what WOULD happen, without DB writes.",
+            help="The default; kept so older instructions still work.",
         )
         parser.add_argument(
             "--verbose-rows",
@@ -30,7 +38,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *files, **opts):
-        dry_run: bool = opts["dry_run"]
+        dry_run: bool = opts["dry_run"] or not opts["apply"]
         verbose: bool = opts["verbose_rows"]
         paths: list[str] = list(opts["files"])
 
@@ -98,6 +106,12 @@ class Command(BaseCommand):
                 if verbose:
                     for p in result.partial_credit_notes:
                         self.stdout.write(f"│  {p}")
+            for label, rows in (("Reverse charge, not booked", result.skipped_reverse_charge),
+                                ("In a filed month, not booked", result.skipped_locked)):
+                if rows:
+                    self.stdout.write(self.style.WARNING(f"│  {label}: {len(rows)}"))
+                    for line in rows:
+                        self.stdout.write(f"│  {line}")
             if result.skipped_no_business:
                 self.stdout.write(self.style.ERROR(
                     f"│  Skipped — no Business match: {result.skipped_no_business}"
@@ -157,5 +171,5 @@ class Command(BaseCommand):
 
         if dry_run:
             self.stdout.write(self.style.WARNING(
-                "\nNothing was written. Re-run without --dry-run to apply."
+                "\nNothing was written. Re-run with --apply to write it."
             ))

@@ -1,0 +1,519 @@
+{
+  "_about": "Where a supply is taxed, as billing/tax_rules.py and src/utils/taxRules.ts must both decide it (M16). Read by billing/tests/test_tax_placement_parity.py and src/utils/taxPlacementParity.test.ts. Each side also checks that every name in its own state table is listed here, so a state added on one side only fails a test.",
+  "state_names": [
+    {
+      "name": "JAMMU AND KASHMIR",
+      "code": "01"
+    },
+    {
+      "name": "HIMACHAL PRADESH",
+      "code": "02"
+    },
+    {
+      "name": "PUNJAB",
+      "code": "03"
+    },
+    {
+      "name": "CHANDIGARH",
+      "code": "04"
+    },
+    {
+      "name": "UTTARAKHAND",
+      "code": "05"
+    },
+    {
+      "name": "HARYANA",
+      "code": "06"
+    },
+    {
+      "name": "DELHI",
+      "code": "07"
+    },
+    {
+      "name": "RAJASTHAN",
+      "code": "08"
+    },
+    {
+      "name": "UTTAR PRADESH",
+      "code": "09"
+    },
+    {
+      "name": "BIHAR",
+      "code": "10"
+    },
+    {
+      "name": "SIKKIM",
+      "code": "11"
+    },
+    {
+      "name": "ARUNACHAL PRADESH",
+      "code": "12"
+    },
+    {
+      "name": "NAGALAND",
+      "code": "13"
+    },
+    {
+      "name": "MANIPUR",
+      "code": "14"
+    },
+    {
+      "name": "MIZORAM",
+      "code": "15"
+    },
+    {
+      "name": "TRIPURA",
+      "code": "16"
+    },
+    {
+      "name": "MEGHALAYA",
+      "code": "17"
+    },
+    {
+      "name": "ASSAM",
+      "code": "18"
+    },
+    {
+      "name": "WEST BENGAL",
+      "code": "19"
+    },
+    {
+      "name": "JHARKHAND",
+      "code": "20"
+    },
+    {
+      "name": "ODISHA",
+      "code": "21"
+    },
+    {
+      "name": "CHHATTISGARH",
+      "code": "22"
+    },
+    {
+      "name": "MADHYA PRADESH",
+      "code": "23"
+    },
+    {
+      "name": "GUJARAT",
+      "code": "24"
+    },
+    {
+      "name": "DAMAN AND DIU",
+      "code": "25"
+    },
+    {
+      "name": "DADRA AND NAGAR HAVELI",
+      "code": "26"
+    },
+    {
+      "name": "MAHARASHTRA",
+      "code": "27"
+    },
+    {
+      "name": "KARNATAKA",
+      "code": "29"
+    },
+    {
+      "name": "GOA",
+      "code": "30"
+    },
+    {
+      "name": "LAKSHADWEEP",
+      "code": "31"
+    },
+    {
+      "name": "KERALA",
+      "code": "32"
+    },
+    {
+      "name": "TAMIL NADU",
+      "code": "33"
+    },
+    {
+      "name": "PUDUCHERRY",
+      "code": "34"
+    },
+    {
+      "name": "ANDAMAN AND NICOBAR ISLANDS",
+      "code": "35"
+    },
+    {
+      "name": "TELANGANA",
+      "code": "36"
+    },
+    {
+      "name": "ANDHRA PRADESH",
+      "code": "37"
+    },
+    {
+      "name": "LADAKH",
+      "code": "38"
+    },
+    {
+      "name": "OTHER TERRITORY",
+      "code": "97"
+    },
+    {
+      "name": "CENTRE JURISDICTION",
+      "code": "99"
+    },
+    {
+      "name": "Jammu & Kashmir",
+      "code": "01"
+    },
+    {
+      "name": "Himachal Pradesh",
+      "code": "02"
+    },
+    {
+      "name": "Punjab",
+      "code": "03"
+    },
+    {
+      "name": "Chandigarh",
+      "code": "04"
+    },
+    {
+      "name": "Uttarakhand",
+      "code": "05"
+    },
+    {
+      "name": "Haryana",
+      "code": "06"
+    },
+    {
+      "name": "Delhi",
+      "code": "07"
+    },
+    {
+      "name": "Rajasthan",
+      "code": "08"
+    },
+    {
+      "name": "Uttar Pradesh",
+      "code": "09"
+    },
+    {
+      "name": "Bihar",
+      "code": "10"
+    },
+    {
+      "name": "Sikkim",
+      "code": "11"
+    },
+    {
+      "name": "Arunachal Pradesh",
+      "code": "12"
+    },
+    {
+      "name": "Nagaland",
+      "code": "13"
+    },
+    {
+      "name": "Manipur",
+      "code": "14"
+    },
+    {
+      "name": "Mizoram",
+      "code": "15"
+    },
+    {
+      "name": "Tripura",
+      "code": "16"
+    },
+    {
+      "name": "Meghalaya",
+      "code": "17"
+    },
+    {
+      "name": "Assam",
+      "code": "18"
+    },
+    {
+      "name": "West Bengal",
+      "code": "19"
+    },
+    {
+      "name": "Jharkhand",
+      "code": "20"
+    },
+    {
+      "name": "Odisha",
+      "code": "21"
+    },
+    {
+      "name": "Chhattisgarh",
+      "code": "22"
+    },
+    {
+      "name": "Madhya Pradesh",
+      "code": "23"
+    },
+    {
+      "name": "Gujarat",
+      "code": "24"
+    },
+    {
+      "name": "Daman & Diu",
+      "code": "25"
+    },
+    {
+      "name": "Dadra & Nagar Haveli",
+      "code": "26"
+    },
+    {
+      "name": "Maharashtra",
+      "code": "27"
+    },
+    {
+      "name": "Karnataka",
+      "code": "29"
+    },
+    {
+      "name": "Goa",
+      "code": "30"
+    },
+    {
+      "name": "Kerala",
+      "code": "32"
+    },
+    {
+      "name": "Tamil Nadu",
+      "code": "33"
+    },
+    {
+      "name": "Puducherry",
+      "code": "34"
+    },
+    {
+      "name": "Andaman & Nicobar Islands",
+      "code": "35"
+    },
+    {
+      "name": "Telangana",
+      "code": "36"
+    },
+    {
+      "name": "Andhra Pradesh",
+      "code": "37"
+    },
+    {
+      "name": "Ladakh",
+      "code": "38"
+    },
+    {
+      "name": " rajasthan ",
+      "code": "08"
+    },
+    {
+      "name": "Jammu and Kashmir",
+      "code": "01"
+    },
+    {
+      "name": "JAMMU & KASHMIR",
+      "code": "01"
+    },
+    {
+      "name": "Andaman and Nicobar Islands",
+      "code": "35"
+    },
+    {
+      "name": "Tamil  Nadu",
+      "code": "33"
+    },
+    {
+      "name": "kerala",
+      "code": "32"
+    },
+    {
+      "name": "Lakshadweep",
+      "code": "31"
+    },
+    {
+      "name": "Other Territory",
+      "code": "97"
+    },
+    {
+      "name": "Centre Jurisdiction",
+      "code": "99"
+    },
+    {
+      "name": "",
+      "code": ""
+    },
+    {
+      "name": "Atlantis",
+      "code": ""
+    }
+  ],
+  "placements": [
+    {
+      "case": "both GSTINs, same state",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "08AAECD1234K1Z2",
+        "state": "RAJASTHAN"
+      },
+      "interstate": false
+    },
+    {
+      "case": "both GSTINs, different states",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "27AABCR1718E1ZP",
+        "state": "MAHARASHTRA"
+      },
+      "interstate": true
+    },
+    {
+      "case": "the party's GSTIN beats its stale state name",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "08AAECD1234K1Z2",
+        "state": "GUJARAT"
+      },
+      "interstate": false
+    },
+    {
+      "case": "the firm's GSTIN beats its stale state name (review M16)",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "GUJARAT"
+      },
+      "party": {
+        "gstin": "",
+        "state": "RAJASTHAN"
+      },
+      "interstate": false
+    },
+    {
+      "case": "a party with a GSTIN and no state, a firm known by name only (review M16)",
+      "firm": {
+        "gstin": "",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "27AABCR1718E1ZP",
+        "state": ""
+      },
+      "interstate": true
+    },
+    {
+      "case": "an unregistered party in another state",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "",
+        "state": "MAHARASHTRA"
+      },
+      "interstate": true
+    },
+    {
+      "case": "an unregistered local party, name typed loosely",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "",
+        "state": " rajasthan "
+      },
+      "interstate": false
+    },
+    {
+      "case": "'&' and 'AND' spellings of one state (review M16)",
+      "firm": {
+        "gstin": "",
+        "state": "Jammu & Kashmir"
+      },
+      "party": {
+        "gstin": "",
+        "state": "JAMMU AND KASHMIR"
+      },
+      "interstate": false
+    },
+    {
+      "case": "an '&' spelling against another state",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "",
+        "state": "JAMMU & KASHMIR"
+      },
+      "interstate": true
+    },
+    {
+      "case": "a local walk-in stored with NA (H12)",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "NA",
+        "state": "RAJASTHAN"
+      },
+      "interstate": false
+    },
+    {
+      "case": "URP and no state: unknown, so local",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "URP",
+        "state": ""
+      },
+      "interstate": false
+    },
+    {
+      "case": "NA in another state goes by the state",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "NA",
+        "state": "MAHARASHTRA"
+      },
+      "interstate": true
+    },
+    {
+      "case": "nothing known on either side: local",
+      "firm": {
+        "gstin": "",
+        "state": ""
+      },
+      "party": {
+        "gstin": "",
+        "state": ""
+      },
+      "interstate": false
+    },
+    {
+      "case": "nothing known about the party: local",
+      "firm": {
+        "gstin": "08AAGPL3375F1ZO",
+        "state": "RAJASTHAN"
+      },
+      "party": {
+        "gstin": "",
+        "state": "Atlantis"
+      },
+      "interstate": false
+    }
+  ]
+}

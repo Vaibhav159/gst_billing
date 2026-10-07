@@ -54,7 +54,7 @@ class GSTR2AImportTests(TestCase):
         self.assertFalse(p.parsed_rows[1].filed_3b)
 
     def test_import_creates_inward_invoices_suppliers_by_gstin_and_is_idempotent(self):
-        result = import_file(portal_file(), filename="2A.xlsx")
+        result = import_file(portal_file(), filename="2A.xlsx", dry_run=False)
         self.assertEqual(result.errors, [])
         self.assertEqual((result.created_invoices, result.created_suppliers), (2, 2))
         invs = Invoice.objects.filter(business=self.biz).order_by("invoice_number")
@@ -67,7 +67,7 @@ class GSTR2AImportTests(TestCase):
         intra = invs.get(invoice_number="J-7").lineitem_set.get()
         self.assertEqual((intra.cgst, intra.sgst, intra.igst), (Decimal("300"), Decimal("300"), Decimal("0")))
 
-        again = import_file(portal_file(), filename="2A.xlsx")
+        again = import_file(portal_file(), filename="2A.xlsx", dry_run=False)
         self.assertEqual(again.created_invoices, 0)
         self.assertEqual(again.skipped_duplicates, 2)
         self.assertEqual(Invoice.objects.filter(business=self.biz).count(), 2)

@@ -185,7 +185,9 @@ export interface HSNRow {
 export interface GSTR3BData {
   output_tax: { cgst: number; sgst: number; igst: number; total: number };
   input_tax_credit: { cgst: number; sgst: number; igst: number; total: number };
-  net_payable: { cgst: number; sgst: number; igst: number; total: number };
+  /** Cash due after Rule 88A credit use; null across firms (one GSTIN only). */
+  net_payable: { cgst: number; sgst: number; igst: number; total: number } | null;
+  itc_carry_forward?: { cgst: number; sgst: number; igst: number; total: number } | null;
 }
 
 // ── Audit Log ──

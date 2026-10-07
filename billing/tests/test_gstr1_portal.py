@@ -8,9 +8,11 @@ the B2CL threshold, which must land in b2cs as an INTER row.
 import json
 from decimal import Decimal as D
 
+from django.test import SimpleTestCase
 from django.urls import reverse
 
 from billing.models import Customer, Invoice, LineItem
+from billing.services.gstr1 import document_series
 from billing.tests.test_base import BaseAPITestCase
 
 
@@ -135,17 +137,66 @@ class Gstr1PortalJsonTest(BaseAPITestCase):
                         for g in f["b2cl"] for v in g["inv"] for i in v["itms"])
         self.assertEqual(sections, 375000.0)
         self.assertEqual(data["meta"]["taxable_total"], 375000.0)
-        hsn_total = sum(h["txval"] for h in f["hsn"]["data"])
+        hsn_total = sum(h["txval"] for tab in f["hsn"].values() for h in tab)
         self.assertEqual(hsn_total, 375000.0)
 
-    def test_hsn_summary_units_and_rates(self):
+    def test_hsn_summary_is_split_into_b2b_and_b2c(self):
+        """H11: since the April/May 2025 periods Table 12 takes B2B and B2C
+        supplies separately (hsn_b2b, hsn_b2c); the single hsn.data list is
+        the pre-2025 format."""
         self._standard_fixture()
         f = self._get().data["file"]
-        rows = f["hsn"]["data"]
-        self.assertEqual(len(rows), 1)  # same hsn+uqc+rate everywhere
-        self.assertEqual(rows[0]["hsn_sc"], "711311")
-        self.assertEqual(rows[0]["uqc"], "GMS")
-        self.assertEqual(rows[0]["qty"], 375000.0)
+        self.assertEqual(set(f["hsn"]), {"hsn_b2b", "hsn_b2c"})
+        b2b, b2c = f["hsn"]["hsn_b2b"], f["hsn"]["hsn_b2c"]
+        self.assertEqual([(r["num"], r["hsn_sc"], r["uqc"], r["rt"], r["qty"], r["txval"]) for r in b2b],
+                         [(1, "711311", "GMS", 3.0, 30000.0, 30000.0)])
+        self.assertEqual([(r["num"], r["hsn_sc"], r["qty"], r["txval"]) for r in b2c],
+                         [(1, "711311", 345000.0, 345000.0)])
+        # Each tab must tie to its own sections, as the portal checks.
+        b2b_txval = sum(i["itm_det"]["txval"] for g in f["b2b"] for v in g["inv"] for i in v["itms"])
+        b2c_txval = sum(r["txval"] for r in f["b2cs"]) + sum(
+            i["itm_det"]["txval"] for g in f["b2cl"] for v in g["inv"] for i in v["itms"])
+        self.assertEqual(sum(r["txval"] for r in b2b), b2b_txval)
+        self.assertEqual(sum(r["txval"] for r in b2c), b2c_txval)
+
+    def test_a_service_code_has_uqc_na_and_no_quantity(self):
+        """HSN 99... is a service: the portal wants UQC "NA", and OTH is refused."""
+        inv = self._invoice(self.b2c_intra, "S-1", "1000", cgst="25", sgst="25", hsn="998892", unit="nos")
+        inv.lineitem_set.update(gst_tax_rate=D("0.05"))
+        row = next(r for r in self._get().data["file"]["hsn"]["hsn_b2c"] if r["hsn_sc"] == "998892")
+        self.assertEqual((row["uqc"], row["qty"], row["txval"]), ("NA", 0.0, 1000.0))
+
+    def test_table_13_reports_the_months_outward_number_series(self):
+        """H11: Table 13 (documents issued) is mandatory and wasn't produced.
+        A number missing inside a series counts as cancelled."""
+        self._standard_fixture()  # R-1, R-2, C-1, C-2, C-3
+        self._invoice(self.b2c_intra, "C-5", "100", cgst="1.50", sgst="1.50")
+        doc = self._get().data["file"]["doc_issue"]
+        self.assertEqual(doc, {"doc_det": [{"doc_num": 1, "docs": [
+            {"num": 1, "from": "C-1", "to": "C-5", "totnum": 5, "cancel": 1, "net_issue": 4},
+            {"num": 2, "from": "R-1", "to": "R-2", "totnum": 2, "cancel": 0, "net_issue": 2},
+        ]}]})
+
+    def test_table_13_leaves_other_months_numbers_alone_and_flags_a_jump(self):
+        """Review of H11: C-3, issued in August, isn't a cancelled July number,
+        and a mistyped C-9000 is flagged instead of filed quietly."""
+        for number in ("C-1", "C-2", "C-4", "C-9000"):
+            self._invoice(self.b2c_intra, number, "100", cgst="1.50", sgst="1.50")
+        self._invoice(self.b2c_intra, "C-3", "100", cgst="1.50", sgst="1.50", date="2026-08-02")
+        data = self._get().data
+        docs = data["file"]["doc_issue"]["doc_det"][0]["docs"]
+        self.assertEqual([(d["from"], d["to"], d["totnum"], d["cancel"], d["net_issue"]) for d in docs],
+                         [("C-1", "C-2", 2, 0, 2), ("C-4", "C-9000", 8997, 8995, 2)])
+        self.assertTrue(any("C-9000" in w and "8995" in w for w in data["meta"]["warnings"]), data["meta"]["warnings"])
+
+    def test_the_gst_page_export_splits_hsn_the_same_way(self):
+        self._standard_fixture()
+        resp = self.client.get(reverse("invoice-gstr-export"), {
+            "business_id": self.business.id, "start_date": "2026-07-01", "end_date": "2026-07-31"})
+        hsn = resp.data["gstr1"]["hsn"]
+        self.assertEqual(set(hsn), {"hsn_b2b", "hsn_b2c"})
+        self.assertEqual([r["qty"] for r in hsn["hsn_b2b"]], [30000.0])
+        self.assertEqual([r["qty"] for r in hsn["hsn_b2c"]], [345000.0])
 
     def test_unfilable_invoices_are_skipped_and_reported(self):
         self._standard_fixture()
@@ -177,3 +228,34 @@ class Gstr1PortalJsonTest(BaseAPITestCase):
         resp = self.client.get(reverse("invoice-gstr1-portal-json"),
                                {"business_id": self.business.id})
         self.assertEqual(resp.status_code, 400)
+
+
+class DocumentSeriesTest(SimpleTestCase):
+    """Table 13's series (review of H11)."""
+
+    def _rows(self, numbers, elsewhere=()):
+        return [(r["from"], r["to"], r["totnum"], r["cancel"], r["net_issue"])
+                for r in document_series(numbers, elsewhere)]
+
+    def test_the_counter_is_the_part_that_runs(self):
+        # "101/2026-27": the trailing 27 is the FY, not the counter.
+        self.assertEqual(self._rows(["101/2026-27", "102/2026-27", "104/2026-27"]),
+                         [("101/2026-27", "104/2026-27", 4, 1, 3)])
+
+    def test_a_trailing_counter_still_works(self):
+        self.assertEqual(self._rows(["INV/2026-27/101", "INV/2026-27/103"]),
+                         [("INV/2026-27/101", "INV/2026-27/103", 3, 1, 2)])
+
+    def test_a_number_issued_in_another_month_splits_the_range(self):
+        self.assertEqual(self._rows(["48", "49", "51", "52"], elsewhere=["50"]),
+                         [("48", "49", 2, 0, 2), ("51", "52", 2, 0, 2)])
+
+    def test_a_back_dated_number_is_a_row_of_its_own(self):
+        self.assertEqual(self._rows(["40", "41", "50"], elsewhere=[str(n) for n in range(42, 50)]),
+                         [("40", "41", 2, 0, 2), ("50", "50", 1, 0, 1)])
+
+    def test_a_gap_nobody_used_counts_as_cancelled(self):
+        self.assertEqual(self._rows(["A/1", "A/2", "A/5"], elsewhere=["B/3"]), [("A/1", "A/5", 5, 2, 3)])
+
+    def test_a_number_without_digits_is_a_series_of_one(self):
+        self.assertEqual(self._rows(["CASH"]), [("CASH", "CASH", 1, 0, 1)])

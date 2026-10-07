@@ -24,10 +24,10 @@ from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
 from billing.period_lock import assert_period_unlocked
-from billing.tax_rules import GST_SLABS, has_gstin, is_interstate, itc_refusal, normalize_rate
+from billing.tax_rules import GST_SLABS, gstin_problem, has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
 
-from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
+from .inward_bills_service import compute_lines, find_duplicate, gstin_conflict, gstin_matches
 from .permissions import RoleBasedPermission
 from .serializers import InwardBillListSerializer, InwardBillSerializer
 
@@ -148,6 +148,9 @@ class InwardBillListCreateView(APIView):
             )
 
         supplier_gstin = (request.data.get("supplier_gstin") or "").strip().upper()
+        # A typo isn't "no GSTIN", which would refuse the credit for the wrong reason.
+        if problem := gstin_problem(supplier_gstin):
+            return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         if not has_gstin(supplier_gstin):
             # "NA", "URP" and the like: not a GSTIN to store on the supplier,
             # or to look one up by.
@@ -165,6 +168,9 @@ class InwardBillListCreateView(APIView):
             return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         try:
             supplier = self._resolve_supplier(business, supplier_gstin, supplier_name, request.data)
+        except SupplierGstinConflict as conflict:
+            return Response({"error": "supplier_gstin_conflict", "detail": str(conflict)},
+                            status=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return Response(
                 {"error": "supplier_name_conflict", "detail":
@@ -176,7 +182,7 @@ class InwardBillListCreateView(APIView):
         # (business, supplier, number) — the same bill number from two
         # different suppliers is not a duplicate.
         override = str(request.data.get("override_warnings", "")).lower() in ("true", "1")
-        if find_duplicate(business, invoice_number, supplier) and not override:
+        if find_duplicate(business, invoice_number, supplier, invoice_date) and not override:
             return Response(
                 {"error": "duplicate", "detail":
                  f"An inward bill #{invoice_number} from {supplier.name} already exists "
@@ -186,10 +192,13 @@ class InwardBillListCreateView(APIView):
 
         # Shared rule with the invoice write paths. The old inline check was
         # `bool(supplier_gstin) and codes match`, so a supplier with no GSTIN
-        # fell through to interstate and the whole bill was taxed IGST.
+        # fell through to interstate and the whole bill was taxed IGST. The
+        # supplier is the one the bill is booked on, as is_igst_applicable
+        # reads it: the GSTIN typed on the form could differ from it (M26).
+        # The bill's state only stands in when the record has neither.
         supplier_for_rule = SimpleNamespace(
-            gst_number=supplier_gstin,
-            state_name=(request.data.get("supplier_state") or getattr(supplier, "state_name", "") or ""),
+            gst_number=supplier.gst_number or "",
+            state_name=supplier.state_name or request.data.get("supplier_state") or "",
         )
         intra = not is_interstate(business, supplier_for_rule)
         service_lines = []
@@ -272,6 +281,8 @@ class InwardBillListCreateView(APIView):
             supplier = Customer.objects.filter(gst_number=gstin).first()
         if supplier is None and name:
             supplier = Customer.objects.filter(name=name).first()
+            if supplier is not None and (problem := gstin_conflict(supplier, gstin)):
+                raise SupplierGstinConflict(problem)
             # The bill carries a GSTIN the supplier on file lacks (the no-GSTIN
             # hint asks for exactly this): keep it there too, or later edits
             # and GSTR-2B matching see no GSTIN behind a bill claiming credit.
@@ -296,6 +307,10 @@ class InwardBillListCreateView(APIView):
         if not supplier.businesses.filter(id=business.id).exists():
             supplier.businesses.add(business)
         return supplier
+
+
+class SupplierGstinConflict(Exception):
+    """The supplier named on the bill is on file under another GSTIN."""
 
 
 class InwardBillDetailView(APIView):

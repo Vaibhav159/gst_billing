@@ -18,6 +18,16 @@ describe("round2", () => {
     }
   });
 
+  it("rounds a half paisa up, as the server's ROUND_HALF_UP does (H13)", () => {
+    // 8.245 is 8.24499999… as a float, so Math.round(x * 100) gave 8.24 while
+    // the server's Decimal gives 8.25 — the two halves of every odd-paise tax
+    // came out swapped between the preview and the stored line.
+    expect(round2(8.245)).toBe(8.25);
+    expect(round2(1.005)).toBe(1.01);
+    expect(round2(16.49 / 2)).toBe(8.25);
+    expect(round2(-8.245)).toBe(-8.25);
+  });
+
   it("treats junk as zero rather than NaN", () => {
     expect(round2(NaN)).toBe(0);
     expect(round2(undefined as any)).toBe(0);
@@ -35,6 +45,11 @@ describe("halveTax", () => {
     // what shipped: both halves rounded independently
     const naive = Math.round((16.49 / 2) * 100) / 100;
     expect(round2(naive * 2)).not.toBe(16.49);
+  });
+
+  it("gives CGST the rounded-up half, as tax_rules.split_tax does (H13)", () => {
+    expect(halveTax(16.49)).toEqual({ cgst: 8.25, sgst: 8.24 });
+    expect(halveTax(0.01)).toEqual({ cgst: 0.01, sgst: 0 });
   });
 
   it("the halves always sum back to the tax", () => {

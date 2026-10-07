@@ -5,7 +5,15 @@ inward-bills module decide this the same way, and so the rules can be unit
 tested without a request.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+
+PAISA = Decimal("0.01")
+
+
+def to_paise(value):
+    """Round to the paisa, half-up (the GST convention)."""
+    return Decimal(str(value or 0)).quantize(PAISA, rounding=ROUND_HALF_UP)
+
 
 # The legal GST rate slabs, as percents. This list is what makes a rate of
 # unknown shape resolvable without guessing: no slab is a slab again when
@@ -131,8 +139,8 @@ def classify_b2c(business, invoice):
     from billing.constants import B2CL_THRESHOLD
 
     customer = invoice.customer
-    cust_gstin = (getattr(customer, "gst_number", "") or "").strip().upper()
-    if len(cust_gstin) == 15:
+    cust_gstin = clean_gstin(getattr(customer, "gst_number", ""))
+    if cust_gstin:
         return "b2b", None, cust_gstin[:2], False
 
     inter = is_interstate(business, customer)
@@ -153,21 +161,62 @@ def normalize_tax_heads(cgst, sgst, igst, interstate):
     GSTR-3B report the wrong heads. Keep the amount the user saw, move it to
     the right column.
     """
-    total = (cgst or 0) + (sgst or 0) + (igst or 0)
+    return split_tax((cgst or 0) + (sgst or 0) + (igst or 0), interstate)
+
+
+def split_tax(tax, interstate):
+    """(cgst, sgst, igst) for one line's tax, every head in whole paise.
+
+    Halving 16.49 gave 8.245 + 8.245, and each document rounded the half-paise
+    its own way: 8.25 + 8.25 on the classic print, 8.24 + 8.24 in GSTR-1, beside
+    a total of 16.49 (H13). CGST takes the half rounded up and SGST the rest, as
+    halveTax in money.ts does, so the preview and the stored line agree.
+    """
+    tax = to_paise(tax)
     if interstate:
-        return Decimal("0"), Decimal("0"), Decimal(total)
-    half = Decimal(total) / 2
-    return half, half, Decimal("0")
+        return Decimal("0"), Decimal("0"), tax
+    cgst = to_paise(tax / 2)
+    return cgst, tax - cgst, Decimal("0")
 
 
 def has_gstin(value):
-    """True when `value` is a GSTIN at all: 15 characters once trimmed.
+    """True when `value` is a GSTIN at all: 15 characters once trimmed, the
+    first two a state code's digits.
 
     "NA", "URP" (unregistered person) and blanks are what people type for a
-    party with no registration; none of them is a GSTIN. Mirrored by
-    hasGstin in src/utils/gstin.ts.
+    party with no registration; none of them is a GSTIN, so none makes a
+    party registered (B2B), gives it a state code, or claims input tax. The
+    one test every reader uses (H12; they used to disagree: == 15, >= 15, any
+    non-empty). Mirrored by hasGstin in src/utils/gstin.ts. gstin.validate is
+    the stricter check for what someone typed.
     """
-    return len((value or "").strip()) == 15
+    v = (value or "").strip()
+    return len(v) == 15 and v[:2].isdigit()
+
+
+# has_gstin for a database filter, matched against the trimmed value.
+GSTIN_SHAPE = r"^[0-9]{2}.{13}$"
+
+
+def clean_gstin(value):
+    """The GSTIN to store: upper-cased, or "" for a placeholder (H12)."""
+    return (value or "").strip().upper() if has_gstin(value) else ""
+
+
+def gstin_problem(value):
+    """Why `value` can't be taken as a party's GSTIN, or None.
+
+    None for a GSTIN, a blank, or a placeholder: "NA", "URP", "-" and the
+    like carry no digits (or only zeros) and mean an unregistered party, so
+    they are stored blank (H12). Anything else that isn't a GSTIN is a typo.
+    Stored blank like a placeholder, it made a registered buyer B2C, and the
+    buyer lost the credit with nothing to say so (review of H12).
+    """
+    v = (value or "").strip()
+    if not v or has_gstin(v) or not any(ch in "123456789" for ch in v):
+        return None
+    return (f"{v} isn't a GSTIN (15 characters, starting with the 2-digit state code). "
+            "Correct it, or leave it blank for an unregistered party.")
 
 
 NO_GSTIN_NO_ITC = (
@@ -216,15 +265,25 @@ def state_name_from_gstin(gstin):
     return derive(g)["state_name"]
 
 
+def normalize_state_name(name):
+    """One spelling per state name: upper-case, "&" read as "AND", whitespace
+    collapsed. Party records and imports carry "JAMMU & KASHMIR" as often as
+    "JAMMU AND KASHMIR". Mirrored by normalizeStateName in taxRules.ts (M16).
+    """
+    return " ".join((name or "").upper().replace("&", " AND ").split())
+
+
 def state_code(party):
     """Two-digit GST state code for a Business or Customer.
 
     GSTIN first; otherwise derive it from state_name via the GST_CODE table, so
-    unregistered (B2C) parties still get a place of supply. Empty when neither
-    is known.
+    unregistered (B2C) parties still get a place of supply. A placeholder
+    ("NA", "URP") is no GSTIN: its first two letters were read as a state, so a
+    local walk-in was booked IGST and filed with pos "NA" (H12). Empty when
+    neither is known.
     """
-    gstin = (getattr(party, "gst_number", "") or "").strip()
-    if len(gstin) >= 2:
+    gstin = clean_gstin(getattr(party, "gst_number", ""))
+    if gstin:
         return gstin[:2]
 
     from billing.models import get_state_code_from_state_name
@@ -261,3 +320,87 @@ def check_line_money(item_data, qty, rate, amount):
                 f"quantity x rate ({taxable}) plus tax ({heads})."
             )
         })
+
+
+def check_tax_rate(item_data, taxable, gst_rate):
+    """Refuse a line whose tax isn't its taxable value at its own rate.
+
+    check_line_money ties the amount to the taxable plus the tax, but nothing
+    tied the tax to the rate: a 3% line carrying no tax on Rs 1,00,000 went in
+    and filed as 3% with Rs 0 (M14). Amount-only rows have no taxable to test.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    if taxable == 0:
+        return
+    heads = sum(Decimal(str(item_data.get(k, 0) or 0)) for k in ("cgst", "sgst", "igst"))
+    expected = to_paise(taxable * gst_rate)
+    if abs(heads - expected) > LINE_MONEY_TOLERANCE:
+        raise ValidationError({
+            "line_items": (
+                f"'{item_data.get('product_name', '')}': tax {heads} is not "
+                f"{rate_as_percent(gst_rate)}% of {to_paise(taxable)} ({expected})."
+            )
+        })
+
+
+HEADS = ("cgst", "sgst", "igst")
+
+
+def utilise_itc(liability, credit):
+    """Pay a period's output tax from input credit in the legal order (M29).
+
+    Section 49(5) and Rule 88A: IGST credit goes to IGST first, then to CGST
+    and SGST, and must be used up before any CGST or SGST credit is; CGST and
+    SGST credit then pay their own head and after that IGST, never each other.
+    Subtracting head by head, as the summary did, showed Rs 18,000 + 18,000
+    payable beside Rs 30,000 of unused IGST credit.
+
+    Where IGST credit may go to CGST or SGST "in any proportion", it goes first
+    to whichever own credit can't cover, so the least cash is paid.
+
+    `liability` and `credit` map cgst/sgst/igst to amounts. Returns the cash
+    due and the credit left to carry forward, each with a total.
+    """
+    due = {h: Decimal(str(liability.get(h) or 0)) for h in HEADS}
+    left = {h: Decimal(str(credit.get(h) or 0)) for h in HEADS}
+
+    def pay(source, head, cap=None):
+        amount = min(left[source], due[head] if cap is None else min(due[head], cap))
+        left[source] -= amount
+        due[head] -= amount
+
+    pay("igst", "igst")
+    for head in ("cgst", "sgst"):  # where the head's own credit falls short
+        pay("igst", head, cap=max(due[head] - left[head], Decimal("0")))
+    for head in ("cgst", "sgst"):  # IGST credit must still be used up first
+        pay("igst", head)
+    for head in ("cgst", "sgst"):
+        pay(head, head)
+        pay(head, "igst")
+
+    return {"cash": _with_total(due), "carry_forward": _with_total(left)}
+
+
+def _with_total(heads):
+    return {**heads, "total": sum(heads.values(), Decimal("0"))}
+
+
+def utilise_by_month(months, opening=None):
+    """Rule 88A month by month, as GSTR-3B is filed (review of M29).
+
+    `months` is [(liability, credit), ...] in date order. Each month's tax is
+    paid from the credit on hand then: what earlier months carried forward
+    plus its own. Over a range run once on the totals, a later month's credit
+    paid an earlier month's tax and the cash due came out short. `opening` is
+    credit carried into the first month. Returns the range's cash and the
+    credit left after its last month, as utilise_itc does.
+    """
+    carry = {h: Decimal(str((opening or {}).get(h) or 0)) for h in HEADS}
+    cash = {h: Decimal("0") for h in HEADS}
+    for liability, credit in months:
+        month = utilise_itc(liability, {h: carry[h] + Decimal(str(credit.get(h) or 0)) for h in HEADS})
+        for h in HEADS:
+            cash[h] += month["cash"][h]
+            carry[h] = month["carry_forward"][h]
+    return {"cash": _with_total(cash), "carry_forward": _with_total(carry)}
