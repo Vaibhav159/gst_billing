@@ -70,3 +70,35 @@ describe("backupInvoiceToImportRow", () => {
     expect(row.items[0]).toMatchObject({ productName: "Diamond", gstRate: 0.25, cgst: 12.5, sgst: 12.5, igst: 0, amount: 10025 });
   });
 });
+
+describe("a v4.0 backup's invoices (review of H8)", () => {
+  // The Backup page saves invoices as the API returns them (invoice_number,
+  // customer_name, line_items); restore read the app's own shape
+  // (invoiceNumber, customerName, items), so every invoice of a current
+  // backup failed with "No customer name for invoice ?".
+  const raw = {
+    id: 41, invoice_number: "INV/41", invoice_date: "2026-04-01", customer: 7, customer_name: "Registered Buyer",
+    business: "b1", business_name: "LODHA JEWELLERS", type_of_invoice: "outward", total_amount: "10025.000",
+    line_items: [{ product_name: "Diamond", hsn_code: "7102", gst_tax_rate: "0.0025", quantity: "1.000",
+                   rate: "10000.000", cgst: "12.500", sgst: "12.500", igst: "0.000", amount: "10025.000", unit: "ct" }],
+  };
+  const customers = [{ id: 7, name: "Registered Buyer", gst_number: "27AAAAA0000A1Z5" }];
+
+  it("reads an invoice saved as the API returns it, its party's GSTIN from the backup's customers", () => {
+    const row = backupInvoiceToImportRow(raw, new Map(backup.businesses.map((b) => [b.id, b])),
+      new Map(customers.map((c) => [String(c.id), c])));
+    expect(row).toMatchObject({
+      invoiceNumber: "INV/41", invoice_date: "2026-04-01", customerName: "Registered Buyer", customerGST: "27AAAAA0000A1Z5",
+      firmName: "LODHA JEWELLERS", firmGSTIN: "08ABCDE1234A1Z5", type: "OUTWARD", total: 10025,
+    });
+    expect(row.items[0]).toMatchObject({ productName: "Diamond", hsn: "7102", gstRate: 0.25, qty: 1, rate: 10000,
+      cgst: 12.5, sgst: 12.5, igst: 0, amount: 10025 });
+  });
+
+  it("sends it to bulk import", async () => {
+    const { api, posts } = fakeApi({});
+    await restoreBackup({ businesses: backup.businesses, customers, invoices: [raw] }, api);
+    const sent = posts.find((p) => p.url === "invoices/bulk-import/")!.body.invoices[0];
+    expect(sent).toMatchObject({ invoiceNumber: "INV/41", customerName: "Registered Buyer", customerGST: "27AAAAA0000A1Z5" });
+  });
+});
