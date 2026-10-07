@@ -160,14 +160,21 @@ function detectColumnMap(row: any[]): Record<string, number> {
     if (val.includes("hsn")) map.hsnCode = idx;
     // A rate in percent ("Rate%", "Rate (%)") is the GST rate, never the price
     // per unit: taken as the price, a register's Rate% 3 became rate 3 (H9).
+    // But only a GST or bare rate: "Making Rate %" set a 12% GST, and "CGST %"
+    // is a half rate (review of H9). "GST %" is one.
     const percent = val.includes("%");
-    if (val.includes("gst rate") || val === "tax rate" || (val.includes("rate") && percent)) map.gstRate = idx;
+    const halfRate = val.includes("cgst") || val.includes("sgst") || val.includes("utgst");
+    const gstRate = val.includes("gst rate") || val.includes("tax rate")
+      || (percent && (val.includes("gst") || val.includes("tax") || /^rate\s*\(?\s*%\s*\)?$/.test(val)));
+    if (gstRate && !halfRate) map.gstRate = idx;
     if (val.includes("qty") || val.includes("quantity") || val.includes("weight")) map.qty = idx;
     if (!percent && ((val.includes("rate") && !val.includes("gst") && !val.includes("tax")) || val.includes("price"))) map.rate = idx;
     if (val.includes("taxable")) map.taxableValue = idx;
-    if (val === "cgst" || val.includes("cgst")) map.cgst = idx;
-    if (val === "sgst" || val.includes("sgst")) map.sgst = idx;
-    if (val === "igst" || val.includes("igst")) map.igst = idx;
+    // The amount columns, not a rate beside them ("CGST %", "CGST Rate").
+    const amount = !percent && !val.includes("rate");
+    if (amount && val.includes("cgst")) map.cgst = idx;
+    if (amount && val.includes("sgst")) map.sgst = idx;
+    if (amount && val.includes("igst")) map.igst = idx;
     if (val.includes("total") && !val.includes("cgst") && !val.includes("sgst") && !val.includes("igst")) map.total = idx;
     if (val.includes("payment")) map.payment = idx;
   });
