@@ -113,9 +113,11 @@ def gst_summary(view, request):
     for (inv_type, _rate), slab in merged.items():
         rate_slabs[inv_type].append(slab)
 
-    # 2. HSN-wise breakdown
+    # 2. HSN-wise breakdown of sales: it is GSTR-1's Table 12, and with
+    #    purchases mixed in, 10 lakh sold and 8 lakh bought showed 18 (M18).
     hsn_data = (
         items
+        .filter(invoice__type_of_invoice="outward")
         .values("hsn_code")
         .annotate(
             taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
