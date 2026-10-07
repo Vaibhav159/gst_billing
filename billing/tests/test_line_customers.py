@@ -10,8 +10,10 @@ lines and Rs 0. No lock check ran and no snapshot held the lines.
 
 from decimal import Decimal as D
 from io import StringIO
+from unittest import mock
 
 from django.core.management import call_command
+from django.test import override_settings
 from django.urls import reverse
 
 from billing.models import AuditLog, Customer, Invoice, LineItem
@@ -69,6 +71,33 @@ class LineCustomerTest(BaseAPITestCase):
         self.assertEqual(r.status_code, 200, getattr(r, "data", None))
         self.line_item.refresh_from_db()
         self.assertEqual(self.line_item.customer_id, third.id)
+
+
+    def test_merging_into_an_out_of_state_record_refiles_the_heads(self):
+        # Review of M14: the merge moved invoices by a queryset update, which
+        # skips Invoice.save, so a local sale merged into an out-of-state
+        # record kept CGST + SGST.
+        mumbai = Customer.objects.create(name="MUMBAI BUYER", gst_number="27ABCDE1234A1Z5", state_name="MAHARASHTRA")
+        r = self.client.post(reverse("customer-merge"), {"source_id": self.customer.id, "target_id": mumbai.id},
+                             format="json")
+        self.assertEqual(r.status_code, 200, getattr(r, "data", None))
+        self.line_item.refresh_from_db()
+        self.assertEqual(self.line_item.customer_id, mumbai.id)
+        self.assertEqual((self.line_item.cgst, self.line_item.sgst, self.line_item.igst), (D("0"), D("0"), D("180")))
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.total_amount, D("1180"))
+
+
+    @override_settings(CACHEOPS_ENABLED=True, CACHEOPS_FAKE=False)
+    def test_the_merge_drops_the_cached_lines(self):
+        # Its line update is a queryset update, which cacheops never hears of:
+        # the merged party's lines could show the old customer for 30 minutes.
+        third = Customer.objects.create(name="Third Buyer", state_name="CHHATTISGARH")
+        with mock.patch("cacheops.invalidate_model") as dropped:
+            r = self.client.post(reverse("customer-merge"), {"source_id": self.customer.id, "target_id": third.id},
+                                 format="json")
+        self.assertEqual(r.status_code, 200, getattr(r, "data", None))
+        self.assertIn(LineItem, [c.args[0] for c in dropped.call_args_list])
 
 
 class FixLineCustomersTest(BaseAPITestCase):

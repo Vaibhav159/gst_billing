@@ -34,6 +34,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.cache import invalidate
 from billing.constants import (
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
@@ -498,9 +499,14 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             assert_period_unlocked(biz_id, inv_date, "edit")
 
         with transaction.atomic():
-            invoices_transferred = Invoice.objects.filter(customer=source).update(
-                customer=target
-            )
+            # Through save(), so each invoice's lines follow it and are re-filed
+            # for the target's state (M14). A queryset update skipped that: a
+            # local sale merged into an out-of-state record kept CGST + SGST.
+            moving = list(Invoice.objects.filter(customer=source).select_related("business"))
+            for invoice in moving:
+                invoice.customer = target
+                invoice.save()
+            invoices_transferred = len(moving)
             # Every line follows its own invoice (H6). Moving lines by their
             # customer field left a drifted line on the source's invoice behind
             # and dragged another invoice's stray line along.
@@ -512,6 +518,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             source_name = source.name
             source_id = source.pk
             source.delete()
+        invalidate(LineItem)  # the line update above sends no signal
 
         # Log merge
         with contextlib.suppress(Exception):

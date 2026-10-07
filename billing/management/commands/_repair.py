@@ -6,14 +6,10 @@ month: the lock stops the app, not a deliberate repair, so the owner has to be
 told which filed returns a fix would move.
 """
 
-import logging
-
-from django.conf import settings
 from django.db.models import Prefetch
 
+from billing.cache import invalidate  # noqa: F401  (the commands import it from here)
 from billing.models import FiledPeriod, LineItem
-
-logger = logging.getLogger(__name__)
 
 
 def add_scope_arguments(parser, what="the fix"):
@@ -48,19 +44,3 @@ def filed_months():
     """{(business_id, year, month)} of every filed (locked) period."""
     return set(FiledPeriod.objects.values_list("business_id", "year", "month"))
 
-
-def invalidate(*models):
-    """Drop cacheops' cached queries for `models` after a QuerySet.update().
-
-    update() sends no signals, so without this the app serves the old rows for
-    up to 30 minutes after a repair. A no-op where cacheops is off (CI, tests).
-    """
-    if not getattr(settings, "CACHEOPS_ENABLED", True) or getattr(settings, "CACHEOPS_FAKE", False):
-        return
-    try:
-        from cacheops import invalidate_model
-
-        for model in models:
-            invalidate_model(model)
-    except Exception:
-        logger.warning("cacheops invalidation failed after a repair", exc_info=True)
