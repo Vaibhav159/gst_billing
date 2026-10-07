@@ -96,8 +96,11 @@ class Command(BaseCommand):
             self.stdout.write(self.style.NOTICE("\nDry run. Re-run with --apply to write these changes."))
             return
 
+        for li, (c, s, i) in fixes:
+            li.cgst, li.sgst, li.igst = c, s, i
+        # A statement per 500 lines: one per line was hours inside a single
+        # transaction against a remote database.
         with transaction.atomic():
-            for li, (c, s, i) in fixes:
-                LineItem.objects.filter(pk=li.pk).update(cgst=c, sgst=s, igst=i)
+            LineItem.objects.bulk_update([li for li, _ in fixes], ["cgst", "sgst", "igst"], batch_size=500)
         invalidate(LineItem)
         self.stdout.write(self.style.SUCCESS(f"\nRe-split {len(fixes)} line(s)."))

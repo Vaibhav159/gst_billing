@@ -8,6 +8,7 @@ can_undo never cleared.
 
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth.models import Group, User
 from django.core.management import call_command
@@ -155,6 +156,18 @@ class FixInvoiceTotalsTests(UndoTestBase):
         out = StringIO()
         call_command("fix_invoice_totals", *args, stdout=out)
         return out.getvalue()
+
+    def test_only_the_stale_invoices_are_loaded(self):
+        # Compared in SQL: loading every invoice to compare in Python doesn't
+        # scale to a production book.
+        fine = [self._invoice(str(n), "outward") for n in (21, 22, 23)]
+        stale = self._invoice("24", "outward")
+        Invoice.objects.filter(pk=stale.pk).update(total_amount=Decimal("1"))
+        with mock.patch.object(Invoice, "from_db", wraps=Invoice.from_db) as loaded:
+            output = self._run()
+        self.assertEqual(loaded.call_count, 1)
+        self.assertIn("#24", output)
+        self.assertNotIn(f"#{fine[0].invoice_number} ", output)
 
     def test_reports_then_resums_a_stale_header(self):
         inv = self._invoice("10", "outward")

@@ -4,7 +4,9 @@ from decimal import Decimal as D
 from io import StringIO
 
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from billing.models import Business, Customer, FiledPeriod, Invoice, LineItem
 
@@ -48,6 +50,18 @@ class FixTaxSplitsTests(TestCase):
         self.assertEqual(li.amount, D("566.160"))
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.total_amount, D("566.160"))  # no invoice total moves
+
+    def test_apply_writes_in_batches_not_a_statement_per_line(self):
+        # Half of a firm's intra-state lines can need this. One UPDATE each was
+        # hours inside one transaction against a remote database.
+        lines = [self._line("8.245", "8.245") for _ in range(5)]
+        with CaptureQueriesContext(connection) as ctx:
+            self._run("--apply")
+        updates = [q for q in ctx.captured_queries if q["sql"].startswith('UPDATE "billing_lineitem"')]
+        self.assertEqual(len(updates), 1)
+        for li in lines:
+            li.refresh_from_db()
+            self.assertEqual((li.cgst, li.sgst), (D("8.25"), D("8.24")))
 
     def test_a_sub_paisa_igst_is_rounded(self):
         li = self._line("0", "0", igst="16.491", amount="566.161")

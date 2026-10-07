@@ -21,7 +21,7 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.db.models import Count, DecimalField, OuterRef, Subquery, Sum
+from django.db.models import Count, DecimalField, F, OuterRef, Subquery, Sum
 from django.db.models.functions import Coalesce
 
 from billing.management.commands._repair import add_scope_arguments, filed_months, invalidate, scope
@@ -43,8 +43,8 @@ class Command(BaseCommand):
             line_count=Coalesce(Subquery(
                 LineItem.objects.filter(invoice=OuterRef("pk")).values("invoice")
                 .annotate(c=Count("id")).values("c")), 0),
-        ).order_by("invoice_date", "id")
-        stale = [inv for inv in qs if inv.total_amount != inv.lines_total]
+        ).exclude(total_amount=F("lines_total")).order_by("invoice_date", "id")
+        stale = list(qs)  # compared in SQL: a production book is too big to load whole
         if not stale:
             self.stdout.write(self.style.SUCCESS("No invoice totals disagree with their lines."))
             return
