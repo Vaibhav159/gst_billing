@@ -42,6 +42,13 @@ class TaxableValueTest(BulkImportMoneyCase):
         self.assertEqual((li.quantity, li.rate, li.cgst, li.sgst, li.amount),
                          (D("1"), D("60000"), D("900"), D("900"), D("61800")))
 
+    def test_a_weighed_row_without_a_rate_keeps_its_weight(self):
+        # Review of H8: stored as 1 x 60,000, GSTR-1's Table 12 said 1 GMS.
+        self._import(self._row("T-5", {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 10.5, "rate": 0,
+                                       "taxable": 60000, "cgst": 900, "sgst": 900, "igst": 0, "amount": 61800}))
+        li = self._line("T-5")
+        self.assertEqual((li.quantity, li.rate, li.amount), (D("10.5"), D("5714.286"), D("61800")))
+
     def test_quantity_times_rate_far_from_the_taxable_value_is_refused(self):
         data = self._import(self._row("T-2", {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 60000,
                                               "rate": 900, "taxable": 60000, "cgst": 900, "sgst": 900, "igst": 0,

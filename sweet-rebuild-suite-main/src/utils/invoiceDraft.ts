@@ -30,11 +30,18 @@ export const storedLineKey = (lineId: string | number) => `line:${lineId}`;
 
 /**
  * Quantity and rate for a line that may be amount-only: imports stored a gross
- * figure as 0 x 0, which a form edit then saved as 0. As one unit at its
- * taxable value (amount less tax), it keeps its amount.
+ * figure as 0 x 0 (or a weight x 0), which a form edit then saved as 0. Its
+ * taxable value (amount less tax) comes back as quantity x rate, keeping the
+ * weight when the rate, to 3 decimals, rounds back to the same paisa, as
+ * tax_rules.unit_split does on the server; otherwise one unit at the taxable value.
  */
 function qtyAndRate(qty: number, rate: number, amount: number, tax: number): { qty: number; rate: number } {
-  if (qty * rate === 0 && amount > 0) return { qty: 1, rate: round2(amount - tax) };
+  if (qty * rate === 0 && amount > 0) {
+    const taxable = round2(amount - tax);
+    const perUnit = qty > 0 ? Math.round((taxable / qty) * 1000) / 1000 : 0;
+    if (qty > 0 && round2(qty * perUnit) === taxable) return { qty, rate: perUnit };
+    return { qty: 1, rate: taxable };
+  }
   return { qty: qty || 1, rate };
 }
 

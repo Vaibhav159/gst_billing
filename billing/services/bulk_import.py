@@ -31,6 +31,7 @@ from billing.tax_rules import (
     split_tax,
     state_name_from_gstin,
     to_paise,
+    unit_split,
 )
 
 logger = logging.getLogger(__name__)
@@ -303,8 +304,10 @@ def run_bulk_import(request):
                     )
                     continue
             if net_amount == 0 and taxable_in > 0:
+                # Keeping the weight a row has (unit_split): one unit, a 10.5 g
+                # line said 1 GMS in GSTR-1's Table 12.
                 net_amount = to_paise(taxable_in)
-                qty, rate = Decimal("1"), net_amount
+                qty, rate = unit_split(qty, rate, net_amount)
             elif net_amount == 0 and user_amount > 0:
                 if cgst == 0 and sgst == 0 and igst == 0:
                     # Gross only: back the taxable value out at the
@@ -321,7 +324,7 @@ def run_bulk_import(request):
                 # HSN), the GST summary and 3B, since all of them read
                 # quantity x rate (H8). As the GSTR-2A import stores it.
                 net_amount = to_paise(net_amount)
-                qty, rate = Decimal("1"), net_amount
+                qty, rate = unit_split(qty, rate, net_amount)
             tax_amount = net_amount * gst_rate
             if cgst == 0 and sgst == 0 and igst == 0:
                 cgst, sgst, igst = split_tax(tax_amount, is_igst)

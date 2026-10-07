@@ -40,6 +40,14 @@ describe("invoice drafts carry each line's own product (H17)", () => {
     expect(lineToSave(draft, false).amount).toBe(10300);
   });
 
+  it("keeps a weighed line's weight when it has no rate (review of H8)", () => {
+    // 10 x 0 for Rs 10,000 of taxable is 10 x 1,000, not 1 x 10,000.
+    const weighed = { ...stored, quantity: "10.000", rate: "0.000", amount: "10300.000", cgst: "150.000", sgst: "150.000", gst_tax_rate: "0.03" };
+    const draft = draftFromStored(weighed, "k6");
+    expect([draft.qty, draft.rate]).toEqual([10, 1000]);
+    expect(lineToSave(draft, false).amount).toBe(10300);
+  });
+
   it("takes name, HSN and rate from a product the user picks", () => {
     const draft = withProduct(draftFromStored(stored, "k4"), { ...catalog7, defaultUnit: "gms" });
     expect(draft).toMatchObject({ productId: "7", productName: "Gold Ornaments 22K", hsn: "711319", gstRate: 3, unit: "gms" });
