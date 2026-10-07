@@ -23,7 +23,7 @@ import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
-import { todayLocal } from "@/utils/localDate";
+import { todayLocal, invoiceDateWarning } from "@/utils/localDate";
 import { round2, halveTax } from "@/utils/money";
 import { draftFromDuplicate, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
@@ -190,20 +190,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     return () => clearTimeout(t);
   }, [form.invoiceNumber, form.businessId, form.type, form.date, mode]);
 
-  // Date validation
+  // Date validation, on calendar dates (M20): as Date objects 31 March read as
+  // outside the FY in IST, and today before 05:30 as in the future.
   useEffect(() => {
     if (!form.date) return;
-    const d = new Date(form.date);
-    const today = new Date();
-    const warns: Record<string, string> = {};
-    if (d > today) warns.date = "Date is in the future";
-    const fy = parseInt((form.financialYear || currentFY).split("-")[0]);
-    if (fy) {
-      const fyStart = new Date(fy, 3, 1);
-      const fyEnd = new Date(fy + 1, 2, 31);
-      if (d < fyStart || d > fyEnd) warns.date = `Date is outside FY ${fy}-${String(fy + 1).slice(2)}`;
-    }
-    setWarnings(w => { const n = { ...w }; delete n.date; return warns.date ? { ...n, date: warns.date } : n; });
+    const warning = invoiceDateWarning(form.date, form.financialYear || currentFY);
+    setWarnings(w => { const n = { ...w }; delete n.date; return warning ? { ...n, date: warning } : n; });
   }, [form.date, form.financialYear]);
 
   const [dirty, setDirty] = useState(false);
