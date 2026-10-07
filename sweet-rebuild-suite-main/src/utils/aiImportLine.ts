@@ -6,10 +6,34 @@
  * but the server recomputes every AI line from quantity x rate x (1 + r), so
  * a bill with making charges showed 1,05,000 in review and stored 1,03,000.
  */
-import { percentToRate, rateToPercent } from "./gstRate";
+import { aiRateChoice, percentToRate, rateToPercent } from "./gstRate";
 import { round2 } from "./money";
 
 type Line = { quantity: number; rate: number; gst_tax_rate: number | null };
+
+/**
+ * The AI's reading, with each rate as the slab it is, or unchosen (null).
+ *
+ * Gemini has to answer a number and answers 0 when a bill prints no per-line
+ * rate (the usual jewellery bill, CGST/SGST @1.5% in its footer). Since M19 a 0
+ * is booked as 0%, so a 0 the AI read went in tax-free. A 0, a missing rate and
+ * one off the slab list start unchosen, as on the inward form (aiRateChoice),
+ * and Create waits until a person picks (review of M19).
+ */
+export function fromAiReading<T extends { line_items: Pick<Line, "gst_tax_rate">[] }>(extracted: T): T {
+  return {
+    ...extracted,
+    line_items: extracted.line_items.map((li) => {
+      const slab = aiRateChoice(li.gst_tax_rate);
+      return { ...li, gst_tax_rate: slab ? percentToRate(slab) : null };
+    }),
+  };
+}
+
+/** Lines still waiting for a rate. A picked 0% is a rate. */
+export function linesWithoutRate(lines: Pick<Line, "gst_tax_rate">[]): number {
+  return lines.filter((li) => li.gst_tax_rate === null || li.gst_tax_rate === undefined).length;
+}
 
 /** The slab picker's value for a line: the slab as text, or "" when none was read. */
 export function rateChoice(li: Pick<Line, "gst_tax_rate">): string {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookedAmount, rateChoice, rateFromChoice } from "./aiImportLine";
+import { bookedAmount, fromAiReading, linesWithoutRate, rateChoice, rateFromChoice } from "./aiImportLine";
 
 describe("AI import review lines (M19)", () => {
   it("shows a stored rate as its slab, not rounded to one decimal", () => {
@@ -24,5 +24,22 @@ describe("AI import review lines (M19)", () => {
     // An unread rate: 3% on a sale (the server's default), nothing on a purchase.
     expect(bookedAmount({ quantity: 1, rate: 1000, gst_tax_rate: null }, "outward")).toBe(1030);
     expect(bookedAmount({ quantity: 1, rate: 1000, gst_tax_rate: null }, "inward")).toBe(1000);
+  });
+});
+
+describe("rates the AI read (review of M19)", () => {
+  // Gemini has to answer a number and answers 0 when a bill prints no per-line
+  // rate, the usual jewellery bill with CGST/SGST @1.5% in its footer. Since M19
+  // an explicit 0 is booked as 0%, so a 0 the AI read showed as a chosen "0%"
+  // and the sale went in tax-free. As on the inward form (C1), a 0, a missing
+  // rate or one off the slab list starts unchosen, and a person picks.
+  it("starts a 0, a missing rate and an off-slab one unchosen, and keeps a slab", () => {
+    const lines = [0, 0.03, 3, 0.25, 0.07, null].map((gst_tax_rate) => ({ quantity: 1, rate: 100, gst_tax_rate }));
+    expect(fromAiReading({ line_items: lines }).line_items.map((l) => l.gst_tax_rate))
+      .toEqual([null, 0.03, 0.03, 0.0025, null, null]);
+  });
+
+  it("counts the lines still waiting for a rate; a picked 0% isn't one", () => {
+    expect(linesWithoutRate([{ gst_tax_rate: null }, { gst_tax_rate: 0 }, { gst_tax_rate: 0.03 }])).toBe(1);
   });
 });

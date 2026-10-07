@@ -13,7 +13,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import { formatCurrency } from "@/utils/mockData";
-import { bookedAmount, rateChoice, rateFromChoice } from "@/utils/aiImportLine";
+import { bookedAmount, fromAiReading, linesWithoutRate, rateChoice, rateFromChoice } from "@/utils/aiImportLine";
 import { GST_SLABS } from "@/utils/gstRate";
 import { formatMoney } from "@/utils/money";
 
@@ -196,7 +196,8 @@ export default function AIInvoiceImport() {
       }>("ai/invoice/process/", fd, { timeout: 120_000 });
       updateFile(entry.id, {
         status: "ready",
-        extracted: res.data.data,
+        // A 0 or off-slab rate the AI read starts unchosen (review of M19).
+        extracted: fromAiReading(res.data.data),
         matchedBusiness: res.data.matched_business,
         businessOverrideId: res.data.matched_business
           ? String(res.data.matched_business.id)
@@ -269,6 +270,10 @@ export default function AIInvoiceImport() {
       || (entry.matchedBusiness?.id ? String(entry.matchedBusiness.id) : "");
     if (!bizId) {
       updateFile(entry.id, { errorMsg: "Pick a business before creating." });
+      return false;
+    }
+    if (linesWithoutRate(entry.extracted.line_items)) {
+      updateFile(entry.id, { errorMsg: "Pick a GST rate for every line before creating." });
       return false;
     }
     try {
@@ -741,6 +746,7 @@ function ReviewForm({
   // What the server will store, not the amounts the AI read: it recomputes
   // every AI line from quantity x rate x (1 + r) (M19).
   const lineItemsTotal = ex.line_items.reduce((s, li) => s + bookedAmount(li, entry.type), 0);
+  const unrated = linesWithoutRate(ex.line_items);
 
   return (
     <div className="p-4 space-y-4 bg-secondary/5">
@@ -889,9 +895,12 @@ function ReviewForm({
           {ex.sgst_total > 0 && <span className="ml-1.5">· SGST: {formatCurrency(ex.sgst_total)}</span>}
           {ex.igst_total > 0 && <span className="ml-1.5">· IGST: {formatCurrency(ex.igst_total)}</span>}
         </div>
+        {unrated > 0 && (
+          <span className="text-[11px] text-warning">Pick a GST rate for {unrated} line{unrated === 1 ? "" : "s"}</span>
+        )}
         <button
           onClick={handleCreate}
-          disabled={creating || !entry.businessOverrideId}
+          disabled={creating || !entry.businessOverrideId || unrated > 0}
           className="premium-btn-primary text-[12px] h-9 disabled:opacity-50"
         >
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
