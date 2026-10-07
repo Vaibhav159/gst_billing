@@ -326,6 +326,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
         return "System"
 
     def get_can_undo(self, obj):
+        if (obj.snapshot or {}).get("_undo"):
+            return False  # used already (H7)
         if obj.action in ("deleted", "updated") and obj.snapshot:
             return True
         return obj.action == "created"

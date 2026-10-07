@@ -2734,10 +2734,29 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         return obj.pk
             return None
 
+        def _undone(response, log):
+            # Recorded on the entry, in the same transaction, so the undo can't
+            # be used twice (H7). In the snapshot, which the browser never sees,
+            # under a key no model field has, so the restore loops skip it.
+            entry.snapshot = {**(entry.snapshot or {}), "_undo": {
+                "at": timezone.localtime().isoformat(), "by": request.user.pk, "log": log.pk}}
+            entry.save(update_fields=["snapshot"])
+            return response
+
         try:
             # Every branch is one transaction: a restore that recreates the header
             # and then fails on a line must leave nothing behind.
             with transaction.atomic():
+                # Locked, so two clicks at once can't both pass the check. Only
+                # the outward-number constraint used to stop a repeat: a deleted
+                # purchase or a blank-number draft came back once per click.
+                entry = AuditLog.objects.select_for_update().get(pk=entry.pk)
+                used = (entry.snapshot or {}).get("_undo")
+                if used:
+                    return Response(
+                        {"error": "already_undone", "detail": f"This change was already undone ({used['at'][:16]})."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
                 if entry.action == "deleted" and entry.snapshot:
                     # Recreate the deleted object
                     snap = entry.snapshot
@@ -2773,7 +2792,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         )
                     if snap.get("line_items"):
                         obj.save()  # re-sums total_amount from the restored lines
-                    AuditLog.objects.create(
+                    log = AuditLog.objects.create(
                         action="created",
                         entity=entry.entity,
                         entity_id=obj.pk,
@@ -2781,7 +2800,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         user=request.user if request.user.is_authenticated else None,
                         details=f"Restored via undo (was #{entry.entity_id})",
                     )
-                    return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
+                    return _undone(Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk}), log)
 
                 elif entry.action == "updated" and entry.snapshot:
                     # Revert to the snapshot state
@@ -2807,7 +2826,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             else:
                                 setattr(obj, k, v)
                     obj.save()
-                    AuditLog.objects.create(
+                    log = AuditLog.objects.create(
                         action="updated",
                         entity=entry.entity,
                         entity_id=obj.pk,
@@ -2815,7 +2834,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         user=request.user if request.user.is_authenticated else None,
                         details=f"Reverted via undo to state before: {entry.details}",
                     )
-                    return Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"})
+                    return _undone(Response({"message": f"Reverted {entry.entity}: {entry.entity_name}"}), log)
 
                 elif entry.action == "created":
                     # Delete the created object
@@ -2825,7 +2844,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             assert_period_unlocked(obj.business_id, obj.invoice_date, "delete")
                         name = str(obj)
                         obj.delete()
-                        AuditLog.objects.create(
+                        log = AuditLog.objects.create(
                             action="deleted",
                             entity=entry.entity,
                             entity_id=entry.entity_id,
@@ -2833,7 +2852,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             user=request.user if request.user.is_authenticated else None,
                             details=f"Deleted via undo (was created at {entry.timestamp})",
                         )
-                        return Response({"message": f"Deleted {entry.entity}: {name}"})
+                        return _undone(Response({"message": f"Deleted {entry.entity}: {name}"}), log)
                     except model.DoesNotExist:
                         return Response({"error": "Record already deleted"}, status=404)
 
