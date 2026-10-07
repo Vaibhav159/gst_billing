@@ -176,7 +176,7 @@ class InwardBillListCreateView(APIView):
         # (business, supplier, number) — the same bill number from two
         # different suppliers is not a duplicate.
         override = str(request.data.get("override_warnings", "")).lower() in ("true", "1")
-        if find_duplicate(business, invoice_number, supplier) and not override:
+        if find_duplicate(business, invoice_number, supplier, invoice_date) and not override:
             return Response(
                 {"error": "duplicate", "detail":
                  f"An inward bill #{invoice_number} from {supplier.name} already exists "

@@ -4,9 +4,12 @@ Kept free of view/serializer concerns so the tax + validation rules can be
 tested in isolation. Only ``find_duplicate`` touches the DB (read-only).
 """
 
+import re
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from billing.constants import INVOICE_TYPE_INWARD
+from billing.tax_rules import clean_gstin
 
 _CENT = Decimal("0.01")
 
@@ -72,21 +75,61 @@ def gstin_matches(bill_gstin, firm_gstin):
     )
 
 
-def find_duplicate(business, invoice_number, supplier=None):
-    """Return an existing inward invoice that is really the same bill, or None.
+def inward_number_key(number):
+    """A supplier's bill number spelt one way: upper-case letters and digits.
 
-    Keyed on (business, supplier, number) when the supplier is known. Supplier
-    numbering is the supplier's own, so two of them issuing a "001" in the same
-    year is ordinary — keying on (business, number) alone rejected the second
-    as a duplicate. Matches the natural key the AI-import path already uses.
+    "SJ-101" typed on the inward form and "SJ/101" read by AI or the GSTR-2A
+    file are the same bill (M28).
+    """
+    return re.sub(r"[^0-9A-Z]", "", str(number or "").upper())
+
+
+def supplier_key(supplier):
+    """Who issued a bill: the supplier's GSTIN, or its record when it has none.
+
+    By GSTIN so the same registration on two customer records (made by two
+    different import paths) is one supplier.
+    """
+    gstin = clean_gstin(getattr(supplier, "gst_number", ""))
+    return ("gstin", gstin) if gstin else ("id", supplier.pk)
+
+
+def fy_start(day):
+    """1 April of the financial year `day` falls in, or None when it won't parse."""
+    if isinstance(day, str):
+        from django.utils.dateparse import parse_date
+
+        try:
+            day = parse_date(day.strip())
+        except ValueError:
+            day = None
+    if not day:
+        return None
+    return date(day.year if day.month >= 4 else day.year - 1, 4, 1)
+
+
+def find_duplicate(business, invoice_number, supplier=None, invoice_date=None):
+    """Return an existing purchase that is really the same bill, or None.
+
+    The one rule for every inward door: inward bills, AI import, GSTR-2A
+    import and bulk import each had their own, so "SJ-101" from one and
+    "SJ/101" from another both counted, ITC and all (M28). Same business, same
+    supplier (supplier_key), the same number once spelt one way, the same FY.
+    Supplier numbering is the supplier's own: two suppliers' "001" are two
+    bills, and so is next year's "001" when a series restarts in April.
     """
     from billing.models import Invoice
 
+    key = inward_number_key(invoice_number)
+    if not key:
+        return None
     qs = Invoice.objects.defer("source_file", "source_preview").filter(
-        business=business,
-        invoice_number=invoice_number,
-        type_of_invoice=INVOICE_TYPE_INWARD,
+        business=business, type_of_invoice=INVOICE_TYPE_INWARD,
     )
     if supplier is not None:
-        qs = qs.filter(customer=supplier)
-    return qs.first()
+        kind, value = supplier_key(supplier)
+        qs = qs.filter(customer__gst_number__iexact=value) if kind == "gstin" else qs.filter(customer=supplier)
+    start = fy_start(invoice_date) if invoice_date else None
+    if start:
+        qs = qs.filter(invoice_date__range=(start, date(start.year + 1, 3, 31)))
+    return next((inv for inv in qs.order_by("id") if inward_number_key(inv.invoice_number) == key), None)

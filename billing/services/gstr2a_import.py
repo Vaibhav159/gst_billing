@@ -52,8 +52,10 @@ from decimal import Decimal, InvalidOperation
 import pandas as pd
 from django.db import transaction
 
+from billing.api.inward_bills_service import find_duplicate
 from billing.constants import INVOICE_TYPE_INWARD
 from billing.models import Business, Customer, Invoice, LineItem
+from billing.period_lock import locked_period_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,10 @@ class ImportResult:
     # Credit notes with no full invoice match — user should review.
     # Each entry: "CN <num> from <supplier> ₹<value> (-₹<itc>)"
     partial_credit_notes: list[str] = field(default_factory=list)
+    # Not booked (M28): reverse charge is credit only once the tax is paid in
+    # cash (3B 3.1(d) and 4(A)(3)), and a filed month is locked.
+    skipped_reverse_charge: list[str] = field(default_factory=list)
+    skipped_locked: list[str] = field(default_factory=list)
 
 
 # ── parsing ────────────────────────────────────────────────────────────
@@ -439,28 +445,17 @@ def _find_or_create_supplier(row: GSTR2ARow, dry_run: bool) -> tuple[Customer | 
     return cust, True
 
 
-def _invoice_exists(business_id: int, customer_id: int, inv_no: str, inv_date: date) -> bool:
-    """Dedup probe. Idempotency relies on this — be conservative.
-
-    Match is exact on (business, customer, invoice_number, invoice_date).
-    `invoice_number` is compared case-insensitively because GSTN
-    sometimes normalises casing differently across re-downloads.
-    """
-    return Invoice.objects.filter(
-        business_id=business_id,
-        customer_id=customer_id,
-        invoice_number__iexact=inv_no,
-        invoice_date=inv_date,
-    ).exists()
-
-
 def import_file(
     file_path_or_buffer,
     *,
-    dry_run: bool = False,
+    dry_run: bool = True,
     filename: str | None = None,
 ) -> ImportResult:
-    """Parse + import one 2A file. Idempotent — safe to re-run."""
+    """Parse + import one 2A file. Idempotent — safe to re-run.
+
+    Dry unless dry_run=False (M28): a 2A file is the suppliers' word, so the
+    first look at it books nothing.
+    """
     preview = preview_file(file_path_or_buffer, filename=filename)
     fname = preview.filename
     result = ImportResult(filename=fname)
@@ -514,6 +509,19 @@ def import_file(
                 )
                 continue
 
+            if row.reverse_charge:
+                result.skipped_reverse_charge.append(
+                    f"  RC {row.invoice_number} from {row.supplier_name} ({row.invoice_date}) "
+                    f"₹{row.invoice_value}: reverse charge, credit only once the tax is paid"
+                )
+                continue
+            if locked_period_or_none(business_id, row.invoice_date):
+                result.skipped_locked.append(
+                    f"  LOCKED {row.invoice_number} from {row.supplier_name} ({row.invoice_date}): "
+                    "its month is filed; unlock it on the GST page to import"
+                )
+                continue
+
             cust, was_created = _find_or_create_supplier(row, dry_run=dry_run)
             if dry_run and was_created:
                 # Count phantom creation for the preview report
@@ -539,7 +547,9 @@ def import_file(
                 continue
             if was_created:
                 result.created_suppliers += 1
-            if _invoice_exists(business_id, cust.id, row.invoice_number, row.invoice_date):
+            # The one inward rule (M28): the same bill entered on the inward
+            # form as "SJ-101" is this file's "SJ/101".
+            if find_duplicate(business_id, row.invoice_number, cust, row.invoice_date):
                 result.skipped_duplicates += 1
                 result.skipped_detail.append(
                     f"  DUP {row.invoice_number} from {cust.name} ({row.invoice_date}) ₹{row.invoice_value}"
@@ -608,7 +618,7 @@ def import_file(
 
 
 def import_files(
-    paths_or_buffers: Iterable, *, dry_run: bool = False
+    paths_or_buffers: Iterable, *, dry_run: bool = True
 ) -> list[ImportResult]:
     """Convenience for batching multiple files in one call."""
     return [import_file(p, dry_run=dry_run) for p in paths_or_buffers]

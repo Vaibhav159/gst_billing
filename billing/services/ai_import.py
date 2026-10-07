@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 
+from billing.api.inward_bills_service import find_duplicate
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.period_lock import assert_period_unlocked
@@ -230,12 +231,8 @@ def create_from_ai(request):
                     state_name=(getattr(business, "state_name", "") or "RAJASTHAN")[:255],
                     workspace_id=1,
                 )
-            mirror_existing = Invoice.objects.filter(
-                business=buyer_business,
-                invoice_number__iexact=inv_number,
-                invoice_date=inv_date,
-                type_of_invoice=INVOICE_TYPE_INWARD,
-            ).first()
+            # The buyer's purchase, by the one inward rule (M28).
+            mirror_existing = find_duplicate(buyer_business, inv_number, supplier_cust, inv_date)
             if mirror_existing is not None:
                 return mirror_existing.id, True
             assert_period_unlocked(buyer_business.id, inv_date, "create")
@@ -292,14 +289,19 @@ def create_from_ai(request):
                     )
             return mirror.id, False
 
-        existing = (
-            Invoice.objects.filter(
-                business_id=business_id,
-                customer_id=customer.id,
-                invoice_number__iexact=inv_number,
-                invoice_date=inv_date,
-            ).first()
-        )
+        if type_of_invoice == INVOICE_TYPE_INWARD:
+            # A purchase already entered through another door ("SJ-101" on
+            # the inward form, "SJ/101" here) is the same bill (M28).
+            existing = find_duplicate(business, inv_number, customer, inv_date)
+        else:
+            existing = (
+                Invoice.objects.filter(
+                    business_id=business_id,
+                    customer_id=customer.id,
+                    invoice_number__iexact=inv_number,
+                    invoice_date=inv_date,
+                ).first()
+            )
         if existing is not None:
             # Primary already exists — still ensure the inter-firm
             # inward mirror is present (completes half-done pairs).

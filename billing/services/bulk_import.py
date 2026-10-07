@@ -14,6 +14,7 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 
+from billing.api.inward_bills_service import fy_start, inward_number_key, supplier_key
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.period_lock import locked_period_or_none
@@ -28,6 +29,12 @@ from billing.tax_rules import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _inward_identity(business_id, supplier, number, day):
+    """A purchase as find_duplicate sees it (M28), or None when it can't say."""
+    key, start = inward_number_key(number), fy_start(day)
+    return (business_id, supplier_key(supplier), start, key) if key and start else None
 
 
 
@@ -163,6 +170,19 @@ def run_bulk_import(request):
                  (inv.type_of_invoice or INVOICE_TYPE_OUTWARD).lower())
             )
 
+    # Purchases already on file, by the one inward rule (M28), one query per
+    # firm: "SJ-101" from the inward form is this sheet's "SJ/101".
+    inward_seen = {}
+
+    def inward_on_file(biz_id):
+        if biz_id not in inward_seen:
+            inward_seen[biz_id] = {
+                ident for inv in Invoice.objects.filter(business_id=biz_id, type_of_invoice=INVOICE_TYPE_INWARD)
+                .select_related("customer").only("invoice_number", "invoice_date", "customer__gst_number")
+                if (ident := _inward_identity(biz_id, inv.customer, inv.invoice_number, inv.invoice_date))
+            }
+        return inward_seen[biz_id]
+
     # ---------- PHASE 2: process invoices in a single transaction ----------
     invoices_to_create = []  # [(Invoice instance, source dict for line items)]
     line_items_to_create = []
@@ -267,6 +287,12 @@ def run_bulk_import(request):
                     if dup_key in existing_invoice_keys:
                         skipped_count += 1
                         continue
+                    inward_ident = None
+                    if type_of_invoice == INVOICE_TYPE_INWARD:
+                        inward_ident = _inward_identity(business.pk, customer, invoice_number, str(invoice_date))
+                        if inward_ident and inward_ident in inward_on_file(business.pk):
+                            skipped_count += 1
+                            continue
 
                     # Filed-and-locked month: never silently mutate a filed
                     # period from a bulk sheet — surface it as a row error.
@@ -292,6 +318,8 @@ def run_bulk_import(request):
                     invoices_to_create.append((invoice, inv_data))
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
+                    if inward_ident:
+                        inward_on_file(business.pk).add(inward_ident)
                     created_count += 1
 
             except Exception as e:
