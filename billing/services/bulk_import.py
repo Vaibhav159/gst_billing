@@ -27,6 +27,7 @@ from billing.tax_rules import (
     normalize_tax_heads,
     split_tax,
     state_name_from_gstin,
+    to_paise,
 )
 
 logger = logging.getLogger(__name__)
@@ -435,6 +436,12 @@ def run_bulk_import(request):
                             net_amount = user_amount - cgst - sgst - igst
                             if net_amount < 0:
                                 net_amount = user_amount / (1 + gst_rate)
+                        # Stored as one unit at the taxable value. Kept as 0 x
+                        # 0, the line filed Rs 0 of taxable in GSTR-1 (B2CS,
+                        # HSN), the GST summary and 3B, since all of them read
+                        # quantity x rate (H8). As the GSTR-2A import stores it.
+                        net_amount = to_paise(net_amount)
+                        qty, rate = Decimal("1"), net_amount
                     tax_amount = net_amount * gst_rate
                     if cgst == 0 and sgst == 0 and igst == 0:
                         cgst, sgst, igst = split_tax(tax_amount, is_igst)
