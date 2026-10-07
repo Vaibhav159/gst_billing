@@ -365,6 +365,14 @@ def process_product_csv(file_content: bytes) -> dict[str, int | list[str]]:
     return result
 
 
+def _csv_rate(text):
+    """A CSV gst_tax_rate cell as the stored fraction. The column holds
+    fractions (0.0025); "3%" is a percent, as the product CSV reads it."""
+    if text.endswith("%"):
+        return normalize_rate(text[:-1].strip(), assume="percent")
+    return normalize_rate(text, assume="fraction")
+
+
 def _csv_cell(value):
     """A CSV cell as stripped text, or "" when pandas read it as blank (NaN)."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -625,8 +633,7 @@ def process_invoice_csv(
                                 "rate": item_data["rate"],
                                 "hsn_code": _csv_cell(item_data.get("hsn_code"))
                                 or (product.hsn_code if product else HSN_CODE),
-                                "gst_tax_rate": normalize_rate(row_rate, assume="fraction")
-                                if row_rate else rate_for_product(product),
+                                "gst_tax_rate": _csv_rate(row_rate) if row_rate else rate_for_product(product),
                             }],
                             source="csv",
                         )

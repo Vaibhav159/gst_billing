@@ -14,6 +14,7 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { parseInvoiceExcel, toImportReadyInvoices } from "@/utils/parseInvoiceExcel";
 import { applyRowEdit } from "@/utils/importRowEdit";
+import { csvImportSummary } from "@/utils/csvImportSummary";
 import type { ImportReadyInvoice } from "@/utils/parseInvoiceExcel";
 import { indianStates } from "@/utils/mockData";
 import { downloadSampleExcel } from "@/utils/generateSampleExcel";
@@ -668,11 +669,14 @@ export default function ImportPage({ type }: ImportPageProps) {
         formData.append("type", type);
         if (bizFilter !== "all") formData.append("business_id", bizFilter);
         const { default: api } = await import("@/utils/api");
-        await api.post("csv/import/", formData, {
+        const res = await api.post("csv/import/", formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
         setImportDone(true);
-        toast({ title: "Import Successful", description: `Records from ${file.name} imported successfully.` });
+        // What the server did, refused rows included (review of M27).
+        const summary = csvImportSummary(res.data ?? {}, file.name);
+        toast({ title: summary.title, description: summary.description,
+                ...(summary.ok ? {} : { variant: "destructive" as const, duration: 15000 }) });
       }
     } catch (err: any) {
       logger.error("Import error:", err?.response?.status, err?.response?.data);

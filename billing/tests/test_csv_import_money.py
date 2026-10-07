@@ -46,3 +46,13 @@ class CsvImportMoneyTest(TestCase):
         result = self._import("E-1,2026-05-10,LOCAL BUYER,Silver,abc,1000,711311,0.03\n")
         self.assertFalse(Invoice.objects.filter(invoice_number="E-1").exists())
         self.assertTrue(any("E-1" in e for e in result["errors"]), result["errors"])
+
+
+    def test_a_rate_written_as_a_percent_is_read(self):
+        # Review of M27: "3%" failed each line with a raw "ConversionSyntax"
+        # (the product CSV already read it).
+        result = self._import("P-1,2026-05-10,LOCAL BUYER,Silver,1,1000,711311,3%\n"
+                              "P-2,2026-05-10,LOCAL BUYER,Loose diamond,1,100000,7102,0.25%\n")
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(Invoice.objects.get(invoice_number="P-1").lineitem_set.get().gst_tax_rate, D("0.03"))
+        self.assertEqual(Invoice.objects.get(invoice_number="P-2").lineitem_set.get().gst_tax_rate, D("0.0025"))
