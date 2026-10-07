@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx-js-style";
-import { lineItemPercent } from "./gstRate";
+import { lineItemPercent, rateToPercent } from "./gstRate";
 import { halveTax, round2 } from "./money";
 import { stateCode } from "./taxRules";
 
@@ -297,8 +297,10 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       // OPTIONAL columns — only read if the header explicitly maps them.
       // If they're missing, leave blank (parser/backend resolves from Product master).
       const hsnCode = colMap.hsnCode !== undefined ? strVal(row[colMap.hsnCode]) : "";
+      // A cell formatted "3%" holds 0.03. The slab list reads 0.03, 3 and "3%"
+      // alike as 3%; taken as a percent, 0.03 taxed 60,000 at 0.03% (H10).
       const gstRate = colMap.gstRate !== undefined
-        ? numVal(strVal(row[colMap.gstRate]).replace("%", ""))
+        ? rateToPercent(numVal(strVal(row[colMap.gstRate]).replace("%", "")))
         : 0;
       const taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : 0;
       const cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : 0;

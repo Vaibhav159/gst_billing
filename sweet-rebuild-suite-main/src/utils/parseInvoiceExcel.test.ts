@@ -229,3 +229,31 @@ describe("parseInvoiceExcel — a register without Qty/Rate columns (H9)", () =>
     expect(inv.items[0]).toMatchObject({ qty: 0, rate: 0, taxable: 60000, cgst: 900, sgst: 900, amount: 61800 });
   });
 });
+
+describe("parseInvoiceExcel — a cell formatted as a percent (H10)", () => {
+  // Excel stores a cell shown as "3%" as 0.03. Used as a percent, 10 x 6,000
+  // carried CGST 9 + SGST 9 instead of 900 + 900.
+  function sheet(rateCell: number | string): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "GST Rate", "Qty", "Rate", "Total"],
+      [1, "102", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", rateCell, 10, 6000, 0],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+
+  it("reads 0.03 as 3% and taxes 60,000 at it", () => {
+    const [inv] = toImportReadyInvoices(parseInvoiceExcel(sheet(0.03)), []);
+    expect(inv.items[0]).toMatchObject({ gstRate: 3, cgst: 900, sgst: 900, amount: 61800 });
+  });
+
+  it("still reads 3 and \"3%\" as 3%, and 0.0025 as the 0.25% slab", () => {
+    for (const cell of [3, "3%"]) {
+      expect(toImportReadyInvoices(parseInvoiceExcel(sheet(cell)), [])[0].items[0].gstRate).toBe(3);
+    }
+    expect(toImportReadyInvoices(parseInvoiceExcel(sheet(0.0025)), [])[0].items[0].gstRate).toBe(0.25);
+  });
+});
