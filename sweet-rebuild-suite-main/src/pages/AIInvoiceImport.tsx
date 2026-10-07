@@ -13,6 +13,9 @@ import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/utils/api";
 import { formatCurrency } from "@/utils/mockData";
+import { bookedAmount, rateChoice, rateFromChoice } from "@/utils/aiImportLine";
+import { GST_SLABS } from "@/utils/gstRate";
+import { formatMoney } from "@/utils/money";
 
 // Mirrors backend AIInvoiceProcessor._convert_to_dict output (floats, not
 // Decimal strings — see billing/utils.py).
@@ -735,7 +738,9 @@ function ReviewForm({
     onUpdateExtracted({ ...ex, line_items: next });
   };
 
-  const lineItemsTotal = ex.line_items.reduce((s, li) => s + (li.amount || 0), 0);
+  // What the server will store, not the amounts the AI read: it recomputes
+  // every AI line from quantity x rate x (1 + r) (M19).
+  const lineItemsTotal = ex.line_items.reduce((s, li) => s + bookedAmount(li, entry.type), 0);
 
   return (
     <div className="p-4 space-y-4 bg-secondary/5">
@@ -840,12 +845,18 @@ function ReviewForm({
                   className="premium-input h-8 w-full text-[11px]" placeholder="Rate" />
               </div>
               <div className="col-span-3 sm:col-span-1">
-                <input type="number" value={Math.round((li.gst_tax_rate || 0) * 1000) / 10} step="0.1" onChange={(e) => updateLine(i, "gst_tax_rate", Number(e.target.value) / 100)}
-                  className="premium-input h-8 w-full text-[11px] text-center" placeholder="GST%" />
+                {/* A slab, never a rounded number: 0.25% showed as "0.3" and saved as 0.003 (M19). */}
+                <select value={rateChoice(li)} onChange={(e) => updateLine(i, "gst_tax_rate", rateFromChoice(e.target.value))}
+                  className="premium-select h-8 w-full text-[11px] text-center" aria-label="GST rate">
+                  <option value="">GST%</option>
+                  {GST_SLABS.map((slab) => <option key={slab} value={String(slab)}>{slab}%</option>)}
+                </select>
               </div>
-              <div className="col-span-3 sm:col-span-2">
-                <input type="number" value={li.amount} step="0.01" onChange={(e) => updateLine(i, "amount", Number(e.target.value))}
-                  className="premium-input h-8 w-full text-[11px] tabular-nums font-semibold" placeholder="Amount" />
+              <div className="col-span-3 sm:col-span-2 text-right" title="The amount that will be stored: quantity x rate plus GST">
+                <p className="h-8 leading-8 text-[11px] tabular-nums font-semibold">{formatMoney(bookedAmount(li, entry.type))}</p>
+                {Math.abs((li.amount || 0) - bookedAmount(li, entry.type)) > 1 && (
+                  <p className="text-[10px] text-warning tabular-nums">bill shows {formatMoney(li.amount || 0)}</p>
+                )}
               </div>
               <div className="col-span-12 sm:col-span-1 flex justify-end">
                 <button
@@ -861,7 +872,7 @@ function ReviewForm({
           <button
             onClick={() => onUpdateExtracted({
               ...ex,
-              line_items: [...ex.line_items, { product_name: "", quantity: 1, rate: 0, hsn_code: "", gst_tax_rate: 0.03, amount: 0 }],
+              line_items: [...ex.line_items, { product_name: "", quantity: 1, rate: 0, hsn_code: "", gst_tax_rate: null, amount: 0 }],
             })}
             className="text-[11px] text-primary font-semibold flex items-center gap-1 hover:underline"
           >
