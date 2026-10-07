@@ -12,7 +12,9 @@ Read-only by default. Nothing is written without --apply.
     python manage.py fix_placeholder_gstins --apply      # blank the customers' values
 
 The app already ignores placeholders when it reads them. Blanking them makes
-the stored party say so too. Lines already filed under the head a placeholder
+the stored party say so too. A mistyped GSTIN (one with digits that isn't a
+GSTIN) is listed but never blanked: blank, a registered buyer would turn B2C
+and lose the credit. A person corrects it on the party. Lines already filed under the head a placeholder
 implied are listed. fix_tax_heads (report only) re-files them, preserving every
 total. A firm with a placeholder is reported, never changed: it needs its real
 GSTIN, set on the Businesses page.
@@ -26,11 +28,15 @@ from django.db.models import Q
 
 from billing.management.commands._repair import fresh_lines, invalidate
 from billing.models import Business, Customer, Invoice
-from billing.tax_rules import has_gstin, is_interstate
+from billing.tax_rules import gstin_problem, has_gstin, is_interstate
 
 
 def _placeholders(qs):
     return [p for p in qs.exclude(gst_number__isnull=True).exclude(gst_number="") if not has_gstin(p.gst_number)]
+
+
+def _mistyped(party):
+    return bool(gstin_problem(party.gst_number))
 
 
 class Command(BaseCommand):
@@ -81,6 +87,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  {c.name[:34]:<34} {c.gst_number!r:<18} {sales} sale(s), {purchases} purchase(s)"
                 + (f"; {refile} line(s) under the other head" if refile else "")
+                + ("  MISTYPED: correct it on the customer; never blanked" if _mistyped(c) else "")
             )
 
         if bad_firms:
@@ -105,8 +112,12 @@ class Command(BaseCommand):
         if not opts["apply"]:
             self.stdout.write(self.style.NOTICE("\nDry run. Re-run with --apply to blank the customers' values."))
             return
-        if bad_customers:
+        placeholders = [c for c in bad_customers if not _mistyped(c)]
+        if placeholders:
             with transaction.atomic():
-                Customer.objects.filter(pk__in=[c.pk for c in bad_customers]).update(gst_number="")
+                Customer.objects.filter(pk__in=[c.pk for c in placeholders]).update(gst_number="")
             invalidate(Customer, Invoice)
-        self.stdout.write(self.style.SUCCESS(f"\nBlanked {len(bad_customers)} customer GSTIN(s)."))
+        self.stdout.write(self.style.SUCCESS(f"\nBlanked {len(placeholders)} customer GSTIN(s)."))
+        if len(placeholders) < len(bad_customers):
+            self.stdout.write(self.style.WARNING(
+                f"{len(bad_customers) - len(placeholders)} mistyped GSTIN(s) left as they are: correct them by hand."))

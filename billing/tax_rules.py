@@ -203,6 +203,22 @@ def clean_gstin(value):
     return (value or "").strip().upper() if has_gstin(value) else ""
 
 
+def gstin_problem(value):
+    """Why `value` can't be taken as a party's GSTIN, or None.
+
+    None for a GSTIN, a blank, or a placeholder: "NA", "URP", "-" and the
+    like carry no digits (or only zeros) and mean an unregistered party, so
+    they are stored blank (H12). Anything else that isn't a GSTIN is a typo.
+    Stored blank like a placeholder, it made a registered buyer B2C, and the
+    buyer lost the credit with nothing to say so (review of H12).
+    """
+    v = (value or "").strip()
+    if not v or has_gstin(v) or not any(ch in "123456789" for ch in v):
+        return None
+    return (f"{v} isn't a GSTIN (15 characters, starting with the 2-digit state code). "
+            "Correct it, or leave it blank for an unregistered party.")
+
+
 NO_GSTIN_NO_ITC = (
     "the supplier has no GSTIN, so this purchase carries no input tax credit. "
     "Add the supplier's GSTIN to claim GST, or set the line to 0%."

@@ -347,12 +347,16 @@ class InwardBillNoGstinTest(BaseAPITestCase):
 
     def test_gst_on_a_bill_without_a_supplier_gstin_is_refused_naming_the_line(self):
         suppliers = Customer.objects.count()
-        for i, gstin in enumerate([None, "", "NA", "URP", " urp ", "22AAAAA0000A1Z"]):  # last: 14 characters
+        for i, gstin in enumerate([None, "", "NA", "URP", " urp "]):
             with self.subTest(gstin=gstin):
                 resp = self._post(f"U-{i}", gstin, ["0", "0.03"])
                 self.assertEqual(resp.status_code, 400, resp.data)
                 self.assertIn("Line 2", resp.data["error"])
                 self.assertIn("GSTIN", resp.data["error"])
+        # 14 characters: a typo, refused as one rather than as "no GSTIN" (review of H12).
+        resp = self._post("U-T", "22AAAAA0000A1Z", ["0", "0.03"])
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("isn't a GSTIN", resp.data["error"])
         self.assertFalse(Invoice.objects.filter(invoice_number__startswith="U-").exists())
         self.assertEqual(Customer.objects.count(), suppliers, "a refused bill must not create its supplier")
 

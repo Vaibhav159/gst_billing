@@ -21,6 +21,7 @@ from billing.period_lock import locked_period_or_none
 from billing.tax_rules import (
     clean_gstin,
     direction_known,
+    gstin_problem,
     has_gstin,
     normalize_rate,
     normalize_tax_heads,
@@ -111,8 +112,8 @@ def run_bulk_import(request):
     for inv_data in invoices_data:
         cn = (inv_data.get("customerName") or "").strip()
         cg = (inv_data.get("customerGST") or "").strip()
-        if not cn:
-            continue
+        if not cn or ("(PAN)" not in cg and gstin_problem(cg)):
+            continue  # a mistyped GSTIN refuses the row below; no party for it
         key = cn.lower()
         # Already in cache (pre-existing)? skip
         if key in cust_by_name:
@@ -233,6 +234,12 @@ def run_bulk_import(request):
                         errors.append(
                             f"No customer name for invoice {inv_data.get('invoiceNumber', '?')}"
                         )
+                        skipped_count += 1
+                        continue
+                    # A typo isn't "no GSTIN": booked as one, a registered party
+                    # turned B2C (review of H12).
+                    if "(PAN)" not in customer_gst and (problem := gstin_problem(customer_gst)):
+                        errors.append(f"Invoice {inv_data.get('invoiceNumber', '?')}: {problem}")
                         skipped_count += 1
                         continue
 

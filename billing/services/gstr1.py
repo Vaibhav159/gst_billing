@@ -16,7 +16,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 
 from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import HEADS, classify_b2c, clean_gstin, rate_as_percent, utilise_itc
+from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_itc
 
 TWO_PLACES = Decimal("0.01")
 
@@ -489,6 +489,9 @@ def gstr_export(view, request):
         table, inter, pos, _downgraded = classify_b2c(inv.business, inv)
         if table == "b2b":
             continue  # Registered — belongs in B2B
+        if gstin_problem(inv.customer.gst_number):
+            warnings.append(f"{inv.invoice_number}: {inv.customer.name}'s GSTIN {inv.customer.gst_number.strip()} "
+                            "isn't a GSTIN, so the sale is filed as B2C. Correct it on the customer.")
 
         items = inv.lineitem_set.all()
 
@@ -711,6 +714,11 @@ def gstr1_portal_json(view, request):
         idt = inv.invoice_date.strftime("%d-%m-%Y")
         val = r2(inv.total_amount)
         cust_gstin = clean_gstin(inv.customer.gst_number)
+        if gstin_problem(inv.customer.gst_number):
+            # On file from before the API refused typos: filed as B2C, the
+            # buyer gets no credit, so say so before it goes up.
+            warnings.append(f"{label}: {inv.customer.name}'s GSTIN {inv.customer.gst_number.strip()} isn't a GSTIN, "
+                            "so the sale is filed as B2C. Correct it on the customer and download again.")
 
         if cust_gstin:
             itms = [

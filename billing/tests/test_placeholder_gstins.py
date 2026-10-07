@@ -124,6 +124,97 @@ class PlaceholderImportTest(BaseAPITestCase):
         self.assertFalse(Customer.objects.filter(gst_number="NA").exists())
 
 
+class MistypedGstinTest(BaseAPITestCase):
+    """Review of H12: a mistyped GSTIN (14 or 16 characters) was stored blank,
+    like "NA". The registered buyer became B2C and lost the credit, with
+    nothing to say so; kept as typed, the portal used to refuse it and someone
+    noticed. A typo is refused at every door; only a placeholder (no digits)
+    is stored blank."""
+
+    TYPO = "08ABCDE1234A1Z"  # 14 characters
+
+    def setUp(self):
+        super().setUp()
+        self.biz = Business.objects.create(name="LODHA JEWELLERS", gst_number=LODHA, state_name="RAJASTHAN")
+
+    def _line(self, **over):
+        return {"productName": "Silver", "hsn": "711311", "qty": 1, "rate": 10000, "gstRate": 3, **over}
+
+    def test_the_customer_api_refuses_it(self):
+        r = self.client.post(reverse("customer-list"), {"name": "TYPO BUYER", "gst_number": self.TYPO,
+                                                        "state_name": "RAJASTHAN"}, format="json")
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertIn(self.TYPO, str(r.data["gst_number"]))
+        self.assertFalse(Customer.objects.filter(name="TYPO BUYER").exists())
+
+    def test_the_business_api_refuses_it(self):
+        r = self.client.patch(reverse("business-detail", args=[self.biz.id]), {"gst_number": self.TYPO}, format="json")
+        self.assertEqual(r.status_code, 400, r.data)
+        self.biz.refresh_from_db()
+        self.assertEqual(self.biz.gst_number, LODHA)
+
+    def test_bulk_import_refuses_the_row(self):
+        r = self.client.post(reverse("bulk-invoice-import"), {"business_id": self.biz.id, "invoices": [
+            {"invoiceNumber": "T-1", "invoice_date": "2026-05-10", "customerName": "TYPO BUYER",
+             "customerGST": self.TYPO, "type": "OUTWARD", "total": 10300, "items": [self._line()]},
+        ]}, format="json")
+        self.assertEqual(r.data["created"], 0, r.data)
+        self.assertTrue(any(self.TYPO in e for e in r.data["errors"]), r.data)
+        self.assertFalse(Customer.objects.filter(name="TYPO BUYER").exists())
+
+    def test_ai_import_refuses_it(self):
+        r = self.client.post(reverse("ai-invoice-create"), {
+            "business_id": self.biz.id, "type_of_invoice": "outward",
+            "invoice_data": {"customer_name": "TYPO BUYER", "customer_gst_number": self.TYPO,
+                             "invoice_number": "AI-T", "invoice_date": "2026-05-10",
+                             "line_items": [{"product_name": "Silver", "hsn_code": "711311", "quantity": 1,
+                                             "rate": 10000, "gst_tax_rate": 0.03}]},
+        }, format="json")
+        self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        self.assertIn(self.TYPO, r.data["error"])
+
+    def test_the_inward_form_refuses_it(self):
+        import json
+
+        r = self.client.post(reverse("inward-bill-list"), {
+            "business_id": self.biz.id, "supplier_name": "TYPO SUPPLIER", "supplier_gstin": self.TYPO,
+            "invoice_number": "IN-T", "invoice_date": "2026-05-10",
+            "lines": json.dumps([{"product_name": "Gold bar", "hsn_code": "710813", "quantity": "1",
+                                  "rate": "10000", "gst_tax_rate": "0.03", "unit": "gms"}]),
+        })
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertIn(self.TYPO, str(r.data))
+
+    def test_the_csv_customer_import_refuses_the_row(self):
+        from billing.utils import process_customer_csv
+
+        result = process_customer_csv(
+            f"name,gst_number,state_name\nTYPO BUYER,{self.TYPO},RAJASTHAN\nWALK-IN CSV,NA,RAJASTHAN\n".encode(),
+            self.biz.id)
+        self.assertEqual(result["customers_created"], 1, result)
+        self.assertTrue(any(self.TYPO in e for e in result["errors"]), result)
+        self.assertFalse(Customer.objects.get(name="WALK-IN CSV").gst_number)  # pandas reads "NA" as missing
+
+    def test_a_placeholder_is_still_stored_blank(self):
+        for value in ("NA", "URP", "-", "N/A", "0"):
+            with self.subTest(value=value):
+                r = self.client.post(reverse("customer-list"), {"name": f"WALK-IN {value}", "gst_number": value},
+                                     format="json")
+                self.assertEqual(r.status_code, 201, r.data)
+                self.assertEqual(Customer.objects.get(name=f"WALK-IN {value}").gst_number, "")
+
+    def test_the_portal_file_warns_of_a_typo_on_file(self):
+        legacy = Customer.objects.create(name="LEGACY TYPO", gst_number=self.TYPO, state_name="RAJASTHAN")
+        inv = Invoice.objects.create(business=self.biz, customer=legacy, invoice_number="L-1",
+                                     invoice_date="2026-07-10", type_of_invoice=INVOICE_TYPE_OUTWARD)
+        LineItem.objects.create(invoice=inv, customer=legacy, product_name="Silver", hsn_code="711311",
+                                gst_tax_rate=D("0.03"), quantity=D("1"), rate=D("10000"), cgst=D("150"),
+                                sgst=D("150"), igst=0, amount=D("10300"))
+        r = self.client.get(reverse("invoice-gstr1-portal-json"), {"business_id": self.biz.id, "month": 7, "year": 2026})
+        self.assertTrue(any("LEGACY TYPO" in w and self.TYPO in w for w in r.data["meta"]["warnings"]),
+                        r.data["meta"]["warnings"])
+
+
 class PlaceholderReconciliationTest(BaseAPITestCase):
     def test_rollup_counts_a_placeholder_as_b2c(self):
         line = {"taxable": D("1000"), "cgst": D("15"), "sgst": D("15"), "igst": D("0"), "rate": D("0.03")}
@@ -152,9 +243,12 @@ class FixPlaceholderGstinsTest(BaseAPITestCase):
         self.assertEqual(na.gst_number, "NA")
 
         self._run("--apply")
-        for c, expected in ((na, ""), (short, ""), (real, LODHA)):
+        # A typo is listed for a person to correct, never blanked: blank, the
+        # buyer would turn B2C (review of H12).
+        for c, expected in ((na, ""), (short, "08ABCDE1234A1Z"), (real, LODHA)):
             c.refresh_from_db()
             self.assertEqual(c.gst_number, expected)
+        self.assertIn("TYPO", self._run())
 
     def test_a_firm_with_a_placeholder_is_reported_not_blanked(self):
         firm = Business.objects.create(name="NO GSTIN FIRM", gst_number="NA", state_name="RAJASTHAN")

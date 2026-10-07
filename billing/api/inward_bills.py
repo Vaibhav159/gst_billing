@@ -24,7 +24,7 @@ from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
 from billing.period_lock import assert_period_unlocked
-from billing.tax_rules import GST_SLABS, has_gstin, is_interstate, itc_refusal, normalize_rate
+from billing.tax_rules import GST_SLABS, gstin_problem, has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_conflict, gstin_matches
@@ -148,6 +148,9 @@ class InwardBillListCreateView(APIView):
             )
 
         supplier_gstin = (request.data.get("supplier_gstin") or "").strip().upper()
+        # A typo isn't "no GSTIN", which would refuse the credit for the wrong reason.
+        if problem := gstin_problem(supplier_gstin):
+            return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         if not has_gstin(supplier_gstin):
             # "NA", "URP" and the like: not a GSTIN to store on the supplier,
             # or to look one up by.
