@@ -100,6 +100,36 @@ class LineCustomerTest(BaseAPITestCase):
         self.assertIn(LineItem, [c.args[0] for c in dropped.call_args_list])
 
 
+class AdminLineCustomerTest(BaseAPITestCase):
+    """Review of H6: the Django admin still offered a line's customer (and an
+    existing line's invoice) as editable fields, so it could make the drift
+    H6 removed."""
+
+    def setUp(self):
+        super().setUp()
+        from django.contrib.auth.models import User
+
+        self.admin_client = self.client_class()
+        self.admin_client.force_login(User.objects.create_superuser("root_h6", "root@example.com", "pw"))
+        self.other = Customer.objects.create(name="Second Buyer", state_name="CHHATTISGARH")
+
+    def test_a_line_saved_with_another_customer_takes_its_invoices(self):
+        li = LineItem.objects.create(invoice=self.invoice, customer=self.other, product_name="Silver",
+                                     hsn_code="711311", gst_tax_rate=D("0.03"), quantity=D("1"), rate=D("100"),
+                                     cgst=D("1.50"), sgst=D("1.50"), igst=0, amount=D("103"))
+        li.refresh_from_db()
+        self.assertEqual(li.customer_id, self.customer.id)
+
+    def test_the_admin_shows_the_customer_without_letting_it_change(self):
+        page = self.admin_client.get(reverse("admin:billing_lineitem_change", args=[self.line_item.id]))
+        self.assertEqual(page.status_code, 200)
+        self.assertNotContains(page, 'name="customer"')
+        self.assertNotContains(page, 'name="invoice"')
+        inline = self.admin_client.get(reverse("admin:billing_invoice_change", args=[self.invoice.id]))
+        self.assertEqual(inline.status_code, 200)
+        self.assertNotContains(inline, 'name="lineitem_set-0-customer"')
+
+
 class FixLineCustomersTest(BaseAPITestCase):
     def _run(self, *args):
         out = StringIO()

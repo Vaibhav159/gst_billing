@@ -388,7 +388,7 @@ class Invoice(AbstractBaseModel):
         """
         known = direction_known(self.business, self.customer)
         interstate = is_interstate(self.business, self.customer)
-        for li in LineItem.objects.filter(invoice=self):
+        for li in self.lineitem_set.all():
             changed = []
             if li.customer_id != self.customer_id:
                 li.customer_id = self.customer_id
@@ -579,6 +579,13 @@ class LineItem(AbstractBaseModel):
 
     def __str__(self):
         return self.product_name
+
+    def save(self, *args, **kwargs):
+        # A line's customer is its invoice's, whoever saves it: the API, the
+        # Django admin, undo (H6). update_fields saves leave it to the caller.
+        if self.invoice_id and not kwargs.get("update_fields"):
+            self.customer_id = self.invoice.customer_id
+        super().save(*args, **kwargs)
 
     @property
     def gst_tax_in_percentage(self):
