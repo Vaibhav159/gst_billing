@@ -676,7 +676,7 @@ export default function ImportReview() {
                     </td>
                     <td className="px-3 py-2 text-center text-muted-foreground text-[11px] whitespace-nowrap">
                       {(() => {
-                        const rates = Array.from(new Set(inv.items.map(i => i.gstRate))).filter(r => r > 0);
+                        const rates = Array.from(new Set(inv.items.map(i => i.gstRate))).filter((r): r is number => r !== null && r > 0);
                         if (rates.length === 0) return <span className="text-destructive/70">?</span>;
                         return rates.length === 1 ? `${rates[0]}%` : rates.map(r => `${r}%`).join("/");
                       })()}

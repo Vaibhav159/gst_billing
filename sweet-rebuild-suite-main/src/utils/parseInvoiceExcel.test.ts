@@ -27,7 +27,7 @@ describe("normalizeDate", () => {
 });
 
 describe("toImportReadyInvoices — Product master lookup", () => {
-  function makeParsed(rows: Array<Partial<{ commodity: string; qty: number; rate: number; gstRate: number; totalInvoiceValue: number }>>): ParsedExcelResult {
+  function makeParsed(rows: Array<Partial<{ commodity: string; qty: number; rate: number; gstRate: number | null; totalInvoiceValue: number }>>): ParsedExcelResult {
     return {
       firms: [{
         firmName: "Test Firm",
@@ -43,7 +43,7 @@ describe("toImportReadyInvoices — Product master lookup", () => {
           gstNumber: "",
           commodity: r.commodity || "GOLD",
           hsnCode: "",
-          gstRate: r.gstRate ?? 0,
+          gstRate: r.gstRate ?? null,  // a sheet without the rate gives none
           qty: r.qty ?? 0,
           rate: r.rate ?? 0,
           taxableValue: 0,
@@ -96,6 +96,19 @@ describe("toImportReadyInvoices — Product master lookup", () => {
     expect(inv.total).toBe(1000); // amount = taxable since taxes are 0
   });
 
+  it("keeps an explicit 0% even for a product the master taxes (review of M19)", () => {
+    // 0 used to mean "no rate", so the master's 3% replaced it.
+    const parsed = makeParsed([{ commodity: "GOLD ORNAMENTS", qty: 5, rate: 14000, gstRate: 0 }]);
+    const products = [{ name: "GOLD ORNAMENTS", hsn_code: "711319", gst_tax_rate: 0.03 }];
+    const [inv] = toImportReadyInvoices(parsed, products);
+    expect(inv.items[0]).toMatchObject({ gstRate: 0, cgst: 0, sgst: 0, amount: 70000 });
+  });
+
+  it("sends no rate when neither the sheet nor the master has one", () => {
+    const [inv] = toImportReadyInvoices(makeParsed([{ commodity: "UNKNOWN_THING", qty: 1, rate: 1000 }]), []);
+    expect(inv.items[0].gstRate).toBeNull();
+  });
+
   it("back-derives taxable from a supplied total + GST rate", () => {
     const parsed = makeParsed([{ commodity: "GOLD ORNAMENTS", totalInvoiceValue: 1030 }]);
     const products = [{ name: "GOLD ORNAMENTS", hsn_code: "711319", gst_tax_rate: 0.03 }];
@@ -114,8 +127,8 @@ describe("parseInvoiceExcel — regression: smart template (no HSN/GST Rate colu
     // Smart template has only 8 columns: S.No., Bill, Date, Party, GST,
     // Commodity, Qty, Rate. Old positional fallback (gst rate at index 7)
     // would have picked up the Rate value (~14000) and treated it as 14000%.
-    // After fix: gstRate column missing → gstRate = 0, backend resolves from
-    // Product master.
+    // After fix: gstRate column missing → no rate (null; 0 is 0% since the
+    // review of M19), backend resolves from Product master.
     const bytes = generateSampleExcelBytes({
       businesses: [{ name: "F1", gst_number: "08AAA1234A1Z1" }],
       products: [{ name: "GOLD ORNAMENTS" }],
@@ -129,8 +142,8 @@ describe("parseInvoiceExcel — regression: smart template (no HSN/GST Rate colu
     const firm = result.firms[0];
     expect(firm.invoices.length).toBeGreaterThan(0);
     for (const inv of firm.invoices) {
-      // gstRate should be 0 (not present in file → backend resolves it)
-      expect(inv.gstRate).toBe(0);
+      // No rate (not present in file → backend resolves it)
+      expect(inv.gstRate).toBeNull();
       // Rate should be the actual Rate value (≥ 100, not weirdly bonkers)
       // and qty should be a sensible weight
       if (inv.qty > 0 && inv.rate > 0) {
@@ -294,5 +307,25 @@ describe("parseInvoiceExcel — a GST rate under 1% (review of H10)", () => {
     for (const [cell, pct] of [[0.03, 3], [3, 3], ["3%", 3], [0.0025, 0.25], [0.25, 0.25], [18, 18]] as const) {
       expect(rateOf(cell).gstRate).toBe(pct);
     }
+  });
+});
+
+describe("parseInvoiceExcel — a blank rate is no rate, a 0 is 0% (review of M19)", () => {
+  function sheet(rateCell: number | string | null): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "GST Rate", "Qty", "Rate", "Total"],
+      [1, "104", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", rateCell, 10, 6000, 0],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+
+  it("reads a blank cell as no rate, and a 0 as 0%", () => {
+    expect(parseInvoiceExcel(sheet(null)).firms[0].invoices[0].gstRate).toBeNull();
+    expect(parseInvoiceExcel(sheet(0)).firms[0].invoices[0].gstRate).toBe(0);
+    expect(parseInvoiceExcel(sheet("0%")).firms[0].invoices[0].gstRate).toBe(0);
   });
 });

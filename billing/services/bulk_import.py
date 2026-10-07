@@ -224,7 +224,9 @@ def run_bulk_import(request):
             product = lookup_product(product_name)
             hsn_code = str(item.get("hsn") or "").strip()
             gst_rate_raw_in = item.get("gstRate")
-            if gst_rate_raw_in in (None, "", 0, "0"):
+            # Only a missing rate is missing: read as one, a 0% line took the
+            # product master's 3% (review of M19, whose builder fix this mirrors).
+            if gst_rate_raw_in in (None, ""):
                 if not product:
                     problems.append(
                         f"Invoice {inv_data.get('invoiceNumber','?')} item '{product_name}': "
@@ -475,7 +477,7 @@ def run_bulk_import(request):
                     if type_of_invoice == INVOICE_TYPE_INWARD:
                         def booked_rate(item):
                             raw = item.get("gstRate")
-                            if raw not in (None, "", 0, "0"):
+                            if raw not in (None, ""):  # a 0% line is 0%, not "no rate"
                                 return normalize_rate(raw, assume="percent")
                             product = lookup_product(str(item.get("productName") or "").strip())
                             return normalize_rate(product.gst_tax_rate, assume="fraction") if product else 0

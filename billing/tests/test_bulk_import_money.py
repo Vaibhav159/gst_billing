@@ -190,3 +190,40 @@ class RefusedLineTest(BulkImportMoneyCase):
         self.assertEqual(data["created"], 1, data)
         inv = Invoice.objects.get(invoice_number="R-2")
         self.assertEqual((inv.lineitem_set.count(), inv.total_amount), (2, D("123600")))
+
+
+class ExplicitZeroRateTest(BulkImportMoneyCase):
+    """Review of M19: bulk import (and so Backup restore) still read a 0% line
+    as "no rate" and took the product master's. A URP purchase at 0% with no
+    tax was refused by C1b ("set the line to 0%": it was), and a restored 0%
+    sale of a 3% product failed its money checks. Only a missing rate is
+    missing."""
+
+    def setUp(self):
+        super().setUp()
+        from billing.models import Product
+
+        Product.objects.create(name="Gold", hsn_code="711319", gst_tax_rate=D("0.03"))
+
+    def test_a_zero_rated_purchase_from_a_seller_without_a_gstin_imports(self):
+        data = self._import(self._row("Z-1", {"productName": "Gold", "hsn": "711319", "gstRate": 0, "qty": 1,
+                                              "rate": 10000, "cgst": 0, "sgst": 0, "igst": 0, "amount": 10000},
+                                      kind="INWARD", customer="WALK-IN SELLER", gst="URP"))
+        self.assertEqual(data["created"], 1, data)
+        self.assertEqual(self._line("Z-1").gst_tax_rate, D("0"))
+
+    def test_a_zero_rated_sale_of_a_three_percent_product_stays_zero(self):
+        for i, rate in enumerate((0, "0", "0.0000")):
+            with self.subTest(rate=rate):
+                number = f"Z-2-{i}"
+                data = self._import(self._row(number, {"productName": "Gold", "hsn": "711319", "gstRate": rate,
+                                                       "qty": 1, "rate": 10000, "amount": 10000}))
+                self.assertEqual(data["created"], 1, data)
+                li = self._line(number)
+                self.assertEqual((li.gst_tax_rate, li.cgst + li.sgst + li.igst, li.amount), (D("0"), D("0"), D("10000")))
+
+    def test_a_missing_rate_still_comes_from_the_product(self):
+        self._import(self._row("Z-3", {"productName": "Gold", "hsn": "711319", "gstRate": None, "qty": 1,
+                                       "rate": 10000}))
+        li = self._line("Z-3")
+        self.assertEqual((li.gst_tax_rate, li.cgst, li.sgst), (D("0.03"), D("150"), D("150")))

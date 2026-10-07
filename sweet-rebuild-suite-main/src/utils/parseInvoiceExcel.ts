@@ -18,7 +18,7 @@ export interface ParsedInvoiceRow {
   gstNumber: string;
   commodity: string;
   hsnCode: string;
-  gstRate: number; // percentage, e.g. 3
+  gstRate: number | null; // percentage, e.g. 3; null when the sheet gives none
   qty: number;
   rate: number;
   taxableValue: number;
@@ -324,9 +324,10 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const hsnCode = colMap.hsnCode !== undefined ? strVal(row[colMap.hsnCode]) : "";
       // A cell formatted "3%" holds 0.03: taken as a percent, 0.03 taxed
       // 60,000 at 0.03% (H10). gstPercentOf reads the column as percents.
+      // null when the sheet gives none, so a 0 stays 0% (review of M19).
       const gstRate = colMap.gstRate !== undefined
-        ? (gstPercentOf(row[colMap.gstRate], shown[i][colMap.gstRate]) ?? 0)
-        : 0;
+        ? gstPercentOf(row[colMap.gstRate], shown[i][colMap.gstRate])
+        : null;
       const taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : 0;
       const cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : 0;
       const sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : 0;
@@ -431,7 +432,8 @@ export interface ImportReadyInvoice {
   items: {
     productName: string;
     hsn: string;
-    gstRate: number;
+    /** Percent; null when neither the sheet nor the product master gives one. */
+    gstRate: number | null;
     qty: number;
     rate: number;
     unit: string;
@@ -541,11 +543,11 @@ export function toImportReadyInvoices(
 
       const items = rows.map(row => {
         // Resolve GST% (in percentage form): row → product → 0
+        // The master fills a missing rate only: a 0% line is 0%, not "no rate"
+        // (review of M19).
         let gstPercent = row.gstRate;
         const lookup = lookupProduct(row.commodity, productMaps);
-        if (!gstPercent || gstPercent === 0) {
-          if (lookup) gstPercent = lookup.gstPercent;
-        }
+        if (gstPercent === null && lookup) gstPercent = lookup.gstPercent;
         const hsn = row.hsnCode || (lookup?.hsn ?? "");
 
         // Compute taxable: prefer file value → qty*rate → back-derive from total
@@ -553,13 +555,13 @@ export function toImportReadyInvoices(
         if (taxable === 0 && row.qty > 0 && row.rate > 0) {
           taxable = Math.round(row.qty * row.rate * 100) / 100;
         }
-        if (taxable === 0 && row.totalInvoiceValue > 0 && gstPercent > 0) {
+        if (taxable === 0 && row.totalInvoiceValue > 0 && gstPercent !== null) {
           taxable = Math.round((row.totalInvoiceValue / (1 + gstPercent / 100)) * 100) / 100;
         }
 
         // Compute taxes if not in file
         let cgst = row.cgst, sgst = row.sgst, igst = row.igst;
-        if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent > 0) {
+        if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent) {
           const tax = round2(taxable * gstPercent / 100);
           // One tax, split exactly: rounding each half-rate head on its own
           // turned 16.49 into 8.25 + 8.25 (H13).
