@@ -47,3 +47,19 @@ export function fyMonthBounds(
   const lastDay = new Date(year, month, 0).getDate();
   return { start: `${year}-${mm}-01`, end: `${year}-${mm}-${String(lastDay).padStart(2, "0")}` };
 }
+
+/**
+ * The invoice form's warning for a date, or "" (M20). Compares calendar dates
+ * as strings: the form parsed "2027-03-31" as UTC midnight (05:30 in IST) and
+ * compared it with an FY end at local midnight, so 31 March, the busiest day
+ * of the year, came out "outside the FY", and today before 05:30 "in the
+ * future". `fy` is "2026-27"; `today` is todayLocal().
+ */
+export function invoiceDateWarning(date: string, fy: string, today: string = todayLocal()): string {
+  const startYear = parseInt(fy.split("-")[0], 10);
+  if (startYear) {
+    const { start, end } = fyBounds(startYear);
+    if (date < start || date > end) return `Date is outside FY ${fy}`;
+  }
+  return date > today ? "Date is in the future" : "";
+}

@@ -11,6 +11,7 @@
  * customers and skips numbers that already exist), and reports what the server
  * actually did.
  */
+import { mapDjangoInvoice } from "@/hooks/useDataStore";
 import type { AxiosInstance } from "axios";
 import { percentToRate } from "./gstRate";
 
@@ -35,13 +36,22 @@ async function existingNames(api: AxiosInstance, path: string): Promise<Set<stri
   return names;
 }
 
-export function backupInvoiceToImportRow(inv: any, bizById: Map<string, any>) {
+/**
+ * A backup's invoice as a bulk-import row. The Backup page saves invoices as
+ * the API returns them (invoice_number, customer_name, line_items); older
+ * backups held the app's own shape (invoiceNumber, items). Read only that
+ * shape, every invoice of a current backup failed with "No customer name"
+ * (review of H8). The party's GSTIN comes from the backup's customers.
+ */
+export function backupInvoiceToImportRow(raw: any, bizById: Map<string, any>, custById: Map<string, any> = new Map()) {
+  const inv = raw.invoice_number !== undefined || raw.line_items !== undefined ? mapDjangoInvoice(raw) : raw;
   const biz = bizById.get(String(inv.businessId)) || {};
+  const cust = custById.get(String(inv.customerId)) || {};
   return {
     invoiceNumber: inv.invoiceNumber,
     invoice_date: inv.invoice_date,
     customerName: inv.customerName,
-    customerGST: inv.customerGST || "",
+    customerGST: inv.customerGST || cust.gst_number || "",
     firmName: inv.businessName || biz.name || "",
     firmGSTIN: biz.gst_number || "",
     type: inv.type || "OUTWARD",
@@ -98,7 +108,8 @@ export async function restoreBackup(
 
   onProgress?.("invoices");
   const bizById = new Map((data.businesses || []).map((b: any) => [String(b.id), b]));
-  const rows = (data.invoices || []).map((inv: any) => backupInvoiceToImportRow(inv, bizById));
+  const custById = new Map((data.customers || []).map((c: any) => [String(c.id), c]));
+  const rows = (data.invoices || []).map((inv: any) => backupInvoiceToImportRow(inv, bizById, custById));
   for (let i = 0; i < rows.length; i += 100) {
     const res = await api.post("invoices/bulk-import/", { invoices: rows.slice(i, i + 100) });
     report.invoices.created += Number(res.data?.created) || 0;

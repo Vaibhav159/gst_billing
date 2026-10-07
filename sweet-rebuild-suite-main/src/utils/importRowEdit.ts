@@ -24,6 +24,8 @@ export interface EditableLine {
   cgst: number;
   sgst: number;
   igst: number;
+  /** The taxable value the parser sends (H9); the server checks qty x rate against it. */
+  taxable?: number;
 }
 
 export interface EditableInvoice {
@@ -64,7 +66,9 @@ export function recomputeLine(line: EditableLine, interstate: boolean): Editable
   const { cgst, sgst } = interstate ? { cgst: 0, sgst: 0 } : halveTax(tax);
   const igst = interstate ? tax : 0;
 
-  return { ...line, gstRate, cgst, sgst, igst, amount: round2(taxable + cgst + sgst + igst) };
+  // The taxable value goes with the edit: kept from the sheet, the server
+  // refused a corrected Qty because qty x rate no longer matched it.
+  return { ...line, gstRate, cgst, sgst, igst, taxable, amount: round2(taxable + cgst + sgst + igst) };
 }
 
 /** True when this invoice is already filed as an interstate supply. */

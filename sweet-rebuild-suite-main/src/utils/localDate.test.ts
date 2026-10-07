@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { toLocalDateString, todayLocal, fyBounds, fyMonthBounds } from "./localDate";
+import { toLocalDateString, todayLocal, fyBounds, fyMonthBounds, invoiceDateWarning } from "./localDate";
 
 // The bug these replace: a local-midnight Date serialized through UTC.
 const viaUtc = (d: Date) => d.toISOString().split("T")[0];
@@ -99,5 +99,28 @@ describe("toLocalDateString", () => {
 
   it("does not shift a local-midnight date", () => {
     expect(toLocalDateString(new Date(2026, 3, 1))).toBe("2026-04-01");
+  });
+});
+
+describe("invoiceDateWarning — calendar dates, not instants (M20)", () => {
+  // The form parsed the date as UTC midnight and compared it with an FY end
+  // at local midnight: in IST 31 March came out "outside the FY", and today
+  // before 05:30 "in the future".
+  it("accepts 31 March, the FY's last day", () => {
+    expect(invoiceDateWarning("2027-03-31", "2026-27", "2027-04-10")).toBe("");
+  });
+
+  it("accepts 1 April, the FY's first day", () => {
+    expect(invoiceDateWarning("2026-04-01", "2026-27", "2026-10-07")).toBe("");
+  });
+
+  it("warns for a day outside the FY", () => {
+    expect(invoiceDateWarning("2026-03-31", "2026-27", "2026-10-07")).toBe("Date is outside FY 2026-27");
+    expect(invoiceDateWarning("2027-04-01", "2026-27", "2027-04-10")).toBe("Date is outside FY 2026-27");
+  });
+
+  it("says today is today, and tomorrow is in the future", () => {
+    expect(invoiceDateWarning("2026-10-07", "2026-27", "2026-10-07")).toBe("");
+    expect(invoiceDateWarning("2026-10-08", "2026-27", "2026-10-07")).toBe("Date is in the future");
   });
 });

@@ -2316,8 +2316,10 @@ class CSVImportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get the import type
-        import_type = request.data.get("import_type", "invoice")
+        # Get the import type. The app's import screen sends it as `type`:
+        # read only as `import_type`, every product or customer CSV uploaded
+        # from the app was processed as invoices.
+        import_type = request.data.get("import_type") or request.data.get("type") or "invoice"
         if import_type not in ["invoice", "customer", "product"]:
             return Response(
                 {

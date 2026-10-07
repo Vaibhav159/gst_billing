@@ -23,8 +23,9 @@ import QuickProductModal from "@/components/QuickProductModal";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
-import { todayLocal } from "@/utils/localDate";
+import { todayLocal, invoiceDateWarning } from "@/utils/localDate";
 import { round2, halveTax } from "@/utils/money";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -55,9 +56,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   // reordering rows doesn't shuffle DOM nodes (which previously caused
   // input values to ghost into the wrong row after a delete). The _key
   // is client-only — stripped before send-to-server.
-  type LineItemDraft = { _key: string; productId: string; qty: number; rate: number; unit: ItemUnit };
+  // Each line carries its own name, HSN and rate (H17): looking them up by
+  // productId rewrote stored lines from whichever catalog product shared the
+  // line's id. See utils/invoiceDraft.
+  type LineItemDraft = DraftLine;
   const newItemKey = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
-  const blankItem = (): LineItemDraft => ({ _key: newItemKey(), productId: "", qty: 1, rate: 0, unit: "gms" as ItemUnit });
+  const blankItem = (): LineItemDraft => ({ _key: newItemKey(), productId: "", productName: "", hsn: "", gstRate: 0, qty: 1, rate: 0, unit: "gms" as ItemUnit });
   const [items, setItems] = useState<LineItemDraft[]>([blankItem()]);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
 
@@ -75,13 +79,13 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       financialYear: "",
     });
     if (duplicateFrom.items?.length > 0) {
-      setItems(duplicateFrom.items.map((it: any) => ({
-        _key: newItemKey(),
-        productId: String(it.productId || it.product || ""),
-        qty: it.qty || it.quantity || 1,
-        rate: it.rate || 0,
-        unit: (it.unit || "gms") as ItemUnit,
-      })));
+      const drafts: DraftLine[] = duplicateFrom.items.map((it: any) => draftFromDuplicate(it, newItemKey()));
+      setItems(drafts);
+      // The dropdown shows each copied line under its own name.
+      setFallbackEntities((prev) => ({
+        ...prev,
+        products: [...prev.products, ...drafts.map((d) => ({ id: d.productId, name: d.productName, hsn: d.hsn, gstRate: d.gstRate }))],
+      }));
     }
   }, [mode, duplicateFrom]);
 
@@ -118,20 +122,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           customer: inv.customer ? { id: String(inv.customer), name: inv.customer_name || `Customer #${inv.customer}` } : undefined,
           business: inv.business ? { id: String(inv.business), name: inv.business_name || `Business #${inv.business}` } : undefined,
           products: (inv.line_items || []).map((li: any) => ({
-            id: String(li.product || li.id || ""),
-            name: li.product_name || li.item_name || `Product #${li.product || li.id}`,
+            id: storedLineKey(li.id),
+            name: li.product_name || li.item_name || `Item #${li.id}`,
             hsn: li.hsn_code || "",
             gstRate: rateToPercent(li.gst_tax_rate),
           })),
         });
 
-        const lineItems = (inv.line_items || []).map((li: any) => ({
-          _key: newItemKey(),
-          productId: String(li.product || li.id || ""),
-          qty: parseFloat(li.quantity) || 1,
-          rate: parseFloat(li.rate) || 0,
-          unit: (li.unit || "gms") as ItemUnit,
-        }));
+        const lineItems = (inv.line_items || []).map((li: any) => draftFromStored(li, newItemKey()));
         if (lineItems.length > 0) setItems(lineItems);
       })
       .catch((err) => {
@@ -192,20 +190,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     return () => clearTimeout(t);
   }, [form.invoiceNumber, form.businessId, form.type, form.date, mode]);
 
-  // Date validation
+  // Date validation, on calendar dates (M20): as Date objects 31 March read as
+  // outside the FY in IST, and today before 05:30 as in the future.
   useEffect(() => {
     if (!form.date) return;
-    const d = new Date(form.date);
-    const today = new Date();
-    const warns: Record<string, string> = {};
-    if (d > today) warns.date = "Date is in the future";
-    const fy = parseInt((form.financialYear || currentFY).split("-")[0]);
-    if (fy) {
-      const fyStart = new Date(fy, 3, 1);
-      const fyEnd = new Date(fy + 1, 2, 31);
-      if (d < fyStart || d > fyEnd) warns.date = `Date is outside FY ${fy}-${String(fy + 1).slice(2)}`;
-    }
-    setWarnings(w => { const n = { ...w }; delete n.date; return warns.date ? { ...n, date: warns.date } : n; });
+    const warning = invoiceDateWarning(form.date, form.financialYear || currentFY);
+    setWarnings(w => { const n = { ...w }; delete n.date; return warning ? { ...n, date: warning } : n; });
   }, [form.date, form.financialYear]);
 
   const [dirty, setDirty] = useState(false);
@@ -269,7 +259,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           // Re-key restored items — drafts saved before _key existed
           // won't have the field, and re-generating is harmless either
           // way since it's client-only.
-          setItems(draft.items.map((it: any) => ({ ...it, _key: it._key || newItemKey() })));
+          // A line saved before H17 carries only its product id: fill it from the catalog.
+          setItems(draft.items.map((it: any) => draftFromSaved({ ...it, _key: it._key || newItemKey() }, allProducts) as DraftLine));
         }
         setDirty(true);
         toast({ title: "Draft Restored", description: "Your unsaved invoice has been restored." });
@@ -329,16 +320,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     const product = localProducts.find((p) => p.id === productId);
     // Picking a product adopts its default unit (a pcs product should not
     // start in gms); the unit select stays editable per line afterwards.
-    setItems((p) => p.map((it, idx) => idx === i ? { ...it, productId, unit: product?.defaultUnit || it.unit, rate: product && it.rate === 0 ? 0 : it.rate } : it));
+    setItems((p) => p.map((it, idx) => idx === i ? (product ? withProduct(it, product) : { ...it, productId }) : it));
     setDirty(true);
   };
 
-  const calcItem = (item: { productId: string; qty: number; rate: number }) => {
-    const product = localProducts.find((p) => p.id === item.productId);
-    const amount = round2(item.qty * item.rate);
-    const tax = product ? round2((amount * product.gstRate) / 100) : 0;
-    return { amount, tax, gstRate: product?.gstRate || 0 };
-  };
+  const calcItem = (item: LineItemDraft) => ({ ...lineMoney(item), gstRate: item.gstRate });
 
   // Quantized once, not carried as a raw float sum into the figures on screen.
   const subtotal = round2(items.reduce((s, it) => s + calcItem(it).amount, 0));
@@ -430,33 +416,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
     const selectedBiz = effectiveBusinesses.find(b => String(b.id) === String(form.businessId));
     const selectedCust = localCustomers.find(c => String(c.id) === String(form.customerId));
-    const invoiceItems = items.map(it => {
-      const product = localProducts.find(p => p.id === it.productId);
-      const netAmount = round2(it.qty * it.rate);
-      const tax = product ? round2((netAmount * product.gstRate) / 100) : 0;
-      // Round one half and give the other the remainder. Rounding both halves
-      // of an odd-paise tax independently loses (or invents) a paisa: 16.49
-      // became 8.24 + 8.24 = 16.48, so the line no longer agreed with the
-      // invoice total inside a single payload.
-      const { cgst, sgst } = form.isIGST ? { cgst: 0, sgst: 0 } : halveTax(tax);
-      const igst = form.isIGST ? tax : 0;
-      // amount stored on line item is GROSS (net + tax) — Invoice.total_amount
-      // is sum(LineItem.amount), so this MUST include the tax.
-      const amount = round2(netAmount + cgst + sgst + igst);
-      return {
-        productId: it.productId,
-        productName: product?.name || "",
-        hsn: product?.hsn || "",
-        gstRate: product?.gstRate || 0,
-        qty: it.qty,
-        rate: it.rate,
-        unit: it.unit,
-        amount,
-        cgst,
-        sgst,
-        igst,
-      };
-    });
+    // Each line's own name, HSN and rate; heads split in whole paise.
+    const invoiceItems = items.map((it) => lineToSave(it, form.isIGST));
 
     // Quantize the aggregate once. A raw float sum serializes as
     // 30.299999999999997 for 10.10 + 20.20, which a strict DecimalField rejects
@@ -796,11 +757,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               <div className="flex items-center gap-2"><Calculator className="w-4 h-4 text-primary" /><h3 className="text-[13px] font-display font-semibold text-foreground">Summary</h3></div>
               <div className="space-y-2 text-[13px]">
                 {items.map((item) => {
-                  const product = localProducts.find(p => p.id === item.productId);
-                  if (item.qty === 0 && item.rate === 0 && !product) return null;
+                  if (item.qty === 0 && item.rate === 0 && !item.productName) return null;
                   return (
                     <div key={item._key} className="space-y-1.5 pb-2 border-b border-border/30">
-                      {product && <div className="text-[12px] font-medium text-foreground truncate" title={product.name}>{product.name}</div>}
+                      {item.productName && <div className="text-[12px] font-medium text-foreground truncate" title={item.productName}>{item.productName}</div>}
                       <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{item.qty} {item.unit}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(item.rate)}/{item.unit}</span></div>
                     </div>
@@ -926,12 +886,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
             <div className="px-5 py-3 space-y-2">
               {items.map((it, i) => {
-                const product = localProducts.find((p) => p.id === it.productId);
                 const { amount, tax, gstRate } = calcItem(it);
                 return (
                   <div key={i} className="py-2 border-b border-border/20 last:border-b-0">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[13px] font-medium truncate" title={product?.name}>{product?.name || "Item"}</span>
+                      <span className="text-[13px] font-medium truncate" title={it.productName}>{it.productName || "Item"}</span>
                       <span className="text-[13px] font-semibold tabular-nums whitespace-nowrap">{formatCurrency(amount + tax)}</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground tabular-nums">

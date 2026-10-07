@@ -78,7 +78,9 @@ def build_line_items(
         qty = _dec(item.get("quantity"), "1" if source == "form" else "0")
         rate = _dec(item.get("rate"))
         raw_rate = item.get("gst_tax_rate")
-        if raw_rate in (None, "", 0, "0") and default_rate is not None:
+        # Only a rate that is absent takes the default: an explicit 0 is an
+        # exempt line, and defaulting it billed 3% (M19).
+        if raw_rate in (None, "") and default_rate is not None:
             raw_rate = default_rate
         gst_rate = normalize_rate(raw_rate or 0, assume="fraction")
         net = qty * rate

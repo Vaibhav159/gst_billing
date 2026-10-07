@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as XLSX from "xlsx-js-style";
 import { normalizeDate, toImportReadyInvoices, parseInvoiceExcel } from "./parseInvoiceExcel";
 import type { ParsedExcelResult } from "./parseInvoiceExcel";
 import { generateSampleExcelBytes } from "./generateSampleExcel";
@@ -26,7 +27,7 @@ describe("normalizeDate", () => {
 });
 
 describe("toImportReadyInvoices — Product master lookup", () => {
-  function makeParsed(rows: Array<Partial<{ commodity: string; qty: number; rate: number; gstRate: number; totalInvoiceValue: number }>>): ParsedExcelResult {
+  function makeParsed(rows: Array<Partial<{ commodity: string; qty: number; rate: number; gstRate: number | null; totalInvoiceValue: number }>>): ParsedExcelResult {
     return {
       firms: [{
         firmName: "Test Firm",
@@ -42,7 +43,7 @@ describe("toImportReadyInvoices — Product master lookup", () => {
           gstNumber: "",
           commodity: r.commodity || "GOLD",
           hsnCode: "",
-          gstRate: r.gstRate ?? 0,
+          gstRate: r.gstRate ?? null,  // a sheet without the rate gives none
           qty: r.qty ?? 0,
           rate: r.rate ?? 0,
           taxableValue: 0,
@@ -95,6 +96,19 @@ describe("toImportReadyInvoices — Product master lookup", () => {
     expect(inv.total).toBe(1000); // amount = taxable since taxes are 0
   });
 
+  it("keeps an explicit 0% even for a product the master taxes (review of M19)", () => {
+    // 0 used to mean "no rate", so the master's 3% replaced it.
+    const parsed = makeParsed([{ commodity: "GOLD ORNAMENTS", qty: 5, rate: 14000, gstRate: 0 }]);
+    const products = [{ name: "GOLD ORNAMENTS", hsn_code: "711319", gst_tax_rate: 0.03 }];
+    const [inv] = toImportReadyInvoices(parsed, products);
+    expect(inv.items[0]).toMatchObject({ gstRate: 0, cgst: 0, sgst: 0, amount: 70000 });
+  });
+
+  it("sends no rate when neither the sheet nor the master has one", () => {
+    const [inv] = toImportReadyInvoices(makeParsed([{ commodity: "UNKNOWN_THING", qty: 1, rate: 1000 }]), []);
+    expect(inv.items[0].gstRate).toBeNull();
+  });
+
   it("back-derives taxable from a supplied total + GST rate", () => {
     const parsed = makeParsed([{ commodity: "GOLD ORNAMENTS", totalInvoiceValue: 1030 }]);
     const products = [{ name: "GOLD ORNAMENTS", hsn_code: "711319", gst_tax_rate: 0.03 }];
@@ -113,8 +127,8 @@ describe("parseInvoiceExcel — regression: smart template (no HSN/GST Rate colu
     // Smart template has only 8 columns: S.No., Bill, Date, Party, GST,
     // Commodity, Qty, Rate. Old positional fallback (gst rate at index 7)
     // would have picked up the Rate value (~14000) and treated it as 14000%.
-    // After fix: gstRate column missing → gstRate = 0, backend resolves from
-    // Product master.
+    // After fix: gstRate column missing → no rate (null; 0 is 0% since the
+    // review of M19), backend resolves from Product master.
     const bytes = generateSampleExcelBytes({
       businesses: [{ name: "F1", gst_number: "08AAA1234A1Z1" }],
       products: [{ name: "GOLD ORNAMENTS" }],
@@ -128,8 +142,8 @@ describe("parseInvoiceExcel — regression: smart template (no HSN/GST Rate colu
     const firm = result.firms[0];
     expect(firm.invoices.length).toBeGreaterThan(0);
     for (const inv of firm.invoices) {
-      // gstRate should be 0 (not present in file → backend resolves it)
-      expect(inv.gstRate).toBe(0);
+      // No rate (not present in file → backend resolves it)
+      expect(inv.gstRate).toBeNull();
       // Rate should be the actual Rate value (≥ 100, not weirdly bonkers)
       // and qty should be a sensible weight
       if (inv.qty > 0 && inv.rate > 0) {
@@ -199,5 +213,152 @@ describe("toImportReadyInvoices — placeholder GSTINs (H12)", () => {
     };
     const [inv] = toImportReadyInvoices(parsed, []);
     expect(inv.items[0]).toMatchObject({ cgst: 150, sgst: 150, igst: 0 });
+  });
+});
+
+describe("parseInvoiceExcel — a register without Qty/Rate columns (H9)", () => {
+  // A CA-style register: taxable value and tax, no quantity or price. With no
+  // Qty/Rate headers the parser read fixed column positions, and "Rate%" was
+  // taken as the price: Taxable 60,000 + CGST 900 imported as 60,000 x 900.
+  function register(): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "Rate%", "Taxable Value", "CGST", "SGST", "Total"],
+      [1, "101", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", 3, 60000, 900, 900, 61800],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+
+  it("reads no quantity or price, and the Rate% column as the GST rate", () => {
+    const [row] = parseInvoiceExcel(register()).firms[0].invoices;
+    expect(row).toMatchObject({ qty: 0, rate: 0, gstRate: 3, taxableValue: 60000, cgst: 900, sgst: 900 });
+  });
+
+  it("sends the taxable value it read", () => {
+    const [inv] = toImportReadyInvoices(parseInvoiceExcel(register()), []);
+    expect(inv.items[0]).toMatchObject({ qty: 0, rate: 0, taxable: 60000, cgst: 900, sgst: 900, amount: 61800 });
+  });
+});
+
+describe("parseInvoiceExcel — a cell formatted as a percent (H10)", () => {
+  // Excel stores a cell shown as "3%" as 0.03. Used as a percent, 10 x 6,000
+  // carried CGST 9 + SGST 9 instead of 900 + 900.
+  function sheet(rateCell: number | string): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "GST Rate", "Qty", "Rate", "Total"],
+      [1, "102", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", rateCell, 10, 6000, 0],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+
+  it("reads 0.03 as 3% and taxes 60,000 at it", () => {
+    const [inv] = toImportReadyInvoices(parseInvoiceExcel(sheet(0.03)), []);
+    expect(inv.items[0]).toMatchObject({ gstRate: 3, cgst: 900, sgst: 900, amount: 61800 });
+  });
+
+  it("still reads 3 and \"3%\" as 3%, and 0.0025 as the 0.25% slab", () => {
+    for (const cell of [3, "3%"]) {
+      expect(toImportReadyInvoices(parseInvoiceExcel(sheet(cell)), [])[0].items[0].gstRate).toBe(3);
+    }
+    expect(toImportReadyInvoices(parseInvoiceExcel(sheet(0.0025)), [])[0].items[0].gstRate).toBe(0.25);
+  });
+});
+
+describe("parseInvoiceExcel — a GST rate under 1% (review of H10)", () => {
+  // The column holds percents. Read through rateToPercent, any off-slab value
+  // up to 1 was taken for a fraction: the app's own export writes a blended
+  // 0.8% (a GSTR-2A purchase) as the text "0.8%", and it came back as 80%.
+  function sheet(rateCell: number | string, format?: string): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "GST Rate", "Qty", "Rate", "Total"],
+      [1, "103", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", rateCell, 10, 6000, 0],
+    ]);
+    if (format) ws["H4"].z = format;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+  const rateOf = (rateCell: number | string, format?: string) =>
+    toImportReadyInvoices(parseInvoiceExcel(sheet(rateCell, format)), [])[0].items[0];
+
+  it("reads the text 0.8% as 0.8% and taxes at it", () => {
+    expect(rateOf("0.8%")).toMatchObject({ gstRate: 0.8, cgst: 240, sgst: 240 });
+  });
+
+  it("reads a bare off-slab 0.5 as 0.5%, not 50%", () => {
+    expect(rateOf(0.5).gstRate).toBe(0.5);
+  });
+
+  it("reads a cell formatted as a percentage by its value: 0.008 shown as 0.8% is 0.8%", () => {
+    expect(rateOf(0.008, "0.0%").gstRate).toBe(0.8);
+    expect(rateOf(0.03, "0%").gstRate).toBe(3);
+  });
+
+  it("still reads every slab either way", () => {
+    for (const [cell, pct] of [[0.03, 3], [3, 3], ["3%", 3], [0.0025, 0.25], [0.25, 0.25], [18, 18]] as const) {
+      expect(rateOf(cell).gstRate).toBe(pct);
+    }
+  });
+});
+
+describe("parseInvoiceExcel — a blank rate is no rate, a 0 is 0% (review of M19)", () => {
+  function sheet(rateCell: number | string | null): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", "GST Rate", "Qty", "Rate", "Total"],
+      [1, "104", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", rateCell, 10, 6000, 0],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+
+  it("reads a blank cell as no rate, and a 0 as 0%", () => {
+    expect(parseInvoiceExcel(sheet(null)).firms[0].invoices[0].gstRate).toBeNull();
+    expect(parseInvoiceExcel(sheet(0)).firms[0].invoices[0].gstRate).toBe(0);
+    expect(parseInvoiceExcel(sheet("0%")).firms[0].invoices[0].gstRate).toBe(0);
+  });
+});
+
+describe("parseInvoiceExcel — which header is the GST rate (review of H9)", () => {
+  // H9 took any header with "rate" and "%" for the GST rate, the last one
+  // winning, so "Making Rate %" beside "GST Rate" set a 12% GST; "GST %" wasn't
+  // recognised at all, and "CGST %" (a half rate) could be read as CGST.
+  function sheet(headers: string[], values: (string | number)[]): ArrayBuffer {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["KIRAN GOLD HOUSE"],
+      ["GSTIN: 08AAGPL3375F1ZO"],
+      ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN", ...headers],
+      [1, "105", "05-04-2026", "ANIL GUPTA", "", "Gold Ornaments", "711319", ...values],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KIRAN");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  }
+  const row = (headers: string[], values: (string | number)[]) =>
+    parseInvoiceExcel(sheet(headers, values)).firms[0].invoices[0];
+
+  it("reads a GST % column as the GST rate", () => {
+    expect(row(["GST %", "Qty", "Rate", "Total"], [3, 10, 6000, 0]).gstRate).toBe(3);
+  });
+
+  it("does not take a making-charge percentage for the GST rate", () => {
+    expect(row(["GST Rate", "Making Rate %", "Qty", "Rate", "Total"], [3, 12, 10, 6000, 0]).gstRate).toBe(3);
+  });
+
+  it("reads CGST from the amount column, not the CGST % beside it", () => {
+    const r = row(["GST Rate", "Taxable Value", "CGST", "CGST %", "SGST", "SGST %", "Total"],
+      [3, 60000, 900, 1.5, 900, 1.5, 61800]);
+    expect(r).toMatchObject({ gstRate: 3, cgst: 900, sgst: 900 });
   });
 });

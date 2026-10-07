@@ -10,7 +10,9 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useBusinesses, useCustomers, mapDjangoInvoice } from "@/hooks/useDataStore";
+import { useBusinesses, useCustomers } from "@/hooks/useDataStore";
+import { fyInvoicesForPdf } from "@/utils/pdfInvoices";
+import { useLatest } from "@/hooks/useLatest";
 import type { Invoice } from "@/utils/mockData";
 import api from "@/utils/api";
 import { BlobProvider } from "@react-pdf/renderer";
@@ -31,8 +33,6 @@ export default function BulkPDF() {
   const [typeFilter, setTypeFilter] = useState("all");
   const { items: businesses } = useBusinesses();
   const { items: customers } = useCustomers();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loadingInvoices, setLoadingInvoices] = useState(false);
 
   // For Tally PDF generation
   const [pdfQueue, setPdfQueue] = useState<Invoice[]>([]);
@@ -45,36 +45,18 @@ export default function BulkPDF() {
   }, []);
 
 
-  // Parse FY into date range: "2025-26" → Apr 2025 to Mar 2026
-  const fyStartYear = parseInt(selectedFY.split("-")[0], 10);
-  const fyStartDate = `${fyStartYear}-04-01`;
-  const fyEndDate = `${fyStartYear + 1}-03-31`;
-
-  // Fetch ALL invoices for the selected FY/business/type
-  const fetchAllInvoices = useCallback(async () => {
-    if (!localStorage.getItem("gst_access_token")) return;
-    setLoadingInvoices(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("page_size", "1000");
-      params.set("include_items", "true");
-      params.set("start_date", fyStartDate);
-      params.set("end_date", fyEndDate);
-      if (bizFilter !== "all") params.set("business_id", bizFilter);
-      if (typeFilter !== "all") params.set("type_of_invoice", typeFilter.toLowerCase());
-
-      const res = await api.get<any>(`invoices/?${params.toString()}`);
-      const data = res.data;
-      const results = Array.isArray(data) ? data : (data.results || []);
-      setInvoices(results.map(mapDjangoInvoice));
-    } catch (e) {
-      logger.error("Failed to fetch invoices for bulk PDF", e);
-    } finally {
-      setLoadingInvoices(false);
-    }
-  }, [fyStartDate, fyEndDate, bizFilter, typeFilter]);
-
-  useEffect(() => { fetchAllInvoices(); }, [fetchAllInvoices]);
+  // Every invoice of the selected FY/business/type, every page (one 1,000-row
+  // request stopped there, H18). Only the latest selection's answer counts,
+  // and a failed fetch empties the list rather than keep the last FY's.
+  const fyList = useLatest(
+    () => (localStorage.getItem("gst_access_token") ? fyInvoicesForPdf(selectedFY, bizFilter, typeFilter) : Promise.resolve([])),
+    [selectedFY, bizFilter, typeFilter],
+  );
+  const invoices: Invoice[] = fyList.data ?? [];
+  const loadingInvoices = fyList.loading;
+  useEffect(() => {
+    if (fyList.failed) toast({ title: "Couldn't load the invoices", description: "Check the connection and pick the FY again.", variant: "destructive" });
+  }, [fyList.failed, toast]);
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
   const [invoiceFrom, setInvoiceFrom] = useState("");
   const [invoiceTo, setInvoiceTo] = useState("");

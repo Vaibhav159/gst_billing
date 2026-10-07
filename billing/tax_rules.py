@@ -10,6 +10,30 @@ from decimal import ROUND_HALF_UP, Decimal
 PAISA = Decimal("0.01")
 
 
+THOUSANDTH = Decimal("0.001")  # LineItem.quantity and rate keep 3 decimals
+
+
+def unit_split(quantity, rate, taxable):
+    """(quantity, rate) for a line whose taxable value is known but whose
+    quantity x rate is 0 (H8).
+
+    It keeps the weight (or the price) the line has when the other figure,
+    worked out to the 3 decimals the columns hold, rounds back to the taxable
+    value's paisa: 10 x 0 for Rs 10,000 is 10 x 1,000, so GSTR-1's Table 12
+    still says 10 GMS. Otherwise it is one unit at the taxable value.
+    """
+    quantity, rate, taxable = Decimal(str(quantity or 0)), Decimal(str(rate or 0)), to_paise(taxable)
+    if quantity > 0 and rate == 0:
+        rate = (taxable / quantity).quantize(THOUSANDTH, rounding=ROUND_HALF_UP)
+        if to_paise(quantity * rate) == taxable:
+            return quantity, rate
+    elif rate > 0 and quantity == 0:
+        quantity = (taxable / rate).quantize(THOUSANDTH, rounding=ROUND_HALF_UP)
+        if quantity > 0 and to_paise(quantity * rate) == taxable:
+            return quantity, rate
+    return Decimal("1"), taxable
+
+
 def to_paise(value):
     """Round to the paisa, half-up (the GST convention)."""
     return Decimal(str(value or 0)).quantize(PAISA, rounding=ROUND_HALF_UP)

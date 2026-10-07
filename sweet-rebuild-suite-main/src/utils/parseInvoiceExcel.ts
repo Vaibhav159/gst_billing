@@ -18,7 +18,7 @@ export interface ParsedInvoiceRow {
   gstNumber: string;
   commodity: string;
   hsnCode: string;
-  gstRate: number; // percentage, e.g. 3
+  gstRate: number | null; // percentage, e.g. 3; null when the sheet gives none
   qty: number;
   rate: number;
   taxableValue: number;
@@ -71,6 +71,25 @@ function numVal(cell: any): number {
 function strVal(cell: any): string {
   if (cell === null || cell === undefined) return "";
   return String(cell).trim();
+}
+
+/**
+ * A GST-rate cell as a percent, or null when the sheet gives none.
+ *
+ * The column holds percents. Text such as "0.8%" (the app's own report writes
+ * rates that way) is the percent written, and so is a bare number: a slab reads
+ * either way (0.03 and 3 are both 3%), an off-slab one as a percent. A cell
+ * formatted as a percentage shows "3%" but holds 0.03, so its value is the
+ * fraction. Read as a fraction whenever it was 1 or less, a blended 0.8% came
+ * back as 80% (review of H10). `shown` is the cell's formatted text.
+ */
+export function gstPercentOf(value: unknown, shown = ""): number | null {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  if (typeof value === "number") {
+    return lineItemPercent({ gstRate: shown.includes("%") ? value * 100 : value });
+  }
+  const n = parseFloat(String(value).replace(/[%\s]/g, ""));
+  return Number.isFinite(n) ? lineItemPercent({ gstRate: n }) : null;
 }
 
 /**
@@ -139,13 +158,23 @@ function detectColumnMap(row: any[]): Record<string, number> {
     if (val.includes("gst number") || val.includes("gstin") || val === "gst no") map.gstNumber = idx;
     if (val.includes("commodity") || val.includes("product") || val.includes("item") || val.includes("description")) map.commodity = idx;
     if (val.includes("hsn")) map.hsnCode = idx;
-    if (val.includes("gst rate") || val === "rate %" || val === "tax rate") map.gstRate = idx;
+    // A rate in percent ("Rate%", "Rate (%)") is the GST rate, never the price
+    // per unit: taken as the price, a register's Rate% 3 became rate 3 (H9).
+    // But only a GST or bare rate: "Making Rate %" set a 12% GST, and "CGST %"
+    // is a half rate (review of H9). "GST %" is one.
+    const percent = val.includes("%");
+    const halfRate = val.includes("cgst") || val.includes("sgst") || val.includes("utgst");
+    const gstRate = val.includes("gst rate") || val.includes("tax rate")
+      || (percent && (val.includes("gst") || val.includes("tax") || /^rate\s*\(?\s*%\s*\)?$/.test(val)));
+    if (gstRate && !halfRate) map.gstRate = idx;
     if (val.includes("qty") || val.includes("quantity") || val.includes("weight")) map.qty = idx;
-    if ((val.includes("rate") && !val.includes("gst") && !val.includes("tax")) || val.includes("price") || val.includes("rate (")) map.rate = idx;
+    if (!percent && ((val.includes("rate") && !val.includes("gst") && !val.includes("tax")) || val.includes("price"))) map.rate = idx;
     if (val.includes("taxable")) map.taxableValue = idx;
-    if (val === "cgst" || val.includes("cgst")) map.cgst = idx;
-    if (val === "sgst" || val.includes("sgst")) map.sgst = idx;
-    if (val === "igst" || val.includes("igst")) map.igst = idx;
+    // The amount columns, not a rate beside them ("CGST %", "CGST Rate").
+    const amount = !percent && !val.includes("rate");
+    if (amount && val.includes("cgst")) map.cgst = idx;
+    if (amount && val.includes("sgst")) map.sgst = idx;
+    if (amount && val.includes("igst")) map.igst = idx;
     if (val.includes("total") && !val.includes("cgst") && !val.includes("sgst") && !val.includes("igst")) map.total = idx;
     if (val.includes("payment")) map.payment = idx;
   });
@@ -158,15 +187,21 @@ function detectColumnMap(row: any[]): Record<string, number> {
 function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
   const rows: any[][] = [];
+  // Each cell's formatted text, beside its value: a GST rate formatted as a
+  // percentage is told apart by it (gstPercentOf).
+  const shown: string[][] = [];
 
   for (let r = range.s.r; r <= range.e.r; r++) {
     const row: any[] = [];
+    const text: string[] = [];
     for (let c = range.s.c; c <= Math.min(range.e.c, 20); c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
       const cell = ws[addr];
       row.push(cell ? cell.v : null);
+      text.push(cell?.w ?? "");
     }
     rows.push(row);
+    shown.push(text);
   }
 
   let firmName = sheetName;
@@ -284,15 +319,22 @@ function parseSheet(ws: XLSX.WorkSheet, sheetName: string): ParsedFirmSheet {
       const invoiceDate = continuation ? lastInvoiceDate : rawDate;
       const partyName = continuation ? lastPartyName : rawParty;
       const gstNumber = continuation ? lastGstNumber : rawGstin;
-      const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : numVal(row[hasSNo ? 8 : 7]);
-      const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : numVal(row[hasSNo ? 9 : 8]);
+      // Read only from a column the header names. The old positional fallback
+      // took a register's Taxable Value column as the quantity: 60,000 x 900
+      // instead of 60,000 of taxable (H9). Without them the taxable value or
+      // the total carries the line, and the server stores 1 x taxable.
+      const qty = colMap.qty !== undefined ? numVal(row[colMap.qty]) : 0;
+      const rate = colMap.rate !== undefined ? numVal(row[colMap.rate]) : 0;
 
       // OPTIONAL columns — only read if the header explicitly maps them.
       // If they're missing, leave blank (parser/backend resolves from Product master).
       const hsnCode = colMap.hsnCode !== undefined ? strVal(row[colMap.hsnCode]) : "";
+      // A cell formatted "3%" holds 0.03: taken as a percent, 0.03 taxed
+      // 60,000 at 0.03% (H10). gstPercentOf reads the column as percents.
+      // null when the sheet gives none, so a 0 stays 0% (review of M19).
       const gstRate = colMap.gstRate !== undefined
-        ? numVal(strVal(row[colMap.gstRate]).replace("%", ""))
-        : 0;
+        ? gstPercentOf(row[colMap.gstRate], shown[i][colMap.gstRate])
+        : null;
       const taxableValue = colMap.taxableValue !== undefined ? numVal(row[colMap.taxableValue]) : 0;
       const cgst = colMap.cgst !== undefined ? numVal(row[colMap.cgst]) : 0;
       const sgst = colMap.sgst !== undefined ? numVal(row[colMap.sgst]) : 0;
@@ -397,10 +439,13 @@ export interface ImportReadyInvoice {
   items: {
     productName: string;
     hsn: string;
-    gstRate: number;
+    /** Percent; null when neither the sheet nor the product master gives one. */
+    gstRate: number | null;
     qty: number;
     rate: number;
     unit: string;
+    /** The taxable value the file gave or the parser worked out (H9). */
+    taxable?: number;
     amount: number;
     cgst: number;
     sgst: number;
@@ -505,11 +550,11 @@ export function toImportReadyInvoices(
 
       const items = rows.map(row => {
         // Resolve GST% (in percentage form): row → product → 0
+        // The master fills a missing rate only: a 0% line is 0%, not "no rate"
+        // (review of M19).
         let gstPercent = row.gstRate;
         const lookup = lookupProduct(row.commodity, productMaps);
-        if (!gstPercent || gstPercent === 0) {
-          if (lookup) gstPercent = lookup.gstPercent;
-        }
+        if (gstPercent === null && lookup) gstPercent = lookup.gstPercent;
         const hsn = row.hsnCode || (lookup?.hsn ?? "");
 
         // Compute taxable: prefer file value → qty*rate → back-derive from total
@@ -517,13 +562,13 @@ export function toImportReadyInvoices(
         if (taxable === 0 && row.qty > 0 && row.rate > 0) {
           taxable = Math.round(row.qty * row.rate * 100) / 100;
         }
-        if (taxable === 0 && row.totalInvoiceValue > 0 && gstPercent > 0) {
+        if (taxable === 0 && row.totalInvoiceValue > 0 && gstPercent !== null) {
           taxable = Math.round((row.totalInvoiceValue / (1 + gstPercent / 100)) * 100) / 100;
         }
 
         // Compute taxes if not in file
         let cgst = row.cgst, sgst = row.sgst, igst = row.igst;
-        if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent > 0) {
+        if (cgst === 0 && sgst === 0 && igst === 0 && taxable > 0 && gstPercent) {
           const tax = round2(taxable * gstPercent / 100);
           // One tax, split exactly: rounding each half-rate head on its own
           // turned 16.49 into 8.25 + 8.25 (H13).
@@ -568,6 +613,9 @@ export function toImportReadyInvoices(
         items: items.map((i: any) => ({
           productName: i.productName, hsn: i.hsn, gstRate: i.gstRate,
           qty: i.qty, rate: i.rate, unit: i.unit,
+          // The taxable value the parser worked out (H9): the server checks
+          // qty x rate against it and stores 1 x taxable when there is none.
+          taxable: i.taxable,
           amount: i.amount, cgst: i.cgst, sgst: i.sgst, igst: i.igst,
         })),
         subtotal: Math.round(subtotal * 100) / 100,
