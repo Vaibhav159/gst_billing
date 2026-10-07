@@ -27,7 +27,7 @@ from billing.period_lock import assert_period_unlocked
 from billing.tax_rules import GST_SLABS, has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
 
-from .inward_bills_service import compute_lines, find_duplicate, gstin_matches
+from .inward_bills_service import compute_lines, find_duplicate, gstin_conflict, gstin_matches
 from .permissions import RoleBasedPermission
 from .serializers import InwardBillListSerializer, InwardBillSerializer
 
@@ -165,6 +165,9 @@ class InwardBillListCreateView(APIView):
             return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         try:
             supplier = self._resolve_supplier(business, supplier_gstin, supplier_name, request.data)
+        except SupplierGstinConflict as conflict:
+            return Response({"error": "supplier_gstin_conflict", "detail": str(conflict)},
+                            status=status.HTTP_400_BAD_REQUEST)
         except IntegrityError:
             return Response(
                 {"error": "supplier_name_conflict", "detail":
@@ -275,6 +278,8 @@ class InwardBillListCreateView(APIView):
             supplier = Customer.objects.filter(gst_number=gstin).first()
         if supplier is None and name:
             supplier = Customer.objects.filter(name=name).first()
+            if supplier is not None and (problem := gstin_conflict(supplier, gstin)):
+                raise SupplierGstinConflict(problem)
             # The bill carries a GSTIN the supplier on file lacks (the no-GSTIN
             # hint asks for exactly this): keep it there too, or later edits
             # and GSTR-2B matching see no GSTIN behind a bill claiming credit.
@@ -299,6 +304,10 @@ class InwardBillListCreateView(APIView):
         if not supplier.businesses.filter(id=business.id).exists():
             supplier.businesses.add(business)
         return supplier
+
+
+class SupplierGstinConflict(Exception):
+    """The supplier named on the bill is on file under another GSTIN."""
 
 
 class InwardBillDetailView(APIView):

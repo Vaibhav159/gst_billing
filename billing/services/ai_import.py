@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 
-from billing.api.inward_bills_service import find_duplicate
+from billing.api.inward_bills_service import find_duplicate, gstin_conflict
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.period_lock import assert_period_unlocked
@@ -126,6 +126,10 @@ def create_from_ai(request):
                     businesses__id=business_id, name__iexact=extracted_name
                 ).first()
             )
+            # Matched by name under another GSTIN: another branch, or a misread
+            # GSTIN. Booked there, the bill followed the record's GSTIN.
+            if customer is not None and (problem := gstin_conflict(customer, extracted_gstin)):
+                return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
         # C1b: no GSTIN, no input tax. The bill's GSTIN as reviewed, else the
         # supplier's on file, so a scan that missed it doesn't cost a
         # registered supplier its credit. Before anything is written.

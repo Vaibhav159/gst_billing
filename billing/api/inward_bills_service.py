@@ -75,6 +75,23 @@ def gstin_matches(bill_gstin, firm_gstin):
     )
 
 
+def gstin_conflict(party, gstin):
+    """Why a bill carrying `gstin` can't be booked on `party`, found by name.
+
+    A trade name can hold a registration in each state, and a scan can misread
+    a GSTIN. Booked on a record with another GSTIN, the bill's head and its
+    credit followed that GSTIN instead of the bill's (review of M26).
+    """
+    on_file = clean_gstin(getattr(party, "gst_number", ""))
+    gstin = clean_gstin(gstin)
+    if gstin and on_file and gstin != on_file:
+        return (
+            f"{party.name} is on file with GSTIN {on_file}, but this bill's GSTIN is {gstin}. "
+            "If the GSTIN was misread, correct it; if this is another branch, give the supplier its own name."
+        )
+    return None
+
+
 def inward_number_key(number):
     """A supplier's bill number spelt one way: upper-case letters and digits.
 
