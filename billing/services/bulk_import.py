@@ -24,6 +24,7 @@ from billing.tax_rules import (
     direction_known,
     gstin_problem,
     has_gstin,
+    itc_refusal,
     normalize_rate,
     normalize_tax_heads,
     rate_as_percent,
@@ -310,6 +311,25 @@ def run_bulk_import(request):
                     if dup_key in existing_invoice_keys:
                         skipped_count += 1
                         continue
+                    # C1b at this door too: no supplier GSTIN, no input tax.
+                    # The row's GSTIN, else the supplier's on file, as AI import
+                    # reads it; each line at the rate it will be booked at.
+                    if type_of_invoice == INVOICE_TYPE_INWARD:
+                        def booked_rate(item):
+                            raw = item.get("gstRate")
+                            if raw not in (None, "", 0, "0"):
+                                return normalize_rate(raw, assume="percent")
+                            product = lookup_product(str(item.get("productName") or "").strip())
+                            return normalize_rate(product.gst_tax_rate, assume="fraction") if product else 0
+                        problem = itc_refusal(
+                            clean_gstin(customer_gst) or clean_gstin(customer.gst_number),
+                            [{"gst_tax_rate": booked_rate(i), "cgst": i.get("cgst"), "sgst": i.get("sgst"),
+                              "igst": i.get("igst")} for i in inv_data.get("items", [])],
+                        )
+                        if problem:
+                            errors.append(f"Invoice {invoice_number}: {problem}")
+                            skipped_count += 1
+                            continue
                     number_key = (business.pk, invoice_number, fy_start(str(invoice_date)))
                     if type_of_invoice == INVOICE_TYPE_OUTWARD and invoice_number and number_key in numbers_used:
                         errors.append(

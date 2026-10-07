@@ -111,3 +111,34 @@ class OneBadRowTest(BulkImportMoneyCase):
         huge["total"] = 10 ** 12
         data = self._import(huge, self._row("202", item))
         self.assertTrue(Invoice.objects.filter(invoice_number="202").exists(), data)
+
+
+class NoGstinNoItcTest(BulkImportMoneyCase):
+    """C1b at the last door: bulk import (and so Backup restore) still booked
+    input tax on a purchase from a supplier with no GSTIN."""
+
+    def setUp(self):
+        super().setUp()
+        from billing.models import Product
+
+        Product.objects.create(name="Old gold", hsn_code="711319", gst_tax_rate=D("0"))
+
+    def test_a_taxed_purchase_without_a_supplier_gstin_is_refused(self):
+        data = self._import(self._row("NG-1", {"productName": "Gold bar", "hsn": "710813", "gstRate": 3, "qty": 1,
+                                               "rate": 10000, "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300},
+                                      kind="INWARD", customer="WALK-IN SELLER", gst="URP"))
+        self.assertFalse(Invoice.objects.filter(invoice_number="NG-1").exists())
+        self.assertTrue(any("NG-1" in e and "no GSTIN" in e for e in data["errors"]), data["errors"])
+
+    def test_an_untaxed_purchase_from_them_imports(self):
+        self._import(self._row("NG-2", {"productName": "Old gold", "hsn": "711319", "gstRate": 0, "qty": 1,
+                                        "rate": 10000, "amount": 10000}, kind="INWARD", customer="WALK-IN SELLER"))
+        li = self._line("NG-2")
+        self.assertEqual((li.cgst, li.sgst, li.igst, li.amount), (D("0"), D("0"), D("0"), D("10000")))
+
+    def test_a_supplier_with_a_gstin_on_file_may_carry_tax(self):
+        Customer.objects.create(name="SJ GOLD", gst_number="08AAECD1234K1Z2", state_name="RAJASTHAN")
+        self._import(self._row("NG-3", {"productName": "Gold bar", "hsn": "710813", "gstRate": 3, "qty": 1,
+                                        "rate": 10000, "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300},
+                               kind="INWARD", customer="SJ GOLD"))
+        self.assertEqual(self._line("NG-3").cgst, D("150"))
