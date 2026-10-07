@@ -24,8 +24,9 @@ var/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual Environment (a local .venv would overwrite the image's own)
 venv/
+.venv/
 ENV/
 .env
 

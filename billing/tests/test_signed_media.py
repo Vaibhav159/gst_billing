@@ -4,16 +4,24 @@ The signature is the credential (img/iframe tags can't carry JWT headers),
 so the tests pin exactly what the signature must and must not allow.
 """
 
+import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
-from django.test import override_settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import reverse
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.test import APIClient
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.views import APIView
 
 from billing.api.media import sign_media_path
-from billing.tests.test_base import BaseAPITestCase
+from billing.tests.test_base import BaseAPITestCase, production_throttling
 
 _MEDIA = tempfile.mkdtemp(prefix="signed_media_test_")
 
@@ -135,3 +143,86 @@ class MediaHardeningTest(SignedMediaTest):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp["Content-Disposition"].startswith("attachment;"))
         self.assertEqual(resp["Content-Security-Policy"], "default-src 'none'")
+
+
+class _PlainAnonymousView(APIView):
+    """Any other unauthenticated endpoint: what the anonymous limit is for."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response({})
+
+
+@override_settings(MEDIA_ROOT=_MEDIA)
+class SignedMediaThrottleTest(SimpleTestCase):
+    """H2: production's AnonRateThrottle (100 a day) applied to signed media,
+    so after about 100 thumbnails and previews every bill image answered 429
+    for a rolling 24 hours. The signature is the credential here."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        (Path(_MEDIA) / "captures").mkdir(parents=True, exist_ok=True)
+        (Path(_MEDIA) / "captures" / "bill.jpg").write_bytes(b"\xff\xd8\xff jpeg-bytes")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def test_bill_images_do_not_spend_the_anonymous_daily_budget(self):
+        url = sign_media_path("captures/bill.jpg")
+        with production_throttling():
+            budget = AnonRateThrottle().num_requests  # production: 100 a day
+            media = [APIClient().get(url).status_code for _ in range(budget + 5)]
+            plain = _PlainAnonymousView.as_view()
+            other = [plain(RequestFactory().get("/other")).status_code for _ in range(budget + 1)]
+        self.assertEqual(media, [200] * (budget + 5))
+        # The anonymous limit still holds for everything else, and the image
+        # fetches above spent none of it.
+        self.assertEqual(other, [200] * budget + [429])
+
+
+@override_settings(MEDIA_ROOT=_MEDIA)
+class SignedDocumentLinksTest(BaseAPITestCase):
+    """M8: the invoice and business serializers emitted FileField paths under
+    /media/, which production nginx answers with 404. AI-imported invoices
+    showed "Preview unavailable" and a dead download link, and the business
+    form showed a broken signature, so people uploaded it again."""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def _assert_signed_and_served(self, url):
+        self.assertTrue(url and url.startswith("/api/media/") and "?s=" in url, url)
+        # Fetched the way an <img> fetches it: no JWT, no session.
+        self.assertEqual(APIClient().get(url).status_code, 200, url)
+
+    def _assert_no_public_media_links(self, data):
+        self.assertEqual(re.findall(r"(?<!/api)/media/[^\"]*", json.dumps(data)), [])
+
+    def test_ai_imported_invoice_links_are_signed(self):
+        inv = self.invoice
+        inv.source_file.save("bill.heic", SimpleUploadedFile("bill.heic", b"heic-bytes"), save=True)
+        inv.source_preview.save("bill.jpg", SimpleUploadedFile("bill.jpg", b"\xff\xd8\xff"), save=True)
+        resp = self.client.get(reverse("invoice-detail", args=[inv.id]))
+        self.assertEqual(resp.status_code, 200)
+        self._assert_signed_and_served(resp.data.get("source_file_url"))
+        self._assert_signed_and_served(resp.data.get("source_preview_url"))
+        self._assert_no_public_media_links(resp.data)
+
+    def test_business_signature_link_is_signed(self):
+        self.business.signature_image.save("sig.png", SimpleUploadedFile("sig.png", b"\x89PNG\r\n\x1a\n"), save=True)
+        resp = self.client.get(reverse("business-detail", args=[self.business.id]))
+        self.assertEqual(resp.status_code, 200)
+        self._assert_signed_and_served(resp.data.get("signature_image_url"))
+        self._assert_no_public_media_links(resp.data)
+
+    def test_documents_without_files_have_no_links(self):
+        inv = self.client.get(reverse("invoice-detail", args=[self.invoice.id])).data
+        biz = self.client.get(reverse("business-detail", args=[self.business.id])).data
+        self.assertEqual((inv["source_file_url"], inv["source_preview_url"], biz["signature_image_url"]), (None, None, None))

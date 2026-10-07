@@ -67,22 +67,40 @@ class UserManagementTests(TestCase):
         self.assertEqual(r.data["role"], "viewer")
 
     def test_duplicate_bad_role_and_missing_password_are_400s(self):
-        self.admin.post(self.url, {"username": "clerk", "password": "pw", "role": "viewer"}, format="json")
-        self.assertEqual(self.admin.post(self.url, {"username": "clerk", "password": "pw", "role": "viewer"}, format="json").status_code, 400)
-        self.assertEqual(self.admin.post(self.url, {"username": "x", "password": "pw", "role": "owner"}, format="json").status_code, 400)
+        ok = self.admin.post(self.url, {"username": "clerk", "password": "Ledger-Lamp-42", "role": "viewer"}, format="json")
+        self.assertEqual(ok.status_code, 201, getattr(ok, "data", None))
+        self.assertEqual(self.admin.post(self.url, {"username": "clerk", "password": "Ledger-Lamp-42", "role": "viewer"}, format="json").status_code, 400)
+        self.assertEqual(self.admin.post(self.url, {"username": "x", "password": "Ledger-Lamp-42", "role": "owner"}, format="json").status_code, 400)
         self.assertEqual(self.admin.post(self.url, {"username": "y", "role": "viewer"}, format="json").status_code, 400)
         self.assertFalse(User.objects.filter(username__in=["x", "y"]).exists())
 
     def test_admin_changes_role_status_and_password(self):
-        r = self.admin.post(self.url, {"username": "clerk", "password": "pw", "role": "viewer"}, format="json")
+        r = self.admin.post(self.url, {"username": "clerk", "password": "Ledger-Lamp-42", "role": "viewer"}, format="json")
         uid = r.data["id"]
-        r = self.admin.patch(self.url, {"user_id": uid, "role": "editor", "is_active": False, "password": "new-pw"}, format="json")
+        r = self.admin.patch(self.url, {"user_id": uid, "role": "editor", "is_active": False, "password": "Teak-Drawer-77"}, format="json")
         self.assertEqual(r.status_code, 200, getattr(r, "data", None))
         u = User.objects.get(id=uid)
         self.assertEqual([g.name for g in u.groups.all()], ["editor"])
         self.assertFalse(u.is_active)
-        self.assertTrue(u.check_password("new-pw"))
+        self.assertTrue(u.check_password("Teak-Drawer-77"))
         self.assertEqual(self.admin.patch(self.url, {"user_id": 999999, "role": "editor"}, format="json").status_code, 404)
+
+    def test_weak_password_is_refused_on_create(self):
+        """H3: users created through the API skipped AUTH_PASSWORD_VALIDATORS."""
+        r = self.admin.post(self.url, {"username": "clerk", "password": "password", "role": "editor"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("too common", r.data["error"])
+        self.assertFalse(User.objects.filter(username="clerk").exists())
+
+    def test_weak_password_is_refused_on_reset_and_nothing_changes(self):
+        clerk = User.objects.create_user(username="clerk", password="Ledger-Lamp-42")
+        clerk.groups.add(Group.objects.get(name="viewer"))
+        r = self.admin.patch(self.url, {"user_id": clerk.id, "password": "12345678", "role": "editor"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("entirely numeric", r.data["error"])
+        clerk.refresh_from_db()
+        self.assertTrue(clerk.check_password("Ledger-Lamp-42"))
+        self.assertEqual([g.name for g in clerk.groups.all()], ["viewer"])
 
     def test_non_admins_are_locked_out(self):
         for role in ("editor", "viewer"):

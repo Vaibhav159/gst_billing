@@ -64,6 +64,7 @@ class CaptureInboxTest(BaseAPITestCase):
         r = self.client.post(reverse("inward-bill-list"), {
             "business_id": self.business.id,
             "supplier_name": "CAPTURE SUPPLIER",
+            "supplier_gstin": "22ZZZZZ0000Z1Z5",
             "invoice_number": "CAP-1", "invoice_date": "2026-08-20",
             "capture_id": cap_id,
             "lines": json.dumps([{"product_name": "Silver", "hsn_code": "711311",

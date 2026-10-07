@@ -52,7 +52,7 @@ export interface ExtractLine {
   quantity: number;
   rate: number;
   hsn_code: string;
-  gst_tax_rate: number;
+  gst_tax_rate: number | null; // null when the model read none
   amount: number;
 }
 

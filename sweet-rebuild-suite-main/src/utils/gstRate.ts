@@ -82,6 +82,20 @@ export function rateToPercent(stored: unknown): number {
 }
 
 /**
+ * Where a slab picker starts for a rate an AI read off a bill: the slab as
+ * its option value ("0.25", "3"), or "" to leave the line unchosen.
+ *
+ * Gemini must answer with a number and answers 0 when a bill prints no
+ * per-line rate. Booking that 0, or the 3% it used to become, is a guess at
+ * input credit, so 0, a missing value and anything off the slab list come
+ * back unchosen and a person picks.
+ */
+export function aiRateChoice(raw: unknown): string {
+  const pct = resolvePercent(raw);
+  return pct ? String(pct) : "";
+}
+
+/**
  * Pull the stored fraction out of a line item that may carry either field —
  * one conversion, by key. (The percent-then-fraction round trip this replaces
  * rounded twice and lost 4dp precision on the way.)

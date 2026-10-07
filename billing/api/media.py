@@ -44,6 +44,12 @@ class SignedMediaView(APIView):
     # requests that carry neither JWT header nor session cookie.
     permission_classes = [AllowAny]
     authentication_classes = []
+    # Not the anonymous rate limit either (production: 100 a day). Every
+    # thumbnail and preview is one of these, URLs are re-signed on each API
+    # response so the browser cache never helps, and after ~100 every bill
+    # image answered 429 for a rolling day. A forged or expired signature
+    # costs one HMAC check and gets a 403.
+    throttle_classes = []
 
     def get(self, request, subpath: str):
         token = request.query_params.get("s", "")

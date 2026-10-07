@@ -580,3 +580,73 @@ class InvoiceAPITestCase(BaseAPITestCase):
             gst_number="22DDDDD0000D1Z5",
             state_name="KARNATAKA",
         )
+
+
+class InwardInvoiceWithoutSupplierGstinTest(BaseAPITestCase):
+    """C1b on the main invoice form's Inward (Purchase) door: the supplier
+    is a saved customer, so its GSTIN on file decides."""
+
+    def setUp(self):
+        super().setUp()
+        self.karigar = Customer.objects.create(name="LOCAL KARIGAR", gst_number="NA", state_name="MAHARASHTRA")
+        self.karigar.businesses.add(self.business)
+
+    def _line(self, rate, tax):
+        return {"product_name": "Gold Ornaments", "hsn_code": "711319", "gst_tax_rate": rate,
+                "quantity": "1", "rate": "10000", "cgst": tax, "sgst": tax, "igst": "0",
+                "amount": str(Decimal("10000") + 2 * Decimal(tax)), "unit": "gms"}
+
+    def test_create_refuses_gst_naming_the_line(self):
+        resp = self.client.post(reverse("invoice-list"), {
+            "invoice_number": "P-NA-1", "invoice_date": "2026-05-01",
+            "business": self.business.id, "customer": self.karigar.id,
+            "type_of_invoice": INVOICE_TYPE_INWARD,
+            "line_items": [self._line("0", "0"), self._line("0.03", "150")],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Line 2", resp.data["error"])
+        self.assertFalse(Invoice.objects.filter(invoice_number="P-NA-1").exists())
+
+    def test_edit_refuses_gst_and_keeps_the_lines(self):
+        inv = Invoice.objects.create(
+            invoice_number="P-NA-2", invoice_date="2026-05-01", business=self.business,
+            customer=self.karigar, type_of_invoice=INVOICE_TYPE_INWARD,
+        )
+        LineItem.objects.create(invoice=inv, customer=self.karigar, product_name="Gold Ornaments",
+                                hsn_code="711319", gst_tax_rate=Decimal("0"), quantity=Decimal("1"),
+                                rate=Decimal("10000"), amount=Decimal("10000"))
+        resp = self.client.post(reverse("invoice-update-line-items", args=[inv.id]),
+                                {"line_items": [self._line("0.03", "150")]}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Line 1", resp.data["error"])
+        self.assertEqual([li.gst_tax_rate for li in inv.lineitem_set.all()], [Decimal("0")])
+
+    def _bill(self, number, customer, kind=INVOICE_TYPE_INWARD):
+        inv = Invoice.objects.create(invoice_number=number, invoice_date="2026-05-01", business=self.business,
+                                     customer=customer, type_of_invoice=kind)
+        LineItem.objects.create(invoice=inv, customer=customer, product_name="Gold Ornaments", hsn_code="711319",
+                                gst_tax_rate=Decimal("0.03"), quantity=Decimal("1"), rate=Decimal("10000"),
+                                cgst=Decimal("150"), sgst=Decimal("150"), amount=Decimal("10300"))
+        return inv
+
+    def test_a_header_edit_cannot_move_gst_onto_a_supplier_without_a_gstin(self):
+        """The SPA saves a header-only edit with a plain PATCH, which skipped C1b."""
+        inv = self._bill("P-REG-1", self.customer)          # registered supplier, 3% ITC
+        resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"customer": self.karigar.id}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("Line 1", resp.data["error"])
+        inv.refresh_from_db()
+        self.assertEqual(inv.customer_id, self.customer.id)
+
+    def test_turning_a_sale_into_a_purchase_without_a_supplier_gstin_is_refused(self):
+        inv = self._bill("S-NA-1", self.karigar, kind=INVOICE_TYPE_OUTWARD)
+        resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"type_of_invoice": INVOICE_TYPE_INWARD}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        inv.refresh_from_db()
+        self.assertEqual(inv.type_of_invoice, INVOICE_TYPE_OUTWARD)
+
+    def test_other_header_edits_on_an_old_bill_still_save(self):
+        """Bills recorded before C1b are for check_inward_rates to list, not to freeze."""
+        inv = self._bill("P-NA-OLD", self.karigar)
+        resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"payment_mode": "cash"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)

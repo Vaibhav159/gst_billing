@@ -15,6 +15,16 @@ export function gstinCheckDigit(first14: string): string {
   return CHARS[(36 - (total % 36)) % 36];
 }
 
+/**
+ * Whether a party has a GSTIN at all: 15 characters once trimmed. "NA", "URP"
+ * and blanks are what people type for an unregistered party, and a purchase
+ * from one carries no input tax (C1b). Mirrors billing/tax_rules.py has_gstin;
+ * validateGstin is the stricter check for what was typed.
+ */
+export function hasGstin(raw: string | null | undefined): boolean {
+  return (raw || "").trim().length === 15;
+}
+
 export function validateGstin(raw: string): { ok: boolean; reason: string } {
   const g = (raw || "").trim().toUpperCase();
   if (g.length !== 15) return { ok: false, reason: "A GSTIN is exactly 15 characters." };

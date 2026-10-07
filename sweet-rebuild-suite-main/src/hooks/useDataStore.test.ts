@@ -22,6 +22,25 @@ describe("mapDjangoInvoice — the server's total, to the paisa (A15)", () => {
   });
 });
 
+describe("mapDjangoInvoice — the AI-import scan (M8)", () => {
+  const base: any = { id: 1, invoice_number: "7", invoice_date: "2026-04-01", total_amount: "100", line_items: [] };
+
+  it("links the signed URLs the API sends, which production serves", () => {
+    const inv = mapDjangoInvoice({
+      ...base,
+      source_file_url: "/api/media/invoice_sources/2026/10/bill.heic?s=abc",
+      source_preview_url: "/api/media/invoice_sources/2026/10/previews/bill.jpg?s=def",
+    });
+    expect(inv.sourceFile).toBe("/api/media/invoice_sources/2026/10/bill.heic?s=abc");
+    expect(inv.sourcePreview).toBe("/api/media/invoice_sources/2026/10/previews/bill.jpg?s=def");
+  });
+
+  it("shows no scan when the invoice has none", () => {
+    const inv = mapDjangoInvoice({ ...base, source_file_url: null, source_preview_url: null });
+    expect([inv.sourceFile, inv.sourcePreview]).toEqual([null, null]);
+  });
+});
+
 describe("buildInvoiceParams — one query builder for the list and the exports (A16)", () => {
   it("ignores 'all' and empty filters", () => {
     const p = buildInvoiceParams({ businessId: "all", customerId: "all", search: "" } as any);

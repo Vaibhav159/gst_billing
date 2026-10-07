@@ -89,12 +89,14 @@ class PeriodLockTest(BaseAPITestCase):
         r = self.client.post(reverse("inward-bill-list"), {
             "business_id": self.business.id,
             "supplier_name": "LOCKED SUPPLIER",
+            "supplier_gstin": "22ZZZZZ0000Z1Z5",
             "invoice_number": "LCK-IN-1", "invoice_date": JULY,
             "lines": json.dumps([{"product_name": "Silver", "hsn_code": "711311",
                                   "quantity": "10", "rate": "100",
                                   "gst_tax_rate": "0.03", "unit": "gms"}]),
         })
         self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        self.assertIn("filed and locked", str(r.data))
         self.assertFalse(Invoice.objects.filter(invoice_number="LCK-IN-1").exists())
 
     def test_bulk_import_skips_locked_rows_with_a_row_error(self):
@@ -186,6 +188,7 @@ class LockCrossFeatureTest(BaseAPITestCase):
         r = self.client.post(reverse("inward-bill-list"), {
             "business_id": self.business.id,
             "supplier_name": "LOCKED CAPTURE SUP",
+            "supplier_gstin": "22ZZZZZ0000Z1Z5",
             "invoice_number": "LCKCAP-1", "invoice_date": "2026-07-10",
             "capture_id": cap["id"],
             "lines": json.dumps([{"product_name": "Silver", "hsn_code": "711311",
@@ -193,6 +196,7 @@ class LockCrossFeatureTest(BaseAPITestCase):
                                   "gst_tax_rate": "0.03", "unit": "gms"}]),
         })
         self.assertEqual(r.status_code, 400, getattr(r, "data", None))
+        self.assertIn("filed and locked", str(r.data))
         self.assertFalse(Invoice.objects.filter(invoice_number="LCKCAP-1").exists())
         capture = InwardCapture.objects.get(id=cap["id"])
         self.assertEqual(capture.status, "new", "a refused convert must not consume the capture")

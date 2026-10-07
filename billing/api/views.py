@@ -23,7 +23,7 @@ from num2words import num2words
 from openpyxl import Workbook
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -40,6 +40,7 @@ from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
+from billing.tax_rules import itc_refusal
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -937,6 +938,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         assert_period_unlocked(payload.get("business"), payload.get("invoice_date"), "create")
         serializer = self.get_serializer(data=payload)
         serializer.is_valid(raise_exception=True)
+        # C1b: a purchase from a supplier with no GSTIN carries no input tax.
+        if serializer.validated_data.get("type_of_invoice") == INVOICE_TYPE_INWARD:
+            supplier = serializer.validated_data.get("customer")
+            problem = itc_refusal(getattr(supplier, "gst_number", ""), line_items_data)
+            if problem:
+                return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             with transaction.atomic():
@@ -981,6 +988,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             vd.get("invoice_date") or inst.invoice_date,
             "edit",
         )
+        # C1b on a header-only edit (the plain PATCH the SPA sends when no line
+        # changed): making the bill a purchase, or changing its supplier, puts
+        # the lines on file under a new supplier's GSTIN. Other edits to a bill
+        # recorded before C1b go through; check_inward_rates lists those.
+        new_type = vd.get("type_of_invoice", inst.type_of_invoice)
+        supplier = vd.get("customer", inst.customer)
+        if new_type == INVOICE_TYPE_INWARD and (
+            new_type != inst.type_of_invoice or getattr(supplier, "pk", None) != inst.customer_id
+        ):
+            lines = inst.lineitem_set.values("gst_tax_rate", "cgst", "sgst", "igst")
+            problem = itc_refusal(getattr(supplier, "gst_number", ""), list(lines))
+            if problem:
+                raise ValidationError({"error": problem})
         super().perform_update(serializer)
 
     def perform_destroy(self, instance):
@@ -1048,6 +1068,14 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     invoice.invoice_date = invoice_data["invoice_date"]
                 if "type_of_invoice" in invoice_data:
                     invoice.type_of_invoice = invoice_data["type_of_invoice"]
+
+            # C1b, as on create, against the supplier as patched. Nothing has
+            # been written yet, so returning here leaves the invoice as it was.
+            if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
+                supplier_gstin = invoice.customer.gst_number if invoice.customer_id else ""
+                problem = itc_refusal(supplier_gstin, line_items_data)
+                if problem:
+                    return Response({"error": problem}, status=status.HTTP_400_BAD_REQUEST)
 
             # 2. Delete old line items + bulk-create new ones.
             # _raw_delete bypasses the post_delete signal in billing/signals.py
@@ -2891,6 +2919,22 @@ class ProfileView(APIView):
         })
 
 
+def _password_problem(password, user):
+    """AUTH_PASSWORD_VALIDATORS' verdict on a new password, or None if it passes.
+
+    Users created or reset through this API skipped the validators entirely;
+    only Django's own forms ran them.
+    """
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+
+    try:
+        validate_password(password, user)
+    except ValidationError as e:
+        return " ".join(e.messages)
+    return None
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class UserManagementView(APIView):
     """Admin-only endpoint to list, create, and manage users with roles."""
@@ -2934,6 +2978,12 @@ class UserManagementView(APIView):
         if role not in ("admin", "editor", "viewer"):
             return Response({"error": "Role must be admin, editor, or viewer"}, status=400)
 
+        problem = _password_problem(
+            password, User(username=username, email=email, first_name=first_name, last_name=last_name)
+        )
+        if problem:
+            return Response({"error": problem}, status=400)
+
         user = User.objects.create_user(
             username=username, password=password, email=email,
             first_name=first_name, last_name=last_name,
@@ -2959,6 +3009,11 @@ class UserManagementView(APIView):
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
+
+        # Before any change, so a refused password leaves the role and status as they were.
+        problem = request.data.get("password") and _password_problem(request.data["password"], user)
+        if problem:
+            return Response({"error": problem}, status=400)
 
         # Update role
         new_role = request.data.get("role")

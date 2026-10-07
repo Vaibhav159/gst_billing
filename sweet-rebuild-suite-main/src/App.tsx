@@ -78,7 +78,12 @@ const App = () => (
           <TooltipProvider>
             <Toaster />
             <Sonner />
-            <BrowserRouter>
+            {/* react-router 7 wraps every navigation in React.startTransition by
+                default; v6 didn't. Under it the old page stayed mounted while the
+                next page's code loaded: no RouteFallback spinner, a blank screen
+                after login, and InvoiceDetail's URL rewrite could land on top of
+                /print. Off, navigation behaves as it did on v6. */}
+            <BrowserRouter useTransitions={false}>
               <KeyboardShortcuts />
               <CommandPalette />
               <Suspense fallback={<RouteFallback />}>

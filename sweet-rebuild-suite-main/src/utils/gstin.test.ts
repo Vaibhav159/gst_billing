@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { gstinCheckDigit, validateGstin } from "./gstin";
+import { gstinCheckDigit, hasGstin, validateGstin } from "./gstin";
 
 // Known-real: the firm's own GSTIN and GSTN's documented example.
 const REAL = ["08AAGPL3375F1ZO", "27AAPFU0939F1ZV"];
@@ -26,5 +26,18 @@ describe("validateGstin", () => {
   it("check digit matches the python implementation's vectors", () => {
     expect(gstinCheckDigit("08AAGPL3375F1Z")).toBe("O");
     expect(gstinCheckDigit("27AAPFU0939F1Z")).toBe("V");
+  });
+});
+
+describe("hasGstin — whether a purchase can carry input tax (C1b, mirrors tax_rules.has_gstin)", () => {
+  it("is true for a 15-character GSTIN, however it was typed", () => {
+    expect(hasGstin("08AAGPL3375F1ZO")).toBe(true);
+    expect(hasGstin(" 27aapfu0939f1zv ")).toBe(true);
+  });
+
+  it("is false for blanks and the placeholders people type for unregistered parties", () => {
+    for (const v of ["", "   ", "NA", "N/A", "URP", "urp", "08AAGPL3375F1Z", undefined, null]) {
+      expect(hasGstin(v)).toBe(false);
+    }
   });
 });

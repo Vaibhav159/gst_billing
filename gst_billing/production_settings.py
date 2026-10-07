@@ -206,6 +206,12 @@ REST_FRAMEWORK = {
         "login": "10/min",
         "token_refresh": "60/min",
     },
+    # Throttles key on the client IP. Requests reach gunicorn through two
+    # proxies, Cosmos (TLS edge) then nginx, and each appends the address it
+    # was connected from to X-Forwarded-For, so the real client is second
+    # from the right. Unset, DRF keyed on the whole header, which the client
+    # starts: a made-up first entry per attempt was a fresh login bucket.
+    "NUM_PROXIES": 2,
 }
 
 # JWT settings
@@ -376,6 +382,15 @@ LOGGING = {
         },
     },
 }
+
+# AI bill reading (billing.utils.AIInvoiceProcessor). It reads these from
+# settings, not the environment, and this file never defined them: from v2.0.5,
+# when the image started forcing production settings, every AI import and
+# inward-bill extract failed with "No Gemini API key configured" whatever .env
+# held. What each one means: settings.py and .env.template.
+GEMINI_API_KEYS = os.environ.get("GEMINI_API_KEYS", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_VISION_MODEL = os.environ.get("GEMINI_VISION_MODEL") or "gemini-2.5-flash-lite"
 
 # GSTIN taxpayer lookup (billing/gstin.py). Without a key the endpoint still
 # validates the checksum and derives state + PAN from the number itself;

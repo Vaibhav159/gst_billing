@@ -16,6 +16,9 @@ import {
 import { useBusinesses } from "@/hooks/useDataStore";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/utils/mockData";
+import { GST_SLABS, aiRateChoice, percentToRate } from "@/utils/gstRate";
+import { hasGstin } from "@/utils/gstin";
+import { cn } from "@/utils/utils";
 import {
   extractInwardBill, createInwardBill, extractInwardCapture, getCapture,
   type ExtractResult, type InwardCaptureRow,
@@ -26,12 +29,15 @@ interface FormLine {
   hsn_code: string;
   quantity: string;
   rate: string;
-  gst_tax_rate: string;
+  // The slab picked, as a percent ("0.25", "3"). "" until someone picks: the
+  // rate is the line's input credit, and the 3% this used to default to booked
+  // diamonds at twelve times their ITC.
+  gst_percent: string;
   unit: string;
 }
 
 const emptyLine: FormLine = {
-  product_name: "", hsn_code: "", quantity: "", rate: "", gst_tax_rate: "0.03", unit: "gms",
+  product_name: "", hsn_code: "", quantity: "", rate: "", gst_percent: "", unit: "gms",
 };
 
 export default function InwardBillAdd() {
@@ -77,19 +83,26 @@ export default function InwardBillAdd() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gstinState]);
 
-  const intra = isIntraState(supplierGstin, firmGstin);
+  // A bill without the supplier's GSTIN carries no input tax credit (C1b),
+  // so until one is entered every line is 0%. The line keeps its own pick for
+  // when a GSTIN arrives.
+  const registered = hasGstin(supplierGstin);
+  // "URP" is no state code: the server drops placeholders before deciding the
+  // head, so the preview does too.
+  const intra = isIntraState(registered ? supplierGstin : "", firmGstin);
+  const lineRate = (l: FormLine) => (registered ? l.gst_percent : "0");
 
   const computed = useMemo(() => {
     let taxable = 0, cgst = 0, sgst = 0, igst = 0;
     for (const l of lines) {
       const t = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
-      const r = parseFloat(l.gst_tax_rate) || 0;
+      const r = percentToRate(lineRate(l));
       taxable += t;
       if (intra) { cgst += t * r / 2; sgst += t * r / 2; }
       else { igst += t * r; }
     }
     return { taxable, cgst, sgst, igst, total: taxable + cgst + sgst + igst };
-  }, [lines, intra]);
+  }, [lines, intra, registered]);
 
   // Converting a phone capture: pull the stored photo through the same AI
   // extract the upload path uses, and carry capture_id into the save so the
@@ -137,7 +150,7 @@ export default function InwardBillAdd() {
             hsn_code: li.hsn_code || "",
             quantity: li.quantity ? String(li.quantity) : "",
             rate: li.rate ? String(li.rate) : "",
-            gst_tax_rate: li.gst_tax_rate ? String(li.gst_tax_rate) : "0.03",
+            gst_percent: aiRateChoice(li.gst_tax_rate),
             unit: "gms",
           }))
         : [{ ...emptyLine }],
@@ -183,6 +196,11 @@ export default function InwardBillAdd() {
       toast({ title: "GSTIN doesn't match this firm", description: "Tick 'Record anyway' to save a bill not addressed to your firm's GSTIN.", variant: "destructive" });
       return;
     }
+    const unrated = lines.flatMap((l, i) => (lineRate(l) ? [] : [i + 1]));
+    if (unrated.length) {
+      toast({ title: "Pick the GST rate", description: `Line ${unrated.join(", ")} has no GST rate. Choose 0% if the bill charges no GST.`, variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       const fd = new FormData();
@@ -202,7 +220,7 @@ export default function InwardBillAdd() {
             hsn_code: l.hsn_code,
             quantity: l.quantity || "0",
             rate: l.rate || "0",
-            gst_tax_rate: l.gst_tax_rate || "0.03",
+            gst_tax_rate: percentToRate(lineRate(l)),
             unit: l.unit || "gms",
           })),
         ),
@@ -350,37 +368,54 @@ export default function InwardBillAdd() {
               {lines.map((l, i) => (
                 <div
                   key={i}
-                  className="rounded-xl border p-3 space-y-2 sm:border-0 sm:p-0 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-center"
+                  className="rounded-xl border p-3 space-y-2 sm:border-0 sm:p-0 sm:space-y-0 sm:grid sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1.6fr)_minmax(0,1.5fr)_auto] sm:gap-2 sm:items-center"
                 >
-                  <div className="sm:col-span-4">
+                  <div>
                     <Label className="text-[11px] text-muted-foreground sm:hidden">Product</Label>
                     <Input placeholder="Product" value={l.product_name} onChange={(e) => setLine(i, { product_name: e.target.value })} />
                   </div>
-                  <div className="grid grid-cols-3 gap-2 sm:contents">
-                    <div className="sm:col-span-2">
+                  <div className="grid grid-cols-2 gap-2 sm:contents">
+                    <div>
                       <Label className="text-[11px] text-muted-foreground sm:hidden">HSN</Label>
                       <Input placeholder="HSN" value={l.hsn_code} onChange={(e) => setLine(i, { hsn_code: e.target.value })} />
                     </div>
-                    <div className="sm:col-span-2">
+                    <div>
                       <Label className="text-[11px] text-muted-foreground sm:hidden">Qty</Label>
                       <Input placeholder="Qty" inputMode="decimal" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} />
                     </div>
-                    <div className="sm:col-span-2">
+                    <div>
                       <Label className="text-[11px] text-muted-foreground sm:hidden">Rate</Label>
                       <Input placeholder="Rate" inputMode="decimal" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />
                     </div>
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground sm:hidden">GST</Label>
+                      <select
+                        aria-label="GST rate"
+                        value={lineRate(l)}
+                        onChange={(e) => setLine(i, { gst_percent: e.target.value })}
+                        className={cn("premium-select w-full", !lineRate(l) && "text-muted-foreground")}
+                      >
+                        <option value="" disabled>GST %</option>
+                        {GST_SLABS.map((r) => <option key={r} value={String(r)} disabled={!registered && r !== 0}>{r}%</option>)}
+                      </select>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between sm:contents">
-                    <div className="text-sm tabular-nums text-muted-foreground sm:col-span-1 sm:text-right">
+                    <div className="text-sm tabular-nums text-muted-foreground sm:text-right">
                       <span className="sm:hidden text-[11px] mr-1">Line total</span>
                       {formatCurrency((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0))}
                     </div>
-                    <Button className="sm:col-span-1" variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))} disabled={lines.length === 1}>
+                    <Button variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))} disabled={lines.length === 1}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
               ))}
+              {!registered && (
+                <p className="text-[12px] text-muted-foreground">
+                  No supplier GSTIN, so this bill carries no input tax credit and every line is 0%. Add the supplier's GSTIN to claim GST.
+                </p>
+              )}
               <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, { ...emptyLine }])}>
                 <Plus className="h-4 w-4 mr-1" /> Add line
               </Button>

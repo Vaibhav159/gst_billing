@@ -29,6 +29,8 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
+import { usePermission } from "@/hooks/usePermission";
+import { bulkDeleteToast, deleteEach, deleteWithFeedback } from "@/utils/deleteFeedback";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
 import { shareInvoice } from "@/utils/shareInvoice";
@@ -39,6 +41,8 @@ interface OutletCtx { selectedFY: string }
 export default function InvoiceList() {
   const { selectedFY } = useOutletContext<OutletCtx>();
   const { toast } = useToast();
+  // Admins only: the API refuses DELETE for editors and viewers.
+  const { canDelete } = usePermission();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { items: businesses } = useBusinesses();
@@ -60,6 +64,7 @@ export default function InvoiceList() {
   const [fyFilter, setFyFilter] = useState(selectedFY);
   useEffect(() => { setFyFilter(selectedFY); }, [selectedFY]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [sortBy, setSortBy] = useState<"date" | "total" | "invoiceNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -349,7 +354,7 @@ export default function InvoiceList() {
           onOpenChange={(open) => !open && setDeleteTarget(null)}
           itemName={deleteTarget?.name || ""}
           itemType="Invoice"
-          onConfirm={() => { removeInvoice(deleteTarget!.id); toast({ title: "Invoice Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+          onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeInvoice(t.id), toast, { label: "Invoice", name: t.name }); }}
         />
       </div>
     );
@@ -386,16 +391,25 @@ export default function InvoiceList() {
               }} className="premium-btn-ghost text-[13px]">
                 <Download className="w-4 h-4" /> Export
               </button>
-              <button onClick={() => {
-                if (confirm(`Delete ${selected.size} selected invoices? This cannot be undone.`)) {
-                  const ids = Array.from(selected);
-                  ids.forEach(id => removeInvoice(id));
-                  toast({ title: "Deleted", description: `${ids.length} invoices deleted`, variant: "destructive" });
-                  setSelected(new Set());
-                }
-              }} className="premium-btn-ghost text-[13px] text-destructive">
-                <Trash2 className="w-4 h-4" /> Delete
-              </button>
+              {canDelete && (
+                <button disabled={bulkDeleting} onClick={async () => {
+                  if (confirm(`Delete ${selected.size} selected invoices? This cannot be undone.`)) {
+                    // One batch at a time: a second click used to send every
+                    // DELETE again and report the 404s as refusals.
+                    setBulkDeleting(true);
+                    try {
+                      const result = await deleteEach(Array.from(selected), removeInvoice);
+                      toast(bulkDeleteToast(result, "invoice"));
+                      // What the server refused stays on screen, still selected.
+                      setSelected(new Set(result.refused.map((r) => r.id)));
+                    } finally {
+                      setBulkDeleting(false);
+                    }
+                  }
+                }} className="premium-btn-ghost text-[13px] text-destructive disabled:opacity-50">
+                  <Trash2 className="w-4 h-4" /> Delete
+                </button>
+              )}
             </>
           )}
           {/* AI Import + the three workflow buttons (Import, Bulk PDF, QR
@@ -622,7 +636,7 @@ export default function InvoiceList() {
                               <DropdownMenuItem onClick={() => navigate(`/billing/invoice/${inv.id}/print`)}><Printer className="w-4 h-4 mr-2" /> Print</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => navigate(`/billing/invoice/${inv.id}/print?share=1`)}><Share2 className="w-4 h-4 mr-2" /> Share PDF</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })}><Copy className="w-4 h-4 mr-2" /> Duplicate</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="text-destructive focus:text-destructive"><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
+                              {canDelete && <DropdownMenuItem onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="text-destructive focus:text-destructive"><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -687,7 +701,7 @@ export default function InvoiceList() {
                   <IconButton to={`/billing/invoice/edit/${inv.id}`} label="Edit invoice" className="hover:text-primary"><Pencil className="w-4 h-4" /></IconButton>
                   <IconButton to={`/billing/invoice/${inv.id}/print`} label="Print invoice" className="hover:text-success"><Printer className="w-4 h-4" /></IconButton>
                   <IconButton onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} label="Duplicate invoice"><Copy className="w-4 h-4" /></IconButton>
-                  <IconButton onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} label="Delete invoice" className="hover:bg-destructive/10 hover:text-destructive ml-auto"><Trash2 className="w-4 h-4" /></IconButton>
+                  {canDelete && <IconButton onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} label="Delete invoice" className="hover:bg-destructive/10 hover:text-destructive ml-auto"><Trash2 className="w-4 h-4" /></IconButton>}
                 </div>
               </motion.div>
             ))}
@@ -720,7 +734,7 @@ export default function InvoiceList() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         itemName={deleteTarget?.name || ""}
         itemType="Invoice"
-        onConfirm={() => { removeInvoice(deleteTarget!.id); toast({ title: "Invoice Deleted", description: deleteTarget?.name, variant: "destructive" }); setDeleteTarget(null); }}
+        onConfirm={() => { const t = deleteTarget!; setDeleteTarget(null); void deleteWithFeedback(() => removeInvoice(t.id), toast, { label: "Invoice", name: t.name }); }}
       />
     </div>
   );

@@ -25,6 +25,7 @@ class InwardCaptureQueryBudgetTest(BaseAPITestCase):
         payload = {
             "business_id": self.business.id,
             "supplier_name": "QUERY BUDGET SUPPLIER",
+            "supplier_gstin": "22ZZZZZ0000Z1Z5",
             "invoice_number": number,
             "invoice_date": "2026-08-10",
             "lines": json.dumps([
