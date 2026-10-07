@@ -41,3 +41,11 @@ describe("hasGstin — whether a purchase can carry input tax (C1b, mirrors tax_
     }
   });
 });
+
+describe("hasGstin — a placeholder is no GSTIN (H12, mirrors tax_rules.has_gstin)", () => {
+  it("needs a two-digit state code as well as 15 characters", () => {
+    expect(hasGstin("UNREGISTERED123")).toBe(false);
+    expect(hasGstin("NA")).toBe(false);
+    expect(hasGstin("08ABCDE1234A1Z5")).toBe(true);
+  });
+});

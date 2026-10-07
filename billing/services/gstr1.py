@@ -13,7 +13,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 
 from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import classify_b2c, rate_as_percent
+from billing.tax_rules import classify_b2c, clean_gstin, rate_as_percent
 
 TWO_PLACES = Decimal("0.01")
 
@@ -355,9 +355,9 @@ def gstr_export(view, request):
     # B2B: Invoices to registered dealers (customer has GSTIN)
     b2b_data = {}
     for inv in outward_invoices:
-        cust_gst = inv.customer.gst_number.strip() if inv.customer.gst_number else ""
-        if not cust_gst or len(cust_gst) < 15:
-            continue  # Skip unregistered
+        cust_gst = clean_gstin(inv.customer.gst_number)
+        if not cust_gst:
+            continue  # Unregistered, or a placeholder like "NA"/"URP"
         items = inv.lineitem_set.all()
         inv_items = []
         for li in items:
@@ -377,7 +377,7 @@ def gstr_export(view, request):
             "inum": inv.invoice_number,
             "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
             "val": float(inv.total_amount),
-            "pos": inv.customer.gst_number[:2] if inv.customer.gst_number else "",
+            "pos": cust_gst[:2],
             "rchrg": "N",
             "inv_typ": "R",
             "itms": inv_items,
@@ -567,8 +567,8 @@ def gstr1_portal_json(view, request):
     except (ValueError, AssertionError):
         return Response({"error": "month (1-12) and year are required."}, status=400)
 
-    gstin = (business.gst_number or "").strip().upper()
-    if len(gstin) != 15:
+    gstin = clean_gstin(business.gst_number)
+    if not gstin:
         return Response(
             {"error": f"Business '{business.name}' has no 15-character GSTIN — "
                       "set it before generating a portal file."},
@@ -625,9 +625,9 @@ def gstr1_portal_json(view, request):
         agg = slabs(items)
         idt = inv.invoice_date.strftime("%d-%m-%Y")
         val = r2(inv.total_amount)
-        cust_gstin = (inv.customer.gst_number or "").strip().upper()
+        cust_gstin = clean_gstin(inv.customer.gst_number)
 
-        if len(cust_gstin) == 15:
+        if cust_gstin:
             itms = [
                 {"num": i + 1, "itm_det": {
                     "txval": r2(s["txval"]), "rt": rt,

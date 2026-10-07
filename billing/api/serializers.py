@@ -71,6 +71,14 @@ class CustomerSerializer(serializers.ModelSerializer):
         # without immediately linking to a business
         extra_kwargs = {"businesses": {"required": False}}
 
+    def validate_gst_number(self, value):
+        # "NA", "URP" and the like are stored as no GSTIN: kept, they were
+        # read as a state code and as B2B (H12). The forms already refuse
+        # anything that isn't GSTIN-shaped; this covers the API and imports.
+        from billing.tax_rules import clean_gstin
+
+        return clean_gstin(value) if value else value
+
 
 class ProductSerializer(serializers.ModelSerializer):
     total_revenue = serializers.DecimalField(

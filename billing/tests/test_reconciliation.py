@@ -46,10 +46,10 @@ class ServiceMathTest(BaseAPITestCase):
 
     def _fixture(self):
         return [
-            row(1, date(2025, 5, 1), "27X", "bank", [line("100000")]),
+            row(1, date(2025, 5, 1), "27ABCDE1234A1Z5", "bank", [line("100000")]),
             row(2, date(2025, 8, 1), "", "cash", [line("200000")]),
             row(3, date(2025, 11, 1), "", "bank", [line("300000")]),
-            row(4, date(2026, 2, 1), "27X", "", [line("400000")]),
+            row(4, date(2026, 2, 1), "27ABCDE1234A1Z5", "", [line("400000")]),
         ]
 
     def test_rollup_identities_all_pass(self):
@@ -166,7 +166,7 @@ class SegmentFilterTest(BaseAPITestCase):
 class InterstateReconTest(BaseAPITestCase):
     def test_igst_rows_flow_and_checks_pass(self):
         rows = [
-            row(1, date(2025, 5, 1), "27X", "bank", [line("100000", igst=True)]),
+            row(1, date(2025, 5, 1), "27ABCDE1234A1Z5", "bank", [line("100000", igst=True)]),
             row(2, date(2025, 8, 1), "", "cash", [line("50000")]),
         ]
         res = reconcile("2025-26", rows)

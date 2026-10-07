@@ -18,7 +18,7 @@ from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.period_lock import assert_period_unlocked
 from billing.services.line_items import build_line_items
-from billing.tax_rules import has_gstin, itc_refusal
+from billing.tax_rules import clean_gstin, itc_refusal
 from billing.utils import AIInvoiceProcessor
 
 logger = logging.getLogger(__name__)
@@ -111,10 +111,10 @@ def create_from_ai(request):
         #      forcing the user to bounce out and create manually.
         #      Name conflicts are disambiguated with state/GSTIN
         #      suffix (mirror of GSTR-2A's logic).
-        extracted_gstin = (invoice_data.get("customer_gst_number") or "").strip().upper()
-        if type_of_invoice == INVOICE_TYPE_INWARD and not has_gstin(extracted_gstin):
-            # "NA", "URP": not a GSTIN to match, create or backfill a supplier with.
-            extracted_gstin = ""
+        extracted_gstin = clean_gstin(invoice_data.get("customer_gst_number"))
+        if not extracted_gstin:
+            # "NA", "URP": not a GSTIN to match, create or backfill a party
+            # with, on a sale (H12) as on a purchase (C1b).
             invoice_data = {**invoice_data, "customer_gst_number": ""}
         customer = None
         if extracted_gstin:

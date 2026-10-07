@@ -139,8 +139,8 @@ def classify_b2c(business, invoice):
     from billing.constants import B2CL_THRESHOLD
 
     customer = invoice.customer
-    cust_gstin = (getattr(customer, "gst_number", "") or "").strip().upper()
-    if len(cust_gstin) == 15:
+    cust_gstin = clean_gstin(getattr(customer, "gst_number", ""))
+    if cust_gstin:
         return "b2b", None, cust_gstin[:2], False
 
     inter = is_interstate(business, customer)
@@ -180,13 +180,23 @@ def split_tax(tax, interstate):
 
 
 def has_gstin(value):
-    """True when `value` is a GSTIN at all: 15 characters once trimmed.
+    """True when `value` is a GSTIN at all: 15 characters once trimmed, the
+    first two a state code's digits.
 
     "NA", "URP" (unregistered person) and blanks are what people type for a
-    party with no registration; none of them is a GSTIN. Mirrored by
-    hasGstin in src/utils/gstin.ts.
+    party with no registration; none of them is a GSTIN, so none makes a
+    party registered (B2B), gives it a state code, or claims input tax. The
+    one test every reader uses (H12; they used to disagree: == 15, >= 15, any
+    non-empty). Mirrored by hasGstin in src/utils/gstin.ts. gstin.validate is
+    the stricter check for what someone typed.
     """
-    return len((value or "").strip()) == 15
+    v = (value or "").strip()
+    return len(v) == 15 and v[:2].isdigit()
+
+
+def clean_gstin(value):
+    """The GSTIN to store: upper-cased, or "" for a placeholder (H12)."""
+    return (value or "").strip().upper() if has_gstin(value) else ""
 
 
 NO_GSTIN_NO_ITC = (
@@ -239,11 +249,13 @@ def state_code(party):
     """Two-digit GST state code for a Business or Customer.
 
     GSTIN first; otherwise derive it from state_name via the GST_CODE table, so
-    unregistered (B2C) parties still get a place of supply. Empty when neither
-    is known.
+    unregistered (B2C) parties still get a place of supply. A placeholder
+    ("NA", "URP") is no GSTIN: its first two letters were read as a state, so a
+    local walk-in was booked IGST and filed with pos "NA" (H12). Empty when
+    neither is known.
     """
-    gstin = (getattr(party, "gst_number", "") or "").strip()
-    if len(gstin) >= 2:
+    gstin = clean_gstin(getattr(party, "gst_number", ""))
+    if gstin:
         return gstin[:2]
 
     from billing.models import get_state_code_from_state_name

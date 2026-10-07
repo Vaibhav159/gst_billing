@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx-js-style";
 import { lineItemPercent } from "./gstRate";
 import { halveTax, round2 } from "./money";
+import { stateCode } from "./taxRules";
 
 /**
  * Parsed invoice row from the user's Excel format.
@@ -497,8 +498,9 @@ export function toImportReadyInvoices(
       const firstRow = rows[0];
       // Inter-state when first 2 chars of customer GSTIN differ from firm GSTIN.
       // Used to decide CGST+SGST split vs IGST. Defaults to intra-state.
-      const custStateCode = (firstRow.gstNumber || "").slice(0, 2);
-      const firmStateCode = (firm.gstin || "").slice(0, 2);
+      // A placeholder ("URP", "NA") has no state code (H12).
+      const custStateCode = stateCode(firstRow.gstNumber);
+      const firmStateCode = stateCode(firm.gstin);
       const useIGST = isInterState && custStateCode && firmStateCode && custStateCode !== firmStateCode;
 
       const items = rows.map(row => {

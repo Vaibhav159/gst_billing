@@ -16,7 +16,7 @@ from google.genai import types
 
 from billing.period_lock import assert_period_unlocked
 from billing.services.line_items import build_line_items, rate_for_product
-from billing.tax_rules import normalize_rate
+from billing.tax_rules import clean_gstin, normalize_rate
 
 GEMINI_TIMEOUT_MS = 45_000  # extraction of a 10MB photo takes ~10-20s; 45s is generous
 
@@ -192,8 +192,9 @@ def process_customer_csv(
                             if not pd.isna(row.get("address", ""))
                             else None
                         ),
+                        # "NA"/"URP" columns are no GSTIN (H12).
                         gst_number=(
-                            str(row.get("gst_number", "")).strip()
+                            clean_gstin(str(row.get("gst_number", "")))
                             if not pd.isna(row.get("gst_number", ""))
                             else None
                         ),

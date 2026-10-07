@@ -17,7 +17,15 @@ from rest_framework.response import Response
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.period_lock import locked_period_or_none
-from billing.tax_rules import direction_known, normalize_rate, normalize_tax_heads, split_tax, state_name_from_gstin
+from billing.tax_rules import (
+    clean_gstin,
+    direction_known,
+    has_gstin,
+    normalize_rate,
+    normalize_tax_heads,
+    split_tax,
+    state_name_from_gstin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +52,7 @@ def run_bulk_import(request):
     # Pre-fetch all businesses (small table, usually <10 rows)
     all_businesses = list(Business.objects.all())
     biz_by_id = {b.pk: b for b in all_businesses}
-    biz_by_gstin = {(b.gst_number or "").lower(): b for b in all_businesses if b.gst_number}
+    biz_by_gstin = {b.gst_number.strip().lower(): b for b in all_businesses if has_gstin(b.gst_number)}
     biz_by_name = {(b.name or "").lower(): b for b in all_businesses}
 
     forced_business = None
@@ -59,8 +67,10 @@ def run_bulk_import(request):
     cust_by_pan = {}
     cust_by_name = {}
     for c in Customer.objects.all().only("id", "name", "gst_number", "pan_number"):
-        if c.gst_number:
-            cust_by_gst[c.gst_number.upper()] = c
+        # Only real GSTINs are keys: "URP" on file would have claimed every
+        # walk-in a sheet typed "URP" for (H12).
+        if has_gstin(c.gst_number):
+            cust_by_gst[clean_gstin(c.gst_number)] = c
         if c.pan_number:
             cust_by_pan[c.pan_number.upper()] = c
         if c.name:
@@ -108,8 +118,8 @@ def run_bulk_import(request):
                 if clean_pan.upper() in cust_by_pan:
                     continue
             else:
-                clean_gst = cg
-                if clean_gst.upper() in cust_by_gst:
+                clean_gst = clean_gstin(cg)
+                if clean_gst in cust_by_gst:
                     continue
         needed_new[key] = {"name": cn, "gst": clean_gst, "pan": clean_pan}
 
@@ -127,7 +137,7 @@ def run_bulk_import(request):
         for c in new_objs:
             cust_by_name[c.name.lower()] = c
             if c.gst_number:
-                cust_by_gst[c.gst_number.upper()] = c
+                cust_by_gst[c.gst_number] = c
             if c.pan_number:
                 cust_by_pan[c.pan_number.upper()] = c
 
@@ -212,8 +222,8 @@ def run_bulk_import(request):
                             clean_pan = customer_gst.replace("(PAN)", "").strip()
                             customer = cust_by_pan.get(clean_pan.upper())
                         else:
-                            clean_gst = customer_gst
-                            customer = cust_by_gst.get(clean_gst.upper())
+                            clean_gst = clean_gstin(customer_gst)
+                            customer = cust_by_gst.get(clean_gst) if clean_gst else None
                     if not customer:
                         customer = cust_by_name.get(customer_name.lower())
 
@@ -234,7 +244,7 @@ def run_bulk_import(request):
                         # customer instead of creating a duplicate.
                         cust_by_name[customer_name.lower()] = customer
                         if clean_gst:
-                            cust_by_gst[clean_gst.upper()] = customer
+                            cust_by_gst[clean_gst] = customer
                         if clean_pan:
                             cust_by_pan[clean_pan.upper()] = customer
 

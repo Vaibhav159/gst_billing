@@ -3,10 +3,15 @@
  * preview a user sees and the row that gets written agree.
  */
 
-/** Two-digit GST state code, or "" when the GSTIN is missing/too short. */
+import { hasGstin } from "./gstin";
+
+/**
+ * Two-digit GST state code, or "" when there is no GSTIN. A placeholder ("NA",
+ * "URP") is none: its first two letters read as a state made a local walk-in
+ * inter-state (H12). Mirrors the GSTIN half of tax_rules.state_code.
+ */
 export function stateCode(gstin?: string | null): string {
-  const g = (gstin || "").trim();
-  return g.length >= 2 ? g.slice(0, 2) : "";
+  return hasGstin(gstin) ? (gstin || "").trim().slice(0, 2) : "";
 }
 
 /**

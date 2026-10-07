@@ -182,3 +182,22 @@ describe("toImportReadyInvoices — paise-exact split (H13)", () => {
     expect(inv.total).toBe(566.16);
   });
 });
+
+describe("toImportReadyInvoices — placeholder GSTINs (H12)", () => {
+  it("does not take a URP walk-in for an out-of-state buyer", () => {
+    const parsed: ParsedExcelResult = {
+      firms: [{
+        firmName: "Test Firm", gstin: "08AAGPL3375F1ZO", supplyType: "Outward Supply", month: "Apr 2026",
+        invoices: [{
+          supplyType: "Outward Supply", sNo: 1, billNo: "1", invoiceDate: "2026-04-01",
+          partyName: "Walk-in", gstNumber: "URP", commodity: "SILVER", hsnCode: "711311",
+          gstRate: 3, qty: 1, rate: 10000, taxableValue: 0, cgst: 0, sgst: 0, igst: 0,
+          totalInvoiceValue: 0,
+        }],
+      }],
+      summary: [],
+    };
+    const [inv] = toImportReadyInvoices(parsed, []);
+    expect(inv.items[0]).toMatchObject({ cgst: 150, sgst: 150, igst: 0 });
+  });
+});
