@@ -322,3 +322,44 @@ def check_tax_rate(item_data, taxable, gst_rate):
                 f"{rate_as_percent(gst_rate)}% of {to_paise(taxable)} ({expected})."
             )
         })
+
+
+HEADS = ("cgst", "sgst", "igst")
+
+
+def utilise_itc(liability, credit):
+    """Pay a period's output tax from input credit in the legal order (M29).
+
+    Section 49(5) and Rule 88A: IGST credit goes to IGST first, then to CGST
+    and SGST, and must be used up before any CGST or SGST credit is; CGST and
+    SGST credit then pay their own head and after that IGST, never each other.
+    Subtracting head by head, as the summary did, showed Rs 18,000 + 18,000
+    payable beside Rs 30,000 of unused IGST credit.
+
+    Where IGST credit may go to CGST or SGST "in any proportion", it goes first
+    to whichever own credit can't cover, so the least cash is paid.
+
+    `liability` and `credit` map cgst/sgst/igst to amounts. Returns the cash
+    due and the credit left to carry forward, each with a total.
+    """
+    due = {h: Decimal(str(liability.get(h) or 0)) for h in HEADS}
+    left = {h: Decimal(str(credit.get(h) or 0)) for h in HEADS}
+
+    def pay(source, head, cap=None):
+        amount = min(left[source], due[head] if cap is None else min(due[head], cap))
+        left[source] -= amount
+        due[head] -= amount
+
+    pay("igst", "igst")
+    for head in ("cgst", "sgst"):  # where the head's own credit falls short
+        pay("igst", head, cap=max(due[head] - left[head], Decimal("0")))
+    for head in ("cgst", "sgst"):  # IGST credit must still be used up first
+        pay("igst", head)
+    for head in ("cgst", "sgst"):
+        pay(head, head)
+        pay(head, "igst")
+
+    def with_total(heads):
+        return {**heads, "total": sum(heads.values(), Decimal("0"))}
+
+    return {"cash": with_total(due), "carry_forward": with_total(left)}

@@ -14,7 +14,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 
 from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import classify_b2c, clean_gstin, rate_as_percent
+from billing.tax_rules import HEADS, classify_b2c, clean_gstin, rate_as_percent, utilise_itc
 
 TWO_PLACES = Decimal("0.01")
 
@@ -170,16 +170,16 @@ def gst_summary(view, request):
             "igst": float(inward_tax["igst"]),
             "total": float(inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"]),
         },
-        "net_payable": {
-            "cgst": float(outward_tax["cgst"] - inward_tax["cgst"]),
-            "sgst": float(outward_tax["sgst"] - inward_tax["sgst"]),
-            "igst": float(outward_tax["igst"] - inward_tax["igst"]),
-            "total": float(
-                (outward_tax["cgst"] + outward_tax["sgst"] + outward_tax["igst"])
-                - (inward_tax["cgst"] + inward_tax["sgst"] + inward_tax["igst"])
-            ),
-        },
+        # Cash due once the period's credit is used in the legal order (Rule
+        # 88A), and the credit left over. Per GSTIN only: across firms it
+        # netted one firm's credit against another's tax (M29).
+        "net_payable": None,
+        "itc_carry_forward": None,
     }
+    if business_id:
+        period = utilise_itc(outward_tax, inward_tax)
+        gstr3b["net_payable"] = {k: float(v) for k, v in period["cash"].items()}
+        gstr3b["itc_carry_forward"] = {k: float(v) for k, v in period["carry_forward"].items()}
 
     # ── GSTR-3B Table 4 (current portal structure as of May 2026) ──
     # Sub-rows: 4(A)(1) imports, 4(A)(5) all other ITC (= current period
@@ -323,19 +323,8 @@ def gst_summary(view, request):
             })
     urgent_invoices.sort(key=lambda x: x["days_left"])
 
-    # ── GSTR-1 vs GSTR-3B reconciliation ──
-    # In a clean book, the rate-slab tax (cgst+sgst+igst per rate) should
-    # match GSTR-3B output_tax exactly. Variance != 0 hints at line items
-    # with missing/wrong rate annotations or out-of-band tax adjustments.
-    gstr1_total_tax = sum(
-        r["cgst"] + r["sgst"] + r["igst"]
-        for r in rate_slabs.get("outward", [])
-    )
-    gstr1_3b_recon = {
-        "gstr1_total_tax": gstr1_total_tax,
-        "gstr3b_output_tax": gstr3b["output_tax"]["total"],
-        "variance": gstr3b["output_tax"]["total"] - gstr1_total_tax,
-    }
+    # (A "GSTR-1 vs 3B" variance used to sit here. Both sides summed the same
+    # outward lines, so it was always about 0 and could detect nothing: M29.)
 
     # ── Effective ITC + Net Tax including carry-forward ──
     # The user came looking for "last year's carry-forward GST" on the
@@ -348,13 +337,21 @@ def gst_summary(view, request):
     # =   Effective Net Tax     = Output - Effective ITC
     carry_total = opening_balance["total"] if opening_balance else 0.0
     current_itc_total = gstr3b["input_tax_credit"]["total"]
-    output_total = gstr3b["output_tax"]["total"]
     effective = {
         "carry_forward_itc": carry_total,
         "current_itc": current_itc_total,
         "effective_itc": current_itc_total + carry_total,
-        "effective_net_tax": output_total - (current_itc_total + carry_total),
+        # Rule 88A over the period's credit plus the carry-forward, per head.
+        "effective_net_tax": None,
+        "effective_cash": None,
+        "effective_carry_forward": None,
     }
+    if business_id:
+        opening = {h: Decimal(str((opening_balance or {}).get(h) or 0)) for h in HEADS}
+        both = utilise_itc(outward_tax, {h: inward_tax[h] + opening[h] for h in HEADS})
+        effective["effective_net_tax"] = float(both["cash"]["total"])
+        effective["effective_cash"] = {k: float(v) for k, v in both["cash"].items()}
+        effective["effective_carry_forward"] = {k: float(v) for k, v in both["carry_forward"].items()}
 
     return Response({
         "rate_slabs": rate_slabs,
@@ -365,7 +362,9 @@ def gst_summary(view, request):
             "buckets": aging_buckets,
             "urgent_invoices": urgent_invoices,
         },
-        "gstr1_3b_recon": gstr1_3b_recon,
+        "net_payable_note": None if business_id else (
+            "Net payable is worked out per GSTIN: pick one firm to see it."
+        ),
         # Promoted to top-level so the Summary view doesn't have to
         # reach into gstr3b_table4.ecrrs_opening_balance. Keeps the old
         # nested copy for backwards compat with the GSTR-3B tab.
@@ -549,12 +548,12 @@ def gstr_export(view, request):
         "intr_ltfee": {
             "intr_details": {"iamt": 0, "camt": 0, "samt": 0},
         },
-        "tax_pmt": {
-            "cgst": float(ot["cgst"] - it["cgst"]),
-            "sgst": float(ot["sgst"] - it["sgst"]),
-            "igst": float(ot["igst"] - it["igst"]),
-        },
+        # Cash per head after Rule 88A, for one GSTIN (M29); none across firms.
+        "tax_pmt": None,
     }
+    if request.query_params.get("business_id"):
+        cash = utilise_itc(ot, it)["cash"]
+        gstr3b["tax_pmt"] = {h: float(cash[h]) for h in ("cgst", "sgst", "igst")}
 
     # ── GSTR-2B Matching (basic) ──
     # Compare inward invoices against expected data

@@ -44,3 +44,65 @@ class HsnSummaryTest(GstSummaryCase):
         self._bill(self.supplier, "inward", "P-1", "800000", cgst="12000", sgst="12000", hsn="711319")
         rows = self._summary()["hsn_summary"]
         self.assertEqual([(r["hsn_code"], r["taxable"], r["count"]) for r in rows], [("711319", 1000000.0, 1)])
+
+
+class Rule88AUtilisationTest(GstSummaryCase):
+    """M29: net payable subtracted credit head by head. With Rs 30,000 of IGST
+    credit against Rs 18,000 + 18,000 of CGST/SGST due it showed both heads
+    payable in full. Section 49(5) and Rule 88A: IGST credit goes to IGST,
+    then to CGST and SGST, before any CGST or SGST credit is used; CGST
+    credit never pays SGST, nor SGST credit CGST."""
+
+    def _heads(self, cgst=0, sgst=0, igst=0):
+        return {"cgst": D(cgst), "sgst": D(sgst), "igst": D(igst)}
+
+    def test_igst_credit_pays_cgst_and_sgst(self):
+        from billing.tax_rules import utilise_itc
+
+        out = utilise_itc(self._heads(18000, 18000, 0), self._heads(0, 0, 30000))
+        self.assertEqual(out["cash"], self._heads(0, 6000, 0) | {"total": D("6000")})
+        self.assertEqual(out["carry_forward"]["total"], 0)
+
+    def test_igst_credit_goes_first_where_own_credit_falls_short(self):
+        from billing.tax_rules import utilise_itc
+
+        out = utilise_itc(self._heads(100, 100, 0), self._heads(100, 0, 150))
+        self.assertEqual(out["cash"]["total"], 0)
+        self.assertEqual(out["carry_forward"], self._heads(50, 0, 0) | {"total": D("50")})
+
+    def test_cgst_credit_never_pays_sgst(self):
+        from billing.tax_rules import utilise_itc
+
+        out = utilise_itc(self._heads(0, 100, 0), self._heads(100, 0, 0))
+        self.assertEqual(out["cash"], self._heads(0, 100, 0) | {"total": D("100")})
+        self.assertEqual(out["carry_forward"], self._heads(100, 0, 0) | {"total": D("100")})
+
+    def test_cgst_and_sgst_credit_pay_igst_after_their_own_heads(self):
+        from billing.tax_rules import utilise_itc
+
+        out = utilise_itc(self._heads(50, 50, 100), self._heads(80, 80, 30))
+        self.assertEqual(out["cash"], self._heads(0, 0, 10) | {"total": D("10")})
+
+    def test_the_summary_nets_one_firm_by_rule_88a(self):
+        self._bill(self.buyer, "outward", "S-1", "1200000", cgst="18000", sgst="18000")
+        self._bill(self.mumbai, "inward", "P-1", "1000000", igst="30000")
+        data = self._summary()
+        self.assertEqual(data["gstr3b"]["net_payable"], {"cgst": 0.0, "sgst": 6000.0, "igst": 0.0, "total": 6000.0})
+        self.assertEqual(data["effective"]["effective_net_tax"], 6000.0)
+        self.assertNotIn("gstr1_3b_recon", data)  # it compared the sales with themselves
+
+    def test_all_firms_have_no_net_payable(self):
+        other = Business.objects.create(name="SECOND FIRM", gst_number="08AAGPL3375F1ZO", state_name="RAJASTHAN")
+        self._bill(self.buyer, "outward", "S-1", "1200000", cgst="18000", sgst="18000")
+        self._bill(self.mumbai, "inward", "P-1", "1000000", igst="30000", business=other)
+        data = self._summary(business_id=None)
+        self.assertIsNone(data["gstr3b"]["net_payable"])
+        self.assertIsNone(data["effective"]["effective_net_tax"])
+        self.assertIn("one firm", data["net_payable_note"])
+
+    def test_the_3b_export_pays_by_rule_88a_too(self):
+        self._bill(self.buyer, "outward", "S-1", "1200000", cgst="18000", sgst="18000")
+        self._bill(self.mumbai, "inward", "P-1", "1000000", igst="30000")
+        r = self.client.get(reverse("invoice-gstr-export"), {
+            "business_id": self.business.id, "start_date": "2026-07-01", "end_date": "2026-07-31"})
+        self.assertEqual(r.data["gstr3b"]["tax_pmt"], {"cgst": 0.0, "sgst": 6000.0, "igst": 0.0})
