@@ -70,8 +70,11 @@ class Command(BaseCommand):
         if not opts["apply"]:
             self.stdout.write(self.style.NOTICE("\nDry run. Re-run with --apply to re-sum these headers."))
             return
+        # The sum as the database has it when it writes, not as it was read.
         with transaction.atomic():
-            for inv in fixable:
-                Invoice.objects.filter(pk=inv.pk).update(total_amount=inv.lines_total)
+            Invoice.objects.filter(pk__in=[inv.pk for inv in fixable]).update(
+                total_amount=Coalesce(Subquery(line_sum, output_field=DecimalField()), Decimal("0"),
+                                      output_field=DecimalField())
+            )
         invalidate(Invoice)
         self.stdout.write(self.style.SUCCESS(f"\nRe-summed {len(fixable)} invoice total(s)."))

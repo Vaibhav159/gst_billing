@@ -64,12 +64,13 @@ class Command(BaseCommand):
         # candidates instead of pulling every line item into Python.
         suspects = [slab for slab in GST_SLABS if slab]
         products = [
-            p for p in Product.objects.filter(gst_tax_rate__in=suspects)
+            # Past cacheops, as every repair reads (_repair.scope).
+            p for p in Product.objects.nocache().filter(gst_tax_rate__in=suspects)
             if _misstored(p.gst_tax_rate)
         ]
 
         qs = (
-            LineItem.objects.filter(gst_tax_rate__in=suspects)
+            LineItem.objects.nocache().filter(gst_tax_rate__in=suspects)
             .select_related("invoice")
             .order_by("id")
         )

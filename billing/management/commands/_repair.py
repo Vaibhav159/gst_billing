@@ -9,8 +9,9 @@ told which filed returns a fix would move.
 import logging
 
 from django.conf import settings
+from django.db.models import Prefetch
 
-from billing.models import FiledPeriod
+from billing.models import FiledPeriod, LineItem
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,12 @@ def add_scope_arguments(parser, what="the fix"):
 
 
 def scope(qs, opts, prefix=""):
-    """Filter a queryset by --business/--from/--to; `prefix` reaches the invoice ("invoice__")."""
+    """Filter a queryset by --business/--from/--to; `prefix` reaches the invoice ("invoice__").
+
+    Read past cacheops: a report has to show the database, and --apply writes
+    from what it read. A cached read could be 30 minutes old.
+    """
+    qs = qs.nocache()
     if opts["business"]:
         qs = qs.filter(**{f"{prefix}business_id": opts["business"]})
     if opts["date_from"]:
@@ -31,6 +37,11 @@ def scope(qs, opts, prefix=""):
     if opts["date_to"]:
         qs = qs.filter(**{f"{prefix}invoice_date__lte": opts["date_to"]})
     return qs
+
+
+def fresh_lines():
+    """An invoice's lines to prefetch, read past cacheops like the invoices."""
+    return Prefetch("lineitem_set", queryset=LineItem.objects.nocache())
 
 
 def filed_months():

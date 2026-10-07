@@ -24,7 +24,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
 
-from billing.management.commands._repair import invalidate
+from billing.management.commands._repair import fresh_lines, invalidate
 from billing.models import Business, Customer, Invoice
 from billing.tax_rules import has_gstin, is_interstate
 
@@ -43,8 +43,9 @@ class Command(BaseCommand):
                             help="Only parties linked to, or invoiced by, this business id.")
 
     def handle(self, *args, **opts):
-        customers = Customer.objects.order_by("name")
-        firms = Business.objects.order_by("name")
+        # Read past cacheops, as every repair does (_repair.scope).
+        customers = Customer.objects.nocache().order_by("name")
+        firms = Business.objects.nocache().order_by("name")
         if opts["business"]:
             customers = customers.filter(
                 Q(businesses__id=opts["business"]) | Q(invoice__business_id=opts["business"])
@@ -61,7 +62,8 @@ class Command(BaseCommand):
         if bad_customers:
             self.stdout.write(self.style.WARNING(f"\n{len(bad_customers)} customer(s) with a placeholder GSTIN:\n"))
         for c in bad_customers:
-            invoices = Invoice.objects.filter(customer=c).select_related("business").prefetch_related("lineitem_set")
+            invoices = (Invoice.objects.nocache().filter(customer=c).select_related("business")
+                        .prefetch_related(fresh_lines()))
             sales = sum(1 for inv in invoices if inv.type_of_invoice == "outward")
             purchases = sum(1 for inv in invoices if inv.type_of_invoice == "inward")
             # The head each line would be filed under once the placeholder is
