@@ -171,14 +171,17 @@ def run_bulk_import(request):
             )
 
     # Purchases already on file, by the one inward rule (M28), one query per
-    # firm: "SJ-101" from the inward form is this sheet's "SJ/101".
+    # firm: "SJ-101" from the inward form is this sheet's "SJ/101". Each with
+    # what it was, so a row skipped as a duplicate says which bill it matched.
     inward_seen = {}
 
     def inward_on_file(biz_id):
         if biz_id not in inward_seen:
             inward_seen[biz_id] = {
-                ident for inv in Invoice.objects.filter(business_id=biz_id, type_of_invoice=INVOICE_TYPE_INWARD)
-                .select_related("customer").only("invoice_number", "invoice_date", "customer__gst_number")
+                ident: f"{inv.invoice_number} of {inv.invoice_date} from {inv.customer.name}"
+                for inv in Invoice.objects.filter(business_id=biz_id, type_of_invoice=INVOICE_TYPE_INWARD)
+                .select_related("customer").only("invoice_number", "invoice_date", "customer__name",
+                                                 "customer__gst_number")
                 if (ident := _inward_identity(biz_id, inv.customer, inv.invoice_number, inv.invoice_date))
             }
         return inward_seen[biz_id]
@@ -290,7 +293,10 @@ def run_bulk_import(request):
                     inward_ident = None
                     if type_of_invoice == INVOICE_TYPE_INWARD:
                         inward_ident = _inward_identity(business.pk, customer, invoice_number, str(invoice_date))
-                        if inward_ident and inward_ident in inward_on_file(business.pk):
+                        if inward_ident and (matched := inward_on_file(business.pk).get(inward_ident)):
+                            # Said, not silent: a number read as another bill's
+                            # would otherwise lose its credit without a trace.
+                            errors.append(f"Invoice {invoice_number}: skipped, already on file as {matched}.")
                             skipped_count += 1
                             continue
 
@@ -319,7 +325,8 @@ def run_bulk_import(request):
                     # Mark as seen so a duplicate row in the same payload is skipped
                     existing_invoice_keys.add(dup_key)
                     if inward_ident:
-                        inward_on_file(business.pk).add(inward_ident)
+                        inward_on_file(business.pk)[inward_ident] = (
+                            f"{invoice_number} of {invoice_date} from {customer.name}, earlier in this import")
                     created_count += 1
 
             except Exception as e:

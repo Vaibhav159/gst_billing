@@ -39,7 +39,33 @@ class InwardDuplicateRuleTest(BaseAPITestCase):
     def test_a_bill_number_is_read_one_way(self):
         from billing.api.inward_bills_service import inward_number_key
 
-        self.assertEqual({inward_number_key(n) for n in ("SJ-101", "sj/101", "SJ 101", " SJ.101 ")}, {"SJ101"})
+        self.assertEqual({inward_number_key(n) for n in ("SJ-101", "sj/101", "SJ 101", " SJ.101 ", "SJ101")}, {"SJ101"})
+
+    def test_a_separator_between_digits_still_tells_bills_apart(self):
+        # Review: with every separator stripped, 12-3 and 1-23 were one bill,
+        # and bulk import dropped the second without a word.
+        from billing.api.inward_bills_service import inward_number_key
+
+        self.assertNotEqual(inward_number_key("12-3"), inward_number_key("1-23"))
+        self.assertEqual(inward_number_key("2026-27/101"), inward_number_key("2026/27 101"))
+
+    def test_a_gstin_stored_with_spaces_is_the_same_supplier(self):
+        from billing.api.inward_bills_service import find_duplicate
+
+        self.assertEqual(self._inward_form("SJ-101").status_code, 201)
+        Customer.objects.filter(pk=self.supplier.pk).update(gst_number=f" {SUPPLIER_GSTIN.lower()} ")
+        twin = Customer(name="SJ GOLD (2A)", gst_number=SUPPLIER_GSTIN)
+        self.assertIsNotNone(find_duplicate(self.business, "SJ/101", twin, "2026-05-06"))
+
+    def test_bulk_import_says_which_bill_it_matched(self):
+        self.assertEqual(self._inward_form("SJ-101").status_code, 201)
+        r = self.client.post(reverse("bulk-invoice-import"), {"business_id": self.business.id, "invoices": [{
+            "invoiceNumber": "SJ/101", "invoice_date": "2026-05-07", "customerName": "SJ GOLD",
+            "customerGST": SUPPLIER_GSTIN, "type": "INWARD", "total": 10300,
+            "items": [{"productName": "Gold bar", "hsn": "710813", "qty": 1, "rate": 10000, "gstRate": 3}],
+        }]}, format="json")
+        self.assertEqual(r.data["skipped"], 1, r.data)
+        self.assertTrue(any("SJ/101" in e and "SJ-101" in e and "2026-05-05" in e for e in r.data["errors"]), r.data)
 
     def test_ai_import_sees_the_inward_forms_bill(self):
         self.assertEqual(self._inward_form("SJ-101").status_code, 201)

@@ -8,6 +8,8 @@ import re
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.db.models.functions import Trim, Upper
+
 from billing.constants import INVOICE_TYPE_INWARD
 from billing.tax_rules import clean_gstin
 
@@ -96,9 +98,11 @@ def inward_number_key(number):
     """A supplier's bill number spelt one way: upper-case letters and digits.
 
     "SJ-101" typed on the inward form and "SJ/101" read by AI or the GSTR-2A
-    file are the same bill (M28).
+    file are the same bill (M28). A separator between two digits is kept, as
+    "-": with every separator stripped, 12-3 and 1-23 were one bill.
     """
-    return re.sub(r"[^0-9A-Z]", "", str(number or "").upper())
+    marked = re.sub(r"(?<=\d)[^0-9A-Z]+(?=\d)", "\0", str(number or "").upper())
+    return re.sub(r"[^0-9A-Z\0]", "", marked).replace("\0", "-")
 
 
 def supplier_key(supplier):
@@ -145,7 +149,11 @@ def find_duplicate(business, invoice_number, supplier=None, invoice_date=None):
     )
     if supplier is not None:
         kind, value = supplier_key(supplier)
-        qs = qs.filter(customer__gst_number__iexact=value) if kind == "gstin" else qs.filter(customer=supplier)
+        if kind == "gstin":
+            # As clean_gstin reads it: a GSTIN on file with stray spaces is the same supplier.
+            qs = qs.annotate(supplier_gstin=Upper(Trim("customer__gst_number"))).filter(supplier_gstin=value)
+        else:
+            qs = qs.filter(customer=supplier)
     start = fy_start(invoice_date) if invoice_date else None
     if start:
         qs = qs.filter(invoice_date__range=(start, date(start.year + 1, 3, 31)))
