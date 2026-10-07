@@ -348,7 +348,16 @@ def run_bulk_import(request):
                 cgst, sgst, igst = normalize_tax_heads(
                     cgst, sgst, igst, is_igst
                 )
-            amount = user_amount if user_amount > 0 else to_paise(net_amount) + cgst + sgst + igst
+            booked = to_paise(net_amount) + cgst + sgst + igst
+            # A line's amount is its taxable value and tax: kept as the file
+            # had it, the invoice total disagreed with what the returns file.
+            if user_amount > 0 and abs(user_amount - booked) > LINE_MONEY_TOLERANCE:
+                problems.append(
+                    f"Invoice {inv_data.get('invoiceNumber', '?')} item '{product_name}': its amount "
+                    f"{user_amount} isn't its taxable value and tax ({booked}). Check the amount column."
+                )
+                continue
+            amount = user_amount if user_amount > 0 else booked
 
             # Validate per-field DB constraints BEFORE bulk_create so
             # a single bad row doesn't 500 the whole batch.

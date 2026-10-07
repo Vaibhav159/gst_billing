@@ -244,3 +244,22 @@ class UnreadableNumberTest(BulkImportMoneyCase):
     def test_a_rate_written_with_a_percent_sign_is_read(self):
         self._import(self._row("N-3", self.GOOD | {"gstRate": "3%"}))
         self.assertEqual(self._line("N-3").gst_tax_rate, D("0.03"))
+
+
+class AmountTest(BulkImportMoneyCase):
+    """Review of H9: with a taxable value given, a line's amount was stored as
+    the file had it, whatever it was: the invoice total then disagreed with
+    the taxable value and tax the returns file. A line's amount is its taxable
+    value plus its tax, within a rupee."""
+
+    LINE = {"productName": "Gold", "hsn": "711319", "gstRate": 3, "qty": 10, "rate": 6000, "taxable": 60000,
+            "cgst": 900, "sgst": 900, "igst": 0}
+
+    def test_an_amount_that_isnt_taxable_plus_tax_is_refused(self):
+        data = self._import(self._row("AM-1", self.LINE | {"amount": 65000}))
+        self.assertFalse(Invoice.objects.filter(invoice_number="AM-1").exists())
+        self.assertTrue(any("AM-1" in e and "61800" in e for e in data["errors"]), data["errors"])
+
+    def test_an_amount_within_a_rupee_is_kept(self):
+        self._import(self._row("AM-2", self.LINE | {"amount": 61800.40}))
+        self.assertEqual(self._line("AM-2").amount, D("61800.40"))
