@@ -11,7 +11,9 @@ from django.db.models import (
     Count,
     F,
     IntegerField,
+    OuterRef,
     Q,
+    Subquery,
     Sum,
 )
 from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
@@ -488,7 +490,12 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             invoices_transferred = Invoice.objects.filter(customer=source).update(
                 customer=target
             )
-            LineItem.objects.filter(customer=source).update(customer=target)
+            # Every line follows its own invoice (H6). Moving lines by their
+            # customer field left a drifted line on the source's invoice behind
+            # and dragged another invoice's stray line along.
+            LineItem.objects.filter(Q(customer=source) | Q(invoice__customer=target)).update(
+                customer_id=Subquery(Invoice.objects.filter(pk=OuterRef("invoice_id")).values("customer_id")[:1])
+            )
             for business in source.businesses.all():
                 target.businesses.add(business)
             source_name = source.name

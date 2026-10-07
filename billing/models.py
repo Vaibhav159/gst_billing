@@ -375,23 +375,30 @@ class Invoice(AbstractBaseModel):
         return instance
 
     def _follow_parties(self):
-        """The lines' heads follow a new firm or customer (M14).
+        """The lines follow a new firm or customer.
 
         A header PATCH, the Django admin and undo all change the parties
-        without touching the lines, which kept the old direction's heads:
-        moving a sale to an out-of-state buyer left it CGST+SGST. Totals don't
-        move. When nothing says where the supply goes, the heads on file stay,
-        as bulk import keeps a file's heads for an unknown direction. save(),
-        not update(), so cacheops drops the cached lines.
+        without touching the lines. Each line now names the invoice's customer
+        (H6: a line left on the old one was deleted with it). Its heads are
+        re-filed for the new direction (M14: a sale moved to an out-of-state
+        buyer stayed CGST+SGST), totals unchanged; when nothing says where the
+        supply goes, the heads on file stay, as bulk import keeps a file's
+        heads for an unknown direction. save(), not update(), so cacheops
+        drops the cached lines.
         """
-        if not direction_known(self.business, self.customer):
-            return
+        known = direction_known(self.business, self.customer)
         interstate = is_interstate(self.business, self.customer)
         for li in LineItem.objects.filter(invoice=self):
+            changed = []
+            if li.customer_id != self.customer_id:
+                li.customer_id = self.customer_id
+                changed.append("customer")
             heads = normalize_tax_heads(li.cgst, li.sgst, li.igst, interstate)
-            if heads != (li.cgst, li.sgst, li.igst):
+            if known and heads != (li.cgst, li.sgst, li.igst):
                 li.cgst, li.sgst, li.igst = heads
-                li.save(update_fields=["cgst", "sgst", "igst"])
+                changed += ["cgst", "sgst", "igst"]
+            if changed:
+                li.save(update_fields=changed)
 
     def save(self, *args, **kwargs):
         # The post_save / post_delete signals on LineItem keep self.total_amount
@@ -489,9 +496,13 @@ class Invoice(AbstractBaseModel):
 
 
 class LineItem(AbstractBaseModel):
+    # PROTECT, like Invoice.customer, and always the invoice's customer
+    # (Invoice.save re-points the lines). As CASCADE, deleting a customer whose
+    # invoices had moved to someone else deleted those invoices' lines, filed
+    # months included, with no snapshot of them (H6).
     customer = models.ForeignKey(
         Customer,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         verbose_name="Customer",
         help_text="Customer of the line item.",
     )

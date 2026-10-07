@@ -127,7 +127,8 @@ class ProtectedDeleteMixin:
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError as e:
-            n = len(e.protected_objects)
+            # Invoices, and since H6 invoice lines: count the invoices either way.
+            n = len({getattr(o, "invoice_id", o.pk) for o in e.protected_objects})
             return Response(
                 {"error": f"Cannot delete: {n} invoice(s) still reference this record. "
                           "Reassign or delete them first.", "protected": n},
