@@ -1,6 +1,5 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { createPortal } from "react-dom";
-import { X, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
+import BottomSheet from "./BottomSheet";
 
 interface FilterOption {
   label: string;
@@ -18,73 +17,39 @@ interface Props {
 }
 
 export default function MobileFilterSheet({ open, onOpenChange, filters, onClear, title = "Filters" }: Props) {
-  // Portal to <body>: a transformed ancestor (page transition mid-flight)
-  // otherwise becomes the containing block for this fixed overlay.
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm"
-            onClick={() => onOpenChange(false)}
-          />
-          <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 350 }}
-            className="fixed bottom-0 left-0 right-0 z-[61] elevated-card rounded-t-2xl max-h-[70vh] overflow-y-auto safe-area-bottom"
-          >
-            {/* Handle */}
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-            </div>
-
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border/30">
-              <div className="flex items-center gap-2">
-                <SlidersHorizontal className="w-4 h-4 text-primary" />
-                <h2 className="text-base font-display font-semibold text-foreground">{title}</h2>
-              </div>
-              <div className="flex items-center gap-3">
-                <button onClick={onClear} className="text-[12px] text-destructive font-medium">Clear All</button>
-                <button type="button" aria-label="Close" onClick={() => onOpenChange(false)} className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-5">
-              {filters.map((filter) => (
-                <div key={filter.label} className="space-y-2">
-                  <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{filter.label}</label>
-                  <select
-                    value={filter.value}
-                    onChange={(e) => filter.onChange(e.target.value)}
-                    className="premium-select w-full h-12 text-[14px]"
-                  >
-                    {filter.options.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
+  return (
+    <BottomSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      titleIcon={<SlidersHorizontal className="w-4 h-4 text-primary" />}
+      actions={<button onClick={onClear} className="text-[12px] text-destructive font-medium">Clear All</button>}
+    >
+      <div className="p-5 space-y-5">
+        {filters.map((filter) => (
+          <div key={filter.label} className="space-y-2">
+            <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{filter.label}</label>
+            <select
+              value={filter.value}
+              onChange={(e) => filter.onChange(e.target.value)}
+              className="premium-select w-full h-12 text-[14px]"
+            >
+              {filter.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
-            </div>
+            </select>
+          </div>
+        ))}
+      </div>
 
-            <div className="p-5 pt-0">
-              <button
-                onClick={() => onOpenChange(false)}
-                className="premium-btn-primary w-full h-12 text-[14px]"
-              >
-                Apply Filters
-              </button>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>,
-    document.body
+      <div className="p-5 pt-0">
+        <button
+          onClick={() => onOpenChange(false)}
+          className="premium-btn-primary w-full h-12 text-[14px]"
+        >
+          Apply Filters
+        </button>
+      </div>
+    </BottomSheet>
   );
 }
