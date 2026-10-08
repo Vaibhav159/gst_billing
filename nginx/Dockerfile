@@ -1,5 +1,9 @@
 # Stage 1: Build the Vite React Frontend
-FROM node:20-alpine AS builder
+# --platform=$BUILDPLATFORM: the build output is plain static files, the same
+# for every image, so it is built once on the runner's own architecture.
+# Without it the arm64 image ran npm ci and vite under QEMU emulation, and the
+# v2.0.9 release's nginx build was still running after 30 minutes (v2.0.8: 7).
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app
 # Copy the new frontend codebase
