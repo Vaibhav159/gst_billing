@@ -60,6 +60,14 @@ describe("invoicePdfName — firm, financial year and number (UX2)", () => {
       .toBe("M-S.-SHREE-LODHA_2026-27_A-B-C-1.pdf");
   });
 
+  it("keeps a Devanagari firm name whole, its vowel signs and viramas included (M1)", () => {
+    // Matras and the virama are combining marks: dropping them made
+    // "लोढ़ा ज्वेलर्स" into "ल-ढ-ज-व-लर-स".
+    const name = "लोढ़ा ज्वेलर्स";
+    expect(invoicePdfName({ invoiceNumber: "30", invoice_date: "2026-05-01" }, { name }))
+      .toBe(`${name.replace(" ", "-")}_2026-27_30.pdf`);
+  });
+
   it("reads the financial year off the date string, April to March", () => {
     expect([fyOf("2026-04-01"), fyOf("2027-03-31"), fyOf("2025-12-31"), fyOf("")]).toEqual(["2026-27", "2026-27", "2025-26", ""]);
   });

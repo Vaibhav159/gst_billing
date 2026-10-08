@@ -11,13 +11,14 @@ type Named = { invoiceNumber?: string; invoice_date?: string; businessName?: str
 type Firm = { name?: string | null; invoice_prefix?: string | null } | null | undefined;
 
 /**
- * A piece of a file name. Letters and digits (any script), ".", "_" and "-"
- * stay; any run of anything else (spaces, "/", ":", brackets, control
- * characters) becomes one "-", which every file system and share sheet takes.
+ * A piece of a file name. Letters, combining marks (a Devanagari vowel sign
+ * or virama is one) and digits of any script, ".", "_" and "-" stay; any run
+ * of anything else (spaces, "/", ":", brackets, control characters) becomes
+ * one "-", which every file system and share sheet takes.
  */
 function safe(part: string, max: number): string {
   const trim = (s: string) => s.replace(/^[-.]+|[-.]+$/g, "");
-  return trim(trim(part.replace(/[^\p{L}\p{N}._-]+/gu, "-")).slice(0, max));
+  return trim(trim(part.replace(/[^\p{L}\p{M}\p{N}._-]+/gu, "-")).slice(0, max));
 }
 
 /** "2026-27" for "2026-05-01": April to March, read off the string (no Date, no timezone). */
