@@ -9,9 +9,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
-vi.mock("@/utils/api", () => ({ default: { get: (url: string) => get(url) } }));
+const post = vi.fn();
+vi.mock("@/utils/api", () => ({ default: { get: (url: string) => get(url), post: (url: string, body: unknown) => post(url, body) } }));
 
-import { buildFullBackup, describeCounts, restorePrompt } from "./fullBackup";
+import { buildFullBackup, describeCounts, restorePrompt, saveFullBackup } from "./fullBackup";
 import { restoreBackup } from "./restoreBackup";
 
 const line = { id: 1, product_name: "Gold Chain", hsn_code: "711319", gst_tax_rate: "0.0300", quantity: "10.000",
@@ -113,6 +114,30 @@ describe("buildFullBackup — everything on file, whatever the page's filters sa
     expect(sent[0].items[0]).toMatchObject({ productName: "Gold Chain", hsn: "711319", gstRate: 3, qty: 10, rate: 6000, amount: 61800 });
     // The product's stored fraction goes back as stored, not through a percent.
     expect(posts.find((p) => p.url === "products/")!.body.gst_tax_rate).toBe("0.0300");
+  });
+});
+
+describe("saveFullBackup (M7)", () => {
+  beforeEach(() => {
+    post.mockReset();
+    Object.assign(window.URL, { createObjectURL: vi.fn(() => "blob:backup"), revokeObjectURL: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  });
+
+  it("records the backup in the audit log, as Bulk PDF records its downloads", async () => {
+    post.mockResolvedValue({ data: { status: "logged" } });
+    const { backup } = await saveFullBackup();
+    expect(backup.counts.invoices).toBe(5);
+    expect(post).toHaveBeenCalledWith("audit-logs/log/", expect.objectContaining({
+      action: "exported", entity: "invoice", entity_id: 0,
+      entity_name: "Full backup (9 records)",
+      details: expect.stringContaining("1 business, 2 customers, 1 product, 5 invoices (2 inward bills)"),
+    }));
+  });
+
+  it("still saves the file when the audit log can't be written", async () => {
+    post.mockRejectedValue(new Error("offline"));
+    await expect(saveFullBackup()).resolves.toMatchObject({ backup: { totalRecords: 9 } });
   });
 });
 

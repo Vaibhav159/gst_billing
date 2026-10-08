@@ -12,6 +12,7 @@
  * products with their stored gst_tax_rate fraction.
  */
 import { fetchAllPages } from "@/hooks/useDataStore";
+import api from "@/utils/api";
 import { todayLocal } from "@/utils/localDate";
 
 export interface BackupCounts {
@@ -80,6 +81,15 @@ export async function saveFullBackup(): Promise<{ backup: FullBackup; bytes: num
   a.download = `gst-backup-${todayLocal()}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  // In the audit log, as Bulk PDF records its downloads (M7); a log that
+  // can't be written never fails the backup.
+  void api.post("audit-logs/log/", {
+    action: "exported",
+    entity: "invoice",
+    entity_id: 0,
+    entity_name: `Full backup (${backup.totalRecords.toLocaleString("en-IN")} records)`,
+    details: `${describeCounts(backup.counts)}; ${Math.round(blob.size / 1024).toLocaleString("en-IN")} KB`,
+  }).catch(() => {});
   return { backup, bytes: blob.size };
 }
 
