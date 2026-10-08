@@ -6,10 +6,11 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InvoiceForm from "./InvoiceForm";
 
-const { update, stored } = vi.hoisted(() => ({
+const { update, stored, phone } = vi.hoisted(() => ({
+  phone: { on: false },
   update: vi.fn().mockResolvedValue({}),
   // A 0.25% ruby whose line id (7) is also a catalog product's id.
   stored: {
@@ -39,6 +40,8 @@ vi.mock("@/utils/api", () => ({
   },
 }));
 
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => phone.on }));
+
 function renderEdit() {
   return render(
     <MemoryRouter initialEntries={["/billing/invoice/edit/9"]}>
@@ -63,5 +66,32 @@ describe("InvoiceForm, editing a stored invoice", () => {
     renderEdit();
     await waitFor(() => expect(screen.getByDisplayValue("H17-1")).toBeInTheDocument());
     expect(screen.queryByText(/outside FY/i)).toBeNull();
+  });
+});
+
+describe("InvoiceForm on a phone (UX4)", () => {
+  // The page root animates in with a transform, and a transformed ancestor
+  // is the containing block for position: fixed: the "fixed" bar sat at the
+  // foot of a 1,726 px page and the unsaved-changes card at top −108 px.
+  // Both now render at <body>, outside the routed page.
+  beforeEach(() => { phone.on = true; });
+  afterEach(() => { phone.on = false; });
+
+  it("puts its action bar outside the page, and the bar's Update still submits the form", async () => {
+    const { container } = renderEdit();
+    await waitFor(() => expect(screen.getByDisplayValue("H17-1")).toBeInTheDocument());
+    const submit = screen.getByRole("button", { name: /^Update$/ });
+    expect(container.contains(submit)).toBe(false);
+    fireEvent.click(submit);
+    expect(await screen.findByRole("button", { name: /Confirm & Save/ })).toBeInTheDocument();
+  });
+
+  it("opens the unsaved-changes dialog outside the page", async () => {
+    const { container } = renderEdit();
+    await waitFor(() => expect(screen.getByDisplayValue("H17-1")).toBeInTheDocument());
+    fireEvent.change(screen.getByDisplayValue("H17-1"), { target: { value: "H17-1A" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /^Cancel$/ }).at(-1)!);
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    expect(container.contains(dialog)).toBe(false);
   });
 });

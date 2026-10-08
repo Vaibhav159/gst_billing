@@ -552,7 +552,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading invoice details...</p>
         </div>
       ) : (
-      <form onSubmit={handleSubmit}>
+      <form id="invoice-form" onSubmit={handleSubmit}>
         <div className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
           <div className={cn(isMobile ? "" : "lg:col-span-2", "space-y-5")}>
             {/* Invoice Details */}
@@ -792,16 +792,19 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           </div>
         </div>
 
-        {/* Mobile fixed bottom actions */}
-        {isMobile && (
+        {/* Mobile fixed bottom actions, at <body>: the page root animates in
+            with a transform, which made it the bar's containing block (UX4).
+            The submit button joins the form by id from there. */}
+        {isMobile && createPortal(
           <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
             <div className="flex items-center gap-2">
               <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost flex-1 h-10 text-[13px] disabled:opacity-50"><X className="w-4 h-4" /> Cancel</button>
-              <button type="submit" disabled={isSaving} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed">
+              <button type="submit" form="invoice-form" disabled={isSaving} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed">
                 <Save className="w-4 h-4" /> {isSaving ? (mode === "create" ? "Creating…" : "Updating…") : (mode === "create" ? "Create" : "Update")}
               </button>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </form>
       )}
@@ -841,7 +844,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           setShowQuickProduct(false);
         }} />
 
-      <AnimatePresence>
+      {/* At <body>, like the review sheet: under the page root's transform
+          this card opened at top −108 px when Cancel was tapped (UX4). */}
+      {createPortal(<AnimatePresence>
         {showUnsavedModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} role="dialog" aria-modal="true" aria-label="Unsaved changes" className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }} transition={{ duration: 0.2 }} className="glass-panel rounded-2xl w-full max-w-sm p-6 space-y-5">
@@ -857,7 +862,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
 
       {/* ── Review before save: every figure eyeballed once, then committed.
              Portaled + opaque per the overlay rules; Escape goes back. ── */}
