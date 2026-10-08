@@ -11,6 +11,7 @@ import QRCode from "qrcode";
 import { useToast } from "@/hooks/use-toast";
 import { withSignatureForPdf } from "@/utils/printDocument";
 import { whatsappNumber } from "@/utils/shareInvoice";
+import { invoicePdfName } from "@/utils/pdfFileName";
 
 export default function InvoicePrintTally() {
   const { id } = useParams<{ id: string }>();
@@ -49,7 +50,8 @@ export default function InvoicePrintTally() {
   if (!inv) return <div className="p-8 text-muted-foreground">Invoice not found.</div>;
   if (!biz || !customer) return <div className="p-8 text-muted-foreground">Business or customer not found.</div>;
 
-  const fileName = `${inv.invoiceNumber.replace(/\//g, "-")}.pdf`;
+  // "LODHA-JEWELLERS_2026-27_30.pdf", not "30.pdf": #30 exists in every firm and year (UX2).
+  const fileName = invoicePdfName(inv, biz);
   const bizWithSig = withSignatureForPdf(biz);
   const document = <TallyInvoicePDF invoice={inv} business={bizWithSig} customer={customer} qrDataUrl={qrDataUrl} />;
 

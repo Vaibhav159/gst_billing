@@ -18,9 +18,9 @@ import api from "@/utils/api";
 import { BlobProvider } from "@react-pdf/renderer";
 import TallyInvoicePDF from "@/components/TallyInvoicePDF";
 import { PDFDocument } from "pdf-lib";
-import JSZip from "jszip";
 import QRCode from "qrcode";
 import { withSignatureForPdf } from "@/utils/printDocument";
+import { invoicePdfName, zipPdfs, zipResultToast } from "@/utils/pdfFileName";
 
 export default function BulkPDF() {
   const { toast } = useToast();
@@ -183,16 +183,16 @@ export default function BulkPDF() {
             details: `Printed invoices #${pdfQueue[0]?.invoiceNumber} to #${pdfQueue[pdfQueue.length - 1]?.invoiceNumber} for FY ${selectedFY}`,
           }).catch(() => {});
         } else {
-          // ZIP download
-          const zip = new JSZip();
-          for (const inv of pdfQueue) {
+          // ZIP download. Each PDF under its firm, FY and number, and the
+          // toast counts the files in the ZIP: "1.pdf" from three firms used
+          // to overwrite itself and still report three (UX2).
+          const files = pdfQueue.flatMap((inv) => {
             const blob = pdfBlobs.get(inv.id);
-            if (blob) {
-              const filename = `${(inv.invoiceNumber || "invoice").replace(/\//g, "-")}.pdf`;
-              zip.file(filename, blob);
-            }
-          }
-          const zipBlob = await zip.generateAsync({ type: "blob" });
+            const firm = businesses.find((b) => String(b.id) === String(inv.businessId));
+            return blob ? [{ name: invoicePdfName(inv, firm), blob }] : [];
+          });
+          const missing = pdfQueue.filter((inv) => !pdfBlobs.has(inv.id)).map((inv) => inv.invoiceNumber);
+          const { zip: zipBlob, written } = await zipPdfs(files);
           const url = window.URL.createObjectURL(zipBlob);
           const a = document.createElement("a");
           a.href = url;
@@ -201,13 +201,13 @@ export default function BulkPDF() {
           a.click();
           window.URL.revokeObjectURL(url);
           a.remove();
-          toast({ title: "Download Complete", description: `${pdfQueue.length} PDFs downloaded as ZIP.` });
+          toast(zipResultToast(written, pdfQueue.length, missing));
           // Log to audit
           api.post("audit-logs/log/", {
             action: "exported",
             entity: "invoice",
             entity_id: 0,
-            entity_name: `Bulk PDF Download (${pdfQueue.length} invoices)`,
+            entity_name: `Bulk PDF Download (${written} invoices)`,
             details: `Downloaded ZIP with invoices #${pdfQueue[0]?.invoiceNumber} to #${pdfQueue[pdfQueue.length - 1]?.invoiceNumber} for FY ${selectedFY}`,
           }).catch(() => {});
         }

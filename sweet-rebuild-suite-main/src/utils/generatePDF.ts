@@ -1,6 +1,10 @@
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { type Invoice, formatCurrency } from "./mockData";
+import { invoicePdfName } from "./pdfFileName";
+
+/** The invoice's firm, for its file name: the prefix when it has one (UX2). */
+type Firm = { name?: string | null; invoice_prefix?: string | null } | null | undefined;
 
 /**
  * Generates a PDF blob from the invoice print element on the page.
@@ -43,13 +47,14 @@ export async function generateInvoicePDF(
  */
 export async function downloadInvoicePDF(
   element: HTMLElement,
-  invoice: Invoice
+  invoice: Invoice,
+  firm?: Firm
 ) {
   const blob = await generateInvoicePDF(element, invoice);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${invoice.invoiceNumber.replace(/\//g, "-")}.pdf`;
+  a.download = invoicePdfName(invoice, firm);
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -60,12 +65,13 @@ export async function downloadInvoicePDF(
  */
 export async function sharePDFViaWebShare(
   element: HTMLElement,
-  invoice: Invoice
+  invoice: Invoice,
+  firm?: Firm
 ): Promise<boolean> {
   const blob = await generateInvoicePDF(element, invoice);
   const file = new File(
     [blob],
-    `${invoice.invoiceNumber.replace(/\//g, "-")}.pdf`,
+    invoicePdfName(invoice, firm),
     { type: "application/pdf" }
   );
 
@@ -86,7 +92,7 @@ export async function sharePDFViaWebShare(
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${invoice.invoiceNumber.replace(/\//g, "-")}.pdf`;
+  a.download = file.name;
   a.click();
   URL.revokeObjectURL(url);
   return true;
@@ -100,10 +106,11 @@ export async function sharePDFViaWebShare(
 export async function sharePDFViaWhatsApp(
   element: HTMLElement,
   invoice: Invoice,
-  phone?: string
+  phone?: string,
+  firm?: Firm
 ) {
   // Download the PDF for the user
-  await downloadInvoicePDF(element, invoice);
+  await downloadInvoicePDF(element, invoice, firm);
 
   // Open WhatsApp with the invoice message
   const text = `Invoice ${invoice.invoiceNumber}\nAmount: ${formatCurrency(invoice.total)}\nPlease find the PDF attached.`;

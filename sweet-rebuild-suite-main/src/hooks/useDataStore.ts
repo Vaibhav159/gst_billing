@@ -75,6 +75,7 @@ export interface Business {
   bank_ifsc_code?: string | null;
   bank_branch_name?: string | null;
   state_name?: string | null;
+  invoice_prefix?: string;
   primary_color_theme?: string;
   // Never returned by the API (upload-only). withSignatureForPdf sets it to
   // the signature_image_base64 data URI for the PDF renderer.
