@@ -1,6 +1,9 @@
 from decimal import Decimal
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 from freezegun import freeze_time
 from rest_framework import status
 
@@ -650,3 +653,67 @@ class InwardInvoiceWithoutSupplierGstinTest(BaseAPITestCase):
         inv = self._bill("P-NA-OLD", self.karigar)
         resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"payment_mode": "cash"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
+
+
+class InvoiceListPageWalkTest(BaseAPITestCase):
+    """Walking invoices/ page by page sees every invoice once (UX1).
+
+    The full backup walks the list newest first. Invoices imported in one
+    batch share a date and can share created_at to the microsecond
+    (bulk_create stamps them in one loop). Sorted on those two alone, rows in
+    a tie have no fixed place: Postgres may order them differently for each
+    page's LIMIT/OFFSET, so a walk repeats some invoices and never sees others.
+    """
+
+    def test_the_list_is_sorted_down_to_the_invoice_id(self):
+        with CaptureQueriesContext(connection) as ctx:
+            resp = self.client.get(reverse("invoice-list"), {"page_size": 2})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        page_sql = [q["sql"] for q in ctx.captured_queries if "LIMIT" in q["sql"] and "billing_invoice" in q["sql"]]
+        order_by = page_sql[-1].rsplit("ORDER BY", 1)[1]
+        self.assertRegex(order_by, r'"billing_invoice"\."id" DESC')
+
+    def test_invoices_that_tie_on_date_and_created_at_page_in_a_fixed_order(self):
+        # SQLite happens to return such a tie newest id first already (it walks
+        # the date index backwards); Postgres, as CircleCI runs it, need not.
+        ids = [
+            Invoice.objects.create(invoice_number=f"TIE-{n}", invoice_date="2026-05-01", business=self.business,
+                                   customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD).id
+            for n in range(1, 6)
+        ]
+        Invoice.objects.filter(id__in=ids).update(created_at=timezone.now())
+        seen, page = [], 1
+        while page:
+            resp = self.client.get(reverse("invoice-list"), {"page_size": 2, "page": page, "start_date": "2026-05-01",
+                                                              "end_date": "2026-05-01"})
+            self.assertEqual(resp.status_code, 200, resp.data)
+            seen += [row["id"] for row in resp.data["results"]]
+            page = page + 1 if resp.data["next"] else 0
+        self.assertEqual(seen, sorted(ids, reverse=True))
+
+
+class InvoiceNumberFilterTest(BaseAPITestCase):
+    """invoices/?invoice_number= finds that number, not numbers containing it (UX8).
+
+    A shared bill link (/billing/invoice/<firm>/<fy>/1) is looked up by
+    number. The filter was a substring match, so "1" also found 10, 21,
+    101…; the page asked for the 30 newest, and #1 of an older month was not
+    among them: the link said "not found". ?search= is the substring search.
+    """
+
+    def test_the_number_filter_matches_the_whole_number(self):
+        one = Invoice.objects.create(invoice_number="1", invoice_date="2026-04-01", business=self.business,
+                                     customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        for n in range(10, 50):  # 40 newer invoices whose numbers contain a 1 or not
+            Invoice.objects.create(invoice_number=f"{n}1", invoice_date="2026-06-01", business=self.business,
+                                   customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        resp = self.client.get(reverse("invoice-list"), {"invoice_number": "1", "page_size": 30})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual([row["id"] for row in resp.data["results"]], [one.id])
+
+    def test_search_still_finds_part_of_a_number(self):
+        Invoice.objects.create(invoice_number="SGJ/2026-27/108", invoice_date="2026-06-01", business=self.business,
+                               customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        resp = self.client.get(reverse("invoice-list"), {"search": "108"})
+        self.assertEqual([row["invoice_number"] for row in resp.data["results"]], ["SGJ/2026-27/108"])

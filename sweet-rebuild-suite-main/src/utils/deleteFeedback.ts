@@ -8,6 +8,21 @@
  * flowed into GSTR-1.
  */
 import { errorTag, formatApiError } from "@/utils/apiError";
+import { formatDate } from "@/utils/mockData";
+import { formatMoney } from "@/utils/money";
+
+/**
+ * An invoice named so a delete can't hit the wrong one (UX5): "KIRAN GOLD
+ * HOUSE · 30 · 01 Apr 2026 · Kavita Joshi · ₹61,800.00". A bare "30" exists
+ * in all three firms and in every year.
+ */
+export function invoiceDeleteName(inv: {
+  businessName?: string; invoiceNumber: string; invoice_date?: string; customerName?: string; total: number;
+}): string {
+  return [inv.businessName, inv.invoiceNumber, inv.invoice_date ? formatDate(inv.invoice_date) : "", inv.customerName, formatMoney(inv.total)]
+    .filter(Boolean)
+    .join(" · ");
+}
 
 /** useToast's toast(), as far as these helpers need it. */
 type Toast = (t: { title: string; description?: string; variant?: "default" | "destructive" }) => unknown;

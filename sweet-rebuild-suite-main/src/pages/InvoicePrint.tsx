@@ -69,7 +69,7 @@ export default function InvoicePrint() {
     if (!printRef.current) return;
     setGenerating(true);
     try {
-      await downloadInvoicePDF(printRef.current, inv);
+      await downloadInvoicePDF(printRef.current, inv, biz);
       toast({ title: "PDF Downloaded", description: inv.invoiceNumber });
     } catch { toast({ title: "PDF Error", variant: "destructive" }); }
     setGenerating(false);
@@ -79,7 +79,7 @@ export default function InvoicePrint() {
     if (!printRef.current) return;
     setGenerating(true);
     try {
-      await sharePDFViaWebShare(printRef.current, inv);
+      await sharePDFViaWebShare(printRef.current, inv, biz);
     } catch { toast({ title: "Share failed", variant: "destructive" }); }
     setGenerating(false);
   };
@@ -88,7 +88,7 @@ export default function InvoicePrint() {
     if (!printRef.current) return;
     setGenerating(true);
     try {
-      await sharePDFViaWhatsApp(printRef.current, inv, customer?.mobile_number ?? undefined);
+      await sharePDFViaWhatsApp(printRef.current, inv, customer?.mobile_number ?? undefined, biz);
       toast({ title: "PDF ready", description: "Attach the downloaded PDF in WhatsApp" });
     } catch { toast({ title: "Error", variant: "destructive" }); }
     setGenerating(false);

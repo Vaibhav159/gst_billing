@@ -362,7 +362,7 @@ export default function CustomerForm() {
 
                 {/* Mobile */}
                 <FormField label="Mobile Number" icon={Phone} error={errors.mobile_number}>
-                  <input type="text" value={form.mobile_number} onChange={(e) => handleChange("mobile_number", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  <input type="tel" inputMode="numeric" autoComplete="tel-national" value={form.mobile_number} onChange={(e) => handleChange("mobile_number", e.target.value.replace(/\D/g, "").slice(0, 10))}
                     placeholder="10-digit number" maxLength={10} className={cn("premium-input tabular-nums", errors.mobile_number && "border-destructive/50 focus:ring-destructive/30")} />
                 </FormField>
 

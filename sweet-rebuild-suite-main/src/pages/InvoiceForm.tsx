@@ -25,7 +25,7 @@ import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
 import { todayLocal, invoiceDateWarning } from "@/utils/localDate";
 import { round2, halveTax } from "@/utils/money";
-import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, figureProblem, lineMoney, lineQty, lineRate, lineToSave, storedLineKey, typedNumber, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -61,7 +61,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   // line's id. See utils/invoiceDraft.
   type LineItemDraft = DraftLine;
   const newItemKey = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
-  const blankItem = (): LineItemDraft => ({ _key: newItemKey(), productId: "", productName: "", hsn: "", gstRate: 0, qty: 1, rate: 0, unit: "gms" as ItemUnit });
+  // Quantity and rate start empty (placeholders 1 and 0.00) and hold what is
+  // typed (UX7): typing into a field that already said "1" gave "10.51".
+  const blankItem = (): LineItemDraft => ({ _key: newItemKey(), productId: "", productName: "", hsn: "", gstRate: 0, qty: "", rate: "", unit: "gms" as ItemUnit });
   const [items, setItems] = useState<LineItemDraft[]>([blankItem()]);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
 
@@ -231,7 +233,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
       if (saved) {
         const draft = JSON.parse(saved);
         // Only show if draft has meaningful data
-        if (draft.form?.businessId || draft.form?.customerId || draft.items?.some((it: any) => it.rate > 0)) {
+        if (draft.form?.businessId || draft.form?.customerId || draft.items?.some((it: any) => typedNumber(it.rate) > 0)) {
           setShowDraftBanner(true);
         }
       }
@@ -315,6 +317,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const addItem = () => { setItems((p) => [...p, blankItem()]); setDirty(true); };
   const removeItem = (i: number) => { if (items.length === 1) return; setItems((p) => p.filter((_, idx) => idx !== i)); setDirty(true); };
   const updateItem = (i: number, field: string, val: any) => { setItems((p) => p.map((it, idx) => idx === i ? { ...it, [field]: val } : it)); setDirty(true); };
+  // A quantity or rate as typed: digits, one decimal point, and commas where
+  // they could still be grouping digits (M2). Stripping every comma read a
+  // comma-decimal keypad's "10,5" as 105; it stays as typed and is flagged
+  // (figureProblem). Any other key is ignored rather than turning the field to 0.
+  const typeFigure = (i: number, field: "qty" | "rate", text: string) => {
+    if (/^(?:\d+(?:,\d{1,3})*,?)?(?:\.\d*)?$/.test(text)) updateItem(i, field, text);
+  };
+  const figureProblems = items.flatMap((it, i) => (["qty", "rate"] as const).flatMap((field) => {
+    const problem = figureProblem(it[field]);
+    return problem ? [`Line ${i + 1} ${field === "qty" ? "quantity" : "rate"} "${it[field]}": ${problem}`] : [];
+  }));
 
   const handleProductChange = (i: number, productId: string) => {
     const product = localProducts.find((p) => p.id === productId);
@@ -371,7 +384,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
 
   const completionFields = [
     !!form.businessId, !!form.customerId, !!form.invoiceNumber, !!form.date,
-    items.length > 0, items.every((it) => !!it.productId), items.every((it) => it.qty > 0), items.every((it) => it.rate > 0),
+    items.length > 0, items.every((it) => !!it.productId), items.every((it) => lineQty(it) > 0), items.every((it) => lineRate(it) > 0),
   ];
   const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
@@ -403,6 +416,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     if (isSaving) return;
     if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
     if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
+    if (figureProblems.length) { toast({ title: "Check the figures", description: figureProblems[0], variant: "destructive" }); return; }
     setShowReview(true);
   };
 
@@ -552,7 +566,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading invoice details...</p>
         </div>
       ) : (
-      <form onSubmit={handleSubmit}>
+      <form id="invoice-form" onSubmit={handleSubmit}>
         <div className={cn("grid gap-5", isMobile ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-3")}>
           <div className={cn(isMobile ? "" : "lg:col-span-2", "space-y-5")}>
             {/* Invoice Details */}
@@ -676,14 +690,14 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                           placeholder="Search Product"
                         />
                         <div className="grid grid-cols-3 gap-2">
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="number" inputMode="decimal" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-11 w-full text-center tabular-nums" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="text" inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} aria-invalid={!!figureProblem(item.qty)} placeholder="1" value={item.qty} onChange={(e) => typeFigure(i, "qty", e.target.value)} className={cn("premium-input h-11 w-full text-center tabular-nums", figureProblem(item.qty) && "border-destructive/60")} /></div>
                           <div><label className="text-[10px] text-muted-foreground uppercase">Unit</label><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-11 w-full text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="number" inputMode="decimal" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-11 w-full tabular-nums" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="text" inputMode="decimal" aria-label={`Rate, line ${i + 1}`} aria-invalid={!!figureProblem(item.rate)} placeholder="0.00" value={item.rate} onChange={(e) => typeFigure(i, "rate", e.target.value)} className={cn("premium-input h-11 w-full tabular-nums", figureProblem(item.rate) && "border-destructive/60")} /></div>
                         </div>
                         {/* The calculator, absorbed: the exact math, live, before saving. */}
-                        {item.qty > 0 && item.rate > 0 && (
+                        {lineQty(item) > 0 && lineRate(item) > 0 && (
                           <p className="text-[11px] text-muted-foreground tabular-nums">
-                            {item.qty} {item.unit} × ₹{item.rate} = <span className="text-foreground font-medium">{formatCurrency(amount)}</span>
+                            {lineQty(item)} {item.unit} × ₹{lineRate(item)} = <span className="text-foreground font-medium">{formatCurrency(amount)}</span>
                             {gstRate > 0 && <> · +{gstRate}% GST = <span className="text-foreground font-semibold">{formatCurrency(amount + tax)}</span></>}
                           </p>
                         )}
@@ -718,9 +732,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
                             <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
-                            <td><input type="number" inputMode="decimal" value={item.qty} min={0.00001} step="0.00001" onChange={(e) => updateItem(i, "qty", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full text-center tabular-nums" /></td>
+                            <td><input type="text" inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} aria-invalid={!!figureProblem(item.qty)} placeholder="1" value={item.qty} onChange={(e) => typeFigure(i, "qty", e.target.value)} className={cn("premium-input h-9 w-full text-center tabular-nums", figureProblem(item.qty) && "border-destructive/60")} /></td>
                             <td><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-full text-[12px] !px-2">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
-                            <td><input type="number" inputMode="decimal" value={item.rate} min={0} step="0.00001" onChange={(e) => updateItem(i, "rate", Math.max(0, Number(e.target.value)))} className="premium-input h-9 w-full tabular-nums" /></td>
+                            <td><input type="text" inputMode="decimal" aria-label={`Rate, line ${i + 1}`} aria-invalid={!!figureProblem(item.rate)} placeholder="0.00" value={item.rate} onChange={(e) => typeFigure(i, "rate", e.target.value)} className={cn("premium-input h-9 w-full tabular-nums", figureProblem(item.rate) && "border-destructive/60")} /></td>
                             <td className="font-bold text-foreground whitespace-nowrap">{formatCurrency(amount)}</td>
                             <td className="text-muted-foreground whitespace-nowrap text-[12px]">{formatCurrency(tax)}</td>
                             <td><button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></td>
@@ -732,6 +746,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 </div>
               )}
               <div className="px-5 py-2 border-t border-border/30">
+                {figureProblems.map((problem) => (
+                  <p key={problem} role="alert" className="text-[11px] text-destructive flex items-center gap-1 mb-1.5"><AlertTriangle className="w-3 h-3 shrink-0" /> {problem}</p>
+                ))}
                 <button type="button" onClick={addItem} className="text-[12px] text-primary hover:underline font-medium flex items-center gap-1"><Plus className="w-3 h-3" /> Add item</button>
               </div>
             </div>
@@ -757,12 +774,12 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               <div className="flex items-center gap-2"><Calculator className="w-4 h-4 text-primary" /><h3 className="text-[13px] font-display font-semibold text-foreground">Summary</h3></div>
               <div className="space-y-2 text-[13px]">
                 {items.map((item) => {
-                  if (item.qty === 0 && item.rate === 0 && !item.productName) return null;
+                  if (!item.qty && !item.rate && !item.productName) return null;
                   return (
                     <div key={item._key} className="space-y-1.5 pb-2 border-b border-border/30">
                       {item.productName && <div className="text-[12px] font-medium text-foreground truncate" title={item.productName}>{item.productName}</div>}
-                      <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{item.qty} {item.unit}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(item.rate)}/{item.unit}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="text-foreground">{lineQty(item)} {item.unit}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="text-foreground">{formatCurrency(lineRate(item))}/{item.unit}</span></div>
                     </div>
                   );
                 })}
@@ -792,16 +809,19 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           </div>
         </div>
 
-        {/* Mobile fixed bottom actions */}
-        {isMobile && (
+        {/* Mobile fixed bottom actions, at <body>: the page root animates in
+            with a transform, which made it the bar's containing block (UX4).
+            The submit button joins the form by id from there. */}
+        {isMobile && createPortal(
           <div className="fixed bottom-16 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border/50 px-4 py-3 safe-area-bottom">
             <div className="flex items-center gap-2">
               <button type="button" disabled={isSaving} onClick={() => safeNavigate("/billing/invoice/list")} className="premium-btn-ghost flex-1 h-10 text-[13px] disabled:opacity-50"><X className="w-4 h-4" /> Cancel</button>
-              <button type="submit" disabled={isSaving} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed">
+              <button type="submit" form="invoice-form" disabled={isSaving} className="premium-btn-primary flex-1 h-10 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed">
                 <Save className="w-4 h-4" /> {isSaving ? (mode === "create" ? "Creating…" : "Updating…") : (mode === "create" ? "Create" : "Update")}
               </button>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </form>
       )}
@@ -841,7 +861,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
           setShowQuickProduct(false);
         }} />
 
-      <AnimatePresence>
+      {/* At <body>, like the review sheet: under the page root's transform
+          this card opened at top −108 px when Cancel was tapped (UX4). */}
+      {createPortal(<AnimatePresence>
         {showUnsavedModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} role="dialog" aria-modal="true" aria-label="Unsaved changes" className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }} transition={{ duration: 0.2 }} className="glass-panel rounded-2xl w-full max-w-sm p-6 space-y-5">
@@ -857,7 +879,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
 
       {/* ── Review before save: every figure eyeballed once, then committed.
              Portaled + opaque per the overlay rules; Escape goes back. ── */}
@@ -894,7 +916,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                       <span className="text-[13px] font-semibold tabular-nums whitespace-nowrap">{formatCurrency(amount + tax)}</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground tabular-nums">
-                      {it.qty} {it.unit} × ₹{it.rate} = {formatCurrency(amount)} · +{gstRate}% GST {formatCurrency(tax)}
+                      {lineQty(it)} {it.unit} × ₹{lineRate(it)} = {formatCurrency(amount)} · +{gstRate}% GST {formatCurrency(tax)}
                     </p>
                   </div>
                 );

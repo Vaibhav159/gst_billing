@@ -18,7 +18,7 @@ const { everyInvoice, firstPage, zip } = vi.hoisted(() => {
   return {
     everyInvoice: Array.from({ length: 55 }, (_, i) => invoice(i + 1)),
     firstPage: Array.from({ length: 50 }, (_, i) => ({ ...invoice(i + 1), items: [] })),
-    zip: vi.fn(() => Promise.resolve(new Blob(["zip"]))),
+    zip: vi.fn(() => Promise.resolve({ blob: new Blob(["zip"]), written: 55, failed: [] as string[] })),
   };
 });
 

@@ -15,6 +15,7 @@ import { useBusinesses } from "@/hooks/useDataStore";
 import { listCaptures, deleteCapture, type InwardCaptureRow, useInwardBills } from "@/hooks/useInwardBills";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/utils/utils";
 import { formatCurrency, formatDate } from "@/utils/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { usePermission } from "@/hooks/usePermission";
@@ -86,7 +87,9 @@ export default function InwardBills() {
   ) : null;
 
   return (
-    <div className="space-y-5">
+    // The page margin every other page has (UX6): without it the register
+    // ran to the screen edge and clipped its totals.
+    <div className={cn("space-y-5", isMobile ? "p-4 pb-24" : "p-6 lg:p-8")}>
       <Breadcrumbs items={[{ label: "Inward Bills" }]} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -112,31 +115,37 @@ export default function InwardBills() {
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Captures inbox · {captures.length} waiting
           </p>
-          <div className="grid gap-2 sm:grid-cols-2">
+          {/* grid-cols-1, not an implicit column: that one grew to the
+              longest supplier line, so on a phone the whole page scrolled
+              sideways with Fill in and Discard off screen. The actions wrap
+              under the text when the row is narrow. */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {captures.map((c) => (
-              <div key={c.id} className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/15 p-2.5">
+              <div key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border/50 bg-secondary/15 p-2.5">
                 <a href={c.image_url} target="_blank" rel="noreferrer" className="shrink-0" title="Open photo">
                   <img src={c.image_url} alt="Captured bill" className="w-12 h-12 rounded-lg object-cover border border-border/50" />
                 </a>
-                <div className="flex-1 min-w-0 text-[12px]">
+                <div className="flex-1 min-w-[9rem] text-[12px]">
                   <p className="font-medium truncate" title={c.supplier_hint || undefined}>{c.supplier_hint || "Unknown supplier"}</p>
                   <p className="text-muted-foreground truncate" title={c.note || undefined}>
                     {c.business_name || "Firm TBD"}{c.note ? ` · ${c.note}` : ""} · {new Date(c.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                   </p>
                 </div>
-                <button onClick={() => navigate(`/billing/inward-bills/add?capture=${c.id}`)} className="premium-btn-ghost h-8 text-[12px]" title="Fill in the bill from this photo"><Pencil className="w-3.5 h-3.5" /> Fill in</button>
-                {canDelete && (
-                  <button
-                    onClick={async () => {
-                      if (!window.confirm("Discard this capture? The photo is deleted.")) return;
-                      if (await deleteWithFeedback(() => deleteCapture(c.id), toast, { label: "Capture" })) {
-                        setCaptures((p) => p.filter((x) => x.id !== c.id));
-                      }
-                    }}
-                    className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    aria-label="Discard capture"
-                  ><Trash2 className="w-3.5 h-3.5" /></button>
-                )}
+                <div className="flex items-center gap-1 ml-auto">
+                  <button onClick={() => navigate(`/billing/inward-bills/add?capture=${c.id}`)} className="premium-btn-ghost h-8 text-[12px]" title="Fill in the bill from this photo"><Pencil className="w-3.5 h-3.5" /> Fill in</button>
+                  {canDelete && (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm("Discard this capture? The photo is deleted.")) return;
+                        if (await deleteWithFeedback(() => deleteCapture(c.id), toast, { label: "Capture" })) {
+                          setCaptures((p) => p.filter((x) => x.id !== c.id));
+                        }
+                      }}
+                      className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      aria-label="Discard capture"
+                    ><Trash2 className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

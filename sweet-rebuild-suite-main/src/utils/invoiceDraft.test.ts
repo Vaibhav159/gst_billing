@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftFromDuplicate, draftFromSaved, draftFromStored, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, figureProblem, lineMoney, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
 
 // H17: line items have no product link, and the form used each line's own id
 // as its "product id". Where that id matched a catalog product, saving the
@@ -21,7 +21,7 @@ describe("invoice drafts carry each line's own product (H17)", () => {
 
   it("keeps a stored line's name, HSN and rate however its id collides", () => {
     const draft = draftFromStored(stored, "k1");
-    expect(draft).toMatchObject({ productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: 2, rate: 20000, unit: "ct" });
+    expect(draft).toMatchObject({ productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: "2", rate: "20000", unit: "ct" });
     expect(lineToSave(draft, false)).toMatchObject({
       productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, amount: 40100, cgst: 50, sgst: 50, igst: 0,
     });
@@ -36,7 +36,7 @@ describe("invoice drafts carry each line's own product (H17)", () => {
   it("loads an amount-only line as one unit at its taxable value, so saving keeps its amount", () => {
     const amountOnly = { ...stored, quantity: "0.000", rate: "0.000", amount: "10300.000", cgst: "150.000", sgst: "150.000", gst_tax_rate: "0.03" };
     const draft = draftFromStored(amountOnly, "k3");
-    expect([draft.qty, draft.rate]).toEqual([1, 10000]);
+    expect([draft.qty, draft.rate]).toEqual(["1", "10000"]);
     expect(lineToSave(draft, false).amount).toBe(10300);
   });
 
@@ -44,7 +44,7 @@ describe("invoice drafts carry each line's own product (H17)", () => {
     // 10 x 0 for Rs 10,000 of taxable is 10 x 1,000, not 1 x 10,000.
     const weighed = { ...stored, quantity: "10.000", rate: "0.000", amount: "10300.000", cgst: "150.000", sgst: "150.000", gst_tax_rate: "0.03" };
     const draft = draftFromStored(weighed, "k6");
-    expect([draft.qty, draft.rate]).toEqual([10, 1000]);
+    expect([draft.qty, draft.rate]).toEqual(["10", "1000"]);
     expect(lineToSave(draft, false).amount).toBe(10300);
   });
 
@@ -64,12 +64,58 @@ describe("a draft saved before H17 (review of H17)", () => {
   it("takes its name, HSN and rate from the product it names", () => {
     const old = { _key: "k1", productId: "7", qty: 2, rate: 6000, unit: "gms" as const };
     expect(draftFromSaved(old, [catalog7])).toMatchObject({
-      productId: "7", productName: "Gold Ornaments 22K", hsn: "711319", gstRate: 3, qty: 2, rate: 6000,
+      productId: "7", productName: "Gold Ornaments 22K", hsn: "711319", gstRate: 3, qty: "2", rate: "6000",
     });
   });
 
   it("keeps a line that carries its own", () => {
-    const line = { _key: "k2", productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: 1, rate: 20000, unit: "gms" as const };
+    const line = { _key: "k2", productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: "1", rate: "20000", unit: "gms" as const };
     expect(draftFromSaved(line, [catalog7])).toEqual(line);
+  });
+});
+
+describe("a line holds what was typed (UX7)", () => {
+  // qty and rate were numbers in inputs that started at "1" and "0", so typing
+  // "10.5" into a fresh quantity gave "10.51", a rate came out "06543.21", and
+  // clearing a field put the 0 back. Lines keep the typed text; the money,
+  // the save and the drafts read it.
+  it("reads typed text for the money", () => {
+    expect(lineMoney({ qty: "10.5", rate: "1000", gstRate: 3 })).toEqual({ amount: 10500, tax: 315 });
+    expect(lineMoney({ qty: "1", rate: "6543.21", gstRate: 3 })).toEqual({ amount: 6543.21, tax: 196.3 });
+  });
+
+  it("counts an empty quantity as the 1 its placeholder shows, an empty rate as nothing", () => {
+    expect(lineMoney({ qty: "", rate: "1000", gstRate: 3 })).toEqual({ amount: 1000, tax: 30 });
+    expect(lineMoney({ qty: "2", rate: "", gstRate: 3 })).toEqual({ amount: 0, tax: 0 });
+  });
+
+  it("saves numbers", () => {
+    const line = { ...draftFromStored(stored, "k7"), qty: "10.5", rate: "1000" };
+    expect(lineToSave(line, false)).toMatchObject({ qty: 10.5, rate: 1000, amount: 10526.25, cgst: 13.13, sgst: 13.12 });
+  });
+
+  it("loads a stored line's figures as text", () => {
+    expect(draftFromStored(stored, "k8")).toMatchObject({ qty: "2", rate: "20000" });
+  });
+
+  it("reads commas that group digits, Indian or international (M2)", () => {
+    expect(lineMoney({ qty: "1", rate: "1,23,456", gstRate: 0 }).amount).toBe(123456);
+    expect(lineMoney({ qty: "1", rate: "123,456.50", gstRate: 0 }).amount).toBe(123456.5);
+    expect(lineMoney({ qty: "1,000", rate: "1", gstRate: 0 }).amount).toBe(1000);
+    expect([figureProblem("1,23,456"), figureProblem("1,234,567.5"), figureProblem("10.5")]).toEqual([null, null, null]);
+  });
+
+  it("refuses a decimal comma instead of making 10,5 into 105 (M2)", () => {
+    // Phones set to a comma-decimal keypad type "10,5" for ten and a half.
+    expect(figureProblem("10,5")).toMatch(/point/);
+    expect(lineMoney({ qty: "1", rate: "10,5", gstRate: 0 }).amount).toBe(0);
+    for (const text of ["1,2345", "12,3,456", "1.5,0"]) expect(figureProblem(text)).not.toBeNull();
+  });
+
+  it("restores a draft saved while lines held numbers", () => {
+    const saved = { _key: "k9", productId: "line:7", productName: "Ruby (Cut)", hsn: "710391", gstRate: 0.25, qty: 2, rate: 20000, unit: "ct" as const };
+    const restored = draftFromSaved(saved, []);
+    expect([restored.qty, restored.rate]).toEqual(["2", "20000"]);
+    expect(lineToSave(restored, false).amount).toBe(40100);
   });
 });

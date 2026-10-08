@@ -34,7 +34,9 @@ export default function DeleteConfirmDialog({
           <AlertDialogDescription className="text-muted-foreground text-[13px] leading-relaxed">
             Are you sure you want to delete{" "}
             <span className="font-semibold text-foreground">"{itemName}"</span>?
-            This action cannot be undone.
+            {/* It said "This action cannot be undone", but every delete is
+                snapshotted and an admin can restore it from the Audit log. */}
+            {" "}You can restore it from the Audit log.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2.5 mt-2">

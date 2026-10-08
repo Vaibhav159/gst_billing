@@ -1,226 +1,68 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
-import { Settings, LogOut, X, Wrench, User, ReceiptText, Building2, Database, History, Users } from "lucide-react";
-import { cn } from "@/utils/utils";
+import { useNavigate } from "react-router-dom";
+import { Settings, LogOut, Wrench, User, ReceiptText, Building2, Database, History, Users } from "lucide-react";
 import { useMobileMode } from "@/contexts/MobileModeContext";
 import { useAuth } from "@/contexts/AuthContext";
+import BottomSheet, { SheetLink } from "../BottomSheet";
+
+const items = [
+  // Inward Bills — recording a purchase bill is a phone-first job, and this
+  // drawer was the only place left to reach it from.
+  { label: "Inward Bills", href: "/billing/inward-bills", icon: ReceiptText },
+  { label: "Profile", href: "/billing/profile", icon: User },
+  { label: "Businesses", href: "/billing/business/list", match: "/billing/business", icon: Building2 },
+  { label: "Backup & Restore", href: "/billing/backup", icon: Database },
+  { label: "Audit Log", href: "/billing/audit-log", icon: History },
+  { label: "Users", href: "/billing/users", icon: Users },
+  { label: "Settings", href: "/billing/settings", icon: Settings },
+];
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
+// As tall as Expert's drawer (70vh): at 50vh, Settings, Expert Mode and
+// Logout sat below the fold.
 export default function EasyMoreDrawer({ open, onOpenChange }: Props) {
-  const location = useLocation();
   const navigate = useNavigate();
   const { setMobileMode } = useMobileMode();
   const { logout: authLogout } = useAuth();
+  const close = () => onOpenChange(false);
 
-  // Portal to <body>: a transformed ancestor (page transition mid-flight)
-  // otherwise becomes the containing block for this fixed overlay.
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm"
-            onClick={() => onOpenChange(false)}
-          />
-          <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 350 }}
-            className="fixed bottom-0 left-0 right-0 z-[61] elevated-card rounded-t-2xl max-h-[50vh] overflow-y-auto safe-area-bottom"
-          >
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-            </div>
+  return (
+    <BottomSheet open={open} onOpenChange={onOpenChange} title="More">
+      <div className="p-3 space-y-1">
+        {items.map((item) => (
+          <SheetLink key={item.href} to={item.href} match={item.match} icon={item.icon} label={item.label} onNavigate={close} />
+        ))}
 
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border/30">
-              <h2 className="text-base font-display font-semibold text-foreground">More</h2>
-              <button type="button" aria-label="Close" onClick={() => onOpenChange(false)} className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/40">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        {/* Switch to Expert */}
+        <button
+          onClick={() => { close(); setMobileMode("expert"); }}
+          className="flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-foreground hover:bg-secondary/30 transition-all w-full"
+        >
+          <div className="w-9 h-9 rounded-xl bg-secondary/40 flex items-center justify-center">
+            <Wrench className="w-4.5 h-4.5" />
+          </div>
+          <div className="text-left">
+            <span className="text-[14px] font-medium block">Expert Mode</span>
+            <span className="text-[11px] text-muted-foreground">All features & reports</span>
+          </div>
+        </button>
+      </div>
 
-            <div className="p-3 space-y-1">
-              {/* Inward Bills — recording a purchase bill is a phone-first job,
-                  and this drawer was the only place left to reach it from. */}
-              <Link
-                to="/billing/inward-bills"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/inward-bills")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/inward-bills") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <ReceiptText className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Inward Bills</span>
-              </Link>
-
-              {/* Profile */}
-              <Link
-                to="/billing/profile"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/profile")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/profile") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <User className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Profile</span>
-              </Link>
-
-              {/* Businesses */}
-              <Link
-                to="/billing/business/list"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/business")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/business") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <Building2 className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Businesses</span>
-              </Link>
-
-              {/* Backup & Restore */}
-              <Link
-                to="/billing/backup"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/backup")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/backup") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <Database className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Backup & Restore</span>
-              </Link>
-
-              {/* Audit Log */}
-              <Link
-                to="/billing/audit-log"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/audit-log")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/audit-log") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <History className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Audit Log</span>
-              </Link>
-
-              {/* Users */}
-              <Link
-                to="/billing/users"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/users")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/users") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <Users className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Users</span>
-              </Link>
-
-              {/* Settings */}
-              <Link
-                to="/billing/settings"
-                onClick={() => onOpenChange(false)}
-                className={cn(
-                  "flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all",
-                  location.pathname.startsWith("/billing/settings")
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-secondary/30"
-                )}
-              >
-                <div className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center",
-                  location.pathname.startsWith("/billing/settings") ? "bg-primary/15" : "bg-secondary/40"
-                )}>
-                  <Settings className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Settings</span>
-              </Link>
-
-              {/* Switch to Expert */}
-              <button
-                onClick={() => { onOpenChange(false); setMobileMode("expert"); }}
-                className="flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-foreground hover:bg-secondary/30 transition-all w-full"
-              >
-                <div className="w-9 h-9 rounded-xl bg-secondary/40 flex items-center justify-center">
-                  <Wrench className="w-4.5 h-4.5" />
-                </div>
-                <div className="text-left">
-                  <span className="text-[14px] font-medium block">Expert Mode</span>
-                  <span className="text-[11px] text-muted-foreground">All features & reports</span>
-                </div>
-              </button>
-            </div>
-
-            {/* Logout */}
-            <div className="p-3 pt-0 border-t border-border/30 mt-1">
-              <button
-                onClick={() => { onOpenChange(false); authLogout(); navigate("/login"); }}
-                className="flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-destructive hover:bg-destructive/10 transition-all w-full"
-              >
-                <div className="w-9 h-9 rounded-xl bg-destructive/10 flex items-center justify-center">
-                  <LogOut className="w-4.5 h-4.5" />
-                </div>
-                <span className="text-[14px] font-medium">Logout</span>
-              </button>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>,
-    document.body
+      {/* Logout */}
+      <div className="p-3 pt-0 border-t border-border/30 mt-1">
+        <button
+          onClick={() => { close(); authLogout(); navigate("/login"); }}
+          className="flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-destructive hover:bg-destructive/10 transition-all w-full"
+        >
+          <div className="w-9 h-9 rounded-xl bg-destructive/10 flex items-center justify-center">
+            <LogOut className="w-4.5 h-4.5" />
+          </div>
+          <span className="text-[14px] font-medium">Logout</span>
+        </button>
+      </div>
+    </BottomSheet>
   );
 }

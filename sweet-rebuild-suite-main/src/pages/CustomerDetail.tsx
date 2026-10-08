@@ -20,6 +20,7 @@ import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { useState } from "react";
 import api from "@/utils/api";
 import { customerInvoicesForPdf } from "@/utils/pdfInvoices";
+import { zipResultToast } from "@/utils/pdfFileName";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 
@@ -95,7 +96,7 @@ export default function CustomerDetail() {
       setDlProgress({ current: 0, total: all.length });
       toast({ title: "Generating PDFs", description: `Creating ${all.length} invoice PDFs...` });
       const { generateBulkPDFZip } = await import("@/utils/generateBulkPDF");
-      const zipBlob = await generateBulkPDFZip(
+      const { blob: zipBlob, written, failed } = await generateBulkPDFZip(
         all,
         businesses,
         [customer],
@@ -109,7 +110,7 @@ export default function CustomerDetail() {
       a.click();
       window.URL.revokeObjectURL(url);
       a.remove();
-      toast({ title: "Download Complete", description: `${all.length} PDFs downloaded as ZIP.` });
+      toast(zipResultToast(written, all.length, failed));
     } catch (err) {
       logger.error("Bulk PDF failed", err);
       toast({ title: "Download Failed", description: "Could not generate PDFs.", variant: "destructive" });

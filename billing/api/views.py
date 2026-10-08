@@ -800,7 +800,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         "customer__name",
         "business__name",
     ]
-    ordering = ["-invoice_date", "-created_at"]
+    # Ends on the id so every page is cut from one fixed order: rows imported
+    # together can tie on date and created_at, and a tie has no fixed place
+    # under LIMIT/OFFSET (the full backup walks every page).
+    ordering = ["-invoice_date", "-created_at", "-id"]
     pagination_class = StandardResultsSetPagination
 
     # Removed caching to ensure fresh data
@@ -814,10 +817,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if self.request.query_params.get("include_items") == "true":
             queryset = queryset.prefetch_related("lineitem_set")
 
-        # Filter by invoice number
+        # Filter by invoice number: that number, whole (UX8). A substring
+        # match also found 10, 21, 101…, and a shared link's lookup (30 newest)
+        # missed #1 of an older month. ?search= finds part of a number.
         invoice_number = self.request.query_params.get("invoice_number")
         if invoice_number:
-            queryset = queryset.filter(invoice_number__icontains=invoice_number)
+            queryset = queryset.filter(invoice_number=invoice_number)
 
         # Filter by business
         business_id = self.request.query_params.get("business_id")

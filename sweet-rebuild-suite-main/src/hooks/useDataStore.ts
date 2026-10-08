@@ -31,22 +31,43 @@ function parseNextUrl(absoluteUrl: string | null): string | null {
  * Use sparingly — only for pages that truly need aggregated data (e.g. Dashboard).
  */
 export async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
+  return (await fetchAllPagesCounted<T>(endpoint)).rows;
+}
+
+/** fetchAllPages, plus the `count` the server reported on its last page (null if it sent none). */
+export async function fetchAllPagesCounted<T = any>(endpoint: string): Promise<{ rows: T[]; count: number | null }> {
+  let count: number | null = null;
   const allResults: T[] = [];
+  // A row saved while we walk moves every row below it one place down the
+  // list, so the last row of one page can come back first on the next: keep
+  // each id once, or a backup holds it twice and a statement sums it twice.
+  const seen = new Set<string>();
+  const add = (rows: T[]) => {
+    for (const row of rows) {
+      const id = (row as { id?: unknown } | null)?.id;
+      if (id != null) {
+        if (seen.has(String(id))) continue;
+        seen.add(String(id));
+      }
+      allResults.push(row);
+    }
+  };
   let url: string | null = endpoint;
   while (url) {
     const res = await api.get(url);
     const data = res.data;
     if (data && Array.isArray(data.results)) {
-      allResults.push(...data.results);
+      add(data.results);
+      if (typeof data.count === "number") count = data.count;
       url = parseNextUrl(data.next);
     } else if (Array.isArray(data)) {
-      allResults.push(...data);
+      add(data);
       url = null;
     } else {
       url = null;
     }
   }
-  return allResults;
+  return { rows: allResults, count };
 }
 
 export interface Business {
@@ -61,6 +82,7 @@ export interface Business {
   bank_ifsc_code?: string | null;
   bank_branch_name?: string | null;
   state_name?: string | null;
+  invoice_prefix?: string;
   primary_color_theme?: string;
   // Never returned by the API (upload-only). withSignatureForPdf sets it to
   // the signature_image_base64 data URI for the PDF renderer.
@@ -777,9 +799,11 @@ export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: stri
 
         if (loaded.invoiceNumber) {
           try {
-            const sibs = await api.get<any>(`invoices/?invoice_number=${encodeURIComponent(loaded.invoiceNumber)}&page_size=20`);
-            const all = (sibs.data?.results || (Array.isArray(sibs.data) ? sibs.data : []))
-              .filter((r: any) => r.invoice_number === loaded.invoiceNumber);
+            // Every invoice with this exact number (the filter is exact since
+            // UX8), all pages: the page's address and picker rely on knowing
+            // whether the number is unique.
+            const sibs = await fetchAllPages<any>(`invoices/?invoice_number=${encodeURIComponent(loaded.invoiceNumber)}&page_size=200`);
+            const all = sibs.filter((r: any) => r.invoice_number === loaded.invoiceNumber);
             setCandidates(all.map((r: any) => ({
               id: String(r.id),
               invoice_number: r.invoice_number,
@@ -793,16 +817,24 @@ export function useInvoice(slug: string | undefined, bizSlug?: string, fy?: stri
           } catch { /* sibling lookup is best-effort */ }
         }
       } else {
-        // Number-based slug. Filter by bizSlug + fy + bizHint as available.
+        // Number-based slug (UX8): that number exactly, within the address's
+        // FY, every page. It asked for numbers containing it, 30 newest first,
+        // with no year, so "#1" of an older month was "not found".
         const target = decodeURIComponent(slug);
         const params = new URLSearchParams();
         params.set("invoice_number", target);
         if (bizHint && /^\d+$/.test(bizHint)) params.set("business_id", bizHint);
         // If bizSlug is purely numeric we can also tell the backend.
         if (bizSlug && /^\d+$/.test(bizSlug)) params.set("business_id", bizSlug);
-        params.set("page_size", "30");
-        const list = await api.get<any>(`invoices/?${params.toString()}`);
-        let results: any[] = (list.data?.results || (Array.isArray(list.data) ? list.data : []))
+        const fyStart = fy && /^\d{4}-\d{2}$/.test(fy) ? parseInt(fy, 10) : NaN;
+        if (!Number.isNaN(fyStart)) {
+          const { start, end } = fyBounds(fyStart);
+          params.set("start_date", start);
+          params.set("end_date", end);
+        }
+        params.set("page_size", "200");
+        // The firm slug is matched below over the complete, exact list.
+        let results: any[] = (await fetchAllPages<any>(`invoices/?${params.toString()}`))
           .filter((r: any) => r.invoice_number === target);
         // Narrow by bizSlug (name OR id).
         if (bizSlug) {

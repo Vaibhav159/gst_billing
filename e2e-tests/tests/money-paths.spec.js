@@ -58,10 +58,9 @@ test.describe('Outward invoice — tax heads land correctly', () => {
     await expect(page.getByText('Inter-state · IGST')).toBeVisible();
 
     await pickOption(page, /Search Product/, 'Gold Ornaments');
-    const qty = page.locator('input[type="number"]').first();
-    const rate = page.locator('input[type="number"]').last();
-    await qty.fill('10');
-    await rate.fill('7000');
+    // Text fields with a decimal keypad since UX7, found by their labels.
+    await page.getByRole('textbox', { name: 'Quantity, line 1' }).fill('10');
+    await page.getByRole('textbox', { name: 'Rate, line 1' }).fill('7000');
 
     const create = page.waitForResponse(
       (r) => r.url().includes('/api/invoices/') && r.request().method() === 'POST');
@@ -90,8 +89,8 @@ test.describe('Outward invoice — tax heads land correctly', () => {
     await expect(page.getByText('Local · CGST + SGST')).toBeVisible();
 
     await pickOption(page, /Search Product/, 'Gold Ornaments');
-    await page.locator('input[type="number"]').first().fill('5');
-    await page.locator('input[type="number"]').last().fill('1000');
+    await page.getByRole('textbox', { name: 'Quantity, line 1' }).fill('5');
+    await page.getByRole('textbox', { name: 'Rate, line 1' }).fill('1000');
 
     const create = page.waitForResponse(
       (r) => r.url().includes('/api/invoices/') && r.request().method() === 'POST');
