@@ -15,7 +15,8 @@ type ExportEntity = "invoices" | "customers" | "products" | "businesses" | "all"
 export interface InvoiceScope {
   query: string;
   label: string;
-  count: number;
+  /** Null until the page has counted them. */
+  count: number | null;
 }
 
 interface DataExportPanelProps {
@@ -27,7 +28,7 @@ interface DataExportPanelProps {
   onFullBackup: () => Promise<boolean>;
 }
 
-const n = (count: number) => count.toLocaleString("en-IN");
+const n = (count: number | null) => (count == null ? "…" : count.toLocaleString("en-IN"));
 
 /**
  * Every export here reads every page when it runs (UX1). It used to write

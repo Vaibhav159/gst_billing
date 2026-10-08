@@ -4,7 +4,7 @@ import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Pac
 import { financialYears, currentFY, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
-import { useCustomers, useProducts, useBusinesses, mapDjangoInvoice, fetchAllPages } from "@/hooks/useDataStore";
+import { useCustomers, useBusinesses, mapDjangoInvoice, fetchAllPages } from "@/hooks/useDataStore";
 import { restoreBackup } from "@/utils/restoreBackup";
 import { backupCounts, describeCounts, restorePrompt, saveFullBackup, type BackupCounts } from "@/utils/fullBackup";
 import { formatApiError } from "@/utils/apiError";
@@ -23,18 +23,18 @@ const LAST_BACKUP_KEY = "gst_last_backup";
 export default function Backup() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: businesses, totalCount: businessCount } = useBusinesses();
-  const { items: customers, totalCount: customerCount } = useCustomers();
-  const { totalCount: productCount } = useProducts();
+  const { items: businesses } = useBusinesses();
+  const { items: customers } = useCustomers();
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState<"customers" | "products" | "businesses" | null>(null);
   // Invoices the export filters pick (the Excel report, the Invoices export)…
-  const [scopeInvoices, setScopeInvoices] = useState(0);
-  // …and every invoice on file, all years: what a full backup holds.
-  const [invoicesOnFile, setInvoicesOnFile] = useState<{ all: number; inward: number } | null>(null);
+  const [scopeInvoices, setScopeInvoices] = useState<number | null>(null);
+  // …and everything on file, all years: what a full backup holds. Null (shown
+  // as "…", not 0) until the counts arrive.
+  const [onFile, setOnFile] = useState<BackupCounts | null>(null);
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const [bizFilter, setBizFilter] = useState("all");
   const [fyFilter, setFyFilter] = useState(currentFY);
@@ -61,18 +61,24 @@ export default function Backup() {
 
   // How many invoices the filters pick
   useEffect(() => {
+    setScopeInvoices(null);
+    let alive = true;
     const params = buildParams();
     params.delete("include_items");
     params.set("page_size", "1");
     api.get(`invoices/?${params.toString()}`).then(res => {
-      setScopeInvoices(res.data?.count || res.data?.results?.length || 0);
+      if (alive) setScopeInvoices(res.data?.count ?? 0);
     }).catch(() => {});
+    return () => { alive = false; };
   }, [buildParams]);
 
-  // How many are on file, all years (the tiles showed the filtered count)
+  // Everything on file, all years, each counted with a one-row request (the
+  // tiles showed the filtered count; products were all downloaded to count them).
   useEffect(() => {
-    Promise.all([api.get("invoices/?page_size=1"), api.get("invoices/?page_size=1&type_of_invoice=inward")])
-      .then(([all, inward]) => setInvoicesOnFile({ all: all.data?.count ?? 0, inward: inward.data?.count ?? 0 }))
+    const count = (url: string) => api.get(url).then((res) => Number(res.data?.count ?? 0));
+    Promise.all(["businesses/", "customers/", "products/", "invoices/", "invoices/?type_of_invoice=inward"]
+      .map((path) => count(`${path}${path.includes("?") ? "&" : "?"}page_size=1`)))
+      .then(([businesses, customers, products, invoices, inwardBills]) => setOnFile({ businesses, customers, products, invoices, inwardBills }))
       .catch(() => {});
   }, []);
 
@@ -81,17 +87,14 @@ export default function Backup() {
     setLastBackup(localStorage.getItem(LAST_BACKUP_KEY));
   }, []);
 
-  const onFile: BackupCounts | null = invoicesOnFile && {
-    businesses: businessCount, customers: customerCount, products: productCount,
-    invoices: invoicesOnFile.all, inwardBills: invoicesOnFile.inward,
-  };
+  const shown = (n: number | null | undefined) => (n == null ? "…" : n.toLocaleString("en-IN"));
   const dataItems = [
-    { label: "Businesses", count: businessCount, note: "records", icon: Building2, color: "text-chart-1" },
-    { label: "Customers", count: customerCount, note: "records", icon: Users, color: "text-chart-2" },
-    { label: "Products", count: productCount, note: "records", icon: Package, color: "text-chart-3" },
-    { label: "Invoices", count: onFile?.invoices ?? 0, note: onFile?.inwardBills ? `all years · incl. ${onFile.inwardBills.toLocaleString("en-IN")} inward` : "all years", icon: Receipt, color: "text-chart-4" },
+    { label: "Businesses", count: onFile?.businesses, note: "records", icon: Building2, color: "text-chart-1" },
+    { label: "Customers", count: onFile?.customers, note: "records", icon: Users, color: "text-chart-2" },
+    { label: "Products", count: onFile?.products, note: "records", icon: Package, color: "text-chart-3" },
+    { label: "Invoices", count: onFile?.invoices, note: onFile?.inwardBills ? `all years · incl. ${shown(onFile.inwardBills)} inward` : "all years", icon: Receipt, color: "text-chart-4" },
   ];
-  const totalRecords = businessCount + customerCount + productCount + (onFile?.invoices ?? 0);
+  const totalRecords = onFile && onFile.businesses + onFile.customers + onFile.products + onFile.invoices;
 
   // What the filters pick, in words: "FY 2026-27", "KIRAN GOLD HOUSE · 01 Apr 2026 – 30 Jun 2026 · purchases"
   const bizName = bizFilter === "all" ? "" : businesses.find((b) => String(b.id) === bizFilter)?.name || "";
@@ -218,12 +221,12 @@ export default function Backup() {
           ...dataItems,
           { label: "Total", count: totalRecords, note: "records on file", icon: Database, color: "text-primary" },
         ].map((d) => (
-          <motion.div key={d.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={`${d.count.toLocaleString("en-IN")} ${d.label.toLowerCase()} records`}>
+          <motion.div key={d.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={`${shown(d.count)} ${d.label.toLowerCase()} records`}>
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{d.label}</p>
               <d.icon className={cn("w-3.5 h-3.5", d.color)} />
             </div>
-            <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", d.color)}>{d.count.toLocaleString("en-IN")}</p>
+            <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", d.color)}>{shown(d.count)}</p>
             <p className="text-[10px] text-muted-foreground/80 mt-0.5">{d.note}</p>
           </motion.div>
         ))}
@@ -273,7 +276,7 @@ export default function Backup() {
           </div>
         </div>
         <p className="text-[10px] text-muted-foreground">
-          For the Excel report and the Invoices export: {scopeLabel} · <span className="font-semibold text-primary">{scopeInvoices.toLocaleString("en-IN")} invoices</span>. The JSON backup always holds everything.
+          For the Excel report and the Invoices export: {scopeLabel} · <span className="font-semibold text-primary">{shown(scopeInvoices)} invoices</span>. The JSON backup always holds everything.
         </p>
       </motion.div>
 
@@ -312,7 +315,7 @@ export default function Backup() {
               JSON: everything on file, all years and firms, for restore{onFile ? ` — ${describeCounts(onFile)}` : ""}.
             </p>
             <p className="text-[10px] text-muted-foreground">
-              Excel: {scopeLabel} · {scopeInvoices.toLocaleString("en-IN")} invoices, formatted for viewing.
+              Excel: {scopeLabel} · {shown(scopeInvoices)} invoices, formatted for viewing.
             </p>
           </div>
         </motion.div>
@@ -338,12 +341,12 @@ export default function Backup() {
                 {(["customers", "products", "businesses"] as const).map((e) => {
                   // Surface the current row count on each button so the
                   // user sees what's about to grow before clicking.
-                  const count = e === "customers" ? customerCount : e === "products" ? productCount : businessCount;
+                  const count = e === "customers" ? onFile?.customers : e === "products" ? onFile?.products : onFile?.businesses;
                   return (
                     <button key={e} onClick={() => setShowImportWizard(e)}
                       className="p-3 rounded-xl border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-all text-center">
                       <p className="text-[12px] font-semibold text-foreground capitalize">{e}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">{count.toLocaleString("en-IN")} existing · CSV / JSON</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">{shown(count)} existing · CSV / JSON</p>
                     </button>
                   );
                 })}
