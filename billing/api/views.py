@@ -800,7 +800,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         "customer__name",
         "business__name",
     ]
-    ordering = ["-invoice_date", "-created_at"]
+    # Ends on the id so every page is cut from one fixed order: rows imported
+    # together can tie on date and created_at, and a tie has no fixed place
+    # under LIMIT/OFFSET (the full backup walks every page).
+    ordering = ["-invoice_date", "-created_at", "-id"]
     pagination_class = StandardResultsSetPagination
 
     # Removed caching to ensure fresh data

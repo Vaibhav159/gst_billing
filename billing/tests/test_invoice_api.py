@@ -1,6 +1,9 @@
 from decimal import Decimal
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 from freezegun import freeze_time
 from rest_framework import status
 
@@ -650,3 +653,40 @@ class InwardInvoiceWithoutSupplierGstinTest(BaseAPITestCase):
         inv = self._bill("P-NA-OLD", self.karigar)
         resp = self.client.patch(reverse("invoice-detail", args=[inv.id]), {"payment_mode": "cash"}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
+
+
+class InvoiceListPageWalkTest(BaseAPITestCase):
+    """Walking invoices/ page by page sees every invoice once (UX1).
+
+    The full backup walks the list newest first. Invoices imported in one
+    batch share a date and can share created_at to the microsecond
+    (bulk_create stamps them in one loop). Sorted on those two alone, rows in
+    a tie have no fixed place: Postgres may order them differently for each
+    page's LIMIT/OFFSET, so a walk repeats some invoices and never sees others.
+    """
+
+    def test_the_list_is_sorted_down_to_the_invoice_id(self):
+        with CaptureQueriesContext(connection) as ctx:
+            resp = self.client.get(reverse("invoice-list"), {"page_size": 2})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        page_sql = [q["sql"] for q in ctx.captured_queries if "LIMIT" in q["sql"] and "billing_invoice" in q["sql"]]
+        order_by = page_sql[-1].rsplit("ORDER BY", 1)[1]
+        self.assertRegex(order_by, r'"billing_invoice"\."id" DESC')
+
+    def test_invoices_that_tie_on_date_and_created_at_page_in_a_fixed_order(self):
+        # SQLite happens to return such a tie newest id first already (it walks
+        # the date index backwards); Postgres, as CircleCI runs it, need not.
+        ids = [
+            Invoice.objects.create(invoice_number=f"TIE-{n}", invoice_date="2026-05-01", business=self.business,
+                                   customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD).id
+            for n in range(1, 6)
+        ]
+        Invoice.objects.filter(id__in=ids).update(created_at=timezone.now())
+        seen, page = [], 1
+        while page:
+            resp = self.client.get(reverse("invoice-list"), {"page_size": 2, "page": page, "start_date": "2026-05-01",
+                                                              "end_date": "2026-05-01"})
+            self.assertEqual(resp.status_code, 200, resp.data)
+            seen += [row["id"] for row in resp.data["results"]]
+            page = page + 1 if resp.data["next"] else 0
+        self.assertEqual(seen, sorted(ids, reverse=True))

@@ -1,35 +1,54 @@
 import { useState } from "react";
-import { Download, FileJson, FileSpreadsheet, CheckCircle2 } from "lucide-react";
+import { Download, FileJson, FileSpreadsheet, CheckCircle2, Clock } from "lucide-react";
 import { cn } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useInvoices, useCustomers, useProducts, useBusinesses } from "@/hooks/useDataStore";
+import { fetchAllPages, mapDjangoInvoice, mapDjangoProduct } from "@/hooks/useDataStore";
+import { formatApiError } from "@/utils/apiError";
+import type { BackupCounts } from "@/utils/fullBackup";
 
 import { todayLocal } from "@/utils/localDate";
 
 type ExportFormat = "csv" | "json";
 type ExportEntity = "invoices" | "customers" | "products" | "businesses" | "all";
 
-interface DataExportPanelProps {
-  defaultEntity?: ExportEntity;
+/** The invoices the page's export filters pick, and how to say so ("FY 2026-27"). */
+export interface InvoiceScope {
+  query: string;
+  label: string;
+  count: number;
 }
 
-export default function DataExportPanel({ defaultEntity = "all" }: DataExportPanelProps) {
+interface DataExportPanelProps {
+  defaultEntity?: ExportEntity;
+  /** Everything on file, all years (null while it loads). */
+  onFile: BackupCounts | null;
+  invoiceScope: InvoiceScope;
+  /** All Data as JSON is the full backup, which the page builds and saves. */
+  onFullBackup: () => Promise<void>;
+}
+
+const n = (count: number) => count.toLocaleString("en-IN");
+
+/**
+ * Every export here reads every page when it runs (UX1). It used to write
+ * what the page had loaded: the invoice list's first 50 rows, whatever the
+ * labels said.
+ */
+export default function DataExportPanel({ defaultEntity = "all", onFile, invoiceScope, onFullBackup }: DataExportPanelProps) {
   const { toast } = useToast();
-  const { items: invoices } = useInvoices();
-  const { items: customers } = useCustomers();
-  const { items: products } = useProducts();
-  const { items: businesses } = useBusinesses();
 
   const [format, setFormat] = useState<ExportFormat>("csv");
   const [entity, setEntity] = useState<ExportEntity>(defaultEntity);
   const [exported, setExported] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const entities: { id: ExportEntity; label: string; count: number }[] = [
-    { id: "all", label: "All Data", count: invoices.length + customers.length + products.length + businesses.length },
-    { id: "invoices", label: "Invoices", count: invoices.length },
-    { id: "customers", label: "Customers", count: customers.length },
-    { id: "products", label: "Products", count: products.length },
-    { id: "businesses", label: "Businesses", count: businesses.length },
+  const allCount = onFile ? onFile.businesses + onFile.customers + onFile.products + onFile.invoices : null;
+  const entities: { id: ExportEntity; label: string; count: number | null }[] = [
+    { id: "all", label: "All Data · all years", count: allCount },
+    { id: "invoices", label: `Invoices · ${invoiceScope.label}`, count: invoiceScope.count },
+    { id: "customers", label: "Customers", count: onFile?.customers ?? null },
+    { id: "products", label: "Products", count: onFile?.products ?? null },
+    { id: "businesses", label: "Businesses", count: onFile?.businesses ?? null },
   ];
 
   const escapeCsvValue = (val: unknown): string => {
@@ -38,15 +57,6 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
       return `"${str.replace(/"/g, '""')}"`;
     }
     return str;
-  };
-
-  const exportCSV = (data: any[], headers: string[], filename: string) => {
-    const csv = [headers.map(escapeCsvValue).join(","), ...data.map((row) => headers.map((h) => escapeCsvValue(row[h])).join(","))].join("\n");
-    downloadFile(csv, `${filename}.csv`, "text/csv");
-  };
-
-  const exportJSON = (data: any, filename: string) => {
-    downloadFile(JSON.stringify(data, null, 2), `${filename}.json`, "application/json");
   };
 
   const downloadFile = (content: string, filename: string, type: string) => {
@@ -59,11 +69,41 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
     URL.revokeObjectURL(url);
   };
 
-  const handleExport = () => {
-    const dateStr = todayLocal();
+  const write = (rows: Record<string, unknown>[], filename: string) => {
+    if (format === "json") return downloadFile(JSON.stringify(rows, null, 2), `${filename}.json`, "application/json");
+    if (rows.length === 0) return;
+    const headers = Object.keys(rows[0]);
+    const csv = [headers.map(escapeCsvValue).join(","), ...rows.map((row) => headers.map((h) => escapeCsvValue(row[h])).join(","))].join("\n");
+    downloadFile(csv, `${filename}.csv`, "text/csv");
+  };
 
-    if (entity === "all" || entity === "invoices") {
-      const invData = invoices.map((i) => ({
+  const flashDone = () => {
+    setExported(true);
+    setTimeout(() => setExported(false), 3000);
+  };
+
+  const handleExport = async () => {
+    if (entity === "all" && format === "json") {
+      await onFullBackup();
+      flashDone();
+      return;
+    }
+    setBusy(true);
+    try {
+      const want = (e: ExportEntity) => entity === "all" || entity === e;
+      const none = Promise.resolve([] as any[]);
+      const [invoiceRows, customers, productRows, businesses] = await Promise.all([
+        want("invoices") ? fetchAllPages<any>(entity === "all" ? "invoices/?page_size=200" : `invoices/?${invoiceScope.query}`) : none,
+        want("customers") ? fetchAllPages<any>("customers/?page_size=1000") : none,
+        want("products") ? fetchAllPages<any>("products/?page_size=1000") : none,
+        want("businesses") ? fetchAllPages<any>("businesses/?page_size=200") : none,
+      ]);
+      const invoices = invoiceRows.map(mapDjangoInvoice);
+      const products = productRows.map(mapDjangoProduct);
+      const dateStr = todayLocal();
+      const prefix = entity === "all" ? "all-" : "";
+
+      if (want("invoices")) write(invoices.map((i) => ({
         "Invoice Number": i.invoiceNumber,
         Date: i.invoice_date,
         Customer: i.customerName,
@@ -74,91 +114,42 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
         Total: i.total,
         "GST Type": i.isIGST ? "IGST" : "CGST/SGST",
         "Financial Year": i.financialYear,
-      }));
-      if (entity === "invoices") {
-        if (format === "csv") exportCSV(invData, Object.keys(invData[0] || {}), `invoices-${dateStr}`);
-        else exportJSON(invData, `invoices-${dateStr}`);
-      }
-    }
-
-    if (entity === "all" || entity === "customers") {
-      const custData = customers.map((c: any) => ({
-        Name: c.name, GST: c.gst_number || c.gst || "", PAN: c.pan_number || c.pan || "",
-        Mobile: c.mobile_number || c.mobile || "", Email: c.email || "",
-        State: c.state_name || c.state || "", Address: c.address || "",
-      }));
-      if (entity === "customers") {
-        if (format === "csv") exportCSV(custData, Object.keys(custData[0] || {}), `customers-${dateStr}`);
-        else exportJSON(custData, `customers-${dateStr}`);
-      }
-    }
-
-    if (entity === "all" || entity === "products") {
-      const prodData = products.map((p) => ({
+      })), `${prefix}invoices-${dateStr}`);
+      if (want("customers")) write(customers.map((c: any) => ({
+        Name: c.name, GST: c.gst_number || "", PAN: c.pan_number || "",
+        Mobile: c.mobile_number || "", Email: c.email || "",
+        State: c.state_name || "", Address: c.address || "",
+      })), `${prefix}customers-${dateStr}`);
+      if (want("products")) write(products.map((p) => ({
         Name: p.name, HSN: p.hsn, "GST Rate": p.gstRate, Description: p.description,
-      }));
-      if (entity === "products") {
-        if (format === "csv") exportCSV(prodData, Object.keys(prodData[0] || {}), `products-${dateStr}`);
-        else exportJSON(prodData, `products-${dateStr}`);
-      }
+      })), `${prefix}products-${dateStr}`);
+      if (want("businesses")) write(businesses.map((b: any) => ({
+        Name: b.name, GST: b.gst_number || "", PAN: b.pan_number || "",
+        State: b.state_name || "", Address: b.address || "",
+        Mobile: b.mobile_number || "", Email: b.email || "",
+        "Bank Name": b.bank_name || "", "Account No": b.bank_account_number || "",
+        IFSC: b.bank_ifsc_code || "", Branch: b.bank_branch_name || "",
+      })), `${prefix}businesses-${dateStr}`);
+
+      const what = entity === "all"
+        ? `All years: ${n(invoices.length)} invoices, ${n(customers.length)} customers, ${n(products.length)} products, ${n(businesses.length)} businesses`
+        : entity === "invoices"
+          ? `${invoiceScope.label} · ${n(invoices.length)} invoices`
+          : `${n((entity === "customers" ? customers : entity === "products" ? products : businesses).length)} ${entity}`;
+      toast({ title: "Export Complete", description: `${what} exported as ${format.toUpperCase()}.` });
+      flashDone();
+    } catch (err) {
+      toast({ title: "Export Failed", description: formatApiError(err, "Could not export data."), variant: "destructive" });
+    } finally {
+      setBusy(false);
     }
-
-    if (entity === "all" || entity === "businesses") {
-      const bizData = businesses.map((b: any) => ({
-        Name: b.name, GST: b.gst_number || b.gst || "", PAN: b.pan_number || b.pan || "",
-        State: b.state_name || b.state || "", Address: b.address || "",
-        Mobile: b.mobile_number || b.mobile || "", Email: b.email || "",
-        "Bank Name": b.bank_name || b.bankName || "", "Account No": b.account_number || b.accountNo || "",
-        IFSC: b.ifsc_code || b.ifsc || "", Branch: b.branch || "",
-      }));
-      if (entity === "businesses") {
-        if (format === "csv") exportCSV(bizData, Object.keys(bizData[0] || {}), `businesses-${dateStr}`);
-        else exportJSON(bizData, `businesses-${dateStr}`);
-      }
-    }
-
-    if (entity === "all") {
-      const allData = {
-        businesses: businesses,
-        customers: customers,
-        products: products,
-        invoices: invoices,
-        exportedAt: new Date().toISOString(),
-        version: "3.0",
-      };
-      if (format === "json") exportJSON(allData, `gst-full-export-${dateStr}`);
-      else {
-        // For CSV all, export each entity as separate file
-        const invData = invoices.map((i) => ({
-          "Invoice Number": i.invoiceNumber, Date: i.invoice_date, Customer: i.customerName,
-          Business: i.businessName, Type: i.type, Subtotal: i.subtotal, "Total Tax": i.totalTax, Total: i.total,
-          "GST Type": i.isIGST ? "IGST" : "CGST/SGST",
-        }));
-        if (invData.length > 0) exportCSV(invData, Object.keys(invData[0]), `all-invoices-${dateStr}`);
-
-        const custData = customers.map((c) => ({
-          Name: c.name, GST: c.gst_number, PAN: c.pan_number, Mobile: c.mobile_number,
-          Email: c.email, State: c.state_name, Address: c.address,
-        }));
-        if (custData.length > 0) exportCSV(custData, Object.keys(custData[0]), `all-customers-${dateStr}`);
-
-        const prodData = products.map((p) => ({
-          Name: p.name, HSN: p.hsn, "GST Rate": p.gstRate, Description: p.description,
-        }));
-        if (prodData.length > 0) exportCSV(prodData, Object.keys(prodData[0]), `all-products-${dateStr}`);
-
-        const bizData = businesses.map((b) => ({
-          Name: b.name, GST: b.gst_number, PAN: b.pan_number, State: b.state_name,
-          Address: b.address, Mobile: b.mobile_number, Email: b.email,
-        }));
-        if (bizData.length > 0) exportCSV(bizData, Object.keys(bizData[0]), `all-businesses-${dateStr}`);
-      }
-    }
-
-    setExported(true);
-    toast({ title: "Export Complete", description: `${entity === "all" ? "All data" : entity} exported as ${format.toUpperCase()}` });
-    setTimeout(() => setExported(false), 3000);
   };
+
+  const buttonLabel = entity === "all"
+    ? (format === "json" ? "Download Full Backup" : "Export All Data · all years")
+    : entity === "invoices"
+      ? `Export Invoices · ${invoiceScope.label} · ${n(invoiceScope.count)}`
+      : `Export ${entity}`;
 
   return (
     <div className="space-y-4">
@@ -175,7 +166,7 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
                 : "border-border/30 text-muted-foreground hover:border-primary/20"
             )}
           >
-            {e.label} <span className="text-[10px] opacity-60 ml-1">({e.count})</span>
+            {e.label} <span className="text-[10px] opacity-60 ml-1 tabular-nums">({e.count == null ? "…" : n(e.count)})</span>
           </button>
         ))}
       </div>
@@ -205,7 +196,7 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
           <FileJson className={cn("w-5 h-5", format === "json" ? "text-primary" : "text-muted-foreground")} />
           <div className="text-left">
             <p className="text-[12px] font-semibold text-foreground">JSON</p>
-            <p className="text-[10px] text-muted-foreground">Full backup format</p>
+            <p className="text-[10px] text-muted-foreground">{entity === "all" ? "Full backup format" : "Rows as listed"}</p>
           </div>
         </button>
       </div>
@@ -213,12 +204,15 @@ export default function DataExportPanel({ defaultEntity = "all" }: DataExportPan
       {/* Export Button */}
       <button
         onClick={handleExport}
-        className={cn("premium-btn-primary w-full", exported && "bg-success")}
+        disabled={busy}
+        className={cn("premium-btn-primary w-full disabled:opacity-40", exported && "bg-success")}
       >
-        {exported ? (
+        {busy ? (
+          <><Clock className="w-4 h-4 animate-spin" /> Exporting…</>
+        ) : exported ? (
           <><CheckCircle2 className="w-4 h-4" /> Exported!</>
         ) : (
-          <><Download className="w-4 h-4" /> Export {entity === "all" ? "All Data" : entity}</>
+          <><Download className="w-4 h-4" /> {buttonLabel}</>
         )}
       </button>
     </div>

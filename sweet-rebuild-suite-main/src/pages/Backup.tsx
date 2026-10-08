@@ -1,11 +1,13 @@
 import { logger } from "@/utils/logger";
 import { useState, useEffect, useCallback } from "react";
 import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, Database } from "lucide-react";
-import { financialYears, currentFY } from "@/utils/mockData";
+import { financialYears, currentFY, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomers, useProducts, useBusinesses, mapDjangoInvoice, fetchAllPages } from "@/hooks/useDataStore";
 import { restoreBackup } from "@/utils/restoreBackup";
+import { backupCounts, describeCounts, restorePrompt, saveFullBackup, type BackupCounts } from "@/utils/fullBackup";
+import { formatApiError } from "@/utils/apiError";
 import { cn } from "@/utils/utils";
 import { motion } from "framer-motion";
 import { stagger, fadeUp } from "@/utils/animations";
@@ -21,15 +23,18 @@ const LAST_BACKUP_KEY = "gst_last_backup";
 export default function Backup() {
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { items: businesses } = useBusinesses();
-  const { items: customers } = useCustomers();
-  const { items: products } = useProducts();
+  const { items: businesses, totalCount: businessCount } = useBusinesses();
+  const { items: customers, totalCount: customerCount } = useCustomers();
+  const { totalCount: productCount } = useProducts();
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState<"customers" | "products" | "businesses" | null>(null);
-  const [totalInvoices, setTotalInvoices] = useState(0);
+  // Invoices the export filters pick (the Excel report, the Invoices export)…
+  const [scopeInvoices, setScopeInvoices] = useState(0);
+  // …and every invoice on file, all years: what a full backup holds.
+  const [invoicesOnFile, setInvoicesOnFile] = useState<{ all: number; inward: number } | null>(null);
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const [bizFilter, setBizFilter] = useState("all");
   const [fyFilter, setFyFilter] = useState(currentFY);
@@ -54,64 +59,62 @@ export default function Backup() {
     return params;
   }, [fyStartDate, fyEndDate, bizFilter, typeFilter]);
 
-  // Fetch real invoice count from API
+  // How many invoices the filters pick
   useEffect(() => {
     const params = buildParams();
     params.delete("include_items");
     params.set("page_size", "1");
     api.get(`invoices/?${params.toString()}`).then(res => {
-      setTotalInvoices(res.data?.count || res.data?.results?.length || 0);
+      setScopeInvoices(res.data?.count || res.data?.results?.length || 0);
     }).catch(() => {});
   }, [buildParams]);
+
+  // How many are on file, all years (the tiles showed the filtered count)
+  useEffect(() => {
+    Promise.all([api.get("invoices/?page_size=1"), api.get("invoices/?page_size=1&type_of_invoice=inward")])
+      .then(([all, inward]) => setInvoicesOnFile({ all: all.data?.count ?? 0, inward: inward.data?.count ?? 0 }))
+      .catch(() => {});
+  }, []);
 
   // Load last backup info
   useEffect(() => {
     setLastBackup(localStorage.getItem(LAST_BACKUP_KEY));
   }, []);
 
+  const onFile: BackupCounts | null = invoicesOnFile && {
+    businesses: businessCount, customers: customerCount, products: productCount,
+    invoices: invoicesOnFile.all, inwardBills: invoicesOnFile.inward,
+  };
   const dataItems = [
-    { label: "Businesses", count: businesses.length, icon: Building2, color: "text-chart-1" },
-    { label: "Customers", count: customers.length, icon: Users, color: "text-chart-2" },
-    { label: "Products", count: products.length, icon: Package, color: "text-chart-3" },
-    { label: "Invoices", count: totalInvoices, icon: Receipt, color: "text-chart-4" },
+    { label: "Businesses", count: businessCount, note: "records", icon: Building2, color: "text-chart-1" },
+    { label: "Customers", count: customerCount, note: "records", icon: Users, color: "text-chart-2" },
+    { label: "Products", count: productCount, note: "records", icon: Package, color: "text-chart-3" },
+    { label: "Invoices", count: onFile?.invoices ?? 0, note: onFile?.inwardBills ? `all years · incl. ${onFile.inwardBills.toLocaleString("en-IN")} inward` : "all years", icon: Receipt, color: "text-chart-4" },
   ];
-  const totalRecords = businesses.length + customers.length + products.length + totalInvoices;
+  const totalRecords = businessCount + customerCount + productCount + (onFile?.invoices ?? 0);
 
-  // Full JSON backup via API
+  // What the filters pick, in words: "FY 2026-27", "KIRAN GOLD HOUSE · 01 Apr 2026 – 30 Jun 2026 · purchases"
+  const bizName = bizFilter === "all" ? "" : businesses.find((b) => String(b.id) === bizFilter)?.name || "";
+  const scopeLabel = [
+    bizName,
+    dateFrom || dateTo ? `${formatDate(fyStartDate)} – ${formatDate(fyEndDate)}` : `FY ${fyFilter}`,
+    typeFilter === "OUTWARD" ? "sales" : typeFilter === "INWARD" ? "purchases" : "",
+  ].filter(Boolean).join(" · ");
+  const scopeQuery = (() => { const p = buildParams(); p.delete("include_items"); return p.toString(); })();
+
+  // Full JSON backup: everything on file, whatever the filters say (UX1)
   const handleExportJSON = async () => {
     setExporting(true);
     try {
-      const params = buildParams();
-      const [invRes] = await Promise.all([
-        fetchAllPages<any>(`invoices/?${params.toString()}`).then((results) => ({ data: results })),
-      ]);
-      const invData = invRes.data;
-      const allInvoices: any[] = invData;
-
-      const data = {
-        businesses,
-        customers,
-        products,
-        invoices: allInvoices,
-        exportedAt: new Date().toISOString(),
-        version: "4.0",
-        totalRecords: businesses.length + customers.length + products.length + allInvoices.length,
-      };
-
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `gst-backup-${todayLocal()}.json`; a.click();
-      URL.revokeObjectURL(url);
-
-      const backupInfo = `${new Date().toLocaleString("en-IN")} (${data.totalRecords} records, ${(blob.size / 1024).toFixed(0)} KB)`;
+      const { backup, bytes } = await saveFullBackup();
+      const backupInfo = `${new Date().toLocaleString("en-IN")} (${backup.totalRecords.toLocaleString("en-IN")} records, ${(bytes / 1024).toFixed(0)} KB)`;
       localStorage.setItem(LAST_BACKUP_KEY, backupInfo);
       setLastBackup(backupInfo);
 
-      toast({ title: "Backup Downloaded", description: `${data.totalRecords} records exported.` });
+      toast({ title: "Backup Downloaded", description: `Everything on file, all years: ${describeCounts(backup.counts)}.` });
     } catch (err) {
       logger.error("Export failed", err);
-      toast({ title: "Export Failed", description: "Could not export data.", variant: "destructive" });
+      toast({ title: "Export Failed", description: formatApiError(err, "Could not export data."), variant: "destructive" });
     }
     setExporting(false);
   };
@@ -126,7 +129,7 @@ export default function Backup() {
 
       const includeSplit = (() => { try { return localStorage.getItem("gst_export_split_pref") === "1"; } catch { return false; } })();
       downloadReportExcel({ invoices: fullInvoices, businesses, customers }, `gst-backup-${todayLocal()}.xlsx`, { includePayment: includeSplit });
-      toast({ title: "Excel Downloaded", description: `${fullInvoices.length} invoices exported.` });
+      toast({ title: "Excel Downloaded", description: `${scopeLabel} · ${fullInvoices.length.toLocaleString("en-IN")} invoices exported.` });
     } catch (err) {
       logger.error("Excel export failed", err);
       toast({ title: "Export Failed", description: "Could not generate Excel.", variant: "destructive" });
@@ -136,24 +139,27 @@ export default function Backup() {
 
   const handleImport = async () => {
     if (!file) return;
-    // Restore is additive: missing masters are created and invoices whose
-    // numbers are already on file are skipped by the server. Say so.
-    if (!confirm(`Restore from "${file.name}"?\n\nMissing businesses, products and customers will be created, and invoices whose numbers are not already on file will be imported. Nothing is deleted.\n\nOn file now: ${customers.length.toLocaleString("en-IN")} customers, ${products.length.toLocaleString("en-IN")} products, ${businesses.length.toLocaleString("en-IN")} businesses, ${totalInvoices.toLocaleString("en-IN")} invoices`)) return;
-    setImporting(true);
+    let data: any;
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-
+      data = JSON.parse(await file.text());
       const requiredKeys = ["businesses", "customers", "products", "invoices"] as const;
       for (const key of requiredKeys) {
         if (!Array.isArray(data[key])) {
           throw new Error(`Invalid backup: missing or invalid "${key}" array`);
         }
       }
-
-      // Show summary before restoring
-      const summary = `${data.businesses.length} businesses, ${data.customers.length} customers, ${data.products.length} products, ${data.invoices.length} invoices`;
-      toast({ title: "Backup Loaded", description: `Found: ${summary}. Restoring...` });
+    } catch (err) {
+      toast({ title: "Import Failed", description: err instanceof Error ? err.message : "Invalid backup file.", variant: "destructive" });
+      return;
+    }
+    // Restore is additive: missing masters are created and invoices whose
+    // numbers are already on file are skipped by the server. Say so, with
+    // what the file holds against everything on file (not one FY's count).
+    const inFile = backupCounts(data);
+    if (!confirm(restorePrompt(file.name, inFile, onFile))) return;
+    setImporting(true);
+    try {
+      toast({ title: "Backup Loaded", description: `Found: ${describeCounts(inFile)}. Restoring...` });
 
       // Through the real API. This used to write the arrays into localStorage
       // keys nothing reads, toast "Restore Complete" and reload (E1).
@@ -206,7 +212,7 @@ export default function Backup() {
       <motion.div variants={stagger} initial="hidden" animate="visible" className={cn("grid gap-3", isMobile ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
         {[
           ...dataItems,
-          { label: "Total", count: totalRecords, icon: Database, color: "text-primary" },
+          { label: "Total", count: totalRecords, note: "records on file", icon: Database, color: "text-primary" },
         ].map((d) => (
           <motion.div key={d.label} variants={fadeUp} className="stat-card rounded-2xl p-4" title={`${d.count.toLocaleString("en-IN")} ${d.label.toLowerCase()} records`}>
             <div className="flex items-center justify-between mb-1.5">
@@ -214,7 +220,7 @@ export default function Backup() {
               <d.icon className={cn("w-3.5 h-3.5", d.color)} />
             </div>
             <p className={cn("text-lg lg:text-xl font-display font-bold tabular-nums", d.color)}>{d.count.toLocaleString("en-IN")}</p>
-            <p className="text-[10px] text-muted-foreground/80 mt-0.5">records</p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5">{d.note}</p>
           </motion.div>
         ))}
       </motion.div>
@@ -263,7 +269,7 @@ export default function Backup() {
           </div>
         </div>
         <p className="text-[10px] text-muted-foreground">
-          Showing: {bizFilter === "all" ? "All businesses" : businesses.find(b => String(b.id) === bizFilter)?.name} · FY {fyFilter} · {typeFilter === "all" ? "All types" : typeFilter} · <span className="font-semibold text-primary">{totalInvoices} invoices</span>
+          For the Excel report and the Invoices export: {scopeLabel} · <span className="font-semibold text-primary">{scopeInvoices.toLocaleString("en-IN")} invoices</span>. The JSON backup always holds everything.
         </p>
       </motion.div>
 
@@ -280,7 +286,11 @@ export default function Backup() {
             </div>
           </div>
 
-          <DataExportPanel />
+          <DataExportPanel
+            onFile={onFile}
+            invoiceScope={{ query: scopeQuery, label: scopeLabel, count: scopeInvoices }}
+            onFullBackup={handleExportJSON}
+          />
 
           <div className="border-t border-border/30 pt-4 space-y-3">
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Full Backup</p>
@@ -295,8 +305,10 @@ export default function Backup() {
               </button>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              JSON: full backup with all data for restore. Excel: formatted report for viewing.
-              {bizFilter !== "all" && " (filtered by selected business)"}
+              JSON: everything on file, all years and firms, for restore{onFile ? ` — ${describeCounts(onFile)}` : ""}.
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              Excel: {scopeLabel} · {scopeInvoices.toLocaleString("en-IN")} invoices, formatted for viewing.
             </p>
           </div>
         </motion.div>
@@ -322,7 +334,7 @@ export default function Backup() {
                 {(["customers", "products", "businesses"] as const).map((e) => {
                   // Surface the current row count on each button so the
                   // user sees what's about to grow before clicking.
-                  const count = e === "customers" ? customers.length : e === "products" ? products.length : businesses.length;
+                  const count = e === "customers" ? customerCount : e === "products" ? productCount : businessCount;
                   return (
                     <button key={e} onClick={() => setShowImportWizard(e)}
                       className="p-3 rounded-xl border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-all text-center">

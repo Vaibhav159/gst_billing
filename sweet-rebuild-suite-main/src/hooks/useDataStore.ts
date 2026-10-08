@@ -32,15 +32,29 @@ function parseNextUrl(absoluteUrl: string | null): string | null {
  */
 export async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
   const allResults: T[] = [];
+  // A row saved while we walk moves every row below it one place down the
+  // list, so the last row of one page can come back first on the next: keep
+  // each id once, or a backup holds it twice and a statement sums it twice.
+  const seen = new Set<string>();
+  const add = (rows: T[]) => {
+    for (const row of rows) {
+      const id = (row as { id?: unknown } | null)?.id;
+      if (id != null) {
+        if (seen.has(String(id))) continue;
+        seen.add(String(id));
+      }
+      allResults.push(row);
+    }
+  };
   let url: string | null = endpoint;
   while (url) {
     const res = await api.get(url);
     const data = res.data;
     if (data && Array.isArray(data.results)) {
-      allResults.push(...data.results);
+      add(data.results);
       url = parseNextUrl(data.next);
     } else if (Array.isArray(data)) {
-      allResults.push(...data);
+      add(data);
       url = null;
     } else {
       url = null;
