@@ -6,7 +6,7 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomers, useBusinesses, mapDjangoInvoice, fetchAllPages } from "@/hooks/useDataStore";
 import { restoreBackup } from "@/utils/restoreBackup";
-import { backupCounts, describeCounts, restorePrompt, saveFullBackup, type BackupCounts } from "@/utils/fullBackup";
+import { backupCounts, backupToast, describeCounts, restorePrompt, saveFullBackup, type BackupCounts } from "@/utils/fullBackup";
 import { formatApiError } from "@/utils/apiError";
 import { cn } from "@/utils/utils";
 import { motion } from "framer-motion";
@@ -120,7 +120,7 @@ export default function Backup() {
       localStorage.setItem(LAST_BACKUP_KEY, backupInfo);
       setLastBackup(backupInfo);
 
-      toast({ title: "Backup Downloaded", description: `Everything on file, all years: ${describeCounts(backup.counts)}.` });
+      toast(backupToast(backup));
       return true;
     } catch (err) {
       logger.error("Export failed", err);

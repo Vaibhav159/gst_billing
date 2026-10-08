@@ -31,6 +31,12 @@ function parseNextUrl(absoluteUrl: string | null): string | null {
  * Use sparingly — only for pages that truly need aggregated data (e.g. Dashboard).
  */
 export async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
+  return (await fetchAllPagesCounted<T>(endpoint)).rows;
+}
+
+/** fetchAllPages, plus the `count` the server reported on its last page (null if it sent none). */
+export async function fetchAllPagesCounted<T = any>(endpoint: string): Promise<{ rows: T[]; count: number | null }> {
+  let count: number | null = null;
   const allResults: T[] = [];
   // A row saved while we walk moves every row below it one place down the
   // list, so the last row of one page can come back first on the next: keep
@@ -52,6 +58,7 @@ export async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
     const data = res.data;
     if (data && Array.isArray(data.results)) {
       add(data.results);
+      if (typeof data.count === "number") count = data.count;
       url = parseNextUrl(data.next);
     } else if (Array.isArray(data)) {
       add(data);
@@ -60,7 +67,7 @@ export async function fetchAllPages<T = any>(endpoint: string): Promise<T[]> {
       url = null;
     }
   }
-  return allResults;
+  return { rows: allResults, count };
 }
 
 export interface Business {

@@ -11,7 +11,7 @@
  * invoices through backupInvoiceToImportRow (invoice_number, line_items),
  * products with their stored gst_tax_rate fraction.
  */
-import { fetchAllPages } from "@/hooks/useDataStore";
+import { fetchAllPagesCounted } from "@/hooks/useDataStore";
 import api from "@/utils/api";
 import { todayLocal } from "@/utils/localDate";
 
@@ -33,6 +33,8 @@ export interface FullBackup {
   scope: "everything";
   counts: BackupCounts;
   totalRecords: number;
+  /** A list that came back short of (or over) the server's count; empty when all match. */
+  warnings: string[];
 }
 
 /** What a backup file holds (an older one too: "type" is the app's own shape). */
@@ -47,16 +49,26 @@ export function backupCounts(data: { businesses?: any[]; customers?: any[]; prod
   };
 }
 
+const LISTS = {
+  businesses: "businesses/?page_size=200",
+  customers: "customers/?page_size=1000",
+  products: "products/?page_size=1000",
+  invoices: "invoices/?page_size=200&include_items=true",
+} as const;
+
 // ponytail: a walk over the list pages, not a snapshot. An invoice deleted
-// while it runs can move the next one past a page boundary unseen; a
-// server-side export endpoint would close that if it ever matters.
+// while it runs can move the next one past a page boundary unseen; each list
+// is checked against the server's own count (R1) and a shortfall is written
+// into the file and toasted. A server-side export would close it if it matters.
 export async function buildFullBackup(): Promise<FullBackup> {
-  const [businesses, customers, products, invoices] = await Promise.all([
-    fetchAllPages<any>("businesses/?page_size=200"),
-    fetchAllPages<any>("customers/?page_size=1000"),
-    fetchAllPages<any>("products/?page_size=1000"),
-    fetchAllPages<any>("invoices/?page_size=200&include_items=true"),
-  ]);
+  const names = Object.keys(LISTS) as (keyof typeof LISTS)[];
+  const walked = await Promise.all(names.map((name) => fetchAllPagesCounted<any>(LISTS[name])));
+  const [businesses, customers, products, invoices] = walked.map((w) => w.rows);
+  const warnings = names.flatMap((name, i) => {
+    const { rows, count } = walked[i];
+    return count == null || count === rows.length ? []
+      : [`${name}: ${rows.length.toLocaleString("en-IN")} saved, but the server counted ${count.toLocaleString("en-IN")}. Records changed while the backup ran; take another.`];
+  });
   const counts = backupCounts({ businesses, customers, products, invoices });
   return {
     businesses,
@@ -68,7 +80,16 @@ export async function buildFullBackup(): Promise<FullBackup> {
     scope: "everything",
     counts,
     totalRecords: counts.businesses + counts.customers + counts.products + counts.invoices,
+    warnings,
   };
+}
+
+/** The toast once the file is saved: what it holds, and any shortfall (R1). */
+export function backupToast(backup: FullBackup) {
+  const holds = `Everything on file, all years: ${describeCounts(backup.counts)}.`;
+  return backup.warnings.length
+    ? { title: "Backup Downloaded, with a warning", description: `${backup.warnings.join(" ")} ${holds}`, variant: "destructive" as const }
+    : { title: "Backup Downloaded", description: holds };
 }
 
 /** Build the backup and save it as gst-backup-<date>.json. */

@@ -80,7 +80,7 @@ describe("One full backup at a time (M3)", () => {
     let finish: () => void = () => {};
     saveFull.mockReset();
     saveFull.mockImplementation(() => new Promise((resolve) => {
-      finish = () => resolve({ backup: { totalRecords: 483, counts: { businesses: 3, customers: 35, products: 10, invoices: 435, inwardBills: 110 } }, bytes: 2048 });
+      finish = () => resolve({ backup: { totalRecords: 483, warnings: [], counts: { businesses: 3, customers: 35, products: 10, invoices: 435, inwardBills: 110 } }, bytes: 2048 });
     }));
     renderPage();
     await waitFor(() => expect(within(tile("Total")).getByText("483")).toBeInTheDocument());

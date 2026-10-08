@@ -12,7 +12,7 @@ const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/utils/api", () => ({ default: { get: (url: string) => get(url), post: (url: string, body: unknown) => post(url, body) } }));
 
-import { buildFullBackup, describeCounts, restorePrompt, saveFullBackup } from "./fullBackup";
+import { backupToast, buildFullBackup, describeCounts, restorePrompt, saveFullBackup } from "./fullBackup";
 import { restoreBackup } from "./restoreBackup";
 
 const line = { id: 1, product_name: "Gold Chain", hsn_code: "711319", gst_tax_rate: "0.0300", quantity: "10.000",
@@ -40,6 +40,8 @@ const lists: Record<string, Record<string, { results: unknown[]; next: string | 
 };
 
 const requested = () => get.mock.calls.map(([url]) => new URL(url as string, "http://testserver/api/"));
+// What the server says it holds, per list (DRF's `count`, on every page).
+const counts: Record<string, number> = { "invoices/": 5, "businesses/": 1, "customers/": 2, "products/": 1 };
 
 beforeEach(() => {
   get.mockReset();
@@ -47,7 +49,7 @@ beforeEach(() => {
     const u = new URL(url, "http://testserver/api/");
     const path = u.pathname.replace(/^\/api\//, "");
     const page = lists[path]?.[u.searchParams.get("page") || "1"];
-    return page ? Promise.resolve({ data: { count: 99, ...page } }) : Promise.reject(new Error(`unexpected ${url}`));
+    return page ? Promise.resolve({ data: { count: counts[path], ...page } }) : Promise.reject(new Error(`unexpected ${url}`));
   });
 });
 
@@ -114,6 +116,32 @@ describe("buildFullBackup — everything on file, whatever the page's filters sa
     expect(sent[0].items[0]).toMatchObject({ productName: "Gold Chain", hsn: "711319", gstRate: 3, qty: 10, rate: 6000, amount: 61800 });
     // The product's stored fraction goes back as stored, not through a percent.
     expect(posts.find((p) => p.url === "products/")!.body.gst_tax_rate).toBe("0.0300");
+  });
+});
+
+describe("a backup checks itself against the server's counts (R1)", () => {
+  it("notes nothing when every list came back whole", async () => {
+    const backup = await buildFullBackup();
+    expect(backup.warnings).toEqual([]);
+    expect(backupToast(backup)).toMatchObject({ title: "Backup Downloaded" });
+  });
+
+  it("writes a shortfall into the file and says so", async () => {
+    // A row deleted mid-walk moves the next one past a page boundary unseen.
+    counts["invoices/"] = 6;
+    try {
+      const backup = await buildFullBackup();
+      expect(backup.warnings).toEqual([
+        "invoices: 5 saved, but the server counted 6. Records changed while the backup ran; take another.",
+      ]);
+      expect(JSON.parse(JSON.stringify(backup)).warnings).toHaveLength(1);
+      expect(backupToast(backup)).toMatchObject({
+        title: "Backup Downloaded, with a warning", variant: "destructive",
+        description: expect.stringContaining("invoices: 5 saved, but the server counted 6"),
+      });
+    } finally {
+      counts["invoices/"] = 5;
+    }
   });
 });
 
