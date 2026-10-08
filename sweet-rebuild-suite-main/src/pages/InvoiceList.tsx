@@ -30,7 +30,7 @@ import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { usePermission } from "@/hooks/usePermission";
-import { bulkDeleteToast, deleteEach, deleteWithFeedback } from "@/utils/deleteFeedback";
+import { bulkDeleteToast, deleteEach, deleteWithFeedback, invoiceDeleteName } from "@/utils/deleteFeedback";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MobileFilterSheet from "@/components/mobile/MobileFilterSheet";
 import { shareInvoice } from "@/utils/shareInvoice";
@@ -636,7 +636,7 @@ export default function InvoiceList() {
                               <DropdownMenuItem onClick={() => navigate(`/billing/invoice/${inv.id}/print`)}><Printer className="w-4 h-4 mr-2" /> Print</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => navigate(`/billing/invoice/${inv.id}/print?share=1`)}><Share2 className="w-4 h-4 mr-2" /> Share PDF</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })}><Copy className="w-4 h-4 mr-2" /> Duplicate</DropdownMenuItem>
-                              {canDelete && <DropdownMenuItem onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} className="text-destructive focus:text-destructive"><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>}
+                              {canDelete && <DropdownMenuItem onClick={() => setDeleteTarget({ id: inv.id, name: invoiceDeleteName(inv) })} className="text-destructive focus:text-destructive"><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -701,7 +701,7 @@ export default function InvoiceList() {
                   <IconButton to={`/billing/invoice/edit/${inv.id}`} label="Edit invoice" className="hover:text-primary"><Pencil className="w-4 h-4" /></IconButton>
                   <IconButton to={`/billing/invoice/${inv.id}/print`} label="Print invoice" className="hover:text-success"><Printer className="w-4 h-4" /></IconButton>
                   <IconButton onClick={() => navigate("/billing/invoice/add", { state: { duplicateFrom: inv } })} label="Duplicate invoice"><Copy className="w-4 h-4" /></IconButton>
-                  {canDelete && <IconButton onClick={() => setDeleteTarget({ id: inv.id, name: inv.invoiceNumber })} label="Delete invoice" className="hover:bg-destructive/10 hover:text-destructive ml-auto"><Trash2 className="w-4 h-4" /></IconButton>}
+                  {canDelete && <IconButton onClick={() => setDeleteTarget({ id: inv.id, name: invoiceDeleteName(inv) })} label="Delete invoice" className="hover:bg-destructive/10 hover:text-destructive ml-auto"><Trash2 className="w-4 h-4" /></IconButton>}
                 </div>
               </motion.div>
             ))}

@@ -11,9 +11,13 @@ import {
   ArrowLeft, Pencil, Printer, Copy, Plus, Clock, Package, IndianRupee,
   Receipt, TrendingUp, Building2, User, MapPin, Hash,
   FileText, Share2, Download, MessageCircle, Truck, AlertTriangle, Link as LinkIcon, Check, Loader2,
-  Image as ImageIcon,
+  Image as ImageIcon, MoreHorizontal, Trash2,
 } from "lucide-react";
 import EwayBillForm from "@/components/EwayBillForm";
+import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { usePermission } from "@/hooks/usePermission";
+import { deleteWithFeedback, invoiceDeleteName } from "@/utils/deleteFeedback";
 import { cn, pluralize } from "@/utils/utils";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
@@ -32,8 +36,10 @@ export default function InvoiceDetail() {
   const isMobile = useIsMobile();
   const [showEway, setShowEway] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const { canDelete } = usePermission();
   const { item: inv, isLoading, candidates, refetch: refetchInvoice } = useInvoice(slug, bizSlug, fy);
-  const { items: invoices } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
+  const { items: invoices, remove: removeInvoice } = useInvoices(inv ? { customerId: inv.customerId } : undefined, !!inv);
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
 
@@ -52,7 +58,11 @@ export default function InvoiceDetail() {
   const headsMismatch = !!inv && (storedIsIGST || storedIsSplit) && storedIsIGST !== !!inv.isIGST;
   const showIGST = storedIsIGST || (!storedIsSplit && !!inv?.isIGST);
 
-  const dbId = slug && /^\d+$/.test(slug) ? slug : (inv ? String(inv.id) : "");
+  // The loaded record's id. The URL slug is an id only on /billing/invoice/:id:
+  // on /:firm/:fy/:number an all-digit number ("30") passed for one, and Edit
+  // and Print opened the invoice whose database id is 30 (found with UX5,
+  // whose Delete must hit the invoice on screen).
+  const dbId = inv ? String(inv.id) : "";
   const printUrl = `/billing/invoice/${dbId}/print`;
 
   // Rewrite the URL bar to the most readable canonical form. We prefer
@@ -249,6 +259,33 @@ export default function InvoiceDetail() {
 
   const customerInvoices = invoices.filter((i) => String(i.customerId) === String(inv.customerId) && String(i.id) !== String(inv.id)).slice(0, 5);
 
+  // Delete from the invoice itself (UX5): the phone had no way to delete at
+  // all, the desktop only the list row's menu. Named in full in the dialog
+  // and the toast; a refusal (a filed month) toasts the server's reason and
+  // stays here.
+  const deleteName = invoiceDeleteName(inv);
+  const handleDelete = async () => {
+    setConfirmDelete(false);
+    if (await deleteWithFeedback(() => removeInvoice(dbId), toast, { label: "Invoice", name: deleteName })) {
+      navigate("/billing/invoice/list");
+    }
+  };
+  // ⋯ holds Delete, so only those who may delete (admins) get it.
+  const moreMenu = (className: string) => canDelete && (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" aria-label="More actions" title="More actions" className={className}>
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-destructive focus:text-destructive">
+          <Trash2 className="w-4 h-4 mr-2" /> Delete invoice
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const summaryCards = [
     { label: "Subtotal", value: formatMoney(inv.subtotal), icon: Package, color: "text-foreground" },
     { label: "Total Tax", value: formatMoney(inv.totalTax), icon: Receipt, color: "text-chart-3" },
@@ -286,6 +323,7 @@ export default function InvoiceDetail() {
             <button onClick={() => setShowEway(!showEway)} className="premium-btn-ghost text-[13px]"><Truck className="w-4 h-4" /> E-way Bill</button>
             <Link to={printUrl} className="premium-btn-primary text-[13px] bg-success"><Printer className="w-4 h-4" /> View Bill</Link>
             <Link to="/billing/invoice/add" className="premium-btn-primary text-[13px]"><Plus className="w-4 h-4" /> New</Link>
+            {moreMenu("premium-btn-ghost text-[13px] px-3")}
           </div>
         )}
       </div>
@@ -586,10 +624,19 @@ export default function InvoiceDetail() {
             <Link to={printUrl} className="premium-btn-primary flex-1 text-[12px] h-10 bg-success"><Printer className="w-3.5 h-3.5" /> Print</Link>
             <button onClick={() => setShowEway(true)} className="premium-btn-outline h-10 px-3 text-[12px] border-chart-2/30 text-chart-2" title="E-way Bill"><Truck className="w-3.5 h-3.5" /></button>
             <button onClick={() => shareViaWhatsApp(inv, customer?.mobile_number ?? undefined)} className="premium-btn-outline h-10 px-3 text-[12px] border-success/30 text-success" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>
+            {moreMenu("premium-btn-outline h-10 px-3 text-[12px] border-border text-muted-foreground")}
           </div>
         </div>,
         document.body,
       )}
+
+      <DeleteConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        itemName={deleteName}
+        itemType="Invoice"
+        onConfirm={() => void handleDelete()}
+      />
     </div>
   );
 }
