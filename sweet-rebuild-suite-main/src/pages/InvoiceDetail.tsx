@@ -229,9 +229,13 @@ export default function InvoiceDetail() {
           <div>
             <h2 className="text-[16px] font-display font-semibold text-foreground">Invoice not found</h2>
             <p className="text-[12px] text-muted-foreground mt-1 max-w-md">
-              {/^\d+$/.test(slug || "")
+              {/* Only /billing/invoice/:id carries a database id; on the
+                  firm/FY/number address an all-digit slug is the number (UX8). */}
+              {/^\d+$/.test(slug || "") && !bizSlug && !fy
                 ? <>Internal id <span className="font-mono text-foreground">{slug}</span> doesn't exist. It may have been deleted, or the link is from an older database.</>
-                : <>No invoice matches <span className="font-mono text-foreground">{slug}</span>. Check the number or use the list / search.</>}
+                : <>No invoice numbered <span className="font-mono text-foreground">{slug}</span>
+                    {bizSlug && <> for <span className="font-mono text-foreground">{bizSlug}</span></>}
+                    {fy && <> in FY <span className="font-mono text-foreground">{fy}</span></>}. Check the number or use the list / search.</>}
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-center">

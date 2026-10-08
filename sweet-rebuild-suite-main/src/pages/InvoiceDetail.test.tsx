@@ -5,7 +5,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { phone, perm, remove, toast, invoice } = vi.hoisted(() => ({
+const { phone, perm, remove, toast, invoice, lookup } = vi.hoisted(() => ({
+  lookup: { found: true },
   phone: { on: false },
   perm: { admin: true },
   remove: vi.fn(),
@@ -21,7 +22,7 @@ const { phone, perm, remove, toast, invoice } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useDataStore", () => ({
-  useInvoice: () => ({ item: invoice, isLoading: false, candidates: [], refetch: vi.fn() }),
+  useInvoice: () => ({ item: lookup.found ? invoice : null, isLoading: false, candidates: [], refetch: vi.fn() }),
   useInvoices: () => ({ items: [], remove }),
   useBusiness: () => ({ item: { id: "14", name: "KIRAN GOLD HOUSE (SANDBOX)" } }),
   useCustomer: () => ({ item: { id: "7", name: "Kavita Joshi", mobile_number: "" } }),
@@ -44,7 +45,27 @@ function renderDetail() {
   );
 }
 
-afterEach(() => { phone.on = false; });
+afterEach(() => { phone.on = false; lookup.found = true; });
+
+describe("An invoice that can't be found (UX8)", () => {
+  it("on the firm/FY/number address, says which number, firm and year it looked for", () => {
+    lookup.found = false;
+    render(
+      <MemoryRouter initialEntries={["/billing/invoice/kiran-gold-house-sandbox/2026-27/1"]}>
+        <Routes><Route path="/billing/invoice/:bizSlug/:fy/:slug" element={<InvoiceDetail />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/No invoice numbered/)).toHaveTextContent("No invoice numbered 1 for kiran-gold-house-sandbox in FY 2026-27");
+    // "1" there is the invoice number, not a database id.
+    expect(screen.queryByText(/Internal id/)).toBeNull();
+  });
+
+  it("on the id address, says the id doesn't exist", () => {
+    lookup.found = false;
+    renderDetail();
+    expect(screen.getByText(/Internal id/)).toHaveTextContent("Internal id 1734 doesn't exist");
+  });
+});
 
 describe("InvoiceDetail on a phone (UX4)", () => {
   it("puts its Edit / Print bar outside the page, which animates in with a transform", () => {

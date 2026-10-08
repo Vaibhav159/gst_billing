@@ -690,3 +690,30 @@ class InvoiceListPageWalkTest(BaseAPITestCase):
             seen += [row["id"] for row in resp.data["results"]]
             page = page + 1 if resp.data["next"] else 0
         self.assertEqual(seen, sorted(ids, reverse=True))
+
+
+class InvoiceNumberFilterTest(BaseAPITestCase):
+    """invoices/?invoice_number= finds that number, not numbers containing it (UX8).
+
+    A shared bill link (/billing/invoice/<firm>/<fy>/1) is looked up by
+    number. The filter was a substring match, so "1" also found 10, 21,
+    101…; the page asked for the 30 newest, and #1 of an older month was not
+    among them: the link said "not found". ?search= is the substring search.
+    """
+
+    def test_the_number_filter_matches_the_whole_number(self):
+        one = Invoice.objects.create(invoice_number="1", invoice_date="2026-04-01", business=self.business,
+                                     customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        for n in range(10, 50):  # 40 newer invoices whose numbers contain a 1 or not
+            Invoice.objects.create(invoice_number=f"{n}1", invoice_date="2026-06-01", business=self.business,
+                                   customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        resp = self.client.get(reverse("invoice-list"), {"invoice_number": "1", "page_size": 30})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual([row["id"] for row in resp.data["results"]], [one.id])
+
+    def test_search_still_finds_part_of_a_number(self):
+        Invoice.objects.create(invoice_number="SGJ/2026-27/108", invoice_date="2026-06-01", business=self.business,
+                               customer=self.customer, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        resp = self.client.get(reverse("invoice-list"), {"search": "108"})
+        self.assertEqual([row["invoice_number"] for row in resp.data["results"]], ["SGJ/2026-27/108"])
