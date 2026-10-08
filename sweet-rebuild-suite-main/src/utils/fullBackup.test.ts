@@ -169,6 +169,45 @@ describe("saveFullBackup (M7)", () => {
   });
 });
 
+describe("the backup file (R2)", () => {
+  const readText = (blob: Blob) => new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsText(blob);
+  });
+
+  it("is written without indentation, a third smaller", async () => {
+    let saved: Blob | undefined;
+    Object.assign(window.URL, { createObjectURL: vi.fn((b: Blob) => { saved = b; return "blob:backup"; }), revokeObjectURL: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    post.mockResolvedValue({ data: {} });
+    const { backup, bytes } = await saveFullBackup();
+    const text = await readText(saved!);
+    expect(text).not.toContain("\n");
+    expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(backup)));
+    expect(bytes).toBeLessThan(JSON.stringify(backup, null, 2).length * 0.8);
+  });
+
+  it("restores the same from an indented file, as older backups were written", async () => {
+    const backup = await buildFullBackup();
+    const restoreFrom = async (text: string) => {
+      const posts: { url: string; body: any }[] = [];
+      const api = {
+        get: vi.fn(async () => ({ data: { results: [], next: null } })),
+        post: vi.fn(async (url: string, body: any) => {
+          posts.push({ url, body });
+          return { data: url.includes("bulk-import") ? { created: 5, skipped: 0, errors: [] } : { id: posts.length } };
+        }),
+      };
+      await restoreBackup(JSON.parse(text), api as any);
+      return posts;
+    };
+    const fromIndented = await restoreFrom(JSON.stringify(backup, null, 2));
+    expect(fromIndented.filter((p) => p.url === "invoices/bulk-import/").flatMap((p) => p.body.invoices)).toHaveLength(5);
+    expect(fromIndented).toEqual(await restoreFrom(JSON.stringify(backup)));
+  });
+});
+
 describe("restorePrompt — the confirmation states true counts (UX1)", () => {
   it("says what the file holds and what is on file now", () => {
     const text = restorePrompt(

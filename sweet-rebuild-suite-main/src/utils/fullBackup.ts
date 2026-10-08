@@ -95,7 +95,9 @@ export function backupToast(backup: FullBackup) {
 /** Build the backup and save it as gst-backup-<date>.json. */
 export async function saveFullBackup(): Promise<{ backup: FullBackup; bytes: number }> {
   const backup = await buildFullBackup();
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  // No indentation (R2): the sandbox's backup is 526 KB, 764 KB indented.
+  // Restore reads either.
+  const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
