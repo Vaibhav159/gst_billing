@@ -275,9 +275,10 @@ export default function Backup() {
           <div className="space-y-1">
             <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Date Range (optional)</label>
             <div className="flex items-center gap-1.5">
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="premium-input text-[11px] flex-1" placeholder="From" />
+              {/* min-w-0: side by side, the two date fields ran 36 px past a 360 px phone. */}
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="premium-input text-[11px] flex-1 min-w-0" placeholder="From" />
               <span className="text-[10px] text-muted-foreground">to</span>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="premium-input text-[11px] flex-1" placeholder="To" />
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="premium-input text-[11px] flex-1 min-w-0" placeholder="To" />
             </div>
           </div>
         </div>

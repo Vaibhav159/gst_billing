@@ -1,7 +1,7 @@
 /**
  * The Backup page's export panel (UX1).
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -18,6 +18,15 @@ describe("DataExportPanel (UX1)", () => {
     render(<DataExportPanel {...props} onFullBackup={vi.fn()} />);
     expect(screen.getByRole("button", { name: "All Data · all years (483)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Invoices · FY 2026-27 (149)" })).toBeInTheDocument();
+  });
+
+  it("gives a long scope its own line, in a button that grows (M4)", () => {
+    const long = { query: "", label: "KIRAN GOLD HOUSE (SANDBOX) · 01 Apr 2026 – 30 Jun 2026 · purchases", count: 1234 };
+    render(<DataExportPanel {...props} invoiceScope={long} onFullBackup={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Invoices ·/ }));
+    const button = screen.getByRole("button", { name: /^Export Invoices/ });
+    expect(button).toHaveClass("!h-auto");
+    expect(within(button).getByText(`${long.label} · 1,234`)).toBeInTheDocument();
   });
 
   it("says Exported only when the full backup was saved", async () => {

@@ -153,11 +153,13 @@ export default function DataExportPanel({ defaultEntity = "all", onFile, invoice
     }
   };
 
-  const buttonLabel = entity === "all"
-    ? (format === "json" ? "Download Full Backup" : "Export All Data · all years")
+  // What the button does, and what it covers on a line of its own (M4): a
+  // firm, a date range and a type ran past the fixed-height button on a phone.
+  const [buttonLabel, buttonScope] = entity === "all"
+    ? (format === "json" ? ["Download Full Backup", ""] : ["Export All Data", "all years"])
     : entity === "invoices"
-      ? `Export Invoices · ${invoiceScope.label} · ${n(invoiceScope.count)}`
-      : `Export ${entity}`;
+      ? ["Export Invoices", `${invoiceScope.label} · ${n(invoiceScope.count)}`]
+      : [`Export ${entity}`, ""];
 
   return (
     <div className="space-y-4">
@@ -213,14 +215,21 @@ export default function DataExportPanel({ defaultEntity = "all", onFile, invoice
       <button
         onClick={handleExport}
         disabled={busy || pageBusy}
-        className={cn("premium-btn-primary w-full disabled:opacity-40", exported && "bg-success")}
+        // !h-auto: premium-btn-primary's h-10 sits later in the utilities layer.
+        className={cn("premium-btn-primary w-full !h-auto min-h-10 py-2 disabled:opacity-40", exported && "bg-success")}
       >
         {busy ? (
           <><Clock className="w-4 h-4 animate-spin" /> Exporting…</>
         ) : exported ? (
           <><CheckCircle2 className="w-4 h-4" /> Exported!</>
         ) : (
-          <><Download className="w-4 h-4" /> {buttonLabel}</>
+          <>
+            <Download className="w-4 h-4 shrink-0" />
+            <span className="flex flex-col items-center min-w-0 leading-tight">
+              <span>{buttonLabel}</span>{" "}
+              {buttonScope && <span className="text-[11px] font-medium opacity-80 text-center break-words">{buttonScope}</span>}
+            </span>
+          </>
         )}
       </button>
     </div>
