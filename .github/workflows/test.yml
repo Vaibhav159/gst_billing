@@ -62,7 +62,7 @@ jobs:
       DJANGO_SECRET_KEY: ci-test-key-not-secret
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install uv
@@ -117,10 +117,10 @@ jobs:
       DJANGO_ALLOWED_HOSTS: "*"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Install backend deps
@@ -181,7 +181,7 @@ jobs:
           curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:8080/
           curl -s -o /dev/null -w "API via proxy: %{http_code}\n" http://localhost:8080/api/profile/
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('e2e-tests/package-lock.json') }}
@@ -225,10 +225,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: pip-audit the locked Python tree
@@ -250,9 +250,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -281,7 +281,7 @@ jobs:
           docker exec --user app web python manage.py collectstatic --noinput >/dev/null || { echo "collectstatic cannot write the static volume"; exit 1; }
           docker exec web curl -fsS 'http://127.0.0.1:8000/healthz?db=1' || { docker logs web; exit 1; }
       - name: Build nginx image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./nginx/Dockerfile
