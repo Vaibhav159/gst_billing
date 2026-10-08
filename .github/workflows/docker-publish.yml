@@ -82,6 +82,10 @@ jobs:
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
+    # A build that stalls (v2.0.9's nginx image did, under emulation) fails
+    # after half an hour instead of holding the release for GitHub's 6 hours.
+    # Each image normally takes under 10 minutes.
+    timeout-minutes: 30
     strategy:
       matrix:
         include:
