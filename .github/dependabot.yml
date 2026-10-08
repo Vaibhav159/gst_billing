@@ -2,10 +2,15 @@
 # June-2023 patch of a line that later went EOL — on the public internet for
 # three years.
 #
-# Once a month, everything arrives in one PR: Python, the frontend, the E2E
-# tests and the CI actions together, major versions included. That is one PR
-# to check and merge on the 1st instead of a stream of them. CI, including the
+# Once a month, the minor and patch updates arrive in one PR: Python, the
+# frontend, the E2E tests and the CI actions together. That is one PR to check
+# and merge on the 1st instead of a stream of them. CI, including the
 # "Dependency advisories" job, decides whether it can go in.
+#
+# Major versions are left out. The first monthly PR (#168) carried Django 6.1
+# and pandas 3, failed every check, and so held back everything else in it.
+# A major version is an upgrade to plan on its own; Django 5.2 is an LTS
+# release with security fixes until April 2028.
 version: 2
 
 multi-ecosystem-groups:
@@ -18,18 +23,30 @@ updates:
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "monthly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/sweet-rebuild-suite-main"
     patterns: ["*"]
     multi-ecosystem-group: "monthly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/e2e-tests"
     patterns: ["*"]
     multi-ecosystem-group: "monthly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "monthly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
