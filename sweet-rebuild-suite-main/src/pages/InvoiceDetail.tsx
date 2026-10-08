@@ -43,9 +43,6 @@ export default function InvoiceDetail() {
   const { item: biz } = useBusiness(inv?.businessId);
   const { item: customer } = useCustomer(inv?.customerId);
 
-  // Print / edit / share routes must hit the database id (the print path
-  // doesn't go through useInvoice's slug-lookup branch). When the URL slug
-  // is the invoice_number, fall back to the loaded record's id.
   // Render the heads that are actually STORED, not the ones is_igst_applicable
   // predicts. When a row was written under the wrong head (see the interstate
   // bug fixed in billing/tax_rules.py) the two disagree, and keying the display
