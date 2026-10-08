@@ -14,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useBusinesses } from "@/hooks/useDataStore";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/utils/mockData";
 import { GST_SLABS, aiRateChoice, percentToRate } from "@/utils/gstRate";
@@ -43,6 +44,7 @@ const emptyLine: FormLine = {
 export default function InwardBillAdd() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const isMobile = useIsMobile();
   const { items: businesses } = useBusinesses();
 
   const [searchParams] = useSearchParams();
@@ -243,7 +245,8 @@ export default function InwardBillAdd() {
   }
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    // The page margin every other page has (UX6).
+    <div className={cn("space-y-5 max-w-4xl", isMobile ? "p-4 pb-24" : "p-6 lg:p-8")}>
       <Breadcrumbs items={[{ label: "Inward Bills", href: "/billing/inward-bills" }, { label: "Add" }]} />
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" onClick={() => navigate("/billing/inward-bills")}>

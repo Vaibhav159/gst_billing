@@ -7,11 +7,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useInwardBill } from "@/hooks/useInwardBills";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { formatCurrency, formatDate } from "@/utils/mockData";
+import { cn } from "@/utils/utils";
 
 export default function InwardBillDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { bill, loading, error } = useInwardBill(id);
 
   if (loading) {
@@ -31,7 +34,9 @@ export default function InwardBillDetail() {
   const isPdf = !!fileUrl && /\.pdf(\?|$)/i.test(fileUrl);
 
   return (
-    <div className="space-y-5">
+    // The page margin every other page has (UX6): without it, and with the
+    // implicit grid column below, a phone cut the totals at the screen edge.
+    <div className={cn("space-y-5", isMobile ? "p-4 pb-24" : "p-6 lg:p-8")}>
       <Breadcrumbs items={[{ label: "Inward Bills", href: "/billing/inward-bills" }, { label: `#${bill.invoice_number}` }]} />
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -48,7 +53,9 @@ export default function InwardBillDetail() {
         )}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-5">
+      {/* grid-cols-1: an implicit column grew to the line table's width, so
+          the table's own scroll never engaged and the page scrolled instead. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Recorded data */}
         <div className="space-y-4">
           <div className="rounded-lg border bg-card p-4 grid grid-cols-2 gap-y-2 text-sm">
@@ -59,6 +66,23 @@ export default function InwardBillDetail() {
             <Meta label="Tax type" value={bill.is_igst_applicable ? "Inter-state (IGST)" : "Intra-state (CGST+SGST)"} />
           </div>
 
+          {/* Phones get one row per line, as the register gets cards: the
+              five-column table hid each line's Amount past the card's edge. */}
+          {isMobile ? (
+            <div className="rounded-lg border bg-card divide-y text-sm">
+              {bill.line_items.map((l) => (
+                <div key={l.id} className="p-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{l.product_name}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      HSN {l.hsn_code || "—"} · {parseFloat(l.quantity)} {l.unit} × {formatCurrency(parseFloat(l.rate))}
+                    </p>
+                  </div>
+                  <p className="font-medium tabular-nums shrink-0">{formatCurrency(parseFloat(l.amount))}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
           <div className="rounded-lg border bg-card overflow-x-auto">
             <Table>
               <TableHeader>
@@ -83,6 +107,7 @@ export default function InwardBillDetail() {
               </TableBody>
             </Table>
           </div>
+          )}
 
           <div className="rounded-lg border bg-card p-4 space-y-1 text-sm">
             <SumRow label="Taxable" value={bill.taxable} />
