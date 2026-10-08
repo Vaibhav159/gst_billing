@@ -40,6 +40,37 @@ async function expectToFit(page, label, locators = []) {
   }
 }
 
+/**
+ * The More drawer (UX3). After an item changed the route, the old drawer
+ * stayed over most of the screen, its X and backdrop did nothing, and a tap
+ * on the bottom nav landed on a drawer item. jsdom can't show that (it
+ * needed the page's re-render mid-animation), so a phone-sized Chromium
+ * checks it, in both phone modes.
+ */
+test.describe("The phone's More drawer (UX3)", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  for (const mode of ['expert', 'easy']) {
+    test(`${mode} mode: an item that navigates closes it, and the bottom nav answers`, async ({ page }) => {
+      await page.addInitScript((m) => localStorage.setItem('mobile-mode', m), mode);
+      await page.goto('/');
+      const bottomNav = page.getByRole('navigation').filter({ hasText: 'Customers' }).last();
+      await bottomNav.getByRole('button', { name: 'More', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeVisible();
+
+      await page.getByRole('link', { name: /Backup/ }).click();
+      await expect(page).toHaveURL(/\/billing\/backup$/);
+      // Gone, not just moved aside.
+      await expect(page.getByRole('heading', { name: 'More', exact: true })).toBeHidden();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+
+      // The next tap reaches the bottom nav, not a drawer item under the finger.
+      await bottomNav.getByRole('link', { name: 'Invoices', exact: true }).click();
+      await expect(page).toHaveURL(/\/billing\/invoice\/list$/);
+    });
+  }
+});
+
 for (const viewport of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
   test.describe(`Inward pages on a ${viewport.width} px phone (UX6)`, () => {
     test.use({ viewport, isMobile: true, hasTouch: true });
