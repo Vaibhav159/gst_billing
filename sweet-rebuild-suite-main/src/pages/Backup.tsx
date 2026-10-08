@@ -102,8 +102,9 @@ export default function Backup() {
   ].filter(Boolean).join(" · ");
   const scopeQuery = (() => { const p = buildParams(); p.delete("include_items"); return p.toString(); })();
 
-  // Full JSON backup: everything on file, whatever the filters say (UX1)
-  const handleExportJSON = async () => {
+  // Full JSON backup: everything on file, whatever the filters say (UX1).
+  // True once the file is saved, for the export panel's "Exported!".
+  const handleExportJSON = async (): Promise<boolean> => {
     setExporting(true);
     try {
       const { backup, bytes } = await saveFullBackup();
@@ -112,11 +113,14 @@ export default function Backup() {
       setLastBackup(backupInfo);
 
       toast({ title: "Backup Downloaded", description: `Everything on file, all years: ${describeCounts(backup.counts)}.` });
+      return true;
     } catch (err) {
       logger.error("Export failed", err);
       toast({ title: "Export Failed", description: formatApiError(err, "Could not export data."), variant: "destructive" });
+      return false;
+    } finally {
+      setExporting(false);
     }
-    setExporting(false);
   };
 
   // Excel export

@@ -23,8 +23,8 @@ interface DataExportPanelProps {
   /** Everything on file, all years (null while it loads). */
   onFile: BackupCounts | null;
   invoiceScope: InvoiceScope;
-  /** All Data as JSON is the full backup, which the page builds and saves. */
-  onFullBackup: () => Promise<void>;
+  /** All Data as JSON is the full backup, which the page builds and saves; true once saved. */
+  onFullBackup: () => Promise<boolean>;
 }
 
 const n = (count: number) => count.toLocaleString("en-IN");
@@ -83,12 +83,16 @@ export default function DataExportPanel({ defaultEntity = "all", onFile, invoice
   };
 
   const handleExport = async () => {
+    setBusy(true);
     if (entity === "all" && format === "json") {
-      await onFullBackup();
-      flashDone();
+      // The page toasts either way; "Exported!" only when the file was saved.
+      try {
+        if (await onFullBackup()) flashDone();
+      } finally {
+        setBusy(false);
+      }
       return;
     }
-    setBusy(true);
     try {
       const want = (e: ExportEntity) => entity === "all" || entity === e;
       const none = Promise.resolve([] as any[]);
