@@ -8,6 +8,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InvoiceForm from "./InvoiceForm";
+import QuickCustomerModal from "@/components/QuickCustomerModal";
 
 const { update, stored, phone } = vi.hoisted(() => ({
   phone: { on: false },
@@ -66,6 +67,63 @@ describe("InvoiceForm, editing a stored invoice", () => {
     renderEdit();
     await waitFor(() => expect(screen.getByDisplayValue("H17-1")).toBeInTheDocument());
     expect(screen.queryByText(/outside FY/i)).toBeNull();
+  });
+});
+
+describe("typing a line's quantity and rate (UX7)", () => {
+  // The inputs held numbers and began at "1" and "0": typing "10.5" into a
+  // fresh quantity came out "10.51", a rate "06543.21", and clearing a field
+  // put the 0 back.
+  function renderCreate() {
+    return render(
+      <MemoryRouter initialEntries={["/billing/invoice/add"]}>
+        <Routes><Route path="/billing/invoice/add" element={<InvoiceForm mode="create" />} /></Routes>
+      </MemoryRouter>,
+    );
+  }
+  const lineInputs = (container: HTMLElement) => [...container.querySelectorAll<HTMLInputElement>("tbody tr input")];
+  // One change per keystroke, each adding to what the field holds, as typing does.
+  const typeInto = (input: HTMLInputElement, text: string) => {
+    for (const ch of text) fireEvent.change(input, { target: { value: input.value + ch } });
+  };
+
+  it("a fresh quantity is empty and takes 10.5 as typed", () => {
+    const { container } = renderCreate();
+    const [qty] = lineInputs(container);
+    expect(qty.value).toBe("");
+    typeInto(qty, "10.5");
+    expect(qty.value).toBe("10.5");
+  });
+
+  it("a rate takes 6543.21 as typed, and stays empty once cleared", () => {
+    const { container } = renderCreate();
+    const [, rate] = lineInputs(container);
+    typeInto(rate, "6543.21");
+    expect(rate.value).toBe("6543.21");
+    fireEvent.change(rate, { target: { value: "" } });
+    expect(rate.value).toBe("");
+  });
+
+  it("works the line's amount out from the typed figures", () => {
+    const { container } = renderCreate();
+    const [qty, rate] = lineInputs(container);
+    typeInto(qty, "10.5");
+    typeInto(rate, "1000");
+    expect(container.querySelector("tbody tr")).toHaveTextContent("₹10,500");
+  });
+
+  it("asks for a number pad, not the text keyboard", () => {
+    const { container } = renderCreate();
+    for (const input of lineInputs(container)) expect(input).toHaveAttribute("inputmode", "decimal");
+  });
+});
+
+describe("Quick Add Customer's mobile number (UX7)", () => {
+  it("opens the phone's number pad", () => {
+    render(<QuickCustomerModal open onClose={() => {}} onCreated={() => {}} />);
+    const mobile = screen.getByPlaceholderText("10-digit (optional)");
+    expect(mobile).toHaveAttribute("type", "tel");
+    expect(mobile).toHaveAttribute("inputmode", "numeric");
   });
 });
 

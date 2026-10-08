@@ -131,7 +131,7 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
                     placeholder="Customer name" className={cn("premium-input", errors.name && "border-destructive/50")} />
                 </Field>
                 <Field label="Mobile" icon={Phone} error={errors.mobile}>
-                  <input type="text" value={form.mobile} onChange={(e) => handleChange("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  <input type="tel" inputMode="numeric" autoComplete="tel-national" value={form.mobile} onChange={(e) => handleChange("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
                     placeholder="10-digit (optional)" maxLength={10} className={cn("premium-input tabular-nums", errors.mobile && "border-destructive/50")} />
                 </Field>
                 <Field label="GST Number" icon={Hash} error={errors.gst}>
