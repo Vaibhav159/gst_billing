@@ -1,5 +1,5 @@
 import { logger } from "@/utils/logger";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Upload, Download, HardDrive, CheckCircle2, FileJson, Shield, Clock, Package, FileSpreadsheet, Building2, Users, Receipt, Filter, Calendar, ArrowUpRight, Database } from "lucide-react";
 import { financialYears, currentFY, formatDate } from "@/utils/mockData";
 import Breadcrumbs from "@/components/Breadcrumbs";
@@ -106,8 +106,13 @@ export default function Backup() {
   const scopeQuery = (() => { const p = buildParams(); p.delete("include_items"); return p.toString(); })();
 
   // Full JSON backup: everything on file, whatever the filters say (UX1).
-  // True once the file is saved, for the export panel's "Exported!".
+  // True once the file is saved, for the export panel's "Exported!". One at a
+  // time from either button (M3): the ref holds it across a re-render, and
+  // `exporting` disables both buttons meanwhile.
+  const backupRunning = useRef(false);
   const handleExportJSON = async (): Promise<boolean> => {
+    if (backupRunning.current) return false;
+    backupRunning.current = true;
     setExporting(true);
     try {
       const { backup, bytes } = await saveFullBackup();
@@ -122,6 +127,7 @@ export default function Backup() {
       toast({ title: "Export Failed", description: formatApiError(err, "Could not export data."), variant: "destructive" });
       return false;
     } finally {
+      backupRunning.current = false;
       setExporting(false);
     }
   };
@@ -297,6 +303,7 @@ export default function Backup() {
             onFile={onFile}
             invoiceScope={{ query: scopeQuery, label: scopeLabel, count: scopeInvoices }}
             onFullBackup={handleExportJSON}
+            pageBusy={exporting}
           />
 
           <div className="border-t border-border/30 pt-4 space-y-3">

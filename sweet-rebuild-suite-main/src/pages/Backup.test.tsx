@@ -1,11 +1,16 @@
 /**
  * The Backup page's counts (M6).
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { get } = vi.hoisted(() => ({ get: vi.fn() }));
+const { get, saveFull } = vi.hoisted(() => ({ get: vi.fn(), saveFull: vi.fn() }));
+
+vi.mock("@/utils/fullBackup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/fullBackup")>()),
+  saveFullBackup: saveFull,
+}));
 
 // No useProducts: the page has no business downloading every product to count them.
 vi.mock("@/hooks/useDataStore", () => ({
@@ -66,5 +71,29 @@ describe("Backup page counts (M6)", () => {
     release();
     await waitFor(() => expect(within(tile("Total")).getByText("483")).toBeInTheDocument());
     expect(screen.getByText(/For the Excel report/)).toHaveTextContent("149 invoices");
+  });
+});
+
+describe("One full backup at a time (M3)", () => {
+  it("whichever button starts it, the other waits", async () => {
+    get.mockImplementation(async (url: string) => answer(url));
+    let finish: () => void = () => {};
+    saveFull.mockReset();
+    saveFull.mockImplementation(() => new Promise((resolve) => {
+      finish = () => resolve({ backup: { totalRecords: 483, counts: { businesses: 3, customers: 35, products: 10, invoices: 435, inwardBills: 110 } }, bytes: 2048 });
+    }));
+    renderPage();
+    await waitFor(() => expect(within(tile("Total")).getByText("483")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /JSON Backup/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^JSON Full backup format/ }));
+    const panelBackup = screen.getByRole("button", { name: /Download Full Backup/ });
+    expect(panelBackup).toBeDisabled();
+    fireEvent.click(panelBackup);
+    fireEvent.click(screen.getByRole("button", { name: /JSON Backup/ }));
+    expect(saveFull).toHaveBeenCalledTimes(1);
+
+    finish();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Download Full Backup/ })).toBeEnabled());
   });
 });

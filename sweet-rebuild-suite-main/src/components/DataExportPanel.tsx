@@ -26,6 +26,8 @@ interface DataExportPanelProps {
   invoiceScope: InvoiceScope;
   /** All Data as JSON is the full backup, which the page builds and saves; true once saved. */
   onFullBackup: () => Promise<boolean>;
+  /** The page is exporting (a full backup or the Excel report): wait for it (M3). */
+  pageBusy?: boolean;
 }
 
 const n = (count: number | null) => (count == null ? "…" : count.toLocaleString("en-IN"));
@@ -35,7 +37,7 @@ const n = (count: number | null) => (count == null ? "…" : count.toLocaleStrin
  * what the page had loaded: the invoice list's first 50 rows, whatever the
  * labels said.
  */
-export default function DataExportPanel({ defaultEntity = "all", onFile, invoiceScope, onFullBackup }: DataExportPanelProps) {
+export default function DataExportPanel({ defaultEntity = "all", onFile, invoiceScope, onFullBackup, pageBusy = false }: DataExportPanelProps) {
   const { toast } = useToast();
 
   const [format, setFormat] = useState<ExportFormat>("csv");
@@ -84,6 +86,7 @@ export default function DataExportPanel({ defaultEntity = "all", onFile, invoice
   };
 
   const handleExport = async () => {
+    if (busy || pageBusy) return;
     setBusy(true);
     if (entity === "all" && format === "json") {
       // The page toasts either way; "Exported!" only when the file was saved.
@@ -209,7 +212,7 @@ export default function DataExportPanel({ defaultEntity = "all", onFile, invoice
       {/* Export Button */}
       <button
         onClick={handleExport}
-        disabled={busy}
+        disabled={busy || pageBusy}
         className={cn("premium-btn-primary w-full disabled:opacity-40", exported && "bg-success")}
       >
         {busy ? (
