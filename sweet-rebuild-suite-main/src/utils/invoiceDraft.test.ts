@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, figureProblem, lineMoney, lineToSave, storedLineKey, withProduct } from "./invoiceDraft";
 
 // H17: line items have no product link, and the form used each line's own id
 // as its "product id". Where that id matched a catalog product, saving the
@@ -96,6 +96,20 @@ describe("a line holds what was typed (UX7)", () => {
 
   it("loads a stored line's figures as text", () => {
     expect(draftFromStored(stored, "k8")).toMatchObject({ qty: "2", rate: "20000" });
+  });
+
+  it("reads commas that group digits, Indian or international (M2)", () => {
+    expect(lineMoney({ qty: "1", rate: "1,23,456", gstRate: 0 }).amount).toBe(123456);
+    expect(lineMoney({ qty: "1", rate: "123,456.50", gstRate: 0 }).amount).toBe(123456.5);
+    expect(lineMoney({ qty: "1,000", rate: "1", gstRate: 0 }).amount).toBe(1000);
+    expect([figureProblem("1,23,456"), figureProblem("1,234,567.5"), figureProblem("10.5")]).toEqual([null, null, null]);
+  });
+
+  it("refuses a decimal comma instead of making 10,5 into 105 (M2)", () => {
+    // Phones set to a comma-decimal keypad type "10,5" for ten and a half.
+    expect(figureProblem("10,5")).toMatch(/point/);
+    expect(lineMoney({ qty: "1", rate: "10,5", gstRate: 0 }).amount).toBe(0);
+    for (const text of ["1,2345", "12,3,456", "1.5,0"]) expect(figureProblem(text)).not.toBeNull();
   });
 
   it("restores a draft saved while lines held numbers", () => {

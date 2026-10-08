@@ -63,6 +63,18 @@ describe("InvoiceForm, editing a stored invoice", () => {
     ]);
   });
 
+  it("won't review or save a figure it can't read, such as a rate of 10,5 (M2)", async () => {
+    renderEdit();
+    await waitFor(() => expect(screen.getByDisplayValue("H17-1")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("textbox", { name: "Rate, line 1" }), { target: { value: "10,5" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /Update Invoice/ })[0]);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("button", { name: /Confirm & Save/ })).toBeNull();
+    expect(update).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      items: [expect.objectContaining({ rate: 105 })],
+    }));
+  });
+
   it("doesn't call 31 March outside its FY (M20)", async () => {
     renderEdit();
     await waitFor(() => expect(screen.getByDisplayValue("H17-1")).toBeInTheDocument());
@@ -110,6 +122,25 @@ describe("typing a line's quantity and rate (UX7)", () => {
     typeInto(qty, "10.5");
     typeInto(rate, "1000");
     expect(container.querySelector("tbody tr")).toHaveTextContent("₹10,500");
+  });
+
+  it("keeps 10,5 as typed and says to use a point, instead of reading 105 (M2)", () => {
+    const { container } = renderCreate();
+    const [, rate] = lineInputs(container);
+    typeInto(rate, "10,5");
+    expect(rate.value).toBe("10,5");
+    expect(rate).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/use a point for decimals/i)).toBeInTheDocument();
+  });
+
+  it("takes 1,23,456 with its grouping commas (M2)", () => {
+    const { container } = renderCreate();
+    const [qty, rate] = lineInputs(container);
+    typeInto(qty, "1");
+    typeInto(rate, "1,23,456");
+    expect(rate.value).toBe("1,23,456");
+    expect(rate).not.toHaveAttribute("aria-invalid", "true");
+    expect(container.querySelector("tbody tr")).toHaveTextContent("₹1,23,456");
   });
 
   it("asks for a number pad, not the text keyboard", () => {

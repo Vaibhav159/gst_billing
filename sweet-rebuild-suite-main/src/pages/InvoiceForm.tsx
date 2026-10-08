@@ -25,7 +25,7 @@ import { formatApiError, errorTag } from "@/utils/apiError";
 import { pushNotification } from "@/hooks/useNotifications";
 import { todayLocal, invoiceDateWarning } from "@/utils/localDate";
 import { round2, halveTax } from "@/utils/money";
-import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineQty, lineRate, lineToSave, storedLineKey, typedNumber, withProduct, type DraftLine } from "@/utils/invoiceDraft";
+import { draftFromDuplicate, draftFromSaved, draftFromStored, figureProblem, lineMoney, lineQty, lineRate, lineToSave, storedLineKey, typedNumber, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
@@ -317,12 +317,17 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const addItem = () => { setItems((p) => [...p, blankItem()]); setDirty(true); };
   const removeItem = (i: number) => { if (items.length === 1) return; setItems((p) => p.filter((_, idx) => idx !== i)); setDirty(true); };
   const updateItem = (i: number, field: string, val: any) => { setItems((p) => p.map((it, idx) => idx === i ? { ...it, [field]: val } : it)); setDirty(true); };
-  // A quantity or rate as typed: digits and one decimal point. Commas (6,543)
-  // drop out; any other key is ignored rather than turning the field to 0.
+  // A quantity or rate as typed: digits, one decimal point, and commas where
+  // they could still be grouping digits (M2). Stripping every comma read a
+  // comma-decimal keypad's "10,5" as 105; it stays as typed and is flagged
+  // (figureProblem). Any other key is ignored rather than turning the field to 0.
   const typeFigure = (i: number, field: "qty" | "rate", text: string) => {
-    const figure = text.replace(/,/g, "");
-    if (/^\d*\.?\d*$/.test(figure)) updateItem(i, field, figure);
+    if (/^(?:\d+(?:,\d{1,3})*,?)?(?:\.\d*)?$/.test(text)) updateItem(i, field, text);
   };
+  const figureProblems = items.flatMap((it, i) => (["qty", "rate"] as const).flatMap((field) => {
+    const problem = figureProblem(it[field]);
+    return problem ? [`Line ${i + 1} ${field === "qty" ? "quantity" : "rate"} "${it[field]}": ${problem}`] : [];
+  }));
 
   const handleProductChange = (i: number, productId: string) => {
     const product = localProducts.find((p) => p.id === productId);
@@ -411,6 +416,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     if (isSaving) return;
     if (!form.businessId || !form.customerId) { toast({ title: "Missing fields", description: "Select business and customer.", variant: "destructive" }); return; }
     if (items.some((it) => !it.productId)) { toast({ title: "Incomplete items", description: "Select a product for all line items.", variant: "destructive" }); return; }
+    if (figureProblems.length) { toast({ title: "Check the figures", description: figureProblems[0], variant: "destructive" }); return; }
     setShowReview(true);
   };
 
@@ -684,9 +690,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                           placeholder="Search Product"
                         />
                         <div className="grid grid-cols-3 gap-2">
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="text" inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} placeholder="1" value={item.qty} onChange={(e) => typeFigure(i, "qty", e.target.value)} className="premium-input h-11 w-full text-center tabular-nums" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="text" inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} aria-invalid={!!figureProblem(item.qty)} placeholder="1" value={item.qty} onChange={(e) => typeFigure(i, "qty", e.target.value)} className={cn("premium-input h-11 w-full text-center tabular-nums", figureProblem(item.qty) && "border-destructive/60")} /></div>
                           <div><label className="text-[10px] text-muted-foreground uppercase">Unit</label><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-11 w-full text-[11px]">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
-                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="text" inputMode="decimal" aria-label={`Rate, line ${i + 1}`} placeholder="0.00" value={item.rate} onChange={(e) => typeFigure(i, "rate", e.target.value)} className="premium-input h-11 w-full tabular-nums" /></div>
+                          <div><label className="text-[10px] text-muted-foreground uppercase">Rate (₹)</label><input type="text" inputMode="decimal" aria-label={`Rate, line ${i + 1}`} aria-invalid={!!figureProblem(item.rate)} placeholder="0.00" value={item.rate} onChange={(e) => typeFigure(i, "rate", e.target.value)} className={cn("premium-input h-11 w-full tabular-nums", figureProblem(item.rate) && "border-destructive/60")} /></div>
                         </div>
                         {/* The calculator, absorbed: the exact math, live, before saving. */}
                         {lineQty(item) > 0 && lineRate(item) > 0 && (
@@ -726,9 +732,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                             <td className="text-muted-foreground font-mono text-[12px]">{i + 1}</td>
                             <td><SearchableSelect value={item.productId} onChange={(val) => handleProductChange(i, val)} options={localProducts.map((p) => ({ value: String(p.id), label: p.name, sublabel: p.hsn }))} placeholder="Search Product" /></td>
                             <td><span className="premium-badge bg-success/12 text-success">{gstRate}%</span></td>
-                            <td><input type="text" inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} placeholder="1" value={item.qty} onChange={(e) => typeFigure(i, "qty", e.target.value)} className="premium-input h-9 w-full text-center tabular-nums" /></td>
+                            <td><input type="text" inputMode="decimal" aria-label={`Quantity, line ${i + 1}`} aria-invalid={!!figureProblem(item.qty)} placeholder="1" value={item.qty} onChange={(e) => typeFigure(i, "qty", e.target.value)} className={cn("premium-input h-9 w-full text-center tabular-nums", figureProblem(item.qty) && "border-destructive/60")} /></td>
                             <td><select value={item.unit} onChange={(e) => updateItem(i, "unit", e.target.value)} className="premium-select h-9 w-full text-[12px] !px-2">{itemUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></td>
-                            <td><input type="text" inputMode="decimal" aria-label={`Rate, line ${i + 1}`} placeholder="0.00" value={item.rate} onChange={(e) => typeFigure(i, "rate", e.target.value)} className="premium-input h-9 w-full tabular-nums" /></td>
+                            <td><input type="text" inputMode="decimal" aria-label={`Rate, line ${i + 1}`} aria-invalid={!!figureProblem(item.rate)} placeholder="0.00" value={item.rate} onChange={(e) => typeFigure(i, "rate", e.target.value)} className={cn("premium-input h-9 w-full tabular-nums", figureProblem(item.rate) && "border-destructive/60")} /></td>
                             <td className="font-bold text-foreground whitespace-nowrap">{formatCurrency(amount)}</td>
                             <td className="text-muted-foreground whitespace-nowrap text-[12px]">{formatCurrency(tax)}</td>
                             <td><button type="button" onClick={() => removeItem(i)} disabled={items.length === 1} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></td>
@@ -740,6 +746,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 </div>
               )}
               <div className="px-5 py-2 border-t border-border/30">
+                {figureProblems.map((problem) => (
+                  <p key={problem} role="alert" className="text-[11px] text-destructive flex items-center gap-1 mb-1.5"><AlertTriangle className="w-3 h-3 shrink-0" /> {problem}</p>
+                ))}
                 <button type="button" onClick={addItem} className="text-[12px] text-primary hover:underline font-medium flex items-center gap-1"><Plus className="w-3 h-3" /> Add item</button>
               </div>
             </div>

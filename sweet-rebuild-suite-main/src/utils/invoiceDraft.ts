@@ -33,9 +33,24 @@ export type DraftLine = {
 /** A stored line's dropdown key. Never equal to a catalog product's id. */
 export const storedLineKey = (lineId: string | number) => `line:${lineId}`;
 
-/** Typed text (or a number from an older draft) as an amount; anything not above zero is 0. */
+// Commas that group digits: international (123,456) or Indian (1,23,456).
+const GROUPED = /^(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})+,\d{3})(?:\.\d*)?$/;
+
+/**
+ * Why typed text can't be read as a figure, or null (M2). A comma is only
+ * ever digit grouping: "10,5" from a comma-decimal keypad is refused, not
+ * read as 105.
+ */
+export function figureProblem(text: string | number | null | undefined): string | null {
+  const s = String(text ?? "").trim();
+  if (!s.includes(",") || GROUPED.test(s)) return null;
+  return "Use a point for decimals (10.5); a comma only groups digits (1,23,456).";
+}
+
+/** Typed text (or a number from an older draft) as an amount; anything not above zero, or unreadable, is 0. */
 export function typedNumber(text: string | number | null | undefined): number {
-  const n = typeof text === "number" ? text : parseFloat(String(text ?? ""));
+  if (typeof text !== "number" && figureProblem(text)) return 0;
+  const n = typeof text === "number" ? text : parseFloat(String(text ?? "").replace(/,/g, ""));
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
