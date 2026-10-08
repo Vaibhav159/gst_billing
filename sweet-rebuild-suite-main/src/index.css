@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+/* No web-font import. nginx's CSP allows stylesheets and fonts from 'self'
+   only, so the Google Fonts import that sat here was refused on every page;
+   the font stacks in tailwind.config.ts fall back to the system fonts, which
+   is how production has rendered since the CSP arrived (v2.0.2). Shipping
+   DM Sans and Space Grotesk would mean self-hosting them, and the wider
+   DM Sans pushes more of the top menu under the search box. */
 
 @tailwind base;
 @tailwind components;
