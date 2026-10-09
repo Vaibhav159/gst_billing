@@ -262,6 +262,11 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm audit --omit=dev --audit-level=high
+      - name: npm audit the v3 web deps
+        working-directory: web
+        run: |
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high
 
   docker-build:
     # Nothing built the images before a tag, so a broken Dockerfile (or a

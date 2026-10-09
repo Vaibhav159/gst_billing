@@ -104,7 +104,7 @@ Before writing any code, stop at the first rung that holds:
    - *Tax logic*: Import `billing/tax_rules.py` or `@/utils/taxRules.ts` (`is_interstate`, `normalize_tax_heads`). Never hand-roll tax placement or GSTIN prefix guessing.
    - *UI*: Check `@/components/ui/` (49 shadcn primitives) and `@/utils/utils` (`cn`) before writing raw components.
    - *API calls*: Use the configured `@/utils/api` axios instance (handles JWT auth & refresh token rotation). Don't invoke raw `axios`.
-   - *Data fetching*: Follow the existing hook pattern (`src/hooks/useDataStore.ts`). Don't introduce TanStack Query or new state managers.
+   - *Data fetching*: In `sweet-rebuild-suite-main/` (v2), follow the existing hook pattern (`src/hooks/useDataStore.ts`) and don't introduce TanStack Query or new state managers there. `web/` (v3, being built on branch `v3`) uses TanStack Query as its only data layer, through `web/src/core/api/`.
    - *Audit/Undo*: Use `AuditLogMixin` with `audit_entity`.
 3. **Standard library / Native** — Python `decimal.Decimal`, modern JS/TS built-ins.
 4. **Installed dependencies** — Django/DRF built-ins, `django-cacheops`, SimpleJWT, `sonner`, `lucide-react`.
