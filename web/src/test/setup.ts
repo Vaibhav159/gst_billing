@@ -16,6 +16,19 @@ g.IntersectionObserver ??= NoopObserver;
 const { jsdom } = globalThis as unknown as { jsdom: { window: Window } };
 for (const k of ["localStorage", "sessionStorage"] as const) Object.defineProperty(globalThis, k, { configurable: true, value: jsdom.window[k] });
 
+// React Router's data routers make a Request for each navigation, with an AbortSignal. Under jsdom the signal is jsdom's,
+// and Node 24+'s Request (undici 7) takes only Node's own, so every navigation in a test would throw; Node 20 takes any.
+// Where it throws, Node's Request gets no signal and the request keeps jsdom's: the router only reads request.signal.
+try { new Request("http://localhost/", { signal: new AbortController().signal }); } catch {
+  const NodeRequest = globalThis.Request;
+  globalThis.Request = class Request extends NodeRequest {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(input, init?.signal ? { ...init, signal: undefined } : init);
+      if (init?.signal) Object.defineProperty(this, "signal", { value: init.signal });
+    }
+  };
+}
+
 // jsdom has no matchMedia; tests that need a phone set window.__phone = true before rendering.
 Object.defineProperty(window, "matchMedia", {
   writable: true,
