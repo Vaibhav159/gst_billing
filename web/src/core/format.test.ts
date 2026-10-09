@@ -23,10 +23,13 @@ test("the API's decimals to paise and back, half-up like the server", () => {
   expect(toPaise(12.3)).toBe(1230);
   expect(toPaise("-5.5")).toBe(-550);
   expect(toPaise("2.345")).toBe(235);
+  expect(toPaise("-2.345")).toBe(-235);
   expect(toPaise("")).toBeNull();
   expect(toPaise("1,000.00")).toBeNull();
   expect(paiseToDecimal(8708321)).toBe("87083.21");
   expect(paiseToDecimal(-550)).toBe("-5.50");
+  expect(paiseToDecimal(105)).toBe("1.05");
+  expect(paiseToDecimal(-5)).toBe("-0.05");
 });
 
 test("dates, months and the financial year", () => {
@@ -40,8 +43,14 @@ test("dates, months and the financial year", () => {
 });
 
 test("today is the Indian calendar date, whatever the device's clock zone", () => {
-  expect(todayIST(new Date("2026-10-08T20:00:00Z"))).toBe("2026-10-09");
-  expect(todayIST(new Date("2026-10-08T18:00:00Z"))).toBe("2026-10-08");
+  vi.stubEnv("TZ", "America/Los_Angeles");
+  try {
+    expect(new Date("2026-10-08T20:00:00Z").getDate()).toBe(8); // the stub took: this clock is on 8 Oct, India is on 9 Oct
+    expect(todayIST(new Date("2026-10-08T20:00:00Z"))).toBe("2026-10-09");
+    expect(todayIST(new Date("2026-10-08T18:00:00Z"))).toBe("2026-10-08");
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 test("units, rates and words", () => {
