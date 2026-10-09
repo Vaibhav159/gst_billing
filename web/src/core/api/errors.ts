@@ -1,0 +1,1 @@
+export type ApiProblem = { kind: "offline" | "unreachable" | "server" | "auth" | "forbidden" | "notfound" | "validation" | "conflict" | "throttled"; message: string; fields?: Record<string, string> };
