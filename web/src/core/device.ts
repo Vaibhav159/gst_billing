@@ -27,6 +27,7 @@ export function storedTheme(): Theme {
   const v3 = read(THEME_KEY);
   if (isTheme(v3)) return v3;
   const v2 = read(V2_THEME_KEY);
+  if (v2 === "light-clean") return "pearl"; // v2's old name for its light theme, which v2 maps the same way
   return isTheme(v2) ? v2 : "obsidian";
 }
 
@@ -41,11 +42,21 @@ export function useTheme(): [Theme, (t: Theme) => void] {
   return [theme, set];
 }
 
-export const TEXT_SIZES = [{ value: 1, label: "Normal" }, { value: 1.1, label: "Large" }, { value: 1.2, label: "Larger" }];
+export const TEXT_SIZES: { value: number; label: string; hint: string }[] = [
+  { value: 1, label: "Normal", hint: "" },
+  { value: 1.1, label: "Large", hint: "A tenth bigger" },
+  { value: 1.2, label: "Larger", hint: "A fifth bigger" },
+];
 const SIZE_KEY = "gst3.textSize";
 
+export function storedTextSize(): number {
+  const n = Number(read(SIZE_KEY));
+  return TEXT_SIZES.some((s) => s.value === n) ? n : 1;
+}
+
 let sizeListener: (() => void) | null = null;
-/** Larger text zooms the whole app; #root gets pixel sizes so the zoomed app still fills the window exactly. */
+/** Larger text zooms the whole app; #root gets pixel sizes so the zoomed app fills the window. They round
+ *  down: rounding up leaves the zoomed app a fraction of a pixel too big, and the browser adds scrollbars. */
 export function applyTextSize(v: number) {
   const root = document.getElementById("root");
   if (!root) return;
@@ -53,8 +64,8 @@ export function applyTextSize(v: number) {
   if (v === 1) { root.style.zoom = ""; root.style.width = ""; root.style.height = ""; return; }
   const fit = () => {
     root.style.zoom = String(v);
-    root.style.width = `${Math.round(window.innerWidth / v)}px`;
-    root.style.height = `${Math.round(window.innerHeight / v)}px`;
+    root.style.width = `${Math.floor(window.innerWidth / v)}px`;
+    root.style.height = `${Math.floor(window.innerHeight / v)}px`;
   };
   fit();
   sizeListener = fit;
@@ -63,8 +74,7 @@ export function applyTextSize(v: number) {
 
 export function useTextSize(): [number, (v: number) => void] {
   const [size, setSize] = useState<number>(() => {
-    const n = Number(read(SIZE_KEY));
-    const v = TEXT_SIZES.some((s) => s.value === n) ? n : 1;
+    const v = storedTextSize();
     applyTextSize(v);
     return v;
   });
@@ -72,13 +82,14 @@ export function useTextSize(): [number, (v: number) => void] {
   return [size, set];
 }
 
-const PHONE_QUERY = "(max-width: 767px)";
+const PHONE_QUERY = "(max-width: 767px), (max-height: 499px) and (pointer: coarse)";
 function subscribePhone(cb: () => void) {
   const mq = window.matchMedia(PHONE_QUERY);
   mq.addEventListener("change", cb);
   return () => mq.removeEventListener("change", cb);
 }
-/** True under 768 px wide, correct on the very first render (today's hook started false). */
+/** True under 768 px wide, or on a touch screen under 500 px tall, so a phone turned on its side (844–932 px
+ *  wide) stays a phone. Correct on the very first render (today's hook started false). */
 export function useIsPhone(): boolean {
   return useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false);
 }
