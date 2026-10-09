@@ -8,7 +8,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import type { ApiProblem } from "@/core/api/errors";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
-import { AppMark, Button, Field, Input, Checkbox, Banner, Dialog, useDocTitle } from "@/core/ui";
+import { AppMark, Button, Field, Input, Banner, Dialog, useDocTitle } from "@/core/ui";
 import { version as APP_VERSION } from "../../../package.json";
 
 /** What's wrong: a missing field says so under it; a sign-in that didn't go through has a title and an icon, above the fields. */
@@ -25,10 +25,14 @@ function failureOf(p: ApiProblem): Problem {
 /**
  * Where `next` may send the person after signing in: a page of this app, never another site. Browsers read
  * "/\host" and "/<tab>/host" as "//host", so the path must also resolve to this origin (React Router throws otherwise).
+ * Never this page again either: the page leaves once, so a signed-in person would be left on it.
  */
 function safeNext(next: string | null): string | null {
   if (!next || !next.startsWith("/") || next.startsWith("//")) return null;
-  try { return new URL(next, window.location.origin).origin === window.location.origin ? next : null; } catch { return null; }
+  try {
+    const url = new URL(next, window.location.origin);
+    return url.origin === window.location.origin && !/^\/login\/?$/i.test(url.pathname) ? next : null;
+  } catch { return null; }
 }
 
 export default function Login() {
@@ -39,19 +43,25 @@ export default function Login() {
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
   const [show, setShow] = useState(false);
-  const [keep, setKeep] = useState(true);
   const [err, setErr] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(query.get("forgot") === "1");
   const userRef = useRef<HTMLInputElement>(null);
   const pwRef = useRef<HTMLInputElement>(null);
+  /** Set once the page has sent the person on: a later signal (this tab's own sign-in coming back late) mustn't move them again. */
+  const left = useRef(false);
   useDocTitle("Sign in");
   const expired = query.get("reason") === "expired";
   // back to where the session ran out (a bill being made), else the start
   const next = safeNext(query.get("next")) || "/";
+  const goOn = () => {
+    if (left.current) return;
+    left.current = true;
+    navigate(next, { replace: true });
+  };
   useEffect(() => { if (!isPhone) userRef.current?.focus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // tabs share one sign-in: signed in on another tab (or already), go on as after signing in here
-  useEffect(() => { if (status === "signed-in") navigate(next, { replace: true }); }, [status, next, navigate]);
+  useEffect(() => { if (status === "signed-in") goOn(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
   // the field at fault takes the cursor, its text selected, once it shows the problem (and is enabled again after a try)
   useLayoutEffect(() => {
     if (!err?.field) return;
@@ -70,7 +80,7 @@ export default function Login() {
     const r = await signIn(user.trim(), pw);
     setBusy(false);
     if (!r.ok) { setErr(failureOf(r.problem)); return; }
-    navigate(next, { replace: true });
+    goOn();
   };
   const ErrIcon = err?.icon;
   const big = isEasy;
@@ -81,7 +91,7 @@ export default function Login() {
           <AppMark size={52} />
           <div>
             <h1 className="text-2xl font-semibold leading-tight">GST Billing</h1>
-            <p className={cn("text-muted", big && "text-md")}>Sign in to Kiran, Meera and Aarav</p>
+            <p className={cn("text-muted", big && "text-md")}>Sign in with your username and password.</p>
           </div>
         </div>
         {expired ? (
@@ -109,7 +119,6 @@ export default function Login() {
             </button>
           </div>
         </Field>
-        <Checkbox label="Keep me signed in on this device" checked={keep} onChange={setKeep} disabled={busy} />
         <Button type="submit" variant="primary" size="lg" icon={LogIn} full loading={busy} className={big ? "!min-h-14 !text-lg" : undefined}>{busy ? "Signing in…" : "Sign in"}</Button>
         <div className={cn("flex items-center justify-between gap-3 text-muted", big ? "text-md" : "text-sm")}>
           <Button variant="link" onClick={() => setForgot(true)}>Forgot your password?</Button>
