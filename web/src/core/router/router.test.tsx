@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AxiosAdapter } from "axios";
 import { api } from "@/core/api/client";
 import { AuthContext } from "@/core/auth/AuthProvider";
+import { AppRoutes } from "@/App";
 import { Page, ToastProvider, useToast, type ToastApi } from "@/core/ui";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { stubAuth } from "@/test/render";
@@ -15,13 +16,17 @@ import { useUnsavedGuard } from "./useUnsavedGuard";
 
 // The shell asks for the firms and this person's preferences: a fake server answers, so no test reaches the network.
 beforeEach(() => {
+  localStorage.clear();
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
     data: config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("preferences/") ? { data: {} } : {} })) as AxiosAdapter;
 });
 
-/** The providers App gives the shell (queries, sign-in, toasts) around a router. */
-const inApp = (router: DataRouter) => <QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
+/** /api/me/'s answer for the owner, as the real sign-in state reads it. */
+const OWNER_ME = { id: 1, username: "kailash", full_name: "Kailash Mehta", role: "owner", role_label: "Owner", permissions: "*", needs_role_choice: false };
+
+/** The providers App gives the shell (queries, sign-in, toasts) around a router; `extra` renders beside the router, inside the toast provider. */
+const inApp = (router: DataRouter, extra: ReactNode = null) => <QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider>{extra}<RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
 
 /** `extra` renders beside the router, inside the toast provider, as App's own providers do. */
 function mount(path: string, signedIn = true, extra: ReactNode = null) {
@@ -245,7 +250,7 @@ test("a filter change (?query) is the same page: no replay, no swallowed tap, no
     const router = createMemoryRouter([{ element: <AppLayout />, children: [
       { path: "/sales/paper", element: <Page title="Paper book"><button>Next month</button></Page> },
     ] }], { initialEntries: ["/sales/paper"] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    render(inApp(router));
     await screen.findByRole("heading", { level: 1, name: "Paper book" });
     await nextFrame();
     const page = frame();
@@ -280,7 +285,7 @@ test("on a phone, a filter change on a page reached by Back keeps its slide and 
       { path: "/sales/paper", element: <Page title="Paper book">The book</Page> },
       { path: "/sales/7", element: <Page title="Bill 7">The bill</Page> },
     ] }] }], { initialEntries: ["/sales/paper", "/sales/7"], initialIndex: 1 });
-    render(<ToastProvider><Grab /><RouterProvider router={router} /></ToastProvider>);
+    render(inApp(router, <Grab />));
     await screen.findByRole("heading", { level: 1, name: "Bill 7" });
     await act(async () => { await router.navigate(-1); });
     await screen.findByRole("heading", { level: 1, name: "Paper book" });
@@ -310,7 +315,7 @@ test("a row opened from the keyboard is where Back puts focus, not the last thin
       { path: "/sales", element: <List /> },
       { path: "/sales/7", element: <Page title="Bill 7">The bill</Page> },
     ] }], { initialEntries: ["/sales"] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    render(inApp(router));
     await screen.findByRole("heading", { level: 1, name: "Bills" });
     afterADoubleTap();
     await userEvent.click(screen.getByRole("button", { name: "Filter" }));
@@ -341,7 +346,7 @@ test("Back keeps the list's place even when the next page's clamp is reported be
     { path: "/sales", element: <Page title="Bills">A long list</Page> },
     { path: "/", element: <ShortPage /> },
   ] }], { initialEntries: ["/sales"] });
-  render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+  render(inApp(router));
   await screen.findByRole("heading", { level: 1, name: "Bills" });
   await nextFrame();
   const main = document.getElementById("app-main")!;
@@ -363,18 +368,19 @@ test("signing in lands with focus on the page's title and announces it; the page
   expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
   cleanup();
 
-  let signIn!: () => void;
-  function SignedInLater({ router }: { router: DataRouter }) {
-    const [on, setOn] = useState(false);
-    signIn = () => setOn(true);
-    return <QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth(on ? undefined : null)}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
-  }
+  // signing in on the sign-in page, through the app's own providers and sign-in state: the page goes on to `next` itself
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url === "token/" || config.url === "me/"
+    ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: config.url === "token/" ? { access: "a", refresh: "r" } : OWNER_ME })
+    : answer(config))) as AxiosAdapter;
   const router = createMemoryRouter(appRoutes, { initialEntries: ["/login?next=%2Fsales"] });
-  render(<SignedInLater router={router} />);
-  await screen.findByRole("heading", { level: 1, name: "Sign in" });
-  act(() => signIn());
-  await act(async () => { await router.navigate("/sales", { replace: true }); }); // what the sign-in page does next
+  render(<AppRoutes router={router} />);
+  await screen.findByRole("heading", { level: 1, name: "GST Billing" }); // the sign-in page (Task 14)
+  await userEvent.type(screen.getByLabelText("Username"), "kailash");
+  await userEvent.type(screen.getByLabelText("Password"), "pw");
+  await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
   const h1 = await screen.findByRole("heading", { level: 1, name: "Bills" });
+  expect(router.state.location.pathname).toBe("/sales");
   await waitFor(() => expect(h1).toHaveFocus());
   await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Bills"));
 });
@@ -382,7 +388,7 @@ test("signing in lands with focus on the page's title and announces it; the page
 test("Back remembers the place on the last 50 pages left, and forgets older ones", async () => {
   function Numbered() { const { n } = useParams(); return <Page title={`Page ${n}`}>Page {n}</Page>; }
   const router = createMemoryRouter([{ element: <AppLayout />, children: [{ path: "/p/:n", element: <Numbered /> }] }], { initialEntries: ["/p/0"] });
-  render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+  render(inApp(router));
   await screen.findByRole("heading", { level: 1, name: "Page 0" });
   const main = document.getElementById("app-main")!;
   const scrollTo = async (y: number) => { await nextFrame(); main.scrollTop = y; fireEvent.scroll(main); };
@@ -404,8 +410,9 @@ test("the sign-in page carries the view too, so phone fields there get the 16 px
   phone(true);
   try {
     mount("/login", false);
-    const h1 = await screen.findByRole("heading", { level: 1, name: "Sign in" });
+    const h1 = await screen.findByRole("heading", { level: 1, name: "GST Billing" }); // the sign-in page (Task 14)
     expect(h1.closest("[data-view]")).toHaveAttribute("data-view", "expert");
+    expect(screen.getByLabelText("Username").closest("[data-view]")).toHaveAttribute("data-view", "expert");
   } finally {
     phone(false);
   }
