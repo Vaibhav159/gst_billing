@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { AxiosAdapter, InternalAxiosRequestConfig } from "axios";
 import axios, { AxiosError } from "axios";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { api, setTokens } from "@/core/api/client";
+import { createMemoryRouter, MemoryRouter, Route, Routes, RouterProvider, useLocation } from "react-router";
+import { api, refreshAccessToken, setTokens } from "@/core/api/client";
 import { renderApp } from "@/test/render";
 import { AuthProvider, useAuth, type Me } from "./AuthProvider";
 import { RequireAuth } from "./RequireAuth";
@@ -352,4 +352,82 @@ test("a switch refreshes what's on screen: a list that doesn't read useAuth refe
   await waitFor(() => expect(screen.getByText("who:Kailash Mehta")).toBeInTheDocument());
   expect(await screen.findByText("bills:KGH/32 for Kailash")).toBeInTheDocument();
   expect(client.getMutationCache().getAll()).toEqual([]);
+});
+
+// Ruling 35: a sign-out on purpose leaves no page behind for whoever signs in next; an expiry and a first visit keep it
+
+/** The sign-in page and every other page behind the sign-in check, on a router the test can move. */
+function mountRouted(entries: string[]) {
+  const router = createMemoryRouter([
+    { path: "/login", element: <><Where /><Probe /></> },
+    { path: "*", element: <RequireAuth><Where /><Probe /></RequireAuth> },
+  ], { initialEntries: entries, initialIndex: entries.length - 1 });
+  render(<QueryClientProvider client={new QueryClient()}><AuthProvider><RouterProvider router={router} /></AuthProvider></QueryClientProvider>);
+  return router;
+}
+
+test("Sign out on purpose goes to a plain sign-in page, Back included: whoever signs in next doesn't land on this person's page", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  const router = mountRouted(["/users", "/sales/31?tab=items"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  await act(async () => { await router.navigate(-1); }); // Back, to the page before
+  await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+  expect(router.state.location.search).toBe("");
+});
+
+test("another tab signing out takes this tab to a plain sign-in page too", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  inAnotherTab(SIGN_OUT);
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+});
+
+test("a first visit while signed out keeps the address it came for, to go on to after signing in", async () => {
+  server({});
+  mountRouted(["/sales/31?tab=items"]);
+  expect(await screen.findByText("at:/login?next=%2Fsales%2F31%3Ftab%3Ditems")).toBeInTheDocument();
+});
+
+test("whoever signs in after a sign-out starts afresh: when their own session runs out, sign-in brings them back to their page", async () => {
+  setTokens("a", "r");
+  api.defaults.adapter = ((config) => (config.url === "token/" ? reply(config, 200, { access: "b", refresh: "rb" })
+    : reply(config, 200, config.headers.Authorization === "Bearer a" ? ME : KAILASH))) as AxiosAdapter;
+  const router = mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  await act(async () => { screen.getByText("in").click(); }); // Kailash signs in
+  expect(await screen.findByText("who:Kailash Mehta")).toBeInTheDocument();
+  await act(async () => { await router.navigate("/customers/9"); });
+  expect(await screen.findByText("at:/customers/9")).toBeInTheDocument();
+  // later his session runs out on that page
+  window.history.pushState({}, "", "/customers/9"); // the client reports the browser's address
+  const refused = new AxiosError("x", "401", {} as InternalAxiosRequestConfig, null, { status: 401, data: { detail: "Token is blacklisted" }, statusText: "", headers: {}, config: {} } as never);
+  vi.spyOn(axios, "post").mockRejectedValue(refused); // the refresh
+  await act(async () => { await refreshAccessToken().catch(() => {}); });
+  expect(await screen.findByText("at:/login?next=%2Fcustomers%2F9&reason=expired")).toBeInTheDocument();
+});
+
+test("a refresh still out at Sign out and refused afterwards doesn't turn the sign-out into a session that ran out", async () => {
+  setTokens("a", "r");
+  localStorage.setItem("gst3.me", JSON.stringify(REMEMBERED));
+  let refuse: ((e: unknown) => void) | undefined;
+  vi.spyOn(axios, "post").mockImplementation(() => new Promise((_resolve, reject) => { refuse = reject; })); // the refresh, held open
+  api.defaults.adapter = ((config) => reply(config, 401, { detail: "Token expired" })) as AxiosAdapter;
+  const router = mountRouted(["/users", "/sales/31"]);
+  expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument(); // remembered, while the start's question is out
+  await waitFor(() => expect(refuse).toBeDefined()); // its 401 sent the refresh out
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  window.history.pushState({}, "", "/sales/31"); // the client reports the browser's address
+  const refused = new AxiosError("x", "401", {} as InternalAxiosRequestConfig, null, { status: 401, data: { detail: "Token is blacklisted" }, statusText: "", headers: {}, config: {} } as never);
+  await act(async () => { refuse!(refused); await new Promise((r) => setTimeout(r, 10)); });
+  await act(async () => { await router.navigate(-1); }); // Back, to the page before
+  await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+  expect(router.state.location.search).toBe("");
 });

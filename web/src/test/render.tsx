@@ -13,7 +13,7 @@ export const OWNER: Me = { id: 1, username: "kailash", fullName: "Kailash Mehta"
 export function stubAuth(me: Partial<Me> | null = OWNER): AuthValue {
   const who = me ? ({ ...OWNER, ...me } as Me) : null;
   return {
-    me: who, status: who ? "signed-in" : "signed-out", startProblem: null, expiredFrom: null,
+    me: who, status: who ? "signed-in" : "signed-out", startProblem: null, expiredFrom: null, signedOutOnPurpose: false,
     signIn: async () => ({ ok: true }), signOut: () => {}, retryStart: () => {},
     can: (a) => can(who?.permissions, a), whyNot: (a, w) => (who ? whyNot(who.role, a, w) : ""),
   };

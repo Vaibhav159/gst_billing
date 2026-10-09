@@ -317,6 +317,8 @@ test("through the real sign-in state, Sign out ends the session and the app goes
     await userEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
     expect(getTokens().access).toBeNull();
+    // Ruling 35: a plain sign-in page, so whoever signs in next on this computer doesn't land on this person's page
+    expect(router.state.location.search).toBe("");
   } finally {
     vi.useRealTimers();
   }
