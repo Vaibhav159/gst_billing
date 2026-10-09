@@ -39,7 +39,8 @@ export function NavBar({ section, inMore: inMoreList }: { section: string; inMor
   // the resize observer calls the latest measure: the first render's would slide the underline back to where the app opened
   const latest = useRef(measure);
   latest.current = measure;
-  useLayoutEffect(measure, [key, fit]); // eslint-disable-line react-hooks/exhaustive-deps
+  // section too: between two pages under More the key stays "more" while More's words, and so its width, change
+  useLayoutEffect(measure, [key, fit, section]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setTimeout(() => setReady(true), 60); return () => clearTimeout(t); }, []);
   useEffect(() => {
     if (!ref.current || typeof ResizeObserver === "undefined") return undefined;

@@ -62,12 +62,12 @@ test("Ctrl K opens search", async () => {
 
 /* ── Beyond the brief ── */
 
-/** jsdom has no layout: give the main nav a width and each of its items a width and a place. */
-function layout(navWidth: number) {
+/** jsdom has no layout: give the main nav a width and each of its items a width (100 px unless `widthOf` says) and a place. */
+function layout(navWidth: number, widthOf: (item: HTMLElement) => number = () => 100) {
   const order = ["dashboard", "sales", "purchases", "customers", "gst", "reports"];
   const spies = [
     vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) { return this.getAttribute("aria-label") === "Main" ? navWidth : 0; }),
-    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.nav ? 100 : 0; }),
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.nav ? widthOf(this) : 0; }),
     vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.nav ? 102 * Math.max(0, order.indexOf(this.dataset.nav)) : 0; }),
   ];
   return () => spies.forEach((s) => s.mockRestore());
@@ -536,4 +536,44 @@ test("another tab's pick doesn't take this tab over: this person's pick is read 
   await userEvent.click(await screen.findByRole("menuitem", { name: new RegExp(`^FY ${lastFy}`) }));
   expect(await screen.findByRole("button", { name: `Financial year ${lastFy}, not the current year` })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
+});
+
+test("moving between two pages under More, the underline takes More's new width", async () => {
+  // More's width follows its words: "More · Products" is wider than "More · Firms"
+  const restore = layout(1000, (el) => (el.dataset.nav === "more" ? 60 + (el.textContent ?? "").length * 5 : 100));
+  try {
+    renderApp(<ScopeProvider><DesktopShell openPalette={() => {}}><p>page</p></DesktopShell></ScopeProvider>, { path: "/products" });
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    const bar = () => nav.querySelector<HTMLElement>("span.absolute");
+    const more = () => within(nav).getByRole("button", { name: /^More · / });
+    const before = more().offsetWidth;
+    expect(bar()).toHaveStyle({ width: `${before}px` });
+    await userEvent.click(more());
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Firms" }));
+    await waitFor(() => expect(more()).toHaveTextContent(/^More · Firms/));
+    expect(more().offsetWidth).toBeLessThan(before);
+    await waitFor(() => expect(bar()).toHaveStyle({ width: `${more().offsetWidth}px` }));
+  } finally {
+    restore();
+  }
+});
+
+test("with a menu or a dialog open, shortcuts wait, except Ctrl K", async () => {
+  const open = vi.fn();
+  renderApp(<ScopeProvider><DesktopShell openPalette={open}><Where /></DesktopShell></ScopeProvider>, { path: "/sales" });
+  await userEvent.click(screen.getByRole("button", { name: /account/i }));
+  await screen.findByRole("menu");
+  await userEvent.keyboard("?");
+  await userEvent.keyboard("{Alt>}n{/Alt}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByTestId("where")).toHaveTextContent(/^\/sales$/);
+  await userEvent.keyboard("{Control>}k{/Control}");
+  expect(open).toHaveBeenCalledTimes(1);
+
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  await userEvent.keyboard("?"); // nothing open now
+  expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+  await userEvent.keyboard("{Alt>}n{/Alt}");
+  expect(screen.getByTestId("where")).toHaveTextContent(/^\/sales$/);
 });

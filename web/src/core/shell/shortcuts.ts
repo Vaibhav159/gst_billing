@@ -5,8 +5,8 @@ import type { Action } from "@/core/auth/permissions";
 import { useToast } from "@/core/ui";
 
 /**
- * Desktop shortcuts. They never fire inside a field, except Ctrl K. They follow the role: a shortcut to something
- * this person can't do says why. Undo (Ctrl Z) comes with part 1.
+ * Desktop shortcuts. They never fire inside a field or while a menu or dialog is open, except Ctrl K. They follow the
+ * role: a shortcut to something this person can't do says why. Undo (Ctrl Z) comes with part 1.
  */
 export function useShortcuts({ enabled, openPalette, openShortcuts }: { enabled: boolean; openPalette(): void; openShortcuts(): void }) {
   const navigate = useNavigate();
@@ -21,7 +21,8 @@ export function useShortcuts({ enabled, openPalette, openShortcuts }: { enabled:
       const typing = (e.target as Element | null)?.closest?.("input, textarea, select, [contenteditable=true]");
       const L = live.current;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); L.openPalette(); return; }
-      if (typing) return;
+      // a menu or dialog open has the keys (the shortcuts list would open under a menu, a new bill behind a dialog)
+      if (typing || document.querySelector('[role="menu"], [role="dialog"]')) return;
       const go = (perm: Action, to: string, what: string) => { if (L.can(perm)) navigate(to); else L.show({ tone: "brand", title: `You can't ${what}`, body: L.whyNot(perm) }); };
       // e.code, not e.key: on a Mac, Option+N types a dead key and Option+P types π
       if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyN") { e.preventDefault(); go("bill.create", "/sales/new", "make bills"); }
