@@ -11,6 +11,7 @@ from .inward_bills import (
     InwardCaptureDetailView,
     InwardCaptureListCreateView,
 )
+from .me import MeView
 from .media import SignedMediaView
 from .preferences import PreferencesView
 from .reconciliation import ReconciliationView
@@ -77,6 +78,7 @@ urlpatterns = [
     # GSTIN validation + taxpayer autofill (see billing/gstin.py)
     path("gstin/<str:gstin>/", GstinLookupView.as_view(), name="gstin-lookup"),
     path("profile/", ProfileView.as_view(), name="profile"),
+    path("me/", MeView.as_view(), name="me"),
     path("users/", UserManagementView.as_view(), name="user-management"),
     path("preferences/", PreferencesView.as_view(), name="preferences"),
     path("media/<path:subpath>", SignedMediaView.as_view(), name="signed-media"),
