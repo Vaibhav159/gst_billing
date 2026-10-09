@@ -6,6 +6,11 @@ export * from "./Banner";
 export * from "./Feedback";
 export * from "./Avatar";
 export { cn } from "@/core/cn";
+// Kit 3: dialogs, sheets, menus and toasts
+export { Portal, usePresence } from "./Overlay";
+export * from "./Dialog";
+export * from "./Menu";
+export * from "./toast";
 // Kit 4: page layout, phone headers and action bars, cards, lists and tables
 export * from "./Page";
 export * from "./Card";
