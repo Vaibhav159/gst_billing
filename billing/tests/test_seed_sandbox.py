@@ -56,8 +56,10 @@ class SeedSandboxTest(TestCase):
         self.assertEqual(role_of(staff), "staff")
         kiran = Business.objects.get(name="KIRAN GOLD HOUSE (SANDBOX)")
         self.assertEqual(UserPreference.objects.get(user=staff).data["defaultBusinessId"], str(kiran.id))
-        for username, role in (("sandbox_accountant", "accountant"), ("sandbox_staff", "staff")):
-            # The v3 group and the v2 one, as v3 assigns them: v2 (and a rollback) still sees an editor.
+        for username, role in (
+            ("sandbox_owner", "owner"), ("sandbox_accountant", "accountant"), ("sandbox_staff", "staff"),
+        ):
+            # The groups v3 assigns each role (roles.ROLES), v2's included, so v2 and a rollback agree.
             groups = User.objects.get(username=username).groups.values_list("name", flat=True)
             self.assertCountEqual(groups, V3_ROLES[role]["groups"], username)
 

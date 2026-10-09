@@ -51,7 +51,7 @@ deploy/sandbox/sandbox.sh manage migrate
 
 - **Python edits** reload gunicorn by themselves: the backend source is mounted
   into the web container.
-- **Frontend edits** hot-reload in Vite (5174 or 5173). To see the built app
+- **Frontend edits** hot-reload in Vite (5174 or 5173; v3 on 5180). To see the built app
   exactly as nginx serves it: `sandbox.sh build nginx && sandbox.sh up`.
 - **Dependency changes** (`pyproject.toml`/`uv.lock`) need `sandbox.sh build web`.
   Image builds run in a BuildKit container capped at 1 CPU / 3 GB.

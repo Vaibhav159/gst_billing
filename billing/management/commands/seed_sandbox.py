@@ -118,7 +118,7 @@ SEASON = {4: 1.3, 5: 1.2, 6: 0.7, 7: 0.6, 8: 0.8, 9: 0.9, 10: 1.5, 11: 1.6, 12: 
 PAYMENT_MODES = ["cash"] * 7 + ["bank"] * 9 + ["credit"] * 2 + ["mixed", ""]
 
 ROLES = [
-    ("owner", "sandbox_owner", (), True),
+    ("owner", "sandbox_owner", ("admin",), True),
     ("admin", "sandbox_admin", ("admin",), False),
     ("editor", "sandbox_editor", ("editor",), False),
     ("viewer", "sandbox_viewer", ("viewer",), False),
