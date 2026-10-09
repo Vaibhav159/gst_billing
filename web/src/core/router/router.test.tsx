@@ -1,17 +1,19 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, Link, RouterProvider } from "react-router";
+import { createMemoryRouter, Link, matchRoutes, RouterProvider } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "@/core/auth/AuthProvider";
-import { Page, ToastProvider } from "@/core/ui";
+import { Page, ToastProvider, useToast, type ToastApi } from "@/core/ui";
 import { AppLayout } from "@/core/shell/AppLayout";
 import { stubAuth } from "@/test/render";
 import { appRoutes, V2_REDIRECTS } from "./routes";
 import { useUnsavedGuard } from "./useUnsavedGuard";
 
-function mount(path: string, signedIn = true) {
+/** `extra` renders beside the router, inside the toast provider, as App's own providers do. */
+function mount(path: string, signedIn = true, extra: ReactNode = null) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
-  render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth(signedIn ? undefined : null)}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+  render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth(signedIn ? undefined : null)}><ToastProvider>{extra}<RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
 }
 
@@ -121,4 +123,67 @@ test("leaving a page with unsaved changes asks first: Stay keeps the page, Leave
   } finally {
     vi.useRealTimers();
   }
+});
+
+/* ── The review's rulings ── */
+
+test("one toast host covers sign-in and the app: a toast shows exactly once on either", async () => {
+  let toast!: ToastApi;
+  function Grab() { toast = useToast(); return null; }
+  mount("/login", false, <Grab />);
+  await screen.findByRole("heading", { level: 1, name: "Sign in" });
+  act(() => { toast.show({ title: "Shown on the sign-in page" }); });
+  expect(await screen.findAllByText("Shown on the sign-in page")).toHaveLength(1);
+  cleanup();
+
+  mount("/sales", true, <Grab />);
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  act(() => { toast.show({ title: "Shown in the app" }); });
+  expect(await screen.findAllByText("Shown in the app")).toHaveLength(1);
+});
+
+const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
+
+test("on a phone, Back up to the page above slides back, even with no page before it in the tab", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  phone(true);
+  try {
+    const router = createMemoryRouter([{ element: <AppLayout />, children: [
+      { path: "/sales/7", element: <Page title="Bill 7" back="/sales">The bill</Page> },
+      { path: "/sales/7/edit", element: <Page title="Edit bill 7" back="/sales/7">The form</Page> },
+    ] }], { initialEntries: ["/sales/7/edit"] });
+    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    await screen.findByRole("heading", { level: 1, name: "Edit bill 7" });
+    const frame = () => document.getElementById("app-main")!.firstElementChild;
+    afterADoubleTap();
+    // opened straight from a link: Back goes up to the bill, in this entry's place
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByRole("heading", { level: 1, name: "Bill 7" });
+    expect(router.state.historyAction).toBe("REPLACE");
+    expect(frame()).toHaveClass("anim-page-pop");
+
+    await act(async () => { await router.navigate("/sales/7/edit"); });
+    await screen.findByRole("heading", { level: 1, name: "Edit bill 7" });
+    expect(frame()).toHaveClass("anim-page-push");
+  } finally {
+    phone(false);
+    vi.useRealTimers();
+  }
+});
+
+test("forms and print hide the phone's tabs; every other page keeps them", () => {
+  const hidesTabs = (path: string) => {
+    const m = matchRoutes(appRoutes, path);
+    return Boolean(m && m[m.length - 1].route.handle?.hideNav);
+  };
+  const hidden = [
+    "/sales/new", "/sales/7/edit", "/sales/7/print", "/customers/new", "/customers/7/edit", "/purchases/new", "/purchases/9/edit", "/purchases/inbox/4",
+    "/products/new", "/products/5/edit", "/firms/new", "/firms/3/edit", "/e/new", "/e/new/items", "/e/customers/new", "/e/customers/7/edit",
+  ];
+  for (const path of hidden) expect(hidesTabs(path), path).toBe(true);
+  const shown = [
+    "/", "/sales", "/sales/7", "/sales/paper", "/customers/7", "/customers/7/statement", "/purchases/inbox", "/purchases/9", "/products/5", "/firms/3",
+    "/e", "/e/bills", "/e/customers", "/e/bill/5", "/more", "/login", "/no/such/page",
+  ];
+  for (const path of shown) expect(hidesTabs(path), path).toBe(false);
 });

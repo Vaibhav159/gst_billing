@@ -105,10 +105,11 @@ export type PhoneHeaderProps = { title: ReactNode; subtitle?: ReactNode; back?: 
 export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeaderProps) {
   const navigate = useNavigate();
   const { isEasy } = useView();
-  // with no page before this one in the tab, go up to `back` (true: home) in place of this entry
+  // with no page before this one in the tab, go up to `back` (true: home) in place of this entry;
+  // it's still a step back, so the page frame slides it in from the left (dir: "back")
   const onBack = () => {
     if (window.history.state?.idx > 0) navigate(-1);
-    else navigate(typeof back === "string" ? back : isEasy ? "/e" : "/", { replace: true });
+    else navigate(typeof back === "string" ? back : isEasy ? "/e" : "/", { replace: true, state: { dir: "back" } });
   };
   return (
     <header data-phone-header="" className="sticky top-0 z-nav bg-bar border-b border-rule pt-[env(safe-area-inset-top,0px)]">

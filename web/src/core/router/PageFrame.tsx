@@ -81,6 +81,8 @@ export function PageFrame({ children }: { children: ReactNode }) {
     const p = places.get(key) || { scroll: 0, opener: null };
     places.set(key, { ...p, opener: openerOf(e.target) });
   };
-  const anim = first.current ? "" : isDesktop ? "anim-page-rise" : nav === "POP" ? "anim-page-pop" : "anim-page-push";
+  // the phone header's Back with no page before it goes up a level in place (a replace marked dir: "back"): still a step back
+  const stepBack = nav === "POP" || (location.state as { dir?: string } | null)?.dir === "back";
+  const anim = first.current ? "" : isDesktop ? "anim-page-rise" : stepBack ? "anim-page-pop" : "anim-page-push";
   return <div key={location.pathname} onClickCapture={onClickCapture} className={cn("h-full", anim)}>{children}</div>;
 }

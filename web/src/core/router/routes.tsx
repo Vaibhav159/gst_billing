@@ -1,6 +1,6 @@
 import { Navigate, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
-import { AppLayout } from "@/core/shell/AppLayout";
+import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 
@@ -41,6 +41,12 @@ const PAGES: Record<string, string[]> = {
   more: ["/more"], // Task 16 fills it
 };
 
+/** The prototype's `hideNav`: forms and print, where the phone's tabs make way. Task 16's PhoneShell reads `handle.hideNav`. */
+const HIDE_NAV = new Set([
+  "/sales/new", "/sales/:id/edit", "/sales/:id/print", "/customers/new", "/customers/:id/edit", "/purchases/new", "/purchases/:id/edit", "/purchases/inbox/:id",
+  "/products/new", "/products/:id/edit", "/firms/new", "/firms/:id/edit", "/e/new", "/e/new/items", "/e/customers/new", "/e/customers/:id/edit",
+]);
+
 /**
  * Every address in v2 (sweet-rebuild-suite-main/src/App.tsx) except /login, / and *, and where it lives now.
  * /billing/invoice/:id may be a purchase (v2 kept purchases as inward invoices): part 1's bill page sends those on.
@@ -68,15 +74,20 @@ function V2Redirect({ to }: { to: (p: Record<string, string>) => string }) {
   return <Navigate to={to(params)} replace />;
 }
 
-export const appRoutes: RouteObject[] = [
-  { path: "/login", element: <Placeholder {...PARTS.login} /> }, // Task 14 swaps in Login
-  // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
-  ...V2_REDIRECTS.map(([path, to]): RouteObject => ({ path, element: <V2Redirect to={to} /> })),
-  {
-    element: <RequireAuth><AppLayout /></RequireAuth>,
-    children: [
-      ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({ path, element: <Placeholder {...PARTS[area]} /> }))),
-      { path: "*", element: <NotFound /> },
-    ],
-  },
-];
+export const appRoutes: RouteObject[] = [{
+  element: <RootLayout />,
+  children: [
+    { path: "/login", element: <Placeholder {...PARTS.login} /> }, // Task 14 swaps in Login
+    // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
+    ...V2_REDIRECTS.map(([path, to]): RouteObject => ({ path, element: <V2Redirect to={to} /> })),
+    {
+      element: <RequireAuth><AppLayout /></RequireAuth>,
+      children: [
+        ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
+          path, element: <Placeholder {...PARTS[area]} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
+        }))),
+        { path: "*", element: <NotFound /> },
+      ],
+    },
+  ],
+}];
