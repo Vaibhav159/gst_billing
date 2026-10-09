@@ -3,9 +3,9 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AxiosError } from "axios";
-import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes, useLocation } from "react-router";
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from "react-router";
 import { renderApp, stubAuth } from "@/test/render";
-import { api } from "@/core/api/client";
+import { api, getTokens, setTokens } from "@/core/api/client";
 import type { AxiosAdapter } from "axios";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";
@@ -14,6 +14,7 @@ import { ToastProvider } from "@/core/ui";
 import { DesktopShell } from "./DesktopShell";
 import { FirmPicker } from "./ScopePickers";
 import { ScopeProvider } from "@/core/scope";
+import { AppRoutes } from "@/App";
 
 beforeEach(() => {
   localStorage.clear();
@@ -262,7 +263,7 @@ test("the account menu offers Settings only to someone who can change them, and 
   expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
 });
 
-test("Sign out asks first, then signs out and goes to the sign-in page", async () => {
+test("Sign out asks first; Stay signed in keeps the session, Sign out ends it", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   try {
     const signOut = vi.fn();
@@ -271,22 +272,51 @@ test("Sign out asks first, then signs out and goes to the sign-in page", async (
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <AuthContext.Provider value={{ ...stubAuth(), signOut }}>
           <MemoryRouter initialEntries={["/sales"]}><ToastProvider>
-            <Routes>
-              <Route path="/login" element={<p>the sign-in page</p>} />
-              <Route path="*" element={<ScopeProvider><DesktopShell openPalette={() => {}}><p>page</p></DesktopShell></ScopeProvider>} />
-            </Routes>
+            <ScopeProvider><DesktopShell openPalette={() => {}}><p>page</p></DesktopShell></ScopeProvider>
           </ToastProvider></MemoryRouter>
         </AuthContext.Provider>
       </QueryClientProvider>,
     );
-    await userEvent.click(screen.getByRole("button", { name: /account/i }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
-    const dialog = await screen.findByRole("dialog", { name: "Sign out?" });
+    const ask = async () => {
+      await userEvent.click(screen.getByRole("button", { name: /account/i }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign out?" });
+      afterADoubleTap();
+      return dialog;
+    };
+    let dialog = await ask();
+    expect(dialog).toHaveTextContent("You'll need your password to sign in again.");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Stay signed in" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(signOut).not.toHaveBeenCalled();
-    afterADoubleTap();
+
+    dialog = await ask();
     await userEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
     expect(signOut).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("the sign-in page")).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+/** A SimpleJWT-shaped access token naming `userId`. */
+const jwt = (userId: number) => ["e30", btoa(JSON.stringify({ token_type: "access", user_id: userId })).replace(/=+$/, ""), "sig"].join(".");
+
+test("through the real sign-in state, Sign out ends the session and the app goes to the sign-in page", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  try {
+    const owner = { id: 1, username: "kailash", full_name: "Kailash Mehta", role: "owner", role_label: "Owner", permissions: "*", needs_role_choice: false };
+    const answer = api.defaults.adapter as AxiosAdapter;
+    api.defaults.adapter = ((config) => (config.url?.startsWith("me/") ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: owner }) : answer(config))) as AxiosAdapter;
+    setTokens(jwt(1), "r1");
+    const router = createMemoryRouter(appRoutes, { initialEntries: ["/sales"] });
+    render(<AppRoutes router={router} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Account: Kailash Mehta" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign out?" });
+    afterADoubleTap();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(getTokens().access).toBeNull();
   } finally {
     vi.useRealTimers();
   }
