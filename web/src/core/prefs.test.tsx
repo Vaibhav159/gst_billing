@@ -5,7 +5,7 @@ import type { AxiosAdapter } from "axios";
 import { api } from "@/core/api/client";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { stubAuth } from "@/test/render";
-import { phoneModeOf, usePrefs } from "./prefs";
+import { phoneModeOf, usePrefs, type Prefs } from "./prefs";
 
 /** The server's /api/preferences/: GET gives { data }, PATCH shallow-merges and answers with the whole blob. */
 function prefsServer(start: Record<string, unknown>) {
@@ -53,4 +53,36 @@ test("signed out, preferences ask the server nothing", async () => {
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
   expect(calls).toEqual([]);
   expect(result.current.prefs).toEqual({});
+});
+
+// Ruling 31: preferences are per person
+
+test("a change still on its way when the person switches stays with the person who made it", async () => {
+  const blobs: Record<number, Prefs> = { 1: { phoneMode: "easy" }, 2: { defaultBusinessId: "4" } };
+  let signedIn = 1; // whose token the server sees
+  const held: (() => void)[] = [];
+  api.defaults.adapter = ((config) => {
+    const who = signedIn;
+    const ok = () => ({ status: 200, statusText: "", headers: {}, config, data: { data: blobs[who] } });
+    if (config.method !== "patch") return Promise.resolve(ok());
+    return new Promise((resolve) => { held.push(() => { blobs[who] = { ...blobs[who], ...JSON.parse(config.data as string) }; resolve(ok()); }); });
+  }) as AxiosAdapter;
+  let auth = stubAuth({ id: 1 });
+  const client = new QueryClient();
+  const { result, rerender } = renderHook(() => usePrefs(), {
+    wrapper: ({ children }) => <QueryClientProvider client={client}><AuthContext.Provider value={auth}>{children}</AuthContext.Provider></QueryClientProvider>,
+  });
+  await waitFor(() => expect(result.current.prefs).toEqual({ phoneMode: "easy" }));
+  let saving: Promise<Prefs> | undefined;
+  act(() => { saving = result.current.setPrefs({ phoneMode: "expert" }); }); // Kailash's change goes out...
+  await waitFor(() => expect(held).toHaveLength(1));
+  signedIn = 2; // ...and Rakesh signs in before it's answered
+  auth = stubAuth({ id: 2, username: "rakesh", fullName: "Rakesh Soni", role: "staff", roleLabel: "Counter staff", permissions: ["view"] });
+  rerender();
+  await waitFor(() => expect(result.current.prefs).toEqual({ defaultBusinessId: "4" })); // Rakesh's own, not Kailash's
+  await act(async () => { held[0](); await saving; });
+  expect(client.getQueryData(["prefs", 2])).toEqual({ defaultBusinessId: "4" });
+  expect(client.getQueryData(["prefs", 1])).toEqual({ phoneMode: "expert" }); // Kailash's answer is kept for Kailash
+  await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+  expect(result.current.prefs).toEqual({ defaultBusinessId: "4" });
 });

@@ -7,9 +7,14 @@ export type Prefs = { defaultBusinessId?: string; phoneMode?: "easy" | "expert";
 
 export function usePrefs() {
   const qc = useQueryClient();
-  const { status } = useAuth();
-  const q = useQuery({ queryKey: ["prefs"], enabled: status === "signed-in", staleTime: Infinity, queryFn: async () => (await api.get("preferences/")).data.data as Prefs });
-  const m = useMutation({ mutationFn: async (patch: Partial<Prefs>) => (await api.patch("preferences/", patch)).data.data as Prefs, onSuccess: (d) => qc.setQueryData(["prefs"], d) });
+  const { status, me } = useAuth();
+  const q = useQuery({ queryKey: ["prefs", me?.id], enabled: status === "signed-in", staleTime: Infinity, queryFn: async () => (await api.get("preferences/")).data.data as Prefs });
+  const m = useMutation({
+    mutationFn: async (patch: Partial<Prefs>) => (await api.patch("preferences/", patch)).data.data as Prefs,
+    // the answer belongs to whoever sent the change: onMutate keeps them, since a switch while it's out updates onSuccess in place
+    onMutate: () => me?.id,
+    onSuccess: (d, _patch, sentFor) => qc.setQueryData(["prefs", sentFor], d),
+  });
   return { prefs: q.data ?? {}, loading: q.isPending, setPrefs: m.mutateAsync };
 }
 

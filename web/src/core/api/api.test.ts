@@ -1,6 +1,6 @@
 import axios, { AxiosError, CanceledError, type AxiosAdapter, type InternalAxiosRequestConfig } from "axios";
 import { renderHook, act } from "@testing-library/react";
-import { api, getTokens, refreshAccessToken, setSessionExpiredHandler, setTokens } from "./client";
+import { api, clearTokens, getTokens, refreshAccessToken, setSessionExpiredHandler, setTokens } from "./client";
 import { problemOf, saveFailure } from "./errors";
 import { __setNetState, markReachable, useNetwork, useSlow } from "./network";
 import { queryClient } from "./query";
@@ -421,4 +421,36 @@ test("a refused refresh doesn't wipe a login another tab stored meanwhile (a v2 
   expect(post.mock.calls).toEqual([REFRESH_CALL]);
   expect(getTokens()).toEqual({ access: "other-access", refresh: "refresh-2" });
   expect(from).not.toHaveBeenCalled();
+});
+
+// Ruling 31: signing out sticks even while a refresh is out
+
+test("signed out while a refresh is out: its new tokens aren't stored, no one is told the session expired, and the request fails as signed out", async () => {
+  setTokens("old-access", "refresh-1");
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  let land: ((r: unknown) => void) | undefined;
+  const post = vi.spyOn(axios, "post").mockImplementation(() => new Promise((resolve) => { land = resolve; }));
+  api.defaults.adapter = acceptOnly("new-access");
+  const failed = api.get("invoices/").catch((e: unknown) => e);
+  await vi.waitFor(() => expect(land).toBeDefined());
+  clearTokens(); // Sign out, in this tab or another, while the refresh is out
+  land!({ data: { access: "new-access", refresh: "refresh-2" } });
+  const e = await failed;
+  expect(problemOf(e).kind).toBe("auth");
+  expect((e as AxiosError).response?.status).toBe(401); // the request's own 401
+  expect(getTokens()).toEqual({ access: null, refresh: null });
+  expect(from).not.toHaveBeenCalled();
+  expect(post).toHaveBeenCalledTimes(1);
+});
+
+test("another tab's login lands while this tab's refresh is out: that login stands, and the request goes with it", async () => {
+  setTokens("old-access", "refresh-1");
+  vi.spyOn(axios, "post").mockImplementation(async () => {
+    setTokens("other-access", "refresh-9"); // another tab signs in, or a v2 tab (no lock) refreshes, while ours is out
+    return { data: { access: "mine", refresh: "refresh-2" } };
+  });
+  api.defaults.adapter = acceptOnly("other-access");
+  await expect(api.get("invoices/")).resolves.toMatchObject({ status: 200 });
+  expect(getTokens()).toEqual({ access: "other-access", refresh: "refresh-9" });
 });

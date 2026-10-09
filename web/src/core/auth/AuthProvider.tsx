@@ -74,7 +74,8 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     const before = shown.current;
     const other = before !== null && before.id !== m.id;
     const next = before && JSON.stringify(before) === JSON.stringify(m) ? before : m; // unchanged details keep the object: nothing re-renders
-    if (other) qc.clear();
+    // what's on screen refetches for the new person (clear() would leave a mounted list showing the last person's rows)
+    if (other) { void qc.resetQueries(); qc.getMutationCache().clear(); }
     shown.current = next;
     saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null);
     if (other && announce) switched.current?.(next);

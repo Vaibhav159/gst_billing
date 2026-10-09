@@ -35,6 +35,8 @@ function noteFailure(error: AxiosError) {
 
 /** The server refused the refresh token, or there is none: the person has to sign in again. */
 class SessionEnded extends Error {}
+/** Signed out (in this tab or another) while this tab's refresh was out. The sign-out stands; the session didn't expire. */
+class SignedOutMeanwhile extends Error {}
 
 /** Just over nginx's 95 s proxy_read_timeout, so a reply the proxy would still deliver is never abandoned. */
 const REFRESH_TIMEOUT_MS = 100_000;
@@ -81,6 +83,12 @@ async function renew(started: string | null): Promise<string> {
   try {
     const r = await axios.post("/api/token/refresh/", { refresh: sent }, { timeout: REFRESH_TIMEOUT_MS });
     markReachable();
+    // The session changed while ours was out: another tab's login stands, and so does a sign-out. Never store over either.
+    if (getTokens().refresh !== sent) {
+      const rotated = rotatedElsewhere(sent);
+      if (rotated) return rotated;
+      throw new SignedOutMeanwhile("signed out while the refresh was out");
+    }
     setTokens(r.data.access, r.data.refresh);
     return r.data.access as string;
   } catch (e) {
@@ -134,8 +142,8 @@ api.interceptors.response.use(
     try {
       access = await refreshAccessToken();
     } catch (e) {
-      // Refused: the session is over, and the original 401 says so. A blip: the person stays signed in and sees the blip.
-      return Promise.reject(e instanceof SessionEnded ? error : e);
+      // Refused, or signed out meanwhile: the session is over, and the original 401 says so. A blip: the person stays signed in and sees the blip.
+      return Promise.reject(e instanceof SessionEnded || e instanceof SignedOutMeanwhile ? error : e);
     }
     original.headers.Authorization = `Bearer ${access}`;
     return api(original);

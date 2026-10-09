@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { AxiosAdapter, InternalAxiosRequestConfig } from "axios";
 import axios, { AxiosError } from "axios";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
@@ -309,4 +309,47 @@ test("a sign-in whose person can't be loaded leaves no tokens behind and says wh
   expect(localStorage.getItem("gst_access_token")).toBeNull();
   expect(localStorage.getItem("gst_refresh_token")).toBeNull();
   expect(screen.getByText("status:signed-out")).toBeInTheDocument();
+});
+
+// Ruling 31: Sign out sticks mid-refresh, and a switch refreshes what's on screen
+
+test("Sign out sticks while a refresh is out: the late refresh brings no one back, here, in other tabs or after a reload", async () => {
+  setTokens("a", "r");
+  let land: ((r: unknown) => void) | undefined;
+  vi.spyOn(axios, "post").mockImplementation(() => new Promise((resolve) => { land = resolve; })); // the refresh, held open
+  api.defaults.adapter = ((config) => (config.headers.Authorization === "Bearer a" ? reply(config, 401, { detail: "Token expired" }) : reply(config, 200, ME))) as AxiosAdapter;
+  const first = mount();
+  await waitFor(() => expect(land).toBeDefined()); // the start's /api/me/ got a 401, and the refresh is out
+  await act(async () => { screen.getByText("out").click(); });
+  await act(async () => { land!({ data: { access: "a2", refresh: "r2" } }); await new Promise((r) => setTimeout(r, 10)); });
+  expect(screen.getByText("status:signed-out")).toBeInTheDocument();
+  // other tabs follow what's stored, and a reload reads it: nothing is
+  expect(localStorage.getItem("gst_access_token")).toBeNull();
+  expect(localStorage.getItem("gst_refresh_token")).toBeNull();
+  expect(localStorage.getItem("gst3.me")).toBeNull();
+  first.unmount();
+  mount();
+  expect(screen.getByText("status:signed-out")).toBeInTheDocument();
+});
+
+function Bills() {
+  const q = useQuery({ queryKey: ["bills"], queryFn: async () => (await api.get("bills/")).data as string[], staleTime: Infinity });
+  return <p>bills:{q.data?.join(",") ?? "…"}</p>;
+}
+
+test("a switch refreshes what's on screen: a list that doesn't read useAuth refetches for the new person", async () => {
+  setTokens("a", "r");
+  api.defaults.adapter = ((config) => {
+    const rakesh = config.headers.Authorization === "Bearer a";
+    if (config.url === "me/") return reply(config, 200, rakesh ? ME : KAILASH);
+    return reply(config, 200, rakesh ? ["KGH/31 for Rakesh"] : ["KGH/32 for Kailash"]);
+  }) as AxiosAdapter;
+  const client = new QueryClient();
+  client.getMutationCache().build(client, { mutationFn: async () => "Rakesh's change" });
+  render(<QueryClientProvider client={client}><AuthProvider><Probe /><Bills /></AuthProvider></QueryClientProvider>);
+  expect(await screen.findByText("bills:KGH/31 for Rakesh")).toBeInTheDocument();
+  inAnotherTab([["gst_access_token", "b"], ["gst_refresh_token", "rb"]]); // Kailash signs in in another tab
+  await waitFor(() => expect(screen.getByText("who:Kailash Mehta")).toBeInTheDocument());
+  expect(await screen.findByText("bills:KGH/32 for Kailash")).toBeInTheDocument();
+  expect(client.getMutationCache().getAll()).toEqual([]);
 });
