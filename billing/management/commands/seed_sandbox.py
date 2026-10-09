@@ -40,7 +40,9 @@ from billing.models import (
     ITCReclaimLedger,
     LineItem,
     Product,
+    UserPreference,
 )
+from billing.roles import GROUP_ACCOUNTANT, GROUP_STAFF
 from billing.services.line_items import build_line_items
 
 D = Decimal
@@ -116,11 +118,14 @@ SEASON = {4: 1.3, 5: 1.2, 6: 0.7, 7: 0.6, 8: 0.8, 9: 0.9, 10: 1.5, 11: 1.6, 12: 
 PAYMENT_MODES = ["cash"] * 7 + ["bank"] * 9 + ["credit"] * 2 + ["mixed", ""]
 
 ROLES = [
-    ("owner", "sandbox_owner", "admin", True),
-    ("admin", "sandbox_admin", "admin", False),
-    ("editor", "sandbox_editor", "editor", False),
-    ("viewer", "sandbox_viewer", "viewer", False),
-    ("no group (viewer by default)", "sandbox_nogroup", None, False),
+    ("owner", "sandbox_owner", (), True),
+    ("admin", "sandbox_admin", ("admin",), False),
+    ("editor", "sandbox_editor", ("editor",), False),
+    ("viewer", "sandbox_viewer", ("viewer",), False),
+    ("no group (viewer by default)", "sandbox_nogroup", (), False),
+    # v3's roles keep their v2 group too, so today's permission classes (and a rollback) work
+    ("accountant", "sandbox_accountant", (GROUP_ACCOUNTANT, "editor"), False),
+    ("staff", "sandbox_staff", (GROUP_STAFF, "editor"), False),
 ]
 
 
@@ -156,6 +161,7 @@ class Command(BaseCommand):
                 raise CommandError("The sandbox already has data; run with --reset to replace it.")
             logins = self._users()
             firms = self._firms()
+            self._usual_firms(firms)
             parties = self._parties(firms)
             self._products()
             n_out = self._outward(firms, parties, opts["scale"])
@@ -194,6 +200,7 @@ class Command(BaseCommand):
         Customer.objects.all().delete()
         Product.objects.all().delete()
         Business.objects.all().delete()
+        UserPreference.objects.filter(user__username__startswith="sandbox_").delete()
         User.objects.filter(username__startswith="sandbox_").delete()
 
     # ── masters ───────────────────────────────────────────────────────────
@@ -208,16 +215,16 @@ class Command(BaseCommand):
 
     def _users(self):
         logins = []
-        for role, username, group, superuser in ROLES:
+        for role, username, groups, superuser in ROLES:
             password = secrets.token_urlsafe(12)
             user = User.objects.create_user(
                 username=username, email=f"{username}@example.com", password=password,
                 is_staff=superuser, is_superuser=superuser,
             )
-            if group:
+            for group in groups:
                 user.groups.add(Group.objects.get_or_create(name=group)[0])
             logins.append((role, username, password))
-        for name in ("admin", "editor", "viewer"):
+        for name in ("admin", "editor", "viewer", GROUP_ACCOUNTANT, GROUP_STAFF):
             Group.objects.get_or_create(name=name)
         return logins
 
@@ -233,6 +240,12 @@ class Command(BaseCommand):
                 bank_ifsc_code=f"SBOX000000{i}", bank_branch_name=city,
             ))
         return firms
+
+    def _usual_firms(self, firms):
+        """Counter staff usually work for KIRAN: v3 opens on that firm (v2 reads the same key)."""
+        kiran = next(f for f in firms if f.name.startswith("KIRAN"))
+        staff = User.objects.get(username="sandbox_staff")
+        UserPreference.objects.update_or_create(user=staff, defaults={"data": {"defaultBusinessId": str(kiran.id)}})
 
     def _parties(self, firms):
         pools = {"all": [], "supplier": [], "b2b_intra": [], "b2b_inter": [], "b2c_intra": [], "b2c_inter": [], "unknown": []}
