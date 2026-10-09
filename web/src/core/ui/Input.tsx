@@ -19,7 +19,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ p
   return (
     <div className={cn("relative min-w-0", className)}>
       {P ? <span className="pointer-events-none absolute left-3 top-0 bottom-0 flex items-center text-muted">{isIcon(P) ? <P size={17} aria-hidden="true" /> : P}</span> : null}
-      <input ref={ref} aria-invalid={invalid || undefined} {...aria} className={cn("ctl", P && "pl-9", suffix && "pr-14", inputClassName)} {...rest} />
+      <input ref={ref} aria-invalid={invalid || undefined} className={cn("ctl", P && "pl-9", suffix && "pr-14", inputClassName)} {...rest} {...aria} />
       {suffix ? <span className="pointer-events-none absolute right-3 top-0 bottom-0 flex items-center text-muted text-sm">{suffix}</span> : null}
     </div>
   );
@@ -32,7 +32,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   const aria = useFieldAria(rest.id, rest);
   return (
     <div className={cn("relative min-w-0", className)}>
-      <select ref={ref} aria-invalid={invalid || undefined} {...aria} className="ctl appearance-none pr-10 truncate" {...rest}>
+      <select ref={ref} aria-invalid={invalid || undefined} className="ctl appearance-none pr-10 truncate" {...rest} {...aria}>
         {placeholder ? <option value="" disabled>{placeholder}</option> : null}
         {options.map((o) => (typeof o === "string" ? <option key={o} value={o}>{o}</option> : <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>))}
       </select>
@@ -45,7 +45,7 @@ export type TextareaProps = { invalid?: boolean } & TextareaHTMLAttributes<HTMLT
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea({ className, invalid, ...rest }, ref) {
   const aria = useFieldAria(rest.id, rest);
-  return <textarea ref={ref} aria-invalid={invalid || undefined} {...aria} className={cn("ctl min-h-[88px] resize-y", className)} {...rest} />;
+  return <textarea ref={ref} aria-invalid={invalid || undefined} className={cn("ctl min-h-[88px] resize-y", className)} {...rest} {...aria} />;
 });
 
 export type SearchInputProps = { value: string; onChange: (v: string) => void; placeholder?: string; id?: string; label?: string | null; className?: string; inputRef?: Ref<HTMLInputElement> } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">;

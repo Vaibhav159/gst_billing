@@ -81,6 +81,25 @@ test("a field ties only the control its htmlFor names: the hint when there's no 
   expect(per).not.toHaveAttribute("aria-invalid");
 });
 
+test("a field keeps its hint and error link when a control passes undefined, and an explicit value still wins", () => {
+  wrap(<>
+    <Field label="Rate" htmlFor="r" hint="h"><Input id="r" aria-describedby={undefined} /></Field>
+    <Field label="Unit" htmlFor="u" error="Pick a unit"><Select id="u" options={["g"]} aria-describedby={undefined} aria-invalid={undefined} /></Field>
+    <Field label="Note" htmlFor="n" hint="Printed on the bill"><Textarea id="n" aria-describedby={undefined} /></Field>
+    <Field label="Making" htmlFor="m" hint="h"><Input id="m" aria-describedby="custom" /></Field>
+    <Field label="Weight" htmlFor="w" error="Too heavy"><Input id="w" aria-invalid={false} /></Field>
+  </>);
+  expect(screen.getByLabelText("Rate")).toHaveAttribute("aria-describedby", "r-hint");
+  const unit = screen.getByLabelText("Unit");
+  expect(unit).toHaveAttribute("aria-describedby", "u-error");
+  expect(unit).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("Note")).toHaveAttribute("aria-describedby", "n-hint");
+  expect(screen.getByLabelText("Making")).toHaveAttribute("aria-describedby", "custom");
+  const weight = screen.getByLabelText("Weight");
+  expect(weight).toHaveAttribute("aria-invalid", "false");
+  expect(weight).toHaveAttribute("aria-describedby", "w-error");
+});
+
 test("invalid marks a control without a field", () => {
   wrap(<><Input aria-label="Name" invalid /><Select aria-label="State" options={["Rajasthan"]} invalid /><Textarea aria-label="Address" invalid /></>);
   for (const name of ["Name", "State", "Address"]) expect(screen.getByLabelText(name)).toHaveAttribute("aria-invalid", "true");

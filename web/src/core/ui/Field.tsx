@@ -7,7 +7,11 @@ const FieldCtx = createContext<{ id: string; describedBy: string | undefined; in
 
 type FieldAria = Pick<AriaAttributes, "aria-describedby" | "aria-invalid">;
 
-/** The error (or hint) and invalid state a kit control gets from the Field whose htmlFor is its id, unless the control sets its own. Used inside the kit only. */
+/**
+ * The error (or hint) and invalid state a kit control gets from the Field whose htmlFor is its id, unless the control sets its own.
+ * Spread it after the control's own props: it holds only the keys they leave undefined, so an explicit `undefined` can't cut the link.
+ * Used inside the kit only.
+ */
 export function useFieldAria(id: string | undefined, rest: FieldAria): FieldAria {
   const f = useContext(FieldCtx);
   if (!f || !id || f.id !== id) return {};
