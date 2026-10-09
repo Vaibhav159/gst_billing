@@ -25,13 +25,14 @@ function failureOf(p: ApiProblem): Problem {
 /**
  * Where `next` may send the person after signing in: a page of this app, never another site. Browsers read
  * "/\host" and "/<tab>/host" as "//host", so the path must also resolve to this origin (React Router throws otherwise).
- * Never this page again either: the page leaves once, so a signed-in person would be left on it.
+ * Never this page again either, however it's spelt (the router reads "/login//" and "/%6Cogin" as this page): the page
+ * leaves once, so a signed-in person would be left on it. A path whose %-escapes don't read goes home.
  */
 function safeNext(next: string | null): string | null {
   if (!next || !next.startsWith("/") || next.startsWith("//")) return null;
   try {
     const url = new URL(next, window.location.origin);
-    return url.origin === window.location.origin && !/^\/login\/?$/i.test(url.pathname) ? next : null;
+    return url.origin === window.location.origin && !/^\/login\/*$/i.test(decodeURIComponent(url.pathname)) ? next : null;
   } catch { return null; }
 }
 

@@ -156,9 +156,16 @@ test("without reason=expired there's no word of a long break", () => {
   expect(screen.queryByText(/Nothing you saved is affected/)).not.toBeInTheDocument();
 });
 
-// With one navigation per visit, a next back to this page would leave a signed-in person on it
-test.each(["/login", "/LOGIN/?next=%2Fsales%2F31"])("a next back to the sign-in page (%j) is ignored: signing in goes home", async (next) => {
+// With one navigation per visit, a next back to this page would leave a signed-in person on it.
+// Ruling 37: the router reads extra slashes and %-escapes as the same page, so those spellings are refused too.
+test.each(["/login", "/LOGIN/?next=%2Fsales%2F31", "/login//", "/LOGIN//", "/%6Cogin", "/l%6Fgin?x=1"])("a next back to the sign-in page (%j) is ignored: signing in goes home", async (next) => {
   mountWith({ ok: true }, `/login?next=${encodeURIComponent(next)}`);
+  await signInAs("a", "b");
+  expect(await screen.findByText("home")).toBeInTheDocument();
+});
+
+test("a next whose %-escapes don't read goes home too", async () => {
+  mountWith({ ok: true }, `/login?next=${encodeURIComponent("/sales/%E0%A4%A")}`);
   await signInAs("a", "b");
   expect(await screen.findByText("home")).toBeInTheDocument();
 });
