@@ -1,12 +1,12 @@
 import { Navigate, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
+import Login from "@/pages/core/Login";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
-  login: { part: 0, area: "Sign in" },
   dashboard: { part: 5, area: "Dashboard" },
   sales: { part: 1, area: "Bills" },
   customers: { part: 1, area: "Customers" },
@@ -77,7 +77,7 @@ function V2Redirect({ to }: { to: (p: Record<string, string>) => string }) {
 export const appRoutes: RouteObject[] = [{
   element: <RootLayout />,
   children: [
-    { path: "/login", element: <Placeholder {...PARTS.login} /> }, // Task 14 swaps in Login
+    { path: "/login", element: <Login /> },
     // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
     ...V2_REDIRECTS.map(([path, to]): RouteObject => ({ path, element: <V2Redirect to={to} /> })),
     {

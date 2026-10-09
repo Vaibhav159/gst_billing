@@ -137,7 +137,7 @@ test("one toast host covers sign-in and the app: a toast shows exactly once on e
   let toast!: ToastApi;
   function Grab() { toast = useToast(); return null; }
   mount("/login", false, <Grab />);
-  await screen.findByRole("heading", { level: 1, name: "Sign in" });
+  await screen.findByRole("heading", { level: 1, name: "GST Billing" }); // the sign-in page (Task 14)
   act(() => { toast.show({ title: "Shown on the sign-in page" }); });
   expect(await screen.findAllByText("Shown on the sign-in page")).toHaveLength(1);
   cleanup();
