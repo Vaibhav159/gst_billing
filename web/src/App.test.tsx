@@ -5,6 +5,9 @@ import { api, setTokens } from "@/core/api/client";
 import { appRoutes } from "@/core/router/routes";
 import App, { AppRoutes } from "./App";
 
+const realAdapter = api.defaults.adapter;
+afterEach(() => { api.defaults.adapter = realAdapter; });
+
 test("signed out, the app opens on the sign-in page", async () => {
   localStorage.clear();
   render(<App />);

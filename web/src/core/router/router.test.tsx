@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, Link, matchRoutes, Outlet, RouterProvider } from "react-router";
+import { createMemoryRouter, Link, matchRoutes, Outlet, RouterProvider, useNavigate, useParams, type DataRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { Page, ToastProvider, useToast, type ToastApi } from "@/core/ui";
-import { AppLayout } from "@/core/shell/AppLayout";
+import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { stubAuth } from "@/test/render";
 import { PageFrame } from "./PageFrame";
 import { appRoutes, V2_REDIRECTS } from "./routes";
@@ -67,6 +67,10 @@ test("the second click of a double click doesn't land on the page that just open
 
 /** Past the guards that drop the second tap of a double tap (300 ms for a new page, 350 ms for a dialog). */
 const afterADoubleTap = () => act(() => { vi.advanceTimersByTime(400); });
+const frame = () => document.getElementById("app-main")!.firstElementChild as HTMLElement;
+const wait = (ms: number) => act(() => new Promise<void>((r) => { setTimeout(r, ms); }));
+/** After the frame in which a page that just opened scrolls itself to the top, the moment a person could scroll it. */
+const nextFrame = () => act(() => new Promise<void>((r) => { requestAnimationFrame(() => r()); }));
 
 test("Back returns to the same scroll and to the row that opened the page; a new page starts at the top", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
@@ -77,6 +81,7 @@ test("Back returns to the same scroll and to the row that opened the page; a new
     ] }], { initialEntries: ["/customers"] });
     render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
     await screen.findByRole("heading", { level: 1, name: "Customers" });
+    await nextFrame();
     const main = document.getElementById("app-main")!;
     main.scrollTop = 480;
     fireEvent.scroll(main);
@@ -155,7 +160,6 @@ test("on a phone, Back up to the page above slides back, even with no page befor
     ] }], { initialEntries: ["/sales/7/edit"] });
     render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
     await screen.findByRole("heading", { level: 1, name: "Edit bill 7" });
-    const frame = () => document.getElementById("app-main")!.firstElementChild;
     afterADoubleTap();
     // opened straight from a link: Back goes up to the bill, in this entry's place
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -205,7 +209,6 @@ test("the page the app opened on doesn't play its entrance again when the shell 
     ] }], { initialEntries: ["/sales"] });
     render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
     await screen.findByRole("heading", { level: 1, name: "Bills" });
-    const frame = () => document.getElementById("app-main")!.firstElementChild;
     expect(frame()).toHaveClass("h-full", { exact: true });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(frame()).toHaveClass("h-full", { exact: true });
@@ -220,4 +223,194 @@ test("the page the app opened on doesn't play its entrance again when the shell 
   } finally {
     phone(false);
   }
+});
+
+/* ── Ruling 33 (review round 1) ── */
+
+test("a filter change (?query) is the same page: no replay, no swallowed tap, no announcement; scroll and focus stay", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  try {
+    const router = createMemoryRouter([{ element: <AppLayout />, children: [
+      { path: "/sales/paper", element: <Page title="Paper book"><button>Next month</button></Page> },
+    ] }], { initialEntries: ["/sales/paper"] });
+    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    await screen.findByRole("heading", { level: 1, name: "Paper book" });
+    await nextFrame();
+    const page = frame();
+    const main = document.getElementById("app-main")!;
+    const next = screen.getByRole("button", { name: "Next month" });
+    afterADoubleTap();
+    act(() => next.focus());
+    main.scrollTop = 480;
+    await act(async () => { await router.navigate("/sales/paper?month=2026-10", { replace: true }); });
+    expect(frame()).toBe(page);
+    expect(page).toHaveClass("h-full", { exact: true });
+    const spy = vi.fn();
+    next.addEventListener("click", spy);
+    fireEvent.click(next);
+    expect(spy).toHaveBeenCalledTimes(1);
+    await wait(200); // past the 90 ms announcement and a frame
+    expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
+    expect(main.scrollTop).toBe(480);
+    expect(next).toHaveFocus();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("on a phone, a filter change on a page reached by Back keeps its slide and the toast on screen", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  phone(true);
+  try {
+    let toast!: ToastApi;
+    function Grab() { toast = useToast(); return null; }
+    const router = createMemoryRouter([{ element: <RootLayout />, children: [{ element: <AppLayout />, children: [
+      { path: "/sales/paper", element: <Page title="Paper book">The book</Page> },
+      { path: "/sales/7", element: <Page title="Bill 7">The bill</Page> },
+    ] }] }], { initialEntries: ["/sales/paper", "/sales/7"], initialIndex: 1 });
+    render(<ToastProvider><Grab /><RouterProvider router={router} /></ToastProvider>);
+    await screen.findByRole("heading", { level: 1, name: "Bill 7" });
+    await act(async () => { await router.navigate(-1); });
+    await screen.findByRole("heading", { level: 1, name: "Paper book" });
+    const page = frame();
+    expect(page).toHaveClass("h-full anim-page-pop", { exact: true });
+    act(() => { toast.show({ title: "Bill 7 saved" }); });
+    act(() => { vi.advanceTimersByTime(2000); }); // older than the 1.2 s a toast shown just before a move is kept
+    await act(async () => { await router.navigate("/sales/paper?month=2026-10", { replace: true }); });
+    await wait(250); // a dismissed toast is gone after 170 ms
+    expect(frame()).toBe(page);
+    expect(page).toHaveClass("h-full anim-page-pop", { exact: true });
+    expect(screen.getByText("Bill 7 saved")).toBeInTheDocument();
+  } finally {
+    phone(false);
+    vi.useRealTimers();
+  }
+});
+
+test("a row opened from the keyboard is where Back puts focus, not the last thing clicked", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  try {
+    function List() {
+      const navigate = useNavigate();
+      return <Page title="Bills"><button id="filter">Filter</button><div data-row="7" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate("/sales/7"); }}>KGH/7</div></Page>;
+    }
+    const router = createMemoryRouter([{ element: <AppLayout />, children: [
+      { path: "/sales", element: <List /> },
+      { path: "/sales/7", element: <Page title="Bill 7">The bill</Page> },
+    ] }], { initialEntries: ["/sales"] });
+    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    await screen.findByRole("heading", { level: 1, name: "Bills" });
+    afterADoubleTap();
+    await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const row = screen.getByText("KGH/7");
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: "Enter" });
+    await screen.findByRole("heading", { level: 1, name: "Bill 7" });
+    await act(async () => { await router.navigate(-1); });
+    await screen.findByRole("heading", { level: 1, name: "Bills" });
+    await waitFor(() => expect(screen.getByText("KGH/7")).toHaveFocus());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Back keeps the list's place even when the next page's clamp is reported before the list is gone (slow phones)", async () => {
+  // Swapping in a short page clamps the list's scroll, and a slow phone can report that scroll while React is still
+  // committing. Here the short page reports it from its layout effect, in the very commit that removes the list.
+  function ShortPage() {
+    useLayoutEffect(() => {
+      const main = document.getElementById("app-main")!;
+      main.scrollTop = 0;
+      main.dispatchEvent(new Event("scroll"));
+    }, []);
+    return <Page title="Dashboard">Today</Page>;
+  }
+  const router = createMemoryRouter([{ element: <AppLayout />, children: [
+    { path: "/sales", element: <Page title="Bills">A long list</Page> },
+    { path: "/", element: <ShortPage /> },
+  ] }], { initialEntries: ["/sales"] });
+  render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  await nextFrame();
+  const main = document.getElementById("app-main")!;
+  main.scrollTop = 3000;
+  fireEvent.scroll(main);
+  await act(async () => { await router.navigate("/"); });
+  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+  await act(async () => { await router.navigate(-1); });
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  await waitFor(() => expect(main.scrollTop).toBe(3000));
+});
+
+test("signing in lands with focus on the page's title and announces it; the page the app opened on is left alone", async () => {
+  // opened straight on a page: the browser decides where focus starts
+  mount("/sales");
+  const opened = await screen.findByRole("heading", { level: 1, name: "Bills" });
+  await wait(200);
+  expect(opened).not.toHaveFocus();
+  expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
+  cleanup();
+
+  let signIn!: () => void;
+  function SignedInLater({ router }: { router: DataRouter }) {
+    const [on, setOn] = useState(false);
+    signIn = () => setOn(true);
+    return <QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth(on ? undefined : null)}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
+  }
+  const router = createMemoryRouter(appRoutes, { initialEntries: ["/login?next=%2Fsales"] });
+  render(<SignedInLater router={router} />);
+  await screen.findByRole("heading", { level: 1, name: "Sign in" });
+  act(() => signIn());
+  await act(async () => { await router.navigate("/sales", { replace: true }); }); // what the sign-in page does next
+  const h1 = await screen.findByRole("heading", { level: 1, name: "Bills" });
+  await waitFor(() => expect(h1).toHaveFocus());
+  await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Bills"));
+});
+
+test("Back remembers the place on the last 50 pages left, and forgets older ones", async () => {
+  function Numbered() { const { n } = useParams(); return <Page title={`Page ${n}`}>Page {n}</Page>; }
+  const router = createMemoryRouter([{ element: <AppLayout />, children: [{ path: "/p/:n", element: <Numbered /> }] }], { initialEntries: ["/p/0"] });
+  render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+  await screen.findByRole("heading", { level: 1, name: "Page 0" });
+  const main = document.getElementById("app-main")!;
+  const scrollTo = async (y: number) => { await nextFrame(); main.scrollTop = y; fireEvent.scroll(main); };
+  await scrollTo(300);
+  await act(async () => { await router.navigate("/p/1"); });
+  await scrollTo(200);
+  for (let n = 2; n <= 50; n++) await act(async () => { await router.navigate(`/p/${n}`); });
+  // 50 pages left behind; going Back leaves page 50 too, the 51st: page 0, the oldest, is forgotten and page 1 kept
+  await act(async () => { await router.navigate(-49); });
+  await screen.findByRole("heading", { level: 1, name: "Page 1" });
+  await waitFor(() => expect(main.scrollTop).toBe(200));
+  await act(async () => { await router.navigate(-1); });
+  await screen.findByRole("heading", { level: 1, name: "Page 0" });
+  await nextFrame();
+  await waitFor(() => expect(main.scrollTop).toBe(0));
+});
+
+test("the sign-in page carries the view too, so phone fields there get the 16 px text that keeps iOS from zooming", async () => {
+  phone(true);
+  try {
+    mount("/login", false);
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Sign in" });
+    expect(h1.closest("[data-view]")).toHaveAttribute("data-view", "expert");
+  } finally {
+    phone(false);
+  }
+});
+
+test("every v2 address lands on its own new address; v2's number link stays a page", async () => {
+  const wrong: string[] = [];
+  for (const [path, to] of V2_REDIRECTS) {
+    const params: Record<string, string> = {};
+    const url = path.replace(/:(\w+)/g, (_m, k: string) => (params[k] = k === "id" ? "42" : k));
+    const router = mount(url);
+    try { await waitFor(() => expect(router.state.location.pathname).toBe(to(params)), { timeout: 500 }); }
+    catch { wrong.push(`${url} -> ${router.state.location.pathname}, not ${to(params)}`); }
+    cleanup();
+  }
+  expect(wrong).toEqual([]);
+  const router = mount("/billing/invoice/kgh/2026-27/31");
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  expect(router.state.location.pathname).toBe("/billing/invoice/kgh/2026-27/31");
 });

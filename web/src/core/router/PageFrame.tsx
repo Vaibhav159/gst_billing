@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type MouseEvent } from "react";
+import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode, type MouseEvent } from "react";
 import { useLocation, useNavigationType } from "react-router";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
@@ -6,7 +6,20 @@ import { useToast } from "@/core/ui";
 
 export type Opener = { href: string | null; row: string | null; id: string | null };
 type Place = { scroll: number; opener: Opener | null };
+/** Where you were on each page you left (by history entry), for Back: the newest 50. */
 const places = new Map<string, Place>();
+const KEEP_PLACES = 50;
+function remember(entry: string, place: Place) {
+  places.delete(entry); // a Map keeps insertion order: re-adding makes it the newest
+  places.set(entry, place);
+  if (places.size > KEEP_PLACES) places.delete(places.keys().next().value!);
+}
+
+/**
+ * True while the sign-in page shows (RootLayout keeps it). The frame mounts fresh after signing in, and that page is
+ * a move like any other (focus to its title, its name announced), not the page the app opened on.
+ */
+export const SignInShown = createContext<{ current: boolean }>({ current: false });
 
 /** Say the new page's name to screen readers (the polite live region in AppLayout). */
 export function announce(text: string) {
@@ -39,55 +52,74 @@ export function focusAfterNavigation(opener?: Opener | null) {
   (target || main?.querySelector<HTMLElement>("[data-page-title]"))?.focus({ preventScroll: true });
 }
 
+type Clicked = { current: { entry: string; opener: Opener | null } | null };
+type KeeperProps = { pathname: string; entry: string; clicked: Clicked; children: ReactNode };
+/**
+ * Notes where you were on the page you're leaving just before React swaps in the next one, as the prototype's
+ * placeOf() did: the list's scroll, and what has focus (a row opened with Enter), else what was last clicked
+ * (Safari doesn't focus a clicked link). A scroll listener would be too late: on a slow phone it hears the
+ * next page's clamp before React removes it, and Back lands at the top.
+ */
+class PlaceKeeper extends Component<KeeperProps> {
+  getSnapshotBeforeUpdate(prev: Readonly<KeeperProps>) {
+    if (prev.pathname === this.props.pathname) return null;
+    const main = document.getElementById("app-main");
+    const a = document.activeElement;
+    const focused = main && a && a !== document.body && main.contains(a) ? openerOf(a) : null;
+    const click = this.props.clicked.current;
+    remember(prev.entry, { scroll: main?.scrollTop ?? 0, opener: focused ?? (click?.entry === prev.entry ? click.opener : null) });
+    return null;
+  }
+  componentDidUpdate() { /* React warns when getSnapshotBeforeUpdate has no componentDidUpdate beside it */ }
+  render() { return this.props.children; }
+}
+
 /**
  * Wraps every page. A new page starts at the top; Back returns to the same scroll and row.
  * Focus moves to the new page's title, and its name is announced. Plain toasts clear.
  * The second click of a double click (within 300 ms) can't land on the page that just opened.
  * Pages rise in on desktop; on phones they slide forward or back.
+ * A page is its path: a filter change (?query) re-renders it, and none of the above happens.
  */
 export function PageFrame({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const { pathname, key } = location;
   const nav = useNavigationType();
   const { isDesktop } = useView();
   const { clearPlain } = useToast();
-  const first = useRef(true);
+  const signIn = useContext(SignInShown);
   const openedAt = useRef(0);
-  const key = location.key;
-  // the page the app opened on came in with the app: it has no entrance to play, however often the shell re-renders,
-  // until the first move (`first` turns false at mount, so it can't tell a re-render from a new page)
-  const startKey = useRef(key);
-  const moved = useRef(false);
+  const clicked = useRef<Clicked["current"]>(null);
 
-  useEffect(() => {
-    const main = document.getElementById("app-main");
-    if (!main) return undefined;
-    const onScroll = () => { const p = places.get(key) || { scroll: 0, opener: null }; places.set(key, { ...p, scroll: main.scrollTop }); };
-    main.addEventListener("scroll", onScroll, { passive: true });
-    return () => main.removeEventListener("scroll", onScroll);
-  }, [key]);
+  // the phone header's Back with no page before it goes up a level in place (a replace marked dir: "back"): still a step back
+  const stepBack = nav === "POP" || (location.state as { dir?: string } | null)?.dir === "back";
+  const entrance = isDesktop ? "anim-page-rise" : stepBack ? "anim-page-pop" : "anim-page-push";
+  // how this page came in, settled once per page: the page the app opened on comes in quietly, with the app,
+  // however often the shell re-renders; the page after signing in comes in like any other move
+  const [visit, setVisit] = useState(() => ({ pathname, anim: signIn.current ? entrance : "", quiet: !signIn.current }));
+  if (visit.pathname !== pathname) setVisit({ pathname, anim: entrance, quiet: false });
 
   useEffect(() => {
     openedAt.current = Date.now();
-    if (key !== startKey.current) moved.current = true;
     const main = document.getElementById("app-main");
     const back = nav === "POP" ? places.get(key) : undefined;
     requestAnimationFrame(() => main?.scrollTo(0, back?.scroll ?? 0));
-    if (first.current) { first.current = false; return undefined; }
+    if (visit.quiet) return undefined;
     clearPlain();
     const t = setTimeout(() => {
       announce(document.title.replace(/ · GST Billing$/, ""));
       focusAfterNavigation(back?.opener);
     }, 90);
     return () => clearTimeout(t);
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onClickCapture = (e: MouseEvent) => {
-    if (!first.current && Date.now() - openedAt.current < 300) { e.stopPropagation(); e.preventDefault(); return; }
-    const p = places.get(key) || { scroll: 0, opener: null };
-    places.set(key, { ...p, opener: openerOf(e.target) });
+    if (Date.now() - openedAt.current < 300) { e.stopPropagation(); e.preventDefault(); return; }
+    clicked.current = { entry: key, opener: openerOf(e.target) };
   };
-  // the phone header's Back with no page before it goes up a level in place (a replace marked dir: "back"): still a step back
-  const stepBack = nav === "POP" || (location.state as { dir?: string } | null)?.dir === "back";
-  const anim = key === startKey.current && !moved.current ? "" : isDesktop ? "anim-page-rise" : stepBack ? "anim-page-pop" : "anim-page-push";
-  return <div key={location.pathname} onClickCapture={onClickCapture} className={cn("h-full", anim)}>{children}</div>;
+  return (
+    <PlaceKeeper pathname={pathname} entry={key} clicked={clicked}>
+      <div key={pathname} onClickCapture={onClickCapture} className={cn("h-full", visit.anim)}>{children}</div>
+    </PlaceKeeper>
+  );
 }

@@ -1,11 +1,24 @@
-import { Outlet } from "react-router";
+import { useEffect, useRef } from "react";
+import { Outlet, useLocation } from "react-router";
 import { useView } from "@/core/view";
 import { ToastHost } from "@/core/ui";
-import { PageFrame } from "@/core/router/PageFrame";
+import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 
-/** Around every route, sign-in included: the app's one ToastHost (a second would show every toast twice). */
+/**
+ * Around every route, sign-in included: the app's one ToastHost (a second would show every toast twice), and the
+ * view on its root, so the sign-in form gets the phone's 16 px fields too (iOS zooms into anything smaller).
+ * It also tells the page frame when the sign-in page was showing, so the page after it is greeted like a move.
+ */
 export function RootLayout() {
-  return <><Outlet /><ToastHost /></>;
+  const { view } = useView();
+  const { pathname } = useLocation();
+  const signIn = useRef(false);
+  useEffect(() => { signIn.current = pathname === "/login"; }, [pathname]);
+  return (
+    <SignInShown.Provider value={signIn}>
+      <div data-view={view} className="h-full"><Outlet /><ToastHost /></div>
+    </SignInShown.Provider>
+  );
 }
 
 export function AppLayout() {
