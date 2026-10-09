@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { useState } from "react";
@@ -196,6 +196,39 @@ test("tabs: only the chosen tab is in the tab order and names its panel; ArrowLe
   expect(b2b).toHaveAttribute("aria-selected", "true");
   await userEvent.keyboard("{End}");
   expect(b2c).toHaveAttribute("aria-selected", "true");
+});
+
+// Ruling 36: a resize measures the tab chosen now, not the one chosen when the row first showed
+test("tabs: after a change of tab, a resize keeps the indicator under the chosen tab", async () => {
+  const resize: (() => void)[] = [];
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private cb: ResizeObserverCallback) {}
+    observe() { resize.push(() => this.cb([], this as unknown as ResizeObserver)); }
+    unobserve() {}
+    disconnect() {}
+  });
+  // jsdom has no layout: each tab is 80 px wide, 4 px apart
+  const order = ["day", "week", "month"];
+  const spies = [
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.v ? 80 : 0; }),
+    vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.v ? 84 * order.indexOf(this.dataset.v) : 0; }),
+  ];
+  try {
+    function Probe() {
+      const [t, setT] = useState("day");
+      return <Tabs label="Period" tabs={order.map((v) => ({ value: v, label: v }))} value={t} onChange={setT} />;
+    }
+    wrap(<Probe />);
+    const bar = () => screen.getByRole("tablist", { name: "Period" }).querySelector<HTMLElement>("span.absolute");
+    expect(bar()).toHaveStyle({ transform: "translateX(0px)", width: "80px" });
+    await userEvent.click(screen.getByRole("tab", { name: "month" }));
+    expect(bar()).toHaveStyle({ transform: "translateX(168px)" });
+    act(() => resize.forEach((r) => r()));
+    expect(bar()).toHaveStyle({ transform: "translateX(168px)", width: "80px" });
+  } finally {
+    spies.forEach((s) => s.mockRestore());
+    vi.unstubAllGlobals();
+  }
 });
 
 test("checkbox, switch, chip and disclosure say their state", async () => {

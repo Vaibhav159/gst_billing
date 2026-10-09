@@ -125,14 +125,17 @@ export function Tabs<T extends string | number>({ tabs, value, onChange, label, 
     const el = ref.current?.querySelector<HTMLElement>(`[data-v="${value}"]`);
     if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth });
   };
+  // the resize observer calls the latest measure: the first render's would slide the indicator back to the tab chosen first
+  const latest = useRef(measure);
+  latest.current = measure;
   useLayoutEffect(measure, [value, tabs.length, isPhone]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setTimeout(() => setReady(true), 50); return () => clearTimeout(t); }, []);
   useEffect(() => {
     if (!ref.current || typeof ResizeObserver === "undefined") return undefined;
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(() => latest.current());
     ro.observe(ref.current);
     return () => ro.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const i = tabs.findIndex((t) => t.value === value);
     if (["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
