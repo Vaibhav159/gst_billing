@@ -129,6 +129,8 @@ type DragHandlers = {
 export function useDragClose(onClose: () => void, enabled: boolean): { dy: number; handlers: DragHandlers } {
   const st = useRef<{ y: number; t: number } | null>(null);
   const [dy, setDy] = useState(0);
+  // closed mid-drag by the app, not the finger: no release comes, so drop the drag and start the next open at rest
+  useEffect(() => { if (!enabled) { st.current = null; setDy(0); } }, [enabled]);
   if (!enabled) return { dy: 0, handlers: {} };
   const handlers: DragHandlers = {
     onPointerDown: (e) => { if (e.button !== 0 || (e.target as Element).closest("button, a, input, select, textarea")) return; st.current = { y: e.clientY, t: Date.now() }; e.currentTarget.setPointerCapture?.(e.pointerId); },

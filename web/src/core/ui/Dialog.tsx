@@ -3,6 +3,8 @@ import { X } from "lucide-react";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
 import { Button, IconButton } from "./Button";
+import { DL, type DLRow } from "./Card";
+import { Checkbox } from "./Choice";
 import { Portal, useDragClose, useFocusTrap, useGhostGuard, usePresence } from "./Overlay";
 
 /** Last value seen while open, so content doesn't blank out during the exit animation. */
@@ -17,7 +19,7 @@ export type DialogProps = {
   open: boolean; onClose: () => void; title: string; description?: ReactNode; footer?: ReactNode; size?: DialogSize;
   initialFocus?: RefObject<HTMLElement>;
   /** What typing would be lost ("Discard this item?"); closing then asks first. */
-  confirmClose?: boolean | string;
+  confirmClose?: string;
   children: ReactNode;
 };
 
@@ -108,8 +110,8 @@ export function Sheet({ open, onClose, title, description, children, footer, wid
 
 export type ConfirmDialogProps = {
   open: boolean; onClose: () => void; onConfirm: () => void; title: string;
-  /** What's being confirmed, shown in a box; usually <DL rows={[[label, value], …]} />. */
-  record?: ReactNode;
+  /** What's being confirmed, as label / value rows: [["Firm", name], ["Bill", number]]. */
+  record?: readonly DLRow[] | null;
   confirmLabel?: string; cancelLabel?: string; tone?: "primary" | "danger";
   /** A sentence the person must tick before confirming. */
   ack?: string;
@@ -117,7 +119,7 @@ export type ConfirmDialogProps = {
 };
 
 /**
- * Confirmation that names the record (record: the rows, in a box).
+ * Confirmation that names the record. record: [[label, value]] rows.
  * ack: optional sentence the person must tick before confirming.
  */
 export function ConfirmDialog({ open, onClose, onConfirm, title, children, record, confirmLabel = "Confirm", cancelLabel = "Cancel", tone = "primary", ack, confirmDisabled, extra, busy, busyLabel }: ConfirmDialogProps) {
@@ -129,29 +131,11 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, children, recor
     <Dialog open={open} onClose={close} title={title} size="sm"
       footer={<><Button onClick={close} disabled={busy}>{cancelLabel}</Button><Button variant={tone === "danger" ? "danger" : "primary"} disabled={Boolean(ack && !acked) || confirmDisabled} loading={busy} onClick={onConfirm}>{busy ? busyLabel || "Saving…" : confirmLabel}</Button></>}>
       <div className="flex flex-col gap-3">
-        {record ? <div className="rounded-ctl border border-line bg-field px-4 py-1">{record}</div> : null}
+        {record ? <div className="rounded-ctl border border-line bg-field px-4 py-1"><DL rows={record} /></div> : null}
         {children ? <div className="text-fg2 flex flex-col gap-2">{children}</div> : null}
         {extra}
         {ack ? <Checkbox label={ack} checked={acked} onChange={setAcked} /> : null}
       </div>
     </Dialog>
-  );
-}
-
-/**
- * The prototype's Checkbox (core/ui.jsx 542–557), the part ConfirmDialog uses. It's private
- * because Task 8 ports the kit's Checkbox (Choice.tsx) alongside this; once both are in, import that one.
- */
-function Checkbox({ label, checked, onChange }: { label: ReactNode; checked: boolean; onChange: (v: boolean) => void }) {
-  const iid = useId();
-  const { isPhone } = useView();
-  return (
-    <label htmlFor={iid} className={cn("inline-flex items-start gap-2.5 cursor-pointer select-none", isPhone && "min-h-11 items-center")}>
-      <input id={iid} type="checkbox" checked={Boolean(checked)} onChange={(e) => onChange?.(e.target.checked)}
-        className="mt-0.5 w-[18px] h-[18px] shrink-0 accent-brand cursor-pointer" />
-      <span>
-        <span>{label}</span>
-      </span>
-    </label>
   );
 }

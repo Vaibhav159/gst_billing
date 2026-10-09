@@ -59,10 +59,10 @@ test("toasts replace one with the same title and keep at most three", async () =
 });
 
 /* ── Beyond the brief: the rest of the prototype's overlay behaviour, and what this port adds ── */
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, within } from "@testing-library/react";
 import { useLocation } from "react-router";
 import { applyTextSize } from "@/core/device";
-import { Sheet, ToastHost } from "./index";
+import { Sheet, ToastHost, type DLRow } from "./index";
 
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 afterEach(() => phone(false));
@@ -126,6 +126,9 @@ test("a dialog holding typing asks before it closes: Keep editing stays, Discard
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
     const onClose = vi.fn();
+    // confirmClose is the sentence to ask; a bare `true` would show the bar with no words
+    // @ts-expect-error confirmClose takes a string
+    void (<Dialog open onClose={onClose} title="New customer" confirmClose><input aria-label="Name" /></Dialog>);
     wrap(<Dialog open onClose={onClose} title="New customer" confirmClose="Discard this customer?"><input aria-label="Name" /></Dialog>);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -212,10 +215,11 @@ test("a confirmation can wait for a tick, and while it saves nothing closes it",
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
     const onClose = vi.fn();
-    const props = { open: true, onClose, onConfirm: () => {}, title: "Remove Meera Ornaments?", confirmLabel: "Remove", ack: "I understand Meera Ornaments goes off every list.", record: <p>GSTIN 08BBBBB0000B1Z5</p> };
+    const record: DLRow[] = [["Firm", "Meera Ornaments"], ["GSTIN", "08BBBBB0000B1Z5"]];
+    const props = { open: true, onClose, onConfirm: () => {}, title: "Remove Meera Ornaments?", confirmLabel: "Remove", ack: "I understand Meera Ornaments goes off every list.", record };
     const { rerender } = wrap(<ConfirmDialog {...props} />);
     await settle();
-    expect(screen.getByText("GSTIN 08BBBBB0000B1Z5")).toBeInTheDocument();
+    expect(screen.getByText("08BBBBB0000B1Z5")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: "I understand Meera Ornaments goes off every list." }));
     expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
@@ -225,6 +229,59 @@ test("a confirmation can wait for a tick, and while it saves nothing closes it",
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("on phones a sheet that asks first springs back while it asks", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  phone(true);
+  try {
+    const onClose = vi.fn();
+    wrap(<Dialog open onClose={onClose} title="New customer" confirmClose="Discard this customer?"><input aria-label="Name" /></Dialog>);
+    const drag = (type: string, y: number) => fireEvent(screen.getByRole("heading", { name: "New customer" }), new MouseEvent(type, { bubbles: true, button: 0, clientY: y }));
+    drag("pointerdown", 100);
+    await settle();
+    drag("pointermove", 250);
+    drag("pointerup", 250);
+    expect(screen.getByRole("alert")).toHaveTextContent("Discard this customer?");
+    expect(screen.getByRole("dialog").style.transform).toBe("");
+    expect(onClose).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a confirmation shows its record as a list, each label beside its value", () => {
+  wrap(<ConfirmDialog open onClose={() => {}} onConfirm={() => {}} title="Delete this bill?" confirmLabel="Delete" record={[["Firm", "KIRAN"], ["Bill", "KGH/2026-27/31"]]} />);
+  const dialog = screen.getByRole("dialog", { name: "Delete this bill?" });
+  const labels = within(dialog).getAllByRole("term");
+  const values = within(dialog).getAllByRole("definition");
+  expect(labels.map((el) => el.textContent)).toEqual(["Firm", "Bill"]);
+  expect(values.map((el) => el.textContent)).toEqual(["KIRAN", "KGH/2026-27/31"]);
+  expect(labels[0].nextElementSibling).toBe(values[0]);
+});
+
+test("on phones a drag cut short by the app closing the sheet leaves no offset when it reopens", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  phone(true);
+  try {
+    function Probe() { const [open, setOpen] = useState(true); return <><Button onClick={() => setOpen(true)}>Open</Button><Button onClick={() => setOpen(false)}>Shut</Button><Dialog open={open} onClose={() => setOpen(false)} title="Firm"><p>Kiran</p></Dialog></>; }
+    wrap(<Probe />);
+    const drag = (type: string, y: number) => fireEvent(screen.getByRole("heading", { name: "Firm" }), new MouseEvent(type, { bubbles: true, button: 0, clientY: y }));
+    drag("pointerdown", 100);
+    drag("pointermove", 180);
+    expect(screen.getByRole("dialog").style.transform).toBe("translateY(80px)");
+    // the app closes it mid-drag (a save came back, say): no release ever comes
+    fireEvent.click(screen.getByRole("button", { name: "Shut" }));
+    await settle();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("dialog", { name: "Firm" }).style.transform).toBe("");
+    // and that drag is over: moving without pressing again doesn't move the sheet
+    drag("pointermove", 200);
+    expect(screen.getByRole("dialog").style.transform).toBe("");
   } finally {
     vi.useRealTimers();
   }
