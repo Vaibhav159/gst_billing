@@ -6,6 +6,11 @@ export * from "./Banner";
 export * from "./Feedback";
 export * from "./Avatar";
 export { cn } from "@/core/cn";
+// Kit 2: fields and choices. useFieldAria stays inside the kit.
+export { Field, type FieldProps } from "./Field";
+export * from "./Input";
+export * from "./MoneyInput";
+export * from "./Choice";
 // Kit 3: dialogs, sheets, menus and toasts
 export { Portal, usePresence } from "./Overlay";
 export * from "./Dialog";
