@@ -24,9 +24,10 @@ test("when another tab signs in as someone else, the app says who is signed in n
     [jwt(1)]: { id: 1, username: "kailash", full_name: "Kailash Mehta", role: "owner", role_label: "Owner", permissions: "*", needs_role_choice: false },
     [jwt(7)]: { id: 7, username: "rakesh", full_name: "Rakesh Soni", role: "staff", role_label: "Counter staff", permissions: ["view", "bill.create"], needs_role_choice: false },
   };
-  // /api/me/ answers for whoever the request's token names
+  // /api/me/ answers for whoever the request's token names; the shell's preferences and firm list come back empty
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: people[String(config.headers.Authorization).replace(/^Bearer /, "")] })) as AxiosAdapter;
+    data: config.url?.startsWith("preferences/") ? { data: {} } : config.url?.startsWith("businesses/") ? { results: [] }
+      : people[String(config.headers.Authorization).replace(/^Bearer /, "")] })) as AxiosAdapter;
   setTokens(jwt(1), "r1");
   render(<AppRoutes router={createMemoryRouter(appRoutes, { initialEntries: ["/sales"] })} />);
   await screen.findByRole("heading", { level: 1, name: "Bills" });

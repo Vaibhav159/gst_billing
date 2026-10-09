@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, Link, matchRoutes, Outlet, RouterProvider, useNavigate, useParams, type DataRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { AxiosAdapter } from "axios";
+import { api } from "@/core/api/client";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { Page, ToastProvider, useToast, type ToastApi } from "@/core/ui";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
@@ -10,6 +12,16 @@ import { stubAuth } from "@/test/render";
 import { PageFrame } from "./PageFrame";
 import { appRoutes, V2_REDIRECTS } from "./routes";
 import { useUnsavedGuard } from "./useUnsavedGuard";
+
+// The shell asks for the firms and this person's preferences: a fake server answers, so no test reaches the network.
+beforeEach(() => {
+  api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
+    data: config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
+      : config.url?.startsWith("preferences/") ? { data: {} } : {} })) as AxiosAdapter;
+});
+
+/** The providers App gives the shell (queries, sign-in, toasts) around a router. */
+const inApp = (router: DataRouter) => <QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
 
 /** `extra` renders beside the router, inside the toast provider, as App's own providers do. */
 function mount(path: string, signedIn = true, extra: ReactNode = null) {
@@ -79,7 +91,7 @@ test("Back returns to the same scroll and to the row that opened the page; a new
       { path: "/customers", element: <Page title="Customers"><Link to="/customers/7" data-row="7">Anil Gupta</Link></Page> },
       { path: "/customers/7", element: <Page title="Anil Gupta">His bills</Page> },
     ] }], { initialEntries: ["/customers"] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    render(inApp(router));
     await screen.findByRole("heading", { level: 1, name: "Customers" });
     await nextFrame();
     const main = document.getElementById("app-main")!;
@@ -158,7 +170,7 @@ test("on a phone, Back up to the page above slides back, even with no page befor
       { path: "/sales/7", element: <Page title="Bill 7" back="/sales">The bill</Page> },
       { path: "/sales/7/edit", element: <Page title="Edit bill 7" back="/sales/7">The form</Page> },
     ] }], { initialEntries: ["/sales/7/edit"] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    render(inApp(router));
     await screen.findByRole("heading", { level: 1, name: "Edit bill 7" });
     afterADoubleTap();
     // opened straight from a link: Back goes up to the bill, in this entry's place
