@@ -22,10 +22,13 @@ export function Money({ value, whole, size, tone, className, sign, strong, bump 
 }
 function moneyContent({ value, whole, size, tone, className, sign, strong }: Omit<MoneyProps, "bump">) {
   if (size) {
-    const p = inrParts(value ?? 0, { whole });
     const sz = { md: "text-md", lg: "text-lg", xl: "text-xl", "2xl": "text-2xl", "3xl": "text-3xl", "4xl": "text-4xl", "5xl": "text-5xl" }[size];
+    const cls = cn("tnum font-semibold tracking-[-0.015em] whitespace-nowrap", sz, tone && TONE_TEXT[tone], className);
+    // No value: the dash inr() gives the plain style and screen readers, never a false ₹0.00.
+    if (value == null || Number.isNaN(value)) return <span className={cls}>{inr(value)}</span>;
+    const p = inrParts(value, { whole });
     return (
-      <span className={cn("tnum font-semibold tracking-[-0.015em] whitespace-nowrap", sz, tone && TONE_TEXT[tone], className)}>
+      <span className={cls}>
         <span className="sr-only">{inr(value, { whole })}</span>
         <span aria-hidden="true">{p.neg ? "−" : ""}<span className="money-sym">₹</span>{p.rupees}{p.paise ? <span className="money-paise">{p.paise}</span> : null}</span>
       </span>

@@ -37,6 +37,17 @@ test("money shows rupees with paise set smaller", () => {
   expect(big.querySelector(".sr-only")?.textContent).toBe("₹87,083.21");
 });
 
+test("a sized amount with no value shows a dash, not ₹0.00", () => {
+  for (const value of [null, NaN]) {
+    const { container, unmount } = wrap(<Money value={value} size="2xl" />);
+    const seen = container.cloneNode(true) as HTMLElement;
+    seen.querySelectorAll(".sr-only").forEach((n) => n.remove());
+    expect(seen.textContent, `value ${value}`).toBe("—");
+    expect(container).not.toHaveTextContent("₹0.00");
+    unmount();
+  }
+});
+
 test("errors and loading are announced in plain words", () => {
   wrap(<><LoadError problem={{ kind: "offline", message: "You're offline" }} what="the bills" retry={() => {}} /><ListSkeleton what="the bills" /></>);
   expect(screen.getByText(/You're offline/)).toBeInTheDocument();
