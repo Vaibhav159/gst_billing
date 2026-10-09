@@ -1,4 +1,4 @@
-import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { markReachable, markUnreachable } from "./network";
 
 export const ACCESS_KEY = "gst_access_token";
@@ -36,32 +36,69 @@ function noteFailure(error: AxiosError) {
 /** The server refused the refresh token, or there is none: the person has to sign in again. */
 class SessionEnded extends Error {}
 
+/** Just over nginx's 95 s proxy_read_timeout, so a reply the proxy would still deliver is never abandoned. */
+const REFRESH_TIMEOUT_MS = 100_000;
 const REFRESH_LOCK = "gst-token-refresh";
+/** How long a tab waits for another tab's refresh. It has sent nothing yet, so giving up costs no rotation. */
+const LOCK_WAIT_MS = 20_000;
+
 /** Every tab shares one refresh through a Web Lock, where the browser has them (https only); otherwise this tab's single flight does. */
 async function underLock<T>(fn: () => Promise<T>): Promise<T> {
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
-  return locks ? await locks.request(REFRESH_LOCK, fn) : fn();
+  if (!locks) return fn();
+  const wait = new AbortController();
+  const timer = setTimeout(() => wait.abort(), LOCK_WAIT_MS);
+  let granted = false;
+  try {
+    // the limit is for waiting only: once granted, the refresh has its own timeout (and an abort after the grant must not matter)
+    return await locks.request(REFRESH_LOCK, { signal: wait.signal }, () => { granted = true; clearTimeout(timer); return fn(); });
+  } catch (e) {
+    if (granted || !wait.signal.aborted) throw e;
+    const stuck = new AxiosError("Another tab's refresh didn't finish", AxiosError.ETIMEDOUT); // no response: reads as unreachable
+    markUnreachable(stuck);
+    throw stuck;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Another tab's login, if storage holds one made from a refresh token other than `ours`: the server rotated ours away. */
+function rotatedElsewhere(ours: string | null): string | null {
+  const { access, refresh } = getTokens();
+  return access && refresh && refresh !== ours ? access : null;
 }
 
 /**
  * Trades the refresh token for new ones, under the lock. `started` is the refresh token this tab had before it waited:
- * if another tab stored a different one meanwhile, that tab already refreshed (the server rotated `started`), so use its tokens.
- * Only a refusal (400 or 401) ends the session: no reply or a 5xx keeps the tokens for the next try.
+ * if another tab stored a different one meanwhile, that tab already refreshed, so use its tokens.
+ * Only a refusal (400 or 401) ends the session: no reply, a timeout or a 5xx keeps the tokens for the next try.
  */
 async function renew(started: string | null): Promise<string> {
-  const { access, refresh } = getTokens();
-  if (access && refresh && refresh !== started) return access;
-  if (!refresh) throw new SessionEnded("no refresh token");
-  const r = await axios.post("/api/token/refresh/", { refresh }).catch((e: unknown) => {
+  const theirs = rotatedElsewhere(started);
+  if (theirs) return theirs;
+  const sent = getTokens().refresh;
+  if (!sent) throw new SessionEnded("no refresh token");
+  try {
+    const r = await axios.post("/api/token/refresh/", { refresh: sent }, { timeout: REFRESH_TIMEOUT_MS });
+    markReachable();
+    setTokens(r.data.access, r.data.refresh);
+    return r.data.access as string;
+  } catch (e) {
     if (!axios.isAxiosError(e)) throw e;
     const status = e.response?.status;
-    if (status === 400 || status === 401) { markReachable(); clearTokens(); throw new SessionEnded("refresh token refused"); }
+    if (status === 400 || status === 401) {
+      markReachable();
+      // Refused, unless another tab rotated the token while ours was out (a v2 tab takes no lock, and storage can lag
+      // the lock). Then its login stands: don't wipe it.
+      const rotated = rotatedElsewhere(sent);
+      if (rotated) return rotated;
+      clearTokens();
+      throw new SessionEnded("refresh token refused");
+    }
     noteFailure(e);
+    for (const c of [e.config, e.response?.config]) if (c) c.data = undefined; // the refresh token is a 30-day credential: keep it out of errors
     throw e;
-  });
-  markReachable();
-  setTokens(r.data.access, r.data.refresh);
-  return r.data.access as string;
+  }
 }
 
 let refreshing: Promise<string> | null = null;

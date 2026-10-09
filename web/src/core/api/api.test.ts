@@ -20,20 +20,43 @@ const refused = (status = 401) => answered(status, { detail: "Token is blacklist
 /** The server takes only requests that carry this access token. */
 const acceptOnly = (access: string) => ((config) => reply(config, config.headers.Authorization === `Bearer ${access}` ? 200 : 401, {})) as AxiosAdapter;
 function netState() { const h = renderHook(() => useNetwork()); const s = h.result.current; h.unmount(); return s; }
-/** navigator.locks as one queue: each callback runs once the one before it has settled, as one lock name does across tabs. */
+/**
+ * navigator.locks as one queue: each callback runs once the one before it has settled, as one lock name does across tabs.
+ * As in the real API, a request whose `signal` aborts before its turn rejects with an AbortError and never runs.
+ */
 function stubLocks() {
   let tail: Promise<unknown> = Promise.resolve();
-  const request = vi.fn((_name: string, callback: () => unknown) => {
-    const turn = tail.then(() => callback());
-    tail = turn.then(() => undefined, () => undefined);
-    return turn;
+  const request = vi.fn((_name: string, ...rest: unknown[]) => {
+    const callback = rest[rest.length - 1] as () => unknown;
+    const signal = rest.length > 1 ? (rest[0] as LockOptions).signal : undefined;
+    let granted = false;
+    let settle = { resolve: (_v: unknown) => {}, reject: (_e: unknown) => {} };
+    const result = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+    signal?.addEventListener("abort", () => { if (!granted) settle.reject(new DOMException("The lock request was aborted.", "AbortError")); });
+    tail = tail.then(async () => {
+      if (signal?.aborted) return;
+      granted = true;
+      try { settle.resolve(await callback()); } catch (e) { settle.reject(e); }
+    });
+    return result;
   });
   Object.defineProperty(navigator, "locks", { configurable: true, value: { request } });
   return request;
 }
+/** A server that never answers, except that the request's own `timeout` ends the wait, as axios's adapters do. */
+const neverAnswers = ((config) => new Promise((_, reject) => {
+  if (config.timeout) setTimeout(() => reject(new AxiosError(`timeout of ${config.timeout}ms exceeded`, "ECONNABORTED", config)), config.timeout);
+})) as AxiosAdapter;
+const REFRESH_CALL = ["/api/token/refresh/", { refresh: "refresh-1" }, { timeout: 100_000 }];
+const realAxiosAdapter = axios.defaults.adapter;
 
 beforeEach(() => { localStorage.clear(); setSessionExpiredHandler(null); markReachable(); });
-afterEach(() => { vi.restoreAllMocks(); delete (navigator as { locks?: unknown }).locks; });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  axios.defaults.adapter = realAxiosAdapter;
+  delete (navigator as { locks?: unknown }).locks;
+});
 
 test("two 401s at once share one refresh, and both requests are retried", async () => {
   setTokens("old-access", "refresh-1");
@@ -112,7 +135,7 @@ test("a refresh that gets no reply keeps you signed in: the request fails as unr
   expect(from).not.toHaveBeenCalled();
   // the network is back: the next request refreshes and goes through
   await expect(api.get("invoices/")).resolves.toMatchObject({ status: 200 });
-  expect(post).toHaveBeenCalledTimes(2);
+  expect(post.mock.calls).toEqual([REFRESH_CALL, REFRESH_CALL]); // the right path, the kept token, the timeout
   expect(getTokens()).toEqual({ access: "new-access", refresh: "refresh-2" });
   expect(netState()).toBe("online");
 });
@@ -181,7 +204,7 @@ test("another tab refreshed while this one waited for the lock: its tokens are u
   expect(await status).toBe(200);
   expect(post).not.toHaveBeenCalled();
   expect(getTokens()).toEqual({ access: "other-access", refresh: "refresh-2" });
-  expect(request).toHaveBeenLastCalledWith("gst-token-refresh", expect.any(Function));
+  expect(request).toHaveBeenLastCalledWith("gst-token-refresh", { signal: expect.any(AbortSignal) }, expect.any(Function));
 });
 
 test("with Web Locks, one tab's parallel 401s still take the lock once and send one refresh", async () => {
@@ -192,8 +215,8 @@ test("with Web Locks, one tab's parallel 401s still take the lock once and send 
   const [a, b] = await Promise.all([api.get("invoices/"), api.get("customers/")]);
   expect([a.status, b.status]).toEqual([200, 200]);
   expect(request).toHaveBeenCalledTimes(1);
-  expect(request).toHaveBeenCalledWith("gst-token-refresh", expect.any(Function));
-  expect(post).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith("gst-token-refresh", { signal: expect.any(AbortSignal) }, expect.any(Function));
+  expect(post.mock.calls).toEqual([REFRESH_CALL]);
   expect(getTokens()).toEqual({ access: "new-access", refresh: "refresh-2" });
 });
 
@@ -285,4 +308,117 @@ test("a 502, 503 or 504 means the proxy answered but the app server didn't: unre
     await api.get("invoices/").catch(() => {});
     expect(netState()).toBe(state);
   }
+});
+
+// Ruling 28: a stalled refresh times out; no token in errors; a tab never wipes another tab's fresh login
+
+test("a refresh that never answers gives up after 100 s: the request fails as unreachable, the tokens are kept, and the next request refreshes normally", async () => {
+  vi.useFakeTimers();
+  setTokens("old-access", "refresh-1");
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  let serverUp = false;
+  axios.defaults.adapter = ((config) => (serverUp ? reply(config, 200, { access: "new-access", refresh: "refresh-2" }) : neverAnswers(config))) as AxiosAdapter;
+  api.defaults.adapter = acceptOnly("new-access");
+  let outcome: unknown = "pending";
+  void api.get("invoices/").then((r) => { outcome = r.status; }, (e: unknown) => { outcome = e; });
+  await vi.advanceTimersByTimeAsync(99_999);
+  expect(outcome).toBe("pending");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(problemOf(outcome).kind).toBe("unreachable");
+  expect(netState()).toBe("unreachable");
+  expect(getTokens()).toEqual({ access: "old-access", refresh: "refresh-1" });
+  expect(from).not.toHaveBeenCalled();
+  // the server answers again: the next request refreshes and goes through
+  serverUp = true;
+  await expect(api.get("invoices/")).resolves.toMatchObject({ status: 200 });
+  expect(getTokens()).toEqual({ access: "new-access", refresh: "refresh-2" });
+  expect(netState()).toBe("online");
+});
+
+test("a tab waiting on another tab's stuck refresh gives up after 20 s, as unreachable, without sending one; the next request refreshes normally", async () => {
+  vi.useFakeTimers();
+  const request = stubLocks();
+  setTokens("old-access", "refresh-1");
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  const post = vi.spyOn(axios, "post").mockResolvedValue({ data: { access: "new-access", refresh: "refresh-2" } });
+  let otherTabDone = () => {};
+  void request("gst-token-refresh", () => new Promise<void>((resolve) => { otherTabDone = resolve; }));
+  api.defaults.adapter = acceptOnly("new-access");
+  let outcome: unknown = "pending";
+  void api.get("invoices/").then((r) => { outcome = r.status; }, (e: unknown) => { outcome = e; });
+  await vi.advanceTimersByTimeAsync(19_999);
+  expect(request).toHaveBeenCalledTimes(2); // this tab is queued behind the other one
+  expect(outcome).toBe("pending");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(problemOf(outcome).kind).toBe("unreachable");
+  expect(netState()).toBe("unreachable");
+  expect(post).not.toHaveBeenCalled();
+  expect(getTokens()).toEqual({ access: "old-access", refresh: "refresh-1" });
+  expect(from).not.toHaveBeenCalled();
+  // the other tab's refresh ends without a new token; the next request here refreshes normally
+  otherTabDone();
+  await expect(api.get("invoices/")).resolves.toMatchObject({ status: 200 });
+  expect(post.mock.calls).toEqual([REFRESH_CALL]);
+  expect(getTokens()).toEqual({ access: "new-access", refresh: "refresh-2" });
+});
+
+test("the 20 s limit is for waiting only: the tab holding the lock gets the refresh's own time, whether it succeeds or is refused", async () => {
+  vi.useFakeTimers();
+  stubLocks();
+  setTokens("old-access", "refresh-1");
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  const in30s = (outcome: () => unknown) => () => new Promise((resolve, reject) => { setTimeout(() => { try { resolve(outcome()); } catch (e) { reject(e); } }, 30_000); });
+  const post = vi.spyOn(axios, "post")
+    .mockImplementationOnce(in30s(() => ({ data: { access: "new-access", refresh: "refresh-2" } })))
+    .mockImplementationOnce(in30s(() => { throw refused(); }));
+  api.defaults.adapter = acceptOnly("new-access");
+  let outcome: unknown = "pending";
+  void api.get("invoices/").then((r) => { outcome = r.status; }, (e: unknown) => { outcome = e; });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(outcome).toBe(200);
+  // later a slow refusal: the session still ends, and it isn't mistaken for a stuck wait
+  api.defaults.adapter = ((config) => reply(config, 401, {})) as AxiosAdapter;
+  outcome = "pending";
+  void api.get("invoices/").then((r) => { outcome = r.status; }, (e: unknown) => { outcome = e; });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(problemOf(outcome).kind).toBe("auth");
+  expect(getTokens()).toEqual({ access: null, refresh: null });
+  expect(from).toHaveBeenCalledTimes(1);
+  expect(post).toHaveBeenCalledTimes(2);
+});
+
+test("an error from the refresh never carries the refresh token", async () => {
+  api.defaults.adapter = acceptOnly("new-access");
+  const failures = [
+    (config: InternalAxiosRequestConfig) => new AxiosError("Network Error", "ERR_NETWORK", config),
+    (config: InternalAxiosRequestConfig) => new AxiosError("x", "500", config, null, { status: 500, data: "<html>", statusText: "", headers: {}, config } as never),
+  ];
+  for (const failure of failures) {
+    setTokens("old-access", "refresh-1");
+    axios.defaults.adapter = ((config) => Promise.reject(failure(config))) as AxiosAdapter; // the real axios core builds config.data
+    const failed = (await api.get("invoices/").catch((e: unknown) => e)) as AxiosError;
+    expect(axios.isAxiosError(failed)).toBe(true);
+    expect(failed.config?.data).toBeUndefined();
+    expect(failed.response?.config?.data).toBeUndefined();
+    expect(JSON.stringify(failed.toJSON())).not.toContain("refresh-1");
+  }
+});
+
+test("a refused refresh doesn't wipe a login another tab stored meanwhile (a v2 tab takes no lock, and storage can lag the lock)", async () => {
+  stubLocks();
+  setTokens("old-access", "refresh-1");
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  const post = vi.spyOn(axios, "post").mockImplementation(async () => {
+    setTokens("other-access", "refresh-2"); // the other tab's refresh lands while ours is out, and the server has blacklisted refresh-1
+    throw refused();
+  });
+  api.defaults.adapter = acceptOnly("other-access");
+  await expect(api.get("invoices/")).resolves.toMatchObject({ status: 200 });
+  expect(post.mock.calls).toEqual([REFRESH_CALL]);
+  expect(getTokens()).toEqual({ access: "other-access", refresh: "refresh-2" });
+  expect(from).not.toHaveBeenCalled();
 });
