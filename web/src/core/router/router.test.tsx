@@ -1,12 +1,13 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, Link, matchRoutes, RouterProvider } from "react-router";
+import { createMemoryRouter, Link, matchRoutes, Outlet, RouterProvider } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { Page, ToastProvider, useToast, type ToastApi } from "@/core/ui";
 import { AppLayout } from "@/core/shell/AppLayout";
 import { stubAuth } from "@/test/render";
+import { PageFrame } from "./PageFrame";
 import { appRoutes, V2_REDIRECTS } from "./routes";
 import { useUnsavedGuard } from "./useUnsavedGuard";
 
@@ -186,4 +187,37 @@ test("forms and print hide the phone's tabs; every other page keeps them", () =>
     "/e", "/e/bills", "/e/customers", "/e/bill/5", "/more", "/login", "/no/such/page",
   ];
   for (const path of shown) expect(hidesTabs(path), path).toBe(false);
+});
+
+/* ── Found in self-review ── */
+
+test("the page the app opened on doesn't play its entrance again when the shell around it re-renders", async () => {
+  phone(true);
+  try {
+    // as AppLayout will be once it holds state (Task 17's search, say)
+    function Shell() {
+      const [, setOpen] = useState(0);
+      return <><button onClick={() => setOpen((n) => n + 1)}>Search</button><main id="app-main"><PageFrame><Outlet /></PageFrame></main></>;
+    }
+    const router = createMemoryRouter([{ element: <Shell />, children: [
+      { path: "/sales", element: <Page title="Bills">The list</Page> },
+      { path: "/sales/7", element: <Page title="Bill 7">The bill</Page> },
+    ] }], { initialEntries: ["/sales"] });
+    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    await screen.findByRole("heading", { level: 1, name: "Bills" });
+    const frame = () => document.getElementById("app-main")!.firstElementChild;
+    expect(frame()).toHaveClass("h-full", { exact: true });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(frame()).toHaveClass("h-full", { exact: true });
+
+    // moving on still slides, and so does coming back to it
+    await act(async () => { await router.navigate("/sales/7"); });
+    await screen.findByRole("heading", { level: 1, name: "Bill 7" });
+    expect(frame()).toHaveClass("anim-page-push");
+    await act(async () => { await router.navigate(-1); });
+    await screen.findByRole("heading", { level: 1, name: "Bills" });
+    expect(frame()).toHaveClass("anim-page-pop");
+  } finally {
+    phone(false);
+  }
 });

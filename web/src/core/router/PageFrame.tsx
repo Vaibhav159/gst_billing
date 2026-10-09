@@ -53,6 +53,10 @@ export function PageFrame({ children }: { children: ReactNode }) {
   const first = useRef(true);
   const openedAt = useRef(0);
   const key = location.key;
+  // the page the app opened on came in with the app: it has no entrance to play, however often the shell re-renders,
+  // until the first move (`first` turns false at mount, so it can't tell a re-render from a new page)
+  const startKey = useRef(key);
+  const moved = useRef(false);
 
   useEffect(() => {
     const main = document.getElementById("app-main");
@@ -64,6 +68,7 @@ export function PageFrame({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     openedAt.current = Date.now();
+    if (key !== startKey.current) moved.current = true;
     const main = document.getElementById("app-main");
     const back = nav === "POP" ? places.get(key) : undefined;
     requestAnimationFrame(() => main?.scrollTo(0, back?.scroll ?? 0));
@@ -83,6 +88,6 @@ export function PageFrame({ children }: { children: ReactNode }) {
   };
   // the phone header's Back with no page before it goes up a level in place (a replace marked dir: "back"): still a step back
   const stepBack = nav === "POP" || (location.state as { dir?: string } | null)?.dir === "back";
-  const anim = first.current ? "" : isDesktop ? "anim-page-rise" : stepBack ? "anim-page-pop" : "anim-page-push";
+  const anim = key === startKey.current && !moved.current ? "" : isDesktop ? "anim-page-rise" : stepBack ? "anim-page-pop" : "anim-page-push";
   return <div key={location.pathname} onClickCapture={onClickCapture} className={cn("h-full", anim)}>{children}</div>;
 }
