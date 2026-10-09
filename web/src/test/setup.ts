@@ -11,6 +11,11 @@ class NoopObserver { observe() {} unobserve() {} disconnect() {} takeRecords() {
 g.ResizeObserver ??= NoopObserver;
 g.IntersectionObserver ??= NoopObserver;
 
+// Node 25 has its own localStorage (no methods without --localstorage-file) and sessionStorage, and
+// vitest 3 keeps a global that already exists, so jsdom's never arrive. Tests get jsdom's, as on Node 20.
+const { jsdom } = globalThis as unknown as { jsdom: { window: Window } };
+for (const k of ["localStorage", "sessionStorage"] as const) Object.defineProperty(globalThis, k, { configurable: true, value: jsdom.window[k] });
+
 // jsdom has no matchMedia; tests that need a phone set window.__phone = true before rendering.
 Object.defineProperty(window, "matchMedia", {
   writable: true,
