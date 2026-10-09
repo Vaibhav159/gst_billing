@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, clearTokens, getTokens, setSessionExpiredHandler, setTokens } from "@/core/api/client";
+import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setTokens } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { can as canDo, whyNot as whyNotFor, type Action } from "./permissions";
 import { RoleContext, type Role } from "./role";
@@ -22,31 +22,96 @@ function saveMe(me: Me | null) { try { if (me) localStorage.setItem(ME_KEY, JSON
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice }; }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+/** The user id an access token names (SimpleJWT's user_id claim), read without asking the server. Null when it can't be read. */
+function tokenUser(access: string | null): string | null {
+  try {
+    const body = access?.split(".")[1];
+    if (!body) return null;
+    const id = (JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/"))) as { user_id?: unknown }).user_id;
+    return id == null ? null : String(id);
+  } catch { return null; }
+}
+/** False only when the token plainly belongs to someone else (v2 or another tab signed them in). */
+function tokenFits(m: Me, access: string | null): boolean {
+  const u = tokenUser(access);
+  return u === null || u === String(m.id);
+}
+/** Who this browser last signed in as, when the stored token is theirs: the app opens with them straight away, even offline. */
+function remembered(): Me | null {
+  const { access } = getTokens();
+  const m = access ? readMe() : null;
+  return m && tokenFits(m, access) ? m : null;
+}
+
+/**
+ * Who is signed in, for every page. Tabs share one sign-in (the tokens in localStorage, shared with v2), so another tab's
+ * change reaches this one by storage events, never a timer: signed out there, signed out here; a new token there, ask
+ * /api/me/ who it is now. A different person clears the cache and is passed to onSwitchedUser, for App to show
+ * "Signed in as <name>", so a half-filled bill isn't saved under someone else's sign-in unnoticed.
+ */
+export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode; onSwitchedUser?: (me: Me) => void }) {
   const qc = useQueryClient();
-  const signedIn = Boolean(getTokens().access);
-  const [me, setMe] = useState<Me | null>(() => (signedIn ? readMe() : null));
-  const [status, setStatus] = useState<Status>(() => (!signedIn ? "signed-out" : readMe() ? "signed-in" : "loading"));
+  const [me, setMe] = useState<Me | null>(remembered);
+  const [status, setStatus] = useState<Status>(() => (!getTokens().access ? "signed-out" : remembered() ? "signed-in" : "loading"));
   const [startProblem, setStartProblem] = useState<ApiProblem | null>(null);
   const [expiredFrom, setExpiredFrom] = useState<string | null>(null);
+  /** The person this tab last showed (signing out forgets them), for the callbacks below. */
+  const shown = useRef(me);
+  /** The access token whose owner this tab knows, or is asking /api/me/ about. */
+  const checked = useRef<string | null>(null);
+  /** Each question to /api/me/ and each sign-out moves this on, so an answer to an older question is dropped. */
+  const gen = useRef(0);
+  const switched = useRef(onSwitchedUser);
+  switched.current = onSwitchedUser;
 
-  const forget = useCallback(() => { clearTokens(); saveMe(null); qc.clear(); setMe(null); setStatus("signed-out"); }, [qc]);
+  const forget = useCallback(() => {
+    gen.current++; checked.current = null; shown.current = null;
+    clearTokens(); saveMe(null); qc.clear(); setMe(null); setStatus("signed-out");
+  }, [qc]);
 
-  const loadMe = useCallback(async () => {
-    const r = await api.get("me/");
-    const m = toMe(r.data);
-    saveMe(m); setMe(m); setStatus("signed-in"); setStartProblem(null);
+  /** This tab's person is now `m`. Someone other than the person shown clears the cache and, unless this tab signed them in, is announced. */
+  const adopt = useCallback((m: Me, announce: boolean) => {
+    const before = shown.current;
+    const other = before !== null && before.id !== m.id;
+    const next = before && JSON.stringify(before) === JSON.stringify(m) ? before : m; // unchanged details keep the object: nothing re-renders
+    if (other) qc.clear();
+    shown.current = next;
+    saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null);
+    if (other && announce) switched.current?.(next);
+  }, [qc]);
+
+  /** Who the stored token belongs to, from the server. Null when a later question or a sign-out overtook this one. */
+  const ask = useCallback(async (): Promise<Me | null> => {
+    checked.current = getTokens().access;
+    const g = ++gen.current;
+    try {
+      const r = await api.get("me/");
+      return g === gen.current ? toMe(r.data) : null;
+    } catch (e) {
+      if (g !== gen.current) return null;
+      throw e;
+    }
+  }, []);
+
+  /**
+   * The server couldn't say who this is (offline, or it's down). The person last shown carries on if the token is theirs.
+   * Otherwise no one is shown and Try again asks again; `shown` keeps them, so the answer is announced if it's someone else.
+   */
+  const unconfirmed = useCallback((p: ApiProblem) => {
+    const m = shown.current;
+    if (m && tokenFits(m, getTokens().access)) { setMe(m); setStatus("signed-in"); setStartProblem(null); return; }
+    setMe(null); setStartProblem(p); setStatus("error");
   }, []);
 
   const start = useCallback(() => {
     if (!getTokens().access) return;
-    loadMe().catch((e) => {
+    ask().then((m) => { if (m) adopt(m, true); }, (e: unknown) => {
       const p = problemOf(e);
-      if (p.kind === "auth") { forget(); return; }
+      if (p.kind === "auth") forget();
       // offline or the server is down: a remembered person keeps working; otherwise say so
-      if (!readMe()) { setStartProblem(p); setStatus("error"); }
+      else unconfirmed(p);
     });
-  }, [loadMe, forget]);
+  }, [ask, adopt, forget, unconfirmed]);
 
   useEffect(() => {
     setSessionExpiredHandler((from) => { setExpiredFrom(from); forget(); });
@@ -54,18 +119,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setSessionExpiredHandler(null);
   }, [start, forget]);
 
+  // Another tab signed out, signed in or refreshed (Ruling 30).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== ACCESS_KEY && e.key !== REFRESH_KEY && e.key !== ME_KEY) return;
+      // What's stored now decides, not the event: a sign-out heard after a newer sign-in must not wipe that sign-in.
+      const { access } = getTokens();
+      if (!access) forget();
+      else if (access !== checked.current) start();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [forget, start]);
+
   const signIn = useCallback(async (username: string, password: string): Promise<SignIn> => {
+    let mine: string | null = null;
     try {
       const r = await api.post("token/", { username, password });
+      mine = r.data.access as string;
       setTokens(r.data.access, r.data.refresh);
-      await loadMe();
-      setExpiredFrom(null);
+      const m = await ask();
+      if (m) adopt(m, false);
       return { ok: true };
     } catch (e) {
-      clearTokens();
+      // only this sign-in's own tokens: a failed try here never signs another tab out
+      if (mine && getTokens().access === mine) clearTokens();
       return { ok: false, problem: problemOf(e) };
     }
-  }, [loadMe]);
+  }, [ask, adopt]);
 
   const value = useMemo<AuthValue>(() => ({
     me, status, startProblem, expiredFrom, signIn, signOut: forget, retryStart: start,
