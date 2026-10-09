@@ -13,7 +13,7 @@ import { appRoutes } from "@/core/router/routes";
 import { ToastProvider } from "@/core/ui";
 import { DesktopShell } from "./DesktopShell";
 import { FirmPicker } from "./ScopePickers";
-import { ScopeProvider } from "@/core/scope";
+import { ScopeProvider, useScope, type FirmId } from "@/core/scope";
 import { AppRoutes } from "@/App";
 
 beforeEach(() => {
@@ -451,4 +451,89 @@ test("a phone doesn't get the desktop shell", async () => {
   } finally {
     phone(false);
   }
+});
+
+/* ── The integration fix: Ruling 38 and the review's Minors ── */
+
+/** The server answers the preferences only when told to; the firm list and the rest as before. */
+function slowPrefs() {
+  const waiting: (() => void)[] = [];
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url?.startsWith("preferences/")
+    ? new Promise((resolve, reject) => { waiting.push(() => { answer(config).then(resolve, reject); }); })
+    : answer(config))) as AxiosAdapter;
+  return { asked: () => waiting.length, answer: () => act(async () => { waiting.splice(0).forEach((go) => go()); }) };
+}
+/** The firm each render of the scope settled on, in order. */
+const seen: FirmId[] = [];
+function Seen() { seen.push(useScope().firmId); return null; }
+const scoped = () => renderApp(<ScopeProvider><Seen /><FirmPicker /></ScopeProvider>, { path: "/sales" });
+
+test("the next load shows the usual firm from its first paint, before the server answers, and never All firms (Ruling 38)", async () => {
+  const server = slowPrefs();
+  // the first load on this device: nothing kept yet, so the picker waits for this person's preferences
+  let view = scoped();
+  expect(screen.getByRole("button", { name: "Firm: loading" })).toBeInTheDocument();
+  await waitFor(() => expect(server.asked()).toBe(1));
+  await server.answer();
+  expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
+  view.unmount();
+
+  // the next load: a fresh query cache, the same storage, and the server slow to answer
+  seen.length = 0;
+  view = scoped();
+  expect(seen[0]).toBe(3);
+  expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument(); // the firm list is in; the preferences aren't yet
+  await waitFor(() => expect(server.asked()).toBe(1));
+  await server.answer();
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+  expect(screen.getByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
+  expect(seen).not.toContain("all");
+});
+
+test("someone else's kept preferences never choose this person's firm", async () => {
+  // Rakesh used this computer first: his usual firm is Meera, and his preferences are kept here
+  let usual = "4";
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url?.startsWith("preferences/")
+    ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: { data: { defaultBusinessId: usual } } })
+    : answer(config))) as AxiosAdapter;
+  const rakesh = renderApp(<ScopeProvider><FirmPicker /></ScopeProvider>, { path: "/sales", me: { id: 2, username: "rakesh", fullName: "Rakesh Soni", role: "staff", roleLabel: "Counter staff", permissions: ["view", "bill.create"] } });
+  expect(await screen.findByRole("button", { name: "Firm: Meera" })).toBeInTheDocument();
+  rakesh.unmount();
+  // then Kailash, whose usual firm is Kiran, and whose server is slow to answer
+  usual = "3";
+  const server = slowPrefs();
+  seen.length = 0;
+  scoped();
+  expect(screen.getByRole("button", { name: "Firm: loading" })).toBeInTheDocument();
+  await waitFor(() => expect(server.asked()).toBe(1));
+  await server.answer();
+  expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
+  expect(seen).not.toContain(4);
+});
+
+test("until the firm list is in, the firm button's name says it's loading", async () => {
+  localStorage.setItem("gst3.scope.1", "4");
+  let release: (() => void) | undefined;
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url?.startsWith("businesses/")
+    ? new Promise((resolve, reject) => { release = () => { answer(config).then(resolve, reject); }; })
+    : answer(config))) as AxiosAdapter;
+  shell();
+  expect(screen.getByRole("button", { name: "Firm: loading" })).toBeInTheDocument();
+  await waitFor(() => expect(release).toBeDefined());
+  await act(async () => release!());
+  expect(await screen.findByRole("button", { name: "Firm: Meera" })).toBeInTheDocument();
+});
+
+test("another tab's pick doesn't take this tab over: this person's pick is read once", async () => {
+  shell();
+  expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
+  localStorage.setItem("gst3.scope.1", "4"); // the same person picks Meera on another tab
+  // this tab draws again: a year picked here
+  await userEvent.click(screen.getByRole("button", { name: `Financial year ${thisFy}` }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: new RegExp(`^FY ${lastFy}`) }));
+  expect(await screen.findByRole("button", { name: `Financial year ${lastFy}, not the current year` })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
 });

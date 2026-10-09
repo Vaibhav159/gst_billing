@@ -42,7 +42,8 @@ export function useFirms(): { firms: Firm[]; loading: boolean; error: boolean } 
   return { firms: q.data ?? NO_FIRMS, loading: q.isPending, error: q.isError };
 }
 
-export type Scope = { firmId: FirmId; setFirmId(id: FirmId): void; fy: string; setFy(fy: string): void; fyChoices: string[] };
+/** ready: the firm is known (a pick on this device, or the person's preferences); until then firmId is only a stand-in. */
+export type Scope = { firmId: FirmId; setFirmId(id: FirmId): void; fy: string; setFy(fy: string): void; fyChoices: string[]; ready: boolean };
 const ScopeCtx = createContext<Scope | null>(null);
 
 const FY_KEY = "gst3.fy";
@@ -80,22 +81,27 @@ function storedFy(choices: string[]): string {
 
 /**
  * Which firm and financial year lists and figures follow. The firm is this person's last pick on this device
- * (localStorage, per person), else their usual firm (preferences), else all firms. A firm the list doesn't have
- * isn't used; until the list arrives the pick is trusted, so pages don't ask for every firm first and then for one.
+ * (localStorage, per person), else their usual firm (preferences, kept from their last visit until the server
+ * answers), else all firms. A firm the list doesn't have isn't used; until the list arrives the pick is trusted, so
+ * pages don't ask for every firm first and then for one. Lists wait for `ready` for the same reason.
  */
 export function ScopeProvider({ children }: { children: ReactNode }) {
   const { me } = useAuth();
-  const { prefs } = usePrefs();
+  const { prefs, ready: prefsReady } = usePrefs();
   const { firms, loading, error } = useFirms();
   const meId = me?.id ?? null;
 
-  // picks made in this tab, by person (storage can be refused); storage carries them to the next visit
-  const [picks, setPicks] = useState<Record<number, FirmId>>({});
-  const stored = meId === null ? null : meId in picks ? picks[meId] : storedPick(meId);
+  // each person's pick, read from this device once when they're first shown, then held here: another tab's later
+  // pick doesn't move this tab, and a pick made here holds for the visit even if storage refuses it
+  const [picks, setPicks] = useState<Record<number, FirmId | null>>(() => (meId === null ? {} : { [meId]: storedPick(meId) }));
+  if (meId !== null && !(meId in picks)) setPicks((p) => ({ ...p, [meId]: storedPick(meId) }));
+  const stored = meId === null ? null : picks[meId] ?? null;
   const listed = !loading && !error;
   const usable = (id: number | null): id is number => id !== null && (!listed || firms.some((f) => f.id === id));
   const usual = toId(prefs.defaultBusinessId);
+  const picked = stored === "all" || usable(stored);
   const firmId: FirmId = stored === "all" ? "all" : usable(stored) ? stored : usable(usual) ? usual : "all";
+  const ready = picked || prefsReady;
   const setFirmId = useCallback((id: FirmId) => {
     if (meId === null) return;
     write(scopeKey(meId), String(id));
@@ -108,7 +114,7 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const fy = fyChoices.includes(fyPick) ? fyPick : fyChoices[0];
   const setFy = useCallback((v: string) => { write(FY_KEY, v); setFyPick(v); }, []);
 
-  const value = useMemo<Scope>(() => ({ firmId, setFirmId, fy, setFy, fyChoices }), [firmId, setFirmId, fy, setFy, fyChoices]);
+  const value = useMemo<Scope>(() => ({ firmId, setFirmId, fy, setFy, fyChoices, ready }), [firmId, setFirmId, fy, setFy, fyChoices, ready]);
   return <ScopeCtx.Provider value={value}>{children}</ScopeCtx.Provider>;
 }
 

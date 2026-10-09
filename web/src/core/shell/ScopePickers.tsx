@@ -12,17 +12,17 @@ function together(firms: Firm[]): string | undefined {
 
 /** Which firm lists and figures follow: every firm by its short name, the GSTIN beside it. */
 export function FirmPicker() {
-  const { firmId, setFirmId } = useScope();
+  const { firmId, setFirmId, ready } = useScope();
   const { firms } = useFirms();
   const firm = firmId === "all" ? null : firms.find((f) => f.id === firmId);
-  // a remembered firm shows its name once the list arrives
-  const label = firmId === "all" ? "All firms" : firm ? firm.short : "…";
+  // loading (null) until this person's firm is known and, for one firm, the list has its name
+  const label = !ready ? null : firmId === "all" ? "All firms" : firm ? firm.short : null;
   return (
     <Menu width={280} title="Firm"
-      items={[{ heading: "Lists and figures follow" }, { label: "All firms", checked: firmId === "all", hint: together(firms), onSelect: () => setFirmId("all") }, ...firms.map((f) => ({ label: f.short, checked: firmId === f.id, hint: f.gstin, onSelect: () => setFirmId(f.id) }))]}
+      items={[{ heading: "Lists and figures follow" }, { label: "All firms", checked: ready && firmId === "all", hint: together(firms), onSelect: () => setFirmId("all") }, ...firms.map((f) => ({ label: f.short, checked: firmId === f.id, hint: f.gstin, onSelect: () => setFirmId(f.id) }))]}
       trigger={(p) => (
-        <button {...p} type="button" aria-label={`Firm: ${label}`} className="h-10 inline-flex items-center gap-2 px-3 rounded-ctl border border-line bg-card hover:border-muted/50 transition-colors max-w-[200px]">
-          <Building2 size={16} className="text-brand shrink-0" aria-hidden="true" /><span className="truncate">{label}</span><ChevronDown size={14} className="text-muted shrink-0" aria-hidden="true" />
+        <button {...p} type="button" aria-label={`Firm: ${label ?? "loading"}`} className="h-10 inline-flex items-center gap-2 px-3 rounded-ctl border border-line bg-card hover:border-muted/50 transition-colors max-w-[200px]">
+          <Building2 size={16} className="text-brand shrink-0" aria-hidden="true" /><span className="truncate">{label ?? "…"}</span><ChevronDown size={14} className="text-muted shrink-0" aria-hidden="true" />
         </button>
       )} />
   );
