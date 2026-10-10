@@ -102,9 +102,12 @@ export function periodCheck(iso: string, today: string, locked: Locked): string 
 }
 
 /* ── The number: the paper bill's, typed or the next one confirmed ── */
-/** What's wrong with the number as typed, in the server's words; "" when its shape is fine (whether it's free is the server's). */
+/**
+ * What's wrong with the number as typed, in the server's words (1B's numberShapeProblem); "" when its shape is fine
+ * (whether it's free is the server's). With nothing typed and no next number known, the paper bill's words.
+ */
 export function numberProblem(text: string, next: string, stored: string): string {
-  if (!text.trim()) return next ? `Type the bill number, or use the next free one, ${next}.` : "Type the number written on the paper bill.";
+  if (!text.trim() && !next) return "Type the number written on the paper bill.";
   return numberShapeProblem(text, { next, stored });
 }
 
@@ -188,8 +191,9 @@ export function checksOf(c: CheckInput): Check[] {
   else if (c.dateWarn) out.push({ key: "date", ok: "warn", text: c.nextNumber ? `Last year's bill: number ${c.nextNumber}` : "Last year's bill" });
   else out.push({ key: "date", ok: true, text: periodCheck(c.f.date, c.today, c.locked) });
   const filled = c.f.lines.filter(hasContent);
-  const noHsn = filled.filter((l) => !/^\d{4,8}$/.test(l.hsn));
-  const noSlab = filled.filter((l) => !isSlab(l.gst));
+  // each line's own problems decide it, so a line's error and this check never disagree
+  const noHsn = filled.filter((l) => lineProblems(l).hsn);
+  const noSlab = filled.filter((l) => lineProblems(l).gst);
   const lineNo = (l: FormLine) => c.f.lines.indexOf(l) + 1;
   if (!filled.length) out.push({ key: "lines", ok: c.mode === "edit" ? false : null, text: c.mode === "edit" ? "This bill has no items yet" : "Add an item" });
   else if (noHsn.length) out.push({ key: "lines", ok: false, text: `${noHsn.length === 1 ? `Line ${lineNo(noHsn[0])} needs` : `${noHsn.length} lines need`} an HSN code` });
@@ -222,7 +226,6 @@ export function paymentNote(payment: FormState["payment"], cashOver: boolean): s
 
 /* ── What an edit changes, for the review and the audit log (PROTO useBillForm.js:507-534) ── */
 export type Change = [field: string, before: string, after: string];
-const qtyOf = (n: number | null, unit: string) => (n == null ? "—" : qtyLabel(n, unit));
 export function changesOf(bill: BillDetail, f: FormState, now: { firmName: string; number: string; pos: string; inter: boolean; total: number; customerName: string }): Change[] {
   const out: Change[] = [];
   if (f.firmId !== bill.business) out.push(["Firm", bill.business_name, now.firmName]);
@@ -238,7 +241,7 @@ export function changesOf(bill: BillDetail, f: FormState, now: { firmName: strin
     const a = bill.lines[i];
     const b = lines[i];
     if (a.product_name !== b.name) { out.push([`Line ${i + 1}`, a.product_name, b.name]); continue; }
-    if (Number(a.quantity) !== b.qty || a.unit !== b.unit) out.push([`${b.name} weight`, qtyOf(Number(a.quantity), a.unit), qtyOf(b.qty, b.unit)]);
+    if (Number(a.quantity) !== b.qty || a.unit !== b.unit) out.push([`${b.name} weight`, qtyLabel(Number(a.quantity), a.unit), qtyLabel(b.qty, b.unit)]);
     if (Number(a.rate) !== Number(b.rate)) out.push([`${b.name} rate`, `${rateText(a.rate)}/${a.unit}`, `${rateText(b.rate)}/${b.unit}`]);
     if (Number(a.gst_percent) !== Number(b.gst)) out.push([`${b.name} GST rate`, `${a.gst_percent}%`, `${b.gst ?? "—"}%`]);
     if (a.hsn_code !== b.hsn) out.push([`${b.name} HSN`, a.hsn_code || "Missing", b.hsn]);

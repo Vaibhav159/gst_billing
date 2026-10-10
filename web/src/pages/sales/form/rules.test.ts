@@ -1,7 +1,7 @@
 import { toCustomer } from "@/core/api/customers";
 import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
-import { blankLine, startEdit, startNew, type FormState } from "./model";
+import { blankLine, startEdit, startNew, type FormLine, type FormState } from "./model";
 import {
   changesOf, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, lineProblems, lineWarning, numberProblem, openMonthsText, parseDateText, paymentNote,
   periodCheck, qtyMissing, rateMissing, type CheckInput,
@@ -105,9 +105,18 @@ test("the checks beside the total: number, customer, period, lines, tax type and
 test("a GST rate that isn't one of the 11 slabs (an old product's 7%) is a problem on its line and beside the total, so it can be fixed", () => {
   const gstProblem = (gst: string | null) => lineProblems({ ...ring, gst }).gst;
   for (const gst of ["7", "2.5", "", null]) expect(gstProblem(gst)).toBe("Choose the GST rate. Gold and silver jewellery is 3%; cut diamonds are 0.25%.");
-  for (const gst of ["3", "0.25", "0", "40"]) expect(gstProblem(gst)).toBeUndefined();
+  // compared as numbers, so "3.00" and "0.250" are the 3% and 0.25% slabs
+  for (const gst of ["3", "0.25", "0", "40", "3.00", "0.250"]) expect(gstProblem(gst)).toBeUndefined();
   const lines = checksOf(input({ f: form({ customer: ANIL, lines: [{ ...ring, gst: "7" }] }) })).find((c) => c.key === "lines");
   expect(lines).toMatchObject({ ok: false, text: "Line 1 needs a GST rate" });
+});
+
+test("the lines check beside the total flags a line exactly when the line's own problems name its HSN code or GST rate", () => {
+  const check = (...ls: Partial<FormLine>[]) => checksOf(input({ f: form({ customer: ANIL, lines: ls.map((l, i) => ({ ...ring, key: `l${i}`, ...l })) }) })).find((c) => c.key === "lines");
+  for (const hsn of ["71", "7113", "711319", "71131912", "711319123", "", "7113A"]) expect(check({ hsn })?.ok === false).toBe(Boolean(lineProblems({ ...ring, hsn }).hsn));
+  for (const gst of ["7", "3", "0.25", "3.00", "", null]) expect(check({ gst })?.ok === false).toBe(Boolean(lineProblems({ ...ring, gst }).gst));
+  expect(check({ hsn: "71" })).toMatchObject({ ok: false, text: "Line 1 needs an HSN code" });
+  expect(check({ hsn: "711319123" }, {}, { hsn: "" })).toMatchObject({ ok: false, text: "2 lines need an HSN code" });
 });
 
 test("the income-tax checks, an address for a business, and a bill maybe made twice", () => {
@@ -153,6 +162,9 @@ test("what an edit changes, old to new, for the review", () => {
     ["Total", "₹87,083.21", "₹84,967.50"],
   ]);
   expect(changesOf(b, s.form, { firmName: "KIRAN GOLD HOUSE", number: "KGH/2026-27/31", pos: "08", inter: false, total: 8708321, customerName: "Anil Gupta" })).toEqual([]);
+  // a weight cleared reads as a dash
+  const cleared = { ...s.form, lines: [{ ...s.form.lines[0], qty: null }, s.form.lines[1]] };
+  expect(changesOf(b, cleared, { firmName: "KIRAN GOLD HOUSE", number: "KGH/2026-27/31", pos: "08", inter: false, total: 8708321, customerName: "Anil Gupta" })).toEqual([["Gold Ring 22K weight", "12.345 gms", "—"]]);
 });
 
 test("the hint under Firm says where the firm came from, or where an edit moves the bill", () => {

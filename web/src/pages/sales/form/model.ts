@@ -6,9 +6,8 @@ import { toCustomer, type Customer } from "@/core/api/customers";
 import type { DraftData, DraftLine, UnfinishedBill } from "@/core/api/drafts";
 import { paiseToDecimal, unitDecimals } from "@/core/format";
 import { GST_STATES, hasGstin, stateCodeOf } from "@/core/ids";
-import { storedNumber } from "@/core/sales/numbers";
 import { autoPos } from "@/core/sales/pos";
-import type { BillDetail, BillInput, CustomerOnBill, Line, NextNumber, PaymentMode, Person } from "@/core/sales/types";
+import type { BillDetail, BillInput, CustomerOnBill, Line, PaymentMode, Person } from "@/core/sales/types";
 import type { SaleProduct } from "./products";
 
 /** A line as it's being typed. qty: a number (its unit's decimals); rate: rupees as typed, up to 3 decimals ("6512.50"). */
@@ -207,15 +206,10 @@ export function toBillInput(f: FormState, { mode, pos, number, draftId, replaces
 }
 
 /**
- * What a typed number is saved as (1B's storedNumber), with the firm's format read off the next-number answer (contract
- * §2.11): digits alone take it when the firm uses full numbers on that date ("034" -> "KGH/2026-27/34"); anything else
- * is kept as typed. The server's check-number answer says the same once it's in.
+ * What a typed number is saved as, by the firm's next-number answer (contract §2.11): 1B's storedFor, its one home
+ * (Ruling 1B-15), named here too so the form's files import it from the model.
  */
-export function storedFor(next: NextNumber | null | undefined, text: string): string {
-  if (!next?.full_number) return text.trim();
-  const at = next.invoice_number.lastIndexOf(`/${next.fy}/`);
-  return storedNumber(text, { prefix: at > 0 ? next.invoice_number.slice(0, at) : "", fy: next.fy, full: true });
-}
+export { storedFor } from "@/core/sales/numbers";
 
 /** The GST rates, the jeweller's two first (PROTO sales/parts.jsx:1039-1040), with what each is for. */
 const SLAB_HINT: Record<string, string> = { "3": "gold, silver, jewellery", "0.25": "cut and polished diamonds", "0.1": "goods to exporters", "1.5": "rough diamonds", "5": "job work", "18": "services, packing", "0": "exempt" };
