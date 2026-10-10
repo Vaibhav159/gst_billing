@@ -75,14 +75,19 @@ screen while the stored row or the filed return is wrong.
 cd sweet-rebuild-suite-main && npx tsc --noEmit -p tsconfig.app.json && npm run test -- --run
 ```
 
-Both must pass — this is what `.github/workflows/test.yml` runs. `vite build`
-does **not** typecheck, so the `tsc` step is the only thing checking types.
+Both must pass — this is what `.github/workflows/test.yml` runs for the server
+and v2. For v3 (`web/`, on branch `v3`) it also runs the `web` job (typecheck,
+unit tests and build) and `web-e2e` (the Playwright and WCAG 2.2 AA suite in
+`e2e-tests/`, `-c v3.config.js`); their commands are in
+[`web/AGENTS.md`](web/AGENTS.md). `vite build` does **not** typecheck, so the
+`tsc` step is the only thing checking types.
 
 ## Where things live
 
 - `billing/` — Django app: models, DRF API, services, tests → [`billing/AGENTS.md`](billing/AGENTS.md)
 - `gst_billing/` — Django project settings, URLs, WSGI
 - `sweet-rebuild-suite-main/` — React SPA → [`sweet-rebuild-suite-main/AGENTS.md`](sweet-rebuild-suite-main/AGENTS.md)
+- `web/` — v3, the rebuilt React app (branch `v3`; replaces the SPA at the switch-over) → [`web/AGENTS.md`](web/AGENTS.md)
 - `e2e-tests/` — Playwright suite, its own package → [`e2e-tests/AGENTS.md`](e2e-tests/AGENTS.md)
 - `deploy/`, `nginx/`, `docker-compose.yml` — serving and release → [`deploy/AGENTS.md`](deploy/AGENTS.md)
 
@@ -102,8 +107,8 @@ Before writing any code, stop at the first rung that holds:
 1. **YAGNI** — Does this need to be built at all?
 2. **Reuse existing helpers** — Don't re-invent what's already here:
    - *Tax logic*: Import `billing/tax_rules.py` or `@/utils/taxRules.ts` (`is_interstate`, `normalize_tax_heads`). Never hand-roll tax placement or GSTIN prefix guessing.
-   - *UI*: Check `@/components/ui/` (49 shadcn primitives) and `@/utils/utils` (`cn`) before writing raw components.
-   - *API calls*: Use the configured `@/utils/api` axios instance (handles JWT auth & refresh token rotation). Don't invoke raw `axios`.
+   - *UI* (v2, `sweet-rebuild-suite-main/`): Check `@/components/ui/` (49 shadcn primitives) and `@/utils/utils` (`cn`) before writing raw components. In `web/` (v3) use the kit, `@/core/ui`: see [`web/AGENTS.md`](web/AGENTS.md).
+   - *API calls* (v2): Use the configured `@/utils/api` axios instance (handles JWT auth & refresh token rotation). Don't invoke raw `axios`. In `web/` (v3) it's `@/core/api/client` with TanStack Query: see [`web/AGENTS.md`](web/AGENTS.md).
    - *Data fetching*: In `sweet-rebuild-suite-main/` (v2), follow the existing hook pattern (`src/hooks/useDataStore.ts`) and don't introduce TanStack Query or new state managers there. `web/` (v3, being built on branch `v3`) uses TanStack Query as its only data layer, through `web/src/core/api/`.
    - *Audit/Undo*: Use `AuditLogMixin` with `audit_entity`.
 3. **Standard library / Native** — Python `decimal.Decimal`, modern JS/TS built-ins.
