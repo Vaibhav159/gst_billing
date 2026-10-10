@@ -1,15 +1,20 @@
 """Sent records and the customer's type (plan 1A, Task 4): POST /api/sales/{id}/sent/,
 walk-ins, and the customer fields the send rules read."""
 
+import threading
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, TestCase
+from django.db import connection
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.urls import reverse
 
 from billing.api.sales import SalesViewSet
 from billing.constants import BILL_CANCELLED
+from billing.gstin import check_digit
 from billing.models import AuditLog, BinnedInvoice, Customer, FiledPeriod, Invoice
 from billing.period_lock import assert_period_unlocked
+from billing.services.bin import bin_bill
+from billing.services.sales import mobile_of, record_send, sent_block
 from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, person, sale
 
 SAY_HOW = {"via": ["Say how it was sent: whatsapp or share."]}
@@ -53,6 +58,7 @@ class SentTest(TestCase):
         walkin.refresh_from_db()
         self.assertFalse(walkin.mobile_number)
         self.assertEqual(self.send(bill).data["sent"]["count"], 2)  # sending again reuses that number
+        self.assertEqual(AuditLog.objects.filter(action="sent").latest("id").details, "Again on WhatsApp to +91 98290 41122")
 
     def test_a_customer_without_a_phone_needs_a_number(self):
         bill = sale(self.biz, buyer("Lalit Mehta"), "KGH/2026-27/34", "2026-10-08")
@@ -110,9 +116,14 @@ class SentTest(TestCase):
         self.assertEqual((self.bill.sent_count, self.bill.sent_at), (0, None))
         self.assertFalse(AuditLog.objects.filter(action="sent").exists())
 
-    def test_a_bill_never_sent_has_no_sends(self):
-        from billing.services.sales import sent_block
+    def test_the_share_sheet_in_the_audit_log(self):
+        # Ruling 1A-21: a first send by the share sheet, then a repeat to a number typed for it.
+        self.send(via="share")
+        self.send(via="share", to="98290 41123")
+        details = list(AuditLog.objects.filter(action="sent").order_by("id").values_list("details", flat=True))
+        self.assertEqual(details, ["On the share sheet to Anil Gupta", "Again on the share sheet to +91 98290 41123"])
 
+    def test_a_bill_never_sent_has_no_sends(self):
         self.assertIsNone(sent_block(self.bill))  # contract 0.2: null when never sent
         self.send()
         self.bill.refresh_from_db()
@@ -120,8 +131,6 @@ class SentTest(TestCase):
 
     def test_a_deleted_bill_comes_back_with_its_sends(self):
         # Contract 3.2: every field as it was. The bin keeps the sends with the rest of the bill.
-        from billing.services.sales import sent_block
-
         sent = self.send(to="98290 41123").data["sent"]
         owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
         owner.delete(reverse("sale-detail", args=[self.bill.pk]), {"reason": "Entered twice"}, format="json")
@@ -153,8 +162,6 @@ class SentTest(TestCase):
     def test_a_v2_save_that_read_the_bill_before_a_send_keeps_the_send(self):
         # Ruling 1A-16: v2's saves never write the v3 columns, so a send that lands while v2's PATCH holds the
         # bill stays. v2 reads the sends, read-only (contract §7).
-        from billing.services.sales import record_send
-
         owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
 
         def sent_meanwhile(*args, **kwargs):
@@ -176,8 +183,6 @@ class MobileOfTest(SimpleTestCase):
     def test_a_10_digit_indian_mobile_from_what_was_typed(self):
         # Contract 2.10: a leading 91 or 0, spaces and marks are dropped. Only 0-9 count as digits (other
         # scripts' are dropped like marks): a wa.me link reads only those.
-        from billing.services.sales import mobile_of
-
         for typed, read in (("9829041122", "9829041122"), ("+91 98290-41122", "9829041122"),
                             ("098290 41122", "9829041122"), ("91 9829041122", "9829041122"),
                             ("12345", ""), ("5829041122", ""), ("98290 41122 3", ""), ("", ""), (None, ""),
@@ -205,8 +210,6 @@ class CustomerTypeTest(TestCase):
         self.assertEqual((gst.kind, Customer.objects.create(name="Priya").kind), ("business", "person"))
 
     def test_a_pan_comes_from_a_gstin_only_when_its_check_digit_passes(self):
-        from billing.gstin import check_digit
-
         good = "08AAKFS4821M1Z" + check_digit("08AAKFS4821M1Z")
         bad = good[:14] + ("A" if good[14] != "A" else "B")
         self.assertEqual(Customer(name="A", gst_number=good).pan, "AAKFS4821M")
@@ -221,11 +224,23 @@ class CustomerTypeTest(TestCase):
 
     def test_a_typed_pan_comes_before_the_gstins(self):
         # Upper-cased: v2 stored a PAN as it was typed.
-        from billing.gstin import check_digit
-
         gstin = "08ABCDE1234A1Z" + check_digit("08ABCDE1234A1Z")
         self.assertEqual(Customer(name="C", pan_number=" aakfs4821m ", gst_number=gstin).pan, "AAKFS4821M")
         self.assertEqual(Customer(name="D", gst_number=gstin).pan, "ABCDE1234A")
+
+    def test_a_typed_pan_counts_only_with_a_pans_shape(self):
+        # Ruling 1A-20: v2's imports store placeholders unchecked ("N/A", "-"). They are no PAN, so Rule 114B still
+        # asks for one and the bill prints none; a GSTIN's PAN counts instead. Spaces and marks inside a real one
+        # don't matter.
+        gstin = "08ABCDE1234A1Z" + check_digit("08ABCDE1234A1Z")
+        for typed, pan in (("N/A", ""), ("NA", ""), ("-", ""), ("", ""), (" abcde 1234f ", "ABCDE1234F")):
+            with self.subTest(typed=typed):
+                self.assertEqual(Customer(name="E", pan_number=typed).pan, pan)
+        for typed in ("N/A", "NA", "-", "ABCDE12345"):
+            with self.subTest(typed=typed, gstin=gstin):
+                self.assertEqual(Customer(name="F", pan_number=typed, gst_number=gstin).pan, "ABCDE1234A")
+        imported = Customer.objects.create(name="Imported", pan_number="N/A")  # as v2's imports store it
+        self.assertEqual(self.client.get(reverse("customer-detail", args=[imported.pk])).data["pan"], "")
 
     def test_a_pan_or_type_that_cant_be_used_gets_the_contracts_words(self):
         # Ruling 1A-5: too long (a GSTIN typed in the PAN box) or not text says what a PAN is; a null or
@@ -239,3 +254,39 @@ class CustomerTypeTest(TestCase):
         self.assertFalse(Customer.objects.exists())
         r = self.add(pan_number="", customer_type="")  # no PAN, and the type left to infer, as in v2
         self.assertEqual((r.status_code, r.data["pan_number"], r.data["type"], r.data["pan"]), (201, "", "person", ""))
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class SendLockTest(TransactionTestCase):
+    """Review M2 on a database with row locks: the send re-reads the bill under its row lock, so a delete that
+    lands meanwhile waits for the send to finish. The send answers with its record, never a 500."""
+
+    def test_a_delete_waits_for_the_send(self):
+        staff, owner = person("rakesh", *ROLE_GROUPS["staff"]), person("kailash", *ROLE_GROUPS["owner"])
+        bill = sale(firm(), buyer(mobile_number="9829041122"), "KGH/2026-27/31", "2026-10-08")
+        deleted, deleter = threading.Event(), []
+
+        def delete():
+            try:
+                bin_bill(bill, owner)
+                deleted.set()
+            finally:
+                connection.close()
+
+        reread = Invoice.refresh_from_db
+
+        def deleted_meanwhile(invoice, *args, **kwargs):
+            # The delete starts as the send re-reads the bill. Under the send's lock it can't finish, so the re-read
+            # goes ahead after 2 s; without the lock it would finish first and the re-read would find no bill.
+            if not deleter:
+                deleter.append(threading.Thread(target=delete))
+                deleter[0].start()
+                deleted.wait(2)
+            return reread(invoice, *args, **kwargs)
+
+        with patch.object(Invoice, "refresh_from_db", deleted_meanwhile):
+            r = client_for(staff).post(reverse("sale-sent", args=[bill.pk]), {"via": "whatsapp"}, format="json")
+        deleter[0].join(10)
+        self.assertEqual((r.status_code, r.data["sent"]["count"]), (200, 1))
+        self.assertTrue(deleted.is_set())  # then the delete went through, with the send in the bin row
+        self.assertEqual(BinnedInvoice.objects.get().data["invoice"]["sent_count"], "1")

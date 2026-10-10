@@ -90,7 +90,8 @@ def sent_block(invoice):
             "via": invoice.sent_via, "to": invoice.sent_to}
 
 
-VIA_WORDS = {"whatsapp": "WhatsApp", "share": "the share sheet"}
+# The Audit log's words for a send: the first, and the ones after it (contract 2.10, Ruling 1A-21).
+VIA_WORDS = {"whatsapp": ("WhatsApp", "Again on WhatsApp"), "share": ("On the share sheet", "Again on the share sheet")}
 
 
 def record_send(invoice, user, via, to=""):
@@ -118,7 +119,8 @@ def record_send(invoice, user, via, to=""):
         )
         invalidate(Invoice)
         who = f"+91 {to[:5]} {to[5:]}" if to else customer.name
-        how = VIA_WORDS[via]
-        log(invoice, user, "sent", f"Again on {how} to {who}" if again else f"{how[0].upper()}{how[1:]} to {who}")
-    invoice.refresh_from_db()
+        first, repeat = VIA_WORDS[via]
+        log(invoice, user, "sent", f"{repeat if again else first} to {who}")
+        # Re-read under the row lock: a delete that lands now waits for this send to commit (review M2).
+        invoice.refresh_from_db()
     return invoice

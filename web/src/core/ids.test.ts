@@ -42,6 +42,16 @@ test("PAN: the pattern, upper case, and the PAN that counts (typed, else from a 
   expect(effectivePan("", "08AAAAA0000A1Z5")).toBe("");
 });
 
+test("a typed PAN counts only with a PAN's shape: a placeholder v2's imports kept falls through to the GSTIN's PAN (Ruling 1A-20)", () => {
+  for (const junk of ["N/A", "NA", "-", ""]) {
+    expect(effectivePan(junk, ""), junk).toBe("");
+    expect(effectivePan(junk, "27XTZPS7585P1ZB"), junk).toBe("XTZPS7585P");
+  }
+  expect(effectivePan("ABCDE12345", "27XTZPS7585P1ZB")).toBe("XTZPS7585P");
+  expect(effectivePan(" abcde 1234f ", "")).toBe("ABCDE1234F");
+  expect(effectivePan(null, undefined)).toBe("");
+});
+
 test("mobile numbers: +91 and a leading 0 drop, ten digits read in two groups, and the problems in words", () => {
   expect(mobileDigits("+91 98290 41122")).toBe("9829041122");
   expect(mobileDigits("098290 41122")).toBe("9829041122");

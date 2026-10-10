@@ -105,9 +105,14 @@ export function panProblem(raw: string | null | undefined): string {
   const p = (raw ?? "").trim().toUpperCase();
   return p && !PAN_RE.test(p) ? PAN_PROBLEM : "";
 }
-/** The PAN that counts for Rule 114B: the one typed, else the PAN in a GSTIN that passes its check (the API's `pan`). */
+/**
+ * The PAN that counts for Rule 114B (the API's `pan`, billing Customer.pan): the typed one when it is PAN-shaped once
+ * cleaned like cleanPan (without the cut to 10), else the PAN in a GSTIN that passes its check, else "". A placeholder
+ * v2's imports kept, like "N/A", is no PAN (Ruling 1A-20).
+ */
 export function effectivePan(panNumber: string | null | undefined, gstin: string | null | undefined): string {
-  return (panNumber ?? "").trim().toUpperCase() || gstinPan(gstin);
+  const typed = (panNumber ?? "").toUpperCase().replace(/[^0-9A-Z]/g, "");
+  return PAN_RE.test(typed) ? typed : gstinPan(gstin);
 }
 
 /* ── Indian mobile numbers ─────────────────────────────── */

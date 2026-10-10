@@ -14,6 +14,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from billing.constants import SENT_VIA_CHOICES
 from billing.fy import fy_range
 from billing.models import BinnedInvoice, Invoice
 from billing.params import fy_param
@@ -80,7 +81,7 @@ TYPE_A_MOBILE = "Type a 10-digit mobile number, like 98290 41122."
 class SentSerializer(serializers.Serializer):
     # Missing, null or anything but the two ways gets the one sentence (Ruling 1A-5).
     via = serializers.ChoiceField(
-        choices=["whatsapp", "share"],
+        choices=SENT_VIA_CHOICES,
         error_messages={"required": SAY_HOW, "null": SAY_HOW, "invalid_choice": SAY_HOW},
     )
     # Optional; null, not text or a null character is no number either.

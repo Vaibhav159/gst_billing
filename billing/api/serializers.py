@@ -1,11 +1,11 @@
 import base64
-import re
 from decimal import Decimal
 
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from billing.api.media import sign_media_path
+from billing.constants import PAN_SHAPE
 from billing.models import Business, Customer, FiledPeriod, Invoice, ITCReclaimLedger, LineItem, Product
 
 
@@ -18,7 +18,6 @@ def signed_url(file):
     return sign_media_path(file.name) if file else None
 
 
-PAN_SHAPE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 # Contract 6.2's words, for whatever is wrong with a PAN or a customer type (Ruling 1A-5).
 PAN_WORDS = "A PAN has 10 characters: 5 letters, 4 digits, then a letter (like ABCDE1234F)."
 TYPE_WORDS = "Choose walk-in, person or business."
@@ -104,7 +103,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         if not value or not value.strip():
             return value
         pan = value.strip().upper()
-        if not PAN_SHAPE.match(pan):
+        if not PAN_SHAPE.fullmatch(pan):
             raise serializers.ValidationError(PAN_WORDS)
         return pan
 

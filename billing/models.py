@@ -1,4 +1,5 @@
 import math
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -27,6 +28,7 @@ from billing.constants import (
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_OUTWARD,
+    PAN_SHAPE,
     SENT_VIA_CHOICES,
     STATE_CHOICES,
     UNIT_CHOICES,
@@ -262,11 +264,14 @@ class Customer(AbstractBaseModel):
 
     @property
     def pan(self):
-        """The PAN on record: typed, or read from a GSTIN that passes its check digit (Rule 114B)."""
+        """The PAN on record for Rule 114B: the typed one when it is PAN-shaped once upper-cased and stripped
+        to letters and digits; else the one in a GSTIN that passes its check digit; else "". v2's imports
+        store placeholders like "N/A" unchecked, and those are no PAN (Ruling 1A-20)."""
         from billing.gstin import validate
 
-        if (self.pan_number or "").strip():
-            return self.pan_number.strip().upper()
+        typed = re.sub(r"[^0-9A-Z]", "", (self.pan_number or "").upper())
+        if PAN_SHAPE.fullmatch(typed):
+            return typed
         gstin = (self.gst_number or "").strip().upper()
         return gstin[2:12] if gstin and validate(gstin)[0] else ""
 
