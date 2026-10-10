@@ -13,7 +13,7 @@ import { bannerShows, OfflineBanner } from "./OfflineBanner";
 /** What a route can say about the phone shell (routes.tsx): forms and print hide the tabs. */
 type ShellHandle = { hideNav?: boolean } | undefined;
 
-/** openPalette: search, for the Expert header's Search button (PhoneHeader puts it on pages without Back). */
+/** openPalette: search, for the Search button of a page that asks for it in its phone header (Today). */
 export function PhoneShell({ children, easy, openPalette }: { children: ReactNode; easy: boolean; openPalette?: () => void }) {
   const { pathname } = useLocation();
   const matches = useMatches();
@@ -27,7 +27,7 @@ export function PhoneShell({ children, easy, openPalette }: { children: ReactNod
   // the topmost strip clears the notch (the prototype's order: the banner, then Back to Easy), else the page's own header does
   const banner = bannerShows(net);
   const back = !easy && fromEasy;
-  // search is Expert's, beside the tabs: Easy has its own big buttons, and a form or print, where the tabs make way, keeps its header
+  // search is Expert's, beside the tabs (on a page that asks: Today): Easy has its own big buttons, and a form or print, where the tabs make way, keeps its header
   const search = !easy && !hide && openPalette ? openPalette : null;
   return (
     <div className={cn("h-full flex flex-col bg-ground text-fg", easy ? "text-[16px]" : "text-md", net === "offline" && "has-offline")}>

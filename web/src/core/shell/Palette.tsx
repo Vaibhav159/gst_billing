@@ -1,13 +1,15 @@
-// Search (Ctrl K, and the phone header's Search): pages, actions, the records opened lately, and customers, sales
-// bills, products and firms from the server. Ported from PROTO/core/shell.jsx (Palette).
+// Search (Ctrl K, and Today's Search on a phone): pages, actions, the records opened lately, and customers, sales
+// bills, products and firms. Ported from PROTO/core/shell.jsx (Palette).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Building2, Camera, CornerDownLeft, FileText, Landmark, LayoutDashboard, Package, Plus, ReceiptText, Search, ShoppingBag, Truck, UserRound, Users, type LucideIcon } from "lucide-react";
 import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { date, inr, pct, toPaise } from "@/core/format";
+import { date, inr, mobileText, pct, toPaise } from "@/core/format";
+import { useFirms, type Firm } from "@/core/scope";
 import { Button, Dialog, Kbd, optionClass } from "@/core/ui";
 import { useView } from "@/core/view";
 import { ALT, DESKTOP_NAV, MORE_NAV } from "./nav";
@@ -20,55 +22,40 @@ const PAGE_ICON: Record<string, LucideIcon> = { dashboard: LayoutDashboard, sale
 /** An opened record's icon, by the first part of its address. */
 const RECENT_ICON: Record<string, LucideIcon> = { sales: FileText, customers: UserRound, purchases: ShoppingBag, products: Package, suppliers: Truck };
 
-type ApiCustomer = { id: number; name: string; mobile_number?: string | null; gst_number?: string | null };
-type ApiBill = { id: number; invoice_number: string; customer_name: string; invoice_date: string; total_amount: string | number };
-type ApiProduct = { id: number; name: string; hsn_code: string; gst_tax_rate: string | number };
-type ApiFirm = { id: number; name: string; gst_number?: string | null };
+/** search/quick/'s answer (billing/api/search.py, v2's search too): customers with their latest bills, bills by number, products. */
+type QuickBill = { id: number; invoice_number: string; invoice_date: string; total_amount: string; type_of_invoice: string };
+type Quick = {
+  customers: { id: number; name: string; gst_number: string; mobile_number: string; recent_invoices: QuickBill[] }[];
+  invoices: (QuickBill & { customer_name: string })[];
+  // gst_tax_rate: a fraction as a string ("0.0300"); a server from before v3 doesn't send it
+  products: { id: number; name: string; hsn_code: string; gst_tax_rate?: string }[];
+};
 
-/** A list's rows: `results` when the API pages it, else the array itself. */
-function rowsOf<T>(data: unknown): T[] {
-  const d = data as { results?: unknown } | null;
-  return (Array.isArray(d) ? d : Array.isArray(d?.results) ? d.results : []) as T[];
+// ponytail: bills come newest first from what the server found by number, so "31" doesn't put KGH/2026-27/31 ahead of
+// /131 as the prototype did. Upgrade: rank an exact bill number first on the server (part 1's bill search).
+/** The server's records as rows: customers; sales bills by number or by a customer found, newest first; products. */
+function recordRows(d: Quick): Result[] {
+  const rows: Result[] = d.customers.map((c) => ({ group: "Customers", label: c.name, icon: UserRound, hint: mobileText(c.mobile_number) || c.gst_number || "Customer", to: `/customers/${c.id}` }));
+  // the prototype's "bills by number or customer": sales only, each once
+  const bills = new Map<number, QuickBill & { customer_name: string }>();
+  for (const b of d.invoices) if (b.type_of_invoice === "outward") bills.set(b.id, b);
+  for (const c of d.customers) for (const b of c.recent_invoices) if (b.type_of_invoice === "outward" && !bills.has(b.id)) bills.set(b.id, { ...b, customer_name: c.name });
+  const newest = [...bills.values()].sort((a, b) => (a.invoice_date === b.invoice_date ? b.id - a.id : a.invoice_date < b.invoice_date ? 1 : -1));
+  for (const b of newest.slice(0, 5)) rows.push({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}`, to: `/sales/${b.id}` });
+  for (const p of d.products.slice(0, 3)) rows.push({ group: "Products", label: p.name, icon: Package, hint: `HSN ${p.hsn_code}${p.gst_tax_rate == null ? "" : ` · GST ${pct(Number(p.gst_tax_rate))}`}`, to: `/products/${p.id}` });
+  return rows;
 }
 
-/** A mobile number as it's read: "9829041122" gives "98290 41122" (a +91 or 0 in front dropped). Anything else as typed. */
-function mobileText(m: string | null | undefined): string {
-  const s = (m ?? "").trim();
-  const d = s.replace(/\D/g, "");
-  const ten = d.length === 12 && d.startsWith("91") ? d.slice(2) : d.length === 11 && d.startsWith("0") ? d.slice(1) : d;
-  return ten.length === 10 ? `${ten.slice(0, 5)} ${ten.slice(5)}` : s;
+/** The firms matching t, by name or GSTIN: the app's own list (useFirms), so nothing is asked for them. */
+function firmRows(firms: Firm[], t: string): Result[] {
+  return firms.filter((f) => f.name.toLowerCase().includes(t) || f.gstin.toLowerCase().includes(t)).slice(0, 3)
+    .map((f) => ({ group: "Firms", label: f.name, icon: Building2, hint: f.gstin || undefined, to: `/firms/${f.id}` }));
 }
 
-/** The server's answer for one search: its rows, and why any part of it failed. */
-type Found = { q: string; rows: Result[]; problem: ApiProblem | null };
-
-/**
- * Customers, sales bills, products and firms matching q, asked for together: one signal cancels all four. A part that
- * fails leaves the rest. Not through TanStack Query: a search is the box's passing state, and its defaults (paused
- * offline, one retry, a cached answer) would hold back the "you're offline" or "couldn't reach" the box must say at once.
- */
-// ponytail: the server matches anywhere and lists bills newest first, so "31" doesn't put KGH/2026-27/31 ahead of /131
-// as the prototype did. Upgrade: rank an exact bill number first on the server (part 1's bill search).
-async function searchServer(q: string, signal: AbortSignal): Promise<Omit<Found, "q">> {
-  const [cs, bs, ps, fs] = await Promise.allSettled([
-    api.get("customers/", { params: { search: q, page_size: 5 }, signal }),
-    api.get("invoices/", { params: { search: q, type_of_invoice: "outward", page_size: 5 }, signal }),
-    api.get("products/", { params: { search: q, page_size: 3 }, signal }),
-    api.get("businesses/", { params: { search: q, page_size: 3 }, signal }),
-  ]);
-  const rows: Result[] = [];
-  if (cs.status === "fulfilled") for (const c of rowsOf<ApiCustomer>(cs.value.data)) rows.push({ group: "Customers", label: c.name, icon: UserRound, hint: mobileText(c.mobile_number) || c.gst_number || "Customer", to: `/customers/${c.id}` });
-  if (bs.status === "fulfilled") for (const b of rowsOf<ApiBill>(bs.value.data)) rows.push({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}`, to: `/sales/${b.id}` });
-  if (ps.status === "fulfilled") for (const p of rowsOf<ApiProduct>(ps.value.data)) rows.push({ group: "Products", label: p.name, icon: Package, hint: `HSN ${p.hsn_code} · GST ${pct(Number(p.gst_tax_rate))}`, to: `/products/${p.id}` });
-  if (fs.status === "fulfilled") for (const f of rowsOf<ApiFirm>(fs.value.data)) rows.push({ group: "Firms", label: f.name, icon: Building2, hint: f.gst_number || undefined, to: `/firms/${f.id}` });
-  const failed = [cs, bs, ps, fs].find((s): s is PromiseRejectedResult => s.status === "rejected");
-  return { rows, problem: failed ? problemOf(failed.reason) : null };
-}
-
-/** Why the records weren't searched, in the app's words (LoadError's). */
+/** Why the server's records weren't searched, in the app's words (LoadError's). */
 function troubleText(p: ApiProblem): string {
-  if (p.kind === "offline") return "You're offline, so customers and bills can't be searched.";
-  if (p.kind === "unreachable" || p.kind === "server") return "The app couldn't reach the shop's records just now, so customers and bills weren't searched.";
+  if (p.kind === "offline") return "You're offline, so customers, bills and products can't be searched.";
+  if (p.kind === "unreachable" || p.kind === "server") return "The app couldn't reach the shop's records just now, so customers, bills and products weren't searched.";
   return p.message;
 }
 
@@ -76,37 +63,31 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
   const { me, can } = useAuth();
   const navigate = useNavigate();
   const { isPhone } = useView();
+  const { firms } = useFirms();
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
-  const [found, setFound] = useState<Found | null>(null);
-  const [tries, setTries] = useState(0);
+  const [term, setTerm] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    // a fresh box each time, cleared as search closes: cleared as it opened instead, keys typed at once would land after
-    // the last search's words
-    if (!open) { setQ(""); setI(0); setFound(null); return; }
-    // ready to type in as it opens, not after the dialog's 20 ms timer. The dialog has noted what had focus by now (its
-    // effects run before this one), so closing still returns there. Again once React's development double run of the
-    // new dialog's effects is over: its cleanup hands focus back to the opener (a production build never does)
-    const box = () => { if (input.current && document.activeElement !== input.current) input.current.focus({ preventScroll: true }); };
-    box();
-    queueMicrotask(box);
-  }, [open]);
+  // a fresh box each time, cleared as search closes: cleared as it opened instead, keys typed at once would land after
+  // the last search's words (the dialog puts the cursor in the box as it opens)
+  useEffect(() => { if (!open) { setQ(""); setI(0); setTerm(""); } }, [open]);
   const text = q.trim();
-  // records come from the server, and only from typing: two characters or more, 250 ms after the last key. A newer
-  // search cancels the one before; nothing asks on a timer (the database is Neon's free plan)
-  useEffect(() => {
-    if (!open || text.length < 2) return undefined;
-    const ctl = new AbortController();
-    const timer = setTimeout(() => {
-      void searchServer(text, ctl.signal)
-        .catch((e: unknown) => ({ rows: [], problem: problemOf(e) }))
-        .then((r) => { if (!ctl.signal.aborted) setFound({ q: text, ...r }); });
-    }, 250);
-    return () => { clearTimeout(timer); ctl.abort(); };
-  }, [open, text, tries]);
-  // the server's rows for what's in the box now (an older search's rows don't stand in for it)
-  const records = found?.q === text ? found : null;
+  // the server is asked about what's typed once it has rested 250 ms, from two characters: one request per term, kept
+  // 30 s, and a newer term cancels the one still out. Nothing asks on a timer (the database is Neon's free plan)
+  useEffect(() => { const t = setTimeout(() => setTerm(text), 250); return () => clearTimeout(t); }, [text]);
+  const search = useQuery({
+    queryKey: ["search", term],
+    queryFn: async ({ signal }) => (await api.get("search/quick/", { params: { q: term }, signal })).data as Quick,
+    enabled: open && term.length >= 2,
+    // a search that fails says so at once: no retry, and offline it still asks (and fails) instead of waiting
+    retry: false, networkMode: "always", staleTime: 30_000,
+  });
+  // the answer for what's in the box now (an older term's rows never stand in for it); a failure is all of it, and the
+  // reason shows again only once Try again has had its answer
+  const current = open && text.length >= 2 && term === text;
+  const records = current && search.data && !search.isError ? search.data : null;
+  const problem = current && search.isError && search.fetchStatus !== "fetching" ? problemOf(search.error) : null;
+  const settled = Boolean(records || problem);
   const meId = me?.id;
   const results = useMemo(() => {
     if (!open) return [];
@@ -133,8 +114,11 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
       out.push(...pages);
       return out.slice(0, 24);
     }
-    return [...actions.filter((a) => match(a.label)), ...pages.filter((p) => match(p.label)), ...(records?.rows ?? [])].slice(0, 24);
-  }, [open, q, can, meId, records]);
+    const out = [...actions.filter((a) => match(a.label)), ...pages.filter((p) => match(p.label))];
+    // the records come in together, once the server has answered for this text (or couldn't: the firms are this app's own)
+    if (settled) out.push(...(records ? recordRows(records) : []), ...firmRows(firms, t));
+    return out.slice(0, 24);
+  }, [open, q, can, meId, records, settled, firms]);
   const go = (r: Result) => { onClose(); navigate(r.to); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((x) => Math.max(0, Math.min(results.length - 1, x + 1))); }
@@ -146,13 +130,12 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
   useEffect(() => { document.getElementById(`pal-${i}`)?.scrollIntoView({ block: "nearest" }); }, [i]);
   if (!open) return null;
   // what the box says above the rows: why records weren't searched, else (with no rows) what to do next
-  const asked = text.length >= 2;
-  const trouble = records?.problem ? troubleText(records.problem) : null;
+  const trouble = problem ? troubleText(problem) : null;
   const status = trouble ?? (results.length ? null
-    : !asked ? "Keep typing to search customers and bills."
-      : !records ? "Searching…"
+    : text.length < 2 ? "Keep typing to search customers and bills."
+      : !settled ? "Searching…"
         : `Nothing matches “${q}”. Try a phone number, or a bill number like 31 or KGH/2026-27/31.`);
-  const retry = () => { setFound(null); setTries((n) => n + 1); input.current?.focus(); };
+  const retry = () => { input.current?.focus(); void search.refetch(); };
   let lastGroup: string | null = null;
   return (
     <Dialog open={open} onClose={onClose} title="Search" size="md" initialFocus={input}

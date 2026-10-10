@@ -55,7 +55,11 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, open: boolean, onClose
     const node = ref.current;
     if (!open || !node) return undefined;
     const prev = document.activeElement as HTMLElement | null;
-    const t = setTimeout(() => {
+    // a dialog that names its field has it at once, so keys typed straight after opening land there. Only after the
+    // opener is read: React's development re-run of this effect reads the opener again (the cleanup gave focus back)
+    initialFocus?.current?.focus({ preventScroll: true });
+    // the others, or a field that couldn't take focus yet, after 20 ms
+    const t = initialFocus?.current && document.activeElement === initialFocus.current ? undefined : setTimeout(() => {
       const target = initialFocus?.current || node.querySelector<HTMLElement>("[data-autofocus]") || focusables(node).find((el) => el.tagName !== "BUTTON" || !el.getAttribute("aria-label")?.startsWith("Close")) || node;
       target.focus?.({ preventScroll: true });
     }, 20);

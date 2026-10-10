@@ -1,32 +1,31 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { AxiosAdapter } from "axios";
-import { Routes, Route } from "react-router";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AxiosError, type AxiosAdapter } from "axios";
+import { Sun } from "lucide-react";
+import { createMemoryRouter, Route, RouterProvider, Routes, type DataRouter, type RouteObject } from "react-router";
 import { api } from "@/core/api/client";
-import { renderApp } from "@/test/render";
-import { Palette } from "./Palette";
-import { noteVisit } from "./recent";
-// for the tests after the brief's four
-import { act, render, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AxiosError } from "axios";
-import { MoreHorizontal, Sun } from "lucide-react";
-import { createMemoryRouter, RouterProvider, type DataRouter } from "react-router";
 import { __setNetState } from "@/core/api/network";
 import { AuthContext } from "@/core/auth/AuthProvider";
+import { appRoutes } from "@/core/router/routes";
 import { IconButton, Page, ToastProvider } from "@/core/ui";
-import { stubAuth } from "@/test/render";
+import { renderApp, stubAuth } from "@/test/render";
 import { AppLayout } from "./AppLayout";
-import { recentVisits } from "./recent";
+import { Palette } from "./Palette";
+import { noteVisit, recentVisits } from "./recent";
 
 const calls: string[] = [];
+/** search/quick/'s answer for "meena" (billing/api/search.py): her row, carrying her latest bills; no bill numbers or products match. */
+const MEENA = {
+  customers: [{ id: 7, name: "Meena Jain", mobile_number: "9414126508", gst_number: "", state_name: "RAJASTHAN",
+    recent_invoices: [{ id: 32, invoice_number: "KGH/2026-27/32", invoice_date: "2026-10-08", total_amount: "38412.50", type_of_invoice: "outward", business_id: 3 }] }],
+  invoices: [], products: [],
+};
 beforeEach(() => {
   localStorage.clear(); calls.length = 0;
   api.defaults.adapter = ((config) => {
     calls.push(String(config.url) + "?" + new URLSearchParams(config.params).toString());
-    const data = config.url?.startsWith("customers/") ? { results: [{ id: 7, name: "Meena Jain", mobile_number: "9414126508", gst_number: "" }] }
-      : config.url?.startsWith("invoices/") ? { results: [{ id: 32, invoice_number: "KGH/2026-27/32", customer_name: "Meena Jain", invoice_date: "2026-10-08", total_amount: "38412.50" }] }
-      : { results: [] };
+    const data = config.url?.startsWith("search/quick/") ? MEENA : { results: [] };
     return Promise.resolve({ status: 200, statusText: "", headers: {}, config, data });
   }) as AxiosAdapter;
 });
@@ -54,8 +53,8 @@ test("typing searches customers and bills once, after a pause, and Enter opens t
   // anchored: the bill's row names its customer too ("Meena Jain · 08 Oct 2026 · ₹38,412.50")
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /KGH\/2026-27\/32 .*₹38,412\.50/ })).toBeInTheDocument();
-  expect(calls.filter((c) => c.startsWith("customers/")).length).toBe(1);
-  expect(calls.some((c) => c.startsWith("invoices/") && c.includes("type_of_invoice=outward"))).toBe(true);
+  // one request, for the word as it rested: search/quick/ (Ruling 49), not a list per kind
+  expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=meena"]);
   await userEvent.keyboard("{Enter}");
   await waitFor(() => expect(screen.getByText("customer 7")).toBeInTheDocument());
 });
@@ -70,19 +69,22 @@ test("arrow keys move the highlight and the input says which option is active", 
   expect(document.getElementById(active!)!.className).toContain("row-on");
 });
 
-/* ── Beyond the brief: what the server search does, how the rows read, Opened recently, and the shells' ways in ── */
+/* ── Beyond the brief: the server search, how the rows read, Opened recently, and the shells' ways in ── */
 
-afterEach(() => { act(() => __setNetState("online")); vi.restoreAllMocks(); vi.useRealTimers(); (window as unknown as { __phone?: boolean }).__phone = false; });
+afterEach(() => { act(() => { __setNetState("online"); onlineManager.setOnline(true); }); vi.restoreAllMocks(); vi.useRealTimers(); (window as unknown as { __phone?: boolean }).__phone = false; });
 
 const wait = (ms: number) => act(() => new Promise<void>((r) => { setTimeout(r, ms); }));
 const answer = (config: Parameters<AxiosAdapter>[0], data: unknown) => Promise.resolve({ status: 200, statusText: "", headers: {}, config, data });
-type Held = { url: string; params: Record<string, unknown>; signal?: AbortSignal };
-/** A server that never answers: each request waits, so a test can see what was asked and what was cancelled. */
+const NOTHING = { customers: [], invoices: [], products: [] };
+type Held = { q: string; signal?: AbortSignal; reply(data: unknown): void };
+/** A server that holds each search until the test replies (the firm list answers at once, with none). */
 function holdingServer(): Held[] {
   const held: Held[] = [];
   api.defaults.adapter = ((config) => {
-    held.push({ url: String(config.url), params: config.params as Record<string, unknown>, signal: config.signal as AbortSignal | undefined });
-    return new Promise(() => {});
+    if (!config.url?.startsWith("search/quick/")) return answer(config, { results: [] });
+    return new Promise((resolve) => {
+      held.push({ q: (config.params as { q: string }).q, signal: config.signal as AbortSignal | undefined, reply: (data) => resolve({ status: 200, statusText: "", headers: {}, config, data }) });
+    });
   }) as AxiosAdapter;
   return held;
 }
@@ -101,100 +103,168 @@ test("nothing is asked on opening or for one character; a search waits for a pau
   expect(held).toHaveLength(0);
   // while it's out the box says so: not "Nothing matches"
   expect(screen.getByRole("status")).toHaveTextContent("Searching…");
-  await waitFor(() => expect(held).toHaveLength(4));
-  expect(held.map((h) => [h.url, h.params])).toEqual([
-    ["customers/", { search: "94", page_size: 5 }],
-    ["invoices/", { search: "94", type_of_invoice: "outward", page_size: 5 }],
-    ["products/", { search: "94", page_size: 3 }],
-    ["businesses/", { search: "94", page_size: 3 }],
-  ]);
-  expect(held.some((h) => h.signal?.aborted)).toBe(false);
+  await waitFor(() => expect(held).toHaveLength(1));
+  expect(held[0].q).toBe("94");
+  expect(held[0].signal?.aborted).toBe(false);
   await userEvent.type(box, "1");
-  expect(held.every((h) => h.signal?.aborted)).toBe(true);
-  await waitFor(() => expect(held).toHaveLength(8));
-  expect(held.slice(4).every((h) => h.params.search === "941" && !h.signal?.aborted)).toBe(true);
+  await waitFor(() => expect(held).toHaveLength(2));
+  expect(held[0].signal?.aborted).toBe(true);
+  expect(held[1].q).toBe("941");
+  expect(held[1].signal?.aborted).toBe(false);
   // a space at the end is the same search
   await userEvent.type(box, " ");
   await wait(300);
-  expect(held).toHaveLength(8);
+  expect(held).toHaveLength(2);
 });
 
-test("an older search's rows never stand in for what's typed now", async () => {
-  const answers: (() => void)[] = [];
-  api.defaults.adapter = ((config) => new Promise((resolve) => {
-    const meena = config.url?.startsWith("customers/") && config.params?.search === "meena";
-    answers.push(() => resolve({ status: 200, statusText: "", headers: {}, config, data: { results: meena ? [{ id: 7, name: "Meena Jain", mobile_number: "9414126508", gst_number: "" }] : [] } }));
-  })) as AxiosAdapter;
+test("a term searched in the last 30 s comes back without asking again", async () => {
   mount();
   const box = screen.getByRole("combobox");
   await userEvent.type(box, "meena");
-  await waitFor(() => expect(answers).toHaveLength(4));
-  await act(async () => { answers.splice(0).forEach((a) => a()); });
+  expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
+  await userEvent.clear(box);
+  await wait(300); // long enough for the box's emptiness to count
+  await userEvent.type(box, "meena");
+  expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
+  await wait(300);
+  expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=meena"]);
+});
+
+test("an older search's rows never stand in for what's typed now", async () => {
+  const held = holdingServer();
+  mount();
+  const box = screen.getByRole("combobox");
+  await userEvent.type(box, "meena");
+  await waitFor(() => expect(held).toHaveLength(1));
+  await act(async () => { held[0].reply(MEENA); });
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   await userEvent.type(box, "x");
   expect(screen.queryByRole("option", { name: /^Meena Jain/ })).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("Searching…");
-  await waitFor(() => expect(answers).toHaveLength(4));
-  await act(async () => { answers.splice(0).forEach((a) => a()); });
+  await waitFor(() => expect(held).toHaveLength(2));
+  await act(async () => { held[1].reply(NOTHING); });
   expect(await screen.findByText(/^Nothing matches “meenax”/)).toBeInTheDocument();
 });
 
-test("each record says what it is: a mobile in two groups, else the GSTIN, else Customer; a product's HSN and GST; a firm's GSTIN", async () => {
-  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("customers/") ? [ // unpaged: the array itself
-    { id: 1, name: "Anil Gupta", mobile_number: "+91 98290 41122", gst_number: "" },
-    { id: 2, name: "Anil Traders", mobile_number: "", gst_number: "08AAAAA0000A1Z5" },
-    { id: 3, name: "Anil Kumar", mobile_number: null, gst_number: null },
-  ] : config.url?.startsWith("products/") ? { results: [{ id: 5, name: "Anklet", hsn_code: "7113", gst_tax_rate: "0.0300" }] }
-    : config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "ANIL JEWELLERS", gst_number: "08BBBBB0000B1Z5" }] }
-      : { results: [] })) as AxiosAdapter;
+test("each record says what it is: a mobile in two groups, else as typed, else the GSTIN, else Customer; a product's HSN and GST; a firm's GSTIN", async () => {
+  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? {
+    customers: [
+      { id: 1, name: "Anil Gupta", mobile_number: "9829041122", gst_number: "08AAAAA0000A1Z5", state_name: "", recent_invoices: [] },
+      { id: 2, name: "Anil & Sons", mobile_number: "0141 2345678", gst_number: "", state_name: "", recent_invoices: [] },
+      { id: 3, name: "Anil Traders", mobile_number: "", gst_number: "08CCCCC0000C1Z5", state_name: "", recent_invoices: [] },
+      { id: 4, name: "Anil Kumar", mobile_number: "", gst_number: "", state_name: "", recent_invoices: [] },
+    ],
+    invoices: [],
+    products: [
+      { id: 5, name: "Anklet", hsn_code: "7113", gst_tax_rate: "0.0300" }, { id: 6, name: "Anklet, kids", hsn_code: "7113", gst_tax_rate: "0.0300" },
+      { id: 7, name: "Anklet, silver", hsn_code: "7113", gst_tax_rate: "0.0300" }, { id: 8, name: "Anklet, toe", hsn_code: "7113", gst_tax_rate: "0.0300" },
+    ],
+  } : config.url?.startsWith("businesses/") ? { results: [
+    { id: 3, name: "ANIL JEWELLERS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" },
+    { id: 4, name: "KIRAN GOLD HOUSE", gst_number: "08DDDDD0000D1Z5", state_name: "RAJASTHAN" },
+    { id: 5, name: "ANIL GOLD", gst_number: "", state_name: "RAJASTHAN" }, { id: 6, name: "ANIL SILVER", gst_number: "", state_name: "RAJASTHAN" },
+    { id: 7, name: "ANIL GEMS", gst_number: "", state_name: "RAJASTHAN" },
+  ] } : { results: [] })) as AxiosAdapter;
   renderApp(<Routes><Route path="*" element={<Palette open onClose={() => {}} />} /><Route path="/firms/3" element={<p>firm 3</p>} /></Routes>);
-  await userEvent.type(screen.getByRole("combobox"), "anil");
+  const box = screen.getByRole("combobox");
+  await userEvent.type(box, "anil");
   expect(await screen.findByRole("option", { name: "Anil Gupta 98290 41122" })).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "Anil Traders 08AAAAA0000A1Z5" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Anil & Sons 0141 2345678" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Anil Traders 08CCCCC0000C1Z5" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "Anil Kumar Customer" })).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "Anklet HSN 7113 · GST 3%" })).toBeInTheDocument();
+  // three products at most
+  expect(screen.getAllByRole("option", { name: /^Anklet.* HSN 7113 · GST 3%$/ })).toHaveLength(3);
+  expect(screen.queryByRole("option", { name: /^Anklet, toe/ })).not.toBeInTheDocument();
+  // firms are the app's own list, matched here by name or GSTIN: no request for them
+  expect(screen.getByRole("option", { name: "ANIL JEWELLERS 08BBBBB0000B1Z5" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /KIRAN/ })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("option", { name: /^ANIL / })).toHaveLength(3);
   expect([...document.querySelectorAll("#palette-list .caps")].map((h) => h.textContent)).toEqual(["Customers", "Products", "Firms"]);
-  await userEvent.click(screen.getByRole("option", { name: "ANIL JEWELLERS 08BBBBB0000B1Z5" }));
+  await userEvent.clear(box);
+  await userEvent.type(box, "08ddd");
+  expect(await screen.findByRole("option", { name: "KIRAN GOLD HOUSE 08DDDDD0000D1Z5" })).toBeInTheDocument();
+  await userEvent.clear(box);
+  await userEvent.type(box, "anil");
+  await userEvent.click(await screen.findByRole("option", { name: "ANIL JEWELLERS 08BBBBB0000B1Z5" }));
   expect(await screen.findByText("firm 3")).toBeInTheDocument();
 });
 
+test("sales bills: by number and from each customer found, sales only, each once, newest first, five at most", async () => {
+  const bill = (id: number, number: string, day: string, type = "outward") => ({ id, invoice_number: number, invoice_date: day, total_amount: "1000.00", type_of_invoice: type, business_id: 3 });
+  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? {
+    invoices: [
+      { ...bill(40, "KGH/2026-27/40", "2026-10-09"), customer_name: "Meena Jain" },
+      { ...bill(132, "KGH/2025-26/132", "2025-11-02"), customer_name: "Mohan Lal" },
+      { ...bill(9, "KGH-P/9", "2026-10-10", "inward"), customer_name: "Jaipur Gem Exporters" },
+    ],
+    customers: [
+      { id: 7, name: "Meena Jain", mobile_number: "", gst_number: "", state_name: "", recent_invoices: [bill(40, "KGH/2026-27/40", "2026-10-09"), bill(32, "KGH/2026-27/32", "2026-10-08"), bill(30, "KGH/2026-27/30", "2026-09-01")] },
+      { id: 8, name: "Mohan Lal", mobile_number: "", gst_number: "", state_name: "", recent_invoices: [bill(33, "KGH/2026-27/33", "2026-10-08"), bill(21, "KGH-P/21", "2026-10-05", "inward"), bill(20, "KGH/2025-26/20", "2025-04-01")] },
+    ],
+    products: [],
+  } : { results: [] })) as AxiosAdapter;
+  mount();
+  await userEvent.type(screen.getByRole("combobox"), "kgh");
+  await screen.findByRole("option", { name: /^KGH\/2026-27\/40/ });
+  const bills = screen.getAllByRole("option").filter((o) => /^KGH/.test(o.textContent ?? ""));
+  expect(bills.map((o) => o.textContent?.split("Mohan")[0].split("Meena")[0])).toEqual(["KGH/2026-27/40", "KGH/2026-27/33", "KGH/2026-27/32", "KGH/2026-27/30", "KGH/2025-26/132"]);
+  // a customer's own bill names that customer
+  expect(screen.getByRole("option", { name: "KGH/2026-27/33 Mohan Lal · 08 Oct 2026 · ₹1,000.00" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /KGH-P/ })).not.toBeInTheDocument();
+});
+
+test("a product from a server that doesn't send its rate shows its HSN alone, never “GST NaN%”", async () => {
+  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? { ...NOTHING, products: [{ id: 5, name: "Anklet", hsn_code: "7113" }] } : { results: [] })) as AxiosAdapter;
+  mount();
+  await userEvent.type(screen.getByRole("combobox"), "ank");
+  expect(await screen.findByRole("option", { name: "Anklet HSN 7113" })).toBeInTheDocument();
+});
+
 test("a finished search that finds nothing says so, with what to try", async () => {
-  api.defaults.adapter = ((config) => answer(config, { results: [] })) as AxiosAdapter;
+  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? NOTHING : { results: [] })) as AxiosAdapter;
   mount();
   await userEvent.type(screen.getByRole("combobox"), "zzz");
   expect(await screen.findByText("Nothing matches “zzz”. Try a phone number, or a bill number like 31 or KGH/2026-27/31.")).toHaveAttribute("role", "status");
   expect(screen.queryByRole("option")).not.toBeInTheDocument();
 });
 
-test("records that couldn't be searched say why, never “Nothing matches”, and Try again asks again", async () => {
+test("when the server can't be searched it says what wasn't, firms still show, never “Nothing matches”, and Try again asks again", async () => {
   let down = true;
-  api.defaults.adapter = ((config) => (down ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config))
-    : answer(config, config.url?.startsWith("customers/") ? { results: [{ id: 7, name: "Meena Jain", mobile_number: "9414126508", gst_number: "" }] } : { results: [] }))) as AxiosAdapter;
+  const asked: string[] = [];
+  api.defaults.adapter = ((config) => {
+    if (config.url?.startsWith("businesses/")) return answer(config, { results: [{ id: 4, name: "MEENA ORNAMENTS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] });
+    asked.push((config.params as { q: string }).q);
+    return down ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config, MEENA);
+  }) as AxiosAdapter;
   const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
   mount();
+  // the browser's word, once the app listens for it: a query that waits for the network would wait here
+  act(() => { window.dispatchEvent(new Event("offline")); });
   const box = screen.getByRole("combobox");
   await userEvent.type(box, "meena");
-  expect(await screen.findByText("You're offline, so customers and bills can't be searched.")).toHaveAttribute("role", "status");
+  // offline it still asks, and says so at once: it doesn't wait for the network to come back
+  expect(await screen.findByText("You're offline, so customers, bills and products can't be searched.")).toHaveAttribute("role", "status");
+  expect(screen.getByRole("option", { name: /^MEENA ORNAMENTS/ })).toBeInTheDocument();
   onLine.mockReturnValue(true);
+  act(() => { window.dispatchEvent(new Event("online")); });
   await userEvent.type(box, "{Backspace}");
-  expect(await screen.findByText("The app couldn't reach the shop's records just now, so customers and bills weren't searched.")).toBeInTheDocument();
+  expect(await screen.findByText("The app couldn't reach the shop's records just now, so customers, bills and products weren't searched.")).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /^MEENA ORNAMENTS/ })).toBeInTheDocument();
   expect(screen.queryByText(/Nothing matches/)).not.toBeInTheDocument();
-  // pages still match while records can't be searched, and the reason stays above them
-  await userEvent.clear(box);
-  await userEvent.type(box, "sales");
-  expect(screen.getByRole("option", { name: /^Sales/ })).toBeInTheDocument();
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("The app couldn't reach the shop's records just now"));
+  // once each: no retry behind the person's back
+  expect(asked).toEqual(["meena", "meen"]);
   down = false;
   await wait(400); // past the dialog's guard against the tail of the tap that opened it
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(box).toHaveFocus();
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
-  expect(box).toHaveFocus();
+  expect(asked).toEqual(["meena", "meen", "meen"]);
 });
 
 test("typing finds the actions and pages it names, as far as the role allows", async () => {
-  api.defaults.adapter = (() => new Promise(() => {})) as AxiosAdapter; // records never come: only what typing matches here
+  holdingServer(); // records never come: only what typing matches here
   const view = mount();
   const box = screen.getByRole("combobox");
   await userEvent.type(box, "add");
@@ -273,36 +343,40 @@ test("noteVisit keeps a person's last eight, newest first and each once; storage
 /** The server for the whole app: this person's preferences (Expert on a phone), one firm, and a search that finds Meena. */
 function serve() {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("preferences/") ? { data: { phoneMode: "expert" } }
-    : config.url?.startsWith("businesses/") ? { results: config.params?.search ? [] : [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
-      : config.url?.startsWith("customers/") ? { results: [{ id: 7, name: "Meena Jain", mobile_number: "9414126508", gst_number: "" }] }
-        : { results: [] })) as AxiosAdapter;
+    : config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
+      : config.url?.startsWith("search/quick/") ? MEENA : {})) as AxiosAdapter;
 }
 function inApp(router: DataRouter) {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
 }
+const shell = (pages: RouteObject[], at: string) => inApp(createMemoryRouter([{ element: <AppLayout />, children: pages }], { initialEntries: [at] }));
 /** Past the page's guard against the second tap of a double tap (300 ms), with Date faked. */
 const afterADoubleTap = () => act(() => { vi.advanceTimersByTime(400); });
 
 test("the page frame notes a record stayed on, under its page's title; not a list, a form, a tool or a page passed through", async () => {
   serve();
-  const router = inApp(createMemoryRouter([{ element: <AppLayout />, children: [
+  const router = shell([
     { path: "/sales", element: <Page title="Bills">the list</Page> },
     { path: "/sales/new", element: <Page title="New bill">the form</Page> },
     { path: "/sales/paper", element: <Page title="Bills from the paper book">the paper book</Page> },
     { path: "/sales/:id", element: <Page title="KGH/2026-27/32">the bill</Page> },
     { path: "/customers/:id", element: <Page title="Meena Jain">the customer</Page> },
     { path: "/customers/:id/statement", element: <Page title="Statement">the statement</Page> },
-  ] }], { initialEntries: ["/sales"] }));
+  ], "/sales");
   await screen.findByRole("heading", { level: 1, name: "Bills" });
-  const visit = async (to: string, stay = 450) => { await act(async () => { await router.navigate(to); }); await wait(stay); };
+  // the clock moves only when the test says, so a short stay is short however busy the machine
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const visit = async (to: string, stay = 450) => { await act(async () => { await router.navigate(to); }); act(() => { vi.advanceTimersByTime(stay); }); };
   await visit("/sales/new");
   await visit("/sales/paper");
   await visit("/customers/7/statement");
   expect(recentVisits(1)).toEqual([]);
-  await visit("/sales/32");
+  await visit("/sales/32", 399);
+  expect(recentVisits(1)).toEqual([]);
+  act(() => { vi.advanceTimersByTime(1); });
   expect(recentVisits(1)).toEqual([{ to: "/sales/32", label: "KGH/2026-27/32" }]);
-  await visit("/customers/7", 150);
+  await visit("/customers/7", 399);
   await visit("/sales?month=2026-09");
   expect(recentVisits(1)).toEqual([{ to: "/sales/32", label: "KGH/2026-27/32" }]);
   await visit("/customers/7");
@@ -312,35 +386,35 @@ test("the page frame notes a record stayed on, under its page's title; not a lis
 
 test("the page the app opens on counts as a visit", async () => {
   serve();
-  inApp(createMemoryRouter([{ element: <AppLayout />, children: [{ path: "/customers/:id", element: <Page title="Meena Jain">the customer</Page> }] }], { initialEntries: ["/customers/7"] }));
+  shell([{ path: "/customers/:id", element: <Page title="Meena Jain">the customer</Page> }], "/customers/7");
   await screen.findByRole("heading", { level: 1, name: "Meena Jain" });
-  await wait(450);
-  expect(recentVisits(1)).toEqual([{ to: "/customers/7", label: "Meena Jain" }]);
+  // (its timer started with the page, so only "it comes" is asked here: the stay test above pins the 400 ms)
+  await waitFor(() => expect(recentVisits(1)).toEqual([{ to: "/customers/7", label: "Meena Jain" }]));
 });
 
 test("on a desktop, the header's Search and Ctrl K open search; choosing a page closes it, opens the page and focuses its title", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   serve();
-  const router = inApp(createMemoryRouter([{ element: <AppLayout />, children: [
+  const router = shell([
     { path: "/sales", element: <Page title="Bills">the list</Page> },
     { path: "/customers", element: <Page title="Customers">the customers</Page> },
-  ] }], { initialEntries: ["/sales"] }));
+  ], "/sales");
   await screen.findByRole("heading", { level: 1, name: "Bills" });
   const button = screen.getByRole("button", { name: "Search (Ctrl K)" });
   afterADoubleTap();
   await userEvent.click(button);
   const dialog = await screen.findByRole("dialog", { name: "Search" });
-  await waitFor(() => expect(within(dialog).getByRole("combobox")).toHaveFocus());
+  expect(within(dialog).getByRole("combobox")).toHaveFocus();
   await userEvent.keyboard("meena");
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   // Esc goes back to where you were
   await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(button).toHaveFocus();
-  // and the next search starts afresh
+  // and the next search starts afresh, ready to type in at once
   await userEvent.keyboard("{Control>}k{/Control}");
   const box = within(screen.getByRole("dialog", { name: "Search" })).getByRole("combobox");
-  await waitFor(() => expect(box).toHaveFocus());
+  expect(box).toHaveFocus();
   expect(box).toHaveValue("");
   expect(screen.queryByRole("option", { name: /^Meena Jain/ })).not.toBeInTheDocument();
   await userEvent.keyboard("customers{Enter}");
@@ -350,47 +424,53 @@ test("on a desktop, the header's Search and Ctrl K open search; choosing a page 
   await waitFor(() => expect(h1).toHaveFocus());
 });
 
-test("on a phone, Search sits at the right end of the Expert header, after the page's own buttons, and opens the same search", async () => {
+test("on a phone, Today carries Search last in its header, after its own buttons; it opens the same search, and a record found opens with focus on its title", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   (window as unknown as { __phone?: boolean }).__phone = true;
   serve();
-  const router = inApp(createMemoryRouter([{ element: <AppLayout />, children: [
-    { path: "/", element: <Page title="Today" phoneActions={<IconButton label="Bright screen for sunlight" icon={Sun} />}>home</Page> },
-    { path: "/customers/:id", element: <Page title="Meena Jain">the customer</Page> },
-  ] }], { initialEntries: ["/"] }));
+  const router = shell([
+    { path: "/", element: <Page title="Today" phoneSearch phoneActions={<IconButton label="Bright screen for sunlight" icon={Sun} />}>home</Page> },
+    { path: "/customers/:id", element: <Page title="Meena Jain" back="/customers">the customer</Page> },
+  ], "/");
   const header = (await screen.findByRole("heading", { level: 1, name: "Today" })).closest("header")!;
-  expect(within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Bright screen for sunlight", "Search"]);
+  expect(within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Bright screen for sunlight", "Search customers and bills"]);
+  const search = within(header).getByRole("button", { name: "Search customers and bills" });
   afterADoubleTap();
-  await userEvent.click(within(header).getByRole("button", { name: "Search" }));
+  await userEvent.click(search);
   const dialog = await screen.findByRole("dialog", { name: "Search" });
-  await waitFor(() => expect(within(dialog).getByRole("combobox")).toHaveFocus());
+  expect(within(dialog).getByRole("combobox")).toHaveFocus();
   await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  expect(within(header).getByRole("button", { name: "Search" })).toHaveFocus();
-  // a record found from the phone opens like any other page
+  expect(search).toHaveFocus();
   afterADoubleTap();
-  await userEvent.click(within(header).getByRole("button", { name: "Search" }));
+  await userEvent.click(search);
   await userEvent.keyboard("meena");
   afterADoubleTap();
   await userEvent.click(await screen.findByRole("option", { name: /^Meena Jain/ }));
-  expect(await screen.findByRole("heading", { level: 1, name: "Meena Jain" })).toBeInTheDocument();
+  const h1 = await screen.findByRole("heading", { level: 1, name: "Meena Jain" });
   expect(router.state.location.pathname).toBe("/customers/7");
+  await waitFor(() => expect(h1).toHaveFocus());
 });
 
-test("a page with Back keeps its header to itself, and so do forms (no tabs) and Easy", async () => {
+test("on a phone only Today carries Search: not Bills, Customers or More, and not where a page asks for it in Easy or on a form", async () => {
   (window as unknown as { __phone?: boolean }).__phone = true;
   serve();
-  const router = inApp(createMemoryRouter([{ element: <AppLayout />, children: [
-    { path: "/sales", element: <Page title="Bills">the list</Page> },
-    { path: "/sales/7", element: <Page title="Bill 7" back="/sales" phoneActions={<IconButton label="More for this bill" icon={MoreHorizontal} />}>the bill</Page> },
-    { path: "/sales/new", handle: { hideNav: true }, element: <Page title="New bill">the form</Page> },
-    { path: "/e", element: <Page title="Easy home">easy</Page> },
-  ] }], { initialEntries: ["/sales"] }));
-  const header = (await screen.findByRole("heading", { level: 1, name: "Bills" })).closest("header")!;
-  expect(within(header).getByRole("button", { name: "Search" })).toBeInTheDocument();
-  for (const [path, title] of [["/sales/7", "Bill 7"], ["/sales/new", "New bill"], ["/e", "Easy home"]]) {
+  const router = inApp(createMemoryRouter(appRoutes, { initialEntries: ["/"] }));
+  let header = (await screen.findByRole("heading", { level: 1, name: "Dashboard" })).closest("header")!;
+  expect(within(header).getByRole("button", { name: "Search customers and bills" })).toBeInTheDocument();
+  for (const [path, title] of [["/sales", "Bills"], ["/customers", "Customers"], ["/more", "More"]]) {
     await act(async () => { await router.navigate(path); });
-    const h = (await screen.findByRole("heading", { level: 1, name: title })).closest("header")!;
-    expect(within(h).queryByRole("button", { name: "Search" }), path).not.toBeInTheDocument();
+    header = (await screen.findByRole("heading", { level: 1, name: title })).closest("header")!;
+    expect(within(header).queryByRole("button", { name: /^Search/ }), path).not.toBeInTheDocument();
+  }
+  // the shell gives it only to Expert pages beside the tabs
+  const asks = shell([
+    { path: "/sales/new", handle: { hideNav: true }, element: <Page title="New bill" phoneSearch>the form</Page> },
+    { path: "/e", element: <Page title="Easy home" phoneSearch>easy</Page> },
+  ], "/sales/new");
+  for (const [path, title] of [["/sales/new", "New bill"], ["/e", "Easy home"]]) {
+    await act(async () => { await asks.navigate(path); });
+    header = (await screen.findByRole("heading", { level: 1, name: title })).closest("header")!;
+    expect(within(header).queryByRole("button", { name: /^Search/ }), path).not.toBeInTheDocument();
   }
 });

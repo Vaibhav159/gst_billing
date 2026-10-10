@@ -185,6 +185,12 @@ export function initials(name = ""): string {
 /** "98290 41122" -> "+91 98290 41122" */
 export function phone(p: string | null | undefined): string { return p ? `+91 ${p}` : ""; }
 
+/** A mobile number in two groups, as it's read out: "9829041122" -> "98290 41122". Anything else (a landline, a +91) as typed. */
+export function mobileText(m: string | null | undefined): string {
+  const s = (m ?? "").trim();
+  return /^[6-9]\d{9}$/.test(s) ? `${s.slice(0, 5)} ${s.slice(5)}` : s;
+}
+
 /** The API's decimal ("87083.21", or a number) -> integer paise, rounding the third decimal half-up as the server does. */
 export function toPaise(v: string | number | null | undefined): number | null {
   if (v == null || v === "") return null;

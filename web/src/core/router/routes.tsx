@@ -82,8 +82,9 @@ export const appRoutes: RouteObject[] = [{
     {
       element: <RequireAuth><AppLayout /></RequireAuth>,
       children: [
+        // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
-          path, element: <Placeholder {...PARTS[area]} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
+          path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
         }))),
         // the phone's More tab, in Expert and in Easy (part 6 brings Easy's own)
         { path: "/more", element: <More /> },

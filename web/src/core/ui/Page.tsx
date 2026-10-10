@@ -30,6 +30,8 @@ export type PageProps = {
   phoneSubtitle?: ReactNode;
   back?: PageBack;
   phoneActions?: ReactNode;
+  /** Phone: the app's search, last in the header ("Search customers and bills"). Today asks for it, as in the prototype. */
+  phoneSearch?: boolean;
   actionBar?: ReactNode;
   narrow?: boolean;
   logo?: boolean;
@@ -42,13 +44,13 @@ export type PageProps = {
  * Desktop: banner, header (icon tile, breadcrumbs, title, context line, actions), content.
  * Phone: sticky header (back or logo, title, subtitle, actions), content, optional sticky action bar.
  */
-export function Page({ title, context, icon, breadcrumbs, actions, banner, children, phoneTitle, phoneSubtitle, back, phoneActions, actionBar, narrow, logo, className }: PageProps) {
+export function Page({ title, context, icon, breadcrumbs, actions, banner, children, phoneTitle, phoneSubtitle, back, phoneActions, phoneSearch, actionBar, narrow, logo, className }: PageProps) {
   const { isPhone } = useView();
   useDocTitle(title);
   if (isPhone) {
     return (
       <div className="min-h-full flex flex-col">
-        <PhoneHeader title={phoneTitle ?? title} subtitle={phoneSubtitle ?? context} back={back} actions={phoneActions} logo={logo} />
+        <PhoneHeader title={phoneTitle ?? title} subtitle={phoneSubtitle ?? context} back={back} actions={phoneActions} search={phoneSearch} logo={logo} />
         <div className={cn("flex-1 px-4 pt-4 pb-8 flex flex-col gap-4 min-w-0", className)}>
           {banner}
           {children}
@@ -100,17 +102,16 @@ export function PageHeader({ title, context, icon: Icon, breadcrumbs, actions }:
   );
 }
 
-export type PhoneHeaderProps = { title: ReactNode; subtitle?: ReactNode; back?: PageBack; actions?: ReactNode; logo?: boolean };
+export type PhoneHeaderProps = { title: ReactNode; subtitle?: ReactNode; back?: PageBack; actions?: ReactNode; logo?: boolean; search?: boolean };
 
-export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeaderProps) {
+export function PhoneHeader({ title, subtitle, back, actions, logo, search }: PhoneHeaderProps) {
   const navigate = useNavigate();
   const { isEasy } = useView();
   const notchCleared = useContext(NotchClearedContext);
-  // the shell's search, on a page a tab opens (no Back): last, so the page's own buttons keep their order and Search
-  // is always the top right corner, where the prototype's Today has it. A page you went into keeps its header for
-  // Back and its own buttons
+  // the app's search where the page asks for it (Today): last, after the page's own buttons, as the prototype's Today has
+  // it. The phone shell offers it in Expert beside the tabs (not in Easy, nor on a form or print)
   const openSearch = useContext(PhoneSearchContext);
-  const search = openSearch && !back ? <IconButton label="Search" icon={Search} onClick={openSearch} /> : null;
+  const searchButton = search && openSearch ? <IconButton label="Search customers and bills" icon={Search} onClick={openSearch} /> : null;
   // with no page before this one in the tab, go up to `back` (true: home) in place of this entry;
   // it's still a step back, so the page frame slides it in from the left (dir: "back")
   const onBack = () => {
@@ -125,15 +126,15 @@ export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeade
           <h1 data-page-title="" tabIndex={-1} className="text-lg font-semibold leading-tight truncate outline-none">{title}</h1>
           {subtitle ? <p className="text-xs text-muted line-clamp-2 mt-0.5">{subtitle}</p> : null}
         </div>
-        {actions || search ? <div className="flex items-center gap-0.5">{actions}{search}</div> : null}
+        {actions || searchButton ? <div className="flex items-center gap-0.5">{actions}{searchButton}</div> : null}
       </div>
     </header>
   );
 }
 
 /**
- * Opens search (Ctrl K's palette) from the phone header. The phone shell provides it in Expert where the tabs show;
- * null in Easy, on forms and print (where the tabs make way), and outside the shell.
+ * Opens search (Ctrl K's palette) from a phone header whose page asks for it (Page's phoneSearch: Today). The phone shell
+ * provides it in Expert where the tabs show; null in Easy, on forms and print (where the tabs make way), and outside the shell.
  */
 export const PhoneSearchContext = createContext<(() => void) | null>(null);
 

@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { useState } from "react";
+import { StrictMode, useRef, useState } from "react";
 import { Button, ConfirmDialog, Dialog, Menu, ToastProvider, useToast } from "./index";
 
 const wrap = (ui: React.ReactNode) => render(<MemoryRouter><ToastProvider>{ui}</ToastProvider></MemoryRouter>);
@@ -24,6 +24,27 @@ test("a dialog takes focus, keeps it inside, closes on Esc and gives focus back"
   expect(dialog.contains(document.activeElement)).toBe(true);
   await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(opener).toHaveFocus();
+});
+
+test("a dialog's own field (initialFocus) has focus straight after opening, under StrictMode too, and Esc gives it back to the opener", () => {
+  function Probe() {
+    const [open, setOpen] = useState(false);
+    const field = useRef<HTMLInputElement>(null);
+    return <>
+      <Button onClick={() => setOpen(true)}>Open</Button>
+      <Dialog open={open} onClose={() => setOpen(false)} title="Search" initialFocus={field}><input ref={field} aria-label="Name" /></Dialog>
+    </>;
+  }
+  // StrictMode runs a new dialog's effects, cleans them up and runs them again, as development builds do
+  render(<StrictMode><MemoryRouter><ToastProvider><Probe /></ToastProvider></MemoryRouter></StrictMode>);
+  const opener = screen.getByRole("button", { name: "Open" });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  // at once, not after the 20 ms fallback: keys typed straight after opening land in the field
+  const field = screen.getByRole("textbox", { name: "Name" });
+  expect(field).toHaveFocus();
+  fireEvent.keyDown(field, { key: "Escape" });
   expect(opener).toHaveFocus();
 });
 

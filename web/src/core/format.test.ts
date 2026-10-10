@@ -1,4 +1,4 @@
-import { addMonths, amountInWords, date, daysBetween, fyOf, groupIN, inr, monthLabel, paiseToDecimal, parseRupees, pct, qty, toPaise, todayIST } from "./format";
+import { addMonths, amountInWords, date, daysBetween, fyOf, groupIN, inr, mobileText, monthLabel, paiseToDecimal, parseRupees, pct, qty, toPaise, todayIST } from "./format";
 import { cn } from "./cn";
 
 test("money in Indian digits, held as paise", () => {
@@ -63,4 +63,18 @@ test("units, rates and words", () => {
 
 test("cn joins what's truthy", () => {
   expect(cn("a", false, null, "b", ["c", undefined])).toBe("a b c");
+});
+
+test("a mobile number reads in two groups; anything else stays as typed", () => {
+  expect(mobileText("9829041122")).toBe("98290 41122");
+  expect(mobileText(" 6123456789 ")).toBe("61234 56789");
+  // a landline, a number with its country code, one already spaced, a short one: as typed
+  expect(mobileText("0141 2345678")).toBe("0141 2345678");
+  expect(mobileText("01412345678")).toBe("01412345678");
+  expect(mobileText("+91 98290 41122")).toBe("+91 98290 41122");
+  expect(mobileText("919829041122")).toBe("919829041122");
+  expect(mobileText("5123456789")).toBe("5123456789");
+  expect(mobileText("98290")).toBe("98290");
+  expect(mobileText("")).toBe("");
+  expect(mobileText(null)).toBe("");
 });

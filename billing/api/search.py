@@ -37,6 +37,7 @@ class QuickSearchView(APIView):
                 "name": c.name,
                 "gst_number": c.gst_number or "",
                 "state_name": c.state_name or "",
+                "mobile_number": c.mobile_number or "",
                 "recent_invoices": [
                     {
                         "id": i.id,
@@ -65,7 +66,8 @@ class QuickSearchView(APIView):
         ]
 
         products = [
-            {"id": p.id, "name": p.name, "hsn_code": p.hsn_code or ""}
+            # gst_tax_rate as stored, a fraction (0.03 is 3%), the way the invoices' totals go: a string
+            {"id": p.id, "name": p.name, "hsn_code": p.hsn_code or "", "gst_tax_rate": str(p.gst_tax_rate)}
             for p in Product.objects.filter(
                 Q(name__icontains=q) | Q(hsn_code__icontains=q)
             ).order_by("name")[:4]
