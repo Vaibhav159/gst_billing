@@ -6,6 +6,10 @@ const REAL = ["08AAGPL3375F1ZO", "27AAPFU0939F1ZV", "27XTZPS7585P1ZB"];
 test("the check character matches the server's (billing/gstin.py) on known GSTINs", () => {
   expect(gstinCheckDigit("08AAGPL3375F1Z")).toBe("O");
   expect(gstinCheckDigit("27AAPFU0939F1Z")).toBe("V");
+  // the total that comes to a multiple of 36 gives "0" (the % 36 after 36 - …), the server's answer too
+  expect(gstinCheckDigit("08AAGPL3375FPZ")).toBe("0");
+  // typed in lower case, the same character: the check reads it upper-cased
+  expect(gstinCheckDigit("08aagpl3375f1z")).toBe("O");
   for (const g of REAL) expect(checkGstin(g), g).toMatchObject({ status: "valid" });
 });
 
@@ -52,6 +56,23 @@ test("a typed PAN counts only with a PAN's shape: a placeholder v2's imports kep
   expect(effectivePan(null, undefined)).toBe("");
 });
 
+test("+91 typed a key at a time into a box that tidies each key (the customer form's): the + goes at once, the 91 stays until an 11th digit", () => {
+  // the form's Mobile number box puts formatMobile(what's there + the key) back in the box at every key
+  let box = "";
+  const shown = [..."+91 98290 41122"].map((key) => (box = formatMobile(box + key)));
+  expect(shown).toEqual([
+    "", "9", "91", "91", "919", "9198", "91982", "91982 9", "91982 90", "91982 90", "91982 904", "91982 9041",
+    // ten digits read as a number that starts with 91, as one may (91166 12345): only the 11th says the 91 was the country code
+    "91982 90411", "98290 4112", "98290 41122",
+  ]);
+  // a pasted number, + and all, is its ten digits at once
+  expect(formatMobile("+91 98290 41122")).toBe("98290 41122");
+  // the other side of the rule: an 11th digit typed by mistake after a number that starts with 91 takes the 91 away, and
+  // the 9 digits left are refused in words
+  expect(formatMobile("91166 123456")).toBe("16612 3456");
+  expect(mobileProblem("91166 123456")).toBe("A mobile number has 10 digits; this has 9.");
+});
+
 test("mobile numbers: +91 and a leading 0 drop, ten digits read in two groups, and the problems in words", () => {
   expect(mobileDigits("+91 98290 41122")).toBe("9829041122");
   expect(mobileDigits("098290 41122")).toBe("9829041122");
@@ -84,7 +105,11 @@ test("states: the server's names, read as words with their codes, home first in 
   expect(stateCodeOf("JAMMU&KASHMIR")).toBe("01");
   expect(stateLabel("MAHARASHTRA")).toBe("Maharashtra (27)");
   expect(stateLabel("")).toBe("No state");
+  // a name the table doesn't have reads in title case, as the table's own names do (kept as the person typed it, it would
+  // shout "NARNIA" beside "Rajasthan (08)")
   expect(stateLabel("Narnia")).toBe("Narnia");
+  expect(stateLabel("NARNIA")).toBe("Narnia");
+  expect(stateLabel("  narnia &  beyond ")).toBe("Narnia and Beyond");
   const opts = stateOptions("RAJASTHAN");
   expect(opts[0]).toEqual({ value: "RAJASTHAN", label: "Rajasthan (08)" });
   expect(opts[1]).toEqual({ value: "ANDAMAN AND NICOBAR ISLANDS", label: "Andaman and Nicobar Islands (35)" });

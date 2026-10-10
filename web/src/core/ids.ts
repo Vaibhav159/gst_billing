@@ -26,7 +26,10 @@ export function stateCodeOf(name: string | null | undefined): string {
   const want = normState(name);
   return want ? Object.keys(GST_STATES).find((code) => GST_STATES[code] === want) ?? "" : "";
 }
-/** "Rajasthan (08)"; a name the table doesn't have, as it reads; "No state". */
+/**
+ * "Rajasthan (08)"; "No state"; a name the table doesn't have in title case, as the table's names read ("NARNIA" ->
+ * "Narnia", "narnia & beyond" -> "Narnia and Beyond"), with no code.
+ */
 export function stateLabel(name: string | null | undefined): string {
   if (!normState(name)) return "No state";
   const code = stateCodeOf(name);
@@ -43,11 +46,15 @@ export function stateOptions(home?: string | null): { value: string; label: stri
 const CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
 
-/** The mod-36 check character over a GSTIN's first 14 characters (billing/gstin.py check_digit). */
+/**
+ * The mod-36 check character over a GSTIN's first 14 characters (billing/gstin.py check_digit), typed in either case:
+ * they're read upper-cased, as every GSTIN check reads them.
+ */
 export function gstinCheckDigit(first14: string): string {
+  const g = first14.toUpperCase();
   let total = 0;
-  for (let i = 0; i < first14.length; i++) {
-    const product = CHARS.indexOf(first14[i]) * (i % 2 ? 2 : 1);
+  for (let i = 0; i < g.length; i++) {
+    const product = CHARS.indexOf(g[i]) * (i % 2 ? 2 : 1);
     total += Math.floor(product / 36) + (product % 36);
   }
   return CHARS[(36 - (total % 36)) % 36];
@@ -63,9 +70,10 @@ export function cleanGstin(raw: string): string {
 }
 
 /**
- * A typed GSTIN, checked. empty and short: nothing to say yet. invalid: it can't be a GSTIN (its words say why), so it
- * isn't saved. check: everything but the last character fits, so it may be one mistyped character; it still saves and
- * the customer stays B2B (part 1 design, decision 3), and its PAN isn't used. valid: the state code and the PAN come from it.
+ * A typed GSTIN, checked. empty: nothing typed. short: still being typed, so a form says nothing while it's typed, but
+ * its problem blocks a save as invalid's does. invalid: it can't be a GSTIN (its words say why), so it isn't saved.
+ * check: everything but the last character fits, so it may be one mistyped character; it still saves and the customer
+ * stays B2B (part 1 design, decision 3), and its PAN isn't used. valid: the state code and the PAN come from it.
  */
 export type GstinCheck =
   | { status: "empty" }
@@ -121,14 +129,21 @@ export function looksLikePhone(raw: string | null | undefined): boolean {
   const t = (raw ?? "").trim();
   return /^\+?[\d\s-]+$/.test(t) && t.replace(/\D/g, "").length >= 3;
 }
-/** The digits of a mobile number as typed: "+91 98290 41122" and "098290 41122" give "9829041122". */
+/**
+ * The digits of a mobile number as typed: "+91 98290 41122" and "098290 41122" give "9829041122". A 91 or 0 in front
+ * goes only once there are more digits than a number has: a number may itself start with 91 (91166 12345).
+ * The trade-off, in a box that tidies each key with formatMobile (the customer form's): "+91 98290 41122" typed a key
+ * at a time loses the + at once and reads "91982 90411" at ten digits, until the 11th shows the 91 was the country code
+ * and the box reads "98290 4112" (ids.test.ts pins each key). Pasted whole, it's "98290 41122" at once. The other side:
+ * an 11th digit typed by mistake after a number that starts with 91 takes the 91 away, and mobileProblem says 9 digits.
+ */
 export function mobileDigits(raw: string | null | undefined): string {
   let d = (raw ?? "").replace(/\D/g, "");
   if (d.length > 10 && d.startsWith("91")) d = d.slice(2);
   if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
   return d;
 }
-/** A mobile number as it's read out, at most 10 digits: "9829041122" -> "98290 41122". */
+/** A mobile number as it's read out, at most 10 digits: "9829041122" -> "98290 41122" (a 91 or 0 in front as mobileDigits drops it). */
 export function formatMobile(raw: string | null | undefined): string {
   const d = mobileDigits(raw).slice(0, 10);
   return d.length > 5 ? `${d.slice(0, 5)} ${d.slice(5)}` : d;
