@@ -80,6 +80,25 @@ test("toasts replace one with the same title and keep at most three", async () =
   expect(screen.getByText("C")).toBeInTheDocument();
 });
 
+test("a toast on its way out ignores its action: a quick second press, or one after Dismiss, does nothing", () => {
+  const mark = vi.fn();
+  const undo = vi.fn();
+  let t!: ReturnType<typeof useToast>;
+  function Probe() { t = useToast(); return null; }
+  wrap(<Probe />);
+  act(() => { t.show({ title: "Not marked as sent", tone: "neg", action: { label: "Mark as sent", onClick: mark } }); });
+  // both presses land while it animates out (170 ms): no time passes between them
+  const press = screen.getByRole("button", { name: "Mark as sent" });
+  fireEvent.click(press);
+  fireEvent.click(press);
+  expect(mark).toHaveBeenCalledTimes(1);
+  act(() => { t.show({ title: "Deleted KGH/2026-27/31", action: { label: "Undo", onClick: undo } }); });
+  const toast = screen.getByText("Deleted KGH/2026-27/31").closest(".card") as HTMLElement;
+  fireEvent.click(within(toast).getByRole("button", { name: "Dismiss" }));
+  fireEvent.click(within(toast).getByRole("button", { name: /^Undo/ }));
+  expect(undo).not.toHaveBeenCalled();
+});
+
 /* ── Beyond the brief: the rest of the prototype's overlay behaviour, and what this port adds ── */
 import { fireEvent, within } from "@testing-library/react";
 import { useLocation } from "react-router";

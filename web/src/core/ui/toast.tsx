@@ -152,7 +152,8 @@ function ToastItem({ t, dismiss, isPhone, isEasy }: { t: Toast; dismiss: (id: st
         {t.body ? <p className={cn("text-fg2 mt-0.5", isEasy ? "text-md" : "text-sm")}>{t.body}</p> : null}
       </div>
       {action ? (
-        <Button size="sm" variant="link" onClick={() => { action.onClick(); dismiss(t.id); }} aria-keyshortcuts={undo && !isPhone ? "Control+Z" : undefined}>
+        // a toast on its way out (pressed, dismissed or timed out) ignores its action, so a quick second press can't run it twice
+        <Button size="sm" variant="link" onClick={() => { if (t.leaving) return; action.onClick(); dismiss(t.id); }} aria-keyshortcuts={undo && !isPhone ? "Control+Z" : undefined}>
           {action.label}{undo && !isPhone ? <Kbd className="ml-1">Ctrl Z</Kbd> : null}
         </Button>
       ) : null}

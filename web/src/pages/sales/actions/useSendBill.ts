@@ -21,10 +21,14 @@ export type SendableBill = Pick<BillRow, "id" | "invoice_number" | "invoice_date
  */
 export type SendOptions = { to?: string; onNeedNumber?: (b: SendableBill) => void; quiet?: boolean; onOpened?: () => void; onRecorded?: () => void };
 
-/** The shop's WhatsApp message: ready once the settings have answered, or failed (then the standard message goes, and the toast says so). */
+/**
+ * The shop's WhatsApp message: ready once the settings have answered, or failed (then the standard message goes, and the
+ * toast says so). Both outlast a second ask: settings with no answer go back to pending while they're asked again (a new
+ * row's Send asks), and Send mustn't switch off meanwhile.
+ */
 function useShopMessage(): { ready: boolean; template: string | undefined; standard: boolean } {
   const s = useShopSettings();
-  return { ready: !s.isPending, template: s.data?.share_message, standard: !s.data && s.isError };
+  return { ready: s.isFetched, template: s.data?.share_message, standard: !s.data && s.errorUpdateCount > 0 };
 }
 /** False while the shop's settings load: Send stays off till then, so it never goes with the standard message instead of the shop's own. */
 export function useSendReady(): boolean {
@@ -65,7 +69,9 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
           await record({ id: b.id, via: d.via, to: to.replace(/\s/g, "") });
         } catch (e) {
           const f = notMarkedSent(problemOf(e), b.invoice_number);
-          show({ tone: f.tone, title: f.title, body: f.body, action: f.again ? { label: "Mark as sent", onClick: () => { void mark(true); } } : undefined });
+          // one press records it once: a quick second press posts nothing (a failure again brings a new toast)
+          let pressed = false;
+          show({ tone: f.tone, title: f.title, body: f.body, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
           return false;
         }
         opts.onRecorded?.();

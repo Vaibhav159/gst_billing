@@ -267,6 +267,62 @@ test("a record that couldn't get through says WhatsApp opened; Mark as sent reco
   expect(window.open).toHaveBeenCalledTimes(1);
 });
 
+test("Mark as sent pressed twice in a row records the send once", async () => {
+  let tries = 0;
+  const { calls } = serve([["POST", "sales/412/sent/", () => (++tries === 1 ? refuse(0, null) : { id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  renderApp(<SendCell bill={row()} />);
+  await userEvent.click(await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" })));
+  await userEvent.dblClick(await screen.findByRole("button", { name: "Mark as sent" }));
+  expect(await screen.findByText("KGH/2026-27/31 marked as sent")).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(2);
+});
+
+test("a double click on Send opens one chat and records one send", async () => {
+  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  renderApp(<SendCell bill={row()} />);
+  await userEvent.dblClick(await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" })));
+  expect(window.open).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1);
+});
+
+test("a Send whose chat didn't open (offline) can be pressed again", async () => {
+  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  renderApp(<SendCell bill={row()} />);
+  act(() => __setNetState("offline"));
+  const send = await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" }));
+  await userEvent.click(send);
+  expect(await screen.findByText("Not sent: you're offline")).toBeInTheDocument();
+  onLine.mockReturnValue(true);
+  act(() => __setNetState("online"));
+  await userEvent.click(send);
+  expect(window.open).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
+});
+
+test("after the shop's settings failed, Send stays on while they're asked again, and still says the standard message went", async () => {
+  // the first answer fails; a later ask waits (Show more's new row asks again, as a query with no answer does)
+  let asked = 0;
+  const { calls } = salesServer([
+    ["GET", "shop-settings/", () => (asked++ ? new Promise(() => {}) : refuse(500, {}))],
+    ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })],
+  ]);
+  function ShowMore() {
+    const [more, setMore] = useState(false);
+    return more ? <SendCell bill={row({ id: 413, invoice_number: "KGH/2026-27/32" })} /> : <button type="button" onClick={() => setMore(true)}>Show more</button>;
+  }
+  renderApp(<><SendCell bill={row()} /><ShowMore /></>);
+  const send = await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" }));
+  await userEvent.click(screen.getByText("Show more"));
+  await waitFor(() => expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(2));
+  expect(send).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Send KGH/2026-27/32 on WhatsApp" })).toBeEnabled();
+  await userEvent.click(send);
+  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is attached. Thank you!")}`, "_blank", "noopener");
+  expect(await screen.findByText(/The shop's own message didn't load, so the standard one is typed in\.$/)).toBeInTheDocument();
+});
+
 test("from the dialog, a record that fails still closes it once WhatsApp has the bill; Mark as sent records it, then keeps the number", async () => {
   let tries = 0;
   const { calls } = serve([

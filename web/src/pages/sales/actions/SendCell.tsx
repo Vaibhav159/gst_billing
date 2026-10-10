@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Check, FileText, Printer, Send } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -23,6 +23,14 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   const send = useSendBill();
   const ready = useSendReady();
   const [ask, setAsk] = useState(false);
+  // one send per press: the second press of a double click, or a press before the list shows the bill as sent, sends
+  // nothing (two chats, two records). A send that wasn't recorded (offline, a number to ask for, the record failed) frees it.
+  const sending = useRef(false);
+  const sendOnce = () => {
+    if (sending.current) return;
+    sending.current = true;
+    void send(bill, { onNeedNumber: () => setAsk(true) }).then((ok) => { if (!ok) sending.current = false; });
+  };
   if (bill.status === "cancelled") return null;
   if (bill.paper && !bill.sent) {
     return <span className={cn("inline-flex items-center gap-1 text-muted shrink-0", isPhone ? "min-h-11 px-2" : "text-sm px-2")} title="Entered from the paper bill book: the customer has the paper bill"><FileText size={15} aria-hidden="true" />On paper</span>;
@@ -62,7 +70,7 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   }
   return (
     <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
-      <Button size="sm" variant="secondary" icon={compact ? undefined : Send} tabIndex={tabIndex} data-row-send="" onClick={() => void send(bill, { onNeedNumber: () => setAsk(true) })}
+      <Button size="sm" variant="secondary" icon={compact ? undefined : Send} tabIndex={tabIndex} data-row-send="" onClick={sendOnce}
         disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} aria-label={`Send ${bill.invoice_number} on WhatsApp`}>Send</Button>
       {dialog}
     </span>
