@@ -6,6 +6,7 @@ import { createMemoryRouter, MemoryRouter, RouterProvider, type RouteObject } fr
 import { api } from "@/core/api/client";
 import { __setNetState } from "@/core/api/network";
 import { AuthContext } from "@/core/auth/AuthProvider";
+import { RoleContext } from "@/core/auth/role";
 import { stubAuth } from "@/test/render";
 import { AppLayout } from "./AppLayout";
 import { OfflineBanner } from "./OfflineBanner";
@@ -32,6 +33,20 @@ test("a page that crashes shows a way home instead of a blank screen", () => {
   render(<MemoryRouter><ScreenBoundary onHome={() => {}}><Boom /></ScreenBoundary></MemoryRouter>);
   expect(screen.getByText("Something went wrong on this page")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Go to the home page" })).toBeInTheDocument();
+});
+
+test.each([
+  ["owner", "If it happens again, call the person who looks after the app and tell them what you were doing.", "tell the owner"],
+  ["accountant", "If it happens again, tell the owner what you were doing.", "looks after the app"],
+  ["staff", "If it happens again, tell the owner what you were doing.", "looks after the app"],
+  ["viewer", "If it happens again, tell the owner what you were doing.", "looks after the app"],
+] as const)("a page that crashes tells the %s who to turn to, as a failed load does", (role, words, not) => {
+  const Boom = () => { throw new Error("boom"); };
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  render(<RoleContext.Provider value={role}><MemoryRouter><ScreenBoundary><Boom /></ScreenBoundary></MemoryRouter></RoleContext.Provider>);
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent(`Nothing you saved is affected. Reload the app, or go back to the home page and try again. ${words}`);
+  expect(alert).not.toHaveTextContent(not);
 });
 
 function Loader({ fn }: { fn: () => Promise<string> }) {
