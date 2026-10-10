@@ -1,4 +1,4 @@
-import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode, type MouseEvent } from "react";
+import { Component, createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent } from "react";
 import { useLocation, useNavigationType } from "react-router";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -41,20 +41,31 @@ function openerOf(target: EventTarget | null): Opener | null {
   return { href: el.getAttribute("href"), row: el.closest("[data-row]")?.getAttribute("data-row") ?? null, id: el.id || null };
 }
 
+/** A row itself when focus can land on it (a tabindex, or a link or button), else its first link or button: never a row that can't take focus (part 0 carry). */
+function focusableRow(row: HTMLElement | null): HTMLElement | null {
+  if (!row) return null;
+  if (row.hasAttribute("tabindex") || row.matches("a[href], button, input, select, textarea")) return row;
+  return row.querySelector<HTMLElement>("a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])");
+}
+
 /** After a page change: keep focus a page or dialog placed on purpose; on Back return to the row that opened the page; else the title. */
 export function focusAfterNavigation(opener?: Opener | null) {
   if (document.querySelector('.overlay-layer [role="dialog"][aria-modal="true"]:not([data-closing])')) return;
   const main = document.getElementById("app-main");
   const a = document.activeElement;
-  if (a && a !== document.body && (a.closest("[role=dialog]") || main?.contains(a) || a.hasAttribute("data-autofocus"))) return;
+  // the page's own title holds focus only because the frame put it there (the page that closed a moment before
+  // focused late): it gives way to the row that opened this page; anything else in the page was placed on purpose (Ruling 60)
+  const onTitle = a instanceof HTMLElement && a.hasAttribute("data-page-title") && Boolean(main?.contains(a));
+  if (a && a !== document.body && !onTitle && (a.closest("[role=dialog]") || main?.contains(a) || a.hasAttribute("data-autofocus"))) return;
   let target: HTMLElement | null = null;
   if (opener && main) {
     try {
       target = (opener.id ? document.getElementById(opener.id) : null)
-        || (opener.row ? main.querySelector<HTMLElement>(`[data-row="${CSS.escape(opener.row)}"]`) : null)
+        || (opener.row ? focusableRow(main.querySelector<HTMLElement>(`[data-row="${CSS.escape(opener.row)}"]`)) : null)
         || (opener.href ? main.querySelector<HTMLElement>(`a[href="${CSS.escape(opener.href)}"]`) : null);
     } catch { target = null; }
   }
+  if (!target && onTitle) return;
   (target || main?.querySelector<HTMLElement>("[data-page-title]"))?.focus({ preventScroll: true });
 }
 
@@ -97,6 +108,10 @@ export function PageFrame({ children }: { children: ReactNode }) {
   const meId = useAuth().me?.id;
   const openedAt = useRef(0);
   const clicked = useRef<Clicked["current"]>(null);
+  // the page on screen now, written as React puts it there (a layout effect runs before anything else can): a page's
+  // 90 ms focus timer that fires after another page took its place does nothing, so a quick Back isn't overtaken (Ruling 60)
+  const shown = useRef(pathname);
+  useLayoutEffect(() => { shown.current = pathname; }, [pathname]);
 
   // the phone header's Back with no page before it goes up a level in place (a replace marked dir: "back"): still a step back
   const stepBack = nav === "POP" || (location.state as { dir?: string } | null)?.dir === "back";
@@ -114,6 +129,7 @@ export function PageFrame({ children }: { children: ReactNode }) {
     if (visit.quiet) return undefined;
     clearPlain();
     const t = setTimeout(() => {
+      if (shown.current !== pathname) return;
       announce(document.title.replace(/ · GST Billing$/, ""));
       focusAfterNavigation(back?.opener);
     }, 90);

@@ -173,6 +173,8 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     } catch (e) {
       // only this sign-in's own tokens: a failed try here never signs another tab out
       if (mine && getTokens().access === mine) clearTokens();
+      // and this tab has no sign-in left to end: a sign-out heard later from another tab isn't this tab's (Ruling 63)
+      if (mine && checked.current === mine) checked.current = null;
       return { ok: false, problem: problemOf(e) };
     }
   }, [ask, adopt]);
