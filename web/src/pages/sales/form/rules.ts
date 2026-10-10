@@ -9,7 +9,7 @@ import { numberShapeProblem } from "@/core/sales/numbers";
 import { stateNameOf } from "@/core/sales/pos";
 import type { BillDetail, ItaxFlag } from "@/core/sales/types";
 import { PAY, rateText } from "@/core/sales/words";
-import { hasContent, SLABS, type FormLine, type FormState } from "./model";
+import { hasContent, slabOf, type FormLine, type FormState } from "./model";
 
 /* ── Units, in the server's words (billing/api/sales.py PER, WEIGHED) ── */
 const PER: Record<string, string> = { gms: "gram", g: "gram", kg: "kg", ct: "carat", oz: "ounce", tola: "tola", pcs: "piece", nos: "piece", unit: "unit", mtr: "metre", ltr: "litre", ml: "ml", box: "box", pair: "pair", set: "set", dozen: "dozen" };
@@ -57,7 +57,8 @@ export function parseDateText(text: string, today: string): string | null {
 
 /** Is a month closed for the firm (contract: the facets' `locked`)? */
 export type Locked = (ym: string) => boolean;
-const prevFy = (fy: string) => fyOf(`${Number(fy.slice(0, 4)) - 1}-04-01`);
+/** The financial year before `fy`: "2026-27" -> "2025-26". */
+export const prevFy = (fy: string) => fyOf(`${Number(fy.slice(0, 4)) - 1}-04-01`);
 /** "September or October": the months a bill can go into now, last year's and this year's so far (only months whose lock is known). */
 export function openMonthsText(today: string, locked: Locked, known: (ym: string) => boolean = () => true): string {
   const cur = monthOf(today);
@@ -128,10 +129,10 @@ export type LineField = "hsn" | "gst" | "qty" | "rate";
 /** An HSN code the server takes: 4 to 8 digits. A bill's line and an item that isn't in Products check it, each in its own words. */
 export const isHsn = (hsn: string) => /^\d{4,8}$/.test(hsn);
 /**
- * A GST rate the server takes: one of the 11 slabs, compared as numbers. Not one: none picked, a blank (which isn't 0%),
- * or a v2 product's rate outside the slabs (0.07 reads as "7"), which the server refuses.
+ * A GST rate the server takes: one of the 11 slabs, compared as numbers (the model's slabOf). Not one: none picked, a
+ * blank (which isn't 0%), or a v2 product's rate outside the slabs (0.07 reads as "7"), which the server refuses.
  */
-const isSlab = (gst: string | null) => gst != null && gst.trim() !== "" && SLABS.some((s) => Number(s) === Number(gst));
+const isSlab = (gst: string | null) => slabOf(gst) !== "";
 /** A line's own problems, in the server's words: the form marks them under the line, the phone's item sheet in itself. */
 export function lineProblems(l: Pick<FormLine, "hsn" | "gst" | "qty" | "rate" | "unit">): Partial<Record<LineField, string>> {
   const e: Partial<Record<LineField, string>> = {};

@@ -150,7 +150,7 @@ test("a form hides the tabs, and its action bar clears the home indicator itself
 
   // and the app's own routes: a new bill hides them, the bills list keeps them
   open("/sales/new");
-  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  await screen.findByRole("heading", { level: 1, name: /^New (sales )?bill$/ });
   expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
   cleanup();
   open("/sales");

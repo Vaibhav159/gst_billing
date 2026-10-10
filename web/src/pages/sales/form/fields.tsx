@@ -160,7 +160,8 @@ export function DateField({ id, value, today, onChange, onCommit, invalid, descr
 }
 
 /* ── How it was paid: nothing chosen until the person picks (PROTO parts.jsx:754-783) ── */
-const PAY_KEYS: PaymentMode[] = ["cash", "bank", "credit", "mixed"];
+/** The ways a bill can be paid, in the order they're offered (a link's ?paid= takes one of them too). */
+export const PAY_KEYS: PaymentMode[] = ["cash", "bank", "credit", "mixed"];
 /** autoFocus: its first choice takes focus as a dialog opens (the review's "How was it paid?"). */
 export function PayPicker({ value, onChange, allowNotRecorded, labelledBy, invalid, describedBy, id, autoFocus }: {
   value: PaymentMode | null; onChange: (v: PaymentMode) => void; allowNotRecorded?: boolean; labelledBy: string; invalid?: boolean; describedBy?: string; id?: string; autoFocus?: boolean;

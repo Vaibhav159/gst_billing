@@ -4,8 +4,8 @@ import { wireDetail } from "@/core/sales/fixtures";
 import { autoPos } from "@/core/sales/pos";
 import { toBillDetail } from "@/core/sales/wire";
 import {
-  blankLine, fromDraftData, hasContent, lineFromProduct, linesFromBill, posCustomer, posOverrideOf, startCopy, startDraft, startEdit, startNew, startPaper, startRemake,
-  stateOf, storedFor, toBillInput, toDraftData,
+  blankLine, fromDraftData, hasContent, idParam, lineFromProduct, linesFromBill, posCustomer, posOverrideOf, slabOf, startCopy, startDraft, startEdit, startNew, startPaper,
+  startRemake, stateOf, storedFor, toBillInput, toDraftData,
 } from "./model";
 
 const bill = (over: Record<string, unknown> = {}) => toBillDetail(wireDetail(over));
@@ -110,4 +110,13 @@ test("a typed number is saved in the firm's format when the firm uses full numbe
 
 test("a saved bill's lines: as stored, with no product link (lines keep their names)", () => {
   expect(linesFromBill(bill().lines)[0]).toMatchObject({ productId: null, custom: false, name: "Gold Ring 22K", hsn: "711319" });
+});
+
+test("an id from a link is a whole number above 0, or nothing", () => {
+  expect(["412", "7", "0", "-3", "7a", "4.5", " 7", "", null].map(idParam)).toEqual([412, 7, null, null, null, null, null, null, null]);
+});
+
+test("a GST rate as its slab in the rate box: compared as numbers, and no slab for a rate outside them", () => {
+  expect(["3", "3.00", "0.250", "0", "40"].map(slabOf)).toEqual(["3", "3", "0.25", "0", "40"]);
+  expect(["7", "", " ", null].map(slabOf)).toEqual(["", "", "", ""]);
 });

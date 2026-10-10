@@ -8,6 +8,7 @@ import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 import SalesList from "@/pages/sales/SalesList";
 import { customerRoutes } from "@/pages/customers/routes";
+import NewBillPage from "@/pages/sales/form/BillFormPage";
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -24,7 +25,7 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
   sales: [
-    "/sales/paper", "/sales/new", "/sales/batch", "/sales/export", "/sales/:id", "/sales/:id/edit", "/sales/:id/print",
+    "/sales/paper", "/sales/batch", "/sales/export", "/sales/:id", "/sales/:id/edit", "/sales/:id/print",
     "/billing/invoice/:bizSlug/:fy/:slug", // v2's links by bill number
   ],
   purchases: [
@@ -88,6 +89,8 @@ export const appRoutes: RouteObject[] = [{
       children: [
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,
+        // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
+        { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         // part 1B: the bills list
         { path: "/sales", element: <SalesList /> },
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)

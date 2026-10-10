@@ -215,3 +215,13 @@ export { storedFor } from "@/core/sales/numbers";
 const SLAB_HINT: Record<string, string> = { "3": "gold, silver, jewellery", "0.25": "cut and polished diamonds", "0.1": "goods to exporters", "1.5": "rough diamonds", "5": "job work", "18": "services, packing", "0": "exempt" };
 export const SLABS = ["3", "0.25", "0", "0.1", "1", "1.5", "5", "12", "18", "28", "40"] as const;
 export const SLAB_OPTIONS = SLABS.map((p) => ({ value: p, label: `${p}%${SLAB_HINT[p] ? ` · ${SLAB_HINT[p]}` : ""}` }));
+/**
+ * A GST rate as its slab, compared as numbers ("3.00" is "3", "0.250" is "0.25"), or "" when it isn't one: none picked,
+ * a blank (which isn't 0%), or a v2 product's rate outside the slabs (0.07 reads "7").
+ */
+export function slabOf(gst: string | null): string {
+  return gst != null && gst.trim() !== "" ? SLABS.find((s) => Number(s) === Number(gst)) ?? "" : "";
+}
+
+/** A record's id from a link (?from=412, ?customer=7): a whole number above 0, else null. The form's pages read their links with it. */
+export const idParam = (v: string | null): number | null => (v && /^\d+$/.test(v) && Number(v) > 0 ? Number(v) : null);

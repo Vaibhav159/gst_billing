@@ -19,12 +19,16 @@ import { isHsn } from "./rules";
 
 /** What the line takes: the item, and the product's id when it was kept in Products. */
 export type NewItem = { productId: number | null; line: { name: string; hsn: string; gst: string; unit: string; rate: string; description: string } };
-export type NewItemFormProps = { initialName?: string; idBase?: string; onDone: (item: NewItem) => void; onCancel?: () => void; onTyped?: (typed: boolean) => void };
+export type NewItemFormProps = {
+  initialName?: string; idBase?: string; onDone: (item: NewItem) => void; onCancel?: () => void; onTyped?: (typed: boolean) => void;
+  /** Whether a save to Products is on its way, for the sheet around the form to stay open until it lands (it would save the product but leave it off the line). */
+  onBusy?: (busy: boolean) => void;
+};
 
 const UNIT_OPTIONS = UNITS.map((u) => ({ value: u.value, label: u.label }));
 type Problems = Partial<Record<"name" | "hsn" | "gst", string>>;
 
-export function NewItemForm({ initialName = "", idBase = "np", onDone, onCancel, onTyped }: NewItemFormProps) {
+export function NewItemForm({ initialName = "", idBase = "np", onDone, onCancel, onTyped, onBusy }: NewItemFormProps) {
   const { can } = useAuth();
   const { isPhone } = useView();
   const { show } = useToast();
@@ -68,6 +72,9 @@ export function NewItemForm({ initialName = "", idBase = "np", onDone, onCancel,
     });
   };
   const busy = create.isPending;
+  // a layout effect, as onTyped's: the sheet knows before the next key (an Esc pressed at once still waits)
+  useLayoutEffect(() => { onBusy?.(busy); }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onBusy?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-4">
       <Field label="Name" htmlFor={`${idBase}-name`} required error={err.name}>
