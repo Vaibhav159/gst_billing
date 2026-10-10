@@ -888,6 +888,68 @@ class AuditLog(models.Model):
         return f"{self.action} {self.entity} #{self.entity_id}"
 
 
+class BinQuerySet(models.QuerySet):
+    def live(self):
+        """Deleted bills still in the bin: not restored here, and not brought back by v2's undo.
+
+        After a rollback v2 knows nothing of this table: its undo brings a bill back under a new id
+        and marks the "deleted" audit row used (`_undo`), leaving the row here stale. The bin list,
+        the number series and the admin read the bin through this, so a stale row lists nowhere and
+        holds no number (Ruling 1A-6).
+        """
+        undone = AuditLog.objects.filter(pk=models.OuterRef("audit_log_id"), snapshot__has_key="_undo")
+        return self.filter(restored_at__isnull=True).exclude(models.Exists(undone))
+
+
+class BinnedInvoice(models.Model):
+    """A deleted sales bill, kept so its number stays used and it can come back (design decision 6).
+
+    Deleting moves the bill and its lines here and out of the Invoice table, so v2 (after a
+    rollback) sees it as deleted, as it sees its own deletes. `data` holds every field of the
+    bill and of each line, v3's included; v2's audit row keeps only v2's keys. No database
+    foreign keys: v2's deletes must never trip over this table.
+    """
+
+    KIND_DELETED = "deleted"
+    KIND_CANCELLED = "cancelled"  # set aside by prepare_v2_rollback, for v2
+
+    objects = BinQuerySet.as_manager()
+
+    original_id = models.IntegerField(db_index=True)
+    business = models.ForeignKey(Business, on_delete=models.PROTECT, db_constraint=False, related_name="+")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, db_constraint=False, related_name="+")
+    invoice_number = models.CharField(max_length=255, blank=True, default="", db_default="")
+    invoice_date = models.DateField()
+    type_of_invoice = models.CharField(
+        max_length=255, choices=INVOICE_TYPE_CHOICES, default=INVOICE_TYPE_OUTWARD, db_default=INVOICE_TYPE_OUTWARD,
+    )
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=BILLING_DECIMAL_PLACE_PRECISION, default=0, db_default=0,
+    )
+    kind = models.CharField(
+        max_length=10, choices=[(KIND_DELETED, "Deleted"), (KIND_CANCELLED, "Cancelled, set aside for v2")],
+        default=KIND_DELETED, db_default=KIND_DELETED,
+    )
+    reason = models.CharField(max_length=255, blank=True, default="", db_default="")
+    data = models.JSONField(default=dict, help_text="Every field of the bill and its lines, as text.")
+    audit_log_id = models.IntegerField(null=True, blank=True, help_text="The v2-shaped 'deleted' audit row.")
+    deleted_at = models.DateTimeField(auto_now_add=True)
+    deleted_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    restored_at = models.DateTimeField(null=True, blank=True)
+    restored_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+
+    class Meta:
+        ordering = ["-deleted_at", "-id"]
+        indexes = [models.Index(fields=["business", "invoice_date"])]
+
+    def __str__(self):
+        return f"{self.invoice_number} (deleted)"
+
+
 class ITCReclaimLedger(AbstractBaseModel):
     """
     Tracks the Electronic Credit Reversal & Reclaimed Statement (ECRRS)

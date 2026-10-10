@@ -32,6 +32,7 @@ from billing.constants import B2CL_THRESHOLD, INVOICE_TYPE_INWARD, INVOICE_TYPE_
 from billing.gstin import check_digit
 from billing.models import (
     AuditLog,
+    BinnedInvoice,
     Business,
     Customer,
     FiledPeriod,
@@ -190,6 +191,7 @@ class Command(BaseCommand):
             raise CommandError(f"Refusing: unexpected database vendor {connection.vendor!r}.")
 
     def _reset(self):
+        BinnedInvoice.objects.all().delete()  # it protects the customers and firms below
         LineItem.objects.all().delete()
         InwardCapture.objects.all().delete()
         Invoice.objects.all().delete()

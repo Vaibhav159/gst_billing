@@ -1,6 +1,7 @@
 import logging
 
 from django.db.models import JSONField, ProtectedError
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -29,6 +30,20 @@ def snapshot_of(instance) -> dict:
         else:
             data[field.name] = str(value)
     return data
+
+
+def mark_undone(entry, user, log, via=None):
+    """Spend an audit entry's Undo: v2's undo and v3's restore each mark it, so neither runs twice (H7).
+
+    The marker lives in the snapshot, which the browser never sees, under a key no model field has,
+    so the restore loops skip it; `log` is the row the undo wrote. v3's restore adds `via` ("bin" or
+    "audit_log"), so a later refusal can say what brought the bill back; v2's marker has no such key.
+    """
+    marker = {"at": timezone.localtime().isoformat(), "by": getattr(user, "pk", None), "log": log.pk}
+    if via:
+        marker["via"] = via
+    entry.snapshot = {**(entry.snapshot or {}), "_undo": marker}
+    entry.save(update_fields=["snapshot"])
 
 
 class AuditLogMixin:

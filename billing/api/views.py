@@ -20,7 +20,7 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear, Trim
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -40,11 +40,13 @@ from billing.constants import (
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
+    V2_LINE_SNAPSHOT_FIELDS,
 )
-from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, FiledPeriod, Invoice, LineItem, Product
 from billing.period_lock import assert_period_unlocked
 from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
+from billing.services.bin import bin_bill, restore_from_bin, v2_snapshot
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
 from billing.services.sales import CANCELLED_WORDS
@@ -58,7 +60,7 @@ from billing.utils import (
     process_product_csv,
 )
 
-from .mixins import AuditLogMixin, ProtectedDeleteMixin
+from .mixins import AuditLogMixin, ProtectedDeleteMixin, mark_undone
 from .permissions import AdminOnlyPermission, RoleBasedPermission, V3PermissionIfPlaced, get_user_role, sale_or_purchase
 from .serializers import (
     AuditLogSerializer,
@@ -520,6 +522,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             )
             for business in source.businesses.all():
                 target.businesses.add(business)
+            # Its deleted bills follow too: the bin protects the customer, and a restore needs one.
+            BinnedInvoice.objects.filter(customer=source).update(customer=target)
             source_name = source.name
             source_id = source.pk
             source.delete()
@@ -1045,25 +1049,21 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         assert_period_unlocked(instance.business_id, instance.invoice_date, "delete")
+        if instance.type_of_invoice == INVOICE_TYPE_OUTWARD:
+            # A sale goes to the bin (design decision 6): its number stays used and it can come
+            # back under its own id. The "deleted" audit row is written as before.
+            bin_bill(instance, self.request.user)
+            return
         super().perform_destroy(instance)
 
-    _LINE_SNAPSHOT_FIELDS = (
-        "product_name", "hsn_code", "gst_tax_rate", "quantity", "rate",
-        "cgst", "sgst", "igst", "amount", "unit",
-    )
+    _LINE_SNAPSHOT_FIELDS = V2_LINE_SNAPSHOT_FIELDS
 
     def _full_snapshot(self, instance):
         # The header alone is not an invoice. Line items cascade away on delete
         # and were never recorded, so undoing a deleted invoice recreated a row
         # with the old total and zero lines — an "empty invoice" that counted
         # in dashboards but vanished from GSTR rate and HSN tables.
-        data = super()._full_snapshot(instance)
-        data["line_items"] = [
-            {f: (str(getattr(li, f)) if getattr(li, f) is not None else None)
-             for f in self._LINE_SNAPSHOT_FIELDS}
-            for li in instance.lineitem_set.all()
-        ]
-        return data
+        return v2_snapshot(instance)
 
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
@@ -2825,12 +2825,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             return None
 
         def _undone(response, log):
-            # Recorded on the entry, in the same transaction, so the undo can't
-            # be used twice (H7). In the snapshot, which the browser never sees,
-            # under a key no model field has, so the restore loops skip it.
-            entry.snapshot = {**(entry.snapshot or {}), "_undo": {
-                "at": timezone.localtime().isoformat(), "by": request.user.pk, "log": log.pk}}
-            entry.save(update_fields=["snapshot"])
+            # Recorded on the entry, in the same transaction, so the undo can't be used twice (H7).
+            mark_undone(entry, request.user, log)
             return response
 
         try:
@@ -2852,6 +2848,14 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         {"error": "already_undone", "detail": "This delete was already undone."},
                         status=status.HTTP_409_CONFLICT,
                     )
+                binned = (BinnedInvoice.objects.filter(audit_log_id=entry.pk, restored_at__isnull=True).first()
+                          if entry.action == "deleted" and entry.entity == "invoice" else None)
+                if binned is not None:
+                    # A sale v3 moved to the bin comes back from there, under its own id; the
+                    # restore marks this entry used. A closed month is still v2's 400 here.
+                    assert_period_unlocked(binned.business_id, binned.invoice_date, "create")
+                    obj = restore_from_bin(binned, request.user, via="audit_log")
+                    return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
                 if entry.action == "deleted" and entry.snapshot:
                     # Recreate the deleted object
                     snap = entry.snapshot
@@ -2950,17 +2954,21 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         if model is Invoice:
                             assert_period_unlocked(obj.business_id, obj.invoice_date, "delete")
                         name = str(obj)
-                        obj.delete()
-                        log = AuditLog.objects.create(
-                            action="deleted",
-                            entity=entry.entity,
-                            entity_id=entry.entity_id,
-                            entity_name=name,
-                            user=request.user if request.user.is_authenticated else None,
-                            details=f"Deleted via undo (was created at {entry.timestamp})",
-                        )
+                        details = f"Deleted via undo (was created at {entry.timestamp})"
+                        if model is Invoice and obj.type_of_invoice == INVOICE_TYPE_OUTWARD:
+                            _binned, log = bin_bill(obj, request.user, details=details)  # a sale goes to the bin
+                        else:
+                            obj.delete()
+                            log = AuditLog.objects.create(
+                                action="deleted",
+                                entity=entry.entity,
+                                entity_id=entry.entity_id,
+                                entity_name=name,
+                                user=request.user if request.user.is_authenticated else None,
+                                details=details,
+                            )
                         return _undone(Response({"message": f"Deleted {entry.entity}: {name}"}), log)
-                    except model.DoesNotExist:
+                    except (model.DoesNotExist, Http404):  # Http404: bin_bill found it gone (Ruling 1A-17)
                         return Response({"error": "Record already deleted"}, status=404)
 
                 else:

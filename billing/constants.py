@@ -63,6 +63,14 @@ BILL_ACTIVE = "active"
 BILL_CANCELLED = "cancelled"
 BILL_STATUS_CHOICES = [(BILL_ACTIVE, "Active"), (BILL_CANCELLED, "Cancelled")]
 
+# The line keys v2's audit log keeps for a deleted bill. v2's undo recreates a
+# line from every one of them, so they never grow (S§0.3); v3 keeps the rest of
+# a deleted bill in the bin (BinnedInvoice.data).
+V2_LINE_SNAPSHOT_FIELDS = (
+    "product_name", "hsn_code", "gst_tax_rate", "quantity", "rate",
+    "cgst", "sgst", "igst", "amount", "unit",
+)
+
 DOWNLOAD_SHEET_FIELD_NAMES = [
     "S.No.",
     "Bill No.",

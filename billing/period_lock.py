@@ -94,3 +94,10 @@ def assert_sales_open(business, day, action="edit"):
         "month_closed",
         locked_period={"id": period.id, "business": period.business_id, "year": period.year, "month": period.month},
     )
+
+
+def closed_months(business_ids):
+    """{(business_id, year, month)} of every closed month of these firms: one query for a page of bills."""
+    from billing.models import FiledPeriod
+
+    return set(FiledPeriod.objects.filter(business_id__in=business_ids).values_list("business_id", "year", "month"))
