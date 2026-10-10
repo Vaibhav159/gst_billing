@@ -194,12 +194,21 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
 /**
  * Heights in points, measured on BillDocument's own layout (A4, Times 9 pt): the room inside the outer border, the
  * header parts, a line's row, the last page's closing part. The character counts are how many fit on one line of a
- * column, on the short side (capitals are wide), so a page is planned a little emptier rather than overfull.
+ * column, on the short side (capitals are wide), so a page is planned a little emptier rather than overfull. Names in
+ * bold count fewer: a business's name often comes in capitals, as the GST portal spells it.
  */
+// ponytail: the plan counts characters, not widths, so a line of capitals right at a count's edge (a 40-character item name
+// heavy in M and W) and a figure too wide for its narrow column (a quantity over 9,999 g, a rate over ₹99,99,999) wrap
+// unseen; `safety` holds about one such line a page. Upgrade: measure each text with Times's own widths.
 export const PAGE_FIT = {
-  page: 800.5, title: 72.3, titleNext: 24.4, shortHead: 30, head: 27.2, closing: 20,
+  page: 800.5, title: 72.3, titleNext: 24.4, head: 27.2, closing: 20,
+  /** A later page's header: its padding and rule, then a line of it; a line of each half (271 pt) holds shortChars. */
+  shortHead: 11, shortLine: 9.6, shortChars: 50,
   row: 18, rowPad: 6, nameLine: 10.2, noteLine: 8.6, nameChars: 40, noteChars: 55,
-  meta: 173.3, blockPad: 10, firmName: 12.3, label: 7.8, infoLine: 10.1, infoChars: 58,
+  /** The 14 boxes a line each; a row of them grows by a line for each line more its longer value wraps to (113 pt, bold). */
+  meta: 173.3, metaLine: 10.1, metaChars: 16,
+  /** The firm's name (11 pt, bold) and a party's (bold) wrap sooner than the blocks' other lines. */
+  blockPad: 10, firmName: 12.3, firmChars: 42, label: 7.8, infoLine: 10.1, infoChars: 58, partyChars: 48,
   taxRow: 18, footer: 216.3, hsnRow: 14.5, bank: 38, wordsChars: 100,
   /** Kept free on every page, for what the estimates above can't see (a word that wraps early). */
   safety: 12,
@@ -212,13 +221,23 @@ function lineHeight(l: PrintLine): number {
   return Math.max(F.row, F.rowPad + F.nameLine * wraps(l.name, F.nameChars) + (l.note ? F.noteLine * wraps(l.note, F.noteChars) : 0));
 }
 
-/** The first page's firm, consignee and buyer blocks beside the 14 boxes. */
+/** The first page's firm, consignee and buyer blocks beside the 14 boxes, as tall as the taller side. */
 function infoHeight(b: Omit<PrintBill, "pages">): number {
   const F = PAGE_FIT;
   const lines = (ls: string[]) => ls.reduce((a, l) => a + wraps(l, F.infoChars), 0) * F.infoLine;
-  const firm = F.blockPad + F.firmName + lines(b.firm.lines) + 1;
-  const parties = b.parties.reduce((a, p) => a + F.blockPad + F.label + lines([p.name, ...p.lines]), 0) + 1;
-  return Math.max(F.meta, firm + parties) + 1;
+  const firm = F.blockPad + F.firmName * wraps(b.firm.name, F.firmChars) + lines(b.firm.lines) + 1;
+  const parties = b.parties.reduce((a, p) => a + F.blockPad + F.label + F.infoLine * wraps(p.name, F.partyChars) + lines(p.lines), 0) + 1;
+  // the boxes stand two to a row (a transporter and its GSTIN wrap in theirs)
+  let meta = F.meta;
+  for (let r = 0; r < b.meta.length; r += 2) meta += F.metaLine * (Math.max(wraps(b.meta[r][1], F.metaChars), wraps(b.meta[r + 1][1], F.metaChars)) - 1);
+  return Math.max(meta, firm + parties) + 1;
+}
+
+/** A later page's header: two halves of two lines each (Ruling 1E-10's runs), as tall as the half that wraps more. */
+function shortHeight(b: Omit<PrintBill, "pages">): number {
+  const F = PAGE_FIT;
+  const [firm, number, buyer, place] = b.short.map((runs) => wraps(runs.map((r) => r.text).join(""), F.shortChars));
+  return F.shortHead + F.shortLine * Math.max(firm + buyer, number + place);
 }
 
 // ponytail: the last page's part after its lines has to fit on one sheet, and past about 28 HSN groups with the bank block
@@ -263,7 +282,7 @@ function pagesOf(b: Omit<PrintBill, "pages">): PrintPage[] {
   const F = PAGE_FIT;
   return planPages(b.lines.map(lineHeight), {
     first: F.page - F.title - infoHeight(b) - F.head - F.closing - F.safety,
-    next: F.page - F.titleNext - F.shortHead - F.head - F.closing - F.safety,
+    next: F.page - F.titleNext - shortHeight(b) - F.head - F.closing - F.safety,
     extra: lastExtra(b),
   });
 }

@@ -164,14 +164,5 @@ export function safeReturn(v: string | null): string | null {
   return path.startsWith("/") && !/^\/[/\\]/.test(path) ? path : null;
 }
 
-/** Hands a file to the person: the browser downloads it as `name`. */
-export function downloadFile(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+/** Hands a file to the person: the browser downloads it as `name` (core/print's saveFile, the app's one copy: Ruling 1E-6). */
+export { saveFile as downloadFile } from "@/core/print/files";

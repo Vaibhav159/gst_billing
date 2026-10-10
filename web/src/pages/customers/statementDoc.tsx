@@ -1,15 +1,14 @@
 // The customer statement as an A4 PDF page (react-pdf). Loaded only when a statement is opened (statementPdf.ts imports
 // it on demand), so @react-pdf/renderer stays out of the app's first download. A register of bills, not a ledger: no
 // balance, cancelled bills listed and not counted, udhaar named as billed on credit (PROTO CustomerStatement.jsx).
-import { Document, Font, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type { Statement } from "@/core/api/customers";
 import { date, inr, plural } from "@/core/format";
 import { PAY } from "@/core/sales/words";
+// The built-in Helvetica has no ₹ (it would print as "¹"): the one-glyph Tinos font carries it, as v2's Tally invoice
+// does, registered once for every PDF by core/print (Ruling 1E-6)
+import "@/core/print/pdfRupee";
 import { notCounted, SETTLED } from "./lib";
-import rupeeSignFont from "./rupeeSignFont";
-
-// The built-in Helvetica has no ₹ (it would print as "¹"): the one-glyph Tinos font carries it, as v2's Tally invoice does
-Font.register({ family: "RupeeSign", src: rupeeSignFont });
 
 /** What the PDF shows: the statement as the page has it, and the words around it. */
 export type StatementPdfData = {

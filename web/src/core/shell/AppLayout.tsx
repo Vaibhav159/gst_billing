@@ -6,6 +6,7 @@ import { phoneModeOf, usePrefs } from "@/core/prefs";
 import { useView } from "@/core/view";
 import { ScopeProvider } from "@/core/scope";
 import { ListSkeleton, ToastHost } from "@/core/ui";
+import { ShareHost } from "@/core/print/ShareHost";
 import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
@@ -82,6 +83,7 @@ export function AppLayout() {
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
         {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"} openPalette={openPalette}>{main}</PhoneShell>}
         <Palette open={palette} onClose={() => setPalette(false)} />
+        <ShareHost />
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>
     </ScopeProvider>

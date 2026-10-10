@@ -2,6 +2,7 @@
 // it. Made ahead, so Print and Share act inside the press itself: a browser opens a tab or the share sheet for a page
 // only straight from a person's press.
 import { useEffect, useState } from "react";
+import { shareFile } from "@/core/print/files";
 import { makeStatementPdf, type StatementPdfData } from "./statementPdf";
 
 /** "Anil-Gupta_statement_FY-2026-27.pdf"; own dates: "Anil-Gupta_statement_2026-10-01_to_2026-10-05.pdf". */
@@ -24,23 +25,9 @@ export function useStatementPdf(data: StatementPdfData | null): { blob: Blob | n
 }
 
 /** Opens the PDF in a new tab and asks it to print. False when the browser stopped the tab. */
-export function printPdf(blob: Blob): boolean {
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank");
-  if (!w) { URL.revokeObjectURL(url); return false; }
-  w.addEventListener("load", () => { try { w.print(); } catch { /* the PDF viewer has its own Print */ } });
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return true;
-}
+export { printFile as printPdf } from "@/core/print/files";
 
 /** The share sheet with the PDF, where the browser has one for files; "unsupported" elsewhere (download it instead). */
-export async function sharePdf(blob: Blob, name: string, title: string): Promise<"shared" | "cancelled" | "unsupported"> {
-  const file = new File([blob], name, { type: "application/pdf" });
-  if (typeof navigator.share !== "function" || typeof navigator.canShare !== "function" || !navigator.canShare({ files: [file] })) return "unsupported";
-  try {
-    await navigator.share({ files: [file], title });
-    return "shared";
-  } catch (e) {
-    return (e as Error).name === "AbortError" ? "cancelled" : "unsupported";
-  }
+export function sharePdf(blob: Blob, name: string, title: string): Promise<"shared" | "cancelled" | "unsupported"> {
+  return shareFile(blob, name, { title }).then((r) => (r === "late" ? "unsupported" : r));
 }
