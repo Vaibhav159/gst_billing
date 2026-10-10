@@ -61,15 +61,16 @@ export function AppLayout() {
   // once a page stays, its frame has taken the greeting after signing in: later frames are for later moves
   useEffect(() => { if (!opening && !unsure) { shown.current = true; signIn.current = false; } });
   if (opening) return <Navigate to={to} replace />;
-  if (unsure) return <div className="p-6"><ListSkeleton what="the app" /></div>;
+  // the offline or server-trouble banner is one per screen: above the page here, the phone shell's own (its topmost
+  // strip), or under the desktop's top bar, as in the prototype
+  if (unsure) return <><OfflineBanner /><div className="p-6"><ListSkeleton what="the app" /></div></>;
   const page = to ? <Navigate to={to} replace /> : <Outlet />;
-  // on a desktop the skip link focuses the page, so <main> takes focus there. The offline or server-trouble banner sits
-  // above the page on every view (on a desktop, under the top bar), and a page that fails to draw shows a way home instead.
-  const main = <><OfflineBanner /><main id="app-main" tabIndex={isDesktop ? -1 : undefined} className={cn("flex-1 min-h-0 overflow-y-auto", isDesktop ? "outline-none" : "overscroll-contain")}><PageFrame><ScreenBoundary key={pathname} onHome={() => navigate("/")}>{page}</ScreenBoundary></PageFrame></main></>;
+  // on a desktop the skip link focuses the page, so <main> takes focus there; a page that fails to draw shows a way home instead
+  const main = <main id="app-main" tabIndex={isDesktop ? -1 : undefined} className={cn("flex-1 min-h-0 overflow-y-auto", isDesktop ? "outline-none" : "overscroll-contain")}><PageFrame><ScreenBoundary key={pathname} onHome={() => navigate("/")}>{page}</ScreenBoundary></PageFrame></main>;
   return (
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
-        {isDesktop ? <DesktopShell openPalette={openPalette}>{main}</DesktopShell> : <PhoneShell easy={view === "easy"}>{main}</PhoneShell>}
+        {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"}>{main}</PhoneShell>}
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>
     </ScopeProvider>

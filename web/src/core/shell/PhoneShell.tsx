@@ -6,8 +6,9 @@ import { ArrowLeft } from "lucide-react";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
 import { phoneModeOf, usePrefs } from "@/core/prefs";
-import { HideNavContext } from "@/core/ui";
+import { HideNavContext, NotchClearedContext } from "@/core/ui";
 import { EASY_TABS, EXPERT_TABS, tabOf } from "./nav";
+import { bannerShows, OfflineBanner } from "./OfflineBanner";
 
 /** What a route can say about the phone shell (routes.tsx): forms and print hide the tabs. */
 type ShellHandle = { hideNav?: boolean } | undefined;
@@ -22,15 +23,21 @@ export function PhoneShell({ children, easy }: { children: ReactNode; easy: bool
   const hide = matches.some((m) => (m.handle as ShellHandle)?.hideNav === true);
   // someone whose phone opens on Easy is on a full-view page: the way back stays at the top (once their setting is known)
   const fromEasy = ready && phoneModeOf(prefs) === "easy";
+  // the topmost strip clears the notch (the prototype's order: the banner, then Back to Easy), else the page's own header does
+  const banner = bannerShows(net);
+  const back = !easy && fromEasy;
   return (
     <div className={cn("h-full flex flex-col bg-ground text-fg", easy ? "text-[16px]" : "text-md", net === "offline" && "has-offline")}>
-      {!easy && fromEasy ? (
+      <OfflineBanner />
+      {back ? (
         // a mode switch is a new home, as More's switch is: Back from Easy's home doesn't return to the full view
-        <Link to="/e" replace className="shrink-0 flex items-center justify-center gap-2 min-h-11 bg-brand text-onbrand font-semibold text-md anim-rise">
+        <Link to="/e" replace className={cn("shrink-0 flex items-center justify-center gap-2 bg-brand text-onbrand font-semibold text-md anim-rise", banner ? "min-h-11" : "pt-[env(safe-area-inset-top,0px)] min-h-[calc(44px+env(safe-area-inset-top,0px))]")}>
           <ArrowLeft size={18} aria-hidden="true" />Back to Easy
         </Link>
       ) : null}
-      <HideNavContext.Provider value={hide}>{children}</HideNavContext.Provider>
+      <NotchClearedContext.Provider value={banner || back}>
+        <HideNavContext.Provider value={hide}>{children}</HideNavContext.Provider>
+      </NotchClearedContext.Provider>
       {hide ? null : (
         <nav aria-label="Tabs" className="phone-tabs shrink-0 border-t border-rule bg-bar grid grid-cols-5 pb-[env(safe-area-inset-bottom,0px)]">
           {tabs.map((t) => {

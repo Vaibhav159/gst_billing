@@ -576,6 +576,68 @@ test("offline, the phone shell carries has-offline", async () => {
   expect(shell).not.toHaveClass("has-offline");
 });
 
+const isBefore = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+test("while a phone waits for its setting, the banner still says what's wrong, at the top, above Loading the app", async () => {
+  const s = server({ hold: "get" }); // nothing kept on this phone yet
+  open("/");
+  await waitFor(() => expect(s.pending()).toBe(1));
+  act(() => __setNetState("unreachable")); // another request found the server not answering
+  const loading = screen.getByText("Loading the app…").closest("[role=status]")!;
+  const banners = document.querySelectorAll<HTMLElement>("[role=status][data-offline]");
+  expect(banners).toHaveLength(1);
+  const [banner] = banners;
+  expect(banner).toHaveTextContent("The app couldn't get through.");
+  expect(isBefore(banner, loading)).toBe(true);
+  expect(banner.parentElement!.firstElementChild).toBe(banner); // nothing above it
+  expect(banner).toHaveClass("pt-[calc(8px+env(safe-area-inset-top,0px))]"); // so it clears the notch
+  // offline the setting can't come, so the Expert home stands in: still one banner, now the shell's, and one page
+  const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  try {
+    act(() => { window.dispatchEvent(new Event("offline")); });
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    expect(document.querySelectorAll("[role=status][data-offline]")).toHaveLength(1);
+    expect(screen.getByText(/You're offline/).closest("[data-offline]")!.parentElement).toContainElement(screen.getByRole("navigation", { name: /tabs/i }));
+    expect(document.querySelectorAll("#app-main")).toHaveLength(1);
+  } finally {
+    onLine.mockRestore();
+    act(() => { window.dispatchEvent(new Event("online")); }); // TanStack's own online state too
+  }
+});
+
+test("the topmost strip clears the notch (the banner, else Back to Easy, else the page's own header), and nothing below pads for it again", async () => {
+  const NOTCH = "pt-[env(safe-area-inset-top,0px)]";
+  const header = () => document.querySelector("#app-main [data-phone-header]")!;
+  server(); // no mode chosen: Easy, so a full-view page has Back to Easy at the top
+  open("/customers");
+  const back = await screen.findByRole("link", { name: /back to easy/i });
+  expect(header()).toBeInTheDocument();
+  // the bar sits under the notch; what it says keeps its 44 px below it
+  expect(back).toHaveClass(NOTCH, "min-h-[calc(44px+env(safe-area-inset-top,0px))]");
+  expect(header()).not.toHaveClass(NOTCH);
+  // offline, the banner goes above the bar and takes the notch from it
+  act(() => __setNetState("offline"));
+  expect(document.querySelector("[data-offline]")).toHaveClass("pt-[calc(8px+env(safe-area-inset-top,0px))]");
+  expect(back).not.toHaveClass(NOTCH);
+  expect(back).toHaveClass("min-h-11");
+  expect(header()).not.toHaveClass(NOTCH);
+  cleanup();
+  act(() => __setNetState("online"));
+
+  // an Expert person's phone has nothing above the page, so its own header clears the notch, until the banner shows
+  const s = server({ prefs: { phoneMode: "expert" } });
+  open("/customers");
+  await screen.findByRole("heading", { level: 1, name: "Customers" });
+  await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
+  await wait(50);
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+  expect(header()).toHaveClass(NOTCH);
+  act(() => __setNetState("unreachable"));
+  expect(header()).not.toHaveClass(NOTCH);
+  act(() => __setNetState("online"));
+  expect(header()).toHaveClass(NOTCH);
+});
+
 // Task 6 hand-off and the keyboard inset
 
 test("on a phone the keyboard's height is --kb on the app, in the app's own pixels, and the overlay layer follows it", async () => {

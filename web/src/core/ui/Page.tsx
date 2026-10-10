@@ -105,6 +105,7 @@ export type PhoneHeaderProps = { title: ReactNode; subtitle?: ReactNode; back?: 
 export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeaderProps) {
   const navigate = useNavigate();
   const { isEasy } = useView();
+  const notchCleared = useContext(NotchClearedContext);
   // with no page before this one in the tab, go up to `back` (true: home) in place of this entry;
   // it's still a step back, so the page frame slides it in from the left (dir: "back")
   const onBack = () => {
@@ -112,7 +113,7 @@ export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeade
     else navigate(typeof back === "string" ? back : isEasy ? "/e" : "/", { replace: true, state: { dir: "back" } });
   };
   return (
-    <header data-phone-header="" className="sticky top-0 z-nav bg-bar border-b border-rule pt-[env(safe-area-inset-top,0px)]">
+    <header data-phone-header="" className={cn("sticky top-0 z-nav bg-bar border-b border-rule", !notchCleared && "pt-[env(safe-area-inset-top,0px)]")}>
       <div className="flex items-center gap-1 pl-2 pr-2 min-h-[60px]">
         {back ? <IconButton label="Back" icon={ChevronLeft} onClick={onBack} /> : logo ? <span className="pl-2 pr-1"><AppMark size={38} /></span> : <span className="w-2" />}
         <div className="flex-1 min-w-0 px-1.5">
@@ -131,6 +132,12 @@ export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeade
  * indicator itself.
  */
 export const HideNavContext = createContext(false);
+
+/**
+ * True under a strip the phone shell shows above the page (the offline banner, Back to Easy). The topmost strip clears
+ * the phone's notch (env(safe-area-inset-top)), so the page's header doesn't pad for it again. The phone shell provides it.
+ */
+export const NotchClearedContext = createContext(false);
 
 export type PhoneActionBarProps = { children: ReactNode; className?: string };
 

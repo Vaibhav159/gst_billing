@@ -112,20 +112,37 @@ function inApp(pages: RouteObject[], path: string) {
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 const isBefore = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-test.each([["a desktop", false], ["a phone", true]])("on %s the banner sits above the page, outside it", async (_, onPhone) => {
+test.each([
+  ["a desktop", "offline", false], ["a desktop", "unreachable", false], ["a phone", "offline", true], ["a phone", "unreachable", true],
+] as const)("on %s, %s: one banner, above the page and outside it, and one page", async (_, net, onPhone) => {
   phone(onPhone);
   try {
     inApp([{ path: "/sales", element: <Page title="Bills">The bills</Page> }], "/sales");
     await screen.findByRole("heading", { level: 1, name: "Bills" });
-    act(() => __setNetState("offline"));
-    const banner = screen.getByText(/You're offline/).closest("[role=status]") as HTMLElement;
+    // on a phone, no mode chosen means Easy: this full-view page has Back to Easy at the top
+    const back = onPhone ? await screen.findByRole("link", { name: /back to easy/i }) : null;
+    act(() => __setNetState(net));
+    const banners = document.querySelectorAll<HTMLElement>("[role=status][data-offline]");
+    expect(banners).toHaveLength(1);
+    expect(document.querySelectorAll("#app-main")).toHaveLength(1);
+    const [banner] = banners;
+    expect(banner).toHaveTextContent(net === "offline"
+      ? "You're offline. What you're making stays on this device. Saving, sending and uploads need the internet."
+      : "The app couldn't get through. It's probably restarting after an update. Wait a minute and try again.");
     const main = document.getElementById("app-main")!;
     expect(main).not.toContainElement(banner);
     expect(isBefore(banner, main)).toBe(true);
-    // on a desktop it's under the top bar, as in the prototype
-    if (!onPhone) expect(isBefore(screen.getByRole("banner"), banner)).toBe(true);
-    act(() => __setNetState("unreachable"));
-    expect(banner).toHaveTextContent("The app couldn't get through. It's probably restarting after an update. Wait a minute and try again.");
+    if (!onPhone) {
+      // on a desktop it's under the top bar, as in the prototype
+      expect(isBefore(screen.getByRole("banner"), banner)).toBe(true);
+    } else {
+      // on a phone it's the topmost thing, as in the prototype: first in the shell, above Back to Easy, and the shell first on screen
+      const shell = banner.parentElement!;
+      expect(shell).toContainElement(screen.getByRole("navigation", { name: /tabs/i }));
+      expect(shell.firstElementChild).toBe(banner);
+      expect(shell.parentElement!.firstElementChild).toBe(shell);
+      expect(isBefore(banner, back!)).toBe(true);
+    }
   } finally {
     phone(false);
   }
