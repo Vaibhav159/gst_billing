@@ -199,7 +199,7 @@ test("each record says what it is: a mobile in two groups, else as typed, else t
   await userEvent.type(box, "anil");
   await userEvent.click(await screen.findByRole("option", { name: "ANIL JEWELLERS 08BBBBB0000B1Z5" }));
   expect(await screen.findByText("firm 3")).toBeInTheDocument();
-});
+}, 15_000); // three typed searches and many role queries: past 5 s on a busy 2-CPU machine
 
 test("sales bills: by number and from each customer found, sales only, each once, newest first, five at most", async () => {
   const bill = (id: number, number: string, day: string, type = "outward") => ({ id, invoice_number: number, invoice_date: day, total_amount: "1000.00", type_of_invoice: type, business_id: 3 });
