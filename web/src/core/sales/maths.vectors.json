@@ -15,39 +15,37 @@
     { "quantity": "7.777", "rate": "8888.888", "gst_percent": "28", "interstate": true, "taxable": "69128.88", "cgst": "0.00", "sgst": "0.00", "igst": "19356.09", "tax": "19356.09", "amount": "88484.97" },
     { "quantity": "1", "rate": "100", "gst_percent": "0", "interstate": false, "taxable": "100.00", "cgst": "0.00", "sgst": "0.00", "igst": "0.00", "tax": "0.00", "amount": "100.00" },
     { "quantity": "1", "rate": "100", "gst_percent": "0.1", "interstate": false, "taxable": "100.00", "cgst": "0.05", "sgst": "0.05", "igst": "0.00", "tax": "0.10", "amount": "100.10" },
-    { "quantity": "250", "rate": "101", "gst_percent": "40", "interstate": false, "taxable": "25250.00", "cgst": "5050.00", "sgst": "5050.00", "igst": "0.00", "tax": "10100.00", "amount": "35350.00" }
+    { "quantity": "250", "rate": "101", "gst_percent": "40", "interstate": false, "taxable": "25250.00", "cgst": "5050.00", "sgst": "5050.00", "igst": "0.00", "tax": "10100.00", "amount": "35350.00" },
+    { "quantity": "1", "rate": "100.125", "gst_percent": "3", "interstate": false, "taxable": "100.13", "cgst": "1.50", "sgst": "1.50", "igst": "0.00", "tax": "3.00", "amount": "103.13" },
+    { "quantity": "1", "rate": "1.50", "gst_percent": "3", "interstate": false, "taxable": "1.50", "cgst": "0.03", "sgst": "0.02", "igst": "0.00", "tax": "0.05", "amount": "1.55" }
   ],
   "bills": [
     {
       "name": "KGH/2026-27/31: a ring and a pendant, local", "interstate": false,
       "lines": [{ "quantity": "12.345", "rate": "6512.500", "gst_percent": "3" }, { "quantity": "1", "rate": "4150", "gst_percent": "3" }],
-      "taxable": "84546.81", "cgst": "1268.20", "sgst": "1268.20", "igst": "0.00", "tax": "2536.40", "total": "87083.21", "payable": "87083.00", "round_off": "-0.21",
+      "taxable": "84546.81", "cgst": "1268.20", "sgst": "1268.20", "igst": "0.00", "tax": "2536.40", "total": "87083.21",
       "slabs": [{ "gst_percent": "3", "taxable": "84546.81", "cgst": "1268.20", "sgst": "1268.20", "igst": "0.00", "tax": "2536.40" }]
     },
     {
       "name": "gold and a cut diamond, inter-state", "interstate": true,
-      "lines": [{ "quantity": "12.345", "rate": "6512.500", "gst_percent": "3" }, { "quantity": "2.140", "rate": "61200.000", "gst_percent": "0.25" }],
-      "taxable": "211364.81", "cgst": "0.00", "sgst": "0.00", "igst": "2739.32", "tax": "2739.32", "total": "214104.13", "payable": "214104.00", "round_off": "-0.13",
+      "lines": [{ "quantity": "2.140", "rate": "61200.000", "gst_percent": "0.25" }, { "quantity": "12.345", "rate": "6512.500", "gst_percent": "3" }],
+      "taxable": "211364.81", "cgst": "0.00", "sgst": "0.00", "igst": "2739.32", "tax": "2739.32", "total": "214104.13",
       "slabs": [
         { "gst_percent": "3", "taxable": "80396.81", "cgst": "0.00", "sgst": "0.00", "igst": "2411.90", "tax": "2411.90" },
         { "gst_percent": "0.25", "taxable": "130968.00", "cgst": "0.00", "sgst": "0.00", "igst": "327.42", "tax": "327.42" }
       ]
     },
     {
-      "name": "one 18% line that rounds up", "interstate": false,
+      "name": "one 18% line, its CGST rounded up from half a paisa", "interstate": false,
       "lines": [{ "quantity": "10", "rate": "999.995", "gst_percent": "18" }],
-      "taxable": "9999.95", "cgst": "900.00", "sgst": "899.99", "igst": "0.00", "tax": "1799.99", "total": "11799.94", "payable": "11800.00", "round_off": "0.06",
+      "taxable": "9999.95", "cgst": "900.00", "sgst": "899.99", "igst": "0.00", "tax": "1799.99", "total": "11799.94",
       "slabs": [{ "gst_percent": "18", "taxable": "9999.95", "cgst": "900.00", "sgst": "899.99", "igst": "0.00", "tax": "1799.99" }]
+    },
+    {
+      "name": "two 3% lines, one typed as 3.0, make one slab", "interstate": false,
+      "lines": [{ "quantity": "1", "rate": "100", "gst_percent": "3" }, { "quantity": "1", "rate": "200", "gst_percent": "3.0" }],
+      "taxable": "300.00", "cgst": "4.50", "sgst": "4.50", "igst": "0.00", "tax": "9.00", "total": "309.00",
+      "slabs": [{ "gst_percent": "3", "taxable": "300.00", "cgst": "4.50", "sgst": "4.50", "igst": "0.00", "tax": "9.00" }]
     }
-  ],
-  "payable": [
-    { "total": "87083.21", "payable": "87083.00", "round_off": "-0.21" },
-    { "total": "1000.50", "payable": "1001.00", "round_off": "0.50" },
-    { "total": "1000.49", "payable": "1000.00", "round_off": "-0.49" },
-    { "total": "0.00", "payable": "0.00", "round_off": "0.00" },
-    { "total": "0.49", "payable": "0.00", "round_off": "-0.49" },
-    { "total": "0.50", "payable": "1.00", "round_off": "0.50" },
-    { "total": "199999.99", "payable": "200000.00", "round_off": "0.01" },
-    { "total": "265740.48", "payable": "265740.00", "round_off": "-0.48" }
   ]
 }

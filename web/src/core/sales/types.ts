@@ -57,12 +57,12 @@ export type Eway = {
   transport_mode: TransportMode; distance_km: number | null; may_be_needed: boolean;
 };
 export type Activity = { at: string; by: string | null; action: AuditAction; details: string };
-/** One bill, also the print data. payable: the total rounded to the rupee; round_off = payable − total (design decision 2). */
+/** One bill, also the print data. Its total stays exact to the paisa: nothing rounds it to the rupee (Ruling 1B-12). */
 export type BillDetail = Omit<BillRow, "customer"> & {
   customer: CustomerOnBill; place_of_supply: string; place_of_supply_name: string; place_of_supply_chosen: string | null; segment: Segment;
   notes: string; replaces: BillRef | null; replaced_by: BillRef | null; cancelled_at: string | null; cancelled_by: Person;
-  firm: FirmOnBill; lines: Line[]; slabs: Slab[]; hsn_summary: HsnRow[]; payable: number; round_off: number;
-  total_in_words: string; payable_in_words: string; tax_in_words: string; eway: Eway; duplicates: BillRef[];
+  firm: FirmOnBill; lines: Line[]; slabs: Slab[]; hsn_summary: HsnRow[];
+  total_in_words: string; tax_in_words: string; eway: Eway; duplicates: BillRef[];
   history: { created_by: Person; activity: Activity[] };
 };
 /** A deleted bill in the bin. id: the bin row's (Restore and Undo use it); original_id: the bill's own id. */

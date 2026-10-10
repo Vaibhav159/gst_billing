@@ -18,6 +18,24 @@ test("a counter sale is taxed where it's handed over: the firm's state unless a 
   expect(taxType("08", "27", { type: "business", gst_number: "27AAACK1234L1ZN", state_code: "27" })).toEqual({ inter: true, short: "Inter-state · IGST", why: "delivered to Maharashtra" });
 });
 
+test("a registered buyer's state is their GSTIN's first two digits, whatever state is stored, as the server reads it", () => {
+  const blank = { type: "business" as const, gst_number: "27AAACK1234L1ZN", state_code: "" };
+  const stale = { type: "business" as const, gst_number: "27AAACK1234L1ZN", state_code: "08" };
+  const inter = { inter: true, short: "Inter-state · IGST", why: "delivered to Maharashtra" };
+  expect(autoPos("08", blank)).toBe("27");
+  expect(taxType("08", autoPos("08", blank), blank)).toEqual(inter);
+  expect(autoPos("08", stale)).toBe("27");
+  expect(taxType("08", autoPos("08", stale), stale)).toEqual(inter);
+  // handed over at the counter here, though the buyer is registered in Maharashtra; and a Rajasthan GSTIN is local whatever is stored
+  expect(taxType("08", "08", stale).why).toBe("handed over at the counter in Rajasthan");
+  expect(taxType("08", "08", { type: "business", gst_number: "08ABCPK1234F1Z5", state_code: "27" }).why).toBe("both in Rajasthan");
+});
+
+test("with no firm state known, no place of supply makes a sale inter-state (the server: bool(firm) and chosen != firm)", () => {
+  expect(isInterState("", "27")).toBe(false);
+  expect(isInterState("", "")).toBe(false);
+});
+
 test("GSTR-1's table: any GSTIN is B2B (a failing check digit too); an inter-state sale over ₹1 lakh without one is B2CL", () => {
   expect(segmentOf("08AAKFS4821M1Z5", false, 100)).toBe("b2b");
   expect(segmentOf("", true, 10000001)).toBe("b2cl");
@@ -31,13 +49,13 @@ test("a GSTIN that doesn't check out says what to fix, and the GSTR-1 table the 
   // only its check character fails: still B2B (design decision 3)
   expect(gstinNote("08AAKFS4821M1Z5")).toBe("Its last character doesn't match, so you may have mistyped one character. The bill still files as B2B; check the GSTIN on the customer.");
   expect(segmentOf("08AAKFS4821M1Z5", false, 100)).toBe("b2b");
-  // short, over-long or not starting with a state's 2 digits: no GSTIN to GSTR-1 (the server's has_gstin), so B2C
+  // short, over-long or not starting with two digits: no GSTIN to GSTR-1 (the server's has_gstin), so B2C
   expect(gstinNote("08AAKFS4821M1Z")).toBe("A GSTIN has 15 characters; this has 14. The bill files as B2C until you fix the GSTIN on the customer.");
   expect(segmentOf("08AAKFS4821M1Z", false, 100)).toBe("b2cs");
   expect(gstinNote("08AAKFS4821M1Z55")).toBe("A GSTIN has 15 characters; this has 16. The bill files as B2C until you fix the GSTIN on the customer.");
   expect(gstinNote("AAAAKFS4821M1Z5")).toBe("This doesn't follow the GSTIN pattern (2 digits, PAN, entity number, Z, check character). The bill files as B2C until you fix the GSTIN on the customer.");
   expect(segmentOf("AAAAKFS4821M1Z5", false, 100)).toBe("b2cs");
-  // 15 characters from a state's 2 digits, off the pattern: the server still files it as B2B, so the note says so
+  // 15 characters starting with two digits, off the pattern: the server still files it as B2B, so the note says so
   expect(gstinNote("08AAKFS4821M1X5")).toBe("This doesn't follow the GSTIN pattern (2 digits, PAN, entity number, Z, check character). The bill still files as B2B; fix the GSTIN on the customer.");
   expect(segmentOf("08AAKFS4821M1X5", false, 100)).toBe("b2b");
 });

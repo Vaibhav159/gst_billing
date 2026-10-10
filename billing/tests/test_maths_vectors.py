@@ -5,10 +5,10 @@ maths.ts to them. This file holds the server to the same figures (Ruling 1B-6):
 
 * tax_rules' rule: a line's taxable value is to_paise(quantity x rate), its tax to_paise(taxable x rate), split by
   split_tax (CGST the half rounded half-up, SGST the rest, or all of it IGST);
-* the line builder every v3 bill goes through, build_line_items(source="api"), on unsaved models;
-* the payable total, rounded to the rupee as v2 prints it (LineItem.custom_round and custom_round_off).
+* the line builder every v3 bill goes through, build_line_items(source="api"), on unsaved models.
 
-A change to either side's rounding fails one of the two files.
+A bill's total stays exact to the paisa: nothing rounds it to the rupee (Ruling 1B-12). A change to either side's
+rounding fails one of the two files.
 """
 
 import json
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from billing.models import Business, Customer, Invoice, LineItem
+from billing.models import Business, Customer, Invoice
 from billing.services.line_items import build_line_items
 from billing.tax_rules import normalize_rate, rate_as_percent, split_tax, to_paise
 
@@ -85,15 +85,3 @@ class MathsVectorsTest(SimpleTestCase):
                         slab[k] += f[k]
                 self.assertEqual([{"gst_percent": p, **slabs[p]} for p in sorted(slabs, reverse=True)],
                                  [{"gst_percent": Decimal(s["gst_percent"]), **money(s, SLAB_FIGURES)} for s in v["slabs"]])
-                payable = Decimal(LineItem.custom_round(total))
-                self.assertEqual((payable, payable - total), (Decimal(v["payable"]), Decimal(v["round_off"])))
-
-    def test_the_payable_total_is_rounded_to_the_rupee_as_v2_prints_it(self):
-        for v in self.vectors["payable"]:
-            total = Decimal(v["total"])
-            with self.subTest(total=v["total"]):
-                payable = Decimal(LineItem.custom_round(total))
-                self.assertEqual(payable, Decimal(v["payable"]))
-                self.assertEqual(payable - total, Decimal(v["round_off"]))
-                # v2's "Rounded Off" line says the same
-                self.assertEqual(Decimal(LineItem.custom_round_off(total)), Decimal(v["round_off"]))

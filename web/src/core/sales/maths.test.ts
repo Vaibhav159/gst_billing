@@ -1,5 +1,5 @@
 import { toPaise } from "@/core/format";
-import { billFigures, lineFigures, payableOf, roundOffOf, scaled, taxFor, taxSlips } from "./maths";
+import { billFigures, lineFigures, scaled, taxFor, taxSlips } from "./maths";
 import vectors from "./maths.vectors.json";
 
 const p = (s: string) => toPaise(s) as number;
@@ -8,17 +8,11 @@ test.each(vectors.lines)("a line of $quantity at $rate and $gst_percent% (inter-
   expect(lineFigures(v, v.interstate)).toEqual({ taxable: p(v.taxable), cgst: p(v.cgst), sgst: p(v.sgst), igst: p(v.igst), tax: p(v.tax), amount: p(v.amount) });
 });
 
-test.each(vectors.bills)("a bill, $name, sums its lines and its slabs, highest first", (v) => {
-  const b = billFigures(v.lines, v.interstate);
-  expect({ taxable: b.taxable, cgst: b.cgst, sgst: b.sgst, igst: b.igst, tax: b.tax, total: b.total, payable: b.payable, round_off: b.round_off })
-    .toEqual({ taxable: p(v.taxable), cgst: p(v.cgst), sgst: p(v.sgst), igst: p(v.igst), tax: p(v.tax), total: p(v.total), payable: p(v.payable), round_off: p(v.round_off) });
-  expect(b.slabs).toEqual(v.slabs.map((s) => ({ gst_percent: s.gst_percent, taxable: p(s.taxable), cgst: p(s.cgst), sgst: p(s.sgst), igst: p(s.igst), tax: p(s.tax) })));
-  expect(b.pending).toBe(0);
-});
-
-test.each(vectors.payable)("$total is payable as $payable, rounding by $round_off", (v) => {
-  expect(payableOf(p(v.total))).toBe(p(v.payable));
-  expect(roundOffOf(p(v.total))).toBe(p(v.round_off));
+test.each(vectors.bills)("a bill, $name, sums its lines and its slabs, highest first, and keeps its total exact: nothing rounds to the rupee (Ruling 1B-12)", (v) => {
+  const { lines, slabs, ...sums } = billFigures(v.lines, v.interstate);
+  expect(sums).toEqual({ taxable: p(v.taxable), cgst: p(v.cgst), sgst: p(v.sgst), igst: p(v.igst), tax: p(v.tax), total: p(v.total), pending: 0 });
+  expect(slabs).toEqual(v.slabs.map((s) => ({ gst_percent: s.gst_percent, taxable: p(s.taxable), cgst: p(s.cgst), sgst: p(s.sgst), igst: p(s.igst), tax: p(s.tax) })));
+  expect(lines).toHaveLength(v.lines.length);
 });
 
 test("a line still being typed isn't worked out, and the bill counts it as pending", () => {
@@ -38,6 +32,10 @@ test("scaled reads decimals exactly, numbers too, and rounds a fourth place half
   expect(scaled("1.0005", 3)).toBe(1001n);
   expect(scaled("-1", 3)).toBeNull();
   expect(scaled("1e3", 3)).toBeNull();
+});
+
+test("a line with no taxable value isn't checked for its tax, as the server's tax_mismatch skips it", () => {
+  expect(taxSlips([{ taxable: 0, tax: 1500, gst_percent: "3" }, { taxable: 100000, tax: 3200, gst_percent: "3" }])).toEqual([{ index: 1, want: 3000, got: 3200 }]);
 });
 
 test("taxFor and taxSlips name a line whose stored tax isn't what its rate gives, beyond a paisa", () => {

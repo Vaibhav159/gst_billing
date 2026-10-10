@@ -1,8 +1,10 @@
 // Bill maths with the server's rounding (billing/tax_rules.py to_paise and split_tax; billing/services/line_items.py):
 // every figure in whole paise, half-up. A line's taxable value = paise(quantity × rate); its tax = paise(taxable × GST
 // rate); CGST = paise(tax ÷ 2) and SGST = tax − CGST, or all of it IGST; amount = taxable + tax. A bill sums its lines.
-// The prototype rounded each head on its own (P§2.3), up to a paisa apart: not followed (design decision 2).
-// maths.vectors.json holds figures worked out with the server's own Decimal rule; maths.test.ts holds the two equal.
+// The prototype rounded each head on its own (P§2.3), up to a paisa apart: not followed (design decision 2). Nothing
+// rounds a bill's total to the rupee: it stays exact to the paisa (Ruling 1B-12).
+// maths.vectors.json holds figures worked out with the server's own Decimal rule. maths.test.ts holds this file to them,
+// and billing/tests/test_maths_vectors.py holds the server to them: a vector you change binds both sides.
 
 /** One line as the maths takes it: quantity, rate per unit and GST percent, as typed or stored ("12.345", "6512.50", "3"). */
 export type MathsLine = { quantity: string | number; rate: string | number; gst_percent: string | number };
@@ -14,7 +16,6 @@ export type BillFigures = {
   taxable: number; cgst: number; sgst: number; igst: number; tax: number; total: number;
   /** Tax by slab, highest first. */
   slabs: SlabFigures[];
-  payable: number; round_off: number;
   /** How many lines aren't worked out yet. */
   pending: number;
 };
@@ -57,21 +58,10 @@ export function taxFor(taxablePaise: number, gstPercent: string | number): numbe
   return Number(halfUp(BigInt(taxablePaise) * bp, 10000n));
 }
 
-/** The total rounded to the rupee by today's rule (custom_round, billing/models.py): 50 paise and up rounds up. */
-export function payableOf(totalPaise: number): number {
-  const r = ((totalPaise % 100) + 100) % 100;
-  return r < 50 ? totalPaise - r : totalPaise - r + 100;
-}
-
-/** payable − total: what the bill rounds by ("-0.21" is −21). */
-export function roundOffOf(totalPaise: number): number {
-  return payableOf(totalPaise) - totalPaise;
-}
-
 /** "3", "3.0" and 3 are one slab. */
 const slabKey = (p: string | number): string => String(Number(p));
 
-/** A bill's figures from its lines: each line, the sums, tax by slab (highest first) and the payable total. */
+/** A bill's figures from its lines: each line, the sums and tax by slab (highest first). The total stays exact to the paisa. */
 export function billFigures(lines: MathsLine[], interstate: boolean): BillFigures {
   const figs = lines.map((l) => lineFigures(l, interstate));
   const sum = { taxable: 0, cgst: 0, sgst: 0, igst: 0, tax: 0 };
@@ -88,14 +78,18 @@ export function billFigures(lines: MathsLine[], interstate: boolean): BillFigure
   return {
     lines: figs, ...sum, total,
     slabs: [...slabs.values()].sort((a, b) => Number(b.gst_percent) - Number(a.gst_percent)),
-    payable: payableOf(total), round_off: roundOffOf(total), pending: figs.filter((f) => !f).length,
+    pending: figs.filter((f) => !f).length,
   };
 }
 
-/** Lines whose stored tax isn't what their GST rate gives, by more than a paisa (imported or hand-typed tax; the server's tax_mismatch). */
+/**
+ * Lines whose stored tax isn't what their GST rate gives, by more than a paisa (imported or hand-typed tax; the server's
+ * tax_mismatch). A line with no taxable value isn't checked, as the server skips it.
+ */
 export function taxSlips(lines: { taxable: number; tax: number; gst_percent: string }[]): { index: number; want: number; got: number }[] {
   const out: { index: number; want: number; got: number }[] = [];
   lines.forEach((l, index) => {
+    if (l.taxable === 0) return;
     const want = taxFor(l.taxable, l.gst_percent);
     if (want != null && Math.abs(want - l.tax) > 1) out.push({ index, want, got: l.tax });
   });
