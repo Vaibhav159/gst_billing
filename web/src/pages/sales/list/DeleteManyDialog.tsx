@@ -3,7 +3,7 @@
 // far it got and is then about what's left, so Try again deletes only those. Undo brings back every one that went.
 import { useEffect, useRef, useState } from "react";
 import { Lock } from "lucide-react";
-import { problemOf } from "@/core/api/errors";
+import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useDeleteBills, useRestoreBins } from "@/core/api/sales";
 import { date, monthLabel, plural } from "@/core/format";
 import { markFresh } from "@/core/sales/fresh";
@@ -17,6 +17,14 @@ const REASONS = ["Entered twice", "Wrong firm", "Test bills"];
 /** A bill this delete sent to the bin, and its bin row's id, which Undo restores. */
 type Deleted = { bill: BillRow; binId: number };
 
+/** A delete that stopped, in words from the counts (gone of total): how far it got, never "Not deleted" once some have gone. */
+function stoppedText(p: ApiProblem, gone: number, total: number): FailText {
+  const next = p.kind === "offline" ? "Try again when the internet is back." : p.kind === "unreachable" || p.kind === "server" ? "Try again in a minute." : p.message;
+  const left = total - gone;
+  return gone ? { title: `Stopped after ${gone} of ${total}`, body: `${left === 1 ? "The other bill is" : `The other ${left} are`} still in Sales. ${next}` }
+    : { title: failText(p, "deleted").title, body: `Nothing was deleted. ${next}` };
+}
+
 export function DeleteManyDialog({ bills, onClose, onDone }: { bills: BillRow[] | null; onClose: () => void; onDone: () => void }) {
   const held = useHeldValue(bills) ?? [];
   const removeBills = useDeleteBills();
@@ -24,17 +32,22 @@ export function DeleteManyDialog({ bills, onClose, onDone }: { bills: BillRow[] 
   const { firms } = useFirms();
   const { show, dismiss } = useToast();
   const [busy, setBusy] = useState(false);
-  const [fail, setFail] = useState<FailText | null>(null);
+  const [problem, setProblem] = useState<ApiProblem | null>(null);
   const [reason, setReason] = useState("");
-  // what this opening of the dialog has deleted (with the bin rows Undo needs), and every bill gone so far: deleted
-  // here, or gone already (a 404). The toast it showed last, so a later try's toast takes its place.
-  const [done, setDone] = useState<Deleted[]>([]);
+  // every bill of this opening of the dialog gone so far: deleted here, or gone already (a 404). Merged into, never set
+  // whole, so an Undo that lands while a try runs keeps its say. What it deleted here (with the bin rows Undo needs) and
+  // how many were gone already aren't drawn: refs, which an Undo edits as it lands. The toast it showed last, so a later
+  // try's toast takes its place.
   const [gone, setGone] = useState<ReadonlySet<number>>(() => new Set());
+  const done = useRef<Deleted[]>([]);
+  const already = useRef(0);
   const toastId = useRef<string | null>(null);
-  useEffect(() => { if (bills) { setFail(null); setReason(""); setDone([]); setGone(new Set()); toastId.current = null; } }, [bills]);
+  useEffect(() => { if (bills) { setProblem(null); setReason(""); setGone(new Set()); done.current = []; already.current = 0; toastId.current = null; } }, [bills]);
   // the bills asked to go (a filed month's stay), and what's left of them
   const asked = held.filter((b) => !b.locked);
   const deletable = asked.filter((b) => !gone.has(b.id));
+  // the last try's failure, in words from what's gone now: an Undo from its toast can bring some back while this shows
+  const fail = problem ? stoppedText(problem, asked.length - deletable.length, asked.length) : null;
   const blocked = held.filter((b) => b.locked);
   const months = [...new Set(blocked.map((b) => monthLabel(b.invoice_date.slice(0, 7), { long: true })))];
   const active = deletable.filter((b) => b.status !== "cancelled").length;
@@ -42,14 +55,26 @@ export function DeleteManyDialog({ bills, onClose, onDone }: { bills: BillRow[] 
   const short = (b: BillRow) => firms.find((f) => f.id === b.business)?.short ?? b.business_name;
 
   // Undo from the toast: each comes back under its own id, in turn, and the list asks again once. A bin row that has gone
-  // (restored or removed already) is passed over; the first other failure says so and the rest stay deleted
+  // (restored or removed already) is passed over; the first other failure says so and the rest stay deleted. What comes
+  // back is this delete's no more: if the dialog still shows (toasts sit above it), it counts those bills as in Sales again
   const undoAll = async (list: Deleted[]) => {
     let back = 0;
     let missing = 0;
     let error: unknown = null;
+    const returned = new Set<number>();
     try {
-      await restoreBins.mutateAsync({ binIds: list.map((x) => x.binId), onEach: (_, bill) => { if (bill) { back += 1; markFresh(bill.id); } else missing += 1; } });
+      await restoreBins.mutateAsync({ binIds: list.map((x) => x.binId), onEach: (binId, bill) => {
+        if (!bill) { missing += 1; return; }
+        back += 1;
+        markFresh(bill.id);
+        returned.add(binId);
+      } });
     } catch (e) { error = e; }
+    if (returned.size) {
+      const ids = new Set(list.filter((x) => returned.has(x.binId)).map((x) => x.bill.id));
+      done.current = done.current.filter((x) => !returned.has(x.binId));
+      setGone((g) => new Set([...g].filter((id) => !ids.has(id))));
+    }
     const left = list.length - back - missing;
     if (error) show(restoreFailure(problemOf(error), back ? `${plural(back, "bill")} came back. The other ${left}` : left === 1 ? "The bill" : `${left === list.length ? "All " : ""}${left} bills`, left > 1));
     const unbinned = missing ? ` ${plural(missing, "bill")} ${missing === 1 ? "wasn't" : "weren't"} in the bin any more.` : "";
@@ -59,39 +84,32 @@ export function DeleteManyDialog({ bills, onClose, onDone }: { bills: BillRow[] 
 
   const confirm = async () => {
     setBusy(true);
-    const goneNow = new Set(gone);
-    const doneNow = [...done];
+    const goneHere: number[] = [];
+    let added = 0;
     let error: unknown = null;
     try {
       await removeBills.mutateAsync({ ids: deletable.map((b) => b.id), reason: reason.trim(), onEach: (id, binned) => {
-        goneNow.add(id);
+        goneHere.push(id);
         const bill = deletable.find((b) => b.id === id);
-        if (binned && bill) doneNow.push({ bill, binId: binned.id });
+        if (!binned) already.current += 1;
+        else if (bill) { done.current = [...done.current, { bill, binId: binned.id }]; added += 1; }
       } });
     } catch (e) { error = e; }
     setBusy(false);
-    setGone(goneNow);
-    setDone(doneNow);
-    const n = goneNow.size;
-    if (error) {
-      // how far it got, from the counts: never "Not deleted" once some have gone
-      const p = problemOf(error);
-      const next = p.kind === "offline" ? "Try again when the internet is back." : p.kind === "unreachable" || p.kind === "server" ? "Try again in a minute." : p.message;
-      const left = asked.length - n;
-      setFail(n ? { title: `Stopped after ${n} of ${asked.length}`, body: `${left === 1 ? "The other bill is" : `The other ${left} are`} still in Sales. ${next}` }
-        : { title: failText(p, "deleted").title, body: `Nothing was deleted. ${next}` });
-    } else setFail(null);
-    const already = n - doneNow.length;
-    if (doneNow.length > done.length) {
+    setGone((g) => new Set([...g, ...goneHere]));
+    setProblem(error ? problemOf(error) : null);
+    const all = done.current;
+    const goneAlready = already.current;
+    if (added) {
       // one toast for all this delete has done, its Undo for every bill: an earlier try's toast gives way to it
       if (toastId.current) dismiss(toastId.current);
       toastId.current = show({
-        title: `Deleted ${billsAnd(doneNow.map((x) => x.bill))}`,
-        body: `${doneNow.length === 1 ? "It's in the Audit log, where it can be restored." : "They're in the Audit log, where they can be restored."}${already ? ` ${plural(already, "bill")} ${already === 1 ? "was" : "were"} deleted already.` : ""}`,
-        action: { label: "Undo", onClick: () => { void undoAll(doneNow); } },
+        title: `Deleted ${billsAnd(all.map((x) => x.bill))}`,
+        body: `${all.length === 1 ? "It's in the Audit log, where it can be restored." : "They're in the Audit log, where they can be restored."}${goneAlready ? ` ${plural(goneAlready, "bill")} ${goneAlready === 1 ? "was" : "were"} deleted already.` : ""}`,
+        action: { label: "Undo", onClick: () => { void undoAll(all); } },
       });
-    } else if (!error && !doneNow.length && already) {
-      show({ tone: "brand", title: "Deleted already", body: already === 1 ? "That bill was deleted already." : `Those ${already} bills were deleted already.` });
+    } else if (!error && !all.length && goneAlready) {
+      show({ tone: "brand", title: "Deleted already", body: goneAlready === 1 ? "That bill was deleted already." : `Those ${goneAlready} bills were deleted already.` });
     }
     if (!error) { onClose(); onDone(); }
   };

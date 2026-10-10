@@ -114,7 +114,8 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
       <div className="px-5 py-3 border-t border-rule flex flex-wrap items-center gap-2">
         <ButtonLink to={`/sales/${b.id}`} variant="primary" size="sm">Open full bill</ButtonLink>
         <ButtonLink to={`/sales/${b.id}/print`} size="sm" icon={Printer}>Print or PDF</ButtonLink>
-        {!cancelled && !(b.paper && !b.sent) && can("bill.send") ? <Button size="sm" icon={Send} disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} onClick={() => send(b)}>{b.sent ? "Send again" : "Send"}</Button> : null}
+        {/* the second click of a double click (detail 2) sends nothing: a quick record turns this button into Send again under it */}
+        {!cancelled && !(b.paper && !b.sent) && can("bill.send") ? <Button size="sm" icon={Send} disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} onClick={(e) => { if (e.detail > 1) return; send(b); }}>{b.sent ? "Send again" : "Send"}</Button> : null}
       </div>
     </aside>
   );

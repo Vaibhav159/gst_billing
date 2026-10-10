@@ -24,7 +24,8 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   const ready = useSendReady();
   const [ask, setAsk] = useState(false);
   // one press, one send: useSendBill holds the bill while its send is on its way, whichever button pressed it, and its
-  // record shows the bill as sent at once
+  // record shows the bill as sent at once. The second click of a double click (detail 2; a key press is 0) sends nothing:
+  // a quick record can land between the two clicks
   const sendIt = () => { void send(bill, { onNeedNumber: () => setAsk(true) }); };
   if (bill.status === "cancelled") return null;
   if (bill.paper && !bill.sent) {
@@ -65,7 +66,7 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   }
   return (
     <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
-      <Button size="sm" variant="secondary" icon={compact ? undefined : Send} tabIndex={tabIndex} data-row-send="" onClick={sendIt}
+      <Button size="sm" variant="secondary" icon={compact ? undefined : Send} tabIndex={tabIndex} data-row-send="" onClick={(e) => { if (e.detail > 1) return; sendIt(); }}
         disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} aria-label={`Send ${bill.invoice_number} on WhatsApp`}>Send</Button>
       {dialog}
     </span>

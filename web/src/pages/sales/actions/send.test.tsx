@@ -380,3 +380,13 @@ test("a send that goes wrong before it's recorded leaves Send free for another p
   // the press that went wrong said so: nothing was marked as sent
   expect(screen.getByText("The bill wasn't sent")).toBeInTheDocument();
 });
+
+test("Send pressed from the keyboard sends (a key press is no double click's second click)", async () => {
+  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  renderApp(<SendCell bill={row()} />);
+  const send = await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" }));
+  act(() => send.focus());
+  await userEvent.keyboard("{Enter}");
+  expect(window.open).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
+});

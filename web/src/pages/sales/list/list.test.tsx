@@ -196,12 +196,12 @@ test("a link's bill opens in the preview; with more than 160 bills still to come
 test("the preview's Send waits for the shop's WhatsApp message, then sends the bill once however fast it's pressed", async () => {
   vi.spyOn(window, "open").mockImplementation(() => null);
   let settings: (w: unknown) => void = () => {};
-  // the record takes its time, as a real server's does: the second click comes while the send is on its way
-  let recorded: (w: unknown) => void = () => {};
+  // the record answers at once: on a quick connection it lands between the two clicks of a double click, and the button
+  // reads "Send again" by the second
   const { calls } = server(ROWS, {}, [
     ["GET", "sales/412/", () => wireDetail()],
     ["GET", "shop-settings/", () => new Promise((resolve) => { settings = resolve; })],
-    ["POST", "sales/412/sent/", () => new Promise((resolve) => { recorded = resolve; })],
+    ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })],
   ]);
   mount("/sales?bill=412");
   const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/31" });
@@ -210,10 +210,9 @@ test("the preview's Send waits for the shop's WhatsApp message, then sends the b
   await act(async () => { settings({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null }); });
   await waitFor(() => expect(send).toBeEnabled());
   await userEvent.dblClick(send);
-  await act(async () => { recorded({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } }); });
-  await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
   expect(window.open).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1);
 });
 
 /* ── Beyond the brief: the preview's own answer can fail (an error says what happened and what to do) ── */
@@ -363,4 +362,52 @@ test("an unsent paper bill's preview says On paper, with no Send to nag", async 
   expect(within(pane).queryByText("Not yet")).not.toBeInTheDocument();
   expect(within(pane).getByText("The customer has the paper bill")).toBeInTheDocument();
   expect(within(pane).queryByRole("button", { name: /^Send/ })).not.toBeInTheDocument();
+});
+
+/* ── Fix round 2 (the re-review) ── */
+
+test("the row's Send double-clicked sends once, even when the record lands between the two clicks", async () => {
+  vi.spyOn(window, "open").mockImplementation(() => null);
+  const { calls } = server(ROWS, {}, [["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  mount();
+  const row = await waitFor(() => { const r = document.querySelector<HTMLElement>('tr[data-row="412"]'); expect(r).not.toBeNull(); return r!; });
+  const send = within(row).getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" });
+  await waitFor(() => expect(send).toBeEnabled());
+  await userEvent.dblClick(send);
+  expect(window.open).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1);
+});
+
+test("an Undo pressed while a stopped delete still shows puts those bills back in its count; Try again then deletes them all, once", async () => {
+  let bin = 50;
+  let failOnce = true;
+  const { calls } = server(ROWS, {}, [
+    ["DELETE", /^sales\/\d+\/$/, (c) => {
+      const id = Number(c.url.split("/")[1]);
+      if (id === 412 && failOnce) { failOnce = false; refuse(500, {}); }
+      return wireBin({ id: (bin += 1), original_id: id });
+    }],
+    ["POST", /^bin\/\d+\/restore\/$/, () => wireDetail()],
+  ]);
+  mount();
+  const dialog = await deleteBoth();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  expect(await within(dialog).findByText("Stopped after 1 of 2")).toBeInTheDocument();
+  // the first try's toast sits above the dialog: its Undo brings 413 back while the dialog still shows
+  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  expect(await screen.findByText("Restored 1 bill")).toBeInTheDocument();
+  // nothing of this delete is deleted now: the dialog is about both bills again, and says so
+  expect(await within(dialog).findByText("Nothing was deleted. Try again in a minute.")).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Delete 2 sales bills?" })).toBe(dialog);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/413/", "sales/412/"]));
+  expect(await screen.findByText("Deleted 2 bills")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  // its Undo is for the two bills in the bin now, and both come back
+  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  const restored = (await screen.findByText("Restored 2 bills")).parentElement!;
+  expect(restored).toHaveTextContent("Back in Sales and in the GST figures.");
+  expect(restored).not.toHaveTextContent("in the bin");
+  expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/", "bin/53/restore/"]);
 });
