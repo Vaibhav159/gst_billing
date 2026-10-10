@@ -27,5 +27,5 @@ export function customersCsv(rows: CustomerRow[], firms: Firm[], figuresLabel: s
     paiseToDecimal(r.figures?.total ?? 0), r.figures?.bills ?? 0, paiseToDecimal(r.figures?.udhaar_total ?? 0), r.figures?.udhaar_bills ?? 0,
     r.figures?.last_bill?.invoice_number ?? "", r.figures?.last_bill?.invoice_date ?? "",
   ]);
-  return `﻿${[head, ...lines].map((l) => l.map(cell).join(",")).join("\r\n")}\r\n`;
+  return `\ufeff${[head, ...lines].map((l) => l.map(cell).join(",")).join("\r\n")}\r\n`;
 }

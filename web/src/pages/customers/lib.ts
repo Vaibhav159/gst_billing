@@ -18,10 +18,14 @@ export function fyPeriod(fy: string, today = todayIST()): { from: string; to: st
   const to = today < end ? today : end;
   return { from, to, label: `FY ${fy}`, range: rangeLabel(from, to < from ? from : to) };
 }
-/** "All firms", or the firm's name (short: its short name). */
+/**
+ * "All firms", or the firm's name (short: its short name). Until a firm's name is known (the list of firms hasn't come,
+ * or didn't), "the firm picked": never "All firms" for one firm's figures.
+ */
 export function scopeName(firms: Firm[], firmId: FirmId | null, short = false): string {
-  const f = typeof firmId === "number" ? firms.find((x) => x.id === firmId) : undefined;
-  return f ? (short ? f.short : f.name) : "All firms";
+  if (firmId === "all") return "All firms";
+  const f = firmId === null ? undefined : firms.find((x) => x.id === firmId);
+  return f ? (short ? f.short : f.name) : "the firm picked";
 }
 /** A state name in the GST table's spelling ("JAMMU & KASHMIR" -> "JAMMU AND KASHMIR"), as the state picker and a GSTIN name it; one the table doesn't have, upper-cased. */
 export function tableState(name: string | null | undefined): string {

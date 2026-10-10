@@ -569,11 +569,14 @@ test("offline, the phone shell carries has-offline", async () => {
   server({ prefs: { phoneMode: "expert" } });
   open("/customers");
   const shell = (await screen.findByRole("navigation", { name: /tabs/i })).parentElement!;
+  // the page's own answers first: one landing after this test would mark the network reachable outside act()
+  await screen.findByText("No customers yet");
   expect(shell).not.toHaveClass("has-offline");
   act(() => __setNetState("offline"));
   expect(shell).toHaveClass("has-offline");
   act(() => __setNetState("unreachable"));
   expect(shell).not.toHaveClass("has-offline");
+  act(() => __setNetState("online"));
 });
 
 const isBefore = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);

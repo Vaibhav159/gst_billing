@@ -33,7 +33,7 @@ export function QueryView<T>({ query, what, skeleton, children }: { query: UseQu
   if (query.isPending && (query.isPaused || waiting) && net === "offline") return <LoadError problem={{ kind: "offline", message: "You're offline" }} what={what} />;
   if (query.isPending) return <>{skeleton ?? <ListSkeleton what={what} />}{slow ? <p role="status" className="mt-3 text-sm text-muted">Still loading {what}…</p> : null}</>;
   if (query.isError && query.data === undefined) return <LoadError problem={problemOf(query.error)} what={what} retry={() => query.refetch()} />;
-  // a refetch that failed keeps what was shown, and says so (part 0 carry: it used to swap the list for the error card)
-  if (query.isError) return <><StaleNote problem={problemOf(query.error)} what={what} retry={() => void query.refetch()} busy={query.isFetching} />{children(query.data as T)}</>;
-  return <>{children(query.data as T)}</>;
+  // a refetch that failed keeps what was shown, and says so (part 0 carry: it used to swap the list for the error card).
+  // One branch with or without the note, so what's shown keeps its place in the tree, and its focus, as the note comes and goes.
+  return <>{query.isError ? <StaleNote problem={problemOf(query.error)} what={what} retry={() => void query.refetch()} busy={query.isFetching} /> : null}{children(query.data as T)}</>;
 }

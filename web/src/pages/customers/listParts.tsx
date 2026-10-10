@@ -1,24 +1,33 @@
 // The list's own pieces: Show more, the phone's firm chips, and each customer's Call · WhatsApp · New bill · Statement
 // (PROTO pages/records/shared.jsx MoreButton, core/common.jsx FirmChips, CustomerDetail.jsx useContact and CustomerRowMenu).
-import { ChevronDown, FileText, MessageCircle, MoreHorizontal, Phone, Plus, Send } from "lucide-react";
+import { ChevronDown, FileText, MessageCircle, MoreHorizontal, Phone, Plus, RotateCw, Send } from "lucide-react";
 import type { Customer, LastBill } from "@/core/api/customers";
+import type { ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { dateShort, inr } from "@/core/format";
-import { formatMobile, mobileDigits } from "@/core/ids";
+import { formatMobile, mobileDigits, mobileProblem } from "@/core/ids";
 import type { Firm, FirmId } from "@/core/scope";
 import { Button, IconButton, Menu, useToast, type MenuItem } from "@/core/ui";
 import { useView } from "@/core/view";
 import { firstName } from "./lib";
 
-/** "Showing 20 of 31 customers · Show 11 more". */
-export function MoreButton({ shown, total, what, pageSize, onMore, loading }: { shown: number; total: number; what: string; pageSize: number; onMore: () => void; loading?: boolean }) {
+/**
+ * "Showing 20 of 31 customers · Show 11 more". problem: the last Show more didn't get its rows, so this says why and its
+ * button asks for them again.
+ */
+export function MoreButton({ shown, total, what, pageSize, onMore, loading, problem }: {
+  shown: number; total: number; what: string; pageSize: number; onMore: () => void; loading?: boolean; problem?: ApiProblem | null;
+}) {
   const { isPhone } = useView();
   if (shown >= total) return null;
+  const next = Math.min(pageSize, total - shown);
+  const failed = !problem ? null : problem.kind === "offline" ? `The next ${next} didn't load: you're offline.`
+    : problem.kind === "unreachable" || problem.kind === "server" ? `The next ${next} didn't load: the app couldn't get through.` : `The next ${next} didn't load. ${problem.message}`;
   return (
     <div className={cn("flex items-center gap-3 border-t border-rule", isPhone ? "flex-col px-4 py-3" : "justify-between px-5 py-3")}>
-      <span className="text-sm text-muted tnum">Showing {shown} of {total} {what}</span>
-      <Button icon={ChevronDown} onClick={onMore} loading={loading} full={isPhone}>{`Show ${Math.min(pageSize, total - shown)} more`}</Button>
+      <span className="text-sm text-muted tnum">Showing {shown} of {total} {what}{failed ? <>{". "}<span role="alert" className="text-neg">{failed}</span></> : null}</span>
+      <Button icon={failed ? RotateCw : ChevronDown} onClick={onMore} loading={loading} full={isPhone}>{failed ? "Try again" : `Show ${next} more`}</Button>
     </div>
   );
 }
@@ -44,7 +53,8 @@ export function useContact(c: Pick<Customer, "name" | "mobile_number">, last: La
   const { can, whyNot } = useAuth();
   const { show } = useToast();
   const digits = mobileDigits(c.mobile_number);
-  if (!/^[6-9]\d{9}$/.test(digits)) return { tel: null, items: [] };
+  // @/core/ids's rule for a mobile number: none, a landline or a short one gets no Call and no WhatsApp
+  if (!digits || mobileProblem(digits)) return { tel: null, items: [] };
   const chat = () => {
     const w = window.open(`https://wa.me/91${digits}`, "_blank");
     if (w) w.opener = null;

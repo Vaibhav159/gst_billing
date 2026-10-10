@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { customerLine } from "./forBills";
-import { homeState, safeReturn, tableState, useOnFile } from "./lib";
+import { homeState, safeReturn, scopeName, tableState, useOnFile } from "./lib";
 import { ANIL, serve } from "./testing";
 
 afterEach(() => { vi.useRealTimers(); });
@@ -26,6 +26,15 @@ test("a state reads in the GST table's spelling, so a stored JAMMU & KASHMIR is 
   // the firm picked, else the first
   expect(homeState([firm(3, "Rajasthan"), firm(4, "Jammu & Kashmir")], 4)).toBe("JAMMU AND KASHMIR");
   expect(homeState([firm(3, "Rajasthan"), firm(4, "Jammu & Kashmir")], "all")).toBe("RAJASTHAN");
+});
+
+test("the firm scope reads as the firm's name, or All firms; one whose name isn't known yet is never called All firms", () => {
+  const firms = [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gstin: "", state: "RAJASTHAN" }];
+  expect(scopeName(firms, "all")).toBe("All firms");
+  expect(scopeName(firms, 3)).toBe("KIRAN GOLD HOUSE");
+  expect(scopeName(firms, 3, true)).toBe("Kiran");
+  // the list of firms hasn't come (or didn't), or the firm isn't in it, or the scope isn't known yet
+  expect([scopeName([], 3), scopeName(firms, 99, true), scopeName(firms, null)]).toEqual(["the firm picked", "the firm picked", "the firm picked"]);
 });
 
 test("customers on file with a phone or GSTIN: asked for once typing pauses, only for a whole number or GSTIN, never the one being edited", async () => {
