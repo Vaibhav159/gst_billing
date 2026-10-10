@@ -37,9 +37,10 @@ const MONTH_KEYS: Record<string, number> = { PageUp: -1, PageDown: 1 };
 /**
  * A month grid: days after today, and days the form can't take (a filed month), are off with the reason (PROTO
  * parts.jsx:787-842). A grid of weeks: a row of the days' names, then a row of seven cells per week (blank before the
- * 1st and after the last day), each day's button in its cell, so a screen reader reads it as a table.
+ * 1st and after the last day), each day's button in its cell, so a screen reader reads it as a table. inDialog: the
+ * calendar sits in a dialog of its own (a phone's), which puts the cursor on the day itself.
  */
-export function Calendar({ value, today, onPick, onClose, offReason, label = "Pick a date" }: { value: string; today: string; onPick: (iso: string) => void; onClose?: () => void; offReason: (iso: string) => string; label?: string }) {
+export function Calendar({ value, today, onPick, onClose, offReason, label = "Pick a date", inDialog = false }: { value: string; today: string; onPick: (iso: string) => void; onClose?: () => void; offReason: (iso: string) => string; label?: string; inDialog?: boolean }) {
   const { isPhone } = useView();
   const start = value || today;
   const [ym, setYm] = useState(start.slice(0, 7));
@@ -47,15 +48,17 @@ export function Calendar({ value, today, onPick, onClose, offReason, label = "Pi
   const grid = useRef<HTMLDivElement>(null);
   const prevMonth = useRef<HTMLButtonElement>(null);
   // the cursor goes to the focused day as the calendar opens and on the arrow and Page keys, never on a month button:
-  // there it stays on the button, so Enter again turns another month and never picks a day the person didn't move to
-  const pull = useRef(true);
+  // there it stays on the button, so Enter again turns another month and never picks a day the person didn't move to.
+  // In a dialog the dialog puts it there as it opens (the day is marked data-autofocus), once it has noted what opened
+  // it, so closing gives the cursor back to that
+  const pull = useRef(!inDialog);
   const [y, m] = ym.split("-").map(Number);
   const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
   const days = Number(lastDayOfMonth(ym).slice(8));
   const iso = (d: number) => `${ym}-${String(d).padStart(2, "0")}`;
   // months and days are calendar sums (part 0's addMonths, Task 2's shiftDate), never a local Date's
-  /** The focused day's date in month `to`, or that month's last day: 31 Oct is 30 Sep. */
-  const sameDayIn = (to: string) => { const day = `${to}-${focus.slice(8)}`; const end = lastDayOfMonth(to); return day > end ? end : day; };
+  /** The focused day's date in month `to`, or that month's last day (31 Oct is 30 Sep), and never after today. */
+  const sameDayIn = (to: string) => { const day = `${to}-${focus.slice(8)}`; const end = to >= today.slice(0, 7) ? today : lastDayOfMonth(to); return day > end ? end : day; };
   const moveFocus = (next: string, cursor: boolean) => {
     pull.current = cursor;
     setFocus(next);
@@ -100,8 +103,9 @@ export function Calendar({ value, today, onPick, onClose, offReason, label = "Pi
               const sel = day === value;
               return (
                 <div key={day} role="gridcell">
-                  <button type="button" data-day={day} tabIndex={day === focus ? 0 : -1} aria-pressed={sel} aria-disabled={off ? true : undefined}
-                    aria-label={`${date(day)}${off ? `, ${off}` : ""}`} title={off || undefined} onClick={() => { if (!off) onPick(day); }}
+                  {/* a day the cursor lands on any way (a click too) is where the arrows go on from */}
+                  <button type="button" data-day={day} tabIndex={day === focus ? 0 : -1} data-autofocus={day === focus ? "" : undefined} aria-pressed={sel} aria-disabled={off ? true : undefined}
+                    aria-label={`${date(day)}${off ? `, ${off}` : ""}`} title={off || undefined} onFocus={() => setFocus(day)} onClick={() => { if (!off) onPick(day); }}
                     className={cn(isPhone ? "min-h-11" : "h-9", "w-full min-w-9 rounded-md tnum text-sm transition-colors", sel ? "bg-brand text-onbrand font-semibold" : off ? "text-muted/60 cursor-not-allowed" : "hover:bg-raised", day === today && !sel && "border border-brand-line text-brand")}>
                     {d}
                   </button>
@@ -135,11 +139,13 @@ export function DateField({ id, value, today, onChange, onCommit, invalid, descr
   }, [cal, isPhone]);
   const commit = () => { const iso = parseDateText(text, today); if (iso) setText(date(iso)); onCommit?.(iso); };
   const pick = (iso: string) => { setCal(false); last.current = iso; setText(date(iso)); onChange(iso, date(iso)); onCommit?.(iso); document.getElementById(id)?.focus(); };
-  const calendar = <Calendar value={value} today={today} onPick={pick} onClose={() => { setCal(false); document.getElementById(id)?.focus(); }} offReason={offReason} label={`${label}: calendar`} />;
+  const calendar = <Calendar value={value} today={today} onPick={pick} onClose={() => { setCal(false); document.getElementById(id)?.focus(); }} offReason={offReason} label={`${label}: calendar`} inDialog={isPhone} />;
   // Tab out of the desktop calendar closes it, so it doesn't sit over the next field (a phone's is a dialog of its own)
   const leave = (e: FocusEvent) => { if (cal && !isPhone && e.relatedTarget && !wrap.current?.contains(e.relatedTarget)) setCal(false); };
+  // Esc closes an open calendar from the date box and its button too (the calendar's own days and month buttons close it themselves)
+  const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && cal) { e.preventDefault(); e.stopPropagation(); setCal(false); } };
   return (
-    <div ref={wrap} className="relative min-w-0" onBlur={leave}>
+    <div ref={wrap} className="relative min-w-0" onBlur={leave} onKeyDown={esc}>
       <Input id={id} value={text} invalid={invalid} aria-describedby={describedBy} autoComplete="off" spellCheck={false} inputClassName={isPhone ? "pl-14" : "pl-11"}
         onChange={(e) => { const t = e.target.value; setText(t); const iso = parseDateText(t, today); last.current = iso ?? ""; onChange(iso, t); }}
         onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "ArrowDown" && e.altKey) { e.preventDefault(); setCal(true); } }} />

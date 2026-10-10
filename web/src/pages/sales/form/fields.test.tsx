@@ -191,6 +191,91 @@ test("on a phone the calendar is a dialog of its own: a tap on a month button in
   } finally { phone(false); }
 });
 
+/** The day Tab would reach in the calendar: the one day button in its tab order. */
+const tabStop = () => within(screen.getByRole("grid")).getAllByRole("button").filter((b) => b.tabIndex === 0).map((b) => b.getAttribute("data-day"));
+
+test("the Tab stop never lands after today: from 30 Sep, Next month leaves it on today, and PageDown goes no further than today", async () => {
+  renderApp(<DateThenButton start="2026-09-30" />);
+  await openCalendar("2026-09-30");
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Next month");
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("grid", { name: "October 2026" })).toBeInTheDocument();
+  expect(tabStop()).toEqual(["2026-10-08"]);
+  // Previous month has the cursor (Next month is off on this month): Tab goes on to today
+  await userEvent.tab();
+  expect(cursor()).toBe("2026-10-08");
+  // a month on from 30 Sep is today, not 30 Oct; and a month on from today stays on today
+  await userEvent.keyboard("{PageUp}");
+  expect(cursor()).toBe("2026-09-08");
+  await userEvent.keyboard("{ArrowRight}{PageDown}");
+  expect(cursor()).toBe("2026-10-08");
+  await userEvent.keyboard("{PageDown}");
+  expect(cursor()).toBe("2026-10-08");
+  expect(screen.getByRole("grid", { name: "October 2026" })).toBeInTheDocument();
+});
+
+test("a day the cursor lands on by a click is where the arrows go on from: click 15 Oct, then the right arrow goes to 16 Oct", async () => {
+  renderApp(<DateThenButton />);
+  await openCalendar("2026-10-08");
+  // a day after today: the click can't pick it, so the calendar stays open with the cursor on it
+  await userEvent.click(screen.getByRole("button", { name: "15 Oct 2026, after today" }));
+  expect(cursor()).toBe("2026-10-15");
+  expect(tabStop()).toEqual(["2026-10-15"]);
+  await userEvent.keyboard("{ArrowRight}");
+  expect(cursor()).toBe("2026-10-16");
+  expect(screen.getByText("value:2026-10-08")).toBeInTheDocument();
+});
+
+test("Esc closes the open calendar from the date box and from the calendar's button too", async () => {
+  renderApp(<DateThenButton />);
+  await openCalendar("2026-10-08");
+  // back in the box, the calendar still open
+  await userEvent.click(screen.getByLabelText("Date"));
+  expect(screen.getByRole("grid")).toBeInTheDocument();
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Date")).toHaveFocus();
+  await userEvent.click(screen.getByRole("button", { name: "Date: open the calendar" }));
+  await waitFor(() => expect(cursor()).toBe("2026-10-08"));
+  // Next month is off on this month: back past Previous month to the calendar's button
+  await userEvent.tab({ shift: true });
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Date: open the calendar");
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Date: open the calendar" })).toHaveFocus();
+});
+
+test("on a phone, closing the calendar gives the cursor back to the button that opened it", async () => {
+  const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
+  phone(true);
+  try {
+    // a clock the test moves: the dialog's focus step, its guard against a double tap's second tap, and its way out
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderApp(<DateThenButton />);
+    const opener = screen.getByRole("button", { name: "Date: open the calendar" });
+    await user.click(opener);
+    await screen.findByRole("dialog", { name: "Date" });
+    await act(() => { vi.advanceTimersByTime(400); });
+    // the dialog puts the cursor on the day, once it has noted what opened it
+    await waitFor(() => expect(cursor()).toBe("2026-10-08"));
+    await user.keyboard("{Escape}");
+    await act(() => { vi.advanceTimersByTime(400); });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    // and by its Close button too
+    await user.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "Date" });
+    await act(() => { vi.advanceTimersByTime(400); });
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await act(() => { vi.advanceTimersByTime(400); });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  } finally { phone(false); }
+});
+
 test("PageUp and PageDown move a month, to the same day or the month's last: 31 Oct to 30 Sep, and back to 30 Oct", async () => {
   renderApp(<DateThenButton start="2025-10-31" />);
   await openCalendar("2025-10-31");
