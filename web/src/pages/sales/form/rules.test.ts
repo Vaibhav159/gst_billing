@@ -2,9 +2,10 @@ import { toCustomer } from "@/core/api/customers";
 import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { blankLine, startEdit, startNew, type FormLine, type FormState } from "./model";
+import type { NumberCheck } from "@/core/sales/types";
 import {
-  changesOf, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, isHsn, lineProblems, lineWarning, numberProblem, openMonthsText, parseDateText, paymentNote,
-  periodCheck, qtyMissing, rateMissing, type CheckInput,
+  changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, isHsn, lineProblems, lineWarning, numberProblem, openMonthsText,
+  parseDateText, paymentNote, periodCheck, qtyMissing, rateMissing, type CheckInput,
 } from "./rules";
 
 const TODAY = "2026-10-08";
@@ -180,4 +181,19 @@ test("the hint under Firm says where the firm came from, or where an edit moves 
   expect(firmHint({ mode: "edit", source: "bill", paper: false, moving: "", canMove: true })).toBe("A bill can move to another firm while its month is open.");
   expect(firmHint({ mode: "edit", source: "bill", paper: false, moving: "Moves the bill to MEERA ORNAMENTS as MO/2026-27/9. KGH/2026-27/31 is left unused.", canMove: true }))
     .toBe("Moves the bill to MEERA ORNAMENTS as MO/2026-27/9. KGH/2026-27/31 is left unused.");
+});
+
+test("a number check that checked nothing is no answer (contract §2.12, Ruling 1A-27): unchecked, or no next number, is never free and names no problem", () => {
+  const free: NumberCheck = {
+    invoice_number: "KGH/2026-27/35", counter: 35, code: "", problem: "", bill: null, binned: null, note: "", same_counter: null, next: { counter: 34, invoice_number: "KGH/2026-27/34" },
+  };
+  const taken: NumberCheck = { ...free, code: "number_taken", problem: "KGH/2026-27/35 is already used in FY 2026-27." };
+  expect(checkedNumber(free)).toBe(free);
+  expect(checkedNumber(taken)).toBe(taken);
+  expect(checkedNumber(null)).toBeNull();
+  // an unchecked answer as 1B reads it today: its code folded to "", its null next read as an empty one
+  expect(checkedNumber({ ...free, counter: null, next: { counter: 0, invoice_number: "" } })).toBeNull();
+  // and once 1B reads the code through (1B Task 9): whatever its problem says, it isn't the number's
+  const unchecked = { ...free, code: "unchecked", problem: "Pick the firm first.", next: null } as unknown as NumberCheck;
+  expect(checkedNumber(unchecked)).toBeNull();
 });

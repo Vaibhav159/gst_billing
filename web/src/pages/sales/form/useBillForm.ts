@@ -29,7 +29,7 @@ import { useDebounced } from "@/core/useDebounced";
 import { focusNow } from "./fields";
 import { blankLine, hasContent, posCustomer, slabOf, stateOf, storedFor, toBillInput, type FormLine, type FormState, type Start } from "./model";
 import { lastPaperDate, rememberPaperDate } from "./paperDates";
-import { changesOf, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, numberProblem, prevFy, type Locked, type NumberState } from "./rules";
+import { changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, numberProblem, prevFy, type Locked, type NumberState } from "./rules";
 
 /**
  * Why a save didn't happen, said once at the top of the review. next: a number to save as instead (a clash). link: where
@@ -170,11 +170,13 @@ export function useBillForm(start: Start) {
   const stored = keep && bill ? bill.invoice_number : storedFor(next.data, numberText);
   const typedNow = useDebounced(f.numberTyped && !keep ? f.number.trim() : "", 300);
   const check = useCheckNumber(typedNow && f.firmId !== null && f.date ? { business: f.firmId, invoice_date: f.date, invoice_number: typedNow, ...(edit && bill ? { exclude_id: bill.id } : {}) } : null);
-  const known = f.numberTyped && typedNow === f.number.trim() ? check.data ?? null : null;
+  // the server's answer for what's typed now; one that checked nothing is no answer either way (contract §2.12)
+  const answer = f.numberTyped && typedNow === f.number.trim() ? check.data ?? null : null;
+  const known = checkedNumber(answer);
   const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline" && (f.paper && !edit ? book.isPending : next.isPending);
   const numberError = keep ? "" : numberProblem(numberText, next.data?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
   const numberNote = !numberError && known?.note ? known.note : "";
-  const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : f.numberTyped && net !== "offline" ? "checking" : "unknown";
+  const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : f.numberTyped && net !== "offline" && !answer ? "checking" : "unknown";
   const setNumber = useCallback((text: string) => set({ number: text, numberTyped: true }), [set]);
   const takeSuggestion = useCallback(() => set({ number: "", numberTyped: false }), [set]);
 

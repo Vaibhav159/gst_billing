@@ -7,7 +7,7 @@ import { addMonths, date, dateShort, fyMonths, fyOf, inr, monthLabel, monthOf, q
 import { hasGstin } from "@/core/ids";
 import { numberShapeProblem } from "@/core/sales/numbers";
 import { stateNameOf } from "@/core/sales/pos";
-import type { BillDetail, ItaxFlag } from "@/core/sales/types";
+import type { BillDetail, ItaxFlag, NumberCheck } from "@/core/sales/types";
 import { PAY, rateText } from "@/core/sales/words";
 import { hasContent, slabOf, type FormLine, type FormState } from "./model";
 
@@ -110,6 +110,16 @@ export function periodCheck(iso: string, today: string, locked: Locked): string 
 export function numberProblem(text: string, next: string, stored: string): string {
   if (!text.trim() && !next) return "Type the number written on the paper bill.";
   return numberShapeProblem(text, { next, stored });
+}
+/**
+ * The server's check of a typed number (contract §2.12), when it checked anything. An answer that checked nothing (code
+ * "unchecked": no firm, or a date it can't read; its next is null) is no answer: never "free", and its words aren't the
+ * number's problem (Ruling 1A-27). Until 1B reads that code through, its reader folds it into "" and the null next into
+ * an empty one, so an answer without a next number reads the same.
+ */
+export function checkedNumber(c: NumberCheck | null): NumberCheck | null {
+  const code: string = c?.code ?? "";
+  return c && code !== "unchecked" && c.next?.invoice_number ? c : null;
 }
 
 /* ── Errors, under each field ── */

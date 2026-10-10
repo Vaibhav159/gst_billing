@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { act, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { toCustomer } from "@/core/api/customers";
@@ -193,12 +193,42 @@ test("a new customer is added without leaving the bill: typed in the customer bo
   expect(screen.queryByRole("listbox", { name: "Customers" })).not.toBeInTheDocument();
 });
 
+test("Ctrl S inside one of the form's own sheets stays there: the bill behind it isn't checked, and nothing is marked", async () => {
+  const user = fakeToday();
+  formServer();
+  mountForm("/sales/new");
+  const customer = await screen.findByRole("combobox", { name: /Customer/ });
+  await waitFor(() => expect(customer).toHaveFocus());
+  await user.keyboard("Kamal Jain");
+  await settle();
+  await screen.findByRole("option", { name: /New customer “Kamal Jain”/ });
+  await user.keyboard("{Enter}");
+  const sheet = await screen.findByRole("dialog", { name: "New customer" });
+  await settle();
+  const name = within(sheet).getByLabelText(/Name on the bill/);
+  expect(name).toHaveFocus();
+  await user.keyboard("{Control>}s{/Control}");
+  await settle();
+  expect(name).toHaveFocus();
+  expect(screen.queryByText(/to fix before saving/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Choose who this bill is for. Pick Walk-in customer for a counter sale.")).not.toBeInTheDocument();
+  expect(screen.queryByRole("listbox", { name: "Customers" })).not.toBeInTheDocument();
+  // the browser's own Save page doesn't open either
+  expect(fireEvent.keyDown(name, { key: "s", ctrlKey: true })).toBe(false);
+  // with the sheet closed, Ctrl S checks the bill again
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "New customer" })).not.toBeInTheDocument());
+  await user.keyboard("{Control>}s{/Control}");
+  expect(within(summary()).getByRole("alert")).toHaveTextContent("2 things to fix before saving. Each is marked under its field.");
+});
+
 test("an item that isn't in Products fills its line, with its HSN and GST rate to change there", async () => {
   const user = fakeToday();
   formServer();
   mountForm("/sales/new", { me: STAFF });
   await screen.findByRole("combobox", { name: /Customer/ });
-  await user.click(screen.getByRole("combobox", { name: "Line 1 product" }));
+  const product = screen.getByRole("combobox", { name: "Line 1 product" });
+  await user.click(product);
   await user.keyboard("silver idol");
   await user.click(await screen.findByRole("option", { name: /An item that isn't in Products: “silver idol”/ }));
   const sheet = await screen.findByRole("dialog", { name: "An item that isn't in Products" });
@@ -206,10 +236,16 @@ test("an item that isn't in Products fills its line, with its HSN and GST rate t
   await user.type(within(sheet).getByLabelText(/^HSN code/), "7114");
   await user.selectOptions(within(sheet).getByLabelText(/^GST rate/), "3");
   await user.selectOptions(within(sheet).getByLabelText("Unit"), "pcs");
+  // the cursor goes straight to the line's quantity: never back through the product box, whose list would open on the way
+  const passed = vi.fn();
+  product.addEventListener("focus", passed);
   await user.click(within(sheet).getByRole("button", { name: "Use on this bill" }));
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Line 1 quantity in pieces" })).toHaveFocus());
-  expect(screen.getByRole("combobox", { name: "Line 1 product" })).toHaveValue("silver idol");
+  expect(product).toHaveValue("silver idol");
   expect(screen.getByRole("textbox", { name: "Line 1 HSN code" })).toHaveValue("7114");
+  await settle();
+  expect(passed).not.toHaveBeenCalled();
+  expect(screen.queryByRole("listbox", { name: "Products" })).not.toBeInTheDocument();
 });
 
 test("an item kept in Products: the sheet stays while the save is on its way (Esc and its Close wait for it), then the line takes the product", async () => {
@@ -418,6 +454,23 @@ test("a registered buyer is placed by the GSTIN; a GSTIN whose state GST's table
   // picked by hand, it's taxed there
   act(() => { result.current.set({ posOverride: "37" }); });
   expect(result.current).toMatchObject({ pos: "37", tt: { inter: true } });
+});
+
+test("a number check that checked nothing (contract §2.12's unchecked: no firm, or a date it can't read) is never free: it's checked when the bill saves", async () => {
+  fakeToday();
+  const { calls } = formServer([["GET", "sales/check-number/", () => ({
+    invoice_number: "KGH/2026-27/35", counter: null, code: "unchecked", problem: "", bill: null, binned: null, note: "", same_counter: null, next: null,
+  })]]);
+  const s = startNew({ firmId: 3, firmSource: "scope", today: TODAY });
+  const { result } = renderHook(() => useBillForm(s), { wrapper: inRouter });
+  await waitFor(() => expect(result.current.suggestion).toBe("34"));
+  act(() => { result.current.setNumber("35"); });
+  await act(async () => { vi.advanceTimersByTime(400); });
+  await waitFor(() => expect(calls.some((c) => c.url === "sales/check-number/" && c.params.invoice_number === "35")).toBe(true));
+  // the answer came, and says nothing either way: not "checking", and never a tick
+  await waitFor(() => expect(result.current.numberState).toBe("unknown"));
+  expect(result.current.checks[0]).toEqual({ key: "num", ok: null, text: "Bill number KGH/2026-27/35: checked when it saves" });
+  expect(result.current.numberError).toBe("");
 });
 
 /** The form hook for `start`, ready to save: its next number in, paid in cash, the review open. */

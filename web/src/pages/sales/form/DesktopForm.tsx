@@ -10,7 +10,7 @@ import { date, monthOf, plural } from "@/core/format";
 import { Button, ButtonLink, Card, Field, Kbd, Page, Select, Sheet, Textarea } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { CustomerFixSheet, CustomerPicker, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
-import { CheckList, focusNow, focusSoon, LabelSpacer, PayPicker, type CheckRow } from "./fields";
+import { CheckList, focusNow, LabelSpacer, PayPicker, type CheckRow } from "./fields";
 import { LineRow, ONE_ROW, LINE_COLS } from "./lines";
 import { hasContent } from "./model";
 import { NewItemForm, type NewItem } from "./NewItemForm";
@@ -57,12 +57,15 @@ export function DesktopForm({ F, children }: { F: BillFormApi; children?: ReactN
   const checks = checksWithFixes(F, setFix);
   /** Check and save: the review, or the first problem, scrolled to and focused. */
   const onTryReview = () => { const r = F.openReview(); if (!r.ok) focusProblem(F, r.first); };
-  // Ctrl S: check and save (and save from the review). Ctrl Enter: add a line, focus moving at once.
+  // Ctrl S: check and save (and save from the review). Ctrl Enter: add a line, focus moving at once. Neither acts on the
+  // bill from behind an open dialog (a new customer, an item, a PAN, search): Ctrl S there would mark the form and pull
+  // the cursor out from under the sheet. Ctrl S is still taken from the browser, so its Save page never opens instead.
   useEffect(() => {
+    const dialogOpen = () => Boolean(document.querySelector('[role="dialog"]:not([data-closing])'));
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() === "s") { e.preventDefault(); if (!F.reviewOpen) onTryReview(); }
-      else if (e.key === "Enter") { if (document.querySelector('[role="dialog"]:not([data-closing])')) return; e.preventDefault(); F.addLine(true); }
+      if (e.key.toLowerCase() === "s") { e.preventDefault(); if (!F.reviewOpen && !dialogOpen()) onTryReview(); }
+      else if (e.key === "Enter") { if (dialogOpen()) return; e.preventDefault(); F.addLine(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -71,8 +74,10 @@ export function DesktopForm({ F, children }: { F: BillFormApi; children?: ReactN
   const close = () => navigate(F.paper && ym && F.f.firmId !== null ? paperBookTo(F.f.firmId, ym) : "/sales");
   const onNewItem = (key: string) => (r: NewItem) => {
     F.setLine(key, (prev) => ({ productId: r.productId, name: r.line.name, hsn: r.line.hsn, gst: r.line.gst, unit: r.line.unit, rate: r.line.rate || prev.rate, note: r.line.description || prev.note, custom: r.productId === null }));
+    // the cursor goes to the line's quantity (drawn already) before the sheet lets go of it, so it never passes back
+    // through the product box, whose list opens on focus: a sheet leaves the cursor where it is once it has moved on
+    focusNow(`bf-${key}-qty`, true);
     setNp(null);
-    focusSoon(`bf-${key}-qty`, true);
   };
   return (
     <Page icon={edit ? SquarePen : F.paper ? BookOpenText : FilePlus2} title={edit && F.bill ? `Edit ${F.bill.invoice_number}` : F.paper ? "Bill from the paper book" : "New sales bill"}
