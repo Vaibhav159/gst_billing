@@ -73,6 +73,11 @@ export function taxLines(b: Heads & { slabs: Slab[] }): TaxLine[] {
   return out;
 }
 
+/** An e-way bill number in fours, as it's read out: "123456789012" -> "1234 5678 9012"; "" stays "" (the server stores 12 digits or ""). */
+export function ewayNumberText(raw: string): string {
+  return raw.replace(/(\d{4})(?=\d)/g, "$1 ");
+}
+
 const TIME = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 /** "10:42" in India's time, from the server's ISO timestamp, whatever zone the device is in. "" when there's none. */
 export function timeOf(ts: string | null | undefined): string {

@@ -8,7 +8,7 @@ export function qrPayload(b: { invoice_number: string; invoice_date: string; tot
   return `${b.invoice_number}|${b.firm.gst_number}|${b.invoice_date}|${paiseToDecimal(b.total_amount)}`;
 }
 
-/** A scanned code read back. firm: a firm's name, when an old code named it instead of its GSTIN; total in paise. */
+/** A scanned code read back. gstin: "" from a firm without one; firm: a firm's name, when an old code named it instead of its GSTIN; total in paise. */
 export type QrText = { number: string; gstin: string; firm: string; date: string; total: number | null };
 
 /**
@@ -33,7 +33,8 @@ export function parseQr(text: string): QrText | null {
     }
   }
   const parts = t.split("|").map((x) => x.trim());
-  if (parts.length < 4 || !parts[0] || !parts[1] || !/^\d{4}-\d{2}-\d{2}$/.test(parts[2])) return null;
+  // a firm without a GSTIN prints an empty field: number||date|total
+  if (parts.length < 4 || !parts[0] || !/^\d{4}-\d{2}-\d{2}$/.test(parts[2])) return null;
   const total = toPaise(parts[3]);
   if (total == null) return null;
   return { number: parts[0], gstin: parts[1].toUpperCase(), firm: "", date: parts[2], total };

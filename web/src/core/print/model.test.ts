@@ -146,3 +146,56 @@ test("the HSN summary follows the heads the bill stored, as its tax rows do: CGS
   }), { showBank: true });
   expect([exempt.igst, exempt.taxes, exempt.hsn.map((h) => h.rate)]).toEqual([true, [{ key: "i0", head: "IGST", rate: "0%", amount: "0.00" }], ["0%", "0%"]]);
 });
+
+/**
+ * Ruling 1E-9's bill, for Task 3's real-PDF test to make too, proving the file has exactly the planned pages: the firm's
+ * and the buyer's addresses typed on two lines each (v2's address boxes are textareas), and 30 one-line rows.
+ */
+const TWO_LINE_ADDRESSES = {
+  firm: { ...(wireDetail().firm as object), address: "12 Sandbox Bazaar\nJaipur, Rajasthan" },
+  customer: { ...(wireDetail().customer as object), address: "Shop 12, Ground Floor\nBapu Bazaar" },
+  lines: Array.from({ length: 30 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}` })),
+};
+
+test("an address typed on two lines prints as two lines, in the firm's block and both parties', and the first page makes room: 30 lines break as 23 and 7", () => {
+  const p = printBill(bill(TWO_LINE_ADDRESSES), { showBank: true });
+  expect(p.firm.lines.slice(0, 3)).toEqual(["12 Sandbox Bazaar", "Jaipur, Rajasthan", "GSTIN/UIN: 08ABCPK1234F1Z5"]);
+  expect(p.parties.map((x) => x.lines.slice(0, 2))).toEqual([["Shop 12, Ground Floor", "Bapu Bazaar, Udaipur"], ["Shop 12, Ground Floor", "Bapu Bazaar, Udaipur"]]);
+  expect(p.pages.map((x) => x.lines.length)).toEqual([23, 7]);
+});
+
+test("a note typed on three lines keeps its breaks for the paper, and the plan counts three lines: 6 lines break as 5 and 1", () => {
+  const p = printBill(bill({ notes: "Hallmarked\nBIS 916\nSize 14", lines: Array.from({ length: 6 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })) }), { showBank: true });
+  expect(p.note).toBe("Hallmarked\nBIS 916\nSize 14");
+  expect(p.pages.map((x) => x.lines.length)).toEqual([5, 1]);
+});
+
+test("the 14 boxes and a continued page's header hold one line each: a line break typed there reads as a space", () => {
+  const p = printBill(bill({ notes: "Hallmarked\nBIS 916\nSize 14", customer: { ...(wireDetail().customer as object), name: "Anil\nGupta" } }), { showBank: true });
+  expect(p.meta[5]).toEqual(["Other References", "Hallmarked BIS 916 Size 14"]);
+  expect(p.short[2]).toBe("Buyer : Anil Gupta");
+});
+
+test("the last page's fixed part fits a sheet only up to a limit (the ponytail at lastExtra): with 28 HSN groups beside the bank block, the totals stand alone on a fourth page", () => {
+  const groups = Array.from({ length: 28 }, (_, i) => String(711301 + i));
+  const p = printBill(bill({
+    lines: groups.map((hsn_code, i) => ({ ...WIRE_LINES[0], id: i + 1, hsn_code })),
+    hsn_summary: groups.map((hsn_code) => ({ ...(wireDetail().hsn_summary as object[])[0], hsn_code })),
+  }), { showBank: true });
+  expect(p.pages.map((x) => x.lines.length)).toEqual([25, 2, 1, 0]);
+});
+
+test("a firm without a GSTIN prints no bare GSTIN, in its block or a continued page's header, and its QR code leaves the field empty", () => {
+  const p = printBill(bill({ firm: { ...(wireDetail().firm as object), gst_number: "" } }), { showBank: true });
+  expect(p.firm.lines).toEqual(["12 Sandbox Bazaar, Jaipur, Rajasthan", "State Name : Rajasthan, Code : 08", "E-Mail : firm3@example.com"]);
+  expect(p.short[0]).toBe("KIRAN GOLD HOUSE");
+  expect(p.qr).toBe("KGH/2026-27/31||2026-10-08|87083.21");
+});
+
+test("the city follows the address unless a part of the address, between commas, is the city: Ajmer isn't Ajmeri Gate", () => {
+  const where = (address: string, city: string) => printBill(bill({ customer: { ...(wireDetail().customer as object), address, city } }), { showBank: true }).parties[0].lines.slice(0, -2);
+  expect(where("12 Ajmeri Gate, Jaipur Road", "Ajmer")).toEqual(["12 Ajmeri Gate, Jaipur Road, Ajmer"]);
+  expect(where("15 Demo Road, Udaipur", "UDAIPUR")).toEqual(["15 Demo Road, Udaipur"]);
+  expect(where("Shop 12\nUdaipur", "Udaipur")).toEqual(["Shop 12", "Udaipur"]);
+  expect(where("", "Udaipur")).toEqual(["Udaipur"]);
+});

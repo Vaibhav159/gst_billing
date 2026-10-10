@@ -9,7 +9,7 @@ import { billPdfName } from "@/core/sales/files";
 import { scaled } from "@/core/sales/maths";
 import { stateNameOf } from "@/core/sales/pos";
 import type { BillDetail, Copies, FirmOnBill } from "@/core/sales/types";
-import { halfPercent, PAY, rateText, storedIgst, taxLines } from "@/core/sales/words";
+import { ewayNumberText, halfPercent, PAY, rateText, storedIgst, taxLines } from "@/core/sales/words";
 import { qrPayload } from "./qr";
 
 /* ── Copies (CGST Rule 48) ─────────────────────────────── */
@@ -57,6 +57,9 @@ export const JURISDICTION = "Udaipur";
  * paper's lines. It can hold any character, a ₹ too, which the PDF's Times can't draw: every drawing of it goes through
  * the one ₹-aware text piece (Ruling 1E-5), and the model keeps it as typed. The rest is the model's own words and
  * figures (amountText, rateText without its ₹, bill numbers, HSN codes, GSTINs), which never hold a ₹.
+ * Line breaks someone typed (v2's address boxes and 1D's note are textareas; react-pdf starts a new line at each) arrive
+ * settled (Ruling 1E-9): an address as one entry of `lines` per printed line, one-line slots (the 14 boxes, `short`)
+ * with each break read as a space, and the bill's `note` with its breaks kept.
  */
 export type FreeText = string;
 export type PrintLine = { sl: string; name: FreeText; note: FreeText; hsn: string; qty: string; rate: string; per: string; amount: string };
@@ -65,19 +68,25 @@ export type PrintTax = { key: string; head: string; rate: string; amount: string
 export type PrintHsn = { key: string; hsn: string; taxable: string; rate: string; cgst: string; sgst: string; igst: string; tax: string };
 /** A sheet of A4. lines: the indexes of the bill's lines on it. */
 export type PrintPage = { index: number; count: number; first: boolean; last: boolean; lines: number[] };
+/** lines: one printed line each (an address typed on two lines is two entries). */
 export type Party = { label: string; name: FreeText; lines: FreeText[] };
 export type PrintBill = {
   id: number; number: string; dated: string; file: string; cancelled: boolean;
   /** What the QR code carries (qrPayload). */
   qr: string;
-  /** bank: [label, value] rows, the bank's name and branch as typed. */
+  /** lines: one printed line each, as a party's; bank: [label, value] rows, the bank's name and branch as typed. */
   firm: { name: FreeText; gstin: string; lines: FreeText[]; pan: string; signature: string | null; bank: [string, FreeText][] | null };
   parties: [Party, Party];
-  /** The 14 boxes beside the parties, as [label, value]: a value can be typed text (the note, the transporter, the city). */
+  /** The 14 boxes beside the parties, as [label, value], one line each: a value can be typed text (the note, the transporter, the city). */
   meta: [string, FreeText][];
-  /** The short header of a continued page: [firm · GSTIN, number · date, buyer, place of supply]. */
+  /** The short header of a continued page, one line each: [firm · GSTIN, number · date, buyer, place of supply]. */
   short: [FreeText, string, FreeText, string];
-  lines: PrintLine[]; taxes: PrintTax[]; note: FreeText;
+  lines: PrintLine[]; taxes: PrintTax[];
+  /**
+   * The bill's note as typed, its line breaks kept: the PDF starts a new line at each, the paper on screen shows it with
+   * white-space: pre-line (Task 4's Paper), and the page plan counts each typed line.
+   */
+  note: FreeText;
   /** qty: the total quantity when every line has one unit; amount: the bill's total, exact to the paisa. */
   total: { qty: string; amount: string };
   words: string; igst: boolean; hsn: PrintHsn[]; hsnTotal: PrintHsn; taxWords: string;
@@ -91,6 +100,10 @@ const WALKIN_NAME = "Walk-in customer";
 function stateLine(code: string): string {
   return code ? `State Name : ${stateNameOf(code)}, Code : ${code}` : "";
 }
+/** Typed text on its printed lines: each line break someone typed starts a new one, and blank lines go (Ruling 1E-9). */
+const linesOf = (text: string): string[] => text.split(/\s*\n\s*/).map((s) => s.trim()).filter(Boolean);
+/** Typed text for a one-line slot: a line break or a run of spaces reads as one space. */
+const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** The bill as the paper prints it. showBank: the switch on the print page (a firm without an account prints none). */
 export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): PrintBill {
@@ -98,7 +111,11 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
   const c = d.customer;
   const walkin = c.type === "walkin";
   const name = walkin ? WALKIN_NAME : c.name;
-  const where = [c.address, c.address.toLowerCase().includes(c.city.toLowerCase()) ? "" : c.city].filter((x) => x && x.trim()).join(", ");
+  // the address's printed lines, then the city after the last, unless a part of the address (between commas) is the city
+  const address = linesOf(c.address);
+  const city = c.city.trim();
+  const named = address.some((l) => l.split(",").some((part) => part.trim().toLowerCase() === city.toLowerCase()));
+  const where = !city || named ? address : address.length ? [...address.slice(0, -1), `${address[address.length - 1]}, ${city}`] : [city];
   const gstin = c.gst_number || "Unregistered";
   const pos = d.place_of_supply ? `${stateNameOf(d.place_of_supply)} (${d.place_of_supply})` : "";
   const e = d.eway;
@@ -124,29 +141,32 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     qr: qrPayload(d),
     firm: {
       name: f.name, gstin: f.gst_number,
-      lines: [f.address, `GSTIN/UIN: ${f.gst_number}`, stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
+      lines: [...linesOf(f.address), f.gst_number ? `GSTIN/UIN: ${f.gst_number}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
       pan: f.pan_number, signature: f.signature_url, bank,
     },
     parties: [
-      { label: "Consignee (Ship to)", name, lines: [where, `GSTIN/UIN : ${gstin}`, stateLine(c.state_code)].filter(Boolean) },
+      { label: "Consignee (Ship to)", name, lines: [...where, `GSTIN/UIN : ${gstin}`, stateLine(c.state_code)].filter(Boolean) },
       {
         label: "Buyer (Bill to)", name,
         lines: [
-          where, c.mobile_number ? `Phone : ${c.mobile_number}` : "", `GSTIN/UIN : ${gstin}${!c.gst_number && c.pan ? ` · PAN : ${c.pan}` : ""}`,
+          ...where, c.mobile_number ? `Phone : ${c.mobile_number}` : "", `GSTIN/UIN : ${gstin}${!c.gst_number && c.pan ? ` · PAN : ${c.pan}` : ""}`,
           stateLine(c.state_code), pos ? `Place of Supply : ${pos}` : "", "Reverse Charge : No",
         ].filter(Boolean),
       },
     ],
-    meta: [
+    meta: ([
       ["Invoice No.", d.invoice_number], ["Dated", date(d.invoice_date)],
-      ["e-Way Bill No.", e.eway_bill_number.replace(/(\d{4})(?=\d)/g, "$1 ")], ["Mode/Terms of Payment", d.payment_mode ? PAY[d.payment_mode] : ""],
-      ["Reference No. & Date.", ""], ["Other References", d.notes.length < 28 ? d.notes : ""],
+      ["e-Way Bill No.", ewayNumberText(e.eway_bill_number)], ["Mode/Terms of Payment", d.payment_mode ? PAY[d.payment_mode] : ""],
+      ["Reference No. & Date.", ""], ["Other References", oneLine(d.notes).length < 28 ? d.notes : ""],
       ["Buyer's Order No.", ""], ["Dated", ""],
       ["Dispatch Doc No.", ""], ["Delivery Note Date", ""],
       ["Dispatched through", e.transporter_name ? `${e.transporter_name}${e.transporter_gstin ? ` (${e.transporter_gstin})` : ""}` : ""], ["Destination", c.city],
       ["Motor Vehicle No.", e.vehicle_number], ["Terms of Delivery", terms],
-    ],
-    short: [`${f.name} · GSTIN ${f.gst_number}`, `Invoice No. ${d.invoice_number} · Dated ${date(d.invoice_date)}`, `Buyer : ${name}${c.gst_number ? ` · GSTIN ${c.gst_number}` : ""}`, pos ? `Place of Supply : ${pos}` : ""],
+    ] as [string, string][]).map(([k, v]): [string, string] => [k, oneLine(v)]),
+    short: [
+      `${f.name}${f.gst_number ? ` · GSTIN ${f.gst_number}` : ""}`, `Invoice No. ${d.invoice_number} · Dated ${date(d.invoice_date)}`,
+      `Buyer : ${name}${c.gst_number ? ` · GSTIN ${c.gst_number}` : ""}`, pos ? `Place of Supply : ${pos}` : "",
+    ].map(oneLine) as PrintBill["short"],
     lines, taxes, note: d.notes,
     total: { qty: units.length === 1 ? qty(Number(thousandths) / 1000, units[0]) : "", amount: amountText(d.total_amount) },
     words: `INR ${d.total_in_words}`, igst, hsn,
@@ -171,7 +191,8 @@ export const PAGE_FIT = {
   /** Kept free on every page, for what the estimates above can't see (a word that wraps early). */
   safety: 12,
 };
-const wraps = (text: string, per: number) => Math.max(1, Math.ceil(text.length / per));
+/** The printed lines a text takes in a column `per` characters wide: each line typed wraps on its own (Ruling 1E-9). */
+const wraps = (text: string, per: number) => text.split("\n").reduce((a, s) => a + Math.max(1, Math.ceil(s.length / per)), 0);
 
 function lineHeight(l: PrintLine): number {
   const F = PAGE_FIT;
@@ -187,6 +208,10 @@ function infoHeight(b: Omit<PrintBill, "pages">): number {
   return Math.max(F.meta, firm + parties) + 1;
 }
 
+// ponytail: the last page's part after its lines has to fit on one sheet, and past about 28 HSN groups with the bank block
+// (30 without), or about 18 beside a 500-character note, it doesn't: the totals then stand alone on a last page that is still
+// too tall, and react-pdf spills it onto one more sheet, with no copy mark and a wrong "Page n of N". Upgrade: carry the HSN
+// summary on to a next page.
 /** The last page's part after its lines: tax rows, the note, the words, HSN summary and footer. */
 function lastExtra(b: Omit<PrintBill, "pages">): number {
   const F = PAGE_FIT;

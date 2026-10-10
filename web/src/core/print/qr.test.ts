@@ -17,6 +17,12 @@ test("a scanned code reads back: this app's, and the JSON v2's bulk PDFs printed
   expect(parseQr('{"total":5}')).toBeNull();
 });
 
+test("a bill from a firm without a GSTIN reads back too: its GSTIN is empty, not unreadable", () => {
+  const b = toBillDetail(wireDetail({ firm: { ...(wireDetail().firm as object), gst_number: "" } }));
+  expect(qrPayload(b)).toBe("KGH/2026-27/31||2026-10-08|87083.21");
+  expect(parseQr(qrPayload(b))).toEqual({ number: "KGH/2026-27/31", gstin: "", firm: "", date: "2026-10-08", total: 8708321 });
+});
+
 test("the code is a real QR: a 2-module quiet zone, then the 7-module finder square in the top left", () => {
   const q = qrPath("KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21")!;
   expect(q.size).toBe(37); // version 4 (33 modules) at level M, and the quiet zone

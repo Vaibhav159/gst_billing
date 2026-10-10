@@ -1,6 +1,6 @@
 import type { BillRow } from "./types";
 import {
-  billsAnd, cancelledNote, dayCount, dayGroups, dayLabel, dayOf, failText, filedRangeText, firmsWord, fyLabel, gstLabel, listFooter, PAY_FILTER,
+  billsAnd, cancelledNote, dayCount, dayGroups, dayLabel, dayOf, ewayNumberText, failText, filedRangeText, firmsWord, fyLabel, gstLabel, listFooter, PAY_FILTER,
   rateText, realReason, restoreFailure, sendFailure, sentLine, sentWhen, taxLines, timeOf, whoCan,
 } from "./words";
 
@@ -42,6 +42,11 @@ test("tax lines by slab: CGST and SGST at half the rate, or IGST at the rate; th
     { key: "c0.25", head: "CGST", rate: "0.125%", label: "CGST 0.125%", value: 16371 }, { key: "s0.25", head: "SGST", rate: "0.125%", label: "SGST 0.125%", value: 16371 },
   ]);
   expect(taxLines({ slabs: [slab("3", 0, 0, 241190)], igst: 241190, cgst: 0, sgst: 0, interstate: true })).toEqual([{ key: "i3", head: "IGST", rate: "3%", label: "IGST 3%", value: 241190 }]);
+});
+
+test("an e-way bill number reads in fours, as it's read out; none stays empty", () => {
+  expect(ewayNumberText("123456789012")).toBe("1234 5678 9012");
+  expect(ewayNumberText("")).toBe("");
 });
 
 test("a rate reads as stored: two decimals, a third only when it isn't 0", () => {
