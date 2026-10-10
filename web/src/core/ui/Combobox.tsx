@@ -27,7 +27,8 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
   useEffect(() => { setActive(0); }, [query, open]);
   const pick = (o: ComboOption<T>) => { setOpen(false); onPick(o); };
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); if (!open) setOpen(true); else setActive((a) => Math.min(items.length - 1, a + 1)); }
+    // (never below 0: an arrow pressed while the list has nothing to pick yet leaves the first match to come highlighted)
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!open) setOpen(true); else setActive((a) => Math.max(0, Math.min(items.length - 1, a + 1))); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
     else if (e.key === "Enter") { if (open && items[active]) { e.preventDefault(); pick(items[active]); } }
     else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey) { if (open && query.trim() && items[active]) { e.preventDefault(); pick(items[active]); } else setOpen(false); }

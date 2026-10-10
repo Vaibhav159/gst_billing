@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/test/render";
 import { Combobox, type ComboItem, type ComboOption } from "./index";
@@ -68,6 +68,28 @@ test("a box focused as its page opens waits for the person: its list opens on an
   expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   await userEvent.keyboard("{ArrowDown}");
   expect(screen.getByRole("listbox", { name: "Customers" })).toBeInTheDocument();
+});
+
+test("an arrow pressed while the list has nothing to pick yet (a heading only) leaves the first match to come highlighted", async () => {
+  const onPick = vi.fn();
+  let answer = (_: boolean) => {};
+  /** A list that says it's searching until its matches come. */
+  function Later() {
+    const [q, setQ] = useState("");
+    const [ready, setReady] = useState(false);
+    answer = setReady;
+    const options: ComboItem<number>[] = ready ? PEOPLE.map((n, i) => ({ key: n, title: n, value: i })) : [{ heading: "Searching…" }];
+    return <Combobox id="cb" ariaLabel="Customer" listLabel="Customers" query={q} onQuery={setQ} options={options} onPick={onPick} />;
+  }
+  renderApp(<Later />);
+  const box = screen.getByRole("combobox", { name: "Customer" });
+  await userEvent.type(box, "a");
+  await userEvent.keyboard("{ArrowDown}{Enter}");
+  expect(onPick).not.toHaveBeenCalled();
+  act(() => answer(true));
+  expect(box).toHaveAttribute("aria-activedescendant", "cb-o0");
+  await userEvent.keyboard("{Enter}");
+  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ title: "Anil Gupta" }));
 });
 
 test("a click on a match picks it, and the cursor stays in the box", async () => {
