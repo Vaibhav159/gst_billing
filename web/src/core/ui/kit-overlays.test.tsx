@@ -458,6 +458,27 @@ test("on phones a page change clears toasts that have shown a while; Undo and fr
   }
 });
 
+test("a toast still leaving when its provider goes leaves no timer behind, so nothing sets state after the provider", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const errors = vi.spyOn(console, "error");
+  try {
+    let t!: ReturnType<typeof useToast>;
+    function Probe() { t = useToast(); return null; }
+    const view = wrap(<Probe />);
+    let id = "";
+    act(() => { id = t.show({ title: "Saved" }); });
+    act(() => { t.dismiss(id); }); // on its way out: it would go 170 ms from now
+    view.unmount();
+    // no toast timer is left waiting: a test file can end here, with nothing to fire once its window has gone
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+    errors.mockRestore();
+  }
+});
+
 test("on desktop toasts outlast a page change, last 6 s, 10 s for a problem, 15 s with an action, and can be dismissed", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {

@@ -33,9 +33,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const isPhone = useIsPhone();
   const phone = useRef(isPhone);
   phone.current = isPhone;
+  // a toast on its way out goes 170 ms later; those still waiting when the provider goes stop with it, so none sets
+  // state after it (a test file can't end with one waiting to fire once its window has gone)
+  const leaveTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = leaveTimers.current;
+    return () => { for (const t of timers) clearTimeout(t); timers.clear(); };
+  }, []);
   const dismiss = useCallback((id: string) => {
     setToasts((t) => t.map((x) => (x.id === id ? { ...x, leaving: true } : x)));
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 170);
+    const timer = setTimeout(() => { leaveTimers.current.delete(timer); setToasts((t) => t.filter((x) => x.id !== id)); }, 170);
+    leaveTimers.current.add(timer);
   }, []);
   // the last Undo a toast offered (PROTO core/store.jsx:101-123): Ctrl Z runs it for 30 s, once
   const undo = useRef<{ id: string; run: () => void; until: number } | null>(null);
