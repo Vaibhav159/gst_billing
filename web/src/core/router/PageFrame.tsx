@@ -1,8 +1,14 @@
 import { Component, createContext, useContext, useEffect, useRef, useState, type ReactNode, type MouseEvent } from "react";
 import { useLocation, useNavigationType } from "react-router";
+import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
+import { noteVisit } from "@/core/shell/recent";
 import { useView } from "@/core/view";
 import { useToast } from "@/core/ui";
+
+/** A record's own page (a bill, a customer, a purchase, a product, a supplier) for search's "Opened recently"; not a form or a tool beside them. */
+const RECORD_PAGE = /^\/(sales|customers|purchases|products|suppliers)\/[^/]+$/;
+const NOT_A_RECORD = /\/(new|export|batch|capture|inbox|ai-import|paper)$/;
 
 export type Opener = { href: string | null; row: string | null; id: string | null };
 type Place = { scroll: number; opener: Opener | null };
@@ -78,7 +84,7 @@ class PlaceKeeper extends Component<KeeperProps> {
  * Wraps every page. A new page starts at the top; Back returns to the same scroll and row.
  * Focus moves to the new page's title, and its name is announced. Plain toasts clear.
  * The second click of a double click (within 300 ms) can't land on the page that just opened.
- * Pages rise in on desktop; on phones they slide forward or back.
+ * Pages rise in on desktop; on phones they slide forward or back. A record stayed on is noted for search's "Opened recently".
  * A page is its path: a filter change (?query) re-renders it, and none of the above happens.
  */
 export function PageFrame({ children }: { children: ReactNode }) {
@@ -88,6 +94,7 @@ export function PageFrame({ children }: { children: ReactNode }) {
   const { isDesktop } = useView();
   const { clearPlain } = useToast();
   const signIn = useContext(SignInShown);
+  const meId = useAuth().me?.id;
   const openedAt = useRef(0);
   const clicked = useRef<Clicked["current"]>(null);
 
@@ -112,6 +119,15 @@ export function PageFrame({ children }: { children: ReactNode }) {
     }, 90);
     return () => clearTimeout(t);
   }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // a record stayed on goes to the top of search's "Opened recently", under the title its page put up (400 ms gives it
+  // time to). The page the app opened on counts; a filter change (?query) is the same visit, as above.
+  // ponytail: a record still loading at 400 ms is noted under its loading title. Upgrade: the record's page names it.
+  useEffect(() => {
+    if (meId == null || !RECORD_PAGE.test(pathname) || NOT_A_RECORD.test(pathname)) return undefined;
+    const t = setTimeout(() => noteVisit(meId, { to: pathname, label: document.title.replace(/ · GST Billing$/, "") }), 400);
+    return () => clearTimeout(t);
+  }, [pathname, meId]);
 
   const onClickCapture = (e: MouseEvent) => {
     if (Date.now() - openedAt.current < 300) { e.stopPropagation(); e.preventDefault(); return; }

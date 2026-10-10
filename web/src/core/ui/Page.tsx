@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
-import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, type LucideIcon } from "lucide-react";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
 import { AppMark } from "./Avatar";
@@ -106,6 +106,11 @@ export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeade
   const navigate = useNavigate();
   const { isEasy } = useView();
   const notchCleared = useContext(NotchClearedContext);
+  // the shell's search, on a page a tab opens (no Back): last, so the page's own buttons keep their order and Search
+  // is always the top right corner, where the prototype's Today has it. A page you went into keeps its header for
+  // Back and its own buttons
+  const openSearch = useContext(PhoneSearchContext);
+  const search = openSearch && !back ? <IconButton label="Search" icon={Search} onClick={openSearch} /> : null;
   // with no page before this one in the tab, go up to `back` (true: home) in place of this entry;
   // it's still a step back, so the page frame slides it in from the left (dir: "back")
   const onBack = () => {
@@ -120,11 +125,17 @@ export function PhoneHeader({ title, subtitle, back, actions, logo }: PhoneHeade
           <h1 data-page-title="" tabIndex={-1} className="text-lg font-semibold leading-tight truncate outline-none">{title}</h1>
           {subtitle ? <p className="text-xs text-muted line-clamp-2 mt-0.5">{subtitle}</p> : null}
         </div>
-        {actions ? <div className="flex items-center gap-0.5">{actions}</div> : null}
+        {actions || search ? <div className="flex items-center gap-0.5">{actions}{search}</div> : null}
       </div>
     </header>
   );
 }
+
+/**
+ * Opens search (Ctrl K's palette) from the phone header. The phone shell provides it in Expert where the tabs show;
+ * null in Easy, on forms and print (where the tabs make way), and outside the shell.
+ */
+export const PhoneSearchContext = createContext<(() => void) | null>(null);
 
 /**
  * The prototype's `route.hideNav`: true under a page that hides the phone's tab bar (a new bill,

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
@@ -10,6 +10,7 @@ import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
 import { OfflineBanner } from "./OfflineBanner";
+import { Palette } from "./Palette";
 import { PhoneShell } from "./PhoneShell";
 import { ScreenBoundary } from "./ScreenBoundary";
 
@@ -32,9 +33,6 @@ export function RootLayout() {
   );
 }
 
-/** Search (Ctrl K) arrives in Task 17; until then the shell's search button and Ctrl K do nothing. */
-const openPalette = () => {};
-
 export function AppLayout() {
   const { view, isPhone, isDesktop } = useView();
   const location = useLocation();
@@ -43,6 +41,9 @@ export function AppLayout() {
   const { prefs, ready } = usePrefs();
   const net = useNetwork();
   const signIn = useContext(SignInShown);
+  // search: one palette for the app, opened by Ctrl K and the desktop header's button, or the phone header's Search
+  const [palette, setPalette] = useState(false);
+  const openPalette = useCallback(() => setPalette(true), []);
   // A phone's home is Easy unless the person chose Expert; an Expert person isn't sent there on a guess before their
   // setting is known. Easy and the phone's More are for phones: on a desktop their addresses open the dashboard.
   const home = isPhone && pathname === "/";
@@ -70,7 +71,8 @@ export function AppLayout() {
   return (
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
-        {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"}>{main}</PhoneShell>}
+        {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"} openPalette={openPalette}>{main}</PhoneShell>}
+        <Palette open={palette} onClose={() => setPalette(false)} />
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>
     </ScopeProvider>

@@ -6,14 +6,15 @@ import { ArrowLeft } from "lucide-react";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
 import { phoneModeOf, usePrefs } from "@/core/prefs";
-import { HideNavContext, NotchClearedContext } from "@/core/ui";
+import { HideNavContext, NotchClearedContext, PhoneSearchContext } from "@/core/ui";
 import { EASY_TABS, EXPERT_TABS, tabOf } from "./nav";
 import { bannerShows, OfflineBanner } from "./OfflineBanner";
 
 /** What a route can say about the phone shell (routes.tsx): forms and print hide the tabs. */
 type ShellHandle = { hideNav?: boolean } | undefined;
 
-export function PhoneShell({ children, easy }: { children: ReactNode; easy: boolean }) {
+/** openPalette: search, for the Expert header's Search button (PhoneHeader puts it on pages without Back). */
+export function PhoneShell({ children, easy, openPalette }: { children: ReactNode; easy: boolean; openPalette?: () => void }) {
   const { pathname } = useLocation();
   const matches = useMatches();
   const net = useNetwork();
@@ -26,6 +27,8 @@ export function PhoneShell({ children, easy }: { children: ReactNode; easy: bool
   // the topmost strip clears the notch (the prototype's order: the banner, then Back to Easy), else the page's own header does
   const banner = bannerShows(net);
   const back = !easy && fromEasy;
+  // search is Expert's, beside the tabs: Easy has its own big buttons, and a form or print, where the tabs make way, keeps its header
+  const search = !easy && !hide && openPalette ? openPalette : null;
   return (
     <div className={cn("h-full flex flex-col bg-ground text-fg", easy ? "text-[16px]" : "text-md", net === "offline" && "has-offline")}>
       <OfflineBanner />
@@ -36,7 +39,7 @@ export function PhoneShell({ children, easy }: { children: ReactNode; easy: bool
         </Link>
       ) : null}
       <NotchClearedContext.Provider value={banner || back}>
-        <HideNavContext.Provider value={hide}>{children}</HideNavContext.Provider>
+        <HideNavContext.Provider value={hide}><PhoneSearchContext.Provider value={search}>{children}</PhoneSearchContext.Provider></HideNavContext.Provider>
       </NotchClearedContext.Provider>
       {hide ? null : (
         <nav aria-label="Tabs" className="phone-tabs shrink-0 border-t border-rule bg-bar grid grid-cols-5 pb-[env(safe-area-inset-bottom,0px)]">

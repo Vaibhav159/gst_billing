@@ -215,7 +215,7 @@ test("forms and print hide the phone's tabs; every other page keeps them", () =>
 test("the page the app opened on doesn't play its entrance again when the shell around it re-renders", async () => {
   phone(true);
   try {
-    // as AppLayout will be once it holds state (Task 17's search, say)
+    // as AppLayout is, now that it holds search's open state (Task 17)
     function Shell() {
       const [, setOpen] = useState(0);
       return <><button onClick={() => setOpen((n) => n + 1)}>Search</button><main id="app-main"><PageFrame><Outlet /></PageFrame></main></>;
@@ -224,7 +224,8 @@ test("the page the app opened on doesn't play its entrance again when the shell 
       { path: "/sales", element: <Page title="Bills">The list</Page> },
       { path: "/sales/7", element: <Page title="Bill 7">The bill</Page> },
     ] }], { initialEntries: ["/sales"] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    // signed in, as the frame always is (it notes who opened each record)
+    render(<AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider>);
     await screen.findByRole("heading", { level: 1, name: "Bills" });
     expect(frame()).toHaveClass("h-full", { exact: true });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
