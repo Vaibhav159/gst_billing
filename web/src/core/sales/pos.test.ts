@@ -1,4 +1,7 @@
+import type { Customer } from "@/core/api/customers";
+import { checkGstin } from "@/core/ids";
 import { autoPos, effectiveType, gstinNote, isInterState, posOptions, segmentOf, stateNameOf, taxType } from "./pos";
+import type { CustomerOnBill, CustomerRef } from "./types";
 
 test("a customer's type: as stored, else business with a GSTIN and person without", () => {
   expect(effectiveType("walkin", "")).toBe("walkin");
@@ -7,15 +10,15 @@ test("a customer's type: as stored, else business with a GSTIN and person withou
 });
 
 test("a counter sale is taxed where it's handed over: the firm's state unless a registered buyer is elsewhere", () => {
-  expect(autoPos("08", { type: "person", gst_number: "", state_code: "24" })).toBe("08");
-  expect(autoPos("08", { type: "walkin", gst_number: "", state_code: "" })).toBe("08");
-  expect(autoPos("08", { type: "business", gst_number: "27AAACK1234L1ZN", state_code: "27" })).toBe("27");
+  expect(autoPos("08", { type: "person", gst_number: "" })).toBe("08");
+  expect(autoPos("08", { type: "walkin", gst_number: "" })).toBe("08");
+  expect(autoPos("08", { type: "business", gst_number: "27AAACK1234L1ZN" })).toBe("27");
   expect(autoPos("08", null)).toBe("08");
   expect(isInterState("08", "27")).toBe(true);
   expect(isInterState("08", "08")).toBe(false);
-  expect(taxType("08", "08", { type: "person", gst_number: "", state_code: "24" })).toEqual({ inter: false, short: "Local sale · CGST + SGST", why: "sold at the counter in Rajasthan" });
-  expect(taxType("08", "08", { type: "business", gst_number: "27AAACK1234L1ZN", state_code: "27" }).why).toBe("handed over at the counter in Rajasthan");
-  expect(taxType("08", "27", { type: "business", gst_number: "27AAACK1234L1ZN", state_code: "27" })).toEqual({ inter: true, short: "Inter-state · IGST", why: "delivered to Maharashtra" });
+  expect(taxType("08", "08", { type: "person", gst_number: "" })).toEqual({ inter: false, short: "Local sale · CGST + SGST", why: "sold at the counter in Rajasthan" });
+  expect(taxType("08", "08", { type: "business", gst_number: "27AAACK1234L1ZN" }).why).toBe("handed over at the counter in Rajasthan");
+  expect(taxType("08", "27", { type: "business", gst_number: "27AAACK1234L1ZN" })).toEqual({ inter: true, short: "Inter-state · IGST", why: "delivered to Maharashtra" });
 });
 
 test("a registered buyer's state is their GSTIN's first two digits, whatever state is stored, as the server reads it", () => {
@@ -27,8 +30,33 @@ test("a registered buyer's state is their GSTIN's first two digits, whatever sta
   expect(autoPos("08", stale)).toBe("27");
   expect(taxType("08", autoPos("08", stale), stale)).toEqual(inter);
   // handed over at the counter here, though the buyer is registered in Maharashtra; and a Rajasthan GSTIN is local whatever is stored
+  const storedElsewhere = { type: "business" as const, gst_number: "08ABCPK1234F1Z5", state_code: "27" };
   expect(taxType("08", "08", stale).why).toBe("handed over at the counter in Rajasthan");
-  expect(taxType("08", "08", { type: "business", gst_number: "08ABCPK1234F1Z5", state_code: "27" }).why).toBe("both in Rajasthan");
+  expect(taxType("08", "08", storedElsewhere).why).toBe("both in Rajasthan");
+});
+
+test("a GSTIN failing only its check character still gives the buyer's state: only hasGstin gates it, as on the server", () => {
+  const typo = { type: "business" as const, gst_number: "27AAKFS4821M1Z5" }; // its last character should be Q
+  expect(checkGstin(typo.gst_number).status).toBe("check");
+  expect(autoPos("08", typo)).toBe("27");
+  expect(taxType("08", autoPos("08", typo), typo)).toEqual({ inter: true, short: "Inter-state · IGST", why: "delivered to Maharashtra" });
+  expect(taxType("08", "08", typo).why).toBe("handed over at the counter in Rajasthan");
+});
+
+test("1C's customer records go in as they are: a list's buyer, a bill's buyer and a customer", () => {
+  const ref: CustomerRef = { id: 12, name: "Rathore Gems", gst_number: "27AAACK1234L1ZN", mobile_number: "", type: "business" };
+  const onBill: CustomerOnBill = {
+    ...ref, address: "4 Zaveri Bazaar, Mumbai", city: "Mumbai", state_name: "MAHARASHTRA", state_code: "27", gstin_valid: true,
+    pan_number: "", pan: "AAACK1234L", email: "",
+  };
+  const customer: Customer = {
+    id: 12, name: "Rathore Gems", address: "4 Zaveri Bazaar, Mumbai", city: "Mumbai", state_name: "MAHARASHTRA", gst_number: "27AAACK1234L1ZN",
+    pan_number: "", mobile_number: "", email: "", businesses: [3], created_at: "2026-10-01T11:00:00+05:30", customer_type: "", type: "business", pan: "AAACK1234L",
+  };
+  for (const c of [ref, onBill, customer]) {
+    expect(autoPos("08", c)).toBe("27");
+    expect(taxType("08", "27", c).short).toBe("Inter-state · IGST");
+  }
 });
 
 test("with no firm state known, no place of supply makes a sale inter-state (the server: bool(firm) and chosen != firm)", () => {

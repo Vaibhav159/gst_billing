@@ -23,7 +23,8 @@ export function posOptions(home = "08"): { value: string; label: string }[] {
   return stateOptions(GST_STATES[home]).map((o) => ({ value: stateCodeOf(o.value), label: o.label }));
 }
 
-type PosCustomer = { type: CustomerType; gst_number: string; state_code: string };
+/** The buyer, as these rules read them: 1C's Customer, CustomerRef and CustomerOnBill all fit. No stored state is read. */
+type PosCustomer = { type: CustomerType; gst_number: string };
 
 /**
  * A registered buyer's state as the server reads it (billing/tax_rules.py state_code): their GSTIN's first two digits,
