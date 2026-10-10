@@ -87,6 +87,11 @@ export function plural(n: number, one: string, many?: string): string {
   return `${groupIN(n)} ${n === 1 ? one : many || one + "s"}`;
 }
 
+/** A name's possessive: "Anil Gupta's", and the apostrophe alone after a final s: "Kulkarni Jewellers'". */
+export function possessive(name: string): string {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
 /** "08 Oct 2026" */
 export function date(iso: string | null | undefined): string {
   if (!iso) return "—";

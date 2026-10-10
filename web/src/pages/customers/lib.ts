@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "react-router";
 import { useCustomer, useCustomerSearch, type Customer, type CustomerRow, type PaidAs } from "@/core/api/customers";
 import { problemOf } from "@/core/api/errors";
 import { mobileText, plural, rangeLabel, todayIST } from "@/core/format";
-import { checkGstin, GST_STATES, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
+import { checkGstin, GST_STATES, looksLikePhone, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
 import { cancelledNote } from "@/core/sales/words";
 import type { Firm, FirmId } from "@/core/scope";
 import { useDebounced } from "@/core/useDebounced";
@@ -70,6 +70,20 @@ export function openOnEnter(open: () => void) {
 export function customerLine(c: Pick<Customer, "type" | "mobile_number" | "gst_number" | "city" | "state_name">): string {
   if (c.type === "walkin") return "Counter sale · no name or GSTIN on the bill";
   return [mobileText(c.mobile_number) || "No phone", c.gst_number ? `GSTIN ${c.gst_number}` : "No GSTIN", `${c.city || "City not set"}${c.state_name ? `, ${stateTitle(c.state_name)}` : ""}`].join(" · ");
+}
+
+/**
+ * What was typed in a customer search, in the box it belongs in on a new customer (as /customers/new?phone=&gstin=&name=
+ * starts one): a phone number in Mobile number, a GSTIN (one failing only its check character too) in GSTIN, anything
+ * else in the name.
+ */
+export function startFrom(typed: string): { name: string; phone: string; gstin: string } {
+  const t = typed.trim();
+  const compact = t.replace(/[\s-]/g, "").toUpperCase();
+  const g = checkGstin(compact).status;
+  if (g === "valid" || g === "check") return { name: "", phone: "", gstin: compact };
+  if (looksLikePhone(t)) return { name: "", phone: t, gstin: "" };
+  return { name: t, phone: "", gstin: "" };
 }
 
 /**

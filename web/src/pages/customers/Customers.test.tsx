@@ -130,6 +130,24 @@ test("search asks once typing pauses, a phone typed in groups as its digits; wit
   expect(searches(calls)).toEqual(["9829041122"]);
 });
 
+test("Add … as a customer puts what was typed where it belongs: a phone number in Mobile, a GSTIN in GSTIN, anything else in the name", async () => {
+  serve({ "GET customers/": (c: Call) => (c.params.search ? { status: 200, data: { count: 0, next: null, results: [], summary: { ...SUMMARY, customers: 0, bills: 0, total: "0.00" } } } : list()(c)) });
+  mount(routes, ["/customers"]);
+  await screen.findByText("3 of 29 customers match");
+  const box = screen.getByRole("searchbox", { name: "Search customers (press /)" });
+  handClock();
+  for (const [typed, href] of [
+    ["98290 41122", "/customers/new?from=list&phone=98290%2041122"],
+    ["27xtzps7585p1zb", "/customers/new?from=list&gstin=27XTZPS7585P1ZB"],
+    // digits in a name don't make it a phone number
+    ["Shop 123", "/customers/new?from=list&name=Shop%20123"],
+  ]) {
+    fireEvent.change(box, { target: { value: typed } });
+    await pass(250);
+    expect(screen.getByRole("link", { name: `Add “${typed}” as a customer` }), typed).toHaveAttribute("href", href);
+  }
+});
+
 test("a search that can't get through keeps the search box and what was typed, says so with Try again, and clearing it brings the list back", async () => {
   const calls = serve({ "GET customers/": (c: Call) => (c.params.search ? { status: 503 } : list()(c)) });
   mount(routes, ["/customers"]);

@@ -10,7 +10,7 @@ import { customerSaveErrors, useCustomerSearch, useSaveCustomer, useStatement, t
 import type { ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { date, plural } from "@/core/format";
+import { date, plural, possessive } from "@/core/format";
 import { checkGstin, cleanGstin, cleanPan, emailProblem, formatMobile, gstinPan, mobileDigits, mobileProblem, panProblem, stateLabel, stateOptions, stateTitle } from "@/core/ids";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope, type Firm } from "@/core/scope";
@@ -93,7 +93,7 @@ export default function CustomerForm() {
   const backTo = editId !== null ? `/customers/${editId}` : "/customers";
   // the customer's loading, slow, offline and failed states, as every page draws them (the kit's QueryView)
   if (editId !== null && !existing) {
-    const skeleton = <ListSkeleton rows={5} what={`${one.data?.name ?? "the customer"}'s details`} />;
+    const skeleton = <ListSkeleton rows={5} what={`${possessive(one.data?.name ?? "the customer")} details`} />;
     return <Page narrow icon={UserRound} breadcrumbs={crumbs} title={title} back={backTo}><QueryView query={one} what="this customer" skeleton={skeleton}>{() => skeleton}</QueryView></Page>;
   }
   // the firms (for the firm cards) come with the app; a list that couldn't load is said, as the firm picker says it

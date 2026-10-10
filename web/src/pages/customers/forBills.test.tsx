@@ -214,12 +214,31 @@ test("a GSTIN another customer has is named once it's found, with Use them inste
   expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 9 }));
 });
 
-test("someone who can't add customers is told so on Save, and nothing is sent", async () => {
+test("someone who can't add customers is told so on Save, with the cursor on Name and the words read out, and nothing is sent", async () => {
   const user = handClock();
   const calls = serve({ "GET customers/": NONE });
   mount([{ path: "/", element: <NewCustomerForm initialName="Rekha" homeState="RAJASTHAN" onSaved={() => {}} /> }], ["/"], { me: VIEWER });
+  const name = screen.getByLabelText(/Name on the bill/);
+  // what a screen reader reads as the cursor lands: the field's description at that moment
+  let heard = "";
+  name.addEventListener("focus", () => { heard = document.getElementById(name.getAttribute("aria-describedby") ?? "")?.textContent ?? ""; });
   await user.click(screen.getByRole("button", { name: "Save and use on this bill" }));
-  expect(screen.getByText("Only the owner, the accountant and counter staff can add or change customers. Ask the owner if you need it.")).toBeInTheDocument();
+  expect(name).toHaveFocus();
+  expect(heard).toBe("Only the owner, the accountant and counter staff can add or change customers. Ask the owner if you need it.");
+  expect(name).toHaveAttribute("aria-invalid", "true");
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+});
+
+test("the cursor goes to the first refused field as they are on screen: the GSTIN, above the name", async () => {
+  const user = handClock();
+  const calls = serve({ "GET customers/": NONE });
+  mount([{ path: "/", element: <NewCustomerForm homeState="RAJASTHAN" onSaved={() => {}} /> }], ["/"]);
+  const gstin = screen.getByLabelText("GSTIN");
+  await user.type(gstin, "27XTZ");
+  await user.click(screen.getByRole("button", { name: "Save and use on this bill" }));
+  expect(gstin).toHaveFocus();
+  expect(gstin).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText(/Name on the bill/)).toHaveAttribute("aria-invalid", "true");
   expect(calls.some((c) => c.method === "POST")).toBe(false);
 });
 
@@ -327,6 +346,43 @@ test("the fix sheet: the PAN is checked, saved to the customer alone, and the bi
   expect(screen.getByText("It's in Customers now; this bill shows it.")).toBeInTheDocument();
 });
 
+/**
+ * What a screen reader reads out while the cursor stays where it is: the words that come into a polite live region
+ * already on the page (one added with its words already in it isn't reliably read).
+ */
+function liveWords(): { said: string[]; stop: () => void } {
+  const said: string[] = [];
+  const watch = new MutationObserver((records) => {
+    for (const r of records) {
+      const region = (r.target instanceof Element ? r.target : r.target.parentElement)?.closest('[aria-live="polite"], [role="status"]');
+      const text = region?.textContent ?? "";
+      if (text && said[said.length - 1] !== text) said.push(text);
+    }
+  });
+  watch.observe(document.body, { subtree: true, childList: true, characterData: true });
+  return { said, stop: () => watch.disconnect() };
+}
+
+test("the fix sheet reads out a refusal after Enter, where the cursor stays put: the words come in a polite live region", async () => {
+  const user = handClock();
+  const calls = serve({});
+  mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer(ANIL)} field="pan" open onClose={() => {}} /> }], ["/"]);
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  await pass(400);
+  const pan = within(sheet).getByLabelText("PAN");
+  await user.type(pan, "abcde1234");
+  const heard = liveWords();
+  try {
+    await user.keyboard("{Enter}");
+    expect(pan).toHaveFocus();
+    expect(heard.said).toEqual([PAN_PROBLEM]);
+  } finally {
+    heard.stop();
+  }
+  expect(pan).toHaveAttribute("aria-invalid", "true");
+  expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+});
+
 test("the fix sheet saves nothing for someone who can't change customers, and says who can (Ruling 1C-6)", async () => {
   const user = handClock();
   const calls = serve({ "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }) });
@@ -360,7 +416,7 @@ test("the fix sheet for an address wants the shop or house, street and area", as
   const user = handClock();
   const calls = serve({ "PATCH customers/9/": (c: Call) => ({ status: 200, data: { ...ANIL, id: 9, ...(c.data as object) } }) });
   mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer({ ...ANIL, id: 9, name: "Kulkarni Jewellers", address: "" })} field="address" open onClose={() => {}} /> }], ["/"]);
-  const sheet = await screen.findByRole("dialog", { name: "Kulkarni Jewellers's address" });
+  const sheet = await screen.findByRole("dialog", { name: "Kulkarni Jewellers' address" });
   await pass(400);
   await user.type(within(sheet).getByLabelText("Address"), "Pune");
   await user.click(within(sheet).getByRole("button", { name: "Save" }));

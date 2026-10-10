@@ -1,4 +1,4 @@
-import { addMonths, amountInWords, date, daysBetween, fyOf, groupIN, inr, mobileText, monthLabel, paiseToDecimal, parseRupees, pct, qty, toPaise, todayIST } from "./format";
+import { addMonths, amountInWords, date, daysBetween, fyOf, groupIN, inr, mobileText, monthLabel, paiseToDecimal, parseRupees, pct, possessive, qty, toPaise, todayIST } from "./format";
 import { cn } from "./cn";
 
 test("money in Indian digits, held as paise", () => {
@@ -77,4 +77,10 @@ test("a mobile number reads in two groups; anything else stays as typed", () => 
   expect(mobileText("98290")).toBe("98290");
   expect(mobileText("")).toBe("");
   expect(mobileText(null)).toBe("");
+});
+
+test("a name's possessive: 's, or the apostrophe alone after a final s", () => {
+  expect(possessive("Anil Gupta")).toBe("Anil Gupta's");
+  expect(possessive("Kulkarni Jewellers")).toBe("Kulkarni Jewellers'");
+  expect(possessive("MEERA ORNAMENTS")).toBe("MEERA ORNAMENTS'");
 });

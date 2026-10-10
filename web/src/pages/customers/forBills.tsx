@@ -13,14 +13,14 @@ import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { dateShort, inr, mobileText } from "@/core/format";
-import { checkGstin, cleanGstin, cleanPan, looksLikePhone, mobileDigits, mobileProblem, PAN_PROBLEM, PAN_RE, panProblem, stateLabel, stateOptions } from "@/core/ids";
+import { dateShort, inr, mobileText, possessive } from "@/core/format";
+import { checkGstin, cleanGstin, cleanPan, mobileDigits, mobileProblem, PAN_PROBLEM, PAN_RE, panProblem, stateLabel, stateOptions } from "@/core/ids";
 import { andList, failText, type FailText } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
 import { Avatar, Button, Combobox, Dialog, FailNote, Field, Input, ListRow, SearchInput, Select, Sheet, useToast, type ComboItem, type ComboOption } from "@/core/ui";
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
-import { customerLine, keepFocus, useOnFile } from "./lib";
+import { customerLine, keepFocus, startFrom, useOnFile } from "./lib";
 
 export { customerLine, homeState } from "./lib";
 
@@ -203,19 +203,8 @@ export type NewCustomerFormProps = {
 };
 
 type FormField = "name" | "phone" | "gstin" | "pan";
-
-/**
- * What was typed in the customer box, in the box it belongs in (as /customers/new?phone=&gstin= does): a phone number in
- * Mobile number, a GSTIN (one failing only its check character too) in GSTIN, anything else in the name.
- */
-function startFrom(typed: string): { name: string; phone: string; gstin: string } {
-  const t = typed.trim();
-  const compact = t.replace(/[\s-]/g, "").toUpperCase();
-  const g = checkGstin(compact).status;
-  if (g === "valid" || g === "check") return { name: "", phone: "", gstin: compact };
-  if (looksLikePhone(t)) return { name: "", phone: t, gstin: "" };
-  return { name: t, phone: "", gstin: "" };
-}
+/** The fields in the order they are on screen, the GSTIN first: a refusal puts the cursor on the first it names. */
+const ON_SCREEN: readonly FormField[] = ["gstin", "name", "phone", "pan"];
 
 /** What a save can refuse that the form has no place to say under a field: said above its buttons, by name. */
 const ELSEWHERE: Partial<Record<CustomerField, string>> = { address: "Address", city: "City", state: "State", email: "Email", firms: "Firms", type: "Type" };
@@ -260,10 +249,10 @@ export function NewCustomerForm({ initialName = "", idBase = "nc", homeState, on
     if (g.status !== "valid" && panProblem(v.pan)) e.pan = panProblem(v.pan);
     return e;
   };
-  /** Shows the problems and puts the cursor on the first: drawn first, so a screen reader reads its words as it lands. */
+  /** Shows the problems and puts the cursor on the first on screen: drawn first, so a screen reader reads its words as it lands. */
   const showProblems = (e: Partial<Record<FormField, string>>): boolean => {
     flushSync(() => setErr(e));
-    const first = (["name", "phone", "gstin", "pan"] as const).find((k) => e[k]);
+    const first = ON_SCREEN.find((k) => e[k]);
     if (first) document.getElementById(`${idBase}-${first}`)?.focus();
     return Boolean(first);
   };
@@ -271,7 +260,7 @@ export function NewCustomerForm({ initialName = "", idBase = "nc", homeState, on
     if (save$.isPending) return;
     setTried(true);
     setFail(null);
-    if (!can("customer.edit")) { setErr({ name: whyNot("customer.edit") }); return; }
+    if (!can("customer.edit")) { showProblems({ name: whyNot("customer.edit") }); return; }
     if (showProblems(validate())) return;
     const name = v.name.trim().replace(/\s+/g, " ");
     const address = v.address.trim();
@@ -378,6 +367,7 @@ export type CustomerFixSheetProps = {
  */
 export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: CustomerFixSheetProps) {
   const { can, whyNot } = useAuth();
+  const { isEasy } = useView();
   const { show } = useToast();
   const save$ = useSaveCustomer();
   const [val, setVal] = useState("");
@@ -390,7 +380,10 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   if (!customer || !field) return null;
   const busy = save$.isPending;
   const id = `fix-${field}`;
-  /** Says what's wrong under the field and puts the cursor there: drawn first, so a screen reader reads it as it lands. */
+  /**
+   * Says what's wrong under the field and puts the cursor there. The words are read out as they come (a polite live
+   * region): after Enter the cursor is in the field already, and focusing it again fires nothing to read them.
+   */
   const refuse = (words: string) => { flushSync(() => setErr(words)); document.getElementById(id)?.focus(); };
   const save = () => {
     if (busy) return;
@@ -414,14 +407,18 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
     });
   };
   return (
-    <Sheet open={open} onClose={busy ? () => {} : onClose} title={field === "pan" ? `${customer.name}'s PAN` : `${customer.name}'s address`} width={420}
+    <Sheet open={open} onClose={busy ? () => {} : onClose} title={`${possessive(customer.name)} ${field === "pan" ? "PAN" : "address"}`} width={420}
       description={field === "pan" ? "Income Tax Rule 114B: a bill over ₹2,00,000 needs the buyer's PAN (or Form 60)." : "CGST Rule 46: a B2B tax invoice shows the buyer's address."}
       footer={<><Button onClick={onClose} disabled={busy}>Not now</Button><Button variant="primary" loading={busy} onClick={save}>{busy ? "Saving…" : fail ? "Try again" : "Save"}</Button></>}>
       <div className="flex flex-col gap-3">
-        <Field label={field === "pan" ? "PAN" : "Address"} htmlFor={id} error={err}>
+        <Field label={field === "pan" ? "PAN" : "Address"} htmlFor={id}>
           <Input id={id} value={val} maxLength={field === "pan" ? 10 : 120} inputClassName={field === "pan" ? "uppercase tnum" : ""} autoComplete="off"
+            invalid={Boolean(err)} aria-describedby={`${id}-error`}
             onChange={(e) => { setVal(field === "pan" ? cleanPan(e.target.value) : e.target.value); setErr(""); }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } }} />
+          {/* the field's error as Field draws one, in a live region that is always there: words that come into it are read
+              out, where a region added with its words already in it may not be. Empty, it takes no room */}
+          <p id={`${id}-error`} aria-live="polite" className={cn(isEasy ? "text-[15px] leading-[21px]" : "text-sm", "text-neg", !err && "sr-only")}>{err}</p>
         </Field>
         <FailNote error={fail} />
       </div>

@@ -22,7 +22,7 @@ import {
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { customersCsv } from "./exportCsv";
-import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved } from "./lib";
+import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, startFrom, tableState, useJustSaved } from "./lib";
 import { CustomerRowMenu, FirmChips, MoreButton } from "./listParts";
 import { WhyNote } from "./parts";
 
@@ -176,12 +176,14 @@ function NoMatch({ d }: { d: D }) {
       </EmptyState>
     );
   }
-  const looksLikePhone = /\d{3}/.test(q);
+  // what was typed starts its own box on the new customer, as in the bill form: a phone number, a GSTIN, else the name
+  const s = startFrom(q);
+  const [box, value] = s.gstin ? ["gstin", s.gstin] : s.phone ? ["phone", s.phone] : ["name", s.name];
   return (
     <EmptyState icon={Search} title={q ? `No customer matches “${q}”` : "No customers match these filters"}
       actions={<>
         <Button onClick={d.clearAll}>Clear search and filters</Button>
-        {q && can("customer.edit") ? <ButtonLink variant="primary" icon={UserPlus} to={`/customers/new?from=list&${looksLikePhone ? "phone" : "name"}=${encodeURIComponent(q)}`}>{`Add “${q}” as a customer`}</ButtonLink> : null}
+        {q && can("customer.edit") ? <ButtonLink variant="primary" icon={UserPlus} to={`/customers/new?from=list&${box}=${encodeURIComponent(value)}`}>{`Add “${q}” as a customer`}</ButtonLink> : null}
       </>}>
       Search looks at names, phone numbers and GSTINs{d.chips.length ? `, inside the filters: ${d.chips.map((c) => c.label).join(", ")}` : ""}.
     </EmptyState>

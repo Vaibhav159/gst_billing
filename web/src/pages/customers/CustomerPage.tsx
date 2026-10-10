@@ -14,7 +14,7 @@ import { deleteRefusal, useDeleteCustomer, useItaxBills, useStatement, type Cust
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { addMonths, date, dateShort, fyOf, inr, mobileText, monthLabel, monthOf, plural, todayIST } from "@/core/format";
+import { addMonths, date, dateShort, fyOf, inr, mobileText, monthLabel, monthOf, plural, possessive, todayIST } from "@/core/format";
 import { checkGstin, stateLabel } from "@/core/ids";
 import { dayOf, PAY, PAY_SHORT } from "@/core/sales/words";
 import { useFirms, useScope, type Firm } from "@/core/scope";
@@ -110,7 +110,7 @@ function useDetail(c: Customer) {
     firms, firmId, setFirmId, fy, fyP, period, setPeriod, st, itax, loaded, ready, bills, shown: bills.slice(0, limit), more: () => setLimit((l) => l + PAGE),
     fig, allFig, since, last, plabel, prange, options, trend, scope, taxWay, key: `${period}|${firmId}`,
     // the firm picked's, by name ("KIRAN GOLD HOUSE's"); without its name, neutral words, never "the firm picked's"
-    whose: typeof firmId === "number" && named ? `${scopeName(firms, firmId)}'s` : "one firm's",
+    whose: typeof firmId === "number" && named ? possessive(scopeName(firms, firmId)) : "one firm's",
     // after "It has no bills", "None" and "Has 3 bills": the statement is the firm picked's, so it says whose bills it looked at
     inScope: typeof firmId === "number" && scope ? ` in ${scope}` : "",
     usual: firms.filter((f) => c.businesses.includes(f.id)),
@@ -378,10 +378,10 @@ function DesktopDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: ()
           <h2 className="text-lg font-semibold">Sales to {c.name}</h2>
           <p className="text-sm text-muted">{["Sales bills only", d.scope, "pick the period"].filter(Boolean).join(" · ")}</p>
         </div>
-        <PeriodSwitch label={`Period for ${c.name}'s figures`} options={d.options} value={d.period} onChange={d.setPeriod} className="w-[680px] max-w-full" />
+        <PeriodSwitch label={`Period for ${possessive(c.name)} figures`} options={d.options} value={d.period} onChange={d.setPeriod} className="w-[680px] max-w-full" />
       </div>
 
-      <QueryView query={d.st} what={`${c.name}'s bills`} skeleton={<ListSkeleton rows={5} what={`${c.name}'s bills`} />}>{() => (
+      <QueryView query={d.st} what={`${possessive(c.name)} bills`} skeleton={<ListSkeleton rows={5} what={`${possessive(c.name)} bills`} />}>{() => (
         <>
           <Card>
             <div className="grid grid-cols-4 divide-x divide-rule -mx-5">
@@ -491,9 +491,9 @@ function PhoneDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: () =
         </div>
       </Card>
 
-      <PeriodSwitch label={`Period for ${c.name}'s figures`} options={d.options} value={d.period} onChange={d.setPeriod} />
+      <PeriodSwitch label={`Period for ${possessive(c.name)} figures`} options={d.options} value={d.period} onChange={d.setPeriod} />
 
-      <QueryView query={d.st} what={`${c.name}'s bills`} skeleton={<ListSkeleton rows={4} what={`${c.name}'s bills`} />}>{() => (
+      <QueryView query={d.st} what={`${possessive(c.name)} bills`} skeleton={<ListSkeleton rows={4} what={`${possessive(c.name)} bills`} />}>{() => (
         <>
           <Card title={d.plabel} subtitle={[d.prange, d.scope].filter(Boolean).join(" · ")}>
             <div className="grid grid-cols-2 gap-x-4 gap-y-5">

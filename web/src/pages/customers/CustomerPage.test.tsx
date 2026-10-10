@@ -236,6 +236,15 @@ test("a firm picked shows only its bills, and Show all firms asks for every firm
   expect(screen.queryByText(/^Showing .* bills only$/)).not.toBeInTheDocument();
 });
 
+test("a name or a firm that ends in s takes the apostrophe alone: Kulkarni Jewellers' bills, MEERA ORNAMENTS' bills", async () => {
+  localStorage.setItem("gst3.scope.1", "4");
+  serve({ "GET customers/9/": { ...ANIL, id: 9, name: "Kulkarni Jewellers" }, "GET customers/9/statement/": () => ({ status: 503 }), "GET sales/": flags([]) });
+  mount(routes, ["/customers/9"]);
+  expect(await screen.findByText("Couldn't load Kulkarni Jewellers' bills")).toBeInTheDocument();
+  expect(screen.getByRole("radiogroup", { name: "Period for Kulkarni Jewellers' figures" })).toBeInTheDocument();
+  expect(screen.getByText("Showing MEERA ORNAMENTS' bills only")).toBeInTheDocument();
+});
+
 test("the figures wait for the firm's name, so they never show under another one", async () => {
   // the person picked Kiran on this device, so the firm is known before the list of firms comes
   localStorage.setItem("gst3.scope.1", "3");
