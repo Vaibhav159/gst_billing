@@ -2,6 +2,7 @@
 import type { RouteObject } from "react-router";
 import CustomerForm from "./CustomerForm";
 import CustomerPage from "./CustomerPage";
+import CustomerStatement from "./CustomerStatement";
 import Customers from "./Customers";
 
 export const customerRoutes: RouteObject[] = [
@@ -10,4 +11,5 @@ export const customerRoutes: RouteObject[] = [
   { path: "/customers/new", element: <CustomerForm />, handle: { hideNav: true } },
   { path: "/customers/:id/edit", element: <CustomerForm />, handle: { hideNav: true } },
   { path: "/customers/:id", element: <CustomerPage /> },
+  { path: "/customers/:id/statement", element: <CustomerStatement /> },
 ];

@@ -26,7 +26,6 @@ const PAGES: Record<string, string[]> = {
     "/sales", "/sales/paper", "/sales/new", "/sales/batch", "/sales/export", "/sales/:id", "/sales/:id/edit", "/sales/:id/print",
     "/billing/invoice/:bizSlug/:fy/:slug", // v2's links by bill number
   ],
-  customers: ["/customers", "/customers/new", "/customers/:id", "/customers/:id/edit", "/customers/:id/statement"],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
     "/capture", "/import", "/scan", "/suppliers", "/suppliers/:id",

@@ -1,0 +1,227 @@
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import CustomerStatement from "./CustomerStatement";
+import { makeStatementPdf } from "./statementPdf";
+import { ANIL, FIRMS, mount, serve, type Call } from "./testing";
+
+// the real PDF is statementPdf.test.tsx's: here a small stand-in comes back at once
+vi.mock("./statementPdf", () => ({ makeStatementPdf: vi.fn(async () => new Blob(["%PDF-1.3"], { type: "application/pdf" })) }));
+
+const routes = [
+  { path: "/customers", element: <p>all customers</p> },
+  { path: "/customers/:id", element: <p>the customer page</p> },
+  { path: "/customers/:id/statement", element: <CustomerStatement /> },
+  { path: "/sales/:id", element: <p>the bill</p> },
+];
+const b = (id: number, date: string, total: string, paid: string, mode: string, status = "active") => ({
+  id, business: 3, business_name: "KIRAN GOLD HOUSE", invoice_number: `KGH/2026-27/${id}`, invoice_date: date, payment_mode: mode, taxable: total, tax: "0.00", total_amount: total, status, cancel_reason: "", paid, itax: [],
+});
+const STATEMENT = {
+  customer: {}, start_date: "2026-04-01", end_date: "2026-10-08", business: 3,
+  bills: [b(17, "2026-09-02", "45210.00", "billing", "cash"), b(18, "2026-09-10", "20000.00", "udhaar", "credit"), b(19, "2026-09-12", "3000.00", "cancelled", "cash", "cancelled"), b(20, "2026-09-20", "1000.00", "not_recorded", "")],
+  totals: { bills: 3, billed: "66210.00", taxable: "66210.00", tax: "0.00", cancelled: 1, paid_at_billing: { bills: 1, total: "45210.00" }, udhaar: { bills: 1, total: "20000.00" }, not_recorded: { bills: 1, total: "1000.00" } },
+  months: [],
+};
+const answer = (c: Call) => ({ status: 200, data: c.params.start_date === "2026-10-01" ? { ...STATEMENT, bills: [], totals: { ...STATEMENT.totals, bills: 0, billed: "0.00", cancelled: 0 } } : STATEMENT });
+let clicked: string[] = [];
+/** The periods a PDF was asked for, in order. */
+const made = () => vi.mocked(makeStatementPdf).mock.calls.map(([d]) => d.periodLabel);
+
+beforeEach(() => {
+  localStorage.clear();
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
+  clicked = [];
+  vi.mocked(makeStatementPdf).mockClear();
+  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:statement"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this.download); });
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  delete (navigator as { share?: unknown }).share;
+  delete (navigator as { canShare?: unknown }).canShare;
+  (window as unknown as { __phone?: boolean }).__phone = false;
+});
+
+test("the year's register from the server: billed, paid at billing, on udhaar, and each bill oldest first with how it was settled", async () => {
+  const calls = serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  expect(await screen.findByRole("heading", { level: 1, name: "Statement" })).toBeInTheDocument();
+  expect(await screen.findByText("Anil Gupta · 98290 41122 · bills register · KIRAN GOLD HOUSE")).toBeInTheDocument();
+  expect(await screen.findByText("Billed · FY 2026-27")).toBeInTheDocument();
+  expect(screen.getByText("Billed · FY 2026-27").parentElement).toHaveTextContent("₹66,210.003 bills · 1 cancelled bill not counted");
+  expect(screen.getByText("Paid at billing · FY 2026-27").parentElement).toHaveTextContent("₹45,210.001 bill · cash, UPI or both");
+  expect(screen.getByText("On udhaar · FY 2026-27").parentElement).toHaveTextContent("₹20,000.001 bill · payment not recorded in the app");
+  expect(screen.getByText("1 bill (₹1,000.00) came in from Tally without a payment mode, so it isn't counted as paid or on udhaar.")).toBeInTheDocument();
+  const rows = within(screen.getByRole("table")).getAllByRole("row");
+  expect(rows.slice(1, -1).map((r) => r.textContent)).toEqual([
+    "02 Sep 2026KGH/2026-27/17KIRAN GOLD HOUSECash₹45,210.00Paid at billing",
+    "10 Sep 2026KGH/2026-27/18KIRAN GOLD HOUSEUdhaar₹20,000.00On udhaar · payment not recorded in the app",
+    "12 Sep 2026KGH/2026-27/19KIRAN GOLD HOUSECash₹3,000.00Cancelled · not counted",
+    "20 Sep 2026KGH/2026-27/20KIRAN GOLD HOUSENot recorded₹1,000.00Payment mode not recorded (from Tally)",
+  ]);
+  expect(rows.at(-1)).toHaveTextContent("₹45,210.00 paid at billing · ₹20,000.00 on udhaar · ₹1,000.00 not recorded");
+  expect(calls.find((c) => c.url === "customers/7/statement/")!.params).toEqual({ start_date: "2026-04-01", end_date: "2026-10-08", business_id: 3 });
+});
+
+test("this month, last month and own dates ask for their period; a start after the end says so and asks nothing", async () => {
+  const calls = serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  await screen.findByText("Billed · FY 2026-27");
+  const asked = () => calls.filter((c) => c.url === "customers/7/statement/").map((c) => `${c.params.start_date}..${c.params.end_date}`);
+  await userEvent.click(screen.getByRole("radio", { name: "October 2026" }));
+  expect(await screen.findByText("No bills to Anil Gupta in October 2026")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download PDF" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "No bills in this period");
+  await userEvent.click(screen.getByRole("radio", { name: "September 2026" }));
+  await waitFor(() => expect(asked()).toEqual(["2026-04-01..2026-10-08", "2026-10-01..2026-10-08", "2026-09-01..2026-09-30"]));
+  // a PDF is made once for each period with bills, and never for one without (Print, Download and Share are off there)
+  await waitFor(() => expect(made()).toEqual(["FY 2026-27", "September 2026"]));
+  await userEvent.click(screen.getByRole("radio", { name: "Choose dates" }));
+  const fromBox = screen.getByLabelText("From");
+  await userEvent.clear(fromBox);
+  await userEvent.type(fromBox, "2026-10-05");
+  const toBox = screen.getByLabelText("To");
+  await userEvent.clear(toBox);
+  await userEvent.type(toBox, "2026-10-01");
+  expect(await screen.findByText("The start date is after the end date.")).toBeInTheDocument();
+  expect(screen.getByText("Fix the dates to see bills")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "Fix the dates first");
+  expect(asked().filter((a) => a.endsWith("..2026-10-01"))).toEqual([]);
+});
+
+test("Download PDF hands over the file, named after the customer and the period", async () => {
+  // a PAN field v2 left as "N/A" is no PAN: the PDF gets the server's pan, which is ""
+  serve({ "GET customers/7/": { ...ANIL, pan_number: "N/A" }, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  const download = await screen.findByRole("button", { name: "Download PDF" });
+  await waitFor(() => expect(download).toBeEnabled());
+  await userEvent.click(download);
+  expect(clicked).toEqual(["Anil-Gupta_statement_FY-2026-27.pdf"]);
+  expect(await screen.findByText("Downloaded Anil-Gupta_statement_FY-2026-27.pdf")).toBeInTheDocument();
+  expect(screen.getByText("4 bills · FY 2026-27 · KIRAN GOLD HOUSE.")).toBeInTheDocument();
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(makeStatementPdf).mock.calls[0][0]).toMatchObject({
+    periodLabel: "FY 2026-27", periodRange: "1 Apr to 8 Oct 2026", scope: "KIRAN GOLD HOUSE", made: "08 Oct 2026",
+    customer: { name: "Anil Gupta", mobile: "98290 41122", gstin: "", pan: "", address: "15 Demo Road, Udaipur, Rajasthan" },
+  });
+});
+
+test("Share PDF opens the share sheet where there is one; elsewhere the file downloads and WhatsApp opens the chat", async () => {
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  const share = vi.fn(async () => {});
+  Object.assign(navigator, { share, canShare: () => true });
+  mount(routes, ["/customers/7/statement"]);
+  const button = await screen.findByRole("button", { name: "Share PDF" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  expect((share.mock.calls[0] as unknown as [{ files: File[] }])[0].files[0].name).toBe("Anil-Gupta_statement_FY-2026-27.pdf");
+  Object.assign(navigator, { share: undefined, canShare: undefined });
+  const open = vi.spyOn(window, "open").mockReturnValue({ opener: {} } as Window);
+  await userEvent.click(button);
+  expect(open).toHaveBeenCalledWith("https://wa.me/919829041122", "_blank");
+  expect(clicked).toEqual(["Anil-Gupta_statement_FY-2026-27.pdf"]);
+  expect(await screen.findByText("WhatsApp opens a chat with Anil Gupta (+91 98290 41122). Attach the PDF there.")).toBeInTheDocument();
+});
+
+test("Print opens the PDF to print; a tab the browser stops says how to allow it", async () => {
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  mount(routes, ["/customers/7/statement"]);
+  const print = await screen.findByRole("button", { name: "Print" });
+  await waitFor(() => expect(print).toBeEnabled());
+  await userEvent.click(print);
+  expect(open).toHaveBeenCalledWith("blob:statement", "_blank");
+  expect(await screen.findByText("The PDF didn't open")).toBeInTheDocument();
+});
+
+test("while the PDF is being made, Share PDF spins and the buttons say so; then they're on", async () => {
+  let ready = (_: Blob) => {};
+  vi.mocked(makeStatementPdf).mockImplementationOnce(() => new Promise<Blob>((resolve) => { ready = resolve; }));
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  const share = await screen.findByRole("button", { name: "Share PDF" });
+  await waitFor(() => expect(share).toHaveAttribute("aria-busy", "true"));
+  expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "Making the PDF…");
+  await act(async () => { ready(new Blob(["%PDF-1.3"], { type: "application/pdf" })); });
+  expect(share).toBeEnabled();
+  expect(share).not.toHaveAttribute("aria-busy");
+  expect(screen.getByRole("button", { name: "Download PDF" })).not.toHaveAttribute("title");
+});
+
+test("a PDF that couldn't be made leaves the buttons off, saying why, and nothing spinning", async () => {
+  vi.mocked(makeStatementPdf).mockRejectedValueOnce(new Error("the font didn't load"));
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  const download = await screen.findByRole("button", { name: "Download PDF" });
+  await waitFor(() => expect(download).toHaveAttribute("title", "The PDF couldn't be made. Reload the page and try again."));
+  expect(download).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Share PDF" })).not.toHaveAttribute("aria-busy");
+});
+
+test("on a phone: the periods short, Share PDF in the bar, Print and Download in the ⋮ menu", async () => {
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  expect(await screen.findByRole("radio", { name: "This FY" })).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "Oct" })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Share PDF" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("button", { name: "Print or download the statement" }));
+  const menu = await screen.findByRole("dialog", { name: "Statement" });
+  act(() => { vi.advanceTimersByTime(400); }); // past the sheet's guard against a double tap's second tap
+  await userEvent.click(within(menu).getByRole("menuitem", { name: /Download the PDF/ }));
+  await waitFor(() => expect(clicked).toEqual(["Anil-Gupta_statement_FY-2026-27.pdf"]));
+});
+
+test("the statement waits for the firm's name, so neither the page nor the PDF says “the firm picked”", async () => {
+  // the person picked Kiran on this device, so the firm is known before the list of firms comes
+  localStorage.setItem("gst3.scope.1", "3");
+  let firmsCome = () => {};
+  const held = new Promise<void>((resolve) => { firmsCome = resolve; });
+  const calls = serve({
+    "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; },
+    "GET customers/7/": ANIL, "GET customers/7/statement/": answer,
+  });
+  mount(routes, ["/customers/7/statement"]);
+  expect(await screen.findByText("Anil Gupta · 98290 41122 · bills register")).toBeInTheDocument();
+  expect(screen.getByText("1 Apr to 8 Oct 2026")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "Waits for the bills to load");
+  expect(calls.filter((c) => c.url === "customers/7/statement/")).toEqual([]);
+  expect(screen.queryByText(/the firm picked/)).not.toBeInTheDocument();
+  await act(async () => { firmsCome(); });
+  expect(await screen.findByText("Anil Gupta · 98290 41122 · bills register · KIRAN GOLD HOUSE")).toBeInTheDocument();
+  expect(screen.getByText("1 Apr to 8 Oct 2026 · KIRAN GOLD HOUSE")).toBeInTheDocument();
+  await waitFor(() => expect(made()).toEqual(["FY 2026-27"]));
+  expect(vi.mocked(makeStatementPdf).mock.calls[0][0].scope).toBe("KIRAN GOLD HOUSE");
+});
+
+test("when the list of firms can't load, the bills still show, and the PDF isn't made without the firm's name", async () => {
+  localStorage.setItem("gst3.scope.1", "3");
+  serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  expect(await screen.findByText("Billed · FY 2026-27")).toBeInTheDocument();
+  expect(screen.getAllByRole("row")).toHaveLength(6);
+  const download = screen.getByRole("button", { name: "Download PDF" });
+  expect(download).toBeDisabled();
+  expect(download).toHaveAttribute("title", "The firms didn't load. Reload the page to make the PDF.");
+  expect(screen.getByRole("button", { name: "Share PDF" })).not.toHaveAttribute("aria-busy");
+  expect(makeStatementPdf).not.toHaveBeenCalled();
+});
+
+test("bills that didn't load say so, with Try again, and the buttons say why they're off", async () => {
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": () => ({ status: 503 }) });
+  mount(routes, ["/customers/7/statement"]);
+  expect(await screen.findByText("Couldn't load the statement")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "The bills didn't load. Use Try again.");
+});
+
+test("an address that names no customer on file says so, with the way to all customers", async () => {
+  const calls = serve({});
+  mount(routes, ["/customers/99/statement"]);
+  expect(await screen.findByText("This customer isn't on file", { selector: "p" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All customers" })).toHaveAttribute("href", "/customers");
+  expect(calls.filter((c) => c.url.includes("statement"))).toEqual([]);
+});
