@@ -22,8 +22,9 @@ function remember(entry: string, place: Place) {
 }
 
 /**
- * True while the sign-in page shows (RootLayout keeps it). The frame mounts fresh after signing in, and that page is
- * a move like any other (focus to its title, its name announced), not the page the app opened on.
+ * Set while the sign-in page shows (RootLayout keeps it), and spent by the frame that greets the page after it (Ruling
+ * 1E-11): that frame mounts fresh once its page's code is in, and its page is a move like any other (focus to its title,
+ * its name announced), not the page the app opened on. A later frame is quiet.
  */
 export const SignInShown = createContext<{ current: boolean }>({ current: false });
 
