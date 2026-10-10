@@ -149,6 +149,31 @@ def direction_known(business, customer):
     return bool(state_code(business) and state_code(customer))
 
 
+def default_place_of_supply(business, customer):
+    """Today's rule, and what a bill's NULL place of supply means: the customer's state, else the firm's."""
+    return state_code(customer) or state_code(business)
+
+
+def place_of_supply(invoice):
+    """The state code a bill's supply goes to: its own choice (v3), else default_place_of_supply."""
+    return (invoice.place_of_supply or "").strip() or default_place_of_supply(invoice.business, invoice.customer)
+
+
+def supply_interstate(invoice):
+    """True when the bill is taxed as IGST.
+
+    A chosen place of supply decides against the firm's state (a counter sale to a buyer from
+    another state is local). Without one, today's rule, is_interstate on the two parties, applies
+    unchanged, so every older bill reads as it always has. The builder, the parties following
+    a header change, is_igst_applicable and GSTR-1 all ask this.
+    """
+    chosen = (invoice.place_of_supply or "").strip()
+    if not chosen:
+        return is_interstate(invoice.business, invoice.customer)
+    firm = state_code(invoice.business)
+    return bool(firm) and chosen != firm
+
+
 def classify_b2c(business, invoice):
     """Which GSTR-1 table a sale files in, and against which place of supply.
 
@@ -164,8 +189,16 @@ def classify_b2c(business, invoice):
 
     customer = invoice.customer
     cust_gstin = clean_gstin(getattr(customer, "gst_number", ""))
+    chosen = (getattr(invoice, "place_of_supply", None) or "").strip()
     if cust_gstin:
-        return "b2b", None, cust_gstin[:2], False
+        return "b2b", None, chosen or cust_gstin[:2], False
+    if chosen:
+        # The bill's own place of supply (v3): what was delivered where, whatever the buyer's state.
+        firm = state_code(business)
+        inter = bool(firm) and chosen != firm
+        if inter and (invoice.total_amount or 0) > B2CL_THRESHOLD:
+            return "b2cl", True, chosen, False
+        return "b2cs", inter, chosen, False
 
     inter = is_interstate(business, customer)
     cust_pos = state_code(customer)

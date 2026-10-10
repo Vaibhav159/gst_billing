@@ -36,10 +36,10 @@ from billing.constants import (
 )
 from billing.tax_rules import (
     direction_known,
-    is_interstate,
     normalize_state_name,
     normalize_tax_heads,
     rate_as_percent,
+    supply_interstate,
 )
 
 
@@ -374,6 +374,13 @@ class Invoice(AbstractBaseModel):
     sent_count = models.PositiveIntegerField(default=0, db_default=0)
     sent_to = models.CharField(max_length=15, blank=True, default="", db_default="")
     sent_via = models.CharField(max_length=10, blank=True, default="", db_default="", choices=SENT_VIA_CHOICES)
+    # The state the goods go to (a 2-digit code). NULL keeps today's rule, the customer's
+    # state (else the firm's): a v3 bill stores one only when it differs from that.
+    place_of_supply = models.CharField(max_length=2, null=True, blank=True)
+    # The firm as printed on the bill, frozen at create and on a move to another firm.
+    # NULL (every older bill) means the live firm (design decision 7).
+    firm_snapshot = models.JSONField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="", db_default="", help_text="Printed under the items.")
 
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
@@ -407,7 +414,8 @@ class Invoice(AbstractBaseModel):
     # Fields only v3's own endpoints write. v2's serializers show them read-only, and v2's
     # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
     V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces",
-                 "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via")
+                 "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via",
+                 "place_of_supply", "firm_snapshot", "notes")
 
     @classmethod
     def v2_columns(cls):
@@ -480,8 +488,8 @@ class Invoice(AbstractBaseModel):
         heads for an unknown direction. save(), not update(), so cacheops
         drops the cached lines.
         """
-        known = direction_known(self.business, self.customer)
-        interstate = is_interstate(self.business, self.customer)
+        known = bool(self.place_of_supply) or direction_known(self.business, self.customer)
+        interstate = supply_interstate(self)
         for li in self.lineitem_set.all():
             changed = []
             if li.customer_id != self.customer_id:
@@ -528,9 +536,10 @@ class Invoice(AbstractBaseModel):
 
         Delegates to the shared rule, which falls back to state_name for
         unregistered parties. The invoice form and the inward-bill service
-        already used it; this makes the property agree with them.
+        already used it; this makes the property agree with them. A bill's own
+        place of supply (v3) decides when it has one.
         """
-        return is_interstate(self.business, self.customer)
+        return supply_interstate(self)
 
     @classmethod
     def get_next_invoice_number(cls, business_id):
@@ -672,6 +681,7 @@ class LineItem(AbstractBaseModel):
         verbose_name="Unit",
         help_text="Unit of measurement (e.g., gms, pcs, kg, nos, etc.)",
     )
+    note = models.CharField(max_length=60, blank=True, default="", db_default="", help_text="Printed under the item.")
 
     def __str__(self):
         return self.product_name

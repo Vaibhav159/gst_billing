@@ -135,8 +135,9 @@ class LineItemSerializer(serializers.ModelSerializer):
         model = LineItem
         fields = "__all__"
         # The invoice's, always (the views set it). A line filed under another
-        # party stays behind when the invoice changes hands (H5, H6).
-        read_only_fields = ("customer",)
+        # party stays behind when the invoice changes hands (H5, H6). The note
+        # is v3's: only /api/sales/ writes it.
+        read_only_fields = ("customer", "note")
 
     def validate_invoice(self, invoice):
         # Moving a line doubled a filed month's total and left the source

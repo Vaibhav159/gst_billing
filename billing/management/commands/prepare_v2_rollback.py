@@ -3,10 +3,11 @@
 v2 doesn't know a bill can be cancelled: on v2's images every cancelled sale would count again.
 Run this with the v3 image, before the images go back to v2. It moves each cancelled sale to
 the bin (kind "cancelled") with a v2-shaped "deleted" row in the audit log, so v2 sees a deleted
-bill it could bring back, and it counts in no v2 figure. --reverse, run with the v3 image after
-going forward again, puts them back as cancelled bills under their own ids. Without --apply
-either way only reports. Like every repair command it bypasses the month locks: a cancelled bill
-in a filed month moves too.
+bill it could bring back, and it counts in no v2 figure. It also lists the bills whose place of
+supply was chosen by hand, which v2 files under the customer's state. --reverse, run with the
+v3 image after going forward again, puts the cancelled bills back under their own ids. Without
+--apply either way only reports. Like every repair command it bypasses the month locks: a
+cancelled bill in a filed month moves too.
 
     python manage.py prepare_v2_rollback            # what would move
     python manage.py prepare_v2_rollback --apply
@@ -19,6 +20,7 @@ from billing.constants import BILL_CANCELLED
 from billing.models import BinnedInvoice, Invoice
 from billing.refusals import Refusal
 from billing.services.bin import bin_bill, restore_from_bin
+from billing.tax_rules import default_place_of_supply
 
 
 class Command(BaseCommand):
@@ -45,6 +47,19 @@ class Command(BaseCommand):
                 bin_bill(inv, None, inv.cancel_reason, kind=BinnedInvoice.KIND_CANCELLED, check_month=False,
                          details=f"Cancelled in v3, set aside for v2: {inv.cancel_reason or 'no reason given'}")
         self.stdout.write(f"{len(bills)} cancelled bill(s) {'moved' if apply else 'to move'} to the bin for v2.")
+        self._chosen_places()
+
+    def _chosen_places(self):
+        """Bills whose place of supply was chosen by hand: v2 files them under the customer's state."""
+        chosen = (Invoice.objects.sales().counted().exclude(place_of_supply__isnull=True).exclude(place_of_supply="")
+                  .select_related("business", "customer"))
+        moved = [(inv, default_place_of_supply(inv.business, inv.customer)) for inv in chosen]
+        moved = [(inv, usual) for inv, usual in moved if usual != inv.place_of_supply]
+        for inv, usual in moved:
+            self.stdout.write(f"  {inv.business.name} {inv.invoice_number} of {inv.invoice_date}: place of supply "
+                              f"{inv.place_of_supply}, v2 reads {usual or 'none'}")
+        self.stdout.write(f"{len(moved)} bill(s) with a place of supply chosen by hand. v2 files them under the "
+                          "customer's state; don't run fix_tax_heads on v2 before the CA has seen this list.")
 
     def _reverse(self, apply):
         # No join on the firm: a row whose firm v2 deleted is reported, not skipped (Ruling 1A-6).

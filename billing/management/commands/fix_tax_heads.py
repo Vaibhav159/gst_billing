@@ -24,7 +24,7 @@ from django.db import transaction
 
 from billing.management.commands._repair import fresh_lines, invalidate, log_repair
 from billing.models import Invoice, LineItem
-from billing.tax_rules import is_interstate, normalize_tax_heads
+from billing.tax_rules import normalize_tax_heads, supply_interstate
 
 
 class Command(BaseCommand):
@@ -49,7 +49,9 @@ class Command(BaseCommand):
 
         wrong = []
         for inv in qs:
-            interstate = is_interstate(inv.business, inv.customer)
+            # The bill's own place of supply when it has one (v3), else the parties: re-filed by the
+            # parties alone, a counter sale to a buyer from another state would turn IGST (Ruling 1A-3).
+            interstate = supply_interstate(inv)
             for li in inv.lineitem_set.all():
                 total = (li.cgst or 0) + (li.sgst or 0) + (li.igst or 0)
                 if total == 0:

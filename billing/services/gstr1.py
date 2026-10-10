@@ -17,7 +17,15 @@ from rest_framework.response import Response
 
 from billing.constants import BILL_CANCELLED
 from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_by_month
+from billing.tax_rules import (
+    HEADS,
+    classify_b2c,
+    clean_gstin,
+    gstin_problem,
+    place_of_supply,
+    rate_as_percent,
+    utilise_by_month,
+)
 
 TWO_PLACES = Decimal("0.01")
 
@@ -489,7 +497,7 @@ def gstr_export(view, request):
             "inum": inv.invoice_number,
             "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
             "val": float(inv.total_amount),
-            "pos": cust_gst[:2],
+            "pos": place_of_supply(inv),
             "rchrg": "N",
             "inv_typ": "R",
             "itms": inv_items,
@@ -707,7 +715,7 @@ def gstr1_portal_json(view, request):
     )
     invoices = (
         month_bills.counted()
-        .select_related("customer")
+        .select_related("customer", "business")
         .prefetch_related("lineitem_set")
         .order_by("invoice_date", "id")
     )
@@ -761,7 +769,7 @@ def gstr1_portal_json(view, request):
             ]
             b2b_data.setdefault(cust_gstin, {"ctin": cust_gstin, "inv": []})["inv"].append({
                 "inum": inv.invoice_number, "idt": idt, "val": val,
-                "pos": cust_gstin[:2], "rchrg": "N", "inv_typ": "R", "itms": itms,
+                "pos": place_of_supply(inv), "rchrg": "N", "inv_typ": "R", "itms": itms,
             })
             counts["b2b"] += 1
             continue

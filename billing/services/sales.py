@@ -21,6 +21,17 @@ from billing.text import stamp
 
 CANCELLED_WORDS = "Cancelled bills can't be changed. Make it again from the bill instead."
 
+# The firm's details a printed bill shows (design decision 7).
+FIRM_FIELDS = ("name", "address", "gst_number", "state_name", "pan_number", "mobile_number", "email",
+               "bank_name", "bank_account_number", "bank_ifsc_code", "bank_branch_name", "invoice_prefix")
+
+
+def firm_snapshot(business):
+    """The firm as a bill prints it, frozen on the bill at create and on a move to another firm."""
+    data = {field: getattr(business, field) or "" for field in FIRM_FIELDS}
+    data["signature_image"] = business.signature_image.name if business.signature_image else ""
+    return data
+
 
 def entity_name(invoice):
     """The audit log's name for a bill, as v2's InvoiceViewSet writes it, kept to the column's 255
