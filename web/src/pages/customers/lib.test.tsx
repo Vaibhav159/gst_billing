@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { customerLine } from "./forBills";
-import { homeState, safeReturn, scopeName, tableState, useOnFile } from "./lib";
+import { homeState, safeReturn, scopeName, SETTLED, tableState, useOnFile } from "./lib";
 import { ANIL, serve } from "./testing";
 
 afterEach(() => { vi.useRealTimers(); });
@@ -35,6 +35,12 @@ test("the firm scope reads as the firm's name, or All firms; one whose name isn'
   expect(scopeName(firms, 3, true)).toBe("Kiran");
   // the list of firms hasn't come (or didn't), or the firm isn't in it, or the scope isn't known yet
   expect([scopeName([], 3), scopeName(firms, 99, true), scopeName(firms, null)]).toEqual(["the firm picked", "the firm picked", "the firm picked"]);
+});
+
+test("how a statement bill was settled, in one set of words that the statement page and its PDF both show", () => {
+  expect(SETTLED).toEqual({
+    billing: "Paid at billing", udhaar: "On udhaar · payment not recorded in the app", not_recorded: "Payment mode not recorded (from Tally)", cancelled: "Cancelled · not counted",
+  });
 });
 
 test("customers on file with a phone or GSTIN: asked for once typing pauses, only for a whole number or GSTIN, never the one being edited", async () => {

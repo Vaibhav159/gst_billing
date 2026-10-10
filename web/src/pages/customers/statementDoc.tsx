@@ -2,10 +2,10 @@
 // it on demand), so @react-pdf/renderer stays out of the app's first download. A register of bills, not a ledger: no
 // balance, cancelled bills listed and not counted, udhaar named as billed on credit (PROTO CustomerStatement.jsx).
 import { Document, Font, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
-import type { Statement, StatementBill } from "@/core/api/customers";
+import type { Statement } from "@/core/api/customers";
 import { date, inr, plural } from "@/core/format";
 import { PAY } from "@/core/sales/words";
-import { notCounted } from "./lib";
+import { notCounted, SETTLED } from "./lib";
 import rupeeSignFont from "./rupeeSignFont";
 
 // The built-in Helvetica has no ₹ (it would print as "¹"): the one-glyph Tinos font carries it, as v2's Tally invoice does
@@ -16,8 +16,6 @@ export type StatementPdfData = {
   customer: { name: string; mobile: string; gstin: string; pan: string; address: string };
   periodLabel: string; periodRange: string; scope: string; made: string; statement: Statement;
 };
-
-const SETTLED: Record<StatementBill["paid"], string> = { billing: "Paid at billing", udhaar: "On udhaar · payment not recorded in the app", not_recorded: "Payment mode not recorded (from Tally)", cancelled: "Cancelled · not counted" };
 
 const s = StyleSheet.create({
   page: { paddingTop: 36, paddingBottom: 48, paddingHorizontal: 36, fontFamily: "Helvetica", fontSize: 9, color: "#1a1a1a" },

@@ -2,7 +2,7 @@
 // its home in core: PAY, PAY_SHORT, cancelledNote and failText in @/core/sales/words, useDebounced in @/core/useDebounced.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router";
-import { useCustomer, useCustomerSearch, type Customer, type CustomerRow } from "@/core/api/customers";
+import { useCustomer, useCustomerSearch, type Customer, type CustomerRow, type PaidAs } from "@/core/api/customers";
 import { problemOf } from "@/core/api/errors";
 import { mobileText, plural, rangeLabel, todayIST } from "@/core/format";
 import { checkGstin, GST_STATES, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
@@ -48,6 +48,10 @@ export function notCounted(n: number): string {
   const note = cancelledNote(n, "not counted");
   return note ? ` · ${note}` : "";
 }
+/** How a statement bill was settled (PROTO CustomerStatement.jsx Settled): the page's badges and the PDF say it in these words. */
+export const SETTLED: Record<PaidAs, string> = {
+  billing: "Paid at billing", udhaar: "On udhaar · payment not recorded in the app", not_recorded: "Payment mode not recorded (from Tally)", cancelled: "Cancelled · not counted",
+};
 /** Enter on a row that has focus (Back puts it there) opens it; Enter on a link or button inside the row is that control's. */
 export function openOnEnter(open: () => void) {
   return (e: ReactKeyboardEvent<HTMLElement>) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); };
