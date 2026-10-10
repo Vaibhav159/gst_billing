@@ -3,7 +3,7 @@
 // keeps them ("Unfinished bills stay on this phone"): drafts are the shop's, not one person's, so whoever signs in next
 // on this device can finish them. A browser that refuses storage keeps them for the visit.
 import { useSyncExternalStore } from "react";
-import type { DraftData } from "@/core/api/drafts";
+import { toDraftData, type DraftData } from "@/core/api/drafts";
 import type { Person } from "@/core/sales/types";
 
 /**
@@ -24,11 +24,16 @@ const listeners = new Set<() => void>();
 /** What was read or written last; once storage refuses a write, it's the only copy for the visit. */
 let cache: { raw: string | null; list: KeptDraft[] } = { raw: null, list: [] };
 let memoryOnly = false;
+/** Whether this page has tried storage yet, by a write or by keepsOnDevice(). */
+let checked = false;
 
 function parse(raw: string | null): KeptDraft[] {
   try {
     const v: unknown = JSON.parse(raw ?? "[]");
-    return Array.isArray(v) ? v.filter((d): d is KeptDraft => Boolean(d) && typeof d === "object" && typeof (d as KeptDraft).id === "string").sort(newestFirst) : [];
+    if (!Array.isArray(v)) return [];
+    // a copy an older version of the app kept reads as today's bill: whatever its data left out reads as empty
+    return v.filter((d): d is KeptDraft => Boolean(d) && typeof d === "object" && typeof (d as KeptDraft).id === "string")
+      .map((d) => ({ ...d, data: toDraftData(d.data) })).sort(newestFirst);
   } catch { return []; }
 }
 function read(): KeptDraft[] {
@@ -41,7 +46,7 @@ function read(): KeptDraft[] {
 function write(list: KeptDraft[]) {
   const sorted = [...list].sort(newestFirst);
   const raw = JSON.stringify(sorted);
-  try { localStorage.setItem(KEY, raw); } catch { memoryOnly = true; }
+  try { localStorage.setItem(KEY, raw); checked = true; } catch { memoryOnly = true; }
   cache = { raw, list: sorted };
   listeners.forEach((l) => l());
 }
@@ -72,6 +77,24 @@ export function markGone(id: string): void {
 export function forgetOnDevice(id: string): void {
   const list = read();
   if (list.some((d) => d.id === id)) write(list.filter((d) => d.id !== id));
+}
+
+/**
+ * Whether this device keeps unfinished bills. False when the browser refuses storage (a private window, a full disk):
+ * they last until this page is closed or reloaded.
+ */
+export function keepsOnDevice(): boolean {
+  if (!memoryOnly && !checked) {
+    checked = true;
+    try { localStorage.setItem(`${KEY}.check`, "1"); localStorage.removeItem(`${KEY}.check`); } catch { read(); memoryOnly = true; }
+  }
+  return !memoryOnly;
+}
+/** Tests only: forget what this page read, wrote or found out about storage. */
+export function __resetDeviceDrafts(): void {
+  cache = { raw: null, list: [] };
+  memoryOnly = false;
+  checked = false;
 }
 
 function subscribe(cb: () => void) {

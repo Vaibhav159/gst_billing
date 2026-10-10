@@ -4,11 +4,11 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { __setNetState } from "@/core/api/network";
 import { AuthContext, AuthProvider, useAuth } from "@/core/auth/AuthProvider";
-import { keepOnDevice, keptDraft, keptDrafts, type KeptDraft } from "@/core/deviceDrafts";
+import { __resetDeviceDrafts, keepOnDevice, keepsOnDevice, keptDraft, keptDrafts, type KeptDraft } from "@/core/deviceDrafts";
 import { refuse, salesServer, type Call } from "@/core/sales/fixtures";
 import { stubAuth } from "@/test/render";
 import { serve, serveWith } from "@/test/server";
-import { setTokens } from "./client";
+import { api, setTokens } from "./client";
 import {
   draftKeys, draftSettled, forgetDraft, newDraftId, toDraftData, useDiscardDraft, useDraftSync, useKeepDraft, useUnfinishedBills, type DraftData, type DraftList,
 } from "./drafts";
@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-10-08T15:40:00+05:30"));
   localStorage.clear();
   sessionStorage.clear();
+  __resetDeviceDrafts();
   act(() => __setNetState("online"));
 });
 afterEach(() => {
@@ -232,6 +233,70 @@ test("a sync goes past a draft the server refuses: that one stays here unsent, t
   await waitFor(() => expect(methods(calls, "GET")).toHaveLength(1));
 });
 
+/** The server's answer to a PUT of a draft a bill took already (contract §4, Ruling 1D-6). */
+const SAVED_AS = {
+  detail: "This unfinished bill was saved as KGH/2026-27/31 already.", code: "draft_saved",
+  bill: { id: 412, invoice_number: "KGH/2026-27/31", invoice_date: "2026-10-08", customer_name: "Anil Gupta", status: "active" },
+};
+
+test("one saved as a bill already (409 draft_saved): forgotten here and off the list, with the server's words; the sync goes on to the next", async () => {
+  const X = "55555555-5555-4555-8555-555555555555";
+  const Y = "66666666-6666-4666-8666-666666666666";
+  keepOnDevice(copy({ id: X, updated_at: "2026-10-08T10:00:00+05:30" }));
+  keepOnDevice(copy({ id: Y, updated_at: "2026-10-08T09:00:00+05:30" }));
+  const { calls } = salesServer([
+    ["PUT", `drafts/${X}/`, () => refuse(409, SAVED_AS)],
+    ["PUT", `drafts/${Y}/`, (c) => row({ id: Y, data: sent(c) })],
+    // a list the server answered before X's bill was saved
+    ["GET", "drafts/", () => ({ results: [row({ id: Y }), row({ id: X })] })],
+  ]);
+  const { wrapper } = setup();
+  const list = renderHook(() => useUnfinishedBills(), { wrapper });
+  renderHook(() => useDraftSync(), { wrapper });
+  await waitFor(() => expect(keptDraft(Y)?.synced).toBe(true));
+  expect(keptDraft(X)).toBeNull();
+  await waitFor(() => expect(methods(calls, "GET").length).toBeGreaterThan(0));
+  await drain();
+  expect(list.result.current.bills.map((b) => b.id)).toEqual([Y]);
+  // a form still open on X keeps it again: the server's words say where it went, and nothing stays here
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  let where: unknown;
+  await act(async () => { where = await keep.result.current(X, 3, DATA); });
+  expect(where).toEqual({ kept: null, refusal: "This unfinished bill was saved as KGH/2026-27/31 already." });
+  expect(keptDraft(X)).toBeNull();
+  expect(list.result.current.bills.map((b) => b.id)).toEqual([Y]);
+});
+
+const X2 = "77777777-1111-4111-8111-777777777777";
+const Y2 = "88888888-2222-4222-8222-888888888888";
+/** Two drafts kept here while the server was out of reach; X2, the newer, goes first and gets `status`. */
+function twoToSend(status: number) {
+  keepOnDevice(copy({ id: X2, updated_at: "2026-10-08T10:00:00+05:30" }));
+  keepOnDevice(copy({ id: Y2, updated_at: "2026-10-08T09:00:00+05:30" }));
+  return salesServer([
+    ["PUT", `drafts/${X2}/`, () => refuse(status, status ? { detail: "Not this one." } : null)],
+    ["PUT", `drafts/${Y2}/`, (c) => row({ id: Y2, data: sent(c) })],
+    ["GET", "drafts/", () => ({ results: [row({ id: Y2 })] })],
+  ]).calls;
+}
+
+test.each([400, 404, 409])("a sync answered %i about one draft goes on to the next (Ruling 1D-7)", async (status) => {
+  twoToSend(status);
+  renderHook(() => useDraftSync(), { wrapper: setup().wrapper });
+  await waitFor(() => expect(keptDraft(Y2)?.synced).toBe(true));
+  expect(keptDraft(X2)).toMatchObject({ synced: false });
+});
+
+test.each([0, 401, 403, 429, 503])("a sync answered %i stops: every write would fail now (Ruling 1D-7)", async (status) => {
+  const calls = twoToSend(status);
+  renderHook(() => useDraftSync(), { wrapper: setup().wrapper });
+  await waitFor(() => expect(methods(calls, "PUT")).toHaveLength(1));
+  await drain();
+  await drain();
+  expect(calls.map((c) => c.url)).toEqual([`drafts/${X2}/`]);
+  expect(keptDraft(Y2)).toMatchObject({ synced: false });
+});
+
 test("nothing syncs for someone who can't make bills, or for no one", async () => {
   keepOnDevice(copy());
   const { calls } = salesServer([]);
@@ -273,6 +338,35 @@ test("offline, the shop's list can't be read: every unfinished bill on this devi
   } finally {
     onlineManager.setOnline(true);
   }
+});
+
+test("a draft picked up from the shop's list keeps who started it, and when, while the server is out of reach", async () => {
+  salesServer([
+    ["GET", "drafts/", () => ({ results: [row({ created_at: "2026-10-08T09:20:00+05:30", updated_at: "2026-10-08T09:25:00+05:30" })] })],
+    ["PUT", `drafts/${ID}/`, () => refuse(0, null)],
+  ]);
+  const { wrapper } = setup();
+  const list = renderHook(() => useUnfinishedBills(), { wrapper });
+  await waitFor(() => expect(list.result.current.bills.map((b) => b.id)).toEqual([ID]));
+  // Kailash opens Rakesh's unfinished bill and changes it while the server is out of reach
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  await act(async () => { await keep.result.current(ID, 3, { ...DATA, notes: "Two rings" }); });
+  expect(keptDraft(ID)).toMatchObject({ started_by: RAKESH, created_at: "2026-10-08T09:20:00+05:30", synced: false });
+  expect(list.result.current.bills).toMatchObject([{ id: ID, started_by: RAKESH, onDevice: true, data: { notes: "Two rings" } }]);
+});
+
+test("a list that comes back full (the server sends at most 500) lets nothing go: it may not hold every draft", async () => {
+  keepOnDevice(copy({ id: "a", synced: true, syncedAt: 1 }));
+  const full = Array.from({ length: 500 }, (_, i) => row({ id: `s${i}` }));
+  const { calls } = salesServer([["GET", "drafts/", () => ({ results: full })]]);
+  const { wrapper } = setup();
+  const list = renderHook(() => useUnfinishedBills(), { wrapper });
+  renderHook(() => useDraftSync(), { wrapper });
+  await waitFor(() => expect(methods(calls, "GET").length).toBeGreaterThan(0));
+  await drain();
+  await drain();
+  expect(keptDraft("a")).not.toBeNull();
+  expect(list.result.current.bills).toHaveLength(501);
 });
 
 test("one draft's writes go in turn: a keep waits for the one on its way, and a discard for both, so the server ends as this device does", async () => {
@@ -332,6 +426,36 @@ test("a discard undone while its delete is on its way: the bill comes back, here
   expect(keptDraft(ID)).toMatchObject({ synced: true, data: DATA });
 });
 
+test("a sync's delete of a discarded draft, waiting behind another, doesn't undo an Undo made meanwhile", async () => {
+  const G = "11111111-1111-4111-8111-111111111111";
+  const X = "22222222-2222-4222-8222-222222222222";
+  const rows = new Map<string, unknown>();
+  keepOnDevice(copy({ id: G, gone: true, updated_at: "2026-10-08T10:00:00+05:30" }));
+  keepOnDevice(copy({ id: X, gone: true, updated_at: "2026-10-08T09:00:00+05:30" }));
+  let releaseG: (() => void) | undefined;
+  const { calls } = salesServer([
+    ["DELETE", `drafts/${G}/`, () => new Promise((r) => { releaseG = () => r(null); })],
+    ["DELETE", `drafts/${X}/`, () => { rows.delete(X); return null; }],
+    ["PUT", `drafts/${X}/`, (c) => { const r = row({ id: X, data: sent(c) }); rows.set(X, r); return r; }],
+    ["GET", "drafts/", () => ({ results: [...rows.values()] })],
+  ]);
+  const { wrapper } = setup();
+  // the network is back: the sync deletes G (slow to answer), and X after it
+  renderHook(() => useDraftSync(), { wrapper });
+  await waitFor(() => expect(releaseG).toBeDefined());
+  // meanwhile X's discard is undone: kept again, and on the server at once
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  await act(async () => { await keep.result.current(X, 3, DATA); });
+  expect(rows.has(X)).toBe(true);
+  await act(async () => { releaseG?.(); });
+  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(1));
+  await drain();
+  expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([`DELETE drafts/${G}/`, `PUT drafts/${X}/`, "GET drafts/"]);
+  expect(rows.has(X)).toBe(true);
+  expect(keptDraft(X)).toMatchObject({ synced: true });
+  expect(keptDraft(X)?.gone).toBeUndefined();
+});
+
 test("saved as a bill: the draft leaves this device and the shop's list at once, and a keep still on its way can't bring it back", async () => {
   const SAVED = "0f6b3c1e-2d4a-4b5c-8e9f-a1b2c3d4e5f6";
   let land!: () => void;
@@ -372,16 +496,60 @@ test("saved as a bill: the draft leaves this device and the shop's list at once,
 
 test("saved as a bill with nothing on its way: forgotten here at once, and the server isn't asked again", async () => {
   const SAVED = "7c9e1a2b-3d4e-4f50-9a1b-2c3d4e5f6a7b";
-  keepOnDevice(copy({ id: SAVED, synced: true, syncedAt: 1 }));
-  const { calls } = salesServer([["GET", "drafts/", () => ({ results: [row({ id: SAVED })] })]]);
+  const { calls } = salesServer([
+    ["GET", "drafts/", () => ({ results: [row({ id: SAVED })] })],
+    ["PUT", `drafts/${SAVED}/`, (c) => row({ id: SAVED, data: sent(c) })],
+  ]);
   const { qc, wrapper } = setup();
   const list = renderHook(() => useUnfinishedBills(), { wrapper });
   await waitFor(() => expect(list.result.current.bills.map((b) => b.id)).toEqual([SAVED]));
+  // its last change reached the server before the save, which found it settled
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  await act(async () => { await keep.result.current(SAVED, 3, DATA); });
+  await act(async () => { await draftSettled(SAVED); });
   act(() => forgetDraft(qc, SAVED));
   expect(keptDraft(SAVED)).toBeNull();
   expect(list.result.current.bills).toEqual([]);
-  await act(async () => { await draftSettled(SAVED); });
-  expect(calls.map((c) => c.method)).toEqual(["GET"]);
+  await drain();
+  expect(calls.map((c) => c.method)).toEqual(["GET", "PUT"]);
+});
+
+test("a sync's PUT that goes out while the bill saves can't leave the saved draft on the shop's list", async () => {
+  const G = "33333333-3333-4333-8333-333333333333";
+  const X = "44444444-4444-4444-8444-444444444444";
+  const rows = new Map<string, unknown>([[X, row({ id: X })]]);
+  keepOnDevice(copy({ id: G, gone: true, updated_at: "2026-10-08T10:00:00+05:30" }));
+  keepOnDevice(copy({ id: X, updated_at: "2026-10-08T09:30:00+05:30" }));
+  let releaseG: (() => void) | undefined;
+  let answerPost: (() => void) | undefined;
+  const { calls } = salesServer([
+    ["DELETE", `drafts/${G}/`, () => new Promise((r) => { releaseG = () => r(null); })],
+    ["DELETE", `drafts/${X}/`, () => { rows.delete(X); return null; }],
+    ["PUT", `drafts/${X}/`, (c) => { const r = row({ id: X, data: sent(c) }); rows.set(X, r); return r; }],
+    // the bill's save takes the draft off the shop's list in its own transaction (contract §4); its answer is slow
+    ["POST", "sales/", (c) => { rows.delete((c.body as { draft_id: string }).draft_id); return new Promise((r) => { answerPost = () => r({ id: 501 }); }); }],
+    ["GET", "drafts/", () => ({ results: [...rows.values()] })],
+  ]);
+  const { qc, wrapper } = setup();
+  // a sync is under way, held up deleting G; this device's change to X waits behind it
+  renderHook(() => useDraftSync(), { wrapper });
+  await waitFor(() => expect(releaseG).toBeDefined());
+  // the bill is saved from X: nothing of X is on its way, so the POST goes
+  await act(async () => { await draftSettled(X); });
+  let posted: Promise<unknown> | undefined;
+  act(() => { posted = api.post("sales/", { draft_id: X }); });
+  await waitFor(() => expect(answerPost).toBeDefined());
+  expect(rows.has(X)).toBe(false);
+  // the sync goes on and sends X before the save has answered: the server makes the draft again
+  await act(async () => { releaseG?.(); });
+  await waitFor(() => expect(keptDraft(X)?.synced).toBe(true));
+  expect(rows.has(X)).toBe(true);
+  await act(async () => { answerPost?.(); await posted; });
+  act(() => forgetDraft(qc, X));
+  // that PUT went out after the save found X settled, so X is deleted there again, and here
+  await waitFor(() => expect(rows.has(X)).toBe(false));
+  await waitFor(() => expect(keptDraft(X)).toBeNull());
+  expect(methods(calls, "DELETE").map((c) => c.url)).toEqual([`drafts/${G}/`, `drafts/${X}/`]);
 });
 
 const ME = { id: 2, username: "rakesh", full_name: "Rakesh Soni", role: "staff", role_label: "Counter staff", permissions: ["view", "bill.create"], needs_role_choice: false };
@@ -435,5 +603,39 @@ test("an unfinished bill's data reads whatever another client left out, and new 
     expect(newDraftId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   } finally {
     Object.defineProperty(globalThis.crypto, "randomUUID", { value: real, configurable: true });
+  }
+});
+
+test("a browser that refuses storage: the bill lasts for this visit only, and a keep doesn't say it's on this device", async () => {
+  const storage = Object.getPrototypeOf(localStorage) as Storage;
+  vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
+  salesServer([["PUT", `drafts/${ID}/`, () => refuse(0, null)]]);
+  expect(keepsOnDevice()).toBe(false);
+  const { result } = renderHook(() => useKeepDraft(), { wrapper: setup().wrapper });
+  let where: unknown;
+  await act(async () => { where = await result.current(ID, 3, DATA); });
+  expect(where).toEqual({ kept: "visit" });
+  // still here until the page closes, so the form and the list can use it
+  expect(keptDraft(ID)).toMatchObject({ synced: false, data: DATA });
+  expect(localStorage.getItem("gst3.drafts")).toBeNull();
+});
+
+test("copies an older app kept on this device read as today's unfinished bills, whatever they left out", () => {
+  localStorage.setItem("gst3.drafts", JSON.stringify([
+    { id: ID, business: 3, started_by: RAKESH, created_at: "x", updated_at: "2026-10-08T09:00:00+05:30", synced: false, data: { lines: [{ name: "Ring", qty: 2 }] } },
+    { id: "c", updated_at: "2026-10-08T08:00:00+05:30", synced: false, data: "not a bill" },
+    "nonsense",
+  ]));
+  expect(keepsOnDevice()).toBe(true);
+  expect(keptDrafts().map((d) => d.id)).toEqual([ID, "c"]);
+  expect(keptDraft(ID)?.data).toMatchObject({ v: 1, customer: null, payment: null, lines: [{ productId: null, name: "Ring", qty: 2, unit: "gms", rate: "" }] });
+  expect(keptDraft("c")?.data).toMatchObject({ v: 1, lines: [], notes: "" });
+  onlineManager.setOnline(false);
+  try {
+    const view = renderHook(() => useUnfinishedBills(), { wrapper: setup().wrapper });
+    expect(view.result.current.bills.map((b) => [b.id, b.data.lines.length])).toEqual([[ID, 1], ["c", 0]]);
+    view.unmount();
+  } finally {
+    onlineManager.setOnline(true);
   }
 });
