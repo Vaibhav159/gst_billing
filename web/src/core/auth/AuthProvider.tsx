@@ -134,35 +134,34 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     return () => setSessionExpiredHandler(null);
   }, [start, forget]);
 
-  // Another tab signed out, signed in or refreshed (Ruling 30).
+  /**
+   * The sign-in stored now, followed (Ruling 30). What's stored decides, not the event that told this tab: a sign-out
+   * heard after a newer sign-in must not wipe that sign-in. No tokens: signed out, to a plain sign-in page. A token this
+   * tab hasn't checked (someone else's sign-in, or a refresh): ask who it is now.
+   */
+  const follow = useCallback(() => {
+    const { access } = getTokens();
+    if (!access) signOut();
+    else if (access !== checked.current) start();
+  }, [signOut, start]);
+
+  // Another tab signed out, signed in or refreshed.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== null && e.key !== ACCESS_KEY && e.key !== REFRESH_KEY && e.key !== ME_KEY) return;
-      // What's stored now decides, not the event: a sign-out heard after a newer sign-in must not wipe that sign-in.
-      const { access } = getTokens();
-      if (!access) signOut();
-      else if (access !== checked.current) start();
+      follow();
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [signOut, start]);
+  }, [follow]);
 
   // Back or Forward to this page from the browser's back/forward cache: it's as it was left, and it heard no storage
-  // events meanwhile, so what's stored now decides. Signed out since, here or elsewhere (the tokens are gone), or a
-  // sign-out on purpose in this tab since (its mark): the person shown and their data go. A different token since
-  // (someone else's sign-in, or a refresh): ask who it is now, as for another tab's.
+  // events while it was away, so it follows what's stored now as if it had (Ruling 42). An unchanged session stays.
   useEffect(() => {
-    const onShow = (e: PageTransitionEvent) => {
-      if (!e.persisted) return;
-      const { access } = getTokens();
-      const marked = readMark();
-      if (marked) setOnPurpose(true);
-      if (!access || (marked && shown.current)) forget();
-      else if (access !== checked.current) start();
-    };
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) follow(); };
     window.addEventListener("pageshow", onShow);
     return () => window.removeEventListener("pageshow", onShow);
-  }, [forget, start]);
+  }, [follow]);
 
   const signIn = useCallback(async (username: string, password: string): Promise<SignIn> => {
     let mine: string | null = null;

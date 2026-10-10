@@ -357,12 +357,12 @@ test("a switch refreshes what's on screen: a list that doesn't read useAuth refe
 // Ruling 35: a sign-out on purpose leaves no page behind for whoever signs in next; an expiry and a first visit keep it
 
 /** The sign-in page and every other page behind the sign-in check, on a router the test can move. */
-function mountRouted(entries: string[]) {
+function mountRouted(entries: string[], client = new QueryClient()) {
   const router = createMemoryRouter([
     { path: "/login", element: <><Where /><Probe /></> },
     { path: "*", element: <RequireAuth><Where /><Probe /></RequireAuth> },
   ], { initialEntries: entries, initialIndex: entries.length - 1 });
-  render(<QueryClientProvider client={new QueryClient()}><AuthProvider><RouterProvider router={router} /></AuthProvider></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><AuthProvider><RouterProvider router={router} /></AuthProvider></QueryClientProvider>);
   return router;
 }
 
@@ -497,24 +497,26 @@ const backFromCache = (persisted = true) => act(() => { window.dispatchEvent(new
 /** Someone signed out while this page sat in the cache: the tokens went, and the page heard nothing. */
 const signedOutMeanwhile = () => SIGN_OUT.forEach(([key]) => localStorage.removeItem(key));
 
-test("back from the browser's cache after a sign-out it didn't hear, the page forgets the person and their data", async () => {
+test("back from the browser's cache after a sign-out it didn't hear, the person and their data go, for a plain sign-in page (Ruling 42)", async () => {
   setTokens("a", "r");
   server({ a: ME });
-  const client = mountTab();
-  await waitFor(() => expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument());
+  const client = new QueryClient();
+  mountRouted(["/sales/31"], client);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
   client.setQueryData(["bills"], ["KGH/31"]);
   signedOutMeanwhile();
   backFromCache(false); // an ordinary page load's pageshow: nothing to catch up on
   expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument();
   backFromCache();
-  expect(screen.getByText("status:signed-out")).toBeInTheDocument();
+  // as if it had heard the sign-out: whoever signs in next on this tab doesn't land on Rakesh's page
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
   expect(screen.getByText("who:-")).toBeInTheDocument();
   expect(client.getQueryData(["bills"])).toBeUndefined();
 });
 
-test("back from the cache after a sign-out on purpose in this tab, the page forgets the person, and the sign-in page stays plain", async () => {
+test("back from the cache after a sign-out on purpose here and a sign-in again on v2, the page keeps that sign-in and follows it", async () => {
   setTokens("a", "r");
-  server({ a: ME });
+  const s = server({ a: ME, a2: ME });
   mountRouted(["/sales/31"]);
   expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
   // this tab went on to a fresh copy of the app, where Rakesh signed out on purpose (the mark), then he signed in
@@ -522,10 +524,50 @@ test("back from the cache after a sign-out on purpose in this tab, the page forg
   sessionStorage.setItem("gst3.signedOutHere", "1");
   setTokens("a2", "r2");
   backFromCache(false);
-  expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument();
+  expect(s.asked).not.toContain("a2");
   backFromCache();
-  expect(await screen.findByText("at:/login")).toBeInTheDocument();
-  expect(screen.getByText("who:-")).toBeInTheDocument();
+  await waitFor(() => expect(s.asked).toContain("a2")); // who is this token's?
+  await waitFor(() => expect(sessionStorage.getItem("gst3.signedOutHere")).toBeNull()); // signed in again: the mark is spent
+  expect(screen.getByText("at:/sales/31")).toBeInTheDocument();
+  expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument();
+  expect(localStorage.getItem("gst_access_token")).toBe("a2");
+});
+
+test("back from the cache with someone else's newer sign-in stored, and this tab's mark from a sign-out, the page follows them and never wipes their sign-in", async () => {
+  const rakesh = jwt(7), kailash = jwt(1);
+  setTokens(rakesh, "ra");
+  server({ [rakesh]: ME, [kailash]: KAILASH });
+  const client = mountTab();
+  await waitFor(() => expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument());
+  client.setQueryData(["bills"], ["KGH/31 for Rakesh"]);
+  // while this page sat in the cache, Rakesh signed out on purpose in this tab, and Kailash signed in on another
+  sessionStorage.setItem("gst3.signedOutHere", "1");
+  setTokens(kailash, "rk");
+  backFromCache();
+  expect(await screen.findByText("who:Kailash Mehta")).toBeInTheDocument();
+  expect(screen.getByText("status:signed-in")).toBeInTheDocument();
+  expect(localStorage.getItem("gst_access_token")).toBe(kailash); // still there for every tab
+  expect(client.getQueryData(["bills"])).toBeUndefined();
+});
+
+test("back from the cache with nothing changed never signs out a session that didn't change, even with a mark left from an earlier sign-out", async () => {
+  sessionStorage.setItem("gst3.signedOutHere", "1"); // Rakesh signed out on purpose on this tab earlier
+  const kailash = jwt(1);
+  setTokens(kailash, "rk"); // since then Kailash signed in on another tab, which this tab never heard
+  localStorage.setItem("gst3.me", JSON.stringify({ id: 1, username: "kailash", fullName: "Kailash Mehta", role: "owner", roleLabel: "Owner", permissions: "*", needsRoleChoice: false }));
+  const s = server({ [kailash]: KAILASH });
+  s.down = true; // this tab opens while the server is down: Kailash, remembered, carries on unconfirmed
+  mountTab();
+  await waitFor(() => expect(s.asked).toEqual([kailash]));
+  await act(() => new Promise<void>((r) => { setTimeout(r, 20); }));
+  expect(screen.getByText("who:Kailash Mehta")).toBeInTheDocument();
+  s.down = false;
+  backFromCache(); // nothing changed in the storage while the page was away
+  await act(() => new Promise<void>((r) => { setTimeout(r, 20); }));
+  expect(screen.getByText("status:signed-in")).toBeInTheDocument();
+  expect(screen.getByText("who:Kailash Mehta")).toBeInTheDocument();
+  expect(localStorage.getItem("gst_access_token")).toBe(kailash);
+  expect(s.asked).toEqual([kailash]); // and nothing to ask again
 });
 
 test("back from the cache with someone else's sign-in stored, the page asks who it is now and drops the old person's data", async () => {
