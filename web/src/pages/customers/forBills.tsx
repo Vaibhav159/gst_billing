@@ -5,7 +5,7 @@
 //   registry's fill-in comes with part 4's lookup.
 // - A customer's PAN or address, added from a bill (PROTO pages/sales/parts.jsx CustomerFixSheet).
 // The combobox and FailNote are the kit's (@/core/ui), and failText is Selling's (@/core/sales/words): one home each.
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { UserPlus } from "lucide-react";
 import { customerSaveErrors, useCustomerSearch, useRecentCustomers, useSaveCustomer, useWalkin, type Customer, type CustomerBody, type CustomerField, type CustomerRow } from "@/core/api/customers";
@@ -367,24 +367,40 @@ export type CustomerFixSheetProps = {
  */
 export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: CustomerFixSheetProps) {
   const { can, whyNot } = useAuth();
-  const { isEasy } = useView();
   const { show } = useToast();
   const save$ = useSaveCustomer();
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
   const [fail, setFail] = useState<FailText | null>(null);
+  const echo = useRef<HTMLParagraphElement>(null);
+  const frame = useRef(0);
+  /**
+   * Says `words` in the echo below ("" empties it): emptied first, then the words a frame later, as PageFrame's announce
+   * does, so the same words again are read again.
+   */
+  const say = (words: string) => {
+    cancelAnimationFrame(frame.current);
+    if (echo.current) echo.current.textContent = "";
+    if (words) frame.current = requestAnimationFrame(() => { if (echo.current) echo.current.textContent = words; });
+  };
   const cid = customer?.id;
   // filled from the record each time it opens (or for another customer or field): the same customer asked for again
   // meanwhile, as after the connection comes back, keeps what's typed
-  useEffect(() => { if (open && customer) { setVal(field === "pan" ? customer.pan_number : customer.address); setErr(""); setFail(null); } }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && customer) { setVal(field === "pan" ? customer.pan_number : customer.address); setErr(""); say(""); setFail(null); } }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!customer || !field) return null;
   const busy = save$.isPending;
   const id = `fix-${field}`;
   /**
-   * Says what's wrong under the field and puts the cursor there. The words are read out as they come (a polite live
-   * region): after Enter the cursor is in the field already, and focusing it again fires nothing to read them.
+   * Says what's wrong under the field and puts the cursor there, where a screen reader reads the words with the field.
+   * After Enter the cursor is there already, and focusing it again fires nothing to read: the echo says them instead.
    */
-  const refuse = (words: string) => { flushSync(() => setErr(words)); document.getElementById(id)?.focus(); };
+  const refuse = (words: string) => {
+    const box = document.getElementById(id);
+    const stays = box !== null && box === document.activeElement;
+    flushSync(() => setErr(words));
+    if (stays) say(words);
+    box?.focus();
+  };
   const save = () => {
     if (busy) return;
     if (!can("customer.edit")) { refuse(whyNot("customer.edit")); return; }
@@ -411,15 +427,15 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
       description={field === "pan" ? "Income Tax Rule 114B: a bill over ₹2,00,000 needs the buyer's PAN (or Form 60)." : "CGST Rule 46: a B2B tax invoice shows the buyer's address."}
       footer={<><Button onClick={onClose} disabled={busy}>Not now</Button><Button variant="primary" loading={busy} onClick={save}>{busy ? "Saving…" : fail ? "Try again" : "Save"}</Button></>}>
       <div className="flex flex-col gap-3">
-        <Field label={field === "pan" ? "PAN" : "Address"} htmlFor={id}>
+        <Field label={field === "pan" ? "PAN" : "Address"} htmlFor={id} error={err}>
           <Input id={id} value={val} maxLength={field === "pan" ? 10 : 120} inputClassName={field === "pan" ? "uppercase tnum" : ""} autoComplete="off"
-            invalid={Boolean(err)} aria-describedby={`${id}-error`}
-            onChange={(e) => { setVal(field === "pan" ? cleanPan(e.target.value) : e.target.value); setErr(""); }}
+            onChange={(e) => { setVal(field === "pan" ? cleanPan(e.target.value) : e.target.value); setErr(""); say(""); }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } }} />
-          {/* the field's error as Field draws one, in a live region that is always there: words that come into it are read
-              out, where a region added with its words already in it may not be. Empty, it takes no room */}
-          <p id={`${id}-error`} aria-live="polite" className={cn(isEasy ? "text-[15px] leading-[21px]" : "text-sm", "text-neg", !err && "sr-only")}>{err}</p>
         </Field>
+        {/* the echo: a polite live region that is always there, for words said while the cursor stays in the field.
+            ponytail: the kit's Field can't say its error again while its field keeps the cursor, so the sheet echoes it;
+            upgrade: a live-error option on the kit's Field, which this echo then gives way to */}
+        <p ref={echo} aria-live="polite" className="sr-only" />
         <FailNote error={fail} />
       </div>
     </Sheet>

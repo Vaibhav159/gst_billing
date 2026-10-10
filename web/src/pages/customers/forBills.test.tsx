@@ -337,7 +337,8 @@ test("the fix sheet: the PAN is checked, saved to the customer alone, and the bi
   await pass(400); // past the sheet's guard against a double tap's second tap
   await user.type(within(sheet).getByLabelText("PAN"), "abcde1234");
   await user.keyboard("{Enter}");
-  expect(within(sheet).getByText(PAN_PROBLEM)).toBeInTheDocument();
+  // under the field, as its description (the live echo says the words too, for a screen reader)
+  expect(within(sheet).getByLabelText("PAN")).toHaveAccessibleDescription(PAN_PROBLEM);
   await user.type(within(sheet).getByLabelText("PAN"), "f");
   await user.click(within(sheet).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ pan_number: "ABCDE1234F" })));
@@ -347,39 +348,88 @@ test("the fix sheet: the PAN is checked, saved to the customer alone, and the bi
 });
 
 /**
- * What a screen reader reads out while the cursor stays where it is: the words that come into a polite live region
- * already on the page (one added with its words already in it isn't reliably read).
+ * What a screen reader reads out while the cursor stays where it is: the words added to a polite live region already on
+ * the page, each time they come, so the same words twice are heard twice (a region added with its words already in it
+ * isn't reliably read).
  */
 function liveWords(): { said: string[]; stop: () => void } {
   const said: string[] = [];
   const watch = new MutationObserver((records) => {
     for (const r of records) {
-      const region = (r.target instanceof Element ? r.target : r.target.parentElement)?.closest('[aria-live="polite"], [role="status"]');
-      const text = region?.textContent ?? "";
-      if (text && said[said.length - 1] !== text) said.push(text);
+      const at = r.target instanceof Element ? r.target : r.target.parentElement;
+      if (!at?.closest('[aria-live="polite"], [role="status"]')) continue;
+      if (r.type === "characterData" && r.target.textContent) said.push(r.target.textContent);
+      for (const n of r.addedNodes) if (n.textContent) said.push(n.textContent);
     }
   });
   watch.observe(document.body, { subtree: true, childList: true, characterData: true });
   return { said, stop: () => watch.disconnect() };
 }
-
-test("the fix sheet reads out a refusal after Enter, where the cursor stays put: the words come in a polite live region", async () => {
-  const user = handClock();
-  const calls = serve({});
+/** The fix sheet for Anil's PAN, open, past its guard against a double tap's second tap, with `typed` in the box. */
+async function panSheet(user: ReturnType<typeof handClock>, typed: string) {
   mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer(ANIL)} field="pan" open onClose={() => {}} /> }], ["/"]);
   const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
   await pass(400);
   const pan = within(sheet).getByLabelText("PAN");
-  await user.type(pan, "abcde1234");
+  await user.type(pan, typed);
+  return { sheet, pan };
+}
+
+test("the fix sheet reads out a refusal after Enter, where the cursor stays put: the words come in a polite live region", async () => {
+  const user = handClock();
+  const calls = serve({});
+  const { pan } = await panSheet(user, "abcde1234");
   const heard = liveWords();
   try {
     await user.keyboard("{Enter}");
+    await pass(16); // a frame: the echo is emptied, then given the words
     expect(pan).toHaveFocus();
     expect(heard.said).toEqual([PAN_PROBLEM]);
   } finally {
     heard.stop();
   }
   expect(pan).toHaveAttribute("aria-invalid", "true");
+  expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+});
+
+test("the fix sheet reads out the same refusal again at a second Enter, and what's typed next empties what it said", async () => {
+  const user = handClock();
+  serve({});
+  const { sheet, pan } = await panSheet(user, "abcde1234");
+  const heard = liveWords();
+  try {
+    await user.keyboard("{Enter}");
+    await pass(16);
+    await user.keyboard("{Enter}");
+    await pass(16);
+    expect(heard.said).toEqual([PAN_PROBLEM, PAN_PROBLEM]);
+    await user.type(pan, "5");
+    expect(sheet.querySelector('[aria-live="polite"]')).toBeEmptyDOMElement();
+    await user.keyboard("{Enter}");
+    await pass(16);
+    expect(heard.said).toEqual([PAN_PROBLEM, PAN_PROBLEM, PAN_PROBLEM]);
+  } finally {
+    heard.stop();
+  }
+});
+
+test("the fix sheet says a refusal on Save once: the cursor lands on the field, which reads it, and nothing comes in the live echo", async () => {
+  const user = handClock();
+  const calls = serve({});
+  const { sheet, pan } = await panSheet(user, "abcde1234");
+  // what a screen reader reads as the cursor lands: the field's description at that moment
+  let landed = "";
+  pan.addEventListener("focus", () => { landed = document.getElementById(pan.getAttribute("aria-describedby") ?? "")?.textContent ?? ""; });
+  const heard = liveWords();
+  try {
+    await user.click(within(sheet).getByRole("button", { name: "Save" }));
+    await pass(16);
+    expect(pan).toHaveFocus();
+    expect(landed).toBe(PAN_PROBLEM);
+    expect(heard.said).toEqual([]);
+  } finally {
+    heard.stop();
+  }
   expect(calls.some((c) => c.method === "PATCH")).toBe(false);
 });
 
@@ -438,8 +488,16 @@ test("the fix sheet says a PAN the server refuses under the field, and puts the 
   let heard = "";
   pan.addEventListener("focus", () => { heard = document.getElementById(pan.getAttribute("aria-describedby") ?? "")?.textContent ?? ""; });
   await user.type(pan, "ABCDE1234F");
-  await user.click(within(sheet).getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(pan).toHaveFocus());
+  // read once, as the cursor lands: not again in the live echo
+  const live = liveWords();
+  try {
+    await user.click(within(sheet).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(pan).toHaveFocus());
+    await pass(16);
+    expect(live.said).toEqual([]);
+  } finally {
+    live.stop();
+  }
   expect(heard).toBe("Enter a valid PAN.");
   expect(pan).toHaveAttribute("aria-invalid", "true");
   expect(within(sheet).queryByRole("alert")).not.toBeInTheDocument();

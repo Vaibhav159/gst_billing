@@ -87,9 +87,13 @@ export function plural(n: number, one: string, many?: string): string {
   return `${groupIN(n)} ${n === 1 ? one : many || one + "s"}`;
 }
 
-/** A name's possessive: "Anil Gupta's", and the apostrophe alone after a final s: "Kulkarni Jewellers'". */
+/**
+ * A name's possessive: "Anil Gupta's", and the apostrophe alone after a final s: "Kulkarni Jewellers'". A name that is
+ * one already ("Ram Lal & Son's") stays as it is; a space kept after a name is dropped.
+ */
 export function possessive(name: string): string {
-  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+  const n = name.trimEnd();
+  return /['’]s$/i.test(n) ? n : /s$/i.test(n) ? `${n}'` : `${n}'s`;
 }
 
 /** "08 Oct 2026" */

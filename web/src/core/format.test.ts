@@ -83,4 +83,8 @@ test("a name's possessive: 's, or the apostrophe alone after a final s", () => {
   expect(possessive("Anil Gupta")).toBe("Anil Gupta's");
   expect(possessive("Kulkarni Jewellers")).toBe("Kulkarni Jewellers'");
   expect(possessive("MEERA ORNAMENTS")).toBe("MEERA ORNAMENTS'");
+  // a name kept with a space after it, and one that is a possessive already
+  expect(possessive("Kulkarni Jewellers ")).toBe("Kulkarni Jewellers'");
+  expect(possessive("Ram Lal & Son's")).toBe("Ram Lal & Son's");
+  expect(possessive("Ram Lal & Son’s")).toBe("Ram Lal & Son’s");
 });

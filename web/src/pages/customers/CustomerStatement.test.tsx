@@ -51,6 +51,22 @@ afterEach(() => {
   (window as unknown as { __phone?: boolean }).__phone = false;
 });
 
+/**
+ * For a test that waits on the page's own timer (the 250 ms pause before own dates ask, Ruling 1C-4): from here the
+ * clock moves only when the test says. Testing Library's async helpers wait on a 0 ms timer this clock never runs, so
+ * the steps after it are synchronous.
+ */
+function handClock() {
+  const now = Date.now();
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
+}
+/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
+async function pass(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
+
 test("the year's register from the server: billed, paid at billing, on udhaar, and each bill oldest first with how it was settled", async () => {
   const calls = serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
   mount(routes, ["/customers/7/statement"]);
@@ -86,33 +102,18 @@ test("this month, last month and own dates ask for their period; a start after t
   // a PDF is made once for each period with bills, and never for one without (Print, Download and Share are off there)
   await waitFor(() => expect(made()).toEqual(["FY 2026-27", "September 2026"]));
   await userEvent.click(screen.getByRole("radio", { name: "Choose dates" }));
-  const fromBox = screen.getByLabelText("From");
-  await userEvent.clear(fromBox);
-  await userEvent.type(fromBox, "2026-10-05");
-  const toBox = screen.getByLabelText("To");
-  await userEvent.clear(toBox);
-  await userEvent.type(toBox, "2026-10-01");
-  expect(await screen.findByText("The start date is after the end date.")).toBeInTheDocument();
+  // own dates are the boxes once they pause: the clock moves when the test says
+  handClock();
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-05" } });
+  fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-10-01" } });
+  await pass(249);
+  expect(screen.queryByText("The start date is after the end date.")).not.toBeInTheDocument();
+  await pass(1);
+  expect(screen.getByText("The start date is after the end date.")).toBeInTheDocument();
   expect(screen.getByText("Fix the dates to see bills")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "Fix the dates first");
   expect(asked().filter((a) => a.endsWith("..2026-10-01"))).toEqual([]);
 });
-
-/**
- * For a test that waits on the page's own timer (the 250 ms pause before own dates ask, Ruling 1C-4): from here the
- * clock moves only when the test says. Testing Library's async helpers wait on a 0 ms timer this clock never runs, so
- * the steps after it are synchronous.
- */
-function handClock() {
-  const now = Date.now();
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
-}
-/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 
 test("own dates ask once the boxes pause: a year typed a digit at a time is a date at every digit, and only the last is asked for", async () => {
   const calls = serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
