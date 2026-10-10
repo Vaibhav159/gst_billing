@@ -3,7 +3,8 @@
 // adds Selling's other words beside them.
 // Plan 1B's (PROTO sales/lib.js, sales/parts.jsx, core/common.jsx): the list's filters, tax labels from the heads stored,
 // when a bill was sent, day rows, how many bills (cancelled ones named apart, never added in), list footers, a send or an
-// Undo that didn't go through, and words for the months filed, the firms, the year and who may do what.
+// Undo that didn't go through, a send that opened but isn't marked as sent, and words for the months filed, the firms,
+// the year and who may do what.
 import type { ApiProblem } from "@/core/api/errors";
 import { can, ROLES, type Action } from "@/core/auth/permissions";
 import perms from "@/core/auth/perms.json";
@@ -190,6 +191,23 @@ export function sendFailure(p: ApiProblem): { tone: "neg"; title: string; body: 
   if (p.kind === "unreachable" || p.kind === "server") return { tone: "neg", title: "The bill wasn't sent", body: "Nothing was marked as sent. Try again in a minute." };
   return { tone: "neg", title: "The bill wasn't sent", body: p.message };
 }
+/**
+ * A send whose WhatsApp chat opened but whose record didn't land (Ruling 1B-14): the customer may have the message
+ * already, so it never says the bill wasn't sent. A refusal says the server's words. again: marking it once more can
+ * work, so the toast offers Mark as sent, which records the send again and never reopens WhatsApp.
+ */
+export function notMarkedSent(p: ApiProblem, number: string): { tone: "neg"; title: string; body: string; again: boolean } {
+  const through = p.kind === "offline" || p.kind === "unreachable" || p.kind === "server";
+  return {
+    tone: "neg", title: "Not marked as sent",
+    body: through ? `WhatsApp opened, but the app couldn't get through, so ${number} isn't marked as sent.` : p.message,
+    again: through || p.kind === "throttled",
+  };
+}
+/** Send pressed before the shop's settings answered: it would go with the standard message instead of the shop's own. */
+export const SEND_WAITING = { tone: "brand", title: "Not sent yet", body: "The shop's WhatsApp message is still loading. Send it again in a moment." } as const;
+/** Said after a send when the shop's settings didn't load, so WhatsApp has the standard message instead of the shop's own. */
+export const STANDARD_MESSAGE = "The shop's own message didn't load, so the standard one is typed in.";
 /** An Undo of a delete that didn't happen, from a toast (PROTO sales/parts.jsx:172-175); a refusal says the server's words. */
 export function restoreFailure(p: ApiProblem, what = "The bill", many = false): { tone: "neg"; title: string; body: string } {
   if (p.kind === "conflict" || p.kind === "forbidden") return { tone: "neg", title: "Not restored", body: p.message };

@@ -1,7 +1,7 @@
 import type { BillRow } from "./types";
 import {
   billsAnd, cancelledNote, dayCount, dayGroups, dayLabel, dayOf, ewayNumberText, failText, filedRangeText, firmsWord, fyLabel, gstLabel, listFooter, PAY_FILTER,
-  rateText, realReason, restoreFailure, sendFailure, sentLine, sentWhen, taxLines, timeOf, whoCan,
+  notMarkedSent, rateText, realReason, restoreFailure, sendFailure, sentLine, sentWhen, taxLines, timeOf, whoCan,
 } from "./words";
 
 test("cancelled bills are named apart, in the caller's words, and not at all when there are none", () => {
@@ -115,6 +115,17 @@ test("a send or an Undo that didn't go through: offline, the server, or the serv
     .toEqual({ tone: "neg", title: "Not restored", body: "KGH/2026-27/27 is back already: it was restored from the Audit log." });
   expect(restoreFailure({ kind: "unreachable", message: "" }, "3 bills", true))
     .toEqual({ tone: "neg", title: "Not restored", body: "3 bills stay deleted. Restore them from the Audit log in a minute." });
+});
+
+test("a send whose WhatsApp chat opened but whose record didn't land says so, never that the bill wasn't sent (Ruling 1B-14)", () => {
+  expect(notMarkedSent({ kind: "unreachable", message: "" }, "KGH/2026-27/31")).toEqual({
+    tone: "neg", title: "Not marked as sent", body: "WhatsApp opened, but the app couldn't get through, so KGH/2026-27/31 isn't marked as sent.", again: true,
+  });
+  expect(notMarkedSent({ kind: "offline", message: "" }, "KGH/2026-27/31")).toMatchObject({ title: "Not marked as sent", again: true });
+  // a refusal says the server's own words, and marking it again wouldn't change them
+  expect(notMarkedSent({ kind: "conflict", message: "KGH/2026-27/31 is cancelled, so it can't be sent." }, "KGH/2026-27/31"))
+    .toEqual({ tone: "neg", title: "Not marked as sent", body: "KGH/2026-27/31 is cancelled, so it can't be sent.", again: false });
+  expect(notMarkedSent({ kind: "forbidden", message: "Only the owner and counter staff can send bills. Ask the owner if you need it." }, "KGH/2026-27/31").again).toBe(false);
 });
 
 test("scope words: filed months, how many firms, the year, and who can", () => {
