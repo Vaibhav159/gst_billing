@@ -125,6 +125,8 @@ export function formErrors({ f, numberError, dateError, pos }: { f: FormState; n
   return e;
 }
 export type LineField = "hsn" | "gst" | "qty" | "rate";
+/** An HSN code the server takes: 4 to 8 digits. A bill's line and an item that isn't in Products check it, each in its own words. */
+export const isHsn = (hsn: string) => /^\d{4,8}$/.test(hsn);
 /**
  * A GST rate the server takes: one of the 11 slabs, compared as numbers. Not one: none picked, a blank (which isn't 0%),
  * or a v2 product's rate outside the slabs (0.07 reads as "7"), which the server refuses.
@@ -133,7 +135,7 @@ const isSlab = (gst: string | null) => gst != null && gst.trim() !== "" && SLABS
 /** A line's own problems, in the server's words: the form marks them under the line, the phone's item sheet in itself. */
 export function lineProblems(l: Pick<FormLine, "hsn" | "gst" | "qty" | "rate" | "unit">): Partial<Record<LineField, string>> {
   const e: Partial<Record<LineField, string>> = {};
-  if (!/^\d{4,8}$/.test(l.hsn)) e.hsn = "Type the HSN code, 4 to 8 digits (7113 for jewellery).";
+  if (!isHsn(l.hsn)) e.hsn = "Type the HSN code, 4 to 8 digits (7113 for jewellery).";
   if (!isSlab(l.gst)) e.gst = "Choose the GST rate. Gold and silver jewellery is 3%; cut diamonds are 0.25%.";
   if (!(l.qty != null && l.qty > 0)) e.qty = qtyMissing(l.unit);
   if (!(Number(l.rate) > 0)) e.rate = rateMissing(l.unit);

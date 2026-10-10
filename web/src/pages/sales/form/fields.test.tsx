@@ -84,6 +84,124 @@ test("Esc closes the calendar and puts the cursor back in the date", async () =>
   expect(screen.getByText("value:2026-10-08")).toBeInTheDocument();
 });
 
+/* ── The calendar by keyboard, past the month buttons ── */
+/** A date that starts on `start`, with a button after it to Tab to. */
+function DateThenButton({ start = TODAY }: { start?: string }) {
+  const [v, setV] = useState(start);
+  return (
+    <>
+      <label htmlFor="d">Date</label>
+      <DateField id="d" value={v} today={TODAY} offReason={(iso) => (iso > TODAY ? "after today" : "")} onChange={(iso) => setV(iso ?? "")} />
+      <p>value:{v || "none"}</p>
+      <button type="button">After the date</button>
+    </>
+  );
+}
+/** Where the cursor is: a day by its date, else a button by its name or words. */
+const cursor = () => {
+  const a = document.activeElement;
+  return a?.getAttribute("data-day") ?? a?.getAttribute("aria-label") ?? a?.textContent ?? "";
+};
+async function openCalendar(on: string) {
+  screen.getByLabelText("Date").focus();
+  await userEvent.keyboard("{Alt>}{ArrowDown}{/Alt}");
+  await waitFor(() => expect(cursor()).toBe(on));
+}
+
+test("after Previous month, Tab reaches the same day of the month shown (or its last day), and the arrows go on from there", async () => {
+  renderApp(<DateThenButton start="2025-10-31" />);
+  await openCalendar("2025-10-31");
+  await userEvent.tab({ shift: true });
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Previous month");
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("grid", { name: "September 2025" })).toBeInTheDocument();
+  // the cursor stays on the button, so Enter again goes back another month
+  expect(cursor()).toBe("Previous month");
+  await userEvent.tab();
+  expect(cursor()).toBe("Next month");
+  await userEvent.tab();
+  expect(cursor()).toBe("2025-09-30");
+  await userEvent.keyboard("{ArrowLeft}");
+  expect(cursor()).toBe("2025-09-29");
+});
+
+test("back on the chosen day's month by the month buttons, Enter goes on through the months and picks no day", async () => {
+  renderApp(<DateThenButton start="2026-08-20" />);
+  await openCalendar("2026-08-20");
+  await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+  expect(cursor()).toBe("2026-08-18");
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Next month");
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("grid", { name: "September 2026" })).toBeInTheDocument();
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Previous month");
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("grid", { name: "August 2026" })).toBeInTheDocument();
+  expect(cursor()).toBe("Previous month");
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("grid", { name: "July 2026" })).toBeInTheDocument();
+  expect(screen.getByText("value:2026-08-20")).toBeInTheDocument();
+});
+
+test("Next month onto this month turns itself off, and the cursor moves to Previous month rather than the page", async () => {
+  renderApp(<DateThenButton start="2026-09-30" />);
+  await openCalendar("2026-09-30");
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Next month");
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("grid", { name: "October 2026" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next month" })).toBeDisabled();
+  expect(cursor()).toBe("Previous month");
+});
+
+test("Esc on a month button closes the calendar too, and puts the cursor back in the date", async () => {
+  renderApp(<DateThenButton />);
+  await openCalendar("2026-10-08");
+  await userEvent.tab({ shift: true });
+  expect(cursor()).toBe("Previous month");
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Date")).toHaveFocus();
+});
+
+test("Tab out of the calendar closes it, so it doesn't sit over the next field", async () => {
+  renderApp(<DateThenButton />);
+  await openCalendar("2026-10-08");
+  await userEvent.tab();
+  expect(cursor()).toBe("After the date");
+  expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+});
+
+test("on a phone the calendar is a dialog of its own: a tap on a month button inside it keeps it open", async () => {
+  const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
+  phone(true);
+  try {
+    // a clock the test moves, past the dialog's guard against a double tap's second tap
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderApp(<DateThenButton />);
+    await user.click(screen.getByRole("button", { name: "Date: open the calendar" }));
+    const dialog = await screen.findByRole("dialog", { name: "Date" });
+    await act(() => { vi.advanceTimersByTime(400); });
+    await waitFor(() => expect(cursor()).toBe("2026-10-08"));
+    await user.click(within(dialog).getByRole("button", { name: "Previous month" }));
+    expect(within(dialog).getByRole("grid", { name: "September 2026" })).toBeInTheDocument();
+  } finally { phone(false); }
+});
+
+test("PageUp and PageDown move a month, to the same day or the month's last: 31 Oct to 30 Sep, and back to 30 Oct", async () => {
+  renderApp(<DateThenButton start="2025-10-31" />);
+  await openCalendar("2025-10-31");
+  await userEvent.keyboard("{PageUp}");
+  expect(cursor()).toBe("2025-09-30");
+  expect(screen.getByRole("grid", { name: "September 2025" })).toBeInTheDocument();
+  await userEvent.keyboard("{PageDown}");
+  expect(cursor()).toBe("2025-10-30");
+  expect(screen.getByRole("grid", { name: "October 2025" })).toBeInTheDocument();
+});
+
 function PayHarness({ notRecorded = false }: { notRecorded?: boolean }) {
   const [v, setV] = useState<PaymentMode | null>(null);
   return <><p id="pay-l">Paid by</p><PayPicker labelledBy="pay-l" value={v} onChange={setV} allowNotRecorded={notRecorded} /><p>paid:{v ?? "nothing"}</p></>;

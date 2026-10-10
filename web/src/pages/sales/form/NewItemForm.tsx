@@ -15,6 +15,7 @@ import { useView } from "@/core/view";
 import { RateInput } from "./fields";
 import { SLAB_OPTIONS } from "./model";
 import { useCreateProduct } from "./products";
+import { isHsn } from "./rules";
 
 /** What the line takes: the item, and the product's id when it was kept in Products. */
 export type NewItem = { productId: number | null; line: { name: string; hsn: string; gst: string; unit: string; rate: string; description: string } };
@@ -47,7 +48,7 @@ export function NewItemForm({ initialName = "", idBase = "np", onDone, onCancel,
   const done = () => {
     const e: Problems = {};
     if (!v.name.trim()) e.name = "Type the item's name as it should print on the bill.";
-    if (!/^\d{4,8}$/.test(v.hsn)) e.hsn = "Type the HSN code, 4 to 8 digits.";
+    if (!isHsn(v.hsn)) e.hsn = "Type the HSN code, 4 to 8 digits.";
     if (v.gst === "") e.gst = "Choose the GST rate. Gold and silver jewellery is 3%; cut diamonds are 0.25%.";
     if (showProblems(e)) return;
     const line = { name: v.name.trim(), hsn: v.hsn, gst: v.gst, unit: v.unit, rate: v.rate, description: v.description.trim() };

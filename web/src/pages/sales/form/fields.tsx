@@ -1,7 +1,7 @@
 // The bill form's own fields (PROTO pages/sales/parts.jsx): a date typed day-first with a calendar, how it was paid with
 // nothing picked for you, the checks beside the total, and a rate typed as written (up to 3 decimals, grouped the
 // Indian way once you leave it). Plus the focus helpers that let a fast typist's next key land in the right box.
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { AlertTriangle, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle } from "lucide-react";
 import { cn } from "@/core/cn";
 import { addMonths, date, lastDayOfMonth, monthLabel } from "@/core/format";
@@ -31,6 +31,9 @@ export function LabelSpacer() {
 
 /* ── Date: typed day-first, with a calendar ── */
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** The arrows move a day or a week; PageUp and PageDown a month. */
+const DAY_KEYS: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+const MONTH_KEYS: Record<string, number> = { PageUp: -1, PageDown: 1 };
 /**
  * A month grid: days after today, and days the form can't take (a filed month), are off with the reason (PROTO
  * parts.jsx:787-842). A grid of weeks: a row of the days' names, then a row of seven cells per week (blank before the
@@ -42,29 +45,45 @@ export function Calendar({ value, today, onPick, onClose, offReason, label = "Pi
   const [ym, setYm] = useState(start.slice(0, 7));
   const [focus, setFocus] = useState(start);
   const grid = useRef<HTMLDivElement>(null);
+  const prevMonth = useRef<HTMLButtonElement>(null);
+  // the cursor goes to the focused day as the calendar opens and on the arrow and Page keys, never on a month button:
+  // there it stays on the button, so Enter again turns another month and never picks a day the person didn't move to
+  const pull = useRef(true);
   const [y, m] = ym.split("-").map(Number);
   const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
   const days = Number(lastDayOfMonth(ym).slice(8));
   const iso = (d: number) => `${ym}-${String(d).padStart(2, "0")}`;
   // months and days are calendar sums (part 0's addMonths, Task 2's shiftDate), never a local Date's
-  const shift = (n: number) => setYm(addMonths(ym, n));
-  const moveFocus = (n: number) => {
-    const next = shiftDate(focus, n);
+  /** The focused day's date in month `to`, or that month's last day: 31 Oct is 30 Sep. */
+  const sameDayIn = (to: string) => { const day = `${to}-${focus.slice(8)}`; const end = lastDayOfMonth(to); return day > end ? end : day; };
+  const moveFocus = (next: string, cursor: boolean) => {
+    pull.current = cursor;
     setFocus(next);
     setYm(next.slice(0, 7));
   };
-  useEffect(() => { grid.current?.querySelector<HTMLElement>(`[data-day="${focus}"]`)?.focus(); }, [focus, ym]);
+  // a month button takes Tab's stop to the month shown; Next month turns off on this month, so the cursor moves to
+  // Previous month rather than drop to the page
+  const shift = (n: number) => {
+    const to = addMonths(ym, n);
+    moveFocus(sameDayIn(to), false);
+    if (to >= today.slice(0, 7)) prevMonth.current?.focus();
+  };
+  useEffect(() => {
+    if (!pull.current) return;
+    pull.current = false;
+    grid.current?.querySelector<HTMLElement>(`[data-day="${focus}"]`)?.focus();
+  }, [focus, ym]);
   const onKey = (e: KeyboardEvent) => {
-    const map: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, PageUp: -30, PageDown: 30 };
-    if (map[e.key] != null) { e.preventDefault(); moveFocus(map[e.key]); }
-    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose?.(); }
+    if (DAY_KEYS[e.key] != null) { e.preventDefault(); moveFocus(shiftDate(focus, DAY_KEYS[e.key]), true); }
+    else if (MONTH_KEYS[e.key] != null) { e.preventDefault(); moveFocus(sameDayIn(addMonths(ym, MONTH_KEYS[e.key])), true); }
   };
   const cells = [...Array.from({ length: first }, () => null), ...Array.from({ length: days }, (_, i) => i + 1)];
   const weeks = Array.from({ length: Math.ceil(cells.length / 7) }, (_, w) => Array.from({ length: 7 }, (__, d) => cells[w * 7 + d] ?? null));
   return (
-    <div className="flex flex-col gap-2" role="group" aria-label={label}>
+    // Esc closes it from the month buttons as well as from the days
+    <div className="flex flex-col gap-2" role="group" aria-label={label} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose?.(); } }}>
       <div className="flex items-center justify-between gap-2">
-        <IconButton size="sm" label="Previous month" icon={ChevronLeft} onClick={() => shift(-1)} />
+        <IconButton ref={prevMonth} size="sm" label="Previous month" icon={ChevronLeft} onClick={() => shift(-1)} />
         <p className="font-semibold" aria-live="polite">{monthLabel(ym, { long: true })}</p>
         <IconButton size="sm" label="Next month" icon={ChevronRight} onClick={() => shift(1)} disabled={ym >= today.slice(0, 7)} />
       </div>
@@ -117,8 +136,10 @@ export function DateField({ id, value, today, onChange, onCommit, invalid, descr
   const commit = () => { const iso = parseDateText(text, today); if (iso) setText(date(iso)); onCommit?.(iso); };
   const pick = (iso: string) => { setCal(false); last.current = iso; setText(date(iso)); onChange(iso, date(iso)); onCommit?.(iso); document.getElementById(id)?.focus(); };
   const calendar = <Calendar value={value} today={today} onPick={pick} onClose={() => { setCal(false); document.getElementById(id)?.focus(); }} offReason={offReason} label={`${label}: calendar`} />;
+  // Tab out of the desktop calendar closes it, so it doesn't sit over the next field (a phone's is a dialog of its own)
+  const leave = (e: FocusEvent) => { if (cal && !isPhone && e.relatedTarget && !wrap.current?.contains(e.relatedTarget)) setCal(false); };
   return (
-    <div ref={wrap} className="relative min-w-0">
+    <div ref={wrap} className="relative min-w-0" onBlur={leave}>
       <Input id={id} value={text} invalid={invalid} aria-describedby={describedBy} autoComplete="off" spellCheck={false} inputClassName={isPhone ? "pl-14" : "pl-11"}
         onChange={(e) => { const t = e.target.value; setText(t); const iso = parseDateText(t, today); last.current = iso ?? ""; onChange(iso, t); }}
         onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "ArrowDown" && e.altKey) { e.preventDefault(); setCal(true); } }} />

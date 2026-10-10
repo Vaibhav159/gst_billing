@@ -3,7 +3,7 @@ import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { blankLine, startEdit, startNew, type FormLine, type FormState } from "./model";
 import {
-  changesOf, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, lineProblems, lineWarning, numberProblem, openMonthsText, parseDateText, paymentNote,
+  changesOf, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, isHsn, lineProblems, lineWarning, numberProblem, openMonthsText, parseDateText, paymentNote,
   periodCheck, qtyMissing, rateMissing, type CheckInput,
 } from "./rules";
 
@@ -59,6 +59,12 @@ test("a line's problems are the server's words, by unit", () => {
   expect(rateMissing("gms")).toBe("Type the rate per gram.");
   expect(rateMissing("nos")).toBe("Type the rate per piece.");
   expect(rateMissing("ct")).toBe("Type the rate per carat.");
+});
+
+test("an HSN code is 4 to 8 digits: one rule for a bill's line and for an item that isn't in Products, each in its own words", () => {
+  for (const hsn of ["7113", "711319", "71131912"]) expect(isHsn(hsn)).toBe(true);
+  for (const hsn of ["", "711", "711319123", "7113A", " 7113"]) expect(isHsn(hsn)).toBe(false);
+  expect(lineProblems({ hsn: "711", gst: "3", qty: 1, rate: "1", unit: "gms" }).hsn).toBe("Type the HSN code, 4 to 8 digits (7113 for jewellery).");
 });
 
 function form(over: Partial<FormState> = {}): FormState {
