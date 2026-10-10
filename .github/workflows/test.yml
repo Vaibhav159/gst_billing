@@ -242,6 +242,7 @@ jobs:
   web-e2e:
     name: Web v3 E2E (Playwright + WCAG 2.2 AA)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16-alpine
@@ -310,7 +311,7 @@ jobs:
         run: |
           VITE_DEV_HOST=127.0.0.1 VITE_DEV_PORT=8081 VITE_API_TARGET=http://127.0.0.1:8000 nohup npx vite > /tmp/vite-v3.log 2>&1 &
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:8081/ >/dev/null 2>&1 && break; sleep 1; done
-          curl -s -o /dev/null -w "v3: %{http_code}\n" http://127.0.0.1:8081/
+          curl -fs -o /dev/null -w "v3: %{http_code}\n" http://127.0.0.1:8081/ || { cat /tmp/vite-v3.log; exit 1; }
           curl -s -o /dev/null -w "me via proxy: %{http_code}\n" http://127.0.0.1:8081/api/me/
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -331,6 +332,7 @@ jobs:
           E2E_USER: testuser
           E2E_PASS: testpass2026
           E2E_SEARCH: TEST
+          E2E_SEARCH_HIT: TEST CUSTOMER
         run: npx playwright test -c v3.config.js
 
   deps-audit:
