@@ -36,8 +36,9 @@ function typesPassword(test) {
 async function signIn(page) {
   const { user, pass } = credentials();
   await page.getByLabel("Username").fill(user);
-  // exact: the show-password toggle's name ("Show password") also has "Password" in it
-  await page.getByLabel("Password", { exact: true }).fill(pass);
+  // exact: the show-password toggle's name ("Show password") also has "Password" in it. A fill that fails logs
+  // fill("<the value>") in its error, which goes to the terminal and error-context.md: it goes on without the value
+  await page.getByLabel("Password", { exact: true }).fill(pass).catch((e) => { throw new Error(String(e?.message ?? e).replaceAll(pass, "•••")); });
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 

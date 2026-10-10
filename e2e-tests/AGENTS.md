@@ -75,7 +75,9 @@ Pitfalls:
   which a `describe` can't set, so such a test gets a file of its own. While the
   password is in its field, wait with `page.waitForURL`, never with
   `expect(page)` or `expect(locator)`: a failed one snapshots the page into
-  `error-context.md` there and then, password included.
+  `error-context.md` there and then, password included. Type a password only
+  through `signIn`: a `fill` that fails logs `fill("<the value>")` in its
+  error, and `signIn` passes the error on without the value.
 - Signed out: `test.use({ storageState: SIGNED_OUT })` in a `describe`.
   `browser.newContext()` would take the project's signed-in session too.
 - The first click inside a page must come at least 300 ms after the page
