@@ -10,6 +10,7 @@ test.describe("signed out", () => {
     await page.goto("/customers");
     await expect(page).toHaveURL(/\/login\?next=%2Fcustomers/);
     await signIn(page);
-    await expect(page).toHaveURL(/\/customers$/);
+    // waitForURL, not expect: the password is still in its field if this fails (see typesPassword)
+    await page.waitForURL(/\/customers$/, { timeout: 15_000 });
   });
 });

@@ -22,6 +22,8 @@ function credentials() {
  * For a file whose tests type a password, called at its top level (Ruling 54): no trace, and a test that fails or times
  * out leaves its page for about:blank before the page closes, so the page snapshot Playwright writes to error-context.md
  * can't show the password field's value. trace is a worker option, so this can't go in a describe.
+ * A failed expect(page) or expect(locator) snapshots the page there and then, before this runs: while a password is in
+ * its field, wait with page.waitForURL (a plain timeout, no snapshot), never with an expect.
  */
 function typesPassword(test) {
   test.use({ trace: "off" });

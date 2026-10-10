@@ -72,7 +72,10 @@ Pitfalls:
   `session.js` at its top level: no trace, and a test that fails goes to
   `about:blank` first, so the page snapshot Playwright writes to
   `error-context.md` can't show the password field. `trace` is a worker option,
-  which a `describe` can't set, so such a test gets a file of its own.
+  which a `describe` can't set, so such a test gets a file of its own. While the
+  password is in its field, wait with `page.waitForURL`, never with
+  `expect(page)` or `expect(locator)`: a failed one snapshots the page into
+  `error-context.md` there and then, password included.
 - Signed out: `test.use({ storageState: SIGNED_OUT })` in a `describe`.
   `browser.newContext()` would take the project's signed-in session too.
 - The first click inside a page must come at least 300 ms after the page
