@@ -10,6 +10,7 @@ import { ToastProvider } from "@/core/ui";
 import { appRoutes } from "@/core/router/routes";
 import { stubAuth } from "@/test/render";
 // for the tests after the brief's four
+import type { ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, cleanup } from "@testing-library/react";
@@ -20,7 +21,7 @@ import { __setNetState } from "@/core/api/network";
 import { queryClient } from "@/core/api/query";
 import type { AuthValue } from "@/core/auth/AuthProvider";
 import { applyTextSize } from "@/core/device";
-import { Button, Page } from "@/core/ui";
+import { Button, Page, useToast, type ToastApi } from "@/core/ui";
 import { overlayLayer } from "@/core/ui/Overlay";
 import { AppLayout } from "./AppLayout";
 import { useKeyboardInset } from "./keyboard";
@@ -105,9 +106,12 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
   return { calls, pending: () => waiting.length, release: () => act(async () => { waiting.splice(0).forEach((go) => go()); }) };
 }
 
-/** A router inside the app's providers, signed in as `who`; queries don't retry, so a failure shows at once. */
-function renderIn(router: DataRouter, who: AuthValue = stubAuth()) {
-  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthContext.Provider value={who}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+/**
+ * A router inside the app's providers, signed in as `who`; queries don't retry, so a failure shows at once.
+ * `extra` renders beside the router, inside the toast provider, as App's own providers do.
+ */
+function renderIn(router: DataRouter, who: AuthValue = stubAuth(), extra: ReactNode = null) {
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthContext.Provider value={who}><ToastProvider>{extra}<RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
 }
 const open = (path: string, who?: AuthValue) => renderIn(createMemoryRouter(appRoutes, { initialEntries: [path] }), who);
@@ -173,14 +177,14 @@ test("each page lights its own tab: Easy's by its pages, Expert's by section, an
   expect(router.state.historyAction).toBe("REPLACE");
 });
 
-test("on a desktop, Easy's addresses open the dashboard", async () => {
+test("on a desktop, Easy's addresses and the phone's More open the dashboard", async () => {
   phone(false);
   server();
-  const router = open("/e/bills");
-  await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-  cleanup();
-  const again = open("/e");
-  await waitFor(() => expect(again.state.location.pathname).toBe("/"));
+  for (const path of ["/e/bills", "/e", "/more"]) {
+    const router = open(path);
+    await waitFor(() => expect(router.state.location.pathname, path).toBe("/"));
+    cleanup();
+  }
 });
 
 // Ruling 38: Easy or Expert from the first paint, and never Easy for an Expert person before their setting is known
@@ -188,15 +192,45 @@ test("on a desktop, Easy's addresses open the dashboard", async () => {
 test("an Expert person's phone isn't sent to Easy while their setting is on its way, nor after it arrives", async () => {
   const s = server({ prefs: { phoneMode: "expert" }, hold: "get" });
   const router = open("/");
-  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
   await waitFor(() => expect(s.pending()).toBe(1));
   await wait(50);
+  // not known yet: the app says it's loading, with neither home and no tabs, until it is
   expect(router.state.location.pathname).toBe("/");
-  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument(); // not known yet, so nothing offered
+  expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
+  expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
   await s.release();
+  expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
   await wait(50);
   expect(router.state.location.pathname).toBe("/");
   expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+  cleanup();
+
+  // on a full-view page the way back to Easy waits for the setting too (and the copy just kept on this phone is gone)
+  localStorage.removeItem("gst3.prefs.1");
+  const again = server({ prefs: { phoneMode: "expert" }, hold: "get" });
+  open("/customers");
+  await screen.findByRole("heading", { level: 1, name: "Customers" });
+  await waitFor(() => expect(again.pending()).toBe(1));
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+  await again.release();
+  await wait(50);
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+});
+
+test("offline on a first visit, with no setting kept, a phone shows its Expert home rather than loading for good", async () => {
+  act(() => __setNetState("offline"));
+  const s = server({ hold: "get" }); // the setting can't come until the internet is back
+  const router = open("/");
+  expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: /tabs/i })).toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/");
+  expect(s.pending()).toBe(1);
+  // back online, the page that stood in stays until the setting arrives and moves the phone on
+  act(() => __setNetState("online"));
+  expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  await s.release();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
 });
 
 test("a phone kept on Easy opens on Easy at once, before the server answers, as the page the app opened on: no slide, nothing read out", async () => {
@@ -210,6 +244,16 @@ test("a phone kept on Easy opens on Easy at once, before the server answers, as 
   await wait(200);
   expect(h1).not.toHaveFocus();
   expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
+});
+
+test("Back to Easy takes the full-view page's place, so Back from Easy's home doesn't return to it", async () => {
+  server();
+  const router = renderIn(createMemoryRouter(appRoutes, { initialEntries: ["/e/bills", "/customers"], initialIndex: 1 }));
+  await userEvent.click(await screen.findByRole("link", { name: /back to easy/i }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  expect(router.state.historyAction).toBe("REPLACE");
+  await act(async () => { await router.navigate(-1); });
+  expect(router.state.location.pathname).toBe("/e/bills");
 });
 
 test("an Easy person tapping Home on a full-view page goes to Easy's home, greeted like any move", async () => {
@@ -226,10 +270,11 @@ test("an Easy person tapping Home on a full-view page goes to Easy's home, greet
 test("a setting that arrives late still opens the phone on Easy, as if the app had opened there", async () => {
   const s = server({ hold: "get" });
   const router = open("/");
-  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+  await waitFor(() => expect(s.pending()).toBe(1));
+  expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
   await s.release();
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
-  expect(router.state.historyAction).toBe("REPLACE"); // the stand-in home isn't left behind for Back
+  expect(router.state.historyAction).toBe("REPLACE"); // home isn't left behind for Back
   const h1 = await screen.findByRole("heading", { level: 1, name: "Easy" });
   expect(frame()).toHaveClass("h-full", { exact: true });
   await wait(200);
@@ -252,27 +297,75 @@ test("when the setting can't be loaded, a phone opens on what today's app chose 
   expect(again.state.location.pathname).toBe("/");
 });
 
-test("on a phone, signing in goes on to Easy with focus on its title and its name read out, whether the setting was kept or not", async () => {
+/**
+ * Signs in as the owner through the real sign-in page, with the app's own providers and sign-in state; the server is
+ * whatever server() set up. The app then goes on to `next`, or home.
+ */
+async function signIn(path = "/login") {
   const OWNER_ME = { id: 1, username: "kailash", full_name: "Kailash Mehta", role: "owner", role_label: "Owner", permissions: "*", needs_role_choice: false };
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url === "token/" || config.url === "me/"
+    ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: config.url === "token/" ? { access: "a", refresh: "r" } : OWNER_ME })
+    : answer(config))) as AxiosAdapter;
+  const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
+  render(<AppRoutes router={router} />);
+  await userEvent.type(await screen.findByLabelText("Username"), "kailash");
+  await userEvent.type(screen.getByLabelText("Password"), "pw");
+  await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  return router;
+}
+
+/** Every page title that takes focus, and everything the page announcer says, until stop(). */
+function listen() {
+  const focused: string[] = [];
+  const said: string[] = [];
+  const onFocus = (e: FocusEvent) => { const el = e.target as HTMLElement; if (el.matches?.("[data-page-title]")) focused.push(el.textContent ?? ""); };
+  document.addEventListener("focusin", onFocus);
+  const watch = new MutationObserver(() => { const t = document.getElementById("route-announcer")?.textContent; if (t && said[said.length - 1] !== t) said.push(t); });
+  watch.observe(document.body, { subtree: true, childList: true, characterData: true });
+  return { focused, said, stop: () => { document.removeEventListener("focusin", onFocus); watch.disconnect(); } };
+}
+
+test("on a phone, signing in goes on to Easy with focus on its title and its name read out, whether the setting was kept or not", async () => {
   for (const kept of [true, false]) {
     localStorage.clear();
     queryClient.clear();
     if (kept) localStorage.setItem("gst3.prefs.1", JSON.stringify({ phoneMode: "easy" }));
     server();
-    const answer = api.defaults.adapter as AxiosAdapter;
-    api.defaults.adapter = ((config) => (config.url === "token/" || config.url === "me/"
-      ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: config.url === "token/" ? { access: "a", refresh: "r" } : OWNER_ME })
-      : answer(config))) as AxiosAdapter;
-    const router = createMemoryRouter(appRoutes, { initialEntries: ["/login"] });
-    render(<AppRoutes router={router} />);
-    await userEvent.type(await screen.findByLabelText("Username"), "kailash");
-    await userEvent.type(screen.getByLabelText("Password"), "pw");
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const router = await signIn();
     await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
     const h1 = await screen.findByRole("heading", { level: 1, name: "Easy" });
     await waitFor(() => expect(h1, kept ? "kept" : "not kept").toHaveFocus());
     await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy"));
     cleanup();
+  }
+  queryClient.clear();
+});
+
+test("a first sign-in on a phone, its setting slow to come, greets only the home that stays: no stand-in first", async () => {
+  for (const mode of ["easy", "expert"] as const) {
+    localStorage.clear();
+    queryClient.clear();
+    const s = server({ prefs: { phoneMode: mode }, hold: "get" }); // nothing kept on this phone yet
+    const heard = listen();
+    try {
+      await signIn();
+      await waitFor(() => expect(s.pending()).toBe(1));
+      await wait(150); // past the 90 ms the page frame waits before it greets a page
+      expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
+      expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
+      await s.release();
+      const name = mode === "easy" ? "Easy" : "Dashboard";
+      const h1 = await screen.findByRole("heading", { level: 1, name });
+      await waitFor(() => expect(h1, mode).toHaveFocus());
+      await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent(name));
+      await wait(150);
+      expect(heard.focused).toEqual([name]);
+      expect(heard.said).toEqual([name]);
+    } finally {
+      heard.stop();
+      cleanup();
+    }
   }
   queryClient.clear();
 });
@@ -288,14 +381,7 @@ test("the greeting after signing in is spent once a page stays: a later redraw o
   }));
   queryClient.clear();
   server({ prefs: { phoneMode: "expert" } });
-  const answer = api.defaults.adapter as AxiosAdapter;
-  api.defaults.adapter = ((config) => (config.url === "token/" || config.url === "me/"
-    ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: config.url === "token/" ? { access: "a", refresh: "r" } : { id: 1, username: "kailash", full_name: "Kailash Mehta", role: "owner", role_label: "Owner", permissions: "*", needs_role_choice: false } })
-    : answer(config))) as AxiosAdapter;
-  render(<AppRoutes router={createMemoryRouter(appRoutes, { initialEntries: ["/login?next=%2Fsales"] })} />);
-  await userEvent.type(await screen.findByLabelText("Username"), "kailash");
-  await userEvent.type(screen.getByLabelText("Password"), "pw");
-  await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await signIn("/login?next=%2Fsales");
   const announcer = () => document.getElementById("route-announcer")!;
   await waitFor(() => expect(announcer()).toHaveTextContent("Bills")); // greeted
   act(() => { announcer().textContent = ""; });
@@ -455,6 +541,29 @@ test("Sign out asks first: Stay signed in keeps the session, Sign out ends it", 
 });
 
 // the shell's other duties: offline, and the keyboard
+
+test("on a phone a toast sits above the tabs, never over them", async () => {
+  let toast!: ToastApi;
+  function Grab() { toast = useToast(); return null; }
+  server({ prefs: { phoneMode: "expert" } });
+  renderIn(createMemoryRouter(appRoutes, { initialEntries: ["/customers"] }), stubAuth(), <Grab />);
+  const tabs = await screen.findByRole("navigation", { name: /tabs/i });
+  // an 844 px tall phone: the overlay layer covers it, and the tab bar is its bottom 60 px
+  const box = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: 390, width: 390, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const real = Element.prototype.getBoundingClientRect;
+  const rects = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.id === "overlay-root") return box(0, 844);
+    if (this === tabs) return box(784, 844);
+    return real.call(this);
+  });
+  try {
+    act(() => { toast.show({ title: "Bill 7 saved" }); });
+    const stack = (await screen.findByText("Bill 7 saved")).closest<HTMLElement>('[aria-live="polite"]')!;
+    expect(stack.style.bottom).toBe("72px"); // the tabs' 60 px, and 12 px clear of them
+  } finally {
+    rects.mockRestore();
+  }
+});
 
 test("offline, the phone shell carries has-offline", async () => {
   server({ prefs: { phoneMode: "expert" } });

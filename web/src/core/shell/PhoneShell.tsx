@@ -25,7 +25,8 @@ export function PhoneShell({ children, easy }: { children: ReactNode; easy: bool
   return (
     <div className={cn("h-full flex flex-col bg-ground text-fg", easy ? "text-[16px]" : "text-md", net === "offline" && "has-offline")}>
       {!easy && fromEasy ? (
-        <Link to="/e" className="shrink-0 flex items-center justify-center gap-2 min-h-11 bg-brand text-onbrand font-semibold text-md anim-rise">
+        // a mode switch is a new home, as More's switch is: Back from Easy's home doesn't return to the full view
+        <Link to="/e" replace className="shrink-0 flex items-center justify-center gap-2 min-h-11 bg-brand text-onbrand font-semibold text-md anim-rise">
           <ArrowLeft size={18} aria-hidden="true" />Back to Easy
         </Link>
       ) : null}

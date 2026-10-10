@@ -1,10 +1,11 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
+import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
 import { phoneModeOf, usePrefs } from "@/core/prefs";
 import { useView } from "@/core/view";
 import { ScopeProvider } from "@/core/scope";
-import { ToastHost } from "@/core/ui";
+import { ListSkeleton, ToastHost } from "@/core/ui";
 import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
@@ -40,20 +41,27 @@ export function AppLayout() {
   const { pathname } = location;
   const navigate = useNavigate();
   const { prefs, ready } = usePrefs();
+  const net = useNetwork();
   const signIn = useContext(SignInShown);
   // A phone's home is Easy unless the person chose Expert; an Expert person isn't sent there on a guess before their
-  // setting is known. Easy is for phones: on a desktop its addresses open the dashboard.
+  // setting is known. Easy and the phone's More are for phones: on a desktop their addresses open the dashboard.
   const home = isPhone && pathname === "/";
-  const to = isDesktop && (pathname === "/e" || pathname.startsWith("/e/")) ? "/" : home && ready && phoneModeOf(prefs) === "easy" ? "/e" : null;
+  const phoneOnly = pathname === "/e" || pathname.startsWith("/e/") || pathname.replace(/\/+$/, "") === "/more";
+  const to = isDesktop && phoneOnly ? "/" : home && ready && phoneModeOf(prefs) === "easy" ? "/e" : null;
   // The address the app opened on (or that signing in led to) moving on is the app opening there: the page it moves to
   // is the first page, quiet as one, or greeted if signing in led here. Any later move goes through the page frame,
   // so it's read out and focused like any other.
   const [first] = useState(location.key);
   const opening = to !== null && location.key === first;
-  // the greeting after signing in waits while the first page may yet move on; once a page stays, the frame has taken it
-  const unsure = home && !ready && location.key === first;
-  useEffect(() => { if (!opening && !unsure) signIn.current = false; });
+  // Opened at home with no setting kept on this phone yet, neither home shows, or is greeted, until the setting is in:
+  // the greeting after signing in is for the home that stays. Offline the setting can't come, so the Expert home
+  // stands in rather than a wait with no end, and a page that has shown stays until the setting moves it on.
+  const shown = useRef(false);
+  const unsure = home && !ready && location.key === first && net !== "offline" && !shown.current;
+  // once a page stays, its frame has taken the greeting after signing in: later frames are for later moves
+  useEffect(() => { if (!opening && !unsure) { shown.current = true; signIn.current = false; } });
   if (opening) return <Navigate to={to} replace />;
+  if (unsure) return <div className="p-6"><ListSkeleton what="the app" /></div>;
   const page = to ? <Navigate to={to} replace /> : <Outlet />;
   // on a desktop the skip link focuses the page, so <main> takes focus there. The offline or server-trouble banner sits
   // above the page on every view (on a desktop, under the top bar), and a page that fails to draw shows a way home instead.

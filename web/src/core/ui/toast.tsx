@@ -90,9 +90,9 @@ function ToastStack() {
     const root = overlay.parentElement ?? document.body;
     const o = overlay.getBoundingClientRect();
     const z = layerZoom(overlay);
-    // sit above the bottom tabs and any pinned action bar on screen
+    // sit above the bottom tabs (the phone shell's .phone-tabs, whatever its label) and any pinned action bar on screen
     let edge = o.bottom;
-    for (const el of root.querySelectorAll('nav[aria-label="Main"], [data-actionbar]')) {
+    for (const el of root.querySelectorAll(".phone-tabs, [data-actionbar]")) {
       const r = el.getBoundingClientRect();
       if (r.height && r.top < o.bottom && r.bottom > o.top + o.height / 2) edge = Math.min(edge, r.top);
     }
