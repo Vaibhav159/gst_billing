@@ -42,6 +42,8 @@ test("a number's shape in the server's words", () => {
   expect(at("KGH-A")).toBe("End the number with digits, like 108 or KGH/2026-27/108, so bills sort in order.");
   expect(at("1234567", "LONGPREFIX/2026-27/1234567")).toBe("LONGPREFIX/2026-27/1234567 would have more than 16 characters. Type a shorter number.");
   expect(at("34", "KGH/2026-27/34")).toBe("");
+  // before the next free number has come (or when it couldn't), the words name no number: never "the next free one, ."
+  expect(numberShapeProblem(" ", { next: "", stored: "" })).toBe("Type the bill number.");
 });
 
 test("the hint names the next free number and how to type one", () => {

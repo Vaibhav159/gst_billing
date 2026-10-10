@@ -115,6 +115,11 @@ test("a send or an Undo that didn't go through: offline, the server, or the serv
     .toEqual({ tone: "neg", title: "Not restored", body: "KGH/2026-27/27 is back already: it was restored from the Audit log." });
   expect(restoreFailure({ kind: "unreachable", message: "" }, "3 bills", true))
     .toEqual({ tone: "neg", title: "Not restored", body: "3 bills stay deleted. Restore them from the Audit log in a minute." });
+  // a bin row that's gone (restored or removed already) says the server's own words (contract §3.2), never "in a minute"
+  expect(restoreFailure({ kind: "notfound", message: "That isn't there any more.", body: { detail: "That deleted bill isn't in the bin any more." } }, "KGH/2026-27/27"))
+    .toEqual({ tone: "neg", title: "Not restored", body: "That deleted bill isn't in the bin any more." });
+  expect(restoreFailure({ kind: "notfound", message: "That isn't there any more." }, "KGH/2026-27/27"))
+    .toEqual({ tone: "neg", title: "Not restored", body: "That isn't there any more." });
 });
 
 test("a send whose WhatsApp chat opened but whose record didn't land says so, never that the bill wasn't sent (Ruling 1B-14)", () => {

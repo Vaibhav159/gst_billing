@@ -208,9 +208,16 @@ export function notMarkedSent(p: ApiProblem, number: string): { tone: "neg"; tit
 export const SEND_WAITING = { tone: "brand", title: "Not sent yet", body: "The shop's WhatsApp message is still loading. Send it again in a moment." } as const;
 /** Said after a send when the shop's settings didn't load, so WhatsApp has the standard message instead of the shop's own. */
 export const STANDARD_MESSAGE = "The shop's own message didn't load, so the standard one is typed in.";
-/** An Undo of a delete that didn't happen, from a toast (PROTO sales/parts.jsx:172-175); a refusal says the server's words. */
+/**
+ * An Undo of a delete that didn't happen, from a toast (PROTO sales/parts.jsx:172-175); a refusal says the server's words.
+ * A 404 means the bin row has gone (restored or removed already): its own words (contract §3.2), never "in a minute".
+ */
 export function restoreFailure(p: ApiProblem, what = "The bill", many = false): { tone: "neg"; title: string; body: string } {
   if (p.kind === "conflict" || p.kind === "forbidden") return { tone: "neg", title: "Not restored", body: p.message };
+  if (p.kind === "notfound") {
+    const detail = (p.body as { detail?: unknown } | undefined)?.detail;
+    return { tone: "neg", title: "Not restored", body: typeof detail === "string" && detail ? detail : p.message };
+  }
   const off = p.kind === "offline";
   return { tone: "neg", title: off ? "Not restored: you're offline" : "Not restored",
     body: `${what} ${many ? "stay" : "stays"} deleted. Restore ${many ? "them" : "it"} from the Audit log ${off ? "when you're back online" : "in a minute"}.` };

@@ -341,3 +341,37 @@ test("from the dialog, a record that fails still closes it once WhatsApp has the
   expect(calls.filter((c) => c.url === "sales/412/sent/").map((c) => c.body)).toEqual([{ via: "whatsapp", to: "9829041122" }, { via: "whatsapp", to: "9829041122" }]);
   expect(window.open).toHaveBeenCalledTimes(1);
 });
+
+/* ── Task 6's review minors (1B Task 7, commit A): the one-shot guard is the bill's, not the cell's ── */
+
+test("a Send cell drawn again for another bill sends that bill: the guard belongs to the bill it held", async () => {
+  const { calls } = serve([
+    ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })],
+    ["POST", "sales/413/sent/", () => ({ id: 413, sent: { at: "2026-10-08T12:10:00+05:30", last_at: "2026-10-08T12:10:00+05:30", count: 1, via: "whatsapp", to: "" } })],
+  ]);
+  // one cell, as a list's row at the same place draws it for whichever bill is there now
+  function Reused() {
+    const [b, setB] = useState(row());
+    return <><SendCell bill={b} /><button type="button" onClick={() => setB(row({ id: 413, invoice_number: "KGH/2026-27/32" }))}>next bill</button></>;
+  }
+  renderApp(<Reused />);
+  await userEvent.click(await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" })));
+  expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+  await userEvent.click(screen.getByText("next bill"));
+  await userEvent.click(screen.getByRole("button", { name: "Send KGH/2026-27/32 on WhatsApp" }));
+  await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/sent/")).map((c) => c.url)).toEqual(["sales/412/sent/", "sales/413/sent/"]));
+  expect(window.open).toHaveBeenCalledTimes(2);
+});
+
+test("a send that goes wrong before it's recorded leaves Send free for another press", async () => {
+  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  // the first press throws on its way to WhatsApp, so the send itself fails
+  vi.mocked(window.open).mockImplementationOnce(() => { throw new Error("no new tab"); });
+  renderApp(<SendCell bill={row()} />);
+  const send = await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" }));
+  await userEvent.click(send);
+  await userEvent.click(send);
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
+  expect(window.open).toHaveBeenCalledTimes(2);
+  expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+});

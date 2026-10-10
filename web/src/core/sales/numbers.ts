@@ -40,10 +40,13 @@ export function storedFor(next: Pick<NextNumber, "fy" | "invoice_number" | "full
   return storedNumber(text, { prefix: at > 0 ? next.invoice_number.slice(0, at) : "", fy: next.fy, full: true });
 }
 
-/** What's wrong with a typed number's shape, in the server's words (contract §2.3), or "". stored: what it would be saved as. */
+/**
+ * What's wrong with a typed number's shape, in the server's words (contract §2.3), or "". stored: what it would be saved
+ * as; next: the firm's next free number, "" while it hasn't come (or couldn't), when the words name none.
+ */
 export function numberShapeProblem(text: string, { next, stored }: { next: string; stored: string }): string {
   const t = text.trim();
-  if (!t) return `Type the bill number, or use the next free one, ${next}.`;
+  if (!t) return next ? `Type the bill number, or use the next free one, ${next}.` : "Type the bill number.";
   if (t.length > 16) return `A GST bill number can have at most 16 characters; this has ${t.length}.`;
   if (!/^[A-Za-z0-9/-]+$/.test(t)) return "Use only letters, digits, \"-\" and \"/\" (GST rule 46). Spaces and other marks aren't allowed.";
   if (counterOf(t) == null) return "End the number with digits, like 108 or KGH/2026-27/108, so bills sort in order.";

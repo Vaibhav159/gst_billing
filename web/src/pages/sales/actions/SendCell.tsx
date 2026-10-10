@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, FileText, Printer, Send } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -24,12 +24,17 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   const ready = useSendReady();
   const [ask, setAsk] = useState(false);
   // one send per press: the second press of a double click, or a press before the list shows the bill as sent, sends
-  // nothing (two chats, two records). A send that wasn't recorded (offline, a number to ask for, the record failed) frees it.
-  const sending = useRef(false);
+  // nothing (two chats, two records). The guard holds the bill's id, not just "sending": a cell drawn for another bill
+  // sends that one, and the bill's own news (its id or its send) clears it. A send that wasn't recorded (offline, a
+  // number to ask for, the record failed) frees it, and so does one that went wrong on its way.
+  const sending = useRef<number | null>(null);
+  useEffect(() => { sending.current = null; }, [bill.id, bill.sent]);
   const sendOnce = () => {
-    if (sending.current) return;
-    sending.current = true;
-    void send(bill, { onNeedNumber: () => setAsk(true) }).then((ok) => { if (!ok) sending.current = false; });
+    const id = bill.id;
+    if (sending.current === id) return;
+    sending.current = id;
+    const free = () => { if (sending.current === id) sending.current = null; };
+    void send(bill, { onNeedNumber: () => setAsk(true) }).then((ok) => { if (!ok) free(); }, free);
   };
   if (bill.status === "cancelled") return null;
   if (bill.paper && !bill.sent) {

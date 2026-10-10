@@ -1,6 +1,7 @@
 // Cancel, delete, renumber, move to another firm and the e-way bill (PROTO sales/parts.jsx:413-641), with the WhatsApp
 // number from Task 5. One host per page: useBillDialogs().open(kind, bill), and render its element once.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Trash2 } from "lucide-react";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useBillDetail, useCancelBill, useCheckNumber, useDeleteBill, useMoveBill, useNextNumber, useRenumberBill, useRestoreBill, useSaveEway } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
@@ -11,7 +12,7 @@ import { numberHint, numberShapeProblem, storedFor } from "@/core/sales/numbers"
 import type { BillDetail, BillRow, Eway, TransportMode, VehicleType } from "@/core/sales/types";
 import { ewayNumberText, failText, restoreFailure, type FailText } from "@/core/sales/words";
 import { useFirms } from "@/core/scope";
-import { Button, Chip, ConfirmDialog, Dialog, FailNote, Field, Input, ListSkeleton, QueryView, Select, Textarea, useToast } from "@/core/ui";
+import { Banner, Button, Chip, ConfirmDialog, Dialog, FailNote, Field, Input, ListSkeleton, QueryView, Select, Textarea, useToast } from "@/core/ui";
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { useHeldValue } from "./held";
@@ -151,9 +152,10 @@ function useNumberField(business: number | null, invoiceDate: string, excludeId:
   const [text, setText] = useState("");
   const [typed, setTyped] = useState(false);
   const [err, setErr] = useState("");
-  // restart() moves this on, so the next free number fills the field again even when its answer is the one already here
+  // restart() moves this on, so the next free number fills the field again even when its answer is the one already here.
+  // A number filling an untyped field takes away words about what was there (pressed before the next number came)
   const [round, setRound] = useState(0);
-  useEffect(() => { if (!typed && next.data) setText(next.data.invoice_number); }, [round, typed, next.data]);
+  useEffect(() => { if (!typed && next.data) { setText(next.data.invoice_number); setErr(""); } }, [round, typed, next.data]);
   const t = text.trim();
   const typedNow = useDebounced(t, 300);
   const check = useCheckNumber(business !== null && typedNow ? { business, invoice_date: invoiceDate, invoice_number: typedNow, exclude_id: excludeId } : null);
@@ -203,6 +205,9 @@ function RenumberDialog({ bill, onClose, onNeedNumber }: { bill: DialogBill | nu
   const month = monthLabel(b.invoice_date.slice(0, 7), { long: true, year: false });
   const hint = `${no.savedAs}${no.known?.note || (nx ? numberHint({ next: nx.invoice_number, firm: b.business_name, fy: b.fy, full: nx.full_number }) : "")}`;
   const confirm = () => {
+    // Enter again while the first is on its way: mutate() would drop the first one's toast and close, then say the
+    // second one's refusal after the first had worked
+    if (renumber.isPending) return;
     if (!can("bill.edit")) { no.setErr(whyNot("bill.edit")); return; }
     if (no.blocked("renumber-no")) return;
     renumber.mutate({ id: b.id, invoice_number: no.text.trim() }, {
@@ -253,6 +258,7 @@ function MoveDialog({ bill, onClose }: { bill: DialogBill | null; onClose: () =>
   const firm = firms.find((f) => f.id === target);
   const t = no.text.trim();
   const confirm = () => {
+    if (move.isPending) return; // Enter again while the first is on its way (as Renumber)
     if (!can("bill.edit")) { no.setErr(whyNot("bill.edit")); return; }
     if (target === null || !firm) return;
     if (no.blocked("move-no")) return;
@@ -315,8 +321,10 @@ function EwayDialog({ bill, onClose }: { bill: DialogBill | null; onClose: () =>
   useEffect(() => { if (bill) { setV(null); setErr({}); setFail(null); } }, [bill]);
   if (!b) return null;
   // what's stored fills the form. The bill page's bill carries it; a list's row doesn't, so the form waits for the bill:
-  // a save sends every field, and blanks typed before the stored details showed would replace them
-  const stored = detail.data?.eway ?? ("eway" in b ? b.eway : undefined);
+  // a save sends every field, and blanks typed before the stored details showed would replace them. A bill deleted
+  // elsewhere (its answer is null) has nothing to record: the dialog says so
+  const gone = detail.data === null;
+  const stored = gone ? undefined : detail.data?.eway ?? ("eway" in b ? b.eway : undefined);
   const f = v ?? (stored ? ewayForm(stored) : EMPTY_EWAY);
   const set = <K extends keyof EwayForm>(k: K) => (x: EwayForm[K]) => { setV({ ...f, [k]: x }); setErr((e) => ({ ...e, [k]: "" })); };
   const submit = () => {
@@ -381,6 +389,8 @@ function EwayDialog({ bill, onClose }: { bill: DialogBill | null; onClose: () =>
             <Input id="ew-distance" inputMode="numeric" value={f.distance} suffix="km" invalid={Boolean(err.distance)} inputClassName="tnum" onChange={(e) => set("distance")(e.target.value.replace(/\D/g, "").slice(0, 4))} />
           </Field>
         </div>
+      ) : gone ? (
+        <Banner tone="neg" icon={Trash2} title={`${b.invoice_number} was deleted`}>It&apos;s in the Audit log, where the owner can restore it. Its e-way bill can be recorded once it&apos;s back.</Banner>
       ) : (
         <QueryView query={detail} what="the bill's e-way details" skeleton={<ListSkeleton rows={3} what="the bill's e-way details" />}>{() => null}</QueryView>
       )}

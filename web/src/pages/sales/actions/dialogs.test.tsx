@@ -269,3 +269,109 @@ test("the e-way bill opened from a list waits for what's stored on the bill, the
   }));
   expect(await screen.findByText("E-way bill saved on KGH/2026-27/31")).toBeInTheDocument();
 });
+
+/* ── Task 6's review minors (1B Task 7, commit A) ── */
+
+/** check-number for any typed number: free, stored as typed. */
+const free = ({ params }: { params: Record<string, unknown> }) => ({
+  invoice_number: String(params.invoice_number), counter: 35, code: "", problem: "", bill: null, binned: null, note: "", same_counter: null, next: NEXT,
+});
+
+test("Enter pressed again while a renumber is on its way sends nothing more, and the first one's toast and close still come", async () => {
+  handClock();
+  let answer: (w: unknown) => void = () => {};
+  const { calls } = salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/next-number/", () => ({ business: 3, fy: "2026-27", invoice_date: "2026-10-08", ...NEXT, full_number: true })],
+    ["GET", "sales/check-number/", free],
+    // a slow server: the renumber answers only when the test says
+    ["POST", "sales/412/renumber/", () => new Promise((resolve) => { answer = resolve; })],
+  ]);
+  renderApp(<Harness bill={row()} kind="renumber" />);
+  fireEvent.click(screen.getByText("open it"));
+  await pass(400);
+  const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
+  const field = within(dialog).getByLabelText("New number");
+  expect(field).toHaveValue("KGH/2026-27/35");
+  fireEvent.keyDown(field, { key: "Enter" });
+  await pass(0);
+  expect(within(dialog).getByRole("button", { name: "Renumbering…" })).toBeInTheDocument();
+  fireEvent.keyDown(field, { key: "Enter" });
+  await pass(0);
+  expect(calls.filter((c) => c.url === "sales/412/renumber/")).toHaveLength(1);
+  await act(async () => { answer({ id: 412, invoice_number: "KGH/2026-27/35", previous: "KGH/2026-27/31" }); });
+  await pass(0);
+  expect(screen.getByText("KGH/2026-27/31 is now KGH/2026-27/35")).toBeInTheDocument();
+  await pass(400); // the dialog animates out
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("Enter pressed again while a move is on its way sends nothing more, and the first one's toast still comes", async () => {
+  handClock();
+  let answer: (w: unknown) => void = () => {};
+  const { calls } = salesServer([
+    ["GET", "sales/next-number/", () => ({ business: 2, fy: "2026-27", invoice_date: "2026-10-08", counter: 31, invoice_number: "MO/2026-27/31", full_number: true })],
+    ["GET", "sales/check-number/", free],
+    ["POST", "sales/412/move/", () => new Promise((resolve) => { answer = resolve; })],
+  ]);
+  renderApp(<Harness bill={row()} kind="move" />);
+  fireEvent.click(screen.getByText("open it"));
+  await pass(400);
+  const dialog = screen.getByRole("dialog", { name: "Move KGH/2026-27/31 to another firm" });
+  const field = within(dialog).getByLabelText("Number in that firm's series");
+  expect(field).toHaveValue("MO/2026-27/31");
+  fireEvent.keyDown(field, { key: "Enter" });
+  await pass(0);
+  expect(within(dialog).getByRole("button", { name: "Moving…" })).toBeInTheDocument();
+  fireEvent.keyDown(field, { key: "Enter" });
+  await pass(0);
+  expect(calls.filter((c) => c.url === "sales/412/move/")).toHaveLength(1);
+  await act(async () => { answer({ id: 412, business: 2, invoice_number: "MO/2026-27/31", previous: { business: 3, invoice_number: "KGH/2026-27/31" } }); });
+  await pass(0);
+  expect(screen.getByText("KGH/2026-27/31 is now MO/2026-27/31")).toBeInTheDocument();
+});
+
+test("Renumber pressed before the next free number has come asks for a number without naming one; the number then fills in and the words go", async () => {
+  handClock();
+  let next: (w: unknown) => void = () => {};
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/next-number/", () => new Promise((resolve) => { next = resolve; })],
+  ]);
+  renderApp(<Harness bill={row()} kind="renumber" />);
+  fireEvent.click(screen.getByText("open it"));
+  await pass(400);
+  const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Renumber bill" }));
+  expect(within(dialog).getByText("Type the bill number.")).toBeInTheDocument();
+  await act(async () => { next({ business: 3, fy: "2026-27", invoice_date: "2026-10-08", ...NEXT, full_number: true }); });
+  await pass(0);
+  expect(within(dialog).getByLabelText("New number")).toHaveValue("KGH/2026-27/35");
+  expect(within(dialog).queryByText("Type the bill number.")).not.toBeInTheDocument();
+  expect(dialog).toHaveTextContent("KGH/2026-27/35 is the next free number in KIRAN GOLD HOUSE for FY 2026-27.");
+});
+
+test("the e-way bill of a bill deleted elsewhere says it was deleted, with nothing to fill in or save", async () => {
+  salesServer([["GET", "sales/412/", () => refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin({ id: 11, original_id: 412, invoice_number: "KGH/2026-27/31" }) })]]);
+  renderApp(<Harness bill={row()} kind="eway" />);
+  await openIt();
+  const dialog = screen.getByRole("dialog", { name: "E-way bill for KGH/2026-27/31" });
+  expect(await within(dialog).findByText("KGH/2026-27/31 was deleted")).toBeInTheDocument();
+  expect(dialog).toHaveTextContent("It's in the Audit log, where the owner can restore it. Its e-way bill can be recorded once it's back.");
+  expect(within(dialog).queryByLabelText("E-way bill number")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+});
+
+test("Undo of a delete whose bin row has gone says the server's words, not to try again in a minute", async () => {
+  salesServer([
+    ["DELETE", "sales/412/", () => wireBin({ id: 11, original_id: 412, invoice_number: "KGH/2026-27/31" })],
+    ["POST", "bin/11/restore/", () => refuse(404, { detail: "That deleted bill isn't in the bin any more." })],
+  ]);
+  renderApp(<Harness bill={row()} kind="delete" />);
+  await openIt();
+  await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete bill" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Undo/ }));
+  expect(await screen.findByText("Not restored")).toBeInTheDocument();
+  expect(screen.getByText("That deleted bill isn't in the bin any more.")).toBeInTheDocument();
+  expect(screen.queryByText(/in a minute/)).not.toBeInTheDocument();
+});
