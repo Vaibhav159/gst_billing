@@ -1,6 +1,7 @@
 """v3's permission base (plan 1A, Task 1): the role matrix on the server, read once per request."""
 
-from datetime import date
+from datetime import date, datetime
+from datetime import timezone as dt_timezone
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
@@ -10,10 +11,12 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework.response import Response
+from rest_framework.routers import SimpleRouter
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 
-from billing.api.permissions import V3Permission, get_user_role
+from billing.api.permissions import V3Permission, V3PermissionIfPlaced, get_user_role, sale_or_purchase
+from billing.api.views import InvoiceViewSet
 from billing.fy import fy_label, fy_of, fy_range, parse_fy
 from billing.models import Business, Customer, FiledPeriod, Invoice
 from billing.period_lock import assert_sales_open
@@ -29,7 +32,6 @@ from billing.roles import (
     role_of,
     why_not,
 )
-from billing.tests.test_ist_dates import EARLY_MORNING_IST
 from billing.tests.v3_helpers import client_for, person
 
 LINE = {"product_name": "Silver", "hsn_code": "711311", "gst_tax_rate": "0.03", "quantity": "1",
@@ -243,6 +245,62 @@ class PlacedPeopleChangingBillsTest(TestCase):
     def test_an_unrouted_method_is_a_405(self):
         self.assertEqual(self.acct.put(reverse("invoice-list"), {}, format="json").status_code, 405)
 
+    def test_a_type_that_isnt_text_is_a_403_or_400_never_a_500(self):
+        # Ruling 1A-5: the type sent is compared, never put in a set, so a list or a dict can't raise.
+        staff = client_for(person("rakesh", GROUP_STAFF, "editor"))
+        for kind in (["inward"], {"type": "inward"}):
+            with self.subTest(kind=kind):
+                r = self.acct.patch(reverse("invoice-detail", args=[self.purchase.id]), {"type_of_invoice": kind},
+                                    format="json")
+                self.assertEqual((r.status_code, r.data), (403, CHANGE_BILLS))
+                body = {"business": self.biz.id, "customer": self.supplier.id, "invoice_number": "SJ-2",
+                        "invoice_date": "2026-05-11", "type_of_invoice": kind, "line_items": [LINE]}
+                r = self.acct.post(reverse("invoice-list"), body, format="json")
+                self.assertEqual((r.status_code, r.data), (403, MAKE_BILLS))
+                # Staff may make bills, so v2's serializer answers: not a type it knows.
+                self.assertEqual(staff.post(reverse("invoice-list"), body, format="json").status_code, 400)
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.type_of_invoice, "inward")
+        self.assertEqual(Invoice.objects.count(), 2)
+
+
+class EveryBillTypeCheckRunsTest(TestCase):
+    """Each InvoiceViewSet write keyed by sale_or_purchase on a stored bill decides from that bill's
+    type, which only get_object() hands the permission (Task 1 review). A new action that skips
+    get_object() skips the check too, and fails here."""
+
+    def test_each_write_to_a_stored_bill_checks_its_type(self):
+        biz = Business.objects.create(name="LODHA JEWELLERS", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
+        cust = Customer.objects.create(name="LOCAL BUYER", state_name="RAJASTHAN")
+        acct = person("neha", GROUP_ACCOUNTANT, "editor")
+        keyed_by_type = sale_or_purchase("", "").__code__
+        checked = set()
+        for route in SimpleRouter().get_routes(InvoiceViewSet):
+            for method, name in route.mapping.items():
+                # Writes keyed by sale_or_purchase to a stored bill. A GET needs "view", and a create
+                # has no stored bill: the type it asks for decides, before any lookup.
+                need = InvoiceViewSet.v3_actions.get(name)
+                if getattr(need, "__code__", None) is not keyed_by_type or method == "get" or not route.detail:
+                    continue
+                with self.subTest(action=name, method=method):
+                    sale = Invoice.objects.create(business=biz, customer=cust, invoice_number=f"{method}-{name}",
+                                                  invoice_date="2026-05-10", type_of_invoice="outward")
+                    # The v3 check alone, as the router builds the view: v2's role check would stop an
+                    # editor's DELETE before it.
+                    view = InvoiceViewSet.as_view({method: name}, **{
+                        **route.initkwargs, "basename": "invoice", "detail": route.detail,
+                        "permission_classes": [V3PermissionIfPlaced]})
+                    request = getattr(APIRequestFactory(), method)("/", {}, format="json")
+                    force_authenticate(request, user=acct)
+                    r = view(request, pk=sale.pk)
+                    # A sale needs a bill.* key, which the accountant lacks: only a check that read the
+                    # stored bill can refuse, since the request names no type.
+                    self.assertEqual(r.status_code, 403, r.data)
+                    self.assertTrue(r.data["needs"].startswith("bill."), r.data)
+                    self.assertTrue(Invoice.objects.filter(pk=sale.pk).exists())
+                    checked.add(name)
+        self.assertTrue({"update", "partial_update", "update_line_items", "eway_bill", "destroy"} <= checked, checked)
+
 
 class PlacedPeopleImportingTest(TestCase):
     """The three import doors take the hybrid too (Ruling 1A-14): a placed accountant imports
@@ -332,8 +390,10 @@ class FinancialYearTest(TestCase):
         self.assertEqual(fy_of(date(2026, 3, 31)), 2025)
         self.assertEqual(fy_of(date(2026, 4, 1)), 2026)
         self.assertEqual(fy_of("2027-02-08"), 2026)
-        with patch("django.utils.timezone.now", return_value=EARLY_MORNING_IST):
-            self.assertEqual(fy_of(), 2026)  # 1 Apr 2026, 01:30 in IST; still 31 Mar in UTC
+        # 1 Apr 2025, 01:30 in IST, still 31 Mar 2025 in UTC: FY 2025. The UTC day reads 2024, and a
+        # slip to the system clock reads today's FY (2026 or later), so neither passes.
+        with patch("django.utils.timezone.now", return_value=datetime(2025, 3, 31, 20, 0, tzinfo=dt_timezone.utc)):
+            self.assertEqual(fy_of(), 2025)
         self.assertEqual(fy_label(2026), "2026-27")
         self.assertEqual(fy_label(2099), "2099-00")
         self.assertEqual(fy_range(2026), (date(2026, 4, 1), date(2027, 3, 31)))

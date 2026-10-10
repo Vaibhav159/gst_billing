@@ -156,10 +156,11 @@ def sale_or_purchase(sale_key, purchase_key, under=None):
         if getattr(view, "detail", False):
             if bill is None:
                 return LATER
-            kinds = {bill.type_of_invoice, _asked_type(request, under, bill.type_of_invoice)}
+            kinds = (bill.type_of_invoice, _asked_type(request, under, bill.type_of_invoice))
         else:
-            kinds = {_asked_type(request, under, None)}
-        return purchase_key if kinds == {INVOICE_TYPE_INWARD} else sale_key
+            kinds = (_asked_type(request, under, None),)
+        # Compared, never hashed: a list or a dict sent as the type gets the sale key, not a 500.
+        return purchase_key if all(kind == INVOICE_TYPE_INWARD for kind in kinds) else sale_key
 
     return need
 
