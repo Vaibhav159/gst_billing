@@ -10,8 +10,8 @@ function set(s: NetState) {
   listeners.forEach((l) => l());
 }
 
-/** A response arrived: the server is reachable. */
-export function markReachable() { set("online"); }
+/** A response arrived: the server is reachable. Unless the browser has since gone offline: a reply already on its way when the connection dropped doesn't mean we're back. */
+export function markReachable() { set(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "online"); }
 /** A request got no response. Cancelled requests don't count. We learn from real requests only: never poll (Neon's budget). */
 export function markUnreachable(error?: unknown) {
   if ((error as { code?: string } | undefined)?.code === "ERR_CANCELED") return;
