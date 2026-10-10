@@ -123,4 +123,7 @@ to step past them; in the e2e suite, `opened(page)` waits.
   `createMemoryRouter` and `RouterProvider`, not `renderApp`.
 - Answer requests with `api.defaults.adapter`; never reach the network. A phone
   is `window.__phone = true` before rendering (`src/test/setup.ts`).
+- One fake server: `serve` (`src/test/server.ts`) answers by `"METHOD url"`, and
+  Selling's `salesServer` (`core/sales/fixtures.ts`) answers through it by
+  method and path, with the contract's examples. Build on them, never a third.
 - Fake the clock rather than wait on real time: a busy CI runner is slow.

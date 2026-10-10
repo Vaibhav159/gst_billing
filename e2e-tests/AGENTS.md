@@ -45,7 +45,10 @@ through the real sign-in page, puts Easy back if a stopped run left Expert saved
 and writes `.auth-v3.json` (git-ignored) without the app's kept copy of the
 preferences; `desktop` (1440×900) and `phone` (390×844, touch) start signed in.
 `tests-v3/session.js` has the session's path, the sign-in, `opened(page)` and the
-API calls the specs make beside the app's. Also `workers: 1`,
+API calls the specs make beside the app's. `tests-v3/sales-data.js` makes and
+removes the bills a spec needs through the API, as the signed-in user:
+`client(request)`, `newBill(api, { firm?, customer?, rate?, lines? })`,
+`removeBill(api, id)`. Also `workers: 1`,
 `retries: 0`: one user for every spec, and the phone spec saves Easy or Expert on
 the server. CI runs it as the `web-e2e` job.
 

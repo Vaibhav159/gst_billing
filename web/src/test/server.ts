@@ -10,10 +10,10 @@ export type Reply = { status: number; data?: unknown };
 export type Answer = unknown | ((c: Call) => Reply | Promise<Reply>);
 
 /**
- * Answers requests by "METHOD url" ("GET customers/7/") and records each in the array it returns. Anything not listed
- * is a 404, so a wrong address fails the test.
+ * The fake server itself: `reply` answers each request (a promise holds it back until it settles, or for ever), and the
+ * array it returns records each request. serve() answers through it, and so does plan 1B's salesServer().
  */
-export function serve(answers: Record<string, Answer>): Call[] {
+export function serveWith(reply: (c: Call) => Reply | Promise<Reply>): Call[] {
   const calls: Call[] = [];
   api.defaults.adapter = (async (config: InternalAxiosRequestConfig) => {
     const call: Call = {
@@ -21,11 +21,21 @@ export function serve(answers: Record<string, Answer>): Call[] {
       data: typeof config.data === "string" ? JSON.parse(config.data) : config.data,
     };
     calls.push(call);
-    const a = answers[`${call.method} ${call.url}`];
-    const r: Reply = typeof a === "function" ? await (a as (c: Call) => Reply | Promise<Reply>)(call) : a === undefined ? { status: 404, data: { detail: "Not found." } } : { status: 200, data: a };
+    const r = await reply(call);
     if (r.status === 0) throw new AxiosError("Network Error", "ERR_NETWORK", config);
     if (r.status >= 400) throw new AxiosError("refused", "ERR_BAD_REQUEST", config, null, { status: r.status, statusText: "", headers: {}, config, data: r.data });
     return { status: r.status, statusText: "", headers: {}, config, data: r.data };
   }) as AxiosAdapter;
   return calls;
+}
+
+/**
+ * Answers requests by "METHOD url" ("GET customers/7/") and records each in the array it returns. Anything not listed
+ * is a 404, so a wrong address fails the test.
+ */
+export function serve(answers: Record<string, Answer>): Call[] {
+  return serveWith((call) => {
+    const a = answers[`${call.method} ${call.url}`];
+    return typeof a === "function" ? (a as (c: Call) => Reply | Promise<Reply>)(call) : a === undefined ? { status: 404, data: { detail: "Not found." } } : { status: 200, data: a };
+  });
 }
