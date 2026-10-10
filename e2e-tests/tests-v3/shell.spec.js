@@ -40,8 +40,10 @@ test("desktop: theme and text size stick after a reload", async ({ page }, info)
   const account = page.getByRole("button", { name: /account/i });
   await account.click();
   await page.getByRole("menuitem", { name: "Pearl" }).click();
+  await expect(page.locator("html")).toHaveClass(/theme-pearl/); // the menu applies a choice just after the click (Menu.tsx select)
   await account.click();
   await page.getByRole("menuitem", { name: /^Larger/ }).click();
+  await expect(page.locator("#root")).toHaveCSS("zoom", "1.2"); // saved before the reload, or the reload can win the race
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/theme-pearl/);
   await expect(page.locator("#root")).toHaveCSS("zoom", "1.2"); // device.ts: a larger text size zooms the app
