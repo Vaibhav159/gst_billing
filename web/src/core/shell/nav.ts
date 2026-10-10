@@ -52,6 +52,21 @@ export function sectionOf(pathname: string): string {
   return SECTION_OF[pathname.split("/")[1] ?? ""] ?? "";
 }
 
+/**
+ * The phone tab a path sits under (the prototype's route `tab`, else its section's): Easy's by its own pages,
+ * Expert's by section, with capturing a supplier's bill under Capture. Anything else is under More.
+ */
+const SECTION_TAB: Record<string, string> = { dashboard: "home", sales: "bills", capture: "capture", customers: "customers" };
+const EASY_TAB: Record<string, string> = {
+  "": "home", new: "home", gst: "home", bills: "bills", bill: "bills", saved: "bills", capture: "capture", customers: "customers", more: "more", profile: "more",
+};
+export function tabOf(pathname: string): string {
+  const [, first = "", second = ""] = pathname.split("/");
+  if (first === "e") return EASY_TAB[second] ?? "more";
+  if (first === "purchases" && (second === "capture" || second === "inbox")) return "capture";
+  return SECTION_TAB[sectionOf(pathname)] ?? "more";
+}
+
 /** Modifier key names as this keyboard shows them. */
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
 export const MOD = MAC ? "⌘" : "Ctrl";

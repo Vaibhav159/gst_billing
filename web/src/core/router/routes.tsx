@@ -2,6 +2,7 @@ import { Navigate, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import Login from "@/pages/core/Login";
+import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 
@@ -14,10 +15,9 @@ export const PARTS: Record<string, { part: number; area: string }> = {
   gst: { part: 3, area: "GST" },
   records: { part: 4, area: "Records and admin" },
   easy: { part: 6, area: "Easy" },
-  more: { part: 0, area: "More" },
 };
 
-/** Every page in the prototype (PROTO/pages/<area>/index.js), by the area that builds it. */
+/** Every page in the prototype (PROTO/pages/<area>/index.js) that a later part builds, by area. Sign-in and More are already built (below). */
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
   sales: [
@@ -36,9 +36,8 @@ const PAGES: Record<string, string[]> = {
   ],
   easy: [
     "/e", "/e/bills", "/e/new", "/e/new/items", "/e/saved/:id", "/e/bill/:id", "/e/capture", "/e/customers", "/e/customers/new", "/e/customers/:id/edit",
-    "/e/gst", "/e/more", "/e/profile",
+    "/e/gst", "/e/profile",
   ],
-  more: ["/more"], // Task 16 fills it
 };
 
 /** The prototype's `hideNav`: forms and print, where the phone's tabs make way. Task 16's PhoneShell reads `handle.hideNav`. */
@@ -86,6 +85,9 @@ export const appRoutes: RouteObject[] = [{
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
         }))),
+        // the phone's More tab, in Expert and in Easy (part 6 brings Easy's own)
+        { path: "/more", element: <More /> },
+        { path: "/e/more", element: <More /> },
         { path: "*", element: <NotFound /> },
       ],
     },
