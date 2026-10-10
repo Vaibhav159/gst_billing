@@ -1,5 +1,5 @@
 import { useLayoutEffect } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AxiosAdapter } from "axios";
@@ -61,8 +61,12 @@ test("a row that can't take focus itself hands Back's focus to its own button", 
   pastGuard();
   await userEvent.click(screen.getByRole("button", { name: "KGH/2026-27/7" }));
   await screen.findByRole("heading", { level: 1, name: "KGH/2026-27/7" });
+  // from here the clock moves only when the test says: Back's own 90 ms focus comes due when the test steps past it (Ruling 1B-10)
+  vi.useRealTimers(); // (a second useFakeTimers keeps the first one's settings)
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   await act(async () => { await router.navigate(-1); });
-  await waitFor(() => expect(screen.getByRole("button", { name: "KGH/2026-27/7" })).toHaveFocus());
+  act(() => { vi.advanceTimersByTime(100); });
+  expect(screen.getByRole("button", { name: "KGH/2026-27/7" })).toHaveFocus();
 });
 
 test("the closed page's own focus, come due once Back's page is on screen (a slow phone), leaves that page alone (Ruling 60)", async () => {

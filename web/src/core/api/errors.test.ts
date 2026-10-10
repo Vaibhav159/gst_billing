@@ -47,6 +47,27 @@ test("the bill form's helpers give every message for one line's field, by positi
   expect(old.fields).toEqual({ "lines.1.rate": "Type the rate per gram." });
 });
 
+test("DRF's own list checks put their words inside “lines”: they read as words about the lines as a whole", () => {
+  const p = problemOf(answered(400, { lines: { non_field_errors: ["This list may not be empty."] } }));
+  expect(p.message).toBe("This list may not be empty.");
+  expect(linesErrors(p)).toEqual(["This list may not be empty."]);
+  expect(lineErrors(p, 0, "quantity")).toEqual([]);
+});
+
+test("only words read as words: a number, or a bare string inside the body, is data (v2's period lock, a 409's bill)", () => {
+  // v2's period-lock 400 as DRF sends it: DRF turns the period's numbers into strings
+  const lock = problemOf(answered(400, {
+    detail: ["09/2026 is filed and locked for KIRAN GOLD HOUSE — this change would make the books disagree with the filed return. Unlock the month on the GST page first (the unlock is audit-logged)."],
+    locked_period: { id: "7", business: "3", year: "2026", month: "9" },
+  }));
+  expect(lock.message).toMatch(/^09\/2026 is filed and locked for KIRAN GOLD HOUSE/);
+  expect(lock.fields).toBeUndefined();
+  // a refusal that names a bill but has no words of its own says the plain words, never "388" or the bill's number
+  const taken = problemOf(answered(409, { code: "number_taken", bill: { id: 388, invoice_number: "KGH/2026-27/34" }, next: { counter: 35, invoice_number: "KGH/2026-27/35" } }));
+  expect(taken.message).toBe("Someone changed this at the same time. Open it again.");
+  expect(problemOf(answered(400, { lines: { "1": { quantity: 0 } } })).message).toBe("Something in the form needs fixing.");
+});
+
 test("a refusal's code and body come with it, for the screen that asked", () => {
   const body = {
     detail: "KGH/2026-27/34 is already used in FY 2026-27 by Anil Gupta's bill of 30 Sep 2026. The next free number is KGH/2026-27/35.",

@@ -14,18 +14,18 @@ export type ApiProblem = {
 /** Keys that say what happened rather than name a field. */
 const NOT_FIELDS = ["detail", "error", "non_field_errors", "code"];
 
-/** The first words in a DRF error value: a string, the first in a list, or the first inside a nested row ({} is a good row, skipped). */
-function words(v: unknown): string | null {
-  if (v == null) return null;
-  if (typeof v === "string") return v || null;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v)) {
-    for (const x of v) { const w = words(x); if (w) return w; }
-    return null;
-  }
-  if (typeof v === "object") {
-    for (const x of Object.values(v as Record<string, unknown>)) { const w = words(x); if (w) return w; }
-  }
+/**
+ * DRF's words: a list of strings. Inside a body (a line's row, a nested object) only such a list is words; anything else
+ * there is data, such as a 409's bill or v2's period lock ({ locked_period: { id: "7" } }: DRF sends its numbers as strings).
+ */
+const isWordList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+/** The first words in a DRF error value: a string or a list of words at the top, else the first list of words inside it (a line's row; {} is a good row, skipped). */
+function words(v: unknown, top = true): string | null {
+  if (typeof v === "string") return top && v ? v : null;
+  if (isWordList(v)) return v.find((x) => x !== "") ?? null;
+  const inner = Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v as Record<string, unknown>) : [];
+  for (const x of inner) { const w = words(x, false); if (w) return w; }
   return null;
 }
 
@@ -47,21 +47,18 @@ function firstMessage(data: unknown): string | null {
  * Every field's words, flat: { gst_number: "…", "lines.1.quantity": "…", lines: "…" }. A list of words is one field's.
  * DRF 3.18 sends a list field's row errors as an object keyed by the row's 0-based position, good rows left out
  * ({ lines: { "1": { quantity: […] } } }, contract §1); an older list aligned with the rows ([{}, {…}]) reads the same.
+ * Below the top, only a list of words counts: a bare string or a number there is data.
  */
 function fieldErrors(data: unknown): Record<string, string> | undefined {
   if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
   const out: Record<string, string> = {};
-  const walk = (v: unknown, path: string) => {
-    if (v == null) return;
-    if (typeof v === "string") { if (v && !(path in out)) out[path] = v; return; }
-    if (Array.isArray(v)) {
-      if (v.every((x) => typeof x === "string")) { const w = words(v); if (w) out[path] = w; return; }
-      v.forEach((x, i) => walk(x, `${path}.${i}`));
-      return;
-    }
-    if (typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, `${path}.${k}`);
+  const walk = (v: unknown, path: string, top: boolean) => {
+    if (typeof v === "string") { if (top && v) out[path] = v; return; }
+    if (isWordList(v)) { const w = words(v); if (w) out[path] = w; return; }
+    if (Array.isArray(v)) { v.forEach((x, i) => walk(x, `${path}.${i}`, false)); return; }
+    if (v && typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, `${path}.${k}`, false);
   };
-  for (const [k, v] of Object.entries(data as Record<string, unknown>)) if (!NOT_FIELDS.includes(k)) walk(v, k);
+  for (const [k, v] of Object.entries(data as Record<string, unknown>)) if (!NOT_FIELDS.includes(k)) walk(v, k, true);
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -85,11 +82,9 @@ export function problemOf(error: unknown): ApiProblem {
   return { kind: "server", message: "The app couldn't get through", ...extra };
 }
 
-/** Every message in a DRF error value, in order: ["…", "…"]. */
+/** Every message in a list of words, in order: ["…", "…"]; [] for anything else. */
 function allWords(v: unknown): string[] {
-  if (typeof v === "string") return v ? [v] : [];
-  if (Array.isArray(v)) return v.flatMap(allWords);
-  return [];
+  return isWordList(v) ? v.filter((x) => x !== "") : [];
 }
 /** The 400's `lines` value, if the problem carries one. */
 function linesOf(problem: ApiProblem | null | undefined): unknown {
@@ -108,10 +103,13 @@ export function lineErrors(problem: ApiProblem | null | undefined, index: number
   return row && typeof row === "object" && !Array.isArray(row) ? allWords((row as Record<string, unknown>)[field]) : [];
 }
 
-/** The messages about the lines as a whole ("Add at least one item: …", "A bill can have at most 200 items."), [] when none. */
+/**
+ * The messages about the lines as a whole ("Add at least one item: …", "A bill can have at most 200 items."), [] when none.
+ * DRF's own list checks (an empty list, too many rows) put theirs inside: { lines: { non_field_errors: […] } }.
+ */
 export function linesErrors(problem: ApiProblem | null | undefined): string[] {
   const lines = linesOf(problem);
-  return Array.isArray(lines) ? lines.filter((x): x is string => typeof x === "string" && x !== "") : [];
+  return allWords(lines && typeof lines === "object" && !Array.isArray(lines) ? (lines as Record<string, unknown>).non_field_errors : lines);
 }
 
 /** The prototype's words for a save that didn't happen (PROTO/core/store.jsx failureFor). */

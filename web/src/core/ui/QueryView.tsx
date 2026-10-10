@@ -8,14 +8,15 @@ import { ListSkeleton, LoadError } from "./Feedback";
 
 /**
  * Above data still on screen when asking for it again failed: it stays, and this says why and offers Try again
- * (offline, TanStack asks again by itself once the device is back, so no button then).
+ * (offline, TanStack asks again by itself once the device is back, so no button then). busy: asking again now, so
+ * Try again shows it's working and ignores another press.
  */
-export function StaleNote({ problem, what, retry }: { problem: ApiProblem; what: string; retry?: () => void }) {
+export function StaleNote({ problem, what, retry, busy }: { problem: ApiProblem; what: string; retry?: () => void; busy?: boolean }) {
   const why = problem.kind === "offline" ? "You're offline, so this is what was last loaded. It refreshes when you're back online."
     : problem.kind === "unreachable" || problem.kind === "server" ? "The app couldn't reach the shop's records just now, so this is what was last loaded."
       : `${problem.message} This is what was last loaded.`;
   return (
-    <Banner tone="neg" title={`Couldn't refresh ${what}`} actions={retry && problem.kind !== "offline" ? <Button size="sm" onClick={retry}>Try again</Button> : undefined}>
+    <Banner tone="neg" className="mt-3" title={`Couldn't refresh ${what}`} actions={retry && problem.kind !== "offline" ? <Button size="sm" loading={busy} onClick={retry}>Try again</Button> : undefined}>
       {why}
     </Banner>
   );
@@ -33,6 +34,6 @@ export function QueryView<T>({ query, what, skeleton, children }: { query: UseQu
   if (query.isPending) return <>{skeleton ?? <ListSkeleton what={what} />}{slow ? <p role="status" className="mt-3 text-sm text-muted">Still loading {what}…</p> : null}</>;
   if (query.isError && query.data === undefined) return <LoadError problem={problemOf(query.error)} what={what} retry={() => query.refetch()} />;
   // a refetch that failed keeps what was shown, and says so (part 0 carry: it used to swap the list for the error card)
-  if (query.isError) return <><StaleNote problem={problemOf(query.error)} what={what} retry={() => void query.refetch()} />{children(query.data as T)}</>;
+  if (query.isError) return <><StaleNote problem={problemOf(query.error)} what={what} retry={() => void query.refetch()} busy={query.isFetching} />{children(query.data as T)}</>;
   return <>{children(query.data as T)}</>;
 }
