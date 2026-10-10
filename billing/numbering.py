@@ -58,8 +58,12 @@ def next_number(business, day):
     return {"counter": counter, "invoice_number": format_number(business, day, str(counter))}
 
 
-def holder(business_id, fy, number, exclude_invoice=None, exclude_bin=None):
-    """The bill (Invoice) or deleted bill (BinnedInvoice) that has `number` in the series, or None."""
+def holder(business_id, fy, number, exclude_invoice=None, exclude_bin=None, bins=True):
+    """The bill (Invoice) or deleted bill (BinnedInvoice) that has `number` in the series, or None.
+
+    bins=False asks the bills in Sales only: a restore's check, since other deleted bills never block
+    one (Ruling 1A-18).
+    """
     number = (number or "").strip()
     if not number:
         return None
@@ -67,7 +71,7 @@ def holder(business_id, fy, number, exclude_invoice=None, exclude_bin=None):
     if exclude_invoice:
         bills = bills.exclude(pk=exclude_invoice)
     found = bills.first()
-    if found is None:
+    if found is None and bins:
         binned = series_bin(business_id, fy).filter(invoice_number__iexact=number)
         if exclude_bin:
             binned = binned.exclude(pk=exclude_bin)
@@ -81,10 +85,11 @@ def bill_ref(invoice):
             "customer_name": invoice.customer.name, "status": invoice.status}
 
 
-def refuse_taken(business, day, number, exclude_invoice=None, exclude_bin=None):
-    """409 number_taken or number_deleted when `number` is in use in the firm's series for `day`."""
+def refuse_taken(business, day, number, exclude_invoice=None, exclude_bin=None, bins=True):
+    """409 number_taken or number_deleted when `number` is in use in the firm's series for `day`
+    (number_taken only, with bins=False: see holder)."""
     fy = fy_of(day)
-    found = holder(business.pk, fy, number, exclude_invoice, exclude_bin)
+    found = holder(business.pk, fy, number, exclude_invoice, exclude_bin, bins)
     if found is None:
         return
     following = next_number(business, day)

@@ -900,6 +900,10 @@ class BinQuerySet(models.QuerySet):
         undone = AuditLog.objects.filter(pk=models.OuterRef("audit_log_id"), snapshot__has_key="_undo")
         return self.filter(restored_at__isnull=True).exclude(models.Exists(undone))
 
+    def settled(self):
+        """live()'s complement: rows back in Sales already, which protect no customer or firm."""
+        return self.exclude(pk__in=self.model.objects.live().values("pk"))
+
 
 class BinnedInvoice(models.Model):
     """A deleted sales bill, kept so its number stays used and it can come back (design decision 6).

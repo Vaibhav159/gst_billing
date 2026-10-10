@@ -139,11 +139,42 @@ class BinTest(TestCase):
         self.assertEqual(staff.get(reverse("bin-list")).status_code, 403)
 
     def test_the_bin_lists_edges_get_words(self):
-        # Ruling 1A-5: a firm that isn't an id, or a page past the end: words, never a 500 or DRF's own.
+        # Ruling 1A-5 and contract 3.1-3.2: a firm that isn't an id, a page past the end, a bin id that isn't
+        # there: the contract's words, never a 500 or DRF's own.
+        self.delete()
         r = self.client.get(reverse("bin-list"), {"business_id": "abc"})
-        self.assertEqual((r.status_code, r.data), (400, {"business_id": ["Pick the firm."]}))
+        self.assertEqual((r.status_code, r.data), (400, {"business_id": ["Pick a firm from the list."]}))
         r = self.client.get(reverse("bin-list"), {"page": "9"})
-        self.assertEqual((r.status_code, r.data), (404, {"detail": "This list has no page 9."}))
+        self.assertEqual((r.status_code, r.data), (404, {"detail": "There's no such page of deleted bills."}))
+        r = self.client.post(reverse("bin-restore", args=[999999]))
+        self.assertEqual((r.status_code, r.data), (404, {"detail": "That deleted bill isn't in the bin any more."}))
+        # Review M4: psycopg refuses a null character in a query; the search reads past it
+        self.assertEqual(self.client.get(reverse("bin-list"), {"q": "27\x00"}).data["count"], 1)
+
+    def test_a_255_character_customer_name_still_deletes(self):
+        # Review M8: the audit row's name keeps to its column's 255 characters; Postgres refuses more.
+        Customer.objects.filter(pk=self.cust.pk).update(name="A" * 255)
+        r = self.delete()
+        self.assertEqual((r.status_code, r.data["customer"]["name"]), (200, "A" * 255))
+        name = AuditLog.objects.get(action="deleted").entity_name
+        self.assertEqual(name, f"#{NUMBER} - " + "A" * (255 - len(f"#{NUMBER} - ")))
+        self.assertEqual(self.restore(BinnedInvoice.objects.get()).status_code, 200)
+        self.assertEqual(len(AuditLog.objects.get(action="restored").entity_name), 255)
+
+    def test_another_deleted_bill_with_its_number_never_blocks_a_restore(self):
+        # Ruling 1A-18: a restore checks bills in Sales only. A second 27 was made as an import makes it
+        # (no look at the bin) and deleted too: the first comes back; the second then meets it in Sales,
+        # through the bin or the Audit log's Undo.
+        self.delete()
+        first = BinnedInvoice.objects.get()
+        twin = sale(self.biz, self.cust, NUMBER, "2026-09-25")
+        self.assertEqual(self.client.delete(reverse("sale-detail", args=[twin.pk]), {}, format="json").status_code, 200)
+        second = BinnedInvoice.objects.exclude(pk=first.pk).get()
+        r = self.restore(first)
+        self.assertEqual((r.status_code, r.data["id"]), (200, self.bill.pk), r.data)
+        for r in (self.restore(second), self.client.post(reverse("auditlog-undo", args=[second.audit_log_id]))):
+            self.assertEqual((r.status_code, r.data["code"], r.data["bill"]["id"]), (409, "number_taken", self.bill.pk))
+        self.assertIsNone(BinnedInvoice.objects.get(pk=second.pk).restored_at)
 
     def test_restore_puts_it_back_under_its_own_id(self):
         self.delete()
@@ -247,13 +278,41 @@ class V2PathsAndTheBinTest(TestCase):
         r = self.client.post(reverse("customer-merge"), {"source_id": self.cust.pk, "target_id": target.pk}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual(BinnedInvoice.objects.get().customer_id, target.pk)
+        # Review M7: under the target's name, as the bin list shows and searches it
+        rows = self.client.get(reverse("bin-list"), {"q": "udaipur"}).data["results"]
+        self.assertEqual([row["customer"] for row in rows], [{"id": target.pk, "name": "Anil Gupta (Udaipur)"}])
 
-    def test_a_customer_or_firm_with_deleted_bills_cant_be_deleted(self):
+    def back_in_sales_with(self, number, customer):
+        """A bill of this customer deleted, restored, then moved to `customer`: its bin row is settled."""
+        bill = sale(self.biz, self.cust, number, "2026-09-24")
+        self.client.delete(reverse("invoice-detail", args=[bill.pk]))
+        self.client.post(reverse("bin-restore", args=[BinnedInvoice.objects.get(original_id=bill.pk).pk]))
+        r = self.client.patch(reverse("invoice-detail", args=[bill.pk]), {"customer": customer.pk}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_a_customer_or_firm_with_bills_in_the_bin_cant_be_deleted(self):
+        # A restore needs both. The refusal names the bills in the bin (review M1), and a refused
+        # delete keeps the rows already back in Sales too: one transaction.
+        self.back_in_sales_with("2", buyer("Rohit Verma"))
         self.client.delete(reverse("invoice-detail", args=[self.bill.pk]))
         r = self.client.delete(reverse("customer-detail", args=[self.cust.pk]))
+        self.assertEqual((r.status_code, r.data), (409, {
+            "error": "Cannot delete: 1 bill(s) in the bin still reference this record. Restore and reassign them first.",
+            "protected": 1}))
+        self.assertEqual(BinnedInvoice.objects.filter(customer=self.cust).count(), 2)
+        # v2's 409, not a 500, for the firm; with a bill in Sales too, the words name both
+        r = self.client.delete(reverse("business-detail", args=[self.biz.pk]))
         self.assertEqual(r.status_code, 409)
-        # The bin protects the firm too: v2's 409, not a 500 (a restore needs both)
-        self.assertEqual(self.client.delete(reverse("business-detail", args=[self.biz.pk])).status_code, 409)
+        self.assertEqual(r.data["error"], "Cannot delete: 1 invoice(s) still reference this record. Reassign or delete "
+                                          "them first. 1 bill(s) in the bin reference it too.")
+
+    def test_rows_back_in_sales_never_block_a_delete(self):
+        # Review M1: a row restored here protects nothing, so it goes with the customer. It used to leave
+        # a 409 nobody could clear. (A row v2's undo brought back, and the firm: test_v3_rollback.)
+        self.back_in_sales_with("2", buyer("Rohit Verma"))
+        Invoice.objects.filter(pk=self.bill.pk).delete()  # the customer's other bill, gone for good
+        self.assertEqual(self.client.delete(reverse("customer-detail", args=[self.cust.pk])).status_code, 204)
+        self.assertFalse(BinnedInvoice.objects.exists())
 
 
 class AdminAndTheBinTest(TestCase):
@@ -293,12 +352,38 @@ class AdminAndTheBinTest(TestCase):
         self.assertFalse(BinnedInvoice.objects.exists())
         self.assertFalse(LogEntry.objects.exists())  # nor does the admin's log say they went
 
+    def test_select_and_delete_of_lines_keeps_a_closed_month(self):
+        # Review M9: the bulk delete of lines goes through the month lock too (the mixin is shared)
+        FiledPeriod.objects.create(business=self.biz, year=2026, month=9)
+        lines = list(LineItem.objects.values_list("pk", flat=True))  # the sale's (September) and the purchase's
+        r = self.client.post(reverse("admin:billing_lineitem_changelist"),
+                             {"action": "delete_selected", "_selected_action": lines, "post": "yes"})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(LineItem.objects.count(), 2)
+
     def test_reverting_a_deleted_bill_says_where_it_comes_back_from(self):
+        # Review M6: the Audit log is offered only when it has an Undo for the delete, as its can_undo
+        # says. One deleted through v2's API has; one deleted in the admin has none; nor has one whose
+        # Undo was used (it's back under another id), marked or from before the marker.
+        api, supplier = client_for(self.root), self.purchase.customer
+        through_v2, undone, undone_before = (sale(self.biz, supplier, f"SJ-{n}", "2026-10-02", kind="inward")
+                                             for n in (2, 3, 4))
+        for bill in (through_v2, undone, undone_before):
+            api.delete(reverse("invoice-detail", args=[bill.pk]))
+        for bill in (undone, undone_before):
+            entry = AuditLog.objects.get(action="deleted", entity_id=bill.pk)
+            self.assertEqual(api.post(reverse("auditlog-undo", args=[entry.pk])).status_code, 200)
+        entry.refresh_from_db()
+        entry.snapshot.pop("_undo")  # undone before the marker existed: only its "Restored via undo" log says so
+        entry.save(update_fields=["snapshot"])
+        no_undo = "This bill was deleted and has no Undo, so it can't be reverted."
         for bill, words in ((self.bill, "This bill was deleted. Restore it from the bin instead."),
-                            (self.purchase, "This bill was deleted. Restore it with Undo in the Audit log instead.")):
+                            (through_v2, "This bill was deleted. Restore it with Undo in the Audit log instead."),
+                            (self.purchase, no_undo), (undone, no_undo), (undone_before, no_undo)):
             with self.subTest(bill=bill.invoice_number):
                 version = bill.history.earliest().history_id
-                self.client.post(reverse("admin:billing_invoice_delete", args=[bill.pk]), {"post": "yes"})
+                if Invoice.objects.filter(pk=bill.pk).exists():
+                    self.client.post(reverse("admin:billing_invoice_delete", args=[bill.pk]), {"post": "yes"})
                 r = self.client.post(reverse("admin:billing_invoice_simple_history", args=[bill.pk, version]), {
                     "customer": bill.customer_id, "business": bill.business_id, "invoice_number": bill.invoice_number,
                     "invoice_date": str(bill.invoice_date), "type_of_invoice": bill.type_of_invoice})

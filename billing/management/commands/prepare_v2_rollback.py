@@ -48,16 +48,20 @@ class Command(BaseCommand):
 
     def _reverse(self, apply):
         # No join on the firm: a row whose firm v2 deleted is reported, not skipped (Ruling 1A-6).
-        rows = list(BinnedInvoice.objects.filter(kind=BinnedInvoice.KIND_CANCELLED, restored_at__isnull=True))
+        rows = BinnedInvoice.objects.filter(kind=BinnedInvoice.KIND_CANCELLED, restored_at__isnull=True)
+        live = set(rows.live().values_list("pk", flat=True))
         back = 0
         for binned in rows:
             where = f"  {binned.data.get('business_name', '')} {binned.invoice_number}"
-            if not apply:
+            if binned.pk not in live:
+                # v2's Undo brought it back during the rollback, as an active bill (review M5).
+                self.stdout.write(f"{where}: already back, skipped")
+            elif not apply:
                 self.stdout.write(f"{where}: to put back as cancelled")
-                continue
-            try:
-                restore_from_bin(binned, None, check_month=False)
-                back += 1
-            except Refusal as refusal:
-                self.stdout.write(f"{where}: left in the bin. {refusal.detail['detail']}")
-        self.stdout.write(f"{back if apply else len(rows)} cancelled bill(s) {'put back' if apply else 'to put back'}.")
+            else:
+                try:
+                    restore_from_bin(binned, None, check_month=False)
+                    back += 1
+                except Refusal as refusal:
+                    self.stdout.write(f"{where}: left in the bin. {refusal.detail['detail']}")
+        self.stdout.write(f"{back if apply else len(live)} cancelled bill(s) {'put back' if apply else 'to put back'}.")

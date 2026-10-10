@@ -62,7 +62,15 @@ class PeriodLockAdminMixin:
         self._assert(form.instance, "edit")
         super().save_formset(request, form, formset, change)
 
-from billing.models import BinnedInvoice, Business, Customer, Invoice, LineItem
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem
+
+
+def _undoable_delete(bill_id):
+    """Whether the Audit log offers Undo for this bill's delete, as AuditLogSerializer.can_undo works it
+    out: a "deleted" entry with a snapshot, not used, and not restored before the marker existed."""
+    entries = AuditLog.objects.filter(entity="invoice", entity_id=bill_id, action="deleted", snapshot__isnull=False)
+    before = AuditLog.objects.filter(entity="invoice", action="created", details=f"Restored via undo (was #{bill_id})")
+    return entries.exclude(snapshot__has_key="_undo").exists() and not before.exists()
 
 
 @admin.register(Business)
@@ -194,10 +202,13 @@ class InvoiceAdmin(PeriodLockAdminMixin, SimpleHistoryAdmin):
         # their columns. Say where it comes back from, with its lines, instead (Ruling 1A-7).
         bill_id = unquote(object_id)
         if request.method == "POST" and not Invoice.objects.filter(pk=bill_id).exists():
-            in_bin = BinnedInvoice.objects.live().filter(original_id=bill_id).exists()
-            self.message_user(request, "This bill was deleted. " + (
-                "Restore it from the bin instead." if in_bin else "Restore it with Undo in the Audit log instead."),
-                messages.ERROR)
+            if BinnedInvoice.objects.live().filter(original_id=bill_id).exists():
+                words = "This bill was deleted. Restore it from the bin instead."
+            elif _undoable_delete(bill_id):
+                words = "This bill was deleted. Restore it with Undo in the Audit log instead."
+            else:  # deleted in the admin, say, or its Undo used already: back under another id (review M6)
+                words = "This bill was deleted and has no Undo, so it can't be reverted."
+            self.message_user(request, words, messages.ERROR)
             return HttpResponseRedirect(reverse("admin:billing_invoice_history", args=[object_id],
                                                 current_app=self.admin_site.name))
         return super().history_form_view(request, object_id, version_id, extra_context)

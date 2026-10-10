@@ -120,7 +120,8 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
         if not Customer.objects.filter(pk=binned.customer_id).exists():
             raise Refusal("The customer on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again with the right customer.", "customer_gone")
-        refuse_taken(firm, binned.invoice_date, binned.invoice_number, exclude_bin=binned.pk)
+        # Bills in Sales only: another deleted bill with this number never blocks it (Ruling 1A-18).
+        refuse_taken(firm, binned.invoice_date, binned.invoice_number, bins=False)
 
         fields = _fields(Invoice, binned.data["invoice"])
         fields.update(business_id=binned.business_id, customer_id=binned.customer_id)

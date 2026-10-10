@@ -192,6 +192,16 @@ class V2OnTheMigratedDatabaseTest(TestCase):
         self.assertEqual(r.data["detail"], "The firm on this bill was deleted, so it can't come back as it was. "
                                            "Make the bill again in the right firm.")
 
+    def test_a_row_v2_brought_back_never_blocks_the_firms_delete(self):
+        # Review M1: v2's undo brought a deleted bill back under a new id, and v2 deleted that one later
+        # (v2 has no bin). The stale row protects nothing, so the firm can go.
+        owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
+        biz = firm()
+        _binned, entry = bin_bill(sale(biz, buyer(), "7", "2026-09-10"), None)
+        v2_deletes("invoice", v2_undo_delete(entry))
+        self.assertEqual(owner.delete(reverse("business-detail", args=[biz.pk])).status_code, 204)
+        self.assertFalse(BinnedInvoice.objects.exists())
+
 
 class PrepareV2RollbackTest(TestCase):
     def setUp(self):
@@ -232,6 +242,27 @@ class PrepareV2RollbackTest(TestCase):
         self.assertEqual(BinnedInvoice.objects.get().original_id, self.dead.pk)
         self.run_command("--reverse", "--apply")
         self.assertEqual(Invoice.objects.get(pk=self.dead.pk).status, BILL_CANCELLED)
+
+    def test_twice_each_way_changes_nothing_more(self):
+        # Review M5: each way is safe to run again.
+        self.run_command("--apply")
+        self.assertIn("0 cancelled bill(s) moved to the bin for v2.", self.run_command("--apply"))
+        self.assertEqual(BinnedInvoice.objects.count(), 1)
+        self.run_command("--reverse", "--apply")
+        self.assertIn("0 cancelled bill(s) put back.", self.run_command("--reverse", "--apply"))
+        self.assertEqual(Invoice.objects.get(pk=self.dead.pk).status, BILL_CANCELLED)
+
+    def test_reverse_skips_a_bill_v2_brought_back(self):
+        # Review M5: during the rollback v2's Undo brought the set-aside bill back (active: v2 doesn't know
+        # cancel). Going forward again it is already back, so it's skipped, not "to put back".
+        self.run_command("--apply")
+        v2_undo_delete(AuditLog.objects.get(pk=BinnedInvoice.objects.get().audit_log_id))
+        for args, total in ((("--reverse",), "0 cancelled bill(s) to put back."),
+                            (("--reverse", "--apply"), "0 cancelled bill(s) put back.")):
+            out = self.run_command(*args)
+            self.assertIn("  KIRAN GOLD HOUSE 2: already back, skipped\n", out)
+            self.assertIn(total, out)
+        self.assertIsNone(BinnedInvoice.objects.get().restored_at)
 
     def test_reverse_leaves_a_bill_whose_number_was_taken(self):
         self.run_command("--apply")

@@ -1,11 +1,12 @@
 import logging
 
+from django.db import transaction
 from django.db.models import JSONField, ProtectedError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 
-from billing.models import AuditLog
+from billing.models import AuditLog, BinnedInvoice, Business, Customer
 
 logger = logging.getLogger(__name__)
 
@@ -141,12 +142,29 @@ class ProtectedDeleteMixin:
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError as e:
+            # Bills in the bin still need their customer and firm for a restore: say so (Task 3 review, M1).
+            binned = sum(isinstance(o, BinnedInvoice) for o in e.protected_objects)
+            rest = [o for o in e.protected_objects if not isinstance(o, BinnedInvoice)]
             # Invoices, and since H6 invoice lines: count the invoices either way.
-            n = len({getattr(o, "invoice_id", o.pk) for o in e.protected_objects})
-            if all(hasattr(o, "invoice_id") for o in e.protected_objects):
+            n = len({getattr(o, "invoice_id", o.pk) for o in rest})
+            if not rest:
+                message = (f"Cannot delete: {binned} bill(s) in the bin still reference this record. "
+                           "Restore and reassign them first.")
+            elif all(hasattr(o, "invoice_id") for o in rest):
                 # Only lines: their invoices belong to someone else now.
                 message = (f"Cannot delete: lines on {n} invoice(s) of other parties still name this record. "
                            "An administrator re-points them with manage.py fix_line_customers.")
             else:
                 message = f"Cannot delete: {n} invoice(s) still reference this record. Reassign or delete them first."
-            return Response({"error": message, "protected": n}, status=status.HTTP_409_CONFLICT)
+            if rest and binned:
+                message += f" {binned} bill(s) in the bin reference it too."
+            return Response({"error": message, "protected": n + binned}, status=status.HTTP_409_CONFLICT)
+
+    def perform_destroy(self, instance):
+        # Bin rows back in Sales already (restored, or brought back by v2's undo) protect nothing, so they
+        # go with the customer or firm; one transaction, so a delete still refused keeps them (review M1).
+        key = {Customer: "customer", Business: "business"}.get(type(instance))
+        with transaction.atomic():
+            if key:
+                BinnedInvoice.objects.settled().filter(**{key: instance}).delete()
+            super().perform_destroy(instance)

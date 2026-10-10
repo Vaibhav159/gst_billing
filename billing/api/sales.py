@@ -6,9 +6,11 @@ permission key in v3_actions; V3Permission refuses the rest.
 """
 
 from django.db.models import Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
@@ -78,6 +80,10 @@ class Pages(PageNumberPagination):
     invalid_page_message = "This list has no page {page_number}."
 
 
+class BinPages(Pages):
+    invalid_page_message = "There's no such page of deleted bills."  # contract 3.1
+
+
 class SalesViewSet(viewsets.GenericViewSet):
     permission_classes = [V3Permission]
     queryset = Invoice.objects.sales().select_related("customer", "business")
@@ -108,7 +114,7 @@ class BinViewSet(viewsets.GenericViewSet):
     """/api/bin/: deleted sales, and Restore (part 1 API contract, section 3). Owner only."""
 
     permission_classes = [V3Permission]
-    pagination_class = Pages
+    pagination_class = BinPages
     lookup_value_regex = r"\d+"
     v3_actions = {"list": "bill.delete", "restore": "bill.delete"}
 
@@ -118,12 +124,12 @@ class BinViewSet(viewsets.GenericViewSet):
         firm = params.get("business_id") or ""
         if firm:
             if not firm.isdecimal():
-                raise serializers.ValidationError({"business_id": ["Pick the firm."]})
+                raise serializers.ValidationError({"business_id": ["Pick a firm from the list."]})
             qs = qs.filter(business_id=firm)
         fy = fy_param(params)
         if fy is not None:
             qs = qs.filter(invoice_date__range=fy_range(fy))
-        q = (params.get("q") or "").strip()
+        q = (params.get("q") or "").replace("\x00", "").strip()  # psycopg refuses a null character
         if q:
             # The customer's name as the row shows it, the bill's own: the customer may be gone since.
             qs = qs.filter(Q(invoice_number__icontains=q) | Q(data__customer_name__icontains=q))
@@ -136,5 +142,9 @@ class BinViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=["post"])
     def restore(self, request, pk=None):
-        invoice = restore_from_bin(get_object_or_404(BinnedInvoice, pk=pk), request.user)
+        try:
+            binned = get_object_or_404(BinnedInvoice, pk=pk)
+        except Http404:
+            raise NotFound("That deleted bill isn't in the bin any more.") from None  # contract 3.2
+        invoice = restore_from_bin(binned, request.user)
         return Response({"id": invoice.pk, "invoice_number": invoice.invoice_number})

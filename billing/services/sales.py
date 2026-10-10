@@ -17,8 +17,9 @@ CANCELLED_WORDS = "Cancelled bills can't be changed. Make it again from the bill
 
 
 def entity_name(invoice):
-    """The audit log's name for a bill, as v2's InvoiceViewSet writes it."""
-    return f"#{invoice.invoice_number} - {invoice.customer.name}"
+    """The audit log's name for a bill, as v2's InvoiceViewSet writes it, kept to the column's 255
+    characters: a 255-character customer name would make Postgres refuse the row (a 500)."""
+    return f"#{invoice.invoice_number} - {invoice.customer.name}"[:255]
 
 
 def log(invoice, user, action, details="", changes=None, snapshot=None):

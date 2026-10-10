@@ -522,8 +522,12 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             )
             for business in source.businesses.all():
                 target.businesses.add(business)
-            # Its deleted bills follow too: the bin protects the customer, and a restore needs one.
-            BinnedInvoice.objects.filter(customer=source).update(customer=target)
+            # Its deleted bills follow too, under the target's name, which the bin list shows and searches:
+            # the bin protects the customer, and a restore needs one.
+            for binned in BinnedInvoice.objects.filter(customer=source):
+                binned.customer = target
+                binned.data = {**binned.data, "customer_name": target.name}
+                binned.save(update_fields=["customer", "data"])
             source_name = source.name
             source_id = source.pk
             source.delete()
