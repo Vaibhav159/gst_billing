@@ -1027,6 +1027,19 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         headers = self.get_success_headers(out.data)
         return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    def update(self, request, *args, **kwargs):
+        """PATCH and PUT read the bill row-locked, in one transaction with the save (Ruling 1A-26).
+
+        v3's move locks the row too, so the two run one after the other: a save that had read the bill
+        before a move landed would write the old firm and number back over it. The lock comes before
+        DRF's read, so the read, and the permission's look at the stored type, see the bill as it stands.
+        """
+        with transaction.atomic():
+            pk = str(kwargs.get(self.lookup_url_kwarg or self.lookup_field, ""))
+            if pk.isascii() and pk.isdigit():  # anything else is DRF's 404, from its read
+                list(Invoice.objects.select_for_update().filter(pk=pk).values_list("pk", flat=True))
+            return super().update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         inst = serializer.instance
         assert_period_unlocked(inst.business_id, inst.invoice_date, "edit")

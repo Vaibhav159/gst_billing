@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import CharField, Count, F, IntegerField, Sum, Value
 from django.db.models.functions import (
     Cast,
@@ -157,6 +157,11 @@ class Business(AbstractBaseModel):
         help_text="Authorised signatory signature for invoices.",
         blank=True,
         null=True,
+    )
+    # v3 (part 1): from this date the paper bills carry the full number, so digits alone take
+    # the firm's format (KGH/2026-27/108); before it, or when blank, numbers are kept as written.
+    paper_full_number_from = models.DateField(
+        null=True, blank=True, help_text="From this date, a number typed as digits takes the firm's prefix and FY.",
     )
 
     class Meta:
@@ -383,6 +388,8 @@ class Invoice(AbstractBaseModel):
     # NULL (every older bill) means the live firm (design decision 7).
     firm_snapshot = models.JSONField(null=True, blank=True)
     notes = models.TextField(blank=True, default="", db_default="", help_text="Printed under the items.")
+    # Copied in later from the paper book: it has the paper's number and date, and no send nag.
+    paper = models.BooleanField(default=False, db_default=False)
 
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
@@ -417,7 +424,7 @@ class Invoice(AbstractBaseModel):
     # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
     V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces",
                  "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via",
-                 "place_of_supply", "firm_snapshot", "notes")
+                 "place_of_supply", "firm_snapshot", "notes", "paper")
 
     @classmethod
     def v2_columns(cls):
@@ -436,15 +443,17 @@ class Invoice(AbstractBaseModel):
         Only v3's move freezes the new firm.
         """
         fields = self.v2_columns()
-        loaded = getattr(self, "_loaded_parties", None)
-        # The firm before this save: as read, or as stored for a bill built rather than read (the
-        # admin's history revert builds one from a historical row).
-        before = loaded[0] if loaded else (
-            type(self).objects.nocache().filter(pk=self.pk).values_list("business_id", flat=True).first())
-        if str(before) != str(self.business_id):
-            self.firm_snapshot = None
-            fields.append("firm_snapshot")  # Ruling 1A-23: the one v3 column v2's paths write, and only to NULL
-        self.save(update_fields=fields, **kwargs)
+        with transaction.atomic():
+            # The firm before this save is the one stored now, row-locked until the save commits: a v3 move
+            # that landed after this bill was read (by the admin's change form, which doesn't lock) changed it,
+            # and the firm it froze must not stay on a bill this save puts back in another (Ruling 1A-26). The
+            # admin's history revert builds its bill rather than reading it, so it has no other.
+            before = (type(self).objects.nocache().select_for_update().filter(pk=self.pk)
+                      .values_list("business_id", flat=True).first())
+            if str(before) != str(self.business_id):
+                self.firm_snapshot = None
+                fields.append("firm_snapshot")  # Ruling 1A-23: the one v3 column v2's paths write, and only to NULL
+            self.save(update_fields=fields, **kwargs)
 
     class Meta:
         # Every report filters on some combination of these three, and the

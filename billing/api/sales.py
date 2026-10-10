@@ -14,13 +14,14 @@ from rest_framework.exceptions import NotFound
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from billing import numbering
 from billing.constants import SENT_VIA_CHOICES
-from billing.fy import fy_range
-from billing.models import BinnedInvoice, Invoice
-from billing.params import fy_param
+from billing.fy import fy_label, fy_of, fy_range
+from billing.models import BinnedInvoice, Business, Invoice
+from billing.params import date_param, firm_param, fy_param, month_param
 from billing.period_lock import closed_months
 from billing.services.bin import bin_bill, bin_row, live_bin, restore_from_bin
-from billing.services.sales import cancel_bill, mobile_of, record_send, sent_block
+from billing.services.sales import cancel_bill, mobile_of, move_bill, record_send, renumber_bill, sent_block
 from billing.text import person, stamp
 
 from .permissions import V3Permission
@@ -93,6 +94,39 @@ class SentSerializer(serializers.Serializer):
         return mobile_of(value)
 
 
+class TypedNumber(serializers.Field):
+    """A bill number as typed: text, or a JSON number read as its digits. Anything else (missing, null, a list,
+    an object, true) is no number typed, which the number check refuses in the contract's words with the next
+    free number; a null character or a space reaches that check too, which names Rule 46 (Ruling 1A-5)."""
+
+    def __init__(self):
+        super().__init__(required=False)
+
+    def run_validation(self, data=serializers.empty):
+        if isinstance(data, str):
+            return data
+        return str(data) if isinstance(data, int | float) and not isinstance(data, bool) else ""
+
+    def to_representation(self, value):
+        return value
+
+
+class RenumberSerializer(serializers.Serializer):
+    invoice_number = TypedNumber()
+
+
+PICK_THE_FIRM = "Pick the firm to move it to."
+
+
+class MoveSerializer(RenumberSerializer):
+    # Missing, null, blank, not an id or no such firm: the one sentence (Ruling 1A-5).
+    business = serializers.PrimaryKeyRelatedField(
+        queryset=Business.objects.all(),
+        error_messages={"required": PICK_THE_FIRM, "null": PICK_THE_FIRM, "does_not_exist": PICK_THE_FIRM,
+                        "incorrect_type": PICK_THE_FIRM},
+    )
+
+
 class Pages(PageNumberPagination):
     page_size = 40
     page_size_query_param = "page_size"
@@ -108,7 +142,49 @@ class SalesViewSet(viewsets.GenericViewSet):
     permission_classes = [V3Permission]
     queryset = Invoice.objects.sales().select_related("customer", "business")
     lookup_value_regex = r"\d+"
-    v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete", "sent": "bill.send"}
+    v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete", "sent": "bill.send",
+                  "renumber": "bill.edit", "move": "bill.edit"}
+
+    @action(detail=False, methods=["get"], url_path="next-number")
+    def next_number(self, request):
+        firm, day = firm_param(request.query_params), date_param(request.query_params, "invoice_date", today=True)
+        return Response({"business": firm.pk, "fy": fy_label(fy_of(day)), "invoice_date": day.isoformat(),
+                         **numbering.next_number(firm, day), "full_number": numbering.full_number_on(firm, day)})
+
+    @action(detail=False, methods=["get"], url_path="check-number")
+    def check_number(self, request):
+        params = request.query_params
+        typed = params.get("invoice_number", "")
+        try:
+            firm, day = firm_param(params), date_param(params, "invoice_date", today=True)
+        except serializers.ValidationError as refused:
+            # Always 200: it only checks (contract 2.12). Without a firm or a date it can read, it says so in
+            # next-number's words (Ruling 1A-5).
+            return Response(numbering.unchecked(typed, str(next(iter(refused.detail.values()))[0])))
+        exclude = params.get("exclude_id") or ""
+        return Response(numbering.check_number(firm, day, typed, exclude_invoice=int(exclude)
+                                               if exclude.isascii() and exclude.isdigit() else None))
+
+    @action(detail=False, methods=["get"], url_path="paper-book")
+    def paper_book(self, request):
+        firm = firm_param(request.query_params)
+        month = month_param(request.query_params)
+        if month is None:
+            raise serializers.ValidationError({"month": ["Give the month like 2026-09."]})
+        return Response(numbering.paper_book(firm, *month))
+
+    @action(detail=True, methods=["post"])
+    def renumber(self, request, pk=None):
+        typed = valid(RenumberSerializer, request.data)["invoice_number"]
+        invoice, old = renumber_bill(self.get_object(), request.user, typed)
+        return Response({"id": invoice.pk, "invoice_number": invoice.invoice_number, "previous": old})
+
+    @action(detail=True, methods=["post"])
+    def move(self, request, pk=None):
+        data = valid(MoveSerializer, request.data)
+        invoice, old_firm, old_number = move_bill(self.get_object(), request.user, data["business"], data["invoice_number"])
+        return Response({"id": invoice.pk, "business": invoice.business_id, "invoice_number": invoice.invoice_number,
+                         "previous": {"business": old_firm.pk, "invoice_number": old_number}})
 
     @action(detail=True, methods=["post"])
     def sent(self, request, pk=None):

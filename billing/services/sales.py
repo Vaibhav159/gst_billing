@@ -6,7 +6,7 @@ check the month (assert_sales_open), write it and its audit row in one transacti
 
 import re
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F
 from django.http import Http404
 from django.utils import timezone
@@ -15,6 +15,7 @@ from rest_framework.exceptions import ValidationError
 from billing.cache import invalidate
 from billing.constants import BILL_ACTIVE, BILL_CANCELLED
 from billing.models import AuditLog, Invoice
+from billing.numbering import checked_number, refuse_taken
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
 from billing.text import stamp
@@ -58,6 +59,17 @@ def locked_bill(invoice):
     if bill is None:
         raise Http404("No Invoice matches the given query.")
     return bill
+
+
+def save_number(invoice, fields=None):
+    """invoice.save() (of `fields` only, when given), with the database's unique-number guard
+    (two saves racing for one number) turned into the 409 clash instead of a 500."""
+    try:
+        with transaction.atomic():
+            invoice.save(**({"update_fields": [*fields, "updated_at"]} if fields else {}))
+    except IntegrityError:
+        refuse_taken(invoice.business, invoice.invoice_date, invoice.invoice_number, exclude_invoice=invoice.pk)
+        raise
 
 
 def refuse_cancelled(invoice, words=CANCELLED_WORDS):
@@ -135,3 +147,44 @@ def record_send(invoice, user, via, to=""):
         # Re-read under the row lock: a delete that lands now waits for this send to commit (review M2).
         invoice.refresh_from_db()
     return invoice
+
+
+def renumber_bill(invoice, user, typed):
+    """Give a bill a new number in its firm's series (the date stays); returns (bill, old number)."""
+    with transaction.atomic():
+        invoice = locked_bill(invoice)
+        refuse_cancelled(invoice)
+        assert_sales_open(invoice.business_id, invoice.invoice_date, "renumber")
+        old = invoice.invoice_number
+        number = checked_number(invoice.business, invoice.invoice_date, typed, exclude_invoice=invoice.pk)
+        if number.lower() == old.strip().lower():
+            raise ValidationError({"invoice_number": [f"{old} is this bill's number already. Type the new number."]})
+        invoice.invoice_number = number
+        save_number(invoice, ["invoice_number"])
+        log(invoice, user, "renumbered", f"{old} → {number}", changes={"invoice_number": {"old": old, "new": number}})
+    return invoice, old
+
+
+def move_bill(invoice, user, business, typed):
+    """Move a bill to another firm's series under a number of that series, with that firm frozen
+    on it; its tax heads follow the new firm's state, its total stays. Returns (bill, old firm, old number).
+
+    The row lock (locked_bill) also holds off v2's PATCH and PUT, which read the bill under it
+    (Ruling 1A-26), so neither writes back what the other just changed.
+    """
+    with transaction.atomic():
+        invoice = locked_bill(invoice)
+        refuse_cancelled(invoice)
+        if business.pk == invoice.business_id:
+            raise ValidationError({"business": [f"The bill is in {business.name} already. Pick the firm to move it to."]})
+        assert_sales_open(invoice.business_id, invoice.invoice_date, "move")
+        assert_sales_open(business, invoice.invoice_date, "move")
+        number = checked_number(business, invoice.invoice_date, typed)
+        old_business, old_number = invoice.business, invoice.invoice_number
+        invoice.business, invoice.invoice_number = business, number
+        invoice.firm_snapshot = firm_snapshot(business)
+        save_number(invoice, ["business", "invoice_number", "firm_snapshot"])  # Invoice.save re-files the heads
+        log(invoice, user, "moved", f"{old_number} → {number} ({business.name})",
+            changes={"business": {"old": old_business.pk, "new": business.pk},
+                     "invoice_number": {"old": old_number, "new": number}})
+    return invoice, old_business, old_number

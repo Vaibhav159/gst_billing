@@ -78,16 +78,19 @@ class AuditLogMixin:
 
     def _log(self, action, instance, user, changes=None, details="", snapshot=None):
         try:
-            AuditLog.objects.create(
-                action=action,
-                entity=self.audit_entity,
-                entity_id=instance.pk,
-                entity_name=self.get_entity_name(instance),
-                user=user if user and user.is_authenticated else None,
-                details=details,
-                changes=changes,
-                snapshot=snapshot,
-            )
+            # Its own savepoint: inside a write's transaction (v2's PATCH and PUT run in one, Ruling 1A-26), a row
+            # the database refuses would otherwise abort the write it only records.
+            with transaction.atomic():
+                AuditLog.objects.create(
+                    action=action,
+                    entity=self.audit_entity,
+                    entity_id=instance.pk,
+                    entity_name=self.get_entity_name(instance),
+                    user=user if user and user.is_authenticated else None,
+                    details=details,
+                    changes=changes,
+                    snapshot=snapshot,
+                )
         except Exception:
             logger.exception("Failed to write audit log entry")
 
