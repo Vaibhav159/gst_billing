@@ -40,6 +40,12 @@ stop only processes you started, by PID.
 - `src/core/router/` — `routes.tsx`, `PageFrame.tsx`, `useUnsavedGuard.tsx`.
 - `src/core/shell/` — the desktop and phone shells, search, `nav.ts`.
 - `src/core/format.ts`, `device.ts`, `prefs.ts`, `scope.tsx`, `view.ts`.
+- `src/core/sales/` — Selling's shared logic: bill maths with the server's rounding (and
+  `maths.vectors.json`), place of supply, numbering, income-tax flags, words, the share
+  message, PDF names, and `wire.ts` (the API's answers as paise-based types). Easy reuses
+  it, so nothing in it imports a page. `fixtures.ts` is test data for every sales test.
+  The GSTIN, PAN and mobile checks and the state table are `src/core/ids.ts`: build on
+  them, never repeat them.
 - `src/pages/<area>/` — the screens. `src/test/` — test setup and helpers.
 
 ## The kit and the prototype
