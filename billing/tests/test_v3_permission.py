@@ -1,13 +1,14 @@
 """v3's permission base (plan 1A, Task 1): the role matrix on the server, read once per request."""
 
 from datetime import date
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
-from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
@@ -28,10 +29,14 @@ from billing.roles import (
     role_of,
     why_not,
 )
+from billing.tests.test_ist_dates import EARLY_MORNING_IST
 from billing.tests.v3_helpers import client_for, person
 
 LINE = {"product_name": "Silver", "hsn_code": "711311", "gst_tax_rate": "0.03", "quantity": "1",
         "rate": "10000", "cgst": "150", "sgst": "150", "igst": "0", "amount": "10300"}
+MAKE_BILLS = {"detail": "Only the owner and counter staff can make bills. Ask the owner if you need it.",
+              "needs": "bill.create"}
+CHANGE_BILLS = {"detail": "Only the owner can change bills. Ask the owner if you need it.", "needs": "bill.edit"}
 
 
 class FrozenPermsTest(TestCase):
@@ -169,6 +174,135 @@ class PlacedPeopleOnV2EndpointsTest(TestCase):
         self.assertEqual(r.status_code, 201, r.data)
 
 
+class PlacedPeopleChangingBillsTest(TestCase):
+    """A placed accountant changes purchases on invoices/, but no write there turns a purchase into
+    a sale (Task 1 review, Important 1); a bad id is still v2's 404 (Rulings 1A-13 and 1A-15)."""
+
+    def setUp(self):
+        self.biz = Business.objects.create(name="LODHA JEWELLERS", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
+        self.cust = Customer.objects.create(name="LOCAL BUYER", state_name="RAJASTHAN")
+        self.supplier = Customer.objects.create(name="SUPPLIER", gst_number="08AAECD1234K1Z2", state_name="RAJASTHAN")
+        self.sale = Invoice.objects.create(business=self.biz, customer=self.cust, invoice_number="1",
+                                           invoice_date="2026-05-10", type_of_invoice="outward")
+        self.purchase = Invoice.objects.create(business=self.biz, customer=self.supplier, invoice_number="SJ-1",
+                                               invoice_date="2026-05-10", type_of_invoice="inward")
+        self.acct = client_for(person("neha", GROUP_ACCOUNTANT, "editor"))
+
+    def test_the_accountant_changes_a_purchase_that_stays_one(self):
+        for body in ({"payment_mode": "cash"}, {"type_of_invoice": "inward", "payment_mode": "bank"}):
+            with self.subTest(body=body):
+                r = self.acct.patch(reverse("invoice-detail", args=[self.purchase.id]), body, format="json")
+                self.assertEqual(r.status_code, 200, r.data)
+
+    def test_a_patch_or_put_that_makes_a_purchase_a_sale_needs_bill_edit(self):
+        for method in ("patch", "put"):
+            with self.subTest(method=method):
+                bill = Invoice.objects.create(business=self.biz, customer=self.supplier, invoice_number=f"SJ-{method}",
+                                              invoice_date="2026-05-10", type_of_invoice="inward")
+                body = {"type_of_invoice": "outward"}
+                if method == "put":
+                    body.update(business=self.biz.id, customer=self.supplier.id, invoice_number=bill.invoice_number,
+                                invoice_date="2026-05-10")
+                r = getattr(self.acct, method)(reverse("invoice-detail", args=[bill.id]), body, format="json")
+                self.assertEqual((r.status_code, r.data), (403, CHANGE_BILLS))
+                bill.refresh_from_db()
+                self.assertEqual(bill.type_of_invoice, "inward")
+
+    def test_update_line_items_that_makes_a_purchase_a_sale_needs_bill_edit(self):
+        r = self.acct.post(reverse("invoice-update-line-items", args=[self.purchase.id]),
+                           {"invoice": {"type_of_invoice": "outward"}, "line_items": [LINE]}, format="json")
+        self.assertEqual((r.status_code, r.data), (403, CHANGE_BILLS))
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.type_of_invoice, "inward")
+        self.assertFalse(self.purchase.lineitem_set.exists())
+
+    def test_update_line_items_follows_the_bill(self):
+        r = self.acct.post(reverse("invoice-update-line-items", args=[self.purchase.id]),
+                           {"line_items": [LINE]}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        r = self.acct.post(reverse("invoice-update-line-items", args=[self.sale.id]),
+                           {"line_items": [LINE]}, format="json")
+        self.assertEqual((r.status_code, r.data), (403, CHANGE_BILLS))
+
+    def test_the_eway_post_follows_the_bill(self):
+        r = self.acct.post(reverse("invoice-eway-bill", args=[self.purchase.id]), {"vehicle_number": "RJ14AB1234"},
+                           format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        r = self.acct.post(reverse("invoice-eway-bill", args=[self.sale.id]), {"vehicle_number": "RJ14AB1234"},
+                           format="json")
+        self.assertEqual((r.status_code, r.data), (403, CHANGE_BILLS))
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.vehicle_number, "")
+
+    def test_a_bad_or_missing_id_is_a_404(self):
+        for pk in ("abc", 999999):
+            with self.subTest(pk=pk):
+                r = self.acct.patch(reverse("invoice-detail", args=[pk]), {"payment_mode": "cash"}, format="json")
+                self.assertEqual(r.status_code, 404)
+
+    def test_an_unrouted_method_is_a_405(self):
+        self.assertEqual(self.acct.put(reverse("invoice-list"), {}, format="json").status_code, 405)
+
+
+class PlacedPeopleImportingTest(TestCase):
+    """The three import doors take the hybrid too (Ruling 1A-14): a placed accountant imports
+    purchases and customers, never a sale."""
+
+    def setUp(self):
+        self.biz = Business.objects.create(name="LODHA JEWELLERS", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
+        Customer.objects.create(name="LOCAL BUYER", state_name="RAJASTHAN").businesses.add(self.biz)
+        self.acct = client_for(person("neha", GROUP_ACCOUNTANT, "editor"))
+
+    def upload(self, rows, **fields):
+        return self.acct.post(reverse("csv-import"), {**fields, "file": SimpleUploadedFile("rows.csv", rows)},
+                              format="multipart")
+
+    def test_a_bulk_import_with_any_sale_needs_bill_create(self):
+        item = {"productName": "Silver", "hsn": "711311", "gstRate": 3, "qty": 1, "rate": 10000, "taxable": 10000,
+                "cgst": 150, "sgst": 150, "igst": 0, "amount": 10300}
+        purchase = {"invoiceNumber": "SJ-1", "invoice_date": "2026-05-10", "customerName": "SUPPLIER",
+                    "customerGST": "08AAECD1234K1Z2", "type": "INWARD", "total": 10300, "items": [item]}
+        sale = {**purchase, "invoiceNumber": "B-1", "customerName": "LOCAL BUYER", "customerGST": "", "type": "OUTWARD"}
+        r = self.acct.post(reverse("bulk-invoice-import"), {"business_id": self.biz.id, "invoices": [purchase, sale]},
+                           format="json")
+        self.assertEqual((r.status_code, r.data), (403, MAKE_BILLS))
+        self.assertFalse(Invoice.objects.exists())
+        r = self.acct.post(reverse("bulk-invoice-import"), {"business_id": self.biz.id, "invoices": [purchase]},
+                           format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(list(Invoice.objects.values_list("type_of_invoice", flat=True)), ["inward"])
+
+    def test_a_csv_import_of_bills_needs_bill_create(self):
+        rows = (b"invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+                b"C-1,2026-05-10,LOCAL BUYER,Silver,1,10000,711311,0.03\n")
+        r = self.upload(rows, business_id=self.biz.id)
+        self.assertEqual((r.status_code, r.data), (403, MAKE_BILLS))
+        self.assertFalse(Invoice.objects.exists())
+
+    def test_a_csv_import_of_customers_needs_customer_edit_and_of_products_product_edit(self):
+        r = self.upload(b"name,address,gst_number,mobile_number,pan_number,state_name\nNEW BUYER,,,,,RAJASTHAN\n",
+                        type="customer", business_id=self.biz.id)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertTrue(Customer.objects.filter(name="NEW BUYER").exists())
+        r = self.upload(b"name,hsn_code,gst_tax_rate,description\nCSV PRODUCT,711319,0.03,ok\n", type="product")
+        self.assertEqual((r.status_code, r.data), (403, {
+            "detail": "Only the owner can add or change products. Ask the owner if you need it.",
+            "needs": "product.edit"}))
+
+    def test_an_ai_create_of_a_sale_needs_bill_create(self):
+        data = {"business_id": self.biz.id, "invoice_data": {
+            "customer_name": "MUMBAI BUYER", "customer_gst_number": "27ABCDE1234A1Z5", "invoice_number": "AI-1",
+            "invoice_date": "2026-05-10",
+            "line_items": [{"product_name": "Silver", "hsn_code": "711311", "quantity": 1, "rate": 10000,
+                            "gst_tax_rate": 0.03}]}}
+        r = self.acct.post(reverse("ai-invoice-create"), data, format="json")
+        self.assertEqual((r.status_code, r.data), (403, MAKE_BILLS))
+        self.assertFalse(Invoice.objects.exists())
+        r = self.acct.post(reverse("ai-invoice-create"), {**data, "type_of_invoice": "inward"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(Invoice.objects.get().type_of_invoice, "inward")
+
+
 class SalesOpenTest(TestCase):
     def setUp(self):
         self.biz = Business.objects.create(name="KIRAN GOLD HOUSE", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
@@ -198,7 +332,8 @@ class FinancialYearTest(TestCase):
         self.assertEqual(fy_of(date(2026, 3, 31)), 2025)
         self.assertEqual(fy_of(date(2026, 4, 1)), 2026)
         self.assertEqual(fy_of("2027-02-08"), 2026)
-        self.assertEqual(fy_of(), fy_of(timezone.localdate()))
+        with patch("django.utils.timezone.now", return_value=EARLY_MORNING_IST):
+            self.assertEqual(fy_of(), 2026)  # 1 Apr 2026, 01:30 in IST; still 31 Mar in UTC
         self.assertEqual(fy_label(2026), "2026-27")
         self.assertEqual(fy_label(2099), "2099-00")
         self.assertEqual(fy_range(2026), (date(2026, 4, 1), date(2027, 3, 31)))

@@ -773,7 +773,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         "create": sale_or_purchase("bill.create", "purchase.create"),
         "update": sale_or_purchase("bill.edit", "purchase.edit"),
         "partial_update": sale_or_purchase("bill.edit", "purchase.edit"),
-        "update_line_items": sale_or_purchase("bill.edit", "purchase.edit"),
+        "update_line_items": sale_or_purchase("bill.edit", "purchase.edit", under="invoice"),
         "eway_bill": sale_or_purchase("bill.edit", "purchase.edit"),
         "destroy": sale_or_purchase("bill.delete", "purchase.delete"),
     }
@@ -2304,12 +2304,20 @@ class ReportView(APIView):
         return self.generate_csv_response(start_date, end_date, invoice_type)
 
 
+def _csv_import_needs(request, view, obj=None):
+    """csv/import/'s v3 key: customers need customer.edit, products product.edit, and bills
+    bill.create (process_invoice_csv writes only sales)."""
+    kind = request.data.get("import_type") or request.data.get("type") or "invoice"
+    return {"customer": "customer.edit", "product": "product.edit"}.get(kind, "bill.create")
+
+
 class CSVImportView(APIView):
     """
     API endpoint for importing data from CSV files.
     Supports importing invoices, customers, and products.
     """
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"POST": _csv_import_needs}
 
     parser_classes = [MultiPartParser]
 
@@ -2391,6 +2399,14 @@ class CSVImportView(APIView):
             )
 
 
+def _bulk_import_needs(request, view, obj=None):
+    """invoices/bulk-import/'s v3 key: purchase.import when every row is a purchase (type
+    "INWARD", as run_bulk_import reads it), bill.create when any row is a sale."""
+    rows = request.data.get("invoices") if isinstance(request.data, dict) else None
+    purchases = isinstance(rows, list) and all(isinstance(row, dict) and row.get("type") == "INWARD" for row in rows)
+    return "purchase.import" if purchases else "bill.create"
+
+
 class BulkInvoiceImportView(APIView):
     """
     API endpoint for bulk importing invoices from parsed Excel data.
@@ -2400,7 +2416,8 @@ class BulkInvoiceImportView(APIView):
     bulk_create for line items, dropping ~200 round-trips for a 23-invoice import
     down to ~10. Wrapped in a single transaction for atomicity.
     """
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"POST": _bulk_import_needs}
 
     def post(self, request):
         return run_bulk_import(request)
@@ -2665,7 +2682,8 @@ class AIInvoiceCreateView(APIView):
     """
     API endpoint for creating invoices from AI-extracted data.
     """
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"POST": sale_or_purchase("bill.create", "purchase.create")}
 
     # Accept both JSON (legacy / non-AI flows) and multipart (AI Import
     # which now ships the original source image alongside the extracted
