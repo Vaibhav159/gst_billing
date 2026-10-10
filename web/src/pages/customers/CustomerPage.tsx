@@ -22,7 +22,7 @@ import {
   Badge, Banner, Button, ButtonLink, Card, ConfirmDialog, DL, EmptyState, Figure, IconButton, ListRow, ListSkeleton, Menu, Money, Page, QueryView, Table, Td, Th, Tr, useToast, type MenuItem,
 } from "@/core/ui";
 import { useView } from "@/core/view";
-import { billsWithCancelled, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, tableState, useJustSaved, useRouteCustomer } from "./lib";
+import { billsWithCancelled, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved, useRouteCustomer } from "./lib";
 import { MoreButton, useContact } from "./listParts";
 import { Bump, CopyButton, InfoCell, PeriodSwitch, QuickActions, type PeriodOption } from "./pageParts";
 import { MissingRecord, WhyNote } from "./parts";
@@ -68,10 +68,10 @@ function useDetail(c: Customer) {
   const view = `${period}|${firmId}|${fy}`;
   const [shownFor, setShownFor] = useState(view);
   if (shownFor !== view) { setShownFor(view); setLimit(PAGE); }
-  // the firm's name is known (a firm picked on this device is known before the list of firms comes). The bills wait for
-  // it, or for that list to fail, so their figures never show under another firm's name and nothing says "the firm picked's"
-  const named = typeof firmId !== "number" || firms.some((f) => f.id === firmId);
-  const worded = firmId !== null && (named || firmsFailed);
+  // the bills wait for the firm's name, or for the list of firms to fail, so their figures never show under another
+  // firm's name and nothing says "the firm picked's". scope: the firm in words once it can be worded, its name or "All
+  // firms"; "the firm picked" when that list failed
+  const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
   const st = useStatement(c.id, !worded ? null : typeof firmId === "number" ? { business_id: firmId } : {});
   const itax = useItaxBills(c.id);
   const all = st.data?.bills ?? [];
@@ -104,8 +104,6 @@ function useDetail(c: Customer) {
     const inMonth = fig.active.filter((b) => monthOf(b.invoice_date) === m);
     trend.push({ ym: m, total: inMonth.reduce((s, b) => s + b.total_amount, 0), count: inMonth.length });
   }
-  // the firm in words, once it can be worded: its name or "All firms"; "the firm picked" when the list of firms failed
-  const scope = worded ? scopeName(firms, firmId) : null;
   const home = homeState(firms, firmId);
   const taxWay: TaxWay = !c.state_name || !home ? null : tableState(c.state_name) !== home ? "igst" : "local";
   return {

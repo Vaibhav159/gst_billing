@@ -28,6 +28,16 @@ export function scopeName(firms: Firm[], firmId: FirmId | null, short = false): 
   const f = firmId === null ? undefined : firms.find((x) => x.id === firmId);
   return f ? (short ? f.short : f.name) : "the firm picked";
 }
+/**
+ * Whether the firm picked can be named yet. named: its name is known (a firm picked on this device is known before the
+ * list of firms comes). worded: a firm's figures may be asked for and shown, under its name, or as "the firm picked" once
+ * that list has failed. scope: the firm in words once worded ("" until then), so nothing names it before its name is known.
+ */
+export function scopeWords(firms: Firm[], firmId: FirmId | null, firmsFailed: boolean): { named: boolean; worded: boolean; scope: string } {
+  const named = typeof firmId !== "number" || firms.some((f) => f.id === firmId);
+  const worded = firmId !== null && (named || firmsFailed);
+  return { named, worded, scope: worded ? scopeName(firms, firmId) : "" };
+}
 /** A state name in the GST table's spelling ("JAMMU & KASHMIR" -> "JAMMU AND KASHMIR"), as the state picker and a GSTIN name it; one the table doesn't have, upper-cased. */
 export function tableState(name: string | null | undefined): string {
   const code = stateCodeOf(name);

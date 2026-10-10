@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Calendar, Download, FileText, Info, MoreVertical, NotebookPen, Printer, Share2, UserRound } from "lucide-react";
 import { useStatement, type Customer, type PaidAs, type StatementBill, type StatementParams } from "@/core/api/customers";
+import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
 import { addMonths, date, dateShort, inr, lastDayOfMonth, mobileText, monthLabel, monthOf, plural, rangeLabel, todayIST } from "@/core/format";
 import { formatMobile, mobileDigits, stateTitle } from "@/core/ids";
@@ -13,8 +14,9 @@ import { useFirms, useScope } from "@/core/scope";
 import {
   Badge, Banner, Button, Card, EmptyState, Field, Figure, IconButton, Input, ListSkeleton, Menu, Money, Page, QueryView, Segmented, Table, Td, Th, Tr, useToast, type BadgeTone,
 } from "@/core/ui";
+import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
-import { downloadFile, fyPeriod, notCounted, scopeName, SETTLED, useRouteCustomer } from "./lib";
+import { downloadFile, fyPeriod, notCounted, scopeWords, SETTLED, useRouteCustomer } from "./lib";
 import { MissingRecord } from "./parts";
 import { printPdf, sharePdf, statementFileName, useStatementPdf } from "./statementFiles";
 
@@ -51,6 +53,7 @@ export default function CustomerStatement() {
 function Statement({ c }: { c: Customer }) {
   const { firmId, fy } = useScope();
   const { firms, error: firmsFailed } = useFirms();
+  const offline = useNetwork() === "offline";
   const { isPhone } = useView();
   const { show } = useToast();
   const today = todayIST();
@@ -58,31 +61,34 @@ function Statement({ c }: { c: Customer }) {
   const [which, setWhich] = useState<Which>("fy");
   const [from, setFrom] = useState(P.fy.from);
   const [to, setTo] = useState(today);
-  const badRange = which === "custom" && (!from || !to || from > to);
-  const span = which === "custom" ? { from, to, label: badRange ? "Dates to fix" : rangeLabel(from, to), range: badRange ? "" : rangeLabel(from, to) } : P[which];
+  // own dates are the boxes once they pause: a date box changes at each digit of a year typed (0002, 0020, 0202, 2026),
+  // each one a date, and the period, its bills and its PDF follow only the last
+  const ownFrom = useDebounced(from);
+  const ownTo = useDebounced(to);
+  const badRange = which === "custom" && (!ownFrom || !ownTo || ownFrom > ownTo);
+  const span = which === "custom" ? { from: ownFrom, to: ownTo, label: badRange ? "Dates to fix" : rangeLabel(ownFrom, ownTo), range: badRange ? "" : rangeLabel(ownFrom, ownTo) } : P[which];
   // the bills wait for the firm's name (a firm picked on this device is known before the list of firms comes), or for
   // that list to fail, so nothing names the firm before its name is known
-  const named = typeof firmId !== "number" || firms.some((f) => f.id === firmId);
-  const worded = firmId !== null && (named || firmsFailed);
+  const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
   const params: StatementParams | null = !worded || badRange ? null : { start_date: span.from, end_date: span.to, ...(typeof firmId === "number" ? { business_id: firmId } : {}) };
   const st = useStatement(c.id, params);
-  const scope = worded ? scopeName(firms, firmId) : "";
-  const file = statementFileName(c.name, span.label, which === "custom" ? { from, to } : undefined);
+  const file = statementFileName(c.name, span.label, which === "custom" ? { from: ownFrom, to: ownTo } : undefined);
   const bills = badRange ? [] : st.data?.bills ?? [];
   const t = st.data?.totals;
-  // the PDF of a period with bills, made once (useMemo keeps it the same object until the statement or its words change);
+  // the PDF of a period with bills, made once (useMemo keeps it the same object until the statement or its words change:
+  // the customer's words, not the customer, as a list's row that stood in for them gives way to the same words anew);
   // never one that would name "the firm picked"
   const data = useMemo(() => (st.data?.bills.length && !badRange && named ? {
     customer: { name: c.name, mobile: mobileText(c.mobile_number), gstin: c.gst_number, pan: c.pan, address: [c.address, c.city, stateTitle(c.state_name)].filter(Boolean).join(", ") },
     periodLabel: span.label, periodRange: span.range, scope, made: date(today), statement: st.data,
-  } : null), [st.data, badRange, named, c, span.label, span.range, scope, today]);
+  } : null), [st.data, badRange, named, c.name, c.mobile_number, c.gst_number, c.pan, c.address, c.city, c.state_name, span.label, span.range, scope, today]);
   const pdf = useStatementPdf(data);
   // making the PDF: Share spins until it's ready (a PDF that couldn't be made says so in the buttons' titles instead)
   const making = data !== null && !pdf.blob && !pdf.failed;
   const off = !pdf.blob;
   // why Print, Download and Share are off: their titles, and the phone menu's hints
   const why = badRange ? "Fix the dates first"
-    : !st.data ? (st.isError ? "The bills didn't load. Use Try again." : "Waits for the bills to load")
+    : !st.data ? (offline ? "Needs the internet" : st.isError ? "The bills didn't load. Use Try again." : "Waits for the bills to load")
       : !bills.length ? "No bills in this period"
         : !named ? "The firms didn't load. Reload the page to make the PDF."
           : pdf.failed ? "The PDF couldn't be made. Reload the page and try again."
@@ -120,10 +126,10 @@ function Statement({ c }: { c: Customer }) {
       <Segmented label="Period" options={periodOptions} value={which} onChange={setWhich} full={isPhone} className={isPhone ? "" : "self-start"} />
       {which === "custom" ? (
         <div className={cn("grid gap-3 anim-rise", isPhone ? "grid-cols-2" : "grid-cols-[200px_200px]")}>
-          <Field label="From" htmlFor="st-from" error={badRange && from && to ? "The start date is after the end date." : !from ? "Pick a start date." : ""}>
+          <Field label="From" htmlFor="st-from" error={badRange && ownFrom && ownTo ? "The start date is after the end date." : !ownFrom ? "Pick a start date." : ""}>
             <Input id="st-from" type="date" value={from} max={today} onChange={(e) => setFrom(e.target.value)} />
           </Field>
-          <Field label="To" htmlFor="st-to" error={!to ? "Pick an end date." : ""}>
+          <Field label="To" htmlFor="st-to" error={!ownTo ? "Pick an end date." : ""}>
             <Input id="st-to" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
           </Field>
         </div>

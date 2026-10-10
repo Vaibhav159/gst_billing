@@ -44,7 +44,7 @@ const PAGES: Record<string, string[]> = {
 
 /** The prototype's `hideNav`: forms and print, where the phone's tabs make way. Task 16's PhoneShell reads `handle.hideNav`. */
 const HIDE_NAV = new Set([
-  "/sales/new", "/sales/:id/edit", "/sales/:id/print", "/customers/new", "/customers/:id/edit", "/purchases/new", "/purchases/:id/edit", "/purchases/inbox/:id",
+  "/sales/new", "/sales/:id/edit", "/sales/:id/print", "/purchases/new", "/purchases/:id/edit", "/purchases/inbox/:id",
   "/products/new", "/products/:id/edit", "/firms/new", "/firms/:id/edit", "/e/new", "/e/new/items", "/e/customers/new", "/e/customers/:id/edit",
 ]);
 

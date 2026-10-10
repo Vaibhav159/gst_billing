@@ -22,7 +22,7 @@ import {
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { customersCsv } from "./exportCsv";
-import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, tableState, useJustSaved } from "./lib";
+import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved } from "./lib";
 import { CustomerRowMenu, FirmChips, MoreButton } from "./listParts";
 import { WhyNote } from "./parts";
 
@@ -59,10 +59,10 @@ function useCustomersPage() {
   const [usual, setUsual] = useState<number | null>(null);
   const [sort, setSort] = useState<CustomerSort>("recent");
   const term = useDebounced(q.trim());
-  // the firm's name is known: a firm picked on this device is known before the list of firms comes
-  const scopeKnown = typeof firmId !== "number" || firms.some((f) => f.id === firmId);
-  // so the figures wait for its name as well as its id (or for that list to fail), and never show under another name
-  const filters: CustomerListFilters = { firmId: scopeKnown || firmsFailed ? firmId : null, from: period.from, to: period.to, q: term, gst, state, usualFirm: usual, sort };
+  // the figures wait for the firm's name as well as its id (or for the list of firms to fail), and never show under
+  // another name: a firm picked on this device is known before that list comes
+  const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
+  const filters: CustomerListFilters = { firmId: worded ? firmId : null, from: period.from, to: period.to, q: term, gst, state, usualFirm: usual, sort };
   const list = useCustomerList(filters);
   const everyone = useCustomerCount();
   const pages = list.data?.pages ?? [];
@@ -90,10 +90,10 @@ function useCustomersPage() {
     chips, clearAll, describe, justSaved, ready, offline: net === "offline",
     // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
     // list of firms (still coming, or failed) it waits even for all firms, as the file names each customer's usual firms
-    exportable: ready && scopeKnown && !firmsLoading && !firmsFailed,
+    exportable: ready && named && !firmsLoading && !firmsFailed,
     // why Export is off once the rows are on screen
     exportWait: firmsFailed ? NO_FIRMS : FIRMS_LOADING,
-    params: filters.firmId === null ? null : customerListParams(filters), scope: scopeName(firms, firmId), home: homeState(firms, firmId),
+    params: filters.firmId === null ? null : customerListParams(filters), scope, home: homeState(firms, firmId),
   };
 }
 type D = ReturnType<typeof useCustomersPage>;

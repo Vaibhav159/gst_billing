@@ -1,5 +1,8 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { onlineManager } from "@tanstack/react-query";
+import { useCustomer, useCustomerSearch } from "@/core/api/customers";
+import { __setNetState } from "@/core/api/network";
 import CustomerStatement from "./CustomerStatement";
 import { makeStatementPdf } from "./statementPdf";
 import { ANIL, FIRMS, mount, serve, type Call } from "./testing";
@@ -32,13 +35,17 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   clicked = [];
-  vi.mocked(makeStatementPdf).mockClear();
+  // (a reset, not a clear: a test that stops early leaves no queued answer for the next)
+  vi.mocked(makeStatementPdf).mockReset();
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:statement"), revokeObjectURL: vi.fn() });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this.download); });
 });
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  // (here, not in the test: a test that stops part-way never reaches its end, and offline would hold every later test's requests)
+  onlineManager.setOnline(true);
+  act(() => __setNetState("online"));
   delete (navigator as { share?: unknown }).share;
   delete (navigator as { canShare?: unknown }).canShare;
   (window as unknown as { __phone?: boolean }).__phone = false;
@@ -89,6 +96,89 @@ test("this month, last month and own dates ask for their period; a start after t
   expect(screen.getByText("Fix the dates to see bills")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "Fix the dates first");
   expect(asked().filter((a) => a.endsWith("..2026-10-01"))).toEqual([]);
+});
+
+/**
+ * For a test that waits on the page's own timer (the 250 ms pause before own dates ask, Ruling 1C-4): from here the
+ * clock moves only when the test says. Testing Library's async helpers wait on a 0 ms timer this clock never runs, so
+ * the steps after it are synchronous.
+ */
+function handClock() {
+  const now = Date.now();
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
+}
+/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
+async function pass(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
+
+test("own dates ask once the boxes pause: a year typed a digit at a time is a date at every digit, and only the last is asked for", async () => {
+  const calls = serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  await screen.findByText("Billed · FY 2026-27");
+  await userEvent.click(screen.getByRole("radio", { name: "Choose dates" }));
+  const asked = () => calls.filter((c) => c.url === "customers/7/statement/").map((c) => `${c.params.start_date}..${c.params.end_date}`);
+  handClock();
+  // as desktop Chrome does while a year is typed into a date box: a change at each digit, each one a date, a quick
+  // typist's 100 ms apart
+  const fromBox = screen.getByLabelText("From");
+  for (const year of ["0002", "0020", "0202", "2026"]) {
+    fireEvent.change(fromBox, { target: { value: `${year}-09-01` } });
+    await pass(100);
+  }
+  await pass(149);
+  expect(asked()).toEqual(["2026-04-01..2026-10-08"]);
+  await pass(1);
+  expect(asked()).toEqual(["2026-04-01..2026-10-08", "2026-09-01..2026-10-08"]);
+  expect(made()).toEqual(["FY 2026-27", "1 Apr to 8 Oct 2026", "1 Sep to 8 Oct 2026"]);
+});
+
+/** A search's rows on screen, as the bill form's customer box or Ctrl K shows them: once they've come, Anil's row is in the cache. */
+function Searched() {
+  return <p>{useCustomerSearch("Anil").data ? "searched" : "searching"}</p>;
+}
+/** Whether the statement's customer is still the row standing in for him, or the customer the server sent. */
+function Whose() {
+  const one = useCustomer(7);
+  return <p>{one.isPlaceholderData ? "the row stands in" : one.data ? "the customer came" : "nothing yet"}</p>;
+}
+
+test("opened from a row already on screen, the PDF is made once: the row stands in for the customer, then the customer comes", async () => {
+  let customerComes = () => {};
+  const held = new Promise<void>((resolve) => { customerComes = resolve; });
+  serve({
+    "GET customers/": { count: 1, next: null, results: [ANIL] },
+    "GET customers/7/": async () => { await held; return { status: 200, data: ANIL }; },
+    "GET customers/7/statement/": answer,
+  });
+  const { router } = mount([{ path: "/customers", element: <Searched /> }, { path: "/customers/:id/statement", element: <><CustomerStatement /><Whose /></> }], ["/customers"]);
+  await screen.findByText("searched");
+  await act(async () => { await router.navigate("/customers/7/statement"); });
+  expect(await screen.findByText("the row stands in")).toBeInTheDocument();
+  await waitFor(() => expect(made()).toEqual(["FY 2026-27"]));
+  await act(async () => { customerComes(); });
+  expect(await screen.findByText("the customer came")).toBeInTheDocument();
+  // the same name, phone, GSTIN, PAN and address: the PDF already made stands
+  expect(made()).toEqual(["FY 2026-27"]);
+});
+
+test("offline, the buttons say the bills need the internet, not that they're loading", async () => {
+  let customerComes = () => {};
+  const held = new Promise<void>((resolve) => { customerComes = resolve; });
+  const calls = serve({ "GET customers/7/": async () => { await held; return { status: 200, data: ANIL }; }, "GET customers/7/statement/": answer });
+  mount(routes, ["/customers/7/statement"]);
+  await waitFor(() => expect(calls.some((c) => c.url === "customers/7/")).toBe(true));
+  // the connection drops while the customer is on its way: the bills, asked for once it comes, wait for the internet
+  onlineManager.setOnline(false);
+  await act(async () => { customerComes(); });
+  const download = await screen.findByRole("button", { name: "Download PDF" });
+  // (the reply that landed marks the server reachable; a real browser that's offline stays offline, jsdom's never is)
+  act(() => __setNetState("offline"));
+  expect(download).toHaveAttribute("title", "Needs the internet");
+  expect(screen.getByRole("button", { name: "Share PDF" })).toHaveAttribute("title", "Needs the internet");
+  expect(calls.some((c) => c.url === "customers/7/statement/")).toBe(false);
 });
 
 test("Download PDF hands over the file, named after the customer and the period", async () => {
