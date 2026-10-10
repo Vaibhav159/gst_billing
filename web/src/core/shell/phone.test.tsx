@@ -383,7 +383,7 @@ test("the greeting after signing in is spent once a page stays: a later redraw o
   server({ prefs: { phoneMode: "expert" } });
   await signIn("/login?next=%2Fsales");
   const announcer = () => document.getElementById("route-announcer")!;
-  await waitFor(() => expect(announcer()).toHaveTextContent("Bills")); // greeted
+  await waitFor(() => expect(announcer()).toHaveTextContent("Sales")); // greeted (the desktop list's title)
   act(() => { announcer().textContent = ""; });
   act(() => { phone(true); crossings.forEach((cb) => cb()); }); // the phone shell takes over, and the page is drawn afresh in it
   await screen.findByRole("navigation", { name: /tabs/i });

@@ -27,7 +27,7 @@ test("desktop: the nav, More, the firm picker and search work against the real s
   await items.nth(was).click();
   await expect(picker).toHaveAccessibleName(usual);
   await page.keyboard.press("Control+k");
-  const box = page.getByRole("combobox");
+  const box = page.getByRole("dialog", { name: "Search" }).getByRole("combobox");
   await expect(box).toBeFocused();
   await box.fill(process.env.E2E_SEARCH || "TEST");
   // a row only the server's search returns: the app lists its own pages, actions and firms

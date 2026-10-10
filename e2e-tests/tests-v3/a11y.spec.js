@@ -35,7 +35,7 @@ const STATES = [
     name: "search open, with the server's results", on: ["desktop"], path: "/sales",
     async show(page) {
       await page.keyboard.press("Control+k");
-      await page.getByRole("combobox").fill(process.env.E2E_SEARCH || "TEST");
+      await page.getByRole("dialog", { name: "Search" }).getByRole("combobox").fill(process.env.E2E_SEARCH || "TEST");
       await expect(page.getByRole("option", { name: process.env.E2E_SEARCH_HIT || "TEST CUSTOMER" }).first()).toBeVisible();
     },
   },

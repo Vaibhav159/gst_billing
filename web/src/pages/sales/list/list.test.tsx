@@ -1,0 +1,220 @@
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Route, Routes, useLocation } from "react-router";
+import type { Me } from "@/core/auth/AuthProvider";
+import { refuse, salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow, type Call, type Route as ApiRoute } from "@/core/sales/fixtures";
+import { ScopeProvider } from "@/core/scope";
+import { renderApp } from "@/test/render";
+import SalesList from "../SalesList";
+
+const MEENA = { id: 8, name: "Meena Jain", gst_number: "", mobile_number: "9414126508", type: "person" };
+/** Two bills today and a cancelled one yesterday, newest first, as the server sends them. */
+const ROWS = [
+  wireRow({ id: 413, invoice_number: "KGH/2026-27/32", counter: 32, customer: MEENA, payment_mode: "credit", taxable: "30636.93", cgst: "459.55", sgst: "459.56", tax: "919.11", total_amount: "31556.04", created_at: "2026-10-08T12:09:00+05:30" }),
+  wireRow(),
+  wireRow({ id: 405, invoice_number: "KGH/2026-27/30", counter: 30, invoice_date: "2026-10-07", created_at: "2026-10-07T16:20:00+05:30", status: "cancelled", cancel_reason: "Customer returned it" }),
+];
+const isFacets = (c: Call) => c.params.facets === 1 && c.params.page_size === 1;
+/** The list's pages (the facets are asked for apart, one bill a page). */
+const lists = (calls: Call[]) => calls.filter((c) => c.url === "sales/" && !isFacets(c));
+function server(rows = ROWS, over: Record<string, unknown> = {}, more: ApiRoute[] = []) {
+  return salesServer([["GET", "sales/", (c) => (isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : wirePage(rows, over))], ...more]);
+}
+function Where() { const l = useLocation(); return <p data-testid="where">{`${l.pathname}${l.search}`}</p>; }
+const mount = (path = "/sales", me?: Partial<Me>) => renderApp(
+  <ScopeProvider><Routes>
+    <Route path="/sales" element={<><SalesList /><Where /></>} />
+    <Route path="/sales/:id" element={<><p>the bill page</p><Where /></>} />
+  </Routes></ScopeProvider>, { path, me });
+
+// 08 Oct 2026 in India, as in the contract's examples; the clock still runs, so pauses and debounces work
+beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true }); vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30")); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+/**
+ * From here the timers are the test's too: a search's pause (300 ms) passes when the test says, so nothing waits on real
+ * time (Ruling 1B-10). They still move with real time, for Testing Library's own waits.
+ */
+function typingClock() {
+  const now = Date.now();
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], shouldAdvanceTime: true, now });
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+}
+
+test("the list asks for the firm and year in view, and shows what they add up to, day by day", async () => {
+  const { calls } = server();
+  mount();
+  expect(await screen.findByRole("heading", { level: 1, name: "Sales" })).toBeInTheDocument();
+  expect(await screen.findByText("Sales bills of both firms · FY 2026-27")).toBeInTheDocument();
+  expect(await screen.findByText("All firms · FY 2026-27")).toBeInTheDocument();
+  expect(lists(calls)[0].params).toEqual({ fy: "2026-27", ordering: "-date", page: 1, page_size: 40 });
+  expect(calls.find(isFacets)?.params).toEqual({ fy: "2026-27", facets: 1, page: 1, page_size: 1 });
+  expect(screen.getByText("₹1,18,639.25")).toBeInTheDocument();
+  expect(screen.getByText("Today, 08 Oct 2026").closest("tr")).toHaveTextContent("Today, 08 Oct 2026 · 2 bills · ₹1,18,639.25");
+  expect(screen.getByText("Yesterday, 07 Oct 2026").closest("tr")).toHaveTextContent("Yesterday, 07 Oct 2026 · 0 bills · ₹0.00 · 1 cancelled");
+  expect([...document.querySelectorAll("tr[data-row]")].map((r) => r.getAttribute("data-row"))).toEqual(["413", "412", "405"]);
+  expect(screen.getByText("Showing all 2 bills · 1 cancelled bill also listed")).toBeInTheDocument();
+  // the summary names the cancelled bill apart, as not counted, in one sentence
+  expect(screen.getByText("Purchases are never counted here. These figures follow your search, firm, payment, status and period. 1 cancelled bill not counted.")).toBeInTheDocument();
+  // the period chips come from the year's facets: the month so far, a month still to file, and the filed ones
+  expect(screen.getByRole("button", { name: "October 2026: 4 bills, 1 to 8 Oct" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "September 2026: 14 bills, file by 11 Oct" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "August 2026: 19 bills, filed" })).toBeInTheDocument();
+  expect(screen.getByText("Filed for both firms: April to August. Bills in those months can't be changed or deleted.")).toBeInTheDocument();
+});
+
+test("filters live in the address and ask again: a saved view, the status, and a search that looks through the whole year", async () => {
+  const { calls } = server();
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Needs a check: 3 bills" }));
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/sales?month=all&status=check"));
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", check: 1 }));
+  expect(screen.getByRole("button", { name: "Needs a check: 3 bills. Showing; press to clear" })).toHaveAttribute("aria-pressed", "true");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Status" }), "cancelled");
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ status: "cancelled" }));
+  await userEvent.click(screen.getByRole("button", { name: /^September 2026/ }));
+  const user = typingClock();
+  await user.type(screen.getByRole("searchbox", { name: /Search sales bills/ }), "anil");
+  act(() => { vi.advanceTimersByTime(300); }); // typing has paused: the search asks
+  expect(await screen.findByText(/Searching all of FY 2026-27, not just September 2026\./)).toBeInTheDocument();
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", q: "anil", facets: 1, status: "cancelled" }));
+  await user.click(screen.getByRole("button", { name: "Only September" }));
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", q: "anil" }));
+});
+
+test("on a row, ↓ moves with the preview, Esc closes it, and Enter opens the bill", async () => {
+  server(ROWS, {}, [["GET", "sales/413/", () => wireDetail({ ...ROWS[0] })], ["GET", "sales/412/", () => wireDetail()]]);
+  mount();
+  const first = await waitFor(() => { const r = document.querySelector<HTMLElement>('tr[data-row="413"]'); expect(r).not.toBeNull(); return r!; });
+  expect(first).toHaveAttribute("tabindex", "0");
+  act(() => first.focus());
+  await userEvent.keyboard("{ArrowDown}");
+  const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/31" });
+  await waitFor(() => expect(document.querySelector('tr[data-row="412"]')).toHaveFocus());
+  expect(screen.getByTestId("where")).toHaveTextContent("bill=412");
+  expect(await within(pane).findByText("12.345 gms × ₹6,512.50/gms")).toBeInTheDocument();
+  expect(within(pane).getByText("Rakesh Soni · 10:42")).toBeInTheDocument();
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+  await userEvent.keyboard("{Enter}");
+  expect(await screen.findByText("the bill page")).toBeInTheDocument();
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/412");
+});
+
+test("ticking bills says what's selected; the owner deletes them together, and Undo brings them back", async () => {
+  let bin = 50;
+  const { calls } = server(ROWS, {}, [
+    ["DELETE", /^sales\/\d+\/$/, (c) => wireBin({ id: (bin += 1), original_id: Number(c.url.split("/")[1]) })],
+    ["POST", /^bin\/\d+\/restore\/$/, () => wireDetail()],
+  ]);
+  mount();
+  await userEvent.click(await screen.findByRole("checkbox", { name: "Select KGH/2026-27/32" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
+  const bar = screen.getByRole("region", { name: "Selected bills" });
+  expect(bar).toHaveTextContent("2 bills selected · ₹1,18,639.25");
+  await userEvent.click(within(bar).getByRole("button", { name: "Delete 2 bills…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Delete 2 sales bills?" });
+  act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against the click that opened it
+  await userEvent.click(within(dialog).getByRole("button", { name: "Entered twice" }));
+  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  await waitFor(() => expect(calls.filter((c) => c.method === "DELETE").map((c) => [c.url, c.body])).toEqual([["sales/413/", { reason: "Entered twice" }], ["sales/412/", { reason: "Entered twice" }]]));
+  expect(await screen.findByText("Deleted 2 bills")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  await waitFor(() => expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/"]));
+  expect(await screen.findByText("Restored 2 bills")).toBeInTheDocument();
+});
+
+test("a search that finds nothing here says where else it found bills, and offers every year", async () => {
+  salesServer([["GET", "sales/", (c) => ({ ...wirePage([]), facets: wireFacets(isFacets(c) ? {} : { elsewhere: [{ fy: "2025-26", bills: 2 }] }) })]]);
+  mount("/sales?q=zzz");
+  expect(await screen.findByText("No sales bills match “zzz”")).toBeInTheDocument();
+  expect(screen.getByText(/Found 2 bills in FY 2025-26\.$/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Search all years (2)" }));
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("month=years"));
+});
+
+test("a viewer is told what they can do, and making bills isn't offered", async () => {
+  server();
+  mount("/sales", { role: "viewer", permissions: ["view", "reports.export"] });
+  expect(await screen.findByText("Signed in as view only: you can look at, print, download and export bills. Making them is for the owner and counter staff; changing or deleting them, for the owner.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "New bill" })).toBeDisabled();
+});
+
+test("a list that can't load says so, keeps the filters as picked but off, and Try again asks again", async () => {
+  let down = true;
+  const { calls } = salesServer([["GET", "sales/", (c) => (down ? refuse(500, {}) : isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : wirePage(ROWS))]]);
+  mount();
+  expect(await screen.findByText("Couldn't load sales bills")).toBeInTheDocument();
+  expect(screen.getByRole("searchbox", { name: /Search sales bills/ })).toBeDisabled();
+  await waitFor(() => expect(calls.some(isFacets)).toBe(true));
+  down = false;
+  const before = calls.length;
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Showing all 2 bills · 1 cancelled bill also listed")).toBeInTheDocument();
+  expect(screen.getByRole("searchbox", { name: /Search sales bills/ })).toBeEnabled();
+  // Try again asks again for everything the page shows: the bills, and the period chips and views (Ruling 1B-11)
+  const again = calls.slice(before);
+  expect(lists(again)).toHaveLength(1);
+  expect(again.filter(isFacets)).toHaveLength(1);
+  expect(await screen.findByRole("button", { name: "Needs a check: 3 bills" })).toBeInTheDocument();
+});
+
+test("a link's bill opens in the preview; with more than 160 bills still to come, the button steps 40 at a time", async () => {
+  const summary = { of: "active", bills: 204, taxable: "0.00", cgst: "0.00", sgst: "0.00", igst: "0.00", tax: "0.00", total_amount: "0.00", average: null, cancelled: 1 };
+  const eway = { eway_bill_number: "123456789012", transporter_name: "", transporter_gstin: "", vehicle_number: "RJ14AB1234", vehicle_type: "Regular", transport_mode: "Road", distance_km: 120, may_be_needed: false };
+  const { calls } = server(ROWS, { count: 205, next: "/api/sales/?page=2", summary }, [["GET", "sales/413/", () => wireDetail({ ...ROWS[0], eway })]]);
+  mount("/sales?bill=413");
+  const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/32" });
+  expect(await within(pane).findByText("1234 5678 9012")).toBeInTheDocument();
+  expect(await screen.findByText("Showing the newest 2 of 204 bills · 1 cancelled bill also listed")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Show more · 202 bills left" }));
+  await waitFor(() => expect(lists(calls).map((c) => c.params.page)).toEqual([1, 2]));
+});
+
+/* ── Beyond the brief: Task 5's carry (every Send waits for the shop's message) ── */
+
+test("the preview's Send waits for the shop's WhatsApp message, then sends the bill once however fast it's pressed", async () => {
+  vi.spyOn(window, "open").mockImplementation(() => null);
+  let settings: (w: unknown) => void = () => {};
+  const { calls } = server(ROWS, {}, [
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "shop-settings/", () => new Promise((resolve) => { settings = resolve; })],
+    ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })],
+  ]);
+  mount("/sales?bill=412");
+  const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/31" });
+  const send = within(pane).getByRole("button", { name: "Send" });
+  expect(send).toBeDisabled();
+  await act(async () => { settings({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null }); });
+  await waitFor(() => expect(send).toBeEnabled());
+  await userEvent.dblClick(send);
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
+  expect(window.open).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+});
+
+/* ── Beyond the brief: the preview's own answer can fail (an error says what happened and what to do) ── */
+
+test("a preview whose bill doesn't load says so instead of loading for ever, and Try again asks again", async () => {
+  let down = true;
+  const { calls } = server(ROWS, {}, [["GET", "sales/412/", () => (down ? refuse(500, {}) : wireDetail())]]);
+  mount("/sales?bill=412");
+  const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/31" });
+  expect(await within(pane).findByText("Couldn't load its items.")).toBeInTheDocument();
+  down = false;
+  await userEvent.click(within(pane).getByRole("button", { name: "Try again" }));
+  expect(await within(pane).findByText("12.345 gms × ₹6,512.50/gms")).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/")).toHaveLength(2);
+});
+
+test("a link's bill that isn't in the list and doesn't load says it couldn't, not that it's gone; a bill that is gone says so", async () => {
+  let down = true;
+  server(ROWS, {}, [["GET", "sales/999/", () => (down ? refuse(500, {}) : refuse(404, { detail: "Not found." }))]]);
+  mount("/sales?bill=999");
+  const pane = await screen.findByRole("complementary", { name: "Preview of a bill" });
+  expect(await within(pane).findByText("Couldn't load this bill.")).toBeInTheDocument();
+  down = false;
+  await userEvent.click(within(pane).getByRole("button", { name: "Try again" }));
+  expect(await within(pane).findByText(/^This bill isn't here any more\./)).toBeInTheDocument();
+});

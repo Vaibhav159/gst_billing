@@ -25,11 +25,11 @@ test("the desktop tour: sign in, Sales, More, the firm picker, search, theme and
   await expect(page.getByText(/comes in part \d/)).toBeVisible();
   await pause(page);
 
-  // Sales: a placeholder until part 1, with the nav marking where you are
+  // Sales: the bills list (part 1B), with the nav marking where you are
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Sales" }).click();
   await expect(nav.getByRole("link", { name: "Sales" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByText(/comes in part \d/)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Sales" })).toBeVisible();
   await pause(page);
   await still(page, "desktop-2-sales");
 
@@ -66,7 +66,7 @@ test("the desktop tour: sign in, Sales, More, the firm picker, search, theme and
 
   // Ctrl K: search finds a customer on the server
   await page.keyboard.press("Control+k");
-  const box = page.getByRole("combobox");
+  const box = page.getByRole("dialog", { name: "Search" }).getByRole("combobox");
   await expect(box).toBeFocused();
   await pause(page);
   await box.pressSequentially(SEARCH, { delay: 120 });
