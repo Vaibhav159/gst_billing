@@ -7,6 +7,8 @@ corrections under explicit permission stay possible; the lock exists to
 stop *casual* edits from silently diverging from a filed return.
 """
 
+from datetime import date
+
 from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
@@ -58,4 +60,37 @@ def assert_period_unlocked(business_id, invoice_date, action="change"):
                 "month": period.month,
             },
         }
+    )
+
+
+# What a closed month refuses, per sales write (part 1 API contract, section 1).
+CLOSED_WORDS = {
+    "create": "no bill can go into it",
+    "edit": "its bills can't be changed",
+    "cancel": "its bills can't be cancelled",
+    "delete": "its bills can't be deleted",
+    "restore": "a deleted bill can't go back into it",
+    "renumber": "its bills can't be renumbered",
+    "move": "its bills can't move to another firm",
+}
+
+
+def assert_sales_open(business, day, action="edit"):
+    """Refuse a sales write into a closed month: 409 {"code": "month_closed", "locked_period"}.
+
+    The one door every v3 sales write goes through (design §4.6). Today a month is closed when
+    v2's FiledPeriod locks it whole; part 3 adds the "GSTR-1 filed" stage here. v2's own paths
+    keep assert_period_unlocked and its 400, which their tests and v2's screens expect.
+    """
+    from billing.refusals import Refusal
+
+    period = locked_period_or_none(getattr(business, "pk", business), day)
+    if period is None:
+        return
+    month = date(period.year, period.month, 1).strftime("%B %Y")
+    raise Refusal(
+        f"{month} is filed and locked for {period.business.name}, so {CLOSED_WORDS[action]}. "
+        f"Have the owner unlock {month} in GST returns first.",
+        "month_closed",
+        locked_period={"id": period.id, "business": period.business_id, "year": period.year, "month": period.month},
     )

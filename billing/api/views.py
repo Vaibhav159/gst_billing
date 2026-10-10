@@ -57,7 +57,7 @@ from billing.utils import (
 )
 
 from .mixins import AuditLogMixin, ProtectedDeleteMixin
-from .permissions import AdminOnlyPermission, RoleBasedPermission, get_user_role
+from .permissions import AdminOnlyPermission, RoleBasedPermission, V3PermissionIfPlaced, get_user_role, sale_or_purchase
 from .serializers import (
     AuditLogSerializer,
     BusinessSerializer,
@@ -237,7 +237,9 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     audit_entity = "customer"
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "customer.edit", "update": "customer.edit", "partial_update": "customer.edit",
+                  "destroy": "customer.merge"}
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     def perform_create(self, serializer):
@@ -765,7 +767,16 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
 @method_decorator(csrf_exempt, name="dispatch")
 class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "invoice"
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    # For people placed in a v3 group: a sale needs the bill.* key, a purchase the purchase.* one.
+    v3_actions = {
+        "create": sale_or_purchase("bill.create", "purchase.create"),
+        "update": sale_or_purchase("bill.edit", "purchase.edit"),
+        "partial_update": sale_or_purchase("bill.edit", "purchase.edit"),
+        "update_line_items": sale_or_purchase("bill.edit", "purchase.edit"),
+        "eway_bill": sale_or_purchase("bill.edit", "purchase.edit"),
+        "destroy": sale_or_purchase("bill.delete", "purchase.delete"),
+    }
     queryset = (
         Invoice.objects.all()
         .select_related("customer", "business")
@@ -1798,7 +1809,9 @@ class LineItemViewSet(viewsets.ModelViewSet):
     queryset = LineItem.objects.all().select_related("invoice")
     serializer_class = LineItemSerializer
     pagination_class = StandardResultsSetPagination
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "bill.edit", "update": "bill.edit", "partial_update": "bill.edit",
+                  "destroy": "bill.edit", "create_for_invoice": "bill.edit"}
 
     def get_queryset(self):
         queryset = super().get_queryset()

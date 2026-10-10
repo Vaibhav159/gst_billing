@@ -243,6 +243,14 @@ class Customer(AbstractBaseModel):
         return get_state_code_from_state_name(self.state_name)
 
 
+class InvoiceQuerySet(models.QuerySet):
+    """Invoice.objects: the shared ways of narrowing bills (design decision 5)."""
+
+    def sales(self):
+        """Outward bills only: what the shop sold."""
+        return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD)
+
+
 class Invoice(AbstractBaseModel):
     # PROTECT, not CASCADE: one admin-role delete of a customer used to destroy
     # their entire invoice history, filed months included, with only a header
@@ -323,6 +331,8 @@ class Invoice(AbstractBaseModel):
     )
 
     history = HistoricalRecords()
+
+    objects = InvoiceQuerySet.as_manager()
 
     class Meta:
         # Every report filters on some combination of these three, and the

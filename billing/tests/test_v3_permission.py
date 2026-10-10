@@ -1,0 +1,217 @@
+"""v3's permission base (plan 1A, Task 1): the role matrix on the server, read once per request."""
+
+from datetime import date
+
+from django.contrib.auth.models import Group
+from django.db import connection
+from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
+from django.utils import timezone
+from rest_framework.response import Response
+from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.views import APIView
+
+from billing.api.permissions import V3Permission, get_user_role
+from billing.fy import fy_label, fy_of, fy_range, parse_fy
+from billing.models import Business, Customer, FiledPeriod, Invoice
+from billing.period_lock import assert_sales_open
+from billing.refusals import Refusal
+from billing.roles import (
+    GROUP_ACCOUNTANT,
+    GROUP_STAFF,
+    PERMS,
+    group_names,
+    is_placed,
+    needs_role_choice,
+    permissions_of,
+    role_of,
+    why_not,
+)
+from billing.tests.v3_helpers import client_for, person
+
+LINE = {"product_name": "Silver", "hsn_code": "711311", "gst_tax_rate": "0.03", "quantity": "1",
+        "rate": "10000", "cgst": "150", "sgst": "150", "igst": "0", "amount": "10300"}
+
+
+class FrozenPermsTest(TestCase):
+    def test_nobody_can_widen_a_role(self):
+        with self.assertRaises(TypeError):
+            PERMS["staff"].append("bill.edit")
+        with self.assertRaises(TypeError):
+            PERMS["viewer"] += ["bill.delete"]
+        with self.assertRaises(TypeError):
+            PERMS["intern"] = ["view"]
+        self.assertNotIn("bill.edit", PERMS["staff"])
+        self.assertEqual(PERMS["viewer"], ["view", "reports.export"])
+
+
+class GroupNamesTest(TestCase):
+    def test_one_query_answers_every_role_question(self):
+        u = person("rakesh", GROUP_STAFF, "editor")
+        with self.assertNumQueries(1):
+            self.assertEqual(role_of(u), "staff")
+            self.assertIn("bill.create", permissions_of(u))
+            self.assertFalse(needs_role_choice(u))
+            self.assertEqual(get_user_role(u), "editor")
+            self.assertTrue(is_placed(u))
+
+    def test_a_group_change_is_read_again(self):
+        u = person("neha", "editor")
+        self.assertEqual(role_of(u), "staff")
+        u.groups.add(Group.objects.get_or_create(name=GROUP_ACCOUNTANT)[0])
+        self.assertEqual(role_of(u), "accountant")
+        self.assertEqual(group_names(u), {"editor", GROUP_ACCOUNTANT})
+
+    def test_me_reads_the_groups_once(self):
+        u = person("kailash", "admin")
+        with CaptureQueriesContext(connection) as ctx:
+            r = client_for(u).get(reverse("me"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(sum("auth_group" in q["sql"] for q in ctx.captured_queries), 1)
+
+
+class WhyNotTest(TestCase):
+    def test_the_prototype_words(self):
+        staff = person("rakesh", GROUP_STAFF, "editor")
+        viewer = person("manoj", "viewer")
+        self.assertEqual(why_not(staff, "bill.cancel"), "Only the owner can cancel bills. Ask the owner if you need it.")
+        self.assertEqual(why_not(viewer, "bill.create"),
+                         "Only the owner and counter staff can make bills. Ask the owner if you need it.")
+        self.assertEqual(why_not(viewer, "customer.edit"),
+                         "Only the owner, the accountant and counter staff can add or change customers. "
+                         "Ask the owner if you need it.")
+        self.assertEqual(why_not(person("kailash", "admin"), "bill.cancel"), "")
+
+
+class Door(APIView):
+    """A stand-in v3 endpoint: reading is open, cancelling is the owner's, PUT was never named."""
+
+    permission_classes = [V3Permission]
+    v3_actions = {"POST": "bill.cancel"}
+
+    def get(self, request):
+        return Response({"ok": True})
+
+    def post(self, request):
+        return Response({"ok": True})
+
+    def put(self, request):
+        return Response({"ok": True})
+
+
+class V3PermissionTest(TestCase):
+    def call(self, method, user=None):
+        request = getattr(APIRequestFactory(), method)("/door/", {}, format="json")
+        if user is not None:
+            force_authenticate(request, user=user)
+        return Door.as_view()(request)
+
+    def test_reading_needs_view(self):
+        self.assertEqual(self.call("get", person("manoj", "viewer")).status_code, 200)
+
+    def test_a_write_needs_its_key_and_says_who_may(self):
+        r = self.call("post", person("rakesh", GROUP_STAFF, "editor"))
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data, {"detail": "Only the owner can cancel bills. Ask the owner if you need it.",
+                                  "needs": "bill.cancel"})
+        self.assertEqual(self.call("post", person("kailash", "admin")).status_code, 200)
+
+    def test_a_write_nobody_named_is_closed_even_to_the_owner(self):
+        r = self.call("put", person("kailash", "admin"))
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data["needs"], "")
+
+    def test_signed_out_is_401(self):
+        self.assertEqual(self.call("get").status_code, 401)
+
+
+class PlacedPeopleOnV2EndpointsTest(TestCase):
+    """invoices/ and customers/ keep v2's rules; the v3 key applies only to people placed in a v3 group."""
+
+    def setUp(self):
+        self.biz = Business.objects.create(name="LODHA JEWELLERS", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
+        self.cust = Customer.objects.create(name="LOCAL BUYER", state_name="RAJASTHAN")
+        self.supplier = Customer.objects.create(name="SUPPLIER", gst_number="08AAECD1234K1Z2", state_name="RAJASTHAN")
+        self.sale = Invoice.objects.create(business=self.biz, customer=self.cust, invoice_number="1",
+                                           invoice_date="2026-05-10", type_of_invoice="outward")
+
+    def bill(self, client, number, kind="outward"):
+        party = self.supplier if kind == "inward" else self.cust
+        return client.post(reverse("invoice-list"), {
+            "business": self.biz.id, "customer": party.id, "invoice_number": number,
+            "invoice_date": "2026-05-11", "type_of_invoice": kind, "line_items": [LINE]}, format="json")
+
+    def test_a_placed_accountant_books_purchases_but_not_sales(self):
+        acct = client_for(person("neha", GROUP_ACCOUNTANT, "editor"))
+        r = self.bill(acct, "2")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data["needs"], "bill.create")
+        self.assertEqual(self.bill(acct, "SJ-9", kind="inward").status_code, 201)
+        r = acct.patch(reverse("invoice-detail", args=[self.sale.id]), {"payment_mode": "cash"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data["needs"], "bill.edit")
+
+    def test_placed_staff_make_bills_but_dont_change_them(self):
+        staff = client_for(person("rakesh", GROUP_STAFF, "editor"))
+        self.assertEqual(self.bill(staff, "2").status_code, 201)
+        r = staff.patch(reverse("invoice-detail", args=[self.sale.id]), {"payment_mode": "cash"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_an_unplaced_editor_keeps_v2_rights(self):
+        editor = client_for(person("old_editor", "editor"))
+        r = editor.patch(reverse("invoice-detail", args=[self.sale.id]), {"payment_mode": "cash"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_placed_people_may_add_customers(self):
+        acct = client_for(person("neha", GROUP_ACCOUNTANT, "editor"))
+        r = acct.post(reverse("customer-list"), {"name": "NEW BUYER", "state_name": "RAJASTHAN"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+
+
+class SalesOpenTest(TestCase):
+    def setUp(self):
+        self.biz = Business.objects.create(name="KIRAN GOLD HOUSE", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
+
+    def test_an_open_month_passes(self):
+        # Locked around it: this firm's August, its September a year back, another firm's September.
+        other = Business.objects.create(name="OTHER FIRM", gst_number="08AAECD1234K1Z2", state_name="RAJASTHAN")
+        for biz, year, month in ((self.biz, 2026, 8), (self.biz, 2025, 9), (other, 2026, 9)):
+            FiledPeriod.objects.create(business=biz, year=year, month=month)
+        self.assertIsNone(assert_sales_open(self.biz, date(2026, 9, 30), "create"))
+
+    def test_a_closed_month_is_a_409_with_the_period(self):
+        period = FiledPeriod.objects.create(business=self.biz, year=2026, month=9)
+        with self.assertRaises(Refusal) as ctx:
+            assert_sales_open(self.biz, date(2026, 9, 30), "create")
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail, {
+            "detail": "September 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. "
+                      "Have the owner unlock September 2026 in GST returns first.",
+            "code": "month_closed",
+            "locked_period": {"id": period.id, "business": self.biz.id, "year": 2026, "month": 9},
+        })
+
+
+class FinancialYearTest(TestCase):
+    def test_april_to_march(self):
+        self.assertEqual(fy_of(date(2026, 3, 31)), 2025)
+        self.assertEqual(fy_of(date(2026, 4, 1)), 2026)
+        self.assertEqual(fy_of("2027-02-08"), 2026)
+        self.assertEqual(fy_of(), fy_of(timezone.localdate()))
+        self.assertEqual(fy_label(2026), "2026-27")
+        self.assertEqual(fy_label(2099), "2099-00")
+        self.assertEqual(fy_range(2026), (date(2026, 4, 1), date(2027, 3, 31)))
+        self.assertEqual(parse_fy("2026-27"), 2026)
+        self.assertIsNone(parse_fy("2026-28"))
+        self.assertIsNone(parse_fy("26-27"))
+
+
+class SalesQuerySetTest(TestCase):
+    def test_sales_are_the_outward_bills(self):
+        biz = Business.objects.create(name="F", gst_number="08ABCDE1234A1Z5", state_name="RAJASTHAN")
+        cust = Customer.objects.create(name="C", state_name="RAJASTHAN")
+        sale = Invoice.objects.create(business=biz, customer=cust, invoice_number="1", invoice_date="2026-05-10")
+        Invoice.objects.create(business=biz, customer=cust, invoice_number="P1", invoice_date="2026-05-10",
+                               type_of_invoice="inward")
+        self.assertEqual(list(Invoice.objects.sales()), [sale])
