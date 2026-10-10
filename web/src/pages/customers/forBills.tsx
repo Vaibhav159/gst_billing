@@ -373,16 +373,19 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   const [err, setErr] = useState("");
   const [fail, setFail] = useState<FailText | null>(null);
   const echo = useRef<HTMLParagraphElement>(null);
-  const frame = useRef(0);
+  const later = useRef<ReturnType<typeof setTimeout>>();
   /**
-   * Says `words` in the echo below ("" empties it): emptied first, then the words a frame later, as PageFrame's announce
-   * does, so the same words again are read again.
+   * Says `words` in the echo below ("" empties it): emptied first, then the words 100 ms later, so the same words again
+   * are read again. A frame isn't enough: its callback runs before the next paint, so the empty echo never reaches the
+   * screen, and Chrome with NVDA or JAWS may not read an identical message again (Angular CDK's live announcer waits
+   * 100 ms too). What's typed meanwhile, or a newer refusal, cancels words still to come.
    */
   const say = (words: string) => {
-    cancelAnimationFrame(frame.current);
+    clearTimeout(later.current);
     if (echo.current) echo.current.textContent = "";
-    if (words) frame.current = requestAnimationFrame(() => { if (echo.current) echo.current.textContent = words; });
+    if (words) later.current = setTimeout(() => { if (echo.current) echo.current.textContent = words; }, 100);
   };
+  useEffect(() => () => clearTimeout(later.current), []);
   const cid = customer?.id;
   // filled from the record each time it opens (or for another customer or field): the same customer asked for again
   // meanwhile, as after the connection comes back, keeps what's typed

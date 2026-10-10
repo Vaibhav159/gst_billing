@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
 import { __setNetState } from "@/core/api/network";
@@ -382,7 +382,7 @@ test("the fix sheet reads out a refusal after Enter, where the cursor stays put:
   const heard = liveWords();
   try {
     await user.keyboard("{Enter}");
-    await pass(16); // a frame: the echo is emptied, then given the words
+    await pass(100); // the echo is emptied, then given the words 100 ms later
     expect(pan).toHaveFocus();
     expect(heard.said).toEqual([PAN_PROBLEM]);
   } finally {
@@ -399,15 +399,52 @@ test("the fix sheet reads out the same refusal again at a second Enter, and what
   const heard = liveWords();
   try {
     await user.keyboard("{Enter}");
-    await pass(16);
+    await pass(100);
     await user.keyboard("{Enter}");
-    await pass(16);
+    await pass(100);
     expect(heard.said).toEqual([PAN_PROBLEM, PAN_PROBLEM]);
     await user.type(pan, "5");
     expect(sheet.querySelector('[aria-live="polite"]')).toBeEmptyDOMElement();
     await user.keyboard("{Enter}");
-    await pass(16);
+    await pass(100);
     expect(heard.said).toEqual([PAN_PROBLEM, PAN_PROBLEM, PAN_PROBLEM]);
+  } finally {
+    heard.stop();
+  }
+});
+
+test("the fix sheet's echo stays empty for 100 ms before the words come again, and typing or a newer refusal cancels words still to come", async () => {
+  const user = handClock();
+  serve({});
+  const { sheet, pan } = await panSheet(user, "abcde1234");
+  const echo = sheet.querySelector('[aria-live="polite"]')!;
+  await user.keyboard("{Enter}");
+  await pass(100);
+  expect(echo).toHaveTextContent(PAN_PROBLEM);
+  // (synchronous steps from here: no real time passes between them, so only the test moves the clock)
+  // the same refusal again: emptied at once, and kept empty past a frame, so a screen reader hears a change
+  fireEvent.keyDown(pan, { key: "Enter" });
+  expect(echo).toBeEmptyDOMElement();
+  act(() => { vi.advanceTimersByTime(99); });
+  expect(echo).toBeEmptyDOMElement();
+  act(() => { vi.advanceTimersByTime(1); });
+  expect(echo).toHaveTextContent(PAN_PROBLEM);
+  // a key typed while the words are still to come: they never come
+  fireEvent.keyDown(pan, { key: "Enter" });
+  act(() => { vi.advanceTimersByTime(50); });
+  fireEvent.change(pan, { target: { value: "ABCDE12" } });
+  act(() => { vi.advanceTimersByTime(100); });
+  expect(echo).toBeEmptyDOMElement();
+  // a newer refusal starts its own 100 ms, and its words come once
+  const heard = liveWords();
+  try {
+    fireEvent.keyDown(pan, { key: "Enter" });
+    act(() => { vi.advanceTimersByTime(60); });
+    fireEvent.keyDown(pan, { key: "Enter" });
+    act(() => { vi.advanceTimersByTime(60); });
+    expect(echo).toBeEmptyDOMElement();
+    await pass(40); // (awaited: the observer hears of a change a microtask later)
+    expect(heard.said).toEqual([PAN_PROBLEM]);
   } finally {
     heard.stop();
   }
@@ -423,7 +460,7 @@ test("the fix sheet says a refusal on Save once: the cursor lands on the field, 
   const heard = liveWords();
   try {
     await user.click(within(sheet).getByRole("button", { name: "Save" }));
-    await pass(16);
+    await pass(100);
     expect(pan).toHaveFocus();
     expect(landed).toBe(PAN_PROBLEM);
     expect(heard.said).toEqual([]);
@@ -493,7 +530,7 @@ test("the fix sheet says a PAN the server refuses under the field, and puts the 
   try {
     await user.click(within(sheet).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(pan).toHaveFocus());
-    await pass(16);
+    await pass(100);
     expect(live.said).toEqual([]);
   } finally {
     live.stop();
