@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setTokens } from "@/core/api/client";
+import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setTokens, tokenUser } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { can as canDo, whyNot as whyNotFor, type Action } from "./permissions";
 import { RoleContext, type Role } from "./role";
@@ -32,15 +32,6 @@ const MARK_KEY = "gst3.signedOutHere";
 function readMark(): boolean { try { return sessionStorage.getItem(MARK_KEY) !== null; } catch { return false; } }
 function saveMark(on: boolean) { try { if (on) sessionStorage.setItem(MARK_KEY, "1"); else sessionStorage.removeItem(MARK_KEY); } catch { /* storage refused: the mark lasts this page */ } }
 
-/** The user id an access token names (SimpleJWT's user_id claim), read without asking the server. Null when it can't be read. */
-function tokenUser(access: string | null): string | null {
-  try {
-    const body = access?.split(".")[1];
-    if (!body) return null;
-    const id = (JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/"))) as { user_id?: unknown }).user_id;
-    return id == null ? null : String(id);
-  } catch { return null; }
-}
 /** False only when the token plainly belongs to someone else (v2 or another tab signed them in). */
 function tokenFits(m: Me, access: string | null): boolean {
   const u = tokenUser(access);

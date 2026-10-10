@@ -481,3 +481,103 @@ test("another tab's login lands while this tab's refresh is out: that login stan
   await expect(api.get("invoices/")).resolves.toMatchObject({ status: 200 });
   expect(getTokens()).toEqual({ access: "other-access", refresh: "refresh-9" });
 });
+
+// Promoted from Task 12: a refresh never sends a request again under someone else's sign-in
+
+/** A SimpleJWT-shaped access token naming `userId`; `n` tells two tokens for one person apart. */
+const jwt = (userId: number, n = 1) => ["e30", btoa(JSON.stringify({ token_type: "access", user_id: userId, jti: `t${n}` })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_"), "sig"].join(".");
+const RAKESH = jwt(7), KAILASH = jwt(1);
+/** Whose a stored token is, read here the slow way rather than with the code under test. */
+const userIn = (token: string | null) => (token ? (JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) as { user_id: number }).user_id : null);
+
+test("a save Rakesh started is never sent again as Kailash, whose sign-in came in meanwhile: it fails as signed out, and Kailash's sign-in stands", async () => {
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  // however Kailash's sign-in reaches this tab's refresh, the save could go again as him
+  const ways: [string, (stage: { onRakesh: () => void }) => void][] = [
+    ["his sign-in lands while this tab's refresh is out, and the server refuses Rakesh's", () => {
+      vi.spyOn(axios, "post").mockImplementation(async () => { setTokens(KAILASH, "refresh-k"); throw refused(); });
+    }],
+    ["his sign-in lands while this tab's refresh is out, and Rakesh's new tokens come back too", () => {
+      vi.spyOn(axios, "post").mockImplementation(async () => { setTokens(KAILASH, "refresh-k"); return { data: { access: jwt(7, 2), refresh: "refresh-r2" } }; });
+    }],
+    ["his sign-in is stored before the 401 comes back, so this tab's refresh renews his", (stage) => {
+      stage.onRakesh = () => setTokens(KAILASH, "refresh-k");
+      vi.spyOn(axios, "post").mockResolvedValue({ data: { access: jwt(1, 2), refresh: "refresh-k2" } });
+    }],
+  ];
+  for (const [way, setUp] of ways) {
+    setTokens(RAKESH, "refresh-r");
+    const sent: unknown[] = [];
+    const stage = { onRakesh: () => {} };
+    setUp(stage);
+    // Rakesh's token has run out; anything sent as Kailash would go through
+    api.defaults.adapter = ((config) => {
+      sent.push(config.headers.Authorization);
+      if (config.headers.Authorization === `Bearer ${RAKESH}`) { stage.onRakesh(); return reply(config, 401, { detail: "Token is invalid or expired" }); }
+      return reply(config, 200, { data: { phoneMode: "expert" } });
+    }) as AxiosAdapter;
+    const failed = await api.patch("preferences/", { phoneMode: "expert" }).catch((e: unknown) => e);
+    expect(sent, way).toEqual([`Bearer ${RAKESH}`]); // once, as Rakesh: never again as Kailash
+    expect((failed as AxiosError).response?.status, way).toBe(401); // the request's own 401
+    expect(problemOf(failed).kind, way).toBe("auth");
+    expect(userIn(getTokens().access), way).toBe(1); // Kailash's sign-in is still stored, for every tab
+    vi.restoreAllMocks();
+  }
+  expect(from).not.toHaveBeenCalled(); // no one's session ran out
+});
+
+test("Kailash's sign-in lands while this tab waits for another tab's refresh: Rakesh's save fails as signed out, not sent as Kailash", async () => {
+  const request = stubLocks();
+  setTokens(RAKESH, "refresh-r");
+  const post = vi.spyOn(axios, "post").mockResolvedValue({ data: { access: jwt(7, 2), refresh: "refresh-r2" } });
+  let otherTabDone = () => {};
+  const otherTab = request("gst-token-refresh", () => new Promise<void>((resolve) => { otherTabDone = resolve; }));
+  const sent: unknown[] = [];
+  api.defaults.adapter = ((config) => { sent.push(config.headers.Authorization); return reply(config, config.headers.Authorization === `Bearer ${RAKESH}` ? 401 : 200, {}); }) as AxiosAdapter;
+  const failed = api.patch("preferences/", { phoneMode: "expert" }).catch((e: unknown) => e);
+  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2)); // this tab now waits behind the other one
+  setTokens(KAILASH, "refresh-k"); // Kailash signs in on the other tab
+  otherTabDone();
+  await otherTab;
+  expect(((await failed) as AxiosError).response?.status).toBe(401);
+  expect(sent).toEqual([`Bearer ${RAKESH}`]);
+  expect(post).not.toHaveBeenCalled();
+  expect(getTokens()).toEqual({ access: KAILASH, refresh: "refresh-k" });
+});
+
+test("the same person's new token, from this tab's refresh or another tab's, still sends the request again", async () => {
+  for (const [way, land] of [
+    ["this tab's own refresh", async () => ({ data: { access: jwt(7, 2), refresh: "refresh-r2" } })],
+    ["another tab's refresh, landed while this one's was out", async () => { setTokens(jwt(7, 2), "refresh-r3"); throw refused(); }],
+  ] as const) {
+    setTokens(RAKESH, "refresh-r");
+    vi.spyOn(axios, "post").mockImplementation(land);
+    api.defaults.adapter = acceptOnly(jwt(7, 2));
+    await expect(api.patch("preferences/", { phoneMode: "expert" }), way).resolves.toMatchObject({ status: 200 });
+    vi.restoreAllMocks();
+  }
+});
+
+// Every request has a time limit: a server that never answers reads as the server not answering
+
+test("a request the server never answers gives up after 100 s, just past nginx's 95 s, and reads as the server not answering", async () => {
+  vi.useFakeTimers();
+  setTokens("access-1", "refresh-1");
+  const from = vi.fn();
+  setSessionExpiredHandler(from);
+  const post = vi.spyOn(axios, "post");
+  api.defaults.adapter = neverAnswers;
+  let outcome: unknown = "pending";
+  void api.patch("preferences/", { phoneMode: "easy" }).then((r) => { outcome = r.status; }, (e: unknown) => { outcome = e; });
+  await vi.advanceTimersByTimeAsync(99_999);
+  expect(outcome).toBe("pending"); // nginx's own 504 would come first
+  await vi.advanceTimersByTimeAsync(1);
+  expect(problemOf(outcome)).toEqual({ kind: "unreachable", message: "The app couldn't get through" });
+  expect(saveFailure(problemOf(outcome)).title).toBe("Not saved: the app couldn't get through");
+  expect(netState()).toBe("unreachable"); // the banner: the app couldn't get through
+  // it says nothing about the sign-in: no refresh, the tokens kept, no one signed out
+  expect(post).not.toHaveBeenCalled();
+  expect(getTokens()).toEqual({ access: "access-1", refresh: "refresh-1" });
+  expect(from).not.toHaveBeenCalled();
+});

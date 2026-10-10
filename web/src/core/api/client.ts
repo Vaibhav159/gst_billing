@@ -13,10 +13,27 @@ export function clearTokens() {
   try { localStorage.removeItem(ACCESS_KEY); localStorage.removeItem(REFRESH_KEY); } catch { /* storage refused */ }
 }
 
+/** The user id an access token names (SimpleJWT's user_id claim), read without asking the server. Null when it can't be read. */
+export function tokenUser(access: string | null | undefined): string | null {
+  try {
+    const body = access?.split(".")[1];
+    if (!body) return null;
+    const id = (JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/"))) as { user_id?: unknown }).user_id;
+    return id == null ? null : String(id);
+  } catch { return null; }
+}
+
 let onExpired: ((from: string) => void) | null = null;
 export function setSessionExpiredHandler(fn: ((from: string) => void) | null) { onExpired = fn; }
 
-export const api = axios.create({ baseURL: "/api/", headers: { "Content-Type": "application/json" } });
+/**
+ * How long any request, the refresh included, waits for its answer: just over nginx's 95 s proxy_read_timeout, so a reply
+ * the proxy would still deliver is never abandoned, and a server that never answers reads as not answering (unreachable).
+ */
+// ponytail: one limit for every request. Upgrade: an upload that can take longer on a slow line passes its own timeout.
+const TIMEOUT_MS = 100_000;
+
+export const api = axios.create({ baseURL: "/api/", timeout: TIMEOUT_MS, headers: { "Content-Type": "application/json" } });
 
 api.interceptors.request.use((config) => {
   const { access } = getTokens();
@@ -35,11 +52,9 @@ function noteFailure(error: AxiosError) {
 
 /** The server refused the refresh token, or there is none: the person has to sign in again. */
 class SessionEnded extends Error {}
-/** Signed out (in this tab or another) while this tab's refresh was out. The sign-out stands; the session didn't expire. */
+/** Signed out, or signed in as someone else, in this tab or another while this tab's refresh was out. That stands; the session didn't expire. */
 class SignedOutMeanwhile extends Error {}
 
-/** Just over nginx's 95 s proxy_read_timeout, so a reply the proxy would still deliver is never abandoned. */
-const REFRESH_TIMEOUT_MS = 100_000;
 const REFRESH_LOCK = "gst-token-refresh";
 /** How long a tab waits for another tab's refresh. It has sent nothing yet, so giving up costs no rotation. */
 const LOCK_WAIT_MS = 20_000;
@@ -64,7 +79,10 @@ async function underLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Another tab's login, if storage holds one made from a refresh token other than `ours`: the server rotated ours away. */
+/**
+ * Another tab's login, if storage holds one made from a refresh token other than `ours`: the server rotated ours away.
+ * It may be someone else's sign-in: a request goes again only as the person it was sent for (the interceptor below).
+ */
 function rotatedElsewhere(ours: string | null): string | null {
   const { access, refresh } = getTokens();
   return access && refresh && refresh !== ours ? access : null;
@@ -81,7 +99,7 @@ async function renew(started: string | null): Promise<string> {
   const sent = getTokens().refresh;
   if (!sent) throw new SessionEnded("no refresh token");
   try {
-    const r = await axios.post("/api/token/refresh/", { refresh: sent }, { timeout: REFRESH_TIMEOUT_MS });
+    const r = await axios.post("/api/token/refresh/", { refresh: sent }, { timeout: TIMEOUT_MS });
     markReachable();
     // The session changed while ours was out: another tab's login stands, and so does a sign-out. Never store over either.
     if (getTokens().refresh !== sent) {
@@ -138,9 +156,15 @@ api.interceptors.response.use(
     const authCall = original?.url?.replace(/^\/+/, "").startsWith("token/");
     if (error.response?.status !== 401 || !original || original._retry || authCall) return Promise.reject(error);
     original._retry = true;
+    // who this request was sent for, by its own token
+    const sentFor = tokenUser(String(original.headers.Authorization ?? "").replace(/^Bearer /, ""));
     let access: string;
     try {
       access = await refreshAccessToken();
+      // Someone else signed in meanwhile (another tab, or v2): sent again, this request would act for them (a phone-mode
+      // save would change their setting). It doesn't go again; their sign-in stands, and this one is over.
+      const now = tokenUser(access);
+      if (sentFor !== null && now !== null && now !== sentFor) throw new SignedOutMeanwhile("someone else signed in while the refresh was out");
     } catch (e) {
       // Refused, or signed out meanwhile: the session is over, and the original 401 says so. A blip: the person stays signed in and sees the blip.
       return Promise.reject(e instanceof SessionEnded || e instanceof SignedOutMeanwhile ? error : e);
