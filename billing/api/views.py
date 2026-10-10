@@ -796,8 +796,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
 
     def get_entity_name(self, instance):
+        # Kept to the column's 255 characters, as v3's entity_name() is: Postgres refuses a longer audit row, and
+        # _log's savepoint would then save the bill without it (Task 6 review fix 3).
         cust = getattr(instance, "customer", None)
-        return f"#{instance.invoice_number} - {cust.name if cust else 'Unknown'}"
+        return f"#{instance.invoice_number} - {cust.name if cust else 'Unknown'}"[:255]
 
     def get_serializer_class(self):
         if self.action == "list":

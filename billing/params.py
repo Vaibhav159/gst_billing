@@ -34,16 +34,17 @@ def date_param(params, key, today=False):
     """An ISO date parameter; when absent, today in IST if `today`, else None.
 
     Years 2000 to 2099 only, as `fy` and `month` read them: a financial year can't be worked out for
-    the calendar's last year (9999), so a date the books can't hold is refused, never a 500 (Ruling 1A-5).
+    the calendar's last year (9999), so a date the books can't hold is refused, never a 500 (Ruling
+    1A-5), in words that say which dates it takes (Ruling 1A-28).
     """
     if not params.get(key):
         return timezone.localdate() if today else None
     try:
         day = date.fromisoformat(params[key])
     except ValueError:
-        day = None
-    if day is None or not 2000 <= day.year <= 2099:
-        raise ValidationError({key: ["Type the date like 2026-09-30."]})
+        raise ValidationError({key: ["Type the date like 2026-09-30."]}) from None
+    if not 2000 <= day.year <= 2099:
+        raise ValidationError({key: ["Pick a date from 2000 to 2099."]})
     return day
 
 

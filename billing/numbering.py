@@ -27,6 +27,7 @@ from billing.text import day_text, money, stamp
 _TRAILING = re.compile(r"(\d+)\s*$")
 _DIGITS = re.compile(r"^[0-9]+$")
 _RULE_46 = re.compile(r"^[A-Za-z0-9/-]+$")
+_PREFIX = re.compile(r"[A-Za-z]+")
 # The shapes the next number reads, as v2's next_invoice_number does: "108" and
 # "KGH/2026-27/108". Anything else ("P1778291284") would leak a giant counter.
 _SERIES_SHAPE = re.compile(r"^(?:\d+|[A-Za-z]+/\d{4}-\d{2}/\d+)\s*$")
@@ -44,9 +45,14 @@ def counter_of(number):
 
 
 def full_number_on(business, day):
-    """True when, on `day`, digits alone take the firm's format (KGH/2026-27/108)."""
+    """True when, on `day`, digits alone take the firm's format (KGH/2026-27/108).
+
+    From the firm's paper_full_number_from date, and with a prefix of letters only: a digit, a mark
+    or a space in it ("KGH2", "K.G") would make numbers the series doesn't read (LETTERS/YYYY-YY/N)
+    or Rule 46 forbids, so such a firm's numbers stay as typed, as without a date (review fix 2).
+    """
     start = business.paper_full_number_from
-    return bool(start and day >= start and (business.invoice_prefix or "").strip())
+    return bool(start and day >= start and _PREFIX.fullmatch((business.invoice_prefix or "").strip()))
 
 
 def format_number(business, day, typed):
@@ -148,7 +154,7 @@ def shape_problem(typed, final, following):
         return f"Type the bill number, or use the next free one, {following}."
     if len(text) > 16:
         return f"A GST bill number can have at most 16 characters; this has {len(text)}."
-    if not _RULE_46.match(text):
+    if not (_RULE_46.match(text) and _RULE_46.match(final)):  # what's stored too, the firm's format included
         return 'Use only letters, digits, "-" and "/" (GST rule 46). Spaces and other marks aren\'t allowed.'
     if counter_of(text) is None:
         return "End the number with digits, like 108 or KGH/2026-27/108, so bills sort in order."
@@ -216,16 +222,20 @@ def paper_book(business, year, month):
 
     Which numbers are in the app, what explains the missing ones (deleted, cancelled), which
     aren't entered yet, and the number and date to enter next. A number another month used
-    isn't missing from this one. Only the numbers next-number reads count, and the missing ones
-    are counted, not listed past the first LISTED: one stray "P20000" or "1778291284" would
-    otherwise make thousands of rows, or a billion (Rulings 1A-1, 1D-3).
+    isn't missing from this one. Every bill of the month is listed and counted, whatever its
+    number's shape ("KGH-18" too: review fix 1). The gaps, runs, twins and the next number read
+    only the numbers next-number reads, and the missing ones are counted, not listed past the
+    first LISTED: one stray "P20000" or "1778291284" would otherwise make thousands of rows, or
+    a billion (Rulings 1A-1, 1D-3).
     """
     first, last = date(year, month, 1), date(year, month, monthrange(year, month)[1])
     fy = fy_of(first)
-    bills = [b for b in series_bills(business.pk, fy).select_related("customer") if _in_series(b)]
+    every = list(series_bills(business.pk, fy).select_related("customer"))
+    listed = sorted((b for b in every if first <= b.invoice_date <= last),
+                    key=lambda b: (counter_of(b.invoice_number) or 0, b.invoice_date, b.pk))
+    bills = [b for b in every if _in_series(b)]
     binned = [b for b in series_bin(business.pk, fy) if _in_series(b)]
-    month_bills = sorted((b for b in bills if first <= b.invoice_date <= last),
-                         key=lambda b: (counter_of(b.invoice_number), b.invoice_date, b.pk))
+    month_bills = [b for b in listed if _in_series(b)]
     month_bin = [b for b in binned if first <= b.invoice_date <= last]
     counters = [counter_of(x.invoice_number) for x in (*month_bills, *month_bin)]
     before = [counter_of(x.invoice_number) for x in (*bills, *binned) if x.invoice_date < first]
@@ -260,8 +270,8 @@ def paper_book(business, year, month):
         "bills": [{"id": b.pk, "invoice_number": b.invoice_number, "counter": counter_of(b.invoice_number),
                    "invoice_date": b.invoice_date.isoformat(), "customer_name": b.customer.name,
                    "total_amount": money(b.total_amount), "status": b.status, "paper": b.paper,
-                   "sent": b.sent_at is not None} for b in month_bills],
-        "entered": len(month_bills),
+                   "sent": b.sent_at is not None} for b in listed],
+        "entered": len(listed),
         "runs": runs,
         "missing": missing,
         "missing_count": missing_count,

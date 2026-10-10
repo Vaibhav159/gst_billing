@@ -17,7 +17,7 @@ from django.urls import reverse
 from billing.api.sales import SalesViewSet
 from billing.constants import BILL_CANCELLED
 from billing.models import AuditLog, BinnedInvoice, FiledPeriod, Invoice
-from billing.numbering import counter_of, format_number, next_number
+from billing.numbering import counter_of, format_number, full_number_on, next_number, shape_problem
 from billing.period_lock import assert_period_unlocked
 from billing.services.bin import bin_bill
 from billing.services.sales import firm_snapshot
@@ -52,6 +52,25 @@ class FormatTest(TestCase):
         self.assertEqual(format_number(self.kgh, date(2026, 9, 1), "1" * 5000), f"KGH/2026-27/{'1' * 5000}")
         self.assertEqual(counter_of("1" * 5000), int("1" * 255))
 
+    def test_a_prefix_that_isnt_letters_keeps_numbers_as_typed(self):
+        # Review fix 2: a full number is LETTERS/YYYY-YY/N, the shape next-number reads. A prefix with a digit, a mark or
+        # a space would make numbers the series never counts, or that Rule 46 forbids, so such a firm's numbers stay as
+        # typed, as without a date.
+        for n, prefix in enumerate(("KGH2", "K.G", "K G", "K-G", "KGH/"), start=1):
+            with self.subTest(prefix=prefix):
+                odd = firm(f"FIRM {n}", gstin=f"08AAAAA000{n}A1Z5", invoice_prefix=prefix,
+                           paper_full_number_from=date(2026, 4, 1))
+                self.assertEqual((full_number_on(odd, date(2026, 9, 1)), format_number(odd, date(2026, 9, 1), "2")),
+                                 (False, "2"))
+        spaced = firm("SPACED", gstin="08AAAAA0009A1Z5", invoice_prefix=" KGH ", paper_full_number_from=date(2026, 4, 1))
+        self.assertEqual(format_number(spaced, date(2026, 9, 1), "2"), "KGH/2026-27/2")
+
+    def test_the_stored_number_meets_rule_46_too(self):
+        # Review fix 2: Rule 46 is checked on the number that would be stored, not only on what was typed.
+        self.assertEqual(shape_problem("2", "K.G/2026-27/2", "K.G/2026-27/1"),
+                         'Use only letters, digits, "-" and "/" (GST rule 46). Spaces and other marks aren\'t allowed.')
+        self.assertEqual(shape_problem("2", "KGH/2026-27/2", "KGH/2026-27/1"), "")
+
 
 class NextNumberTest(TestCase):
     def setUp(self):
@@ -85,16 +104,36 @@ class NextNumberTest(TestCase):
 
     def test_a_firm_or_date_that_cant_be_read_is_a_400_with_words(self):
         # Ruling 1A-5: never a 500. A firm id that isn't plain digits ("²" passes isdigit() but not int()), one past
-        # the database's range, or a firm that's gone; a date that isn't one, or outside 2000 to 2099 as `fy` and
-        # `month` read years (9999's financial year can't even be worked out).
+        # the database's range, or a firm that's gone; a date that isn't one. A real date outside 2000 to 2099, the
+        # years `fy` and `month` read (9999's financial year can't even be worked out), says so (Ruling 1A-28).
         for firm_id in ("abc", "²", "1.5", " 1", "99999999999999999999999", "424242"):
             with self.subTest(business_id=firm_id):
                 r = self.client.get(reverse("sale-next-number"), {"business_id": firm_id})
                 self.assertEqual((r.status_code, r.data), (400, {"business_id": ["Pick the firm."]}))
-        for day in ("9999-12-31", "0001-01-01", "1999-12-31", "2026-02-30", "2026-09-30\x00"):
+        for day, words in (("2026-02-30", "Type the date like 2026-09-30."), ("2026-09-30\x00", "Type the date like 2026-09-30."),
+                           ("1999-12-31", "Pick a date from 2000 to 2099."), ("2100-01-01", "Pick a date from 2000 to 2099."),
+                           ("9999-12-31", "Pick a date from 2000 to 2099."), ("0001-01-01", "Pick a date from 2000 to 2099.")):
             with self.subTest(invoice_date=day):
-                self.assertEqual((self.next(day).status_code, self.next(day).data),
-                                 (400, {"invoice_date": ["Type the date like 2026-09-30."]}))
+                r = self.next(day)
+                self.assertEqual((r.status_code, r.data), (400, {"invoice_date": [words]}))
+        self.assertEqual(self.next("2000-01-01").data["fy"], "1999-00")  # the years' edges are kept
+        self.assertEqual(self.next("2099-12-31").data["fy"], "2099-00")
+
+    def test_a_prefix_that_isnt_letters_numbers_as_typed(self):
+        # Review fix 2 through the endpoints: with "KGH2" next-number suggested KGH2/2026-27/1, already used, and the
+        # paper book counted nothing; with "K.G", check-number called K.G/2026-27/2 free though Rule 46 forbids the ".".
+        for n, prefix in enumerate(("KGH2", "K.G"), start=1):
+            with self.subTest(prefix=prefix):
+                odd = firm(f"FIRM {n}", gstin=f"08AAAAA000{n}A1Z5", invoice_prefix=prefix,
+                           paper_full_number_from=date(2026, 4, 1))
+                sale(odd, buyer(f"Buyer {n}"), f"{prefix}/2026-27/1", "2026-09-10")  # as v2 lets it be typed
+                r = self.client.get(reverse("sale-next-number"), {"business_id": odd.pk, "invoice_date": "2026-09-30"})
+                self.assertEqual((r.data["invoice_number"], r.data["full_number"]), ("1", False))
+                data = self.client.get(reverse("sale-check-number"), {"business_id": odd.pk, "invoice_date": "2026-09-30",
+                                                                      "invoice_number": "2"}).data
+                self.assertEqual((data["invoice_number"], data["code"]), ("2", ""))
+                book = self.client.get(reverse("sale-paper-book"), {"business_id": odd.pk, "month": "2026-09"}).data
+                self.assertEqual((book["entered"], book["bills"][0]["counter"]), (1, 1))
 
     def test_today_when_no_date_is_given(self):
         with patch("billing.params.timezone.localdate", return_value=date(2026, 9, 30)):
@@ -181,7 +220,9 @@ class CheckNumberTest(TestCase):
         for params, words in (({}, "Pick the firm."), ({"business_id": "abc"}, "Pick the firm."),
                               ({"business_id": "424242"}, "Pick the firm."),
                               ({"business_id": self.kgh.pk, "invoice_date": "30/09/2026"},
-                               "Type the date like 2026-09-30.")):
+                               "Type the date like 2026-09-30."),
+                              ({"business_id": self.kgh.pk, "invoice_date": "2100-01-01"},
+                               "Pick a date from 2000 to 2099.")):
             with self.subTest(params=params):
                 r = self.client.get(url, {"invoice_number": " 34 ", **params})
                 self.assertEqual((r.status_code, r.data), (200, {
@@ -264,16 +305,17 @@ class PaperBookTest(TestCase):
         data = self.book()
         self.assertEqual((data["missing_count"], data["missing"]), (4, [23, 24, 25, 26]))
 
-    def test_only_the_series_shapes_count(self):
-        # An odd number ("P20000") isn't the paper book's, in the month or before it: no 19,998 rows.
+    def test_only_the_series_shapes_make_the_gaps(self):
+        # An odd number ("P20000") is listed and counted as the month's bill, but the gaps, runs and next number read
+        # the series shapes only, in the month or before it: no 19,998 rows (Ruling 1A-1; review fix 1).
         cust = buyer("Odd Import")
         sale(self.kgh, cust, "P20000", "2026-09-10")
         sale(self.kgh, cust, "P1778291284", "2026-08-10")
         bin_bill(sale(self.kgh, cust, "COMBINED-TEST-1778345121", "2026-09-11"), None)
         data = self.book()
-        self.assertEqual((data["entered"], data["missing_count"], data["missing"]), (9, 4, [23, 24, 25, 26]))
-        self.assertEqual((data["runs"], data["next"]["counter"]), ([[17, 22], [27, 29]], 23))
-        self.assertNotIn("P20000", [b["invoice_number"] for b in data["bills"]])
+        self.assertEqual((data["entered"], data["missing_count"], data["missing"]), (10, 4, [23, 24, 25, 26]))
+        self.assertEqual((data["runs"], data["next"]["counter"], data["twice"]), ([[17, 22], [27, 29]], 23, [22]))
+        self.assertEqual((data["bills"][-1]["invoice_number"], data["bills"][-1]["counter"]), ("P20000", 20000))
         self.assertEqual([e["counter"] for e in data["explained"]], [19, 27])
 
     def test_a_stray_number_is_counted_not_listed(self):
@@ -332,6 +374,40 @@ class PaperBookTest(TestCase):
             data = self.client.get(reverse("sale-paper-book"), {"business_id": meera.pk, "month": "2026-10"}).data
         self.assertEqual(data["next"], {"counter": 1, "invoice_number": "1", "invoice_date": "2026-10-09"})
         self.assertEqual(data["gstr1_due"], "2026-11-11")
+
+
+class PaperBookEveryBillTest(TestCase):
+    """Review fix 1: the paper book lists every bill of the month and counts it in `entered`, whatever its number's
+    shape, with `counter` as BillRow gives it (the trailing digits, or null). The gaps and the next number still read
+    the series shapes only (Ruling 1A-1). A bill v3's own renumber calls "KGH-18" used to vanish from the list."""
+
+    def setUp(self):
+        self.owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
+        self.kgh = firm(invoice_prefix="KGH", paper_full_number_from=date(2026, 4, 1))
+        self.cust = buyer()
+        sale(self.kgh, self.cust, "KGH/2026-27/16", "2026-08-30")
+        sale(self.kgh, self.cust, "KGH/2026-27/17", "2026-09-02")
+        self.b18 = sale(self.kgh, self.cust, "KGH/2026-27/18", "2026-09-03")
+        sale(self.kgh, self.cust, "KGH/2026-27/19", "2026-09-04")
+
+    def book(self):
+        return self.owner.get(reverse("sale-paper-book"), {"business_id": self.kgh.pk, "month": "2026-09"}).data
+
+    def test_a_bill_renumbered_kgh_18_is_listed(self):
+        r = self.owner.post(reverse("sale-renumber", args=[self.b18.pk]), {"invoice_number": "KGH-18"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        data = self.book()
+        self.assertEqual([(b["invoice_number"], b["counter"]) for b in data["bills"]],
+                         [("KGH/2026-27/17", 17), ("KGH-18", 18), ("KGH/2026-27/19", 19)])
+        self.assertEqual((data["entered"], data["missing"], data["missing_count"]), (3, [18], 1))
+
+    def test_a_number_of_any_shape_is_listed(self):
+        Invoice.objects.filter(pk=self.b18.pk).update(invoice_number="KGH/26-27/18")  # as v2 may have stored it
+        sale(self.kgh, self.cust, "OPENING", "2026-09-01")  # no number part: counter null, listed first
+        data = self.book()
+        self.assertEqual([(b["invoice_number"], b["counter"]) for b in data["bills"]],
+                         [("OPENING", None), ("KGH/2026-27/17", 17), ("KGH/26-27/18", 18), ("KGH/2026-27/19", 19)])
+        self.assertEqual((data["entered"], data["runs"], data["missing"]), (4, [[17, 17], [19, 19]], [18]))
 
 
 class RenumberAndMoveTest(TestCase):
@@ -613,6 +689,18 @@ class MoveAndV2SaveTest(TestCase):
         self.assertTrue(seen and all(depth > outer for depth in seen), (outer, seen))
         self.assertTrue(lock.called)
 
+    def test_a_very_long_name_still_gets_its_created_row(self):
+        # Review fix 3: v2's audit name for a bill ("#number - customer") is cut to the column's 255 characters, as v3's
+        # entity_name() is. Longer, Postgres refuses the row, and _log's savepoint would save the bill without it.
+        long_named = buyer("A" * 255)
+        r = self.owner.post(reverse("invoice-list"), {"invoice_number": "77", "invoice_date": "2026-09-10",
+                                                      "business": self.kgh.pk, "customer": long_named.pk,
+                                                      "type_of_invoice": "outward"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        entry = AuditLog.objects.get(action="created", entity_id=r.data["id"])
+        self.assertEqual(entry.entity_name, f"#77 - {'A' * 249}")
+        self.assertEqual(len(entry.entity_name), 255)
+
     def test_an_audit_row_the_database_refuses_never_undoes_the_patch(self):
         # The PATCH now runs in one transaction. v2 swallows a failed audit write (a 255-character entity name on
         # Postgres): the row's own savepoint takes the failure, so the transaction and the save go on.
@@ -652,7 +740,8 @@ class MoveLockTest(TransactionTestCase):
             # The move starts after the PATCH read the bill. Under the PATCH's lock it can't finish, so the PATCH goes
             # on after 2 s; without the lock it would finish first, and the PATCH would write the old firm back.
             if not mover:
-                mover.append(threading.Thread(target=move))
+                # A daemon: were a regression to leave it waiting past join(10), pytest still exits (review fix 5).
+                mover.append(threading.Thread(target=move, daemon=True))
                 mover[0].start()
                 moved.wait(2)
             return assert_period_unlocked(*args, **kwargs)
