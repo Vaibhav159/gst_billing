@@ -231,6 +231,65 @@ test("tabs: after a change of tab, a resize keeps the indicator under the chosen
   }
 });
 
+// a count arriving after the first paint widens its tab, and the tabs after it move, while the row keeps its width
+test("tabs: when a tab's own width changes, the indicator follows", async () => {
+  /** As the browser does: each observer hears about the elements it watches whose size changed since it last looked. */
+  const observers: { cb: ResizeObserverCallback; sizes: Map<Element, number> }[] = [];
+  vi.stubGlobal("ResizeObserver", class {
+    private o: { cb: ResizeObserverCallback; sizes: Map<Element, number> };
+    constructor(cb: ResizeObserverCallback) { this.o = { cb, sizes: new Map() }; observers.push(this.o); }
+    observe(el: Element) { this.o.sizes.set(el, (el as HTMLElement).offsetWidth); }
+    unobserve(el: Element) { this.o.sizes.delete(el); }
+    disconnect() { this.o.sizes.clear(); }
+  });
+  const settle = () => act(() => {
+    for (const o of observers) {
+      const changed = [...o.sizes].filter(([el, w]) => (el as HTMLElement).offsetWidth !== w).map(([el]) => el);
+      changed.forEach((el) => o.sizes.set(el, (el as HTMLElement).offsetWidth));
+      if (changed.length) o.cb(changed.map((target) => ({ target }) as unknown as ResizeObserverEntry), {} as ResizeObserver);
+    }
+  });
+  // jsdom has no layout: a tab is as wide as its words (24 px and 6 px a character), tabs sit 4 px apart, and the row is 600 px
+  const tabWidth = (el: HTMLElement) => 24 + (el.textContent ?? "").length * 6;
+  const spies = [
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.v ? tabWidth(this) : this.getAttribute("role") === "tablist" ? 600 : 0; }),
+    vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) {
+      let left = 0;
+      if (this.dataset.v) for (let el = this.previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) left += tabWidth(el) + 4;
+      return left;
+    }),
+  ];
+  try {
+    function Probe() {
+      const [count, setCount] = useState<number | undefined>(undefined);
+      const [extra, setExtra] = useState<number | null | undefined>(undefined); // undefined: no such tab yet; null: there, no count yet
+      const tabs = [{ value: "b2b", label: "B2B", count }, ...(extra === undefined ? [] : [{ value: "exp", label: "EXP", count: extra ?? undefined }]), { value: "b2cl", label: "B2CL" }, { value: "b2c", label: "B2C" }];
+      return <>
+        <button type="button" onClick={() => setCount(12)}>Counts in</button>
+        <button type="button" onClick={() => setExtra(null)}>Add a tab</button>
+        <button type="button" onClick={() => setExtra(7)}>Its count in</button>
+        <Tabs label="GSTR-1 sections" tabs={tabs} value="b2cl" onChange={() => {}} />
+      </>;
+    }
+    wrap(<Probe />);
+    const bar = () => screen.getByRole("tablist", { name: "GSTR-1 sections" }).querySelector<HTMLElement>("span.absolute");
+    expect(bar()).toHaveStyle({ transform: "translateX(46px)", width: "48px" }); // B2B is 42 px, so B2CL starts at 46
+    await userEvent.click(screen.getByRole("button", { name: "Counts in" })); // "B2B12" is 54 px
+    settle();
+    expect(bar()).toHaveStyle({ transform: "translateX(58px)", width: "48px" });
+    // a tab that comes later is watched too
+    await userEvent.click(screen.getByRole("button", { name: "Add a tab" })); // EXP, 42 px, before B2CL
+    settle();
+    expect(bar()).toHaveStyle({ transform: "translateX(104px)" });
+    await userEvent.click(screen.getByRole("button", { name: "Its count in" })); // "EXP7" is 48 px
+    settle();
+    expect(bar()).toHaveStyle({ transform: "translateX(110px)", width: "48px" });
+  } finally {
+    spies.forEach((s) => s.mockRestore());
+    vi.unstubAllGlobals();
+  }
+});
+
 test("checkbox, switch, chip and disclosure say their state", async () => {
   function Probe() {
     const [keep, setKeep] = useState(false);

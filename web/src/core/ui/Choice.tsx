@@ -130,12 +130,16 @@ export function Tabs<T extends string | number>({ tabs, value, onChange, label, 
   latest.current = measure;
   useLayoutEffect(measure, [value, tabs.length, isPhone]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setTimeout(() => setReady(true), 50); return () => clearTimeout(t); }, []);
+  // the row, and each tab: a tab's own width changes (a count arriving after the first paint) while the row's doesn't
+  const tabKeys = tabs.map((t) => String(t.value)).join("\u0000");
   useEffect(() => {
-    if (!ref.current || typeof ResizeObserver === "undefined") return undefined;
+    const row = ref.current;
+    if (!row || typeof ResizeObserver === "undefined") return undefined;
     const ro = new ResizeObserver(() => latest.current());
-    ro.observe(ref.current);
+    ro.observe(row);
+    row.querySelectorAll("[data-v]").forEach((el) => ro.observe(el));
     return () => ro.disconnect();
-  }, []);
+  }, [tabKeys]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const i = tabs.findIndex((t) => t.value === value);
     if (["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
