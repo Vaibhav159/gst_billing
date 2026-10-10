@@ -57,6 +57,12 @@ INVOICE_TYPE_CHOICES = (
     (INVOICE_TYPE_INWARD, "Inward"),
 )
 
+# A bill's status (v3). A cancelled bill keeps its number and stays in GSTR-1's
+# Table 13, but no figure counts it (design decision 5).
+BILL_ACTIVE = "active"
+BILL_CANCELLED = "cancelled"
+BILL_STATUS_CHOICES = [(BILL_ACTIVE, "Active"), (BILL_CANCELLED, "Cancelled")]
+
 DOWNLOAD_SHEET_FIELD_NAMES = [
     "S.No.",
     "Bill No.",

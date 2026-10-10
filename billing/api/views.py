@@ -36,6 +36,7 @@ from rest_framework.views import APIView
 
 from billing.cache import invalidate
 from billing.constants import (
+    BILL_CANCELLED,
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
@@ -46,6 +47,7 @@ from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
+from billing.services.sales import CANCELLED_WORDS
 from billing.tax_rules import GSTIN_SHAPE, itc_refusal
 from billing.utils import (
     AIInvoiceProcessingError,
@@ -126,8 +128,8 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             return response
 
         # Bulk fetch metrics to avoid N+1 subqueries
-        # Total revenue (outward) and purchases (inward)
-        invoices = Invoice.objects.filter(business_id__in=business_ids)
+        # Total revenue (outward) and purchases (inward); a cancelled bill counts in neither.
+        invoices = Invoice.objects.counted().filter(business_id__in=business_ids)
 
         # Apply date filters
         start_date = request.query_params.get("start_date")
@@ -194,8 +196,8 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         start_date = request.query_params.get("start_date")
         end_date = request.query_params.get("end_date")
 
-        # Base query
-        query = Invoice.objects.all()
+        # Base query: the bills that count (a cancelled one counts in no figure)
+        query = Invoice.objects.counted()
 
         # Apply filters
         if start_date:
@@ -270,8 +272,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         if not customer_ids:
             return response
 
-        # Bulk fetch metrics for all customers on the page
-        invoices = Invoice.objects.filter(customer_id__in=customer_ids)
+        # Bulk fetch metrics for all customers on the page; a cancelled bill counts in neither
+        invoices = Invoice.objects.counted().filter(customer_id__in=customer_ids)
 
         # Apply date filters
         start_date = request.query_params.get("start_date")
@@ -347,8 +349,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         business_id = request.query_params.get("business")
         limit = int(request.query_params.get("limit", 5))
 
-        # Base query - focus on outward invoices (sales)
-        query = Invoice.objects.filter(type_of_invoice="outward")
+        # Base query - focus on outward invoices (sales) that count
+        query = Invoice.objects.counted().filter(type_of_invoice="outward")
 
         # Apply filters
         if start_date:
@@ -571,7 +573,7 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
         from django.db.models.functions import Lower
 
         product_names_lower = [name.lower() for name in product_names]
-        line_items = LineItem.objects.annotate(
+        line_items = LineItem.objects.counted().annotate(
             product_name_lower=Lower("product_name")
         ).filter(product_name_lower__in=product_names_lower)
 
@@ -657,8 +659,8 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "sort_by", "amount"
         )  # 'amount' or 'quantity'
 
-        # Base query - focus on outward invoices (sales)
-        query = LineItem.objects.filter(invoice__type_of_invoice="outward")
+        # Base query - focus on outward invoices (sales) that count
+        query = LineItem.objects.counted().filter(invoice__type_of_invoice="outward")
 
         # Apply filters
         if start_date:
@@ -738,7 +740,7 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         product = self.get_object()
         rows = (
-            LineItem.objects.filter(product_name=product.name)
+            LineItem.objects.counted().filter(product_name=product.name)
             .values("hsn_code")
             .annotate(
                 lines=Count("id"),
@@ -1293,7 +1295,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def totals(self, request):
         """Get total amounts for invoices with the same filters as list"""
-        queryset = self.get_queryset()
+        queryset = self.get_queryset().counted()
 
         # Calculate totals
         inward_total = (
@@ -1334,8 +1336,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         """Get monthly totals for invoices (outward and inward)"""
         from django.db.models.functions import ExtractMonth, ExtractYear
 
-        # Use the same queryset as list to apply filters
-        queryset = self.get_queryset()
+        # Use the same queryset as list to apply filters, without cancelled bills
+        queryset = self.get_queryset().counted()
 
         # Annotate with month and year
         queryset = queryset.annotate(
@@ -1361,8 +1363,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def distribution(self, request):
         """Get distribution of invoices by type"""
-        # Use the same queryset as list to apply filters
-        queryset = self.get_queryset()
+        # Use the same queryset as list to apply filters, without cancelled bills
+        queryset = self.get_queryset().counted()
 
         # Calculate totals by type
         from django.db.models import Count
@@ -1393,7 +1395,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def stats(self, request):
         """Get consolidated dashboard stats"""
-        queryset = self.get_queryset()
+        # Figures leave cancelled bills out; the recent list keeps them, marked by `status`.
+        listed = self.get_queryset()
+        queryset = listed.counted()
 
         results = {}
         # 1. Totals
@@ -1550,7 +1554,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         # 5. Recent Invoices
         recent_invoices = InvoiceListSerializer(
-            queryset.order_by("-created_at")[:5], many=True
+            listed.order_by("-created_at")[:5], many=True
         ).data
         results["recent_invoices"] = recent_invoices
 
@@ -1649,8 +1653,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         """
         from django.db.models import Case, When
         from django.db.models.functions import ExtractYear
-        empty_inv = Invoice.objects.filter(lineitem__isnull=True).count()
-        no_hsn = LineItem.objects.filter(
+        # A cancelled bill needs no items or HSN fixed; it still holds its number,
+        # so the duplicate groups below keep it.
+        empty_inv = Invoice.objects.counted().filter(lineitem__isnull=True).count()
+        no_hsn = LineItem.objects.counted().filter(
             Q(hsn_code__isnull=True) | Q(hsn_code="")
         ).count()
 
@@ -2697,6 +2703,15 @@ class AIInvoiceCreateView(APIView):
     def post(self, request):
         return create_from_ai(request)
 
+def _renumbered_since(entry):
+    """{"invoice_number", "business"} when a later change to the invoice renumbered it or moved it
+    to another firm: undoing an older edit must not silently reverse that (S§0.4)."""
+    later = AuditLog.objects.filter(entity="invoice", entity_id=entry.entity_id, pk__gt=entry.pk)
+    if any({"invoice_number", "business"} & set(changes or {}) for changes in later.values_list("changes", flat=True)):
+        return {"invoice_number", "business"}
+    return set()
+
+
 def _restore_logs(entity, entity_id):
     """The log an undo of a delete writes for the record it restores.
 
@@ -2888,13 +2903,20 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
                     snap = entry.snapshot
                     if model is Invoice:
+                        if obj.status == BILL_CANCELLED:
+                            return Response({"error": "cancelled", "detail": CANCELLED_WORDS},
+                                            status=status.HTTP_409_CONFLICT)
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
                         assert_period_unlocked(snap.get("business"), snap.get("invoice_date"), "edit")
                     field_names = {f.name for f in model._meta.concrete_fields}
                     # The total is the lines' sum, and the lines may have
                     # changed since the snapshot: copying it back left a header
                     # of 1,030 over lines of 2,060 (M9). Re-summed below.
-                    skip = {"id", "total_amount"} if model is Invoice else {"id"}
+                    # Nor does it write back what only v3's actions set (a cancel,
+                    # a send…), or a number a later renumber or move replaced.
+                    skip = {"id"}
+                    if model is Invoice:
+                        skip |= {"total_amount", *Invoice.V3_FIELDS, *_renumbered_since(entry)}
                     for k, v in snap.items():
                         if k not in field_names or k in skip:
                             continue

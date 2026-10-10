@@ -23,7 +23,7 @@ class ReconciliationView(APIView):
             return Response({"error": "fy must look like 2025-26."}, status=400)
         start, end = fy_bounds(fy)
 
-        qs = Invoice.objects.filter(
+        qs = Invoice.objects.counted().filter(
             type_of_invoice="outward", invoice_date__gte=start, invoice_date__lte=end,
         )
         business_id = request.query_params.get("business_id")

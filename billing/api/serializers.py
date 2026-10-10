@@ -161,7 +161,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
         # The total is derived from the lines; a PATCH used to persist any
         # figure at all, breaking the invariant every export and GSTR table
         # depends on.
-        read_only_fields = ("total_amount", "workspace_id")
+        # The v3 fields too: only v3's endpoints (cancel, renumber, send…) change them.
+        read_only_fields = ("total_amount", "workspace_id", *Invoice.V3_FIELDS)
         extra_kwargs = {"source_file": {"write_only": True}, "source_preview": {"write_only": True}}
 
     def get_source_file_url(self, obj):
@@ -197,6 +198,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "is_igst_applicable",
             "total_tax",
             "line_item_count",
+            "status",
             "created_at",
             "updated_at",
         ]

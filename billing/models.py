@@ -17,6 +17,9 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
+    BILL_ACTIVE,
+    BILL_CANCELLED,
+    BILL_STATUS_CHOICES,
     BILLING_DECIMAL_PLACE_PRECISION,
     GST_CODE,
     GST_TAX_RATE,
@@ -250,6 +253,20 @@ class InvoiceQuerySet(models.QuerySet):
         """Outward bills only: what the shop sold."""
         return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD)
 
+    def counted(self):
+        """The bills every figure counts: all but the cancelled ones.
+
+        A cancelled bill keeps its number (lists, Table 13) but leaves every total. The list,
+        detail and edit views keep the plain manager; anything that adds bills up calls this.
+        """
+        return self.exclude(status=BILL_CANCELLED)
+
+
+class LineItemQuerySet(models.QuerySet):
+    def counted(self):
+        """Lines of the bills that count: Invoice.objects.counted()'s twin for line sums."""
+        return self.exclude(invoice__status=BILL_CANCELLED)
+
 
 class Invoice(AbstractBaseModel):
     # PROTECT, not CASCADE: one admin-role delete of a customer used to destroy
@@ -305,6 +322,21 @@ class Invoice(AbstractBaseModel):
         help_text="How the invoice was settled; blank = not recorded.",
     )
 
+    # v3 (part 1). Lifecycle fields: only v3's own endpoints change them; v2's
+    # serializers show them read-only and v2's undo of an old edit leaves them be.
+    status = models.CharField(
+        max_length=10, choices=BILL_STATUS_CHOICES, default=BILL_ACTIVE, db_default=BILL_ACTIVE, db_index=True,
+        help_text="Active, or cancelled: a cancelled bill keeps its number but counts in no figure.",
+    )
+    cancel_reason = models.CharField(max_length=255, blank=True, default="", db_default="")
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    # The id of the cancelled bill this one makes again. A plain id, not a foreign key: that
+    # bill may sit in the bin and come back under the same id (design decision 6).
+    replaces = models.IntegerField(null=True, blank=True)
+
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
     # audit trail of what the OCR actually saw. Nothing else writes
@@ -333,6 +365,10 @@ class Invoice(AbstractBaseModel):
     history = HistoricalRecords()
 
     objects = InvoiceQuerySet.as_manager()
+
+    # Fields only v3's own endpoints write. v2's serializers show them read-only, and v2's
+    # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
+    V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces")
 
     class Meta:
         # Every report filters on some combination of these three, and the
@@ -507,6 +543,8 @@ class Invoice(AbstractBaseModel):
 
 
 class LineItem(AbstractBaseModel):
+    objects = LineItemQuerySet.as_manager()
+
     # PROTECT, like Invoice.customer, and always the invoice's customer
     # (Invoice.save re-points the lines). As CASCADE, deleting a customer whose
     # invoices had moved to someone else deleted those invoices' lines, filed
@@ -676,7 +714,7 @@ class LineItem(AbstractBaseModel):
         # quantity as 1.000 gm, rate as 1 / g
 
         line_item_data = (
-            cls.objects.filter(
+            cls.objects.counted().filter(
                 invoice__invoice_date__range=[start_date, end_date],
                 invoice__business=business,
             )

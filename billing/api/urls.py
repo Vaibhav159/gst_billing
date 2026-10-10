@@ -15,6 +15,7 @@ from .me import MeView
 from .media import SignedMediaView
 from .preferences import PreferencesView
 from .reconciliation import ReconciliationView
+from .sales import SalesViewSet
 from .search import QuickSearchView
 from .views import (
     AIInvoiceCreateView,
@@ -42,6 +43,7 @@ router.register(r"line-items", LineItemViewSet)
 router.register(r"products", ProductViewSet)
 router.register(r"audit-logs", AuditLogViewSet)
 router.register(r"filed-periods", FiledPeriodViewSet)
+router.register(r"sales", SalesViewSet, basename="sale")
 
 urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them
