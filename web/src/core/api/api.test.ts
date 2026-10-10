@@ -1,5 +1,6 @@
 import axios, { AxiosError, CanceledError, type AxiosAdapter, type InternalAxiosRequestConfig } from "axios";
 import { renderHook, act } from "@testing-library/react";
+import { MutationObserver, onlineManager } from "@tanstack/react-query";
 import { api, clearTokens, getTokens, refreshAccessToken, setSessionExpiredHandler, setTokens } from "./client";
 import { problemOf, saveFailure } from "./errors";
 import { __setNetState, markReachable, useNetwork, useSlow } from "./network";
@@ -118,6 +119,32 @@ test("the query cache never polls and never refetches on focus", () => {
   const d = queryClient.getDefaultOptions().queries!;
   expect(d.refetchOnWindowFocus).toBe(false);
   expect(d.refetchInterval).toBeUndefined();
+});
+
+// Ruling 41: nothing queues. A save made offline fails at once and says so; it isn't held to go out later.
+test("offline, a save fails at once, in the app's words for it, and nothing is held back to send later", async () => {
+  const sent: string[] = [];
+  const before = api.defaults.adapter;
+  // a browser that's offline: no reply at all
+  api.defaults.adapter = ((config) => { sent.push(`${config.method} ${config.url}`); return Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)); }) as AxiosAdapter;
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  onlineManager.setOnline(false); // as after the browser's "offline" event
+  try {
+    const save = new MutationObserver(queryClient, { mutationFn: (patch: Record<string, unknown>) => api.patch("preferences/", patch) });
+    const outcome = await Promise.race([
+      save.mutate({ phoneMode: "easy" }).then(() => "saved", (e: unknown) => e),
+      new Promise((r) => { setTimeout(() => r("still waiting"), 200); }),
+    ]);
+    expect(outcome).toBeInstanceOf(AxiosError);
+    expect(sent).toEqual(["patch preferences/"]); // tried once, at once, and not again
+    expect(queryClient.getMutationCache().getAll().filter((m) => m.state.isPaused)).toEqual([]);
+    const p = problemOf(outcome);
+    expect(p.kind).toBe("offline");
+    expect(saveFailure(p)).toEqual({ title: "You're offline, so this wasn't saved", body: "What you typed is still here. Save again when the internet is back." });
+  } finally {
+    onlineManager.setOnline(true);
+    api.defaults.adapter = before;
+  }
 });
 
 // Ruling 26: a network blip never signs you out

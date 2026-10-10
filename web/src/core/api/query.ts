@@ -9,6 +9,8 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
       retry: (count, error) => count < 1 && !(axios.isAxiosError(error) && error.response && error.response.status < 500),
     },
-    mutations: { retry: false },
+    // Ruling 41: nothing queues. TanStack's default ("online") holds a save made offline and sends it later: the button
+    // spins, and the save could land after the person was told it wasn't saved. "always" sends it at once, so it fails at once.
+    mutations: { retry: false, networkMode: "always" },
   },
 });
