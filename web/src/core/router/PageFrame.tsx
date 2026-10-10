@@ -120,6 +120,7 @@ export function PageFrame({ children }: { children: ReactNode }) {
   // however often the shell re-renders; the page after signing in comes in like any other move
   const [visit, setVisit] = useState(() => ({ pathname, anim: signIn.current ? entrance : "", quiet: !signIn.current }));
   if (visit.pathname !== pathname) setVisit({ pathname, anim: entrance, quiet: false });
+  useEffect(() => { signIn.current = false; }, []); // the frame that greets the page after signing in spends the greeting: a later frame is quiet (Ruling 1E-11)
 
   useEffect(() => {
     openedAt.current = Date.now();

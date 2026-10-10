@@ -217,6 +217,28 @@ test("a firm without a GSTIN prints no bare GSTIN, in its block or a continued p
   expect(p.qr).toBe("KGH/2026-27/31||2026-10-08|87083.21");
 });
 
+test("a GSTIN that ends in a line break prints as one line wherever it prints: the firm's block and its QR code, both parties, a later page's header; one that's only a break or spaces is no GSTIN", () => {
+  // v2's bulk import stores a spreadsheet's GSTIN as it is
+  const p = printBill(bill({
+    firm: { ...(wireDetail().firm as object), gst_number: "08ABCPK1234F1Z5\n" },
+    customer: { ...(wireDetail().customer as object), gst_number: "08AAKFS4821M1ZQ\n" },
+  }), { showBank: true });
+  expect(p.firm.gstin).toBe("08ABCPK1234F1Z5");
+  expect(p.firm.lines).toContain("GSTIN/UIN: 08ABCPK1234F1Z5");
+  expect(p.qr).toBe("KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21");
+  expect(p.parties.map((x) => x.lines.filter((l) => l.startsWith("GSTIN")))).toEqual([["GSTIN/UIN : 08AAKFS4821M1ZQ"], ["GSTIN/UIN : 08AAKFS4821M1ZQ"]]);
+  expect([p.short[0][1], p.short[2][2]]).toEqual([{ text: " · GSTIN 08ABCPK1234F1Z5" }, { text: " · GSTIN 08AAKFS4821M1ZQ" }]);
+  const none = printBill(bill({
+    firm: { ...(wireDetail().firm as object), gst_number: "\n" },
+    customer: { ...(wireDetail().customer as object), gst_number: " " },
+  }), { showBank: true });
+  expect(none.firm.gstin).toBe("");
+  expect(none.firm.lines.filter((l) => l.includes("GSTIN"))).toEqual([]);
+  expect(none.qr).toBe("KGH/2026-27/31||2026-10-08|87083.21");
+  expect(none.parties.map((x) => x.lines.filter((l) => l.startsWith("GSTIN")))).toEqual([["GSTIN/UIN : Unregistered"], ["GSTIN/UIN : Unregistered"]]);
+  expect([none.short[0], none.short[2]]).toEqual([[{ text: "KIRAN GOLD HOUSE", bold: true }], [{ text: "Buyer : " }, { text: "Anil Gupta", bold: true }]]);
+});
+
 test("the city follows the address unless a part of the address, between commas, is the city: Ajmer isn't Ajmeri Gate", () => {
   const where = (address: string, city: string) => printBill(bill({ customer: { ...(wireDetail().customer as object), address, city } }), { showBank: true }).parties[0].lines.slice(0, -2);
   expect(where("12 Ajmeri Gate, Jaipur Road", "Ajmer")).toEqual(["12 Ajmeri Gate, Jaipur Road, Ajmer"]);

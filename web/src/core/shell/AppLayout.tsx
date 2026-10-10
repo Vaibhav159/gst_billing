@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
@@ -18,7 +18,8 @@ import { ScreenBoundary } from "./ScreenBoundary";
  * Around every route, sign-in included: the app's one ToastHost (a second would show every toast twice), the view on
  * its root, so the sign-in form gets the phone's 16 px fields too (iOS zooms into anything smaller), and the phone's
  * keyboard height (--kb). It also tells the page frame that the sign-in page was showing, so the page after it is
- * greeted like a move: set while the sign-in page shows, cleared by AppLayout once a page has stayed.
+ * greeted like a move: set while the sign-in page shows, and spent by the page frame that greets that page (Ruling
+ * 1E-11), never by the skeleton shown while the page's code loads.
  */
 export function RootLayout() {
   const { view } = useView();
@@ -40,7 +41,6 @@ export function AppLayout() {
   const navigate = useNavigate();
   const { prefs, ready } = usePrefs();
   const net = useNetwork();
-  const signIn = useContext(SignInShown);
   // search: one palette for the app, opened by Ctrl K and the desktop header's button, or the phone header's Search
   const [palette, setPalette] = useState(false);
   const openPalette = useCallback(() => setPalette(true), []);
@@ -59,8 +59,8 @@ export function AppLayout() {
   // stands in rather than a wait with no end, and a page that has shown stays until the setting moves it on.
   const shown = useRef(false);
   const unsure = home && !ready && location.key === first && net !== "offline" && !shown.current;
-  // once a page stays, its frame has taken the greeting after signing in: later frames are for later moves
-  useEffect(() => { if (!opening && !unsure) { shown.current = true; signIn.current = false; } });
+  // once a page shows, it stays until the setting moves it on (the greeting after signing in is its frame's to spend)
+  useEffect(() => { if (!opening && !unsure) shown.current = true; });
   if (opening) return <Navigate to={to} replace />;
   // the offline or server-trouble banner is one per screen: above the page here, the phone shell's own (its topmost
   // strip), or under the desktop's top bar, as in the prototype

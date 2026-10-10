@@ -59,8 +59,9 @@ export const JURISDICTION = "Udaipur";
  * figures (amountText, rateText without its ₹, bill numbers, HSN codes, GSTINs), which never hold a ₹.
  * Line breaks someone typed (v2's address boxes and 1D's note are textareas; react-pdf starts a new line at each) arrive
  * settled (Ruling 1E-9): an address as one entry of `lines` per printed line, one-line slots (the firm's, the customer's
- * and an item's names, a line's note, the 14 boxes, `short`, whose bill number and GSTINs can keep a spreadsheet's breaks
- * from v2's bulk import) with each break read as a space, and the bill's `note` with its breaks kept.
+ * and an item's names, a line's note, the 14 boxes, `short`, and the GSTINs wherever they print: v2's bulk import can keep
+ * a spreadsheet's breaks in a bill number or a GSTIN) with each break read as a space, and the bill's `note` with its
+ * breaks kept.
  */
 export type FreeText = string;
 export type PrintLine = { sl: string; name: FreeText; note: FreeText; hsn: string; qty: string; rate: string; per: string; amount: string };
@@ -116,6 +117,9 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
   const f = d.firm;
   const firmName = oneLine(f.name);
   const c = d.customer;
+  // each GSTIN settled once, for every place it prints
+  const firmGstin = oneLine(f.gst_number);
+  const buyerGstin = oneLine(c.gst_number);
   const walkin = c.type === "walkin";
   const name = walkin ? WALKIN_NAME : oneLine(c.name);
   // the address's printed lines, then the city after the last, unless a part of the address (between commas) is the city
@@ -123,7 +127,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
   const city = c.city.trim();
   const named = address.some((l) => l.split(",").some((part) => part.trim().toLowerCase() === city.toLowerCase()));
   const where = !city || named ? address : address.length ? [...address.slice(0, -1), `${address[address.length - 1]}, ${city}`] : [city];
-  const gstin = c.gst_number || "Unregistered";
+  const gstin = buyerGstin || "Unregistered";
   const pos = d.place_of_supply ? `${stateNameOf(d.place_of_supply)} (${d.place_of_supply})` : "";
   const e = d.eway;
   const units = [...new Set(d.lines.map((l) => l.unit))];
@@ -145,10 +149,10 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     ? `By ${e.transport_mode.toLowerCase()}${e.distance_km ? `, ${e.distance_km} km` : ""}` : "";
   const bill: Omit<PrintBill, "pages"> = {
     id: d.id, number: d.invoice_number, dated: date(d.invoice_date), file: billPdfName(d), cancelled: d.status === "cancelled",
-    qr: qrPayload(d),
+    qr: qrPayload({ ...d, firm: { gst_number: firmGstin } }),
     firm: {
-      name: firmName, gstin: f.gst_number,
-      lines: [...linesOf(f.address), f.gst_number ? `GSTIN/UIN: ${f.gst_number}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
+      name: firmName, gstin: firmGstin,
+      lines: [...linesOf(f.address), firmGstin ? `GSTIN/UIN: ${firmGstin}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
       pan: f.pan_number, signature: f.signature_url, bank,
     },
     parties: [
@@ -156,7 +160,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
       {
         label: "Buyer (Bill to)", name,
         lines: [
-          ...where, c.mobile_number ? `Phone : ${c.mobile_number}` : "", `GSTIN/UIN : ${gstin}${!c.gst_number && c.pan ? ` · PAN : ${c.pan}` : ""}`,
+          ...where, c.mobile_number ? `Phone : ${c.mobile_number}` : "", `GSTIN/UIN : ${gstin}${!buyerGstin && c.pan ? ` · PAN : ${c.pan}` : ""}`,
           stateLine(c.state_code), pos ? `Place of Supply : ${pos}` : "", "Reverse Charge : No",
         ].filter(Boolean),
       },
@@ -171,9 +175,9 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
       ["Motor Vehicle No.", e.vehicle_number], ["Terms of Delivery", terms],
     ] as [string, string][]).map(([k, v]): [string, string] => [k, oneLine(v)]),
     short: [
-      [{ text: firmName, bold: true }, ...(f.gst_number ? [{ text: ` · GSTIN ${oneLine(f.gst_number)}` }] : [])],
+      [{ text: firmName, bold: true }, ...(firmGstin ? [{ text: ` · GSTIN ${firmGstin}` }] : [])],
       [{ text: "Invoice No. " }, { text: oneLine(d.invoice_number), bold: true }, { text: " · Dated " }, { text: date(d.invoice_date), bold: true }],
-      [{ text: "Buyer : " }, { text: name, bold: true }, ...(c.gst_number ? [{ text: ` · GSTIN ${oneLine(c.gst_number)}` }] : [])],
+      [{ text: "Buyer : " }, { text: name, bold: true }, ...(buyerGstin ? [{ text: ` · GSTIN ${buyerGstin}` }] : [])],
       pos ? [{ text: `Place of Supply : ${pos}` }] : [],
     ],
     lines, taxes, note: d.notes,
