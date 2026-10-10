@@ -1,4 +1,4 @@
-import { counterOf, fullNumber, numberHint, numberShapeProblem, sameNumber, storedNumber } from "./numbers";
+import { counterOf, fullNumber, numberHint, numberShapeProblem, sameNumber, storedFor, storedNumber } from "./numbers";
 
 test("a number's counter is its trailing digits", () => {
   expect(counterOf("KGH/2026-27/108")).toBe(108);
@@ -22,6 +22,16 @@ test("digits alone take the firm's format only when it uses full numbers on that
   expect(storedNumber("000", { prefix: "KGH", fy: "2026-27", full: true })).toBe("KGH/2026-27/0");
   // and keeps every digit (Python's int is exact): 16 digits are past what a JavaScript number holds exactly
   expect(storedNumber("9007199254740993", { prefix: "KGH", fy: "2026-27", full: true })).toBe("KGH/2026-27/9007199254740993");
+});
+
+test("a next-number answer says what a typed number is stored as: storedNumber, with the firm's prefix read off its number", () => {
+  const next = { fy: "2026-27", invoice_number: "KGH/2026-27/35", full_number: true };
+  expect(storedFor(next, " 034 ")).toBe("KGH/2026-27/34");
+  expect(storedFor(next, "MO/26/9")).toBe("MO/26/9");
+  expect(storedFor({ fy: "2026-27", invoice_number: "KGH/A/2026-27/35", full_number: true }, "34")).toBe("KGH/A/2026-27/34");
+  // before the firm's full-number date, or with no answer yet, a number is kept as typed
+  expect(storedFor({ fy: "2026-27", invoice_number: "35", full_number: false }, " 34 ")).toBe("34");
+  expect(storedFor(undefined, " 34 ")).toBe("34");
 });
 
 test("a number's shape in the server's words", () => {

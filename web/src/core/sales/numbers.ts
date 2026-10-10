@@ -1,6 +1,7 @@
 // Bill numbers: stored exactly as typed and trimmed, except that on or after a firm's paper_full_number_from date digits
 // alone take the firm's format (34 -> KGH/2026-27/34). One series per firm and FY; a number's counter is its trailing
 // digits. Whether a number is free is the server's to say (GET sales/check-number/): these say what it looks like.
+import type { NextNumber } from "./types";
 
 /** The number part at the end: "KGH/2026-27/108" -> 108, "45" -> 45; null when there's none. */
 export function counterOf(text: string | null | undefined): number | null {
@@ -26,6 +27,17 @@ export function fullNumber(prefix: string, fy: string, n: number | string): stri
 export function storedNumber(text: string, { prefix, fy, full }: { prefix: string; fy: string; full: boolean }): string {
   const t = text.trim();
   return full && /^\d+$/.test(t) ? fullNumber(prefix, fy, t.replace(/^0+(?=\d)/, "")) : t;
+}
+
+/**
+ * What a typed number is stored as, by a firm's next-number answer (contract §2.11): storedNumber, with the firm's prefix
+ * read off the answer's number ("KGH/2026-27/35" gives KGH) and its full_number for that date. Renumber and Move use it
+ * (Ruling 1B-9); the check-number answer's invoice_number says the same once it's in.
+ */
+export function storedFor(next: Pick<NextNumber, "fy" | "invoice_number" | "full_number"> | null | undefined, text: string): string {
+  if (!next?.full_number) return text.trim();
+  const at = next.invoice_number.lastIndexOf(`/${next.fy}/`);
+  return storedNumber(text, { prefix: at > 0 ? next.invoice_number.slice(0, at) : "", fy: next.fy, full: true });
 }
 
 /** What's wrong with a typed number's shape, in the server's words (contract §2.3), or "". stored: what it would be saved as. */

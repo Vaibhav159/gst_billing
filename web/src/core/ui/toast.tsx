@@ -10,15 +10,20 @@ import { Portal, layerZoom, overlayLayer } from "./Overlay";
 
 export type ToastInput = { title: string; body?: ReactNode; tone?: "sale" | "neg" | "brand"; action?: { label: string; onClick: () => void }; duration?: number };
 type Toast = ToastInput & { id: string; duration: number; at: number; leaving?: boolean };
-export type ToastApi = { show(t: ToastInput): string; dismiss(id: string): void; clearPlain(): void };
+export type ToastApi = {
+  show(t: ToastInput): string; dismiss(id: string): void; clearPlain(): void;
+  /** Ctrl Z: runs the last Undo a toast offered, once, for 30 s. False when there's nothing to undo. */
+  undoLast(): boolean;
+};
 
 const ToastApiCtx = createContext<ToastApi | null>(null);
-const ToastListCtx = createContext<{ toasts: Toast[]; hosted: boolean }>({ toasts: [], hosted: false });
+const ToastListCtx = createContext<{ toasts: Toast[]; hosted: boolean; acted(id: string): void }>({ toasts: [], hosted: false, acted: () => {} });
 
 /**
  * Holds the toasts (the prototype kept them in its store). show({ title, body, tone, action: { label, onClick }, duration }):
  * the host times each one (paused while pointed at or focused): 6 s, 15 s with an action, 10 s for a problem.
- * A new toast replaces one with the same title, and at most three show.
+ * A new toast replaces one with the same title, and at most three show. An action labelled Undo can also be run by
+ * Ctrl Z (undoLast) for 30 s, once; pressing it on the toast uses it up.
  * Inside a router the provider shows them itself; above one (the app's case), ToastHost shows them.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -32,10 +37,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((t) => t.map((x) => (x.id === id ? { ...x, leaving: true } : x)));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 170);
   }, []);
+  // the last Undo a toast offered (PROTO core/store.jsx:101-123): Ctrl Z runs it for 30 s, once
+  const undo = useRef<{ id: string; run: () => void; until: number } | null>(null);
   const show = useCallback((t: ToastInput) => {
     const id = Math.random().toString(36).slice(2);
     const duration = t.duration || (t.action ? 15000 : t.tone === "neg" ? 10000 : 6000);
     setToasts((all) => [...all.filter((x) => x.title !== t.title).slice(-2), { id, tone: "sale", ...t, duration, at: Date.now() }]);
+    if (t.action && /^undo/i.test(t.action.label)) undo.current = { id, run: t.action.onClick, until: Date.now() + 30_000 };
     return id;
   }, []);
   // a toast that says what just happened belongs to that page: on phones, moving on clears it
@@ -44,9 +52,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     if (!phone.current) return;
     for (const t of shown.current) if (!t.action && Date.now() - (t.at || 0) > 1200) dismiss(t.id);
   }, [dismiss]);
-  const api = useMemo(() => ({ show, dismiss, clearPlain }), [show, dismiss, clearPlain]);
+  const undoLast = useCallback(() => {
+    const u = undo.current;
+    undo.current = null;
+    if (!u || Date.now() > u.until) return false;
+    u.run();
+    dismiss(u.id);
+    return true;
+  }, [dismiss]);
+  /** A toast's own action was pressed: its Undo is used up, so Ctrl Z can't run it a second time. */
+  const acted = useCallback((id: string) => { if (undo.current?.id === id) undo.current = null; }, []);
+  const api = useMemo(() => ({ show, dismiss, clearPlain, undoLast }), [show, dismiss, clearPlain, undoLast]);
   const hosted = useInRouterContext();
-  const list = useMemo(() => ({ toasts, hosted }), [toasts, hosted]);
+  const list = useMemo(() => ({ toasts, hosted, acted }), [toasts, hosted, acted]);
   return (
     <ToastApiCtx.Provider value={api}>
       <ToastListCtx.Provider value={list}>
@@ -78,7 +96,7 @@ const TOAST_ICON: Record<string, [LucideIcon, string]> = { sale: [CheckCircle2, 
  * or the next page's first field; moving to another page clears it (clearPlain).
  */
 function ToastStack() {
-  const { toasts } = useContext(ToastListCtx);
+  const { toasts, acted } = useContext(ToastListCtx);
   const { dismiss } = useToast();
   const { isPhone, isEasy } = useView();
   const { pathname } = useLocation();
@@ -110,13 +128,13 @@ function ToastStack() {
   return (
     <Portal>
       <div aria-live="polite" style={place} className={cn("absolute z-toast flex gap-2 pointer-events-none", isPhone ? "left-3 right-3 flex-col" : "left-6 bottom-6 w-[400px] flex-col")}>
-        {toasts.map((t) => <ToastItem key={t.id} t={t} dismiss={dismiss} isPhone={isPhone} isEasy={isEasy} />)}
+        {toasts.map((t) => <ToastItem key={t.id} t={t} dismiss={dismiss} acted={acted} isPhone={isPhone} isEasy={isEasy} />)}
       </div>
     </Portal>
   );
 }
 
-function ToastItem({ t, dismiss, isPhone, isEasy }: { t: Toast; dismiss: (id: string) => void; isPhone: boolean; isEasy: boolean }) {
+function ToastItem({ t, dismiss, acted, isPhone, isEasy }: { t: Toast; dismiss: (id: string) => void; acted: (id: string) => void; isPhone: boolean; isEasy: boolean }) {
   const [I, c] = TOAST_ICON[t.tone ?? "sale"] || TOAST_ICON.sale;
   const paused = useRef(false);
   const left = useRef(isEasy && !t.action ? Math.round(t.duration * 1.35) : t.duration || 6000);
@@ -153,7 +171,7 @@ function ToastItem({ t, dismiss, isPhone, isEasy }: { t: Toast; dismiss: (id: st
       </div>
       {action ? (
         // a toast on its way out (pressed, dismissed or timed out) ignores its action, so a quick second press can't run it twice
-        <Button size="sm" variant="link" onClick={() => { if (t.leaving) return; action.onClick(); dismiss(t.id); }} aria-keyshortcuts={undo && !isPhone ? "Control+Z" : undefined}>
+        <Button size="sm" variant="link" onClick={() => { if (t.leaving) return; action.onClick(); acted(t.id); dismiss(t.id); }} aria-keyshortcuts={undo && !isPhone ? "Control+Z" : undefined}>
           {action.label}{undo && !isPhone ? <Kbd className="ml-1">Ctrl Z</Kbd> : null}
         </Button>
       ) : null}
