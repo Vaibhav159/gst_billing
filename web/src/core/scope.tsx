@@ -42,8 +42,11 @@ export function useFirms(): { firms: Firm[]; loading: boolean; error: boolean } 
   return { firms: q.data ?? NO_FIRMS, loading: q.isPending, error: q.isError };
 }
 
-/** ready: the firm is known (a pick on this device, or the person's preferences); until then firmId is only a stand-in. */
-export type Scope = { firmId: FirmId; setFirmId(id: FirmId): void; fy: string; setFy(fy: string): void; fyChoices: string[]; ready: boolean };
+/**
+ * firmId is null until the firm is known (a pick on this device, or the person's preferences), so a list can't ask for
+ * every firm before the person's usual one is known: it waits for `firmId !== null`. ready says the same.
+ */
+export type Scope = { firmId: FirmId | null; setFirmId(id: FirmId): void; fy: string; setFy(fy: string): void; fyChoices: string[]; ready: boolean };
 const ScopeCtx = createContext<Scope | null>(null);
 
 const FY_KEY = "gst3.fy";
@@ -100,8 +103,8 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const usable = (id: number | null): id is number => id !== null && (!listed || firms.some((f) => f.id === id));
   const usual = toId(prefs.defaultBusinessId);
   const picked = stored === "all" || usable(stored);
-  const firmId: FirmId = stored === "all" ? "all" : usable(stored) ? stored : usable(usual) ? usual : "all";
   const ready = picked || prefsReady;
+  const firmId: FirmId | null = !ready ? null : stored === "all" ? "all" : usable(stored) ? stored : usable(usual) ? usual : "all";
   const setFirmId = useCallback((id: FirmId) => {
     if (meId === null) return;
     write(scopeKey(meId), String(id));

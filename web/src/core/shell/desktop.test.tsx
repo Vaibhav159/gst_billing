@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from "react-router";
 import { renderApp, stubAuth } from "@/test/render";
@@ -465,19 +465,29 @@ function slowPrefs() {
     : answer(config))) as AxiosAdapter;
   return { asked: () => waiting.length, answer: () => act(async () => { waiting.splice(0).forEach((go) => go()); }) };
 }
-/** The firm each render of the scope settled on, in order. */
-const seen: FirmId[] = [];
-function Seen() { seen.push(useScope().firmId); return null; }
+/** The firm each render of the scope settled on, in order (null: not known yet), and any render where ready said otherwise. */
+const seen: (FirmId | null)[] = [];
+const disagreed: unknown[] = [];
+function Seen() {
+  const { firmId, ready } = useScope();
+  seen.push(firmId);
+  if (ready !== (firmId !== null)) disagreed.push({ firmId, ready });
+  return null;
+}
 const scoped = () => renderApp(<ScopeProvider><Seen /><FirmPicker /></ScopeProvider>, { path: "/sales" });
 
 test("the next load shows the usual firm from its first paint, before the server answers, and never All firms (Ruling 38)", async () => {
   const server = slowPrefs();
-  // the first load on this device: nothing kept yet, so the picker waits for this person's preferences
+  // the first load on this device: nothing kept yet, so the firm isn't known, and the picker waits, until the preferences come
+  seen.length = 0;
+  disagreed.length = 0;
   let view = scoped();
   expect(screen.getByRole("button", { name: "Firm: loading" })).toBeInTheDocument();
   await waitFor(() => expect(server.asked()).toBe(1));
   await server.answer();
   expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
+  expect(seen[0]).toBeNull();
+  expect(seen).not.toContain("all");
   view.unmount();
 
   // the next load: a fresh query cache, the same storage, and the server slow to answer
@@ -490,6 +500,8 @@ test("the next load shows the usual firm from its first paint, before the server
   await act(() => new Promise((r) => setTimeout(r, 30)));
   expect(screen.getByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
   expect(seen).not.toContain("all");
+  expect(seen).not.toContain(null);
+  expect(disagreed).toEqual([]); // ready is firmId !== null, on both loads
 });
 
 test("someone else's kept preferences never choose this person's firm", async () => {
@@ -508,10 +520,49 @@ test("someone else's kept preferences never choose this person's firm", async ()
   seen.length = 0;
   scoped();
   expect(screen.getByRole("button", { name: "Firm: loading" })).toBeInTheDocument();
+  expect(seen[0]).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Firm: loading" }));
+  await screen.findAllByRole("menuitem");
+  expect(screen.getAllByRole("menuitem").filter((row) => row.hasAttribute("aria-current"))).toEqual([]); // nothing ticked while the firm isn't known
+  await userEvent.keyboard("{Escape}");
   await waitFor(() => expect(server.asked()).toBe(1));
   await server.answer();
   expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
   expect(seen).not.toContain(4);
+});
+
+/** A list as part 1 will write one: it asks for its firm's bills once the scope knows the firm. */
+function BillsList({ asked }: { asked: FirmId[] }) {
+  const { firmId } = useScope();
+  useQuery({ queryKey: ["bills", firmId], enabled: firmId !== null, staleTime: Infinity, queryFn: async () => { if (firmId !== null) asked.push(firmId); return []; } });
+  return null;
+}
+
+test("a list that waits for the firm asks once, for the usual firm, never for all firms first", async () => {
+  const server = slowPrefs();
+  const asked: FirmId[] = [];
+  renderApp(<ScopeProvider><BillsList asked={asked} /></ScopeProvider>, { path: "/sales" });
+  await waitFor(() => expect(server.asked()).toBe(1));
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+  expect(asked).toEqual([]); // nothing until this person's usual firm is known
+  await server.answer();
+  await waitFor(() => expect(asked).toEqual([3]));
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+  expect(asked).toEqual([3]);
+});
+
+test("when the firm list can't load, the firm button says so instead of loading for ever", async () => {
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url?.startsWith("businesses/") ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config))) as AxiosAdapter;
+  localStorage.setItem("gst3.scope.1", "4");
+  const view = shell();
+  const button = await screen.findByRole("button", { name: "Firm: couldn't load" });
+  expect(button).toHaveTextContent("Couldn't load");
+  view.unmount();
+  // All firms needs no names from the list
+  localStorage.setItem("gst3.scope.1", "all");
+  shell();
+  expect(await screen.findByRole("button", { name: "Firm: All firms" })).toBeInTheDocument();
 });
 
 test("until the firm list is in, the firm button's name says it's loading", async () => {
