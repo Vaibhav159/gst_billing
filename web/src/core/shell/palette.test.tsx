@@ -117,6 +117,18 @@ test("nothing is asked on opening or for one character; a search waits for a pau
   expect(held).toHaveLength(2);
 });
 
+test("a phone number typed in groups is asked for as its digits, and its rows show; a bill's year keeps its hyphen", async () => {
+  mount();
+  const box = screen.getByRole("combobox");
+  await userEvent.type(box, "98290 41122");
+  // the rows are for what's in the box, so they show: the stale-rows check reads the same digits
+  expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
+  expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=9829041122"]);
+  await userEvent.clear(box);
+  await userEvent.type(box, "2026-27");
+  await waitFor(() => expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=9829041122", "search/quick/?q=2026-27"]));
+});
+
 test("a term searched in the last 30 s comes back without asking again", async () => {
   mount();
   const box = screen.getByRole("combobox");

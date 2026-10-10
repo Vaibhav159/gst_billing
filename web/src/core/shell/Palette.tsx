@@ -72,9 +72,11 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
   // the last search's words (the dialog puts the cursor in the box as it opens)
   useEffect(() => { if (!open) { setQ(""); setI(0); setTerm(""); } }, [open]);
   const text = q.trim();
+  // what the server is asked for: a phone number typed in groups ("98290 41122") as the digits it keeps; a hyphen stays ("2026-27")
+  const asked = /^\d[\d ]*\d$/.test(text) ? text.replace(/ /g, "") : text;
   // the server is asked about what's typed once it has rested 250 ms, from two characters: one request per term, kept
   // 30 s, and a newer term cancels the one still out. Nothing asks on a timer (the database is Neon's free plan)
-  useEffect(() => { const t = setTimeout(() => setTerm(text), 250); return () => clearTimeout(t); }, [text]);
+  useEffect(() => { const t = setTimeout(() => setTerm(asked), 250); return () => clearTimeout(t); }, [asked]);
   const search = useQuery({
     queryKey: ["search", term],
     queryFn: async ({ signal }) => (await api.get("search/quick/", { params: { q: term }, signal })).data as Quick,
@@ -84,7 +86,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
   });
   // the answer for what's in the box now (an older term's rows never stand in for it); a failure is all of it, and the
   // reason shows again only once Try again has had its answer
-  const current = open && text.length >= 2 && term === text;
+  const current = open && asked.length >= 2 && term === asked;
   const records = current && search.data && !search.isError ? search.data : null;
   const problem = current && search.isError && search.fetchStatus !== "fetching" ? problemOf(search.error) : null;
   const settled = Boolean(records || problem);
