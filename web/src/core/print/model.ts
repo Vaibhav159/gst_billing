@@ -71,6 +71,8 @@ export type PrintHsn = { key: string; hsn: string; taxable: string; rate: string
 export type PrintPage = { index: number; count: number; first: boolean; last: boolean; lines: number[] };
 /** lines: one printed line each (an address typed on two lines is two entries). */
 export type Party = { label: string; name: FreeText; lines: FreeText[] };
+/** A stretch of a printed line in one weight: a later page's short header bolds some of its words (PROTO). */
+export type Run = { text: FreeText; bold?: boolean };
 export type PrintBill = {
   id: number; number: string; dated: string; file: string; cancelled: boolean;
   /** What the QR code carries (qrPayload). */
@@ -80,8 +82,11 @@ export type PrintBill = {
   parties: [Party, Party];
   /** The 14 boxes beside the parties, as [label, value], one line each: a value can be typed text (the note, the transporter, the city). */
   meta: [string, FreeText][];
-  /** The short header of a continued page, one line each: [firm · GSTIN, number · date, buyer, place of supply]. */
-  short: [FreeText, string, FreeText, string];
+  /**
+   * The short header of a continued page, one line each, in runs: [firm · GSTIN, number · date, buyer, place of supply].
+   * The bold runs are the firm's name, the number, the date and the buyer's name, as PROTO bolds them (Ruling 1E-10).
+   */
+  short: [Run[], Run[], Run[], Run[]];
   lines: PrintLine[]; taxes: PrintTax[];
   /**
    * The bill's note as typed, its line breaks kept: the PDF starts a new line at each, the paper on screen shows it with
@@ -109,6 +114,7 @@ const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 /** The bill as the paper prints it. showBank: the switch on the print page (a firm without an account prints none). */
 export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): PrintBill {
   const f = d.firm;
+  const firmName = oneLine(f.name);
   const c = d.customer;
   const walkin = c.type === "walkin";
   const name = walkin ? WALKIN_NAME : oneLine(c.name);
@@ -124,7 +130,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
   const thousandths = d.lines.reduce((a, l) => a + (scaled(l.quantity, 3) ?? 0n), 0n);
   const igst = storedIgst(d);
   const bank = showBank && hasBank(f)
-    ? [["Bank Name", f.bank_name], ["A/c No.", f.bank_account_number], ["Branch & IFS Code", [f.bank_branch_name, f.bank_ifsc_code].filter(Boolean).join(" & ")]] as [string, string][]
+    ? [["Bank Name", oneLine(f.bank_name)], ["A/c No.", f.bank_account_number], ["Branch & IFS Code", [f.bank_branch_name, f.bank_ifsc_code].map(oneLine).filter(Boolean).join(" & ")]] as [string, string][]
     : null;
   const lines: PrintLine[] = d.lines.map((l, i) => ({
     sl: String(i + 1), name: oneLine(l.product_name), note: oneLine(l.note), hsn: l.hsn_code, qty: qty(Number(l.quantity), l.unit),
@@ -141,7 +147,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     id: d.id, number: d.invoice_number, dated: date(d.invoice_date), file: billPdfName(d), cancelled: d.status === "cancelled",
     qr: qrPayload(d),
     firm: {
-      name: oneLine(f.name), gstin: f.gst_number,
+      name: firmName, gstin: f.gst_number,
       lines: [...linesOf(f.address), f.gst_number ? `GSTIN/UIN: ${f.gst_number}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
       pan: f.pan_number, signature: f.signature_url, bank,
     },
@@ -165,9 +171,11 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
       ["Motor Vehicle No.", e.vehicle_number], ["Terms of Delivery", terms],
     ] as [string, string][]).map(([k, v]): [string, string] => [k, oneLine(v)]),
     short: [
-      `${f.name}${f.gst_number ? ` · GSTIN ${f.gst_number}` : ""}`, `Invoice No. ${d.invoice_number} · Dated ${date(d.invoice_date)}`,
-      `Buyer : ${name}${c.gst_number ? ` · GSTIN ${c.gst_number}` : ""}`, pos ? `Place of Supply : ${pos}` : "",
-    ].map(oneLine) as PrintBill["short"],
+      [{ text: firmName, bold: true }, ...(f.gst_number ? [{ text: ` · GSTIN ${f.gst_number}` }] : [])],
+      [{ text: "Invoice No. " }, { text: d.invoice_number, bold: true }, { text: " · Dated " }, { text: date(d.invoice_date), bold: true }],
+      [{ text: "Buyer : " }, { text: name, bold: true }, ...(c.gst_number ? [{ text: ` · GSTIN ${c.gst_number}` }] : [])],
+      pos ? [{ text: `Place of Supply : ${pos}` }] : [],
+    ],
     lines, taxes, note: d.notes,
     total: { qty: units.length === 1 ? qty(Number(thousandths) / 1000, units[0]) : "", amount: amountText(d.total_amount) },
     words: `INR ${d.total_in_words}`, igst, hsn,

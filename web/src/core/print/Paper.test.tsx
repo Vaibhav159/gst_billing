@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
@@ -19,7 +21,7 @@ test("the paper on screen says what prints: the copy's mark, the rows, the total
   }
   expect(paper).not.toHaveTextContent("Rounded Off");
   expect(within(paper).getByRole("img", { name: "QR code: KGH/2026-27/31, 08ABCPK1234F1Z5, 08 Oct 2026, ₹87,083.21" })).toBeInTheDocument();
-  expect(within(paper).getByRole("table")).toHaveTextContent("SGST/UTGST Amount");
+  expect(within(paper).getByRole("table", { name: "Tax by HSN/SAC" })).toHaveTextContent("SGST/UTGST Amount");
 });
 
 test("a page after the first has the short header, no QR, and the next page's number at its foot", () => {
@@ -32,6 +34,27 @@ test("a page after the first has the short header, no QR, and the next page's nu
   expect(paper).toHaveTextContent("continued on page 3");
   expect(within(paper).queryByRole("img", { name: /^QR code/ })).not.toBeInTheDocument();
   expect(within(paper).getByRole("img", { name: "Cancelled" })).toBeInTheDocument();
+  expect(within(paper).getByRole("heading", { level: 2, name: "Tax Invoice (continued, page 2)" })).toBeInTheDocument();
+  // the sheet's own lines and only them, under its copy's mark and its place among the pages
+  expect(paper).toHaveTextContent("Page 2 of 3");
+  expect(paper).toHaveTextContent("(ORIGINAL FOR RECIPIENT)");
+  const own = p.pages[1].lines;
+  expect(within(paper).getAllByText(/^Gold Ring 22K \d+$/)).toHaveLength(own.length);
+  expect(within(paper).getByText(`Gold Ring 22K ${own[0] + 1}`)).toBeInTheDocument();
+  expect(within(paper).getByText(`Gold Ring 22K ${own[own.length - 1] + 1}`)).toBeInTheDocument();
+  expect(within(paper).queryByText("Gold Ring 22K 1")).not.toBeInTheDocument(); // page 1's
+  expect(within(paper).queryByText("Gold Ring 22K 60")).not.toBeInTheDocument(); // page 3's
+});
+
+test("a later page's short header bolds the firm's name, the bill number, the date and the buyer's name, as the prototype does (Ruling 1E-10)", () => {
+  const p = bill({ lines: Array.from({ length: 30 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })), customer: { ...(wireDetail().customer as object), gst_number: "08AAKFS4821M1ZQ" } });
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[1]} />);
+  const paper = screen.getByRole("document");
+  const boldIn = (line: string) => [...within(paper).getByText((_, el) => el?.tagName === "DIV" && el.textContent === line).querySelectorAll(".font-bold")].map((el) => el.textContent);
+  expect(boldIn("KIRAN GOLD HOUSE · GSTIN 08ABCPK1234F1Z5")).toEqual(["KIRAN GOLD HOUSE"]);
+  expect(boldIn("Invoice No. KGH/2026-27/31 · Dated 08 Oct 2026")).toEqual(["KGH/2026-27/31", "08 Oct 2026"]);
+  expect(boldIn("Buyer : Anil Gupta · GSTIN 08AAKFS4821M1ZQ")).toEqual(["Anil Gupta"]);
+  expect(boldIn("Place of Supply : Rajasthan (08)")).toEqual([]);
 });
 
 test("the print copy sits outside the app, hidden from screen readers: the browser's print shows it alone (styles.css)", () => {
@@ -43,6 +66,18 @@ test("the print copy sits outside the app, hidden from screen readers: the brows
   expect(document.getElementById("app")).toBeEmptyDOMElement();
   expect(screen.queryByRole("document")).not.toBeInTheDocument();
   expect(copy.querySelector("[data-paper]")).toHaveTextContent("ORIGINAL FOR RECIPIENT");
+});
+
+test("the A4 sheet without margins holds only while a print copy is mounted, not for every Ctrl P in the app (Ruling 1E-10)", () => {
+  const p = bill();
+  const pageRules = () => [...document.styleSheets].flatMap((s) => [...s.cssRules]).map((r) => r.cssText).filter((t) => t.includes("@page"));
+  expect(pageRules()).toEqual([]);
+  const { unmount } = render(<PrintCopy><Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} /></PrintCopy>);
+  expect(pageRules()).toEqual([expect.stringMatching(/^@media print \{\s*@page \{\s*size: A4; margin: 0;?\s*\}\s*\}$/)]);
+  unmount();
+  expect(pageRules()).toEqual([]);
+  // and the app's own stylesheet sets none, so Ctrl P anywhere else keeps the browser's sheet and margins
+  expect(readFileSync(resolve(__dirname, "../../styles.css"), "utf8")).not.toMatch(/@page/);
 });
 
 test("a firm without a GSTIN: the QR code's name leaves the GSTIN out, with no empty part", () => {
@@ -91,7 +126,7 @@ test("an inter-state bill sets out IGST in the HSN summary; bank details off pri
   const p = printBill(d, { showBank: false });
   render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
   const paper = screen.getByRole("document");
-  const cells = within(paper).getAllByRole("row").map((r) => [...r.querySelectorAll("th, td")].map((c) => c.textContent));
+  const cells = within(within(paper).getByRole("table", { name: "Tax by HSN/SAC" })).getAllByRole("row").map((r) => [...r.querySelectorAll("th, td")].map((c) => c.textContent));
   expect(cells).toEqual([
     ["HSN/SAC", "Taxable Value", "IGST Rate", "IGST Amount", "Total Tax Amount"],
     ["711319", "80,396.81", "3%", "2,411.90", "2,411.90"],
@@ -103,15 +138,45 @@ test("an inter-state bill sets out IGST in the HSN summary; bank details off pri
   expect(within(paper).getByRole("img", { name: "Signature for KIRAN GOLD HOUSE" })).toHaveAttribute("src", "/api/media/signatures/3.png?s=abc");
 });
 
+test("an empty box and a one-page bill's copy-mark line keep the prototype's non-breaking space, so they keep their height", () => {
+  const p = bill();
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const paper = screen.getByRole("document");
+  expect(within(paper).getByText("Reference No. & Date.").nextElementSibling!.textContent).toBe("\u00a0");
+  expect(within(paper).getByText("(ORIGINAL FOR RECIPIENT)").previousElementSibling!.textContent).toBe("\u00a0");
+});
+
+test("a screen reader reads the title and the declaration as headings and the goods as a table, with nothing changed on the paper", () => {
+  const p = bill();
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const paper = screen.getByRole("document");
+  expect(within(paper).getByRole("heading", { level: 2 })).toHaveTextContent(/^Tax Invoice$/);
+  expect(within(paper).getByRole("heading", { level: 3 })).toHaveTextContent(/^Declaration$/);
+  const goods = within(paper).getByRole("table", { name: "Goods" });
+  expect(within(goods).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Sl No.", "Description of Goods", "HSN/SAC", "Quantity", "Rate", "per", "Amount"]);
+  expect(within(goods).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent))).toEqual([
+    ["1", "Gold Ring 22K", "711319", "12.345 gms", "6,512.50", "gms", "80,396.81"],
+    ["2", "Gold Pendant 22KPeacock design", "711319", "1 pcs", "4,150.00", "pcs", "4,150.00"], // the line's note sits under its name
+    ["", "CGST", "", "", "1.5%", "", "1,268.20"],
+    ["", "SGST", "", "", "1.5%", "", "1,268.20"],
+    ["", "Total", "", "", "", "", "₹ 87,083.21"],
+  ]);
+  // the empty row that stretches the table down the sheet says nothing
+  expect(goods.querySelectorAll('[role="row"][aria-hidden="true"]')).toHaveLength(1);
+});
+
 test("on a narrow screen the paper shrinks to fit, and a button shows it full size and back; where it fits, there's no button", async () => {
   const p = bill();
   const zoom = () => screen.getByRole("document").parentElement!.style.zoom;
   const { unmount } = renderApp(<ScaledPaper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
   expect(Number(zoom())).toBeCloseTo(358 / A4_W); // jsdom lays nothing out, so the box reads as a 358 px phone
+  expect(screen.queryByRole("region")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "See it full size" }));
   expect(zoom()).toBe("");
+  expect(screen.getByRole("region", { name: "The bill at full size" })).toHaveAttribute("tabindex", "0"); // the keyboard can scroll it
   await userEvent.click(screen.getByRole("button", { name: "Fit to the screen" }));
   expect(Number(zoom())).toBeCloseTo(358 / A4_W);
+  expect(screen.queryByRole("region")).not.toBeInTheDocument();
   unmount();
   vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1000);
   renderApp(<ScaledPaper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);

@@ -173,19 +173,20 @@ test("a note typed on three lines keeps its breaks for the paper, and the plan c
 test("the 14 boxes and a continued page's header hold one line each: a line break typed there reads as a space", () => {
   const p = printBill(bill({ notes: "Hallmarked\nBIS 916\nSize 14", customer: { ...(wireDetail().customer as object), name: "Anil\nGupta" } }), { showBank: true });
   expect(p.meta[5]).toEqual(["Other References", "Hallmarked BIS 916 Size 14"]);
-  expect(p.short[2]).toBe("Buyer : Anil Gupta");
+  expect(p.short[2]).toEqual([{ text: "Buyer : " }, { text: "Anil Gupta", bold: true }]);
 });
 
-test("a line break inside a name or a line's note reads as a space, so each prints on one line, and the plan counts one: 30 lines break as 18 and 12", () => {
-  // names reach v3 with breaks only from v2's imports; the firm's name sits in a slot of fixed height that the plan never counts
+test("a line break inside a name, a line's note or the bank's details reads as a space, so each prints on one line, and the plan counts one: 30 lines break as 18 and 12", () => {
+  // these reach v3 with breaks only from v2's imports; the firm's name and the bank's details sit in slots of fixed height that the plan never counts
   const p = printBill(bill({
-    firm: { ...(wireDetail().firm as object), name: "KIRAN GOLD\nHOUSE" },
+    firm: { ...(wireDetail().firm as object), name: "KIRAN GOLD\nHOUSE", bank_name: "Sandbox\nBank", bank_branch_name: "Jaipur\nMain Branch" },
     customer: { ...(wireDetail().customer as object), name: "Anil\r\nGupta" },
     lines: Array.from({ length: 30 }, (_, i) => ({ ...WIRE_LINES[1], id: i + 1, product_name: "Gold Pendant\n22K", note: "Peacock\ndesign" })),
   }), { showBank: true });
   expect(p.firm.name).toBe("KIRAN GOLD HOUSE");
   expect(p.parties.map((x) => x.name)).toEqual(["Anil Gupta", "Anil Gupta"]);
   expect(p.lines[0]).toMatchObject({ name: "Gold Pendant 22K", note: "Peacock design" });
+  expect(p.firm.bank).toEqual([["Bank Name", "Sandbox Bank"], ["A/c No.", "000000000003"], ["Branch & IFS Code", "Jaipur Main Branch & SBOX0000003"]]);
   expect(p.pages.map((x) => x.lines.length)).toEqual([18, 12]);
 });
 
@@ -201,7 +202,7 @@ test("the last page's fixed part fits a sheet only up to a limit (the ponytail a
 test("a firm without a GSTIN prints no bare GSTIN, in its block or a continued page's header, and its QR code leaves the field empty", () => {
   const p = printBill(bill({ firm: { ...(wireDetail().firm as object), gst_number: "" } }), { showBank: true });
   expect(p.firm.lines).toEqual(["12 Sandbox Bazaar, Jaipur, Rajasthan", "State Name : Rajasthan, Code : 08", "E-Mail : firm3@example.com"]);
-  expect(p.short[0]).toBe("KIRAN GOLD HOUSE");
+  expect(p.short[0]).toEqual([{ text: "KIRAN GOLD HOUSE", bold: true }]);
   expect(p.qr).toBe("KGH/2026-27/31||2026-10-08|87083.21");
 });
 
@@ -211,4 +212,14 @@ test("the city follows the address unless a part of the address, between commas,
   expect(where("15 Demo Road, Udaipur", "UDAIPUR")).toEqual(["15 Demo Road, Udaipur"]);
   expect(where("Shop 12\nUdaipur", "Udaipur")).toEqual(["Shop 12", "Udaipur"]);
   expect(where("", "Udaipur")).toEqual(["Udaipur"]);
+});
+
+test("a later page's short header comes in runs, the bold ones marked as the prototype bolds them: the firm's name, the number, the date and the buyer's name (Ruling 1E-10)", () => {
+  const p = printBill(bill({ customer: { ...(wireDetail().customer as object), gst_number: "08AAKFS4821M1ZQ" } }), { showBank: true });
+  expect(p.short).toEqual([
+    [{ text: "KIRAN GOLD HOUSE", bold: true }, { text: " · GSTIN 08ABCPK1234F1Z5" }],
+    [{ text: "Invoice No. " }, { text: "KGH/2026-27/31", bold: true }, { text: " · Dated " }, { text: "08 Oct 2026", bold: true }],
+    [{ text: "Buyer : " }, { text: "Anil Gupta", bold: true }, { text: " · GSTIN 08AAKFS4821M1ZQ" }],
+    [{ text: "Place of Supply : Rajasthan (08)" }],
+  ]);
 });

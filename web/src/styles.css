@@ -323,13 +323,14 @@
 }
 
 /* Printing from the browser (Ctrl P; the print page's own Print prints the PDF). The text size zooms #root and gives
-   it pixel sizes (device.ts): a printed page takes neither. Where a bill's paper is on screen, its full-size copy
-   (PrintCopy) prints instead of the app, one A4 sheet per paper, with the grey heading rows the PDF has. */
+   it pixel sizes (device.ts), and the overlay layer copies the zoom (Overlay.tsx): a printed page takes none of them.
+   Where a bill's paper is on screen, its full-size copy (PrintCopy) prints instead of the app, one A4 sheet per paper,
+   with the grey heading rows the PDF has; PrintCopy also makes the sheet A4 without margins while it's mounted. */
 [data-print-copy] { display: none; }
 @media print {
-  @page { size: A4; margin: 0; }
   html, body { height: auto !important; background: #fff !important; }
   #root { zoom: 1 !important; width: auto !important; height: auto !important; }
+  .overlay-layer { zoom: 1 !important; }
   body:has([data-print-copy]) > :not([data-print-copy]) { display: none !important; }
   [data-print-copy] { display: block !important; }
   [data-print-copy] [data-paper] { box-shadow: none !important; min-height: 296mm !important; break-after: page; print-color-adjust: exact; }
