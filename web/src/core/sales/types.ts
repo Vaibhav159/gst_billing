@@ -84,10 +84,15 @@ export type SalesFacets = {
 export type SalesPage = { count: number; next: string | null; previous: string | null; results: BillRow[]; summary: SalesSummary; facets: SalesFacets | null };
 export type BinPage = { count: number; next: string | null; previous: string | null; results: BinRow[] };
 export type NextNumber = { business: number; fy: string; invoice_date: string; counter: number; invoice_number: string; full_number: boolean };
+/**
+ * GET sales/check-number/'s answer (contract §2.12). code "" is free. "unchecked": nothing was checked (no firm, or a date
+ * the server can't read), so the number is not known, never free, its problem isn't the number's, and next is null
+ * (Ruling 1A-27).
+ */
 export type NumberCheck = {
-  invoice_number: string; counter: number | null; code: "" | "shape" | "number_taken" | "number_deleted"; problem: string;
+  invoice_number: string; counter: number | null; code: "" | "shape" | "number_taken" | "number_deleted" | "unchecked"; problem: string;
   bill: BillRef | null; binned: { id: number; original_id: number; invoice_number: string; invoice_date: string; reason: string; deleted_at: string } | null;
-  note: string; same_counter: BillRef | null; next: { counter: number; invoice_number: string };
+  note: string; same_counter: BillRef | null; next: { counter: number; invoice_number: string } | null;
 };
 export type PaperBookBill = { id: number; invoice_number: string; counter: number | null; invoice_date: string; customer_name: string; total_amount: number; status: BillStatus; paper: boolean; sent: boolean };
 export type PaperBookExplained =

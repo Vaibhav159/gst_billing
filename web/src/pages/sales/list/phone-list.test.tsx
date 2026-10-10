@@ -160,3 +160,15 @@ test("while the bills can't load, only the picked period shows and the filters a
   expect(within(screen.getByRole("group", { name: "Period" })).getAllByRole("button")).toHaveLength(10);
   expect(screen.getByRole("button", { name: "Filter" })).toBeEnabled();
 });
+
+/* ── 1B Task 9, commit A ── */
+
+test("a screen reader hears a card's status with it: the link's name stays the customer, number and total, and its badges describe it (Ruling 1B-17)", async () => {
+  salesServer([["GET", "sales/", (c) => (isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : wirePage(ROWS))]]);
+  mount();
+  const udhaar = await screen.findByRole("link", { name: "Meena Jain, KGH/2026-27/32, ₹31,556.04" });
+  expect(udhaar).toHaveAccessibleDescription("Udhaar");
+  expect(screen.getByRole("link", { name: "Anil Gupta, KGH/2026-27/30, ₹87,083.21, cancelled" })).toHaveAccessibleDescription("Cancelled");
+  // a bill with nothing to say has no description
+  expect(screen.getByRole("link", { name: "Anil Gupta, KGH/2026-27/31, ₹87,083.21" })).toHaveAccessibleDescription("");
+});

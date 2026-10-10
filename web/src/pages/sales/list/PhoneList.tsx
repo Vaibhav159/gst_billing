@@ -1,6 +1,6 @@
 // The phone's bills (PROTO sales/SalesList.jsx:995-1127): the summary line, period chips newest first, search and the
 // filter sheet, then cards by day. No table, no selection and no preview: a card opens the bill.
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { BookOpenText, History, Lock, MoreHorizontal, Plus, SlidersHorizontal, X } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
@@ -18,18 +18,20 @@ import { ChipCount, DrillBanner, FilterSet, ListEmpty, ListRoleNote, PastYearBan
 /**
  * A bill as a card: the customer and total first, then the number, time and payment (never cut), status under them; Send
  * at the right. A cancelled bill's words are muted, as the desktop's row has them, rather than the card faded (the
- * prototype's opacity-70): faded, its red badge and muted lines fall below AA contrast in both themes.
+ * prototype's opacity-70): faded, its red badge and muted lines fall below AA contrast in both themes. The link's name
+ * stands in for its content, so its status badges are its description: a screen reader hears them too (Ruling 1B-17).
  */
 export const PhoneCard = memo(function PhoneCard({ b, fresh, marked }: { b: BillRow; fresh: boolean; marked: boolean }) {
   const cancelled = b.status === "cancelled";
+  const statusId = useId();
   return (
     <div data-card={b.id} aria-current={marked || undefined} className={cn("card relative flex items-stretch", fresh && "anim-flash", marked && "border-brand")}>
       {/* the whole card opens the bill (the link stretches over it); Send sits above it */}
       <Link to={`/sales/${b.id}`} data-row={b.id} className="flex-1 min-w-0 block pl-4 pr-2 pt-3.5 pb-3 rounded-card after:content-[''] after:absolute after:inset-0 after:rounded-card"
-        aria-label={`${b.customer.name}, ${b.invoice_number}, ${inr(b.total_amount)}${cancelled ? ", cancelled" : ""}`}>
+        aria-label={`${b.customer.name}, ${b.invoice_number}, ${inr(b.total_amount)}${cancelled ? ", cancelled" : ""}`} aria-describedby={statusId}>
         <span className={cn("block font-medium break-words", cancelled && "text-muted")}>{b.customer.name}</span>
         <span className="block mt-1 text-sm text-muted tnum">{b.invoice_number}{b.paper ? "" : ` · ${timeOf(b.created_at)}`} · {b.payment_mode ? PAY_SHORT[b.payment_mode] : "Payment not recorded"}</span>
-        <span className="flex flex-wrap items-center gap-1.5 mt-1.5 empty:hidden"><StatusCell bill={b} /></span>
+        <span id={statusId} className="flex flex-wrap items-center gap-1.5 mt-1.5 empty:hidden"><StatusCell bill={b} /></span>
       </Link>
       <div className="flex flex-col items-end justify-between gap-1 pr-2 pt-3 pb-2 shrink-0">
         <span className="pr-2" aria-hidden="true"><Money value={b.total_amount} strong className={cancelled ? "line-through text-muted" : ""} /></span>

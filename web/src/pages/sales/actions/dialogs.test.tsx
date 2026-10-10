@@ -245,6 +245,33 @@ test("moving checks the number in the new firm's series with the same check, and
   expect(calls.filter((c) => c.url === "sales/412/move/").map((c) => c.body)).toEqual([{ business: 2, invoice_number: "30" }]);
 });
 
+test("a check that checked nothing (unchecked) is no answer: it never reads as free, its words don't stop the renumber, and the firm's format says how the number is stored (Ruling 1A-27)", async () => {
+  handClock();
+  const { calls } = salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/next-number/", () => ({ business: 3, fy: "2026-27", invoice_date: "2026-10-08", ...NEXT, full_number: true })],
+    // the server checked nothing (contract §2.12): the number comes back as typed, with next-number's words for what's missing
+    ["GET", "sales/check-number/", ({ params }) => ({ invoice_number: String(params.invoice_number), counter: 34, code: "unchecked", problem: "Pick the firm.", bill: null, binned: null, note: "", same_counter: null, next: null })],
+    ["POST", "sales/412/renumber/", () => ({ id: 412, invoice_number: "KGH/2026-27/34", previous: "KGH/2026-27/31" })],
+  ]);
+  renderApp(<Harness bill={row()} kind="renumber" />);
+  fireEvent.click(screen.getByText("open it"));
+  await pass(400);
+  const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
+  const field = within(dialog).getByLabelText("New number");
+  expect(field).toHaveValue("KGH/2026-27/35");
+  typeIn(field, "34");
+  await pass(300);
+  expect(calls.filter((c) => c.url === "sales/check-number/").map((c) => c.params)).toContainEqual({ business_id: 3, invoice_date: "2026-10-08", invoice_number: "34", exclude_id: 412 });
+  // the answer's own "34" isn't how it's stored: the firm's format still says so
+  expect(within(dialog).getByText(/^Saved as KGH\/2026-27\/34\. /)).toBeInTheDocument();
+  fireEvent.keyDown(field, { key: "Enter" });
+  await pass(0);
+  expect(within(dialog).queryByText("Pick the firm.")).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/renumber/").map((c) => c.body)).toEqual([{ invoice_number: "34" }]);
+  expect(screen.getByText("KGH/2026-27/31 is now KGH/2026-27/34")).toBeInTheDocument();
+});
+
 test("the e-way bill opened from a list waits for what's stored on the bill, then shows it, the number in fours, so a save keeps it", async () => {
   let answer: (w: unknown) => void = () => {};
   const STORED = { eway_bill_number: "123456789012", transporter_name: "Shree Transport", transporter_gstin: "", vehicle_number: "RJ14AB1234", vehicle_type: "Regular", transport_mode: "Road", distance_km: 120, may_be_needed: false };

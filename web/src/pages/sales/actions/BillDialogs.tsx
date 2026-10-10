@@ -160,8 +160,10 @@ function useNumberField(business: number | null, invoiceDate: string, excludeId:
   const typedNow = useDebounced(t, 300);
   const check = useCheckNumber(business !== null && typedNow ? { business, invoice_date: invoiceDate, invoice_number: typedNow, exclude_id: excludeId } : null);
   const nx = next.data;
-  // the check's answer counts only for what's in the field now
-  const known = typedNow === t ? check.data ?? null : null;
+  // the check's answer counts only for what's in the field now, and only when it checked something: an unchecked answer
+  // (no firm, or a date the server can't read) is no answer, never free, and its words aren't the number's (Ruling 1A-27)
+  const answer = typedNow === t ? check.data ?? null : null;
+  const known = answer?.code === "unchecked" ? null : answer;
   const stored = known?.invoice_number || storedFor(nx, text);
   return {
     text, err, setErr, next: nx, known, stored,

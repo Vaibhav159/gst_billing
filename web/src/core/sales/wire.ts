@@ -124,12 +124,18 @@ export function toBinPage(w: W): BinPage {
 export function toNextNumber(w: W): NextNumber {
   return { business: whole(w?.business), fy: text(w?.fy), invoice_date: text(w?.invoice_date), counter: whole(w?.counter), invoice_number: text(w?.invoice_number), full_number: Boolean(w?.full_number) };
 }
+const CHECK_CODES: NumberCheck["code"][] = ["", "shape", "number_taken", "number_deleted", "unchecked"];
+/**
+ * A typed number's check. Free ("") only when the server says so: "unchecked" (it checked nothing), a code this app
+ * doesn't know yet, or none at all, reads as unchecked, not known, never as free (Ruling 1A-27). An unchecked answer has
+ * no next number (null).
+ */
 export function toNumberCheck(w: W): NumberCheck {
-  const code = w?.code === "shape" || w?.code === "number_taken" || w?.code === "number_deleted" ? w.code : "";
+  const code: NumberCheck["code"] = CHECK_CODES.includes(w?.code) ? w.code : "unchecked";
   return {
     invoice_number: text(w?.invoice_number), counter: w?.counter == null ? null : whole(w.counter), code, problem: text(w?.problem), bill: billRefOrNull(w?.bill),
     binned: w?.binned ? { id: whole(w.binned.id), original_id: whole(w.binned.original_id), invoice_number: text(w.binned.invoice_number), invoice_date: text(w.binned.invoice_date), reason: text(w.binned.reason), deleted_at: text(w.binned.deleted_at) } : null,
-    note: text(w?.note), same_counter: billRefOrNull(w?.same_counter), next: { counter: whole(w?.next?.counter), invoice_number: text(w?.next?.invoice_number) },
+    note: text(w?.note), same_counter: billRefOrNull(w?.same_counter), next: w?.next ? { counter: whole(w.next.counter), invoice_number: text(w.next.invoice_number) } : null,
   };
 }
 export function toPaperBook(w: W): PaperBook {

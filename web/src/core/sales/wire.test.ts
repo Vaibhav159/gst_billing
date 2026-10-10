@@ -72,7 +72,19 @@ test("an answer with fields left out reads as empty, never a crash", () => {
   });
   expect(toBinPage(null)).toEqual({ count: 0, next: null, previous: null, results: [] });
   expect(toShopSettings(undefined)).toEqual({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null });
-  expect(toNumberCheck({})).toEqual({ invoice_number: "", counter: null, code: "", problem: "", bill: null, binned: null, note: "", same_counter: null, next: { counter: 0, invoice_number: "" } });
+  // a check answer that doesn't say the number is free isn't read as free (Ruling 1A-27)
+  expect(toNumberCheck({})).toEqual({ invoice_number: "", counter: null, code: "unchecked", problem: "", bill: null, binned: null, note: "", same_counter: null, next: null });
+});
+
+test("a number check that checked nothing reads as unchecked, never as free, and so does a code this app doesn't know (Ruling 1A-27)", () => {
+  // no firm, or a date the server can't read: the number as typed, next-number's words for what's missing, no next number
+  const answer = { invoice_number: "34", counter: 34, code: "unchecked", problem: "Pick the firm.", bill: null, binned: null, note: "", same_counter: null, next: null };
+  expect(toNumberCheck(answer)).toEqual(answer);
+  expect(toNumberCheck({ ...answer, code: "number_reserved", problem: "A code from a newer server." }).code).toBe("unchecked");
+  // the contract's other codes read as they come, free ("") among them
+  for (const code of ["", "shape", "number_taken", "number_deleted"]) {
+    expect(toNumberCheck({ ...answer, code, next: { counter: 35, invoice_number: "KGH/2026-27/35" } })).toMatchObject({ code, next: { counter: 35, invoice_number: "KGH/2026-27/35" } });
+  }
 });
 
 test("the paper book's month reads as the contract sends it, its money in paise", () => {
