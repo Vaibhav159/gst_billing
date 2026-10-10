@@ -84,7 +84,8 @@ test("toasts replace one with the same title and keep at most three", async () =
 import { fireEvent, within } from "@testing-library/react";
 import { useLocation } from "react-router";
 import { applyTextSize } from "@/core/device";
-import { Sheet, ToastHost, type DLRow } from "./index";
+import { Sheet, ToastHost, menuPlace, type DLRow } from "./index";
+import { overlayLayer } from "./Overlay";
 
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 afterEach(() => phone(false));
@@ -347,6 +348,56 @@ test("menu items can go to a page and show the current choice; arrows skip headi
   await userEvent.click(trigger);
   await userEvent.click(await screen.findByRole("menuitem", { name: "Profile and password" }));
   await waitFor(() => expect(screen.getByText("at /profile")).toBeInTheDocument());
+});
+
+// Ruling 57: a menu is as tall as the room beside its trigger, so the account menu shows whole on a 1440×900 screen
+
+test("a desktop menu fills the room beside its trigger: under it, or over it when it doesn't fit below and there's more room above; past that it scrolls inside", () => {
+  // the account menu on a 1440×900 screen: 16 rows, guessed at 656 px, fit in the 836 px under the avatar
+  expect(menuPlace({ top: 14, bottom: 50 }, 900, 656)).toEqual({ top: 56, maxH: 836 });
+  // a row's menu near the foot of the screen opens upwards, from its trigger, as tall as the room over it
+  expect(menuPlace({ top: 800, bottom: 836 }, 900, 296)).toEqual({ bottom: 106, maxH: 786 });
+  // taller than the room either way: it opens where there's more, and scrolls inside
+  expect(menuPlace({ top: 100, bottom: 136 }, 600, 900)).toEqual({ top: 142, maxH: 450 });
+  expect(menuPlace({ top: 400, bottom: 436 }, 600, 900)).toEqual({ bottom: 206, maxH: 386 });
+  // never shorter than two rows, even in a window too short for that
+  expect(menuPlace({ top: 20, bottom: 56 }, 120, 400).maxH).toBe(96);
+});
+
+test("an open menu takes its room from the screen as measured, in the overlay layer's px when text is larger, with no flat 420 px cap", async () => {
+  const layer = overlayLayer();
+  const rect = (top: number, bottom: number, left: number, right: number) => ({ top, bottom, left, right, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  const onScreen = vi.spyOn(layer, "getBoundingClientRect").mockReturnValue(rect(0, 900, 0, 1440)); // a 1440×900 window
+  const rows = Array.from({ length: 16 }, (_, i) => ({ label: `Row ${i + 1}`, onSelect: () => {} }));
+  wrap(<Menu title="Account" width={260} items={rows} trigger={(p) => <button {...p}>Account</button>} />);
+  const trigger = screen.getByRole("button", { name: "Account" });
+  const at = vi.spyOn(trigger, "getBoundingClientRect");
+  const openMenu = async () => { await userEvent.click(trigger); return screen.findByRole("menu"); };
+  const closeMenu = async () => { await userEvent.keyboard("{Escape}"); await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument()); };
+  try {
+    // the avatar in the top bar: the whole menu fits under it
+    at.mockReturnValue(rect(14, 50, 1380, 1416));
+    let menu = await openMenu();
+    expect([menu.style.top, menu.style.bottom, menu.style.maxHeight]).toEqual(["56px", "", "836px"]);
+    expect(menu).toHaveClass("overflow-y-auto");
+    expect(menu.className).not.toMatch(/max-h-/);
+    await closeMenu();
+    // Larger text: the layer is zoomed 1.2, so the 900 screen px are 750 of its own
+    layer.style.zoom = "1.2";
+    at.mockReturnValue(rect(16.8, 60, 1656, 1699.2));
+    menu = await openMenu();
+    expect([menu.style.top, menu.style.maxHeight]).toEqual(["56px", "686px"]);
+    await closeMenu();
+    layer.style.zoom = "";
+    // a trigger near the foot of the screen: the menu opens upwards, its foot 6 px over the trigger
+    at.mockReturnValue(rect(800, 836, 600, 700));
+    menu = await openMenu();
+    expect([menu.style.top, menu.style.bottom, menu.style.maxHeight]).toEqual(["", "106px", "786px"]);
+    await closeMenu();
+  } finally {
+    layer.style.zoom = "";
+    onScreen.mockRestore();
+  }
 });
 
 test("with the provider above the router, ToastHost shows each toast once; inside a router the provider hosts them", () => {

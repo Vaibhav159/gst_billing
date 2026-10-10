@@ -20,6 +20,21 @@ type MenuAction = Extract<MenuItem, { label: string }>;
 export type MenuTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & { ref: Ref<HTMLButtonElement> };
 export type MenuProps = { trigger: (props: MenuTriggerProps) => ReactNode; items: MenuItem[]; align?: "start" | "end"; width?: number; title?: string };
 
+/** A desktop menu's place: under its trigger (top) or over it (bottom, so it grows up from the trigger), and its tallest. */
+export type MenuPlace = { top?: number; bottom?: number; maxH: number };
+const GAP = 6, EDGE = 8, MIN_H = 96;
+/**
+ * Where a desktop menu opens, in the overlay layer's px, and how tall it may grow (Ruling 57): under its trigger, or
+ * over it when its guessed height (estH) doesn't fit below and there's more room above. Either way it's capped at the
+ * room on that side less an 8 px margin, so it shows whole when it fits and scrolls inside when it doesn't.
+ */
+export function menuPlace(trigger: { top: number; bottom: number }, layerH: number, estH: number): MenuPlace {
+  const below = layerH - trigger.bottom - GAP - EDGE;
+  const above = trigger.top - GAP - EDGE;
+  if (estH <= below || below >= above) return { top: trigger.bottom + GAP, maxH: Math.max(MIN_H, below) };
+  return { bottom: layerH - trigger.top + GAP, maxH: Math.max(MIN_H, above) };
+}
+
 /**
  * Dropdown menu. trigger(props) renders the button; spread props onto it.
  * items: [{ label, icon, onSelect, to, tone: 'danger', disabled, checked, hint }, { heading }, { divider: true }]
@@ -29,7 +44,7 @@ export function Menu({ trigger, items, align = "end", width = 248, title = "Acti
   const { isPhone } = useView();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<(MenuPlace & { left: number }) | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const { mounted, closing } = usePresence(open, 130);
@@ -43,10 +58,7 @@ export function Menu({ trigger, items, align = "end", width = 248, title = "Acti
     const ow = o.width / z, oh = o.height / z;
     let left = align === "end" ? (r.right - o.left) / z - width : (r.left - o.left) / z;
     left = Math.max(8, Math.min(left, ow - width - 8));
-    let top = (r.bottom - o.top) / z + 6;
-    const estH = Math.min(items.length * 40 + 16, 420);
-    if (top + estH > oh - 8) top = Math.max(8, (r.top - o.top) / z - estH - 6);
-    setPos({ top, left });
+    setPos({ left, ...menuPlace({ top: (r.top - o.top) / z, bottom: (r.bottom - o.top) / z }, oh, items.length * 40 + 16) });
   }, [open, isPhone, align, width, items.length]);
   useEffect(() => {
     if (!open || isPhone) return;
@@ -90,8 +102,9 @@ export function Menu({ trigger, items, align = "end", width = 248, title = "Acti
       {mounted && pos ? (
         <Portal>
           <div className={cn("absolute inset-0 z-pop", closing ? "pointer-events-none" : "pointer-events-auto")} onMouseDown={(e) => { if (e.target === e.currentTarget) close(false); }}>
-            <div ref={list} role="menu" data-closing={closing ? "" : undefined} onKeyDown={onKey} style={{ top: pos.top, left: pos.left, width, transformOrigin: align === "end" ? "top right" : "top left" }}
-              className={cn("absolute card shadow-pop py-1.5 max-h-[420px] overflow-y-auto", closing ? "anim-pop-out" : "anim-pop")}>
+            <div ref={list} role="menu" data-closing={closing ? "" : undefined} onKeyDown={onKey}
+              style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width, maxHeight: pos.maxH, transformOrigin: `${pos.bottom === undefined ? "top" : "bottom"} ${align === "end" ? "right" : "left"}` }}
+              className={cn("absolute card shadow-pop py-1.5 overflow-y-auto", closing ? "anim-pop-out" : "anim-pop")}>
               {items.map((it, i) => {
                 if ("divider" in it) return <div key={i} className="h-px bg-rule my-1.5" />;
                 if ("heading" in it) return <p key={i} className="caps px-3.5 pt-2 pb-1">{it.heading}</p>;
