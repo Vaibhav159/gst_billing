@@ -6,6 +6,7 @@ import Login from "@/pages/core/Login";
 import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
+import { customerRoutes } from "@/pages/customers/routes";
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -85,6 +86,8 @@ export const appRoutes: RouteObject[] = [{
     {
       element: <RequireAuth><AppLayout /></RequireAuth>,
       children: [
+        // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
+        ...customerRoutes,
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
