@@ -2,11 +2,11 @@
 // statement, and the income-tax flags on their bills (sales/?itax=1). Money arrives as decimal strings and is kept as
 // integer paise here; every other field keeps the contract's name. Nothing here polls: lists wait for the firm
 // (firmId !== null) and refetch only when asked for again or after a save.
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type Query, type QueryClient } from "@tanstack/react-query";
+import { skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type Query, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { plural, toPaise } from "@/core/format";
-import { effectivePan, hasGstin } from "@/core/ids";
+import { effectivePan, hasGstin, mobileDigits } from "@/core/ids";
 import type { PaymentMode } from "@/core/sales/types";
 import type { FirmId } from "@/core/scope";
 
@@ -142,16 +142,18 @@ function toItaxBills(raw: unknown): ItaxBill[] {
 
 /* ── Query keys ────────────────────────────────────────── */
 // Everything under "customers", so a save refreshes all of it. A customer's PAN or address changes the income-tax flags
-// on their bills, so a save refreshes "sales" too (the bill screens' queries).
+// on their bills, so a save refreshes "sales" too (the bill screens' queries), and Ctrl K's search ("search") shows
+// customers. A query that can't ask yet (no firm or period known) has a key of its own, null where the firm or the
+// period goes, so it never shows the answer for every firm as its own.
 export const customerKeys = {
   all: ["customers"] as const,
-  list: (params: Record<string, string | number>) => ["customers", "list", params] as const,
+  list: (params: Record<string, string | number> | null) => ["customers", "list", params] as const,
   count: () => ["customers", "count"] as const,
   one: (id: number) => ["customers", "one", id] as const,
-  statement: (id: number, params: StatementParams) => ["customers", "statement", id, params] as const,
+  statement: (id: number, params: StatementParams | null) => ["customers", "statement", id, params] as const,
   itax: (id: number) => ["customers", "itax", id] as const,
   search: (term: string, size: number) => ["customers", "search", term, size] as const,
-  recent: (firm: FirmId) => ["customers", "recent", firm] as const,
+  recent: (firm: FirmId | null) => ["customers", "recent", firm] as const,
   walkin: () => ["customers", "walkin"] as const,
 };
 /** A customer row already in the cache (a list, a search, recent customers), so its page can show the name at once. */
@@ -176,10 +178,10 @@ export type CustomerListFilters = {
 export const LIST_PAGE = 20;
 const ORDERING: Record<CustomerSort, string> = { recent: "-last_bill", name: "name", sales: "-sales" };
 
-/** What search is asked for: a phone number typed in groups, or with +91, as its digits. */
+/** What search is asked for: a phone number typed in groups, or with +91, 91 or 0 in front, as its 10 digits; part of one as typed. */
 export function searchTerm(q: string): string {
   const t = q.trim();
-  return /^\+?[\d\s-]+$/.test(t) && t.replace(/\D/g, "").length >= 3 ? t.replace(/^\+91/, "").replace(/\D/g, "") : t;
+  return /^\+?[\d\s-]+$/.test(t) && t.replace(/\D/g, "").length >= 3 ? mobileDigits(t.replace(/^\+91/, "")) : t;
 }
 /** All the customers a list's filters match, every page (page_size 1000), for an export. */
 export async function fetchAllCustomers(params: Record<string, string | number>): Promise<CustomerRow[]> {
@@ -200,44 +202,55 @@ export function customerListParams(f: CustomerListFilters): Record<string, strin
   if (f.usualFirm !== null) p.business_id = f.usualFirm;
   return p;
 }
+/** The parameters that say whose figures a list counts: the firm and the period. */
+const FIGURES = ["figures_business_id", "start_date", "end_date"] as const;
 /**
  * The customers list, LIST_PAGE at a time (fetchNextPage for the next), with figures and the summary. A new search or
- * filter keeps the rows on screen until its answer comes, so the search box never gives way to a skeleton mid-word.
+ * filter keeps the rows on screen until its answer comes, so the search box never gives way to a skeleton mid-word. A
+ * new firm or period doesn't: those rows would show the last firm's or year's money under the new one's name.
  */
 export function useCustomerList(f: CustomerListFilters) {
-  const params = customerListParams(f);
+  const params = f.firmId === null ? null : customerListParams(f);
   return useInfiniteQuery({
-    queryKey: customerKeys.list(params), enabled: f.firmId !== null, initialPageParam: 1, placeholderData: keepPreviousData,
-    queryFn: async ({ pageParam, signal }) => toCustomerPage((await api.get("customers/", { params: { ...params, page: pageParam }, signal })).data),
+    queryKey: customerKeys.list(params), initialPageParam: 1,
+    queryFn: params ? async ({ pageParam, signal }) => toCustomerPage((await api.get("customers/", { params: { ...params, page: pageParam }, signal })).data) : skipToken,
     getNextPageParam: (last, _all, page) => (last.next ? page + 1 : undefined),
+    // (after queryFn: TypeScript reads the page's type from it before it types this function's arguments)
+    placeholderData: (prev, prevQuery) => {
+      const was = prevQuery?.queryKey[2];
+      return params && was && FIGURES.every((k) => was[k] === params[k]) ? prev : undefined;
+    },
   });
 }
 /** How many customers there are, filters aside ("3 of 29 match"). */
 export function useCustomerCount() {
   return useQuery({ queryKey: customerKeys.count(), queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { page_size: 1 }, signal })).data).count });
 }
+// A query that isn't ready to ask (no customer, firm or period yet) has skipToken for its queryFn: unlike enabled: false,
+// a refetch() or QueryView's Try again can't make it ask either, so it never asks for every firm or for customers/null/.
+
 /** One customer. A row already on screen stands in while it loads, so the page names them at once. */
 export function useCustomer(id: number | null) {
   const qc = useQueryClient();
   return useQuery<Customer>({
-    queryKey: customerKeys.one(id ?? 0), enabled: id !== null,
-    queryFn: async ({ signal }) => toCustomer((await api.get(`customers/${id}/`, { signal })).data),
+    queryKey: customerKeys.one(id ?? 0),
+    queryFn: id === null ? skipToken : async ({ signal }) => toCustomer((await api.get(`customers/${id}/`, { signal })).data),
     placeholderData: () => (id === null ? undefined : cachedCustomer(qc, id)),
   });
 }
 /** A customer's statement for a period and firm (null params: not ready to ask, like a firm not known yet). */
 export function useStatement(id: number | null, params: StatementParams | null) {
   return useQuery({
-    queryKey: customerKeys.statement(id ?? 0, params ?? {}), enabled: id !== null && params !== null,
-    queryFn: async ({ signal }) => toStatement((await api.get(`customers/${id}/statement/`, { params, signal })).data),
+    queryKey: customerKeys.statement(id ?? 0, params),
+    queryFn: id === null || params === null ? skipToken : async ({ signal }) => toStatement((await api.get(`customers/${id}/statement/`, { params, signal })).data),
   });
 }
 /** A customer's bills with an income-tax flag, every firm and year, newest first (200 at most). */
 export function useItaxBills(customerId: number | null) {
   return useQuery({
-    queryKey: customerKeys.itax(customerId ?? 0), enabled: customerId !== null,
+    queryKey: customerKeys.itax(customerId ?? 0),
     // ponytail: one page of 200 flagged bills; a customer with more would show the first 200's numbers and counts
-    queryFn: async ({ signal }) => toItaxBills((await api.get("sales/", { params: { customer_id: customerId, itax: 1, ordering: "-date", page_size: 200 }, signal })).data),
+    queryFn: customerId === null ? skipToken : async ({ signal }) => toItaxBills((await api.get("sales/", { params: { customer_id: customerId, itax: 1, ordering: "-date", page_size: 200 }, signal })).data),
   });
 }
 /** Customers whose name, phone or GSTIN has `term` in it (from 2 characters), with their last bill in any firm. */
@@ -251,25 +264,25 @@ export function useCustomerSearch(term: string, { size = 8, enabled = true }: { 
 /** The five customers a firm billed last (never the walk-in record). Waits for the firm. */
 export function useRecentCustomers(firmId: FirmId | null) {
   return useQuery({
-    queryKey: customerKeys.recent(firmId ?? "all"), enabled: firmId !== null, staleTime: 30_000,
-    queryFn: async ({ signal }) => {
+    queryKey: customerKeys.recent(firmId), staleTime: 30_000,
+    queryFn: firmId === null ? skipToken : async ({ signal }) => {
       const params: Record<string, string | number> = { figures: 1, ordering: "-last_bill", page_size: 6 };
       if (typeof firmId === "number") params.figures_business_id = firmId;
       return toCustomerPage((await api.get("customers/", { params, signal })).data).rows.filter((r) => r.type !== "walkin" && r.figures?.last_bill).slice(0, 5);
     },
   });
 }
-/** The walk-in record (customer_type walkin), or null while none is marked. */
+/** The walk-in record (customer_type walkin), or null while none is marked. A server that doesn't know the type filter answers with another customer, so the row's type decides. */
 export function useWalkin() {
   return useQuery({
     queryKey: customerKeys.walkin(), staleTime: 5 * 60_000,
-    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { type: "walkin", page_size: 1 }, signal })).data).rows[0] ?? null,
+    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { type: "walkin", page_size: 1 }, signal })).data).rows.find((r) => r.type === "walkin") ?? null,
   });
 }
 
 /* ── Writing ───────────────────────────────────────────── */
 const refreshedBySave = (keep?: number) => (q: Query) =>
-  q.queryKey[0] === "sales" || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
+  q.queryKey[0] === "sales" || q.queryKey[0] === "search" || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
 /** Adds a customer (no id) or changes one (PATCH, any fields). Answers the saved customer. */
 export function useSaveCustomer() {
   const qc = useQueryClient();
@@ -282,13 +295,18 @@ export function useSaveCustomer() {
     },
   });
 }
+const LISTS = ["list", "count", "search", "recent", "walkin"];
+const OWN = ["one", "statement", "itax"];
 /** Deletes a customer with no bills (owner: customer.merge). The server refuses one with bills (409). */
 export function useDeleteCustomer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: number) => { await api.delete(`customers/${id}/`); },
-    // the lists only: the page being left still holds this customer until it has gone
-    onSuccess: () => { void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "customers" && ["list", "count", "search", "recent", "walkin"].includes(String(q.queryKey[1])) }); },
+    onSuccess: (_, id) => {
+      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "search" || (q.queryKey[0] === "customers" && LISTS.includes(String(q.queryKey[1]))) });
+      // the page being left still holds this customer until it has gone: its own entries are marked stale, not asked for again
+      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "customers" && OWN.includes(String(q.queryKey[1])) && q.queryKey[2] === id, refetchType: "none" });
+    },
   });
 }
 

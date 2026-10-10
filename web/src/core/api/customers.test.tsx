@@ -1,32 +1,14 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AxiosError, type AxiosAdapter, type InternalAxiosRequestConfig } from "axios";
-import { api } from "./client";
+import { AxiosError, type InternalAxiosRequestConfig } from "axios";
+import { serve, type Call, type Reply } from "@/test/server";
 import {
-  customerKeys, customerListParams, customerSaveErrors, deleteRefusal, fetchAllCustomers, searchTerm, toCustomer, useCustomer, useCustomerCount,
-  useCustomerList, useCustomerSearch, useDeleteCustomer, useItaxBills, useRecentCustomers, useSaveCustomer, useStatement, useWalkin,
+  customerKeys, customerListParams, customerSaveErrors, deleteRefusal, fetchAllCustomers, searchTerm, toCustomer, toCustomerPage, toStatement, useCustomer,
+  useCustomerCount, useCustomerList, useCustomerSearch, useDeleteCustomer, useItaxBills, useRecentCustomers, useSaveCustomer, useStatement, useWalkin,
   type CustomerListFilters,
 } from "./customers";
 
-type Call = { method: string; url: string; params: Record<string, unknown>; data: unknown };
-type Reply = { status: number; data: unknown };
-let calls: Call[] = [];
-/**
- * Answers by "METHOD url"; anything else is a 404, so a wrong address shows up as a failure. A function answers when
- * what it returns does, so a test can hold an answer back until it says, or never give one.
- */
-function serve(answers: Record<string, unknown>) {
-  calls = [];
-  api.defaults.adapter = (async (config: InternalAxiosRequestConfig) => {
-    const call = { method: (config.method ?? "get").toUpperCase(), url: String(config.url), params: { ...(config.params ?? {}) }, data: config.data ? JSON.parse(String(config.data)) : undefined };
-    calls.push(call);
-    const a = answers[`${call.method} ${call.url}`];
-    const r: Reply = typeof a === "function" ? await (a as (c: Call) => Reply | Promise<Reply>)(call) : a === undefined ? { status: 404, data: { detail: "Not found." } } : { status: 200, data: a };
-    if (r.status >= 400) throw new AxiosError("refused", "ERR_BAD_REQUEST", config, null, { status: r.status, statusText: "", headers: {}, config, data: r.data });
-    return { status: r.status, statusText: "", headers: {}, config, data: r.data };
-  }) as AxiosAdapter;
-}
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return { qc, wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> };
@@ -52,7 +34,7 @@ test("the list asks for this year's figures in the firm picked, 20 at a time, an
     figures: 1, page_size: 20, start_date: "2026-04-01", end_date: "2026-10-08", ordering: "-sales", figures_business_id: 3,
     search: "9829041122", has_gstin: 0, state_name: "RAJASTHAN", business_id: 4,
   });
-  serve({
+  const calls = serve({
     "GET customers/": (c: Call) => ({ status: 200, data: {
       count: 21, next: c.params.page === 1 ? "next" : null,
       results: [{ ...ANIL, id: Number(c.params.page) * 100, figures: { bills: 14, total: "87083.21", cancelled: 1, udhaar_bills: 2, udhaar_total: "1000.50", last_bill: { id: 412, invoice_number: "KGH/2026-27/31", invoice_date: "2026-10-08", total_amount: "87083.21", business: 3 } } }],
@@ -71,7 +53,7 @@ test("the list asks for this year's figures in the firm picked, 20 at a time, an
 });
 
 test("the list waits for the firm to be known: nothing is asked while firmId is null, then it asks for that firm", async () => {
-  serve({ "GET customers/": page([ANIL]) });
+  const calls = serve({ "GET customers/": page([ANIL]) });
   const { wrapper: w } = wrapper();
   const firmNotKnown: CustomerListFilters = { ...FILTERS, firmId: null };
   const { result, rerender } = renderHook((f: CustomerListFilters) => useCustomerList(f), { wrapper: w, initialProps: firmNotKnown });
@@ -82,9 +64,28 @@ test("the list waits for the firm to be known: nothing is asked while firmId is 
   expect(calls.map((c) => c.params.figures_business_id)).toEqual([3]);
 });
 
+test("a query that can't ask yet (no firm or customer known) has a key of its own and asks nothing, even on Try again", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {}); // TanStack's note that a query with nothing to ask was told to fetch
+  const calls = serve({ "GET customers/": page([ANIL]), "GET customers/7/statement/": {}, "GET customers/null/": ANIL, "GET sales/": page([]) });
+  const { qc, wrapper: w } = wrapper();
+  // every firm's answers are in the cache already: a query that isn't ready must not show them as its own
+  qc.setQueryData(customerKeys.list(customerListParams({ ...FILTERS, firmId: "all" })), { pages: [toCustomerPage(page([ANIL]))], pageParams: [1] });
+  qc.setQueryData(customerKeys.recent("all"), [{ ...toCustomer(ANIL), figures: null }]);
+  qc.setQueryData(customerKeys.statement(7, {}), toStatement({}));
+  const list = renderHook(() => useCustomerList({ ...FILTERS, firmId: null }), { wrapper: w });
+  const recent = renderHook(() => useRecentCustomers(null), { wrapper: w });
+  const statement = renderHook(() => useStatement(7, null), { wrapper: w });
+  // nor do a customer and their income-tax flags before there's a customer
+  const one = renderHook(() => useCustomer(null), { wrapper: w });
+  const itax = renderHook(() => useItaxBills(null), { wrapper: w });
+  expect([list.result.current.data, recent.result.current.data, statement.result.current.data]).toEqual([undefined, undefined, undefined]);
+  await act(async () => { await Promise.all([list, recent, statement, one, itax].map((h) => h.result.current.refetch())); });
+  expect(calls).toEqual([]);
+});
+
 test("a new search keeps the rows on screen until its answer comes", async () => {
   let answer = (_r: Reply) => {};
-  serve({ "GET customers/": (c: Call) => (c.params.search ? new Promise<Reply>((r) => { answer = r; }) : { status: 200, data: page([ANIL]) }) });
+  const calls = serve({ "GET customers/": (c: Call) => (c.params.search ? new Promise<Reply>((r) => { answer = r; }) : { status: 200, data: page([ANIL]) }) });
   const { wrapper: w } = wrapper();
   const { result, rerender } = renderHook((f: CustomerListFilters) => useCustomerList(f), { wrapper: w, initialProps: FILTERS });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -97,8 +98,23 @@ test("a new search keeps the rows on screen until its answer comes", async () =>
   expect(result.current.data!.pages[0].rows.map((r) => r.name)).toEqual(["Rekha Soni"]);
 });
 
+test("a new firm or year never shows the last one's money while its own figures load", async () => {
+  // firm 3's figures for this year answer; every other ask is held
+  serve({ "GET customers/": (c: Call) => (c.params.figures_business_id === 3 && c.params.end_date === FILTERS.to ? { status: 200, data: page([ANIL]) } : new Promise<Reply>(() => {})) });
+  const { wrapper: w } = wrapper();
+  const { result, rerender } = renderHook((f: CustomerListFilters) => useCustomerList(f), { wrapper: w, initialProps: FILTERS });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  const others: CustomerListFilters[] = [{ ...FILTERS, firmId: 4 }, { ...FILTERS, firmId: "all" }, { ...FILTERS, from: "2025-04-01", to: "2026-03-31" }, { ...FILTERS, to: "2026-09-30" }];
+  for (const other of others) {
+    rerender(other);
+    expect(result.current.data, JSON.stringify(other)).toBeUndefined();
+    rerender(FILTERS);
+    expect(result.current.data!.pages[0].rows.map((r) => r.name)).toEqual(["Anil Gupta"]);
+  }
+});
+
 test("a statement is asked for its period and firm, with money in paise; null params ask nothing", async () => {
-  serve({
+  const calls = serve({
     "GET customers/7/statement/": {
       customer: { id: 7, name: "Anil Gupta", type: "person", mobile_number: "9829041122", gst_number: "", pan: "", city: "Udaipur", state_name: "RAJASTHAN" },
       start_date: "2026-04-01", end_date: "2026-10-08", business: null,
@@ -118,7 +134,7 @@ test("a statement is asked for its period and firm, with money in paise; null pa
 });
 
 test("the income-tax flags come from the bills list: this customer's flagged bills, every firm and year", async () => {
-  serve({ "GET sales/": { count: 1, next: null, results: [{ id: 388, invoice_number: "KGH/2026-27/18", invoice_date: "2026-09-10", total_amount: "265740.48", itax: [{ kind: "pan", short: "PAN missing", text: "A bill over ₹2,00,000 needs the buyer's PAN (Rule 114B). Add Anil Gupta's PAN." }] }] } });
+  const calls = serve({ "GET sales/": { count: 1, next: null, results: [{ id: 388, invoice_number: "KGH/2026-27/18", invoice_date: "2026-09-10", total_amount: "265740.48", itax: [{ kind: "pan", short: "PAN missing", text: "A bill over ₹2,00,000 needs the buyer's PAN (Rule 114B). Add Anil Gupta's PAN." }] }] } });
   const { wrapper: w } = wrapper();
   const { result } = renderHook(() => useItaxBills(7), { wrapper: w });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -127,7 +143,7 @@ test("the income-tax flags come from the bills list: this customer's flagged bil
 });
 
 test("search asks from 2 characters, a phone typed in groups as its digits, with each customer's last bill in any firm", async () => {
-  serve({ "GET customers/": page([{ ...ANIL, figures: { bills: 14, total: "87083.21", cancelled: 0, udhaar_bills: 0, udhaar_total: "0.00", last_bill: null } }]) });
+  const calls = serve({ "GET customers/": page([{ ...ANIL, figures: { bills: 14, total: "87083.21", cancelled: 0, udhaar_bills: 0, udhaar_total: "0.00", last_bill: null } }]) });
   const { wrapper: w } = wrapper();
   expect(renderHook(() => useCustomerSearch(" 9 "), { wrapper: w }).result.current.fetchStatus).toBe("idle");
   expect(renderHook(() => useCustomerSearch("Anil", { enabled: false }), { wrapper: w }).result.current.fetchStatus).toBe("idle");
@@ -145,7 +161,7 @@ test("recent customers are the five the firm billed last, never the walk-in; the
     figures: { bills: 1, total: "500.00", cancelled: 0, udhaar_bills: 0, udhaar_total: "0.00", last_bill: last ? { id: 400 + id, invoice_number: `KGH/2026-27/${id}`, invoice_date: "2026-10-01", total_amount: "500.00", business: 3 } : null },
   });
   // the walk-in has bills too; customer 3 has none in this firm
-  serve({ "GET customers/": (c: Call) => ({ status: 200, data: page(c.params.type === "walkin" ? [WALKIN] : [{ ...billed(1), ...WALKIN }, billed(2), billed(3, false), billed(4), billed(5), billed(6), billed(7), billed(8)]) }) });
+  const calls = serve({ "GET customers/": (c: Call) => ({ status: 200, data: page(c.params.type === "walkin" ? [WALKIN] : [{ ...billed(1), ...WALKIN }, billed(2), billed(3, false), billed(4), billed(5), billed(6), billed(7), billed(8)]) }) });
   const { wrapper: w } = wrapper();
   expect(renderHook(() => useRecentCustomers(null), { wrapper: w }).result.current.fetchStatus).toBe("idle");
   const recent = renderHook(() => useRecentCustomers(3), { wrapper: w });
@@ -156,14 +172,15 @@ test("recent customers are the five the firm billed last, never the walk-in; the
   await waitFor(() => expect(walkin.result.current.isSuccess).toBe(true));
   expect(calls[1].params).toEqual({ type: "walkin", page_size: 1 });
   expect(walkin.result.current.data).toMatchObject({ id: 1, name: "Walk-in Customer", type: "walkin" });
-  serve({ "GET customers/": page([]) });
+  // a server that doesn't know type=walkin answers with its first customer, who isn't the walk-in record
+  serve({ "GET customers/": page([ANIL]) });
   const none = renderHook(() => useWalkin(), { wrapper: wrapper().wrapper });
   await waitFor(() => expect(none.result.current.isSuccess).toBe(true));
   expect(none.result.current.data).toBeNull();
 });
 
 test("the count asks for one row; an export reads every page the filters match, a thousand at a time", async () => {
-  serve({ "GET customers/": (c: Call) => ({ status: 200, data: c.params.page_size === 1 ? { ...page([ANIL], "next"), count: 29 } : page([{ ...ANIL, id: Number(c.params.page) }], c.params.page === 1 ? "next" : null) }) });
+  const calls = serve({ "GET customers/": (c: Call) => ({ status: 200, data: c.params.page_size === 1 ? { ...page([ANIL], "next"), count: 29 } : page([{ ...ANIL, id: Number(c.params.page) }], c.params.page === 1 ? "next" : null) }) });
   const { wrapper: w } = wrapper();
   const count = renderHook(() => useCustomerCount(), { wrapper: w });
   await waitFor(() => expect(count.result.current.data).toBe(29));
@@ -172,8 +189,8 @@ test("the count asks for one row; an export reads every page the filters match, 
   expect(calls.map((c) => [c.params.page, c.params.page_size, c.params.figures_business_id])).toEqual([[undefined, 1, undefined], [1, 1000, 3], [2, 1000, 3]]);
 });
 
-test("saving posts a new customer and patches an old one, keeps the answer, and refreshes the lists and the bills", async () => {
-  serve({ "POST customers/": { ...ANIL, id: 30, name: "Rekha Soni" }, "PATCH customers/7/": { ...ANIL, pan_number: "ABCDE1234F", pan: "ABCDE1234F" } });
+test("saving posts a new customer and patches an old one, keeps the answer, and refreshes the lists, the bills and search", async () => {
+  const calls = serve({ "POST customers/": { ...ANIL, id: 30, name: "Rekha Soni" }, "PATCH customers/7/": { ...ANIL, pan_number: "ABCDE1234F", pan: "ABCDE1234F" } });
   const { qc, wrapper: w } = wrapper();
   const spy = vi.spyOn(qc, "invalidateQueries");
   const { result } = renderHook(() => useSaveCustomer(), { wrapper: w });
@@ -184,25 +201,35 @@ test("saving posts a new customer and patches an old one, keeps the answer, and 
   expect(qc.getQueryData(["customers", "one", 7])).toMatchObject({ pan: "ABCDE1234F" });
   const predicate = spy.mock.calls[1][0]!.predicate!;
   const q = (key: unknown[]) => ({ queryKey: key }) as never;
-  expect([predicate(q(["sales", "list"])), predicate(q(["customers", "list", {}])), predicate(q(["customers", "one", 7])), predicate(q(["prefs", 1]))]).toEqual([true, true, false, false]);
+  // Ctrl K's search ("search", term) shows customers too
+  expect([predicate(q(["sales", "list"])), predicate(q(["customers", "list", {}])), predicate(q(["search", "anil"])), predicate(q(["customers", "one", 7])), predicate(q(["prefs", 1]))])
+    .toEqual([true, true, true, false, false]);
 });
 
-test("a delete refreshes the lists, not the page being left: it still holds the customer until it has gone", async () => {
-  serve({ "DELETE customers/7/": "" });
+test("a delete refreshes the lists and search; the customer's own entries are marked stale, not asked for again", async () => {
+  const calls = serve({ "GET customers/7/": ANIL, "DELETE customers/7/": "" });
   const { qc, wrapper: w } = wrapper();
-  qc.setQueryData(customerKeys.one(7), toCustomer(ANIL));
+  // the page being left still shows the customer until it has gone
+  const shown = renderHook(() => useCustomer(7), { wrapper: w });
+  await waitFor(() => expect(shown.result.current.isSuccess).toBe(true));
+  qc.setQueryData(customerKeys.statement(7, {}), toStatement({}));
+  qc.setQueryData(customerKeys.one(8), toCustomer({ ...ANIL, id: 8, name: "Meena Jain" }));
   qc.setQueryData(customerKeys.search("anil", 8), [{ ...toCustomer(ANIL), figures: null }]);
   qc.setQueryData(customerKeys.count(), 29);
+  qc.setQueryData(["search", "anil"], { customers: [] });
+  const spy = vi.spyOn(qc, "invalidateQueries");
   const { result } = renderHook(() => useDeleteCustomer(), { wrapper: w });
-  await act(async () => { await result.current.mutateAsync(7); });
-  expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["DELETE customers/7/"]);
-  expect([customerKeys.search("anil", 8), customerKeys.count(), customerKeys.one(7)].map((k) => qc.getQueryState(k)?.isInvalidated)).toEqual([true, true, false]);
+  // the delete, and every refresh it starts
+  await act(async () => { await result.current.mutateAsync(7); await Promise.all(spy.mock.results.map((r) => r.value)); });
+  expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET customers/7/", "DELETE customers/7/"]);
+  const keys = [customerKeys.search("anil", 8), customerKeys.count(), ["search", "anil"], customerKeys.one(7), customerKeys.statement(7, {}), customerKeys.one(8)];
+  expect(keys.map((k) => qc.getQueryState(k)?.isInvalidated)).toEqual([true, true, true, true, true, false]);
 });
 
 test("a customer page can show a name it already has from a list while the customer loads", async () => {
   let answer = (_r: Reply) => {};
   // Anil's own answer comes only when the test gives it; Rekha's never comes
-  serve({ "GET customers/7/": () => new Promise<Reply>((r) => { answer = r; }), "GET customers/12/": () => new Promise<Reply>(() => {}) });
+  const calls = serve({ "GET customers/7/": () => new Promise<Reply>((r) => { answer = r; }), "GET customers/12/": () => new Promise<Reply>(() => {}) });
   const { qc, wrapper: w } = wrapper();
   qc.setQueryData(["customers", "search", "anil", 8], [{ ...toCustomer(ANIL), figures: null }]);
   qc.setQueryData(["customers", "list", {}], { pages: [{ count: 1, next: null, rows: [{ ...toCustomer({ id: 12, name: "Rekha Soni" }), figures: null }], summary: null }], pageParams: [1] });
@@ -231,7 +258,9 @@ test("refusals read as the form's fields; a taken name and a customer with bills
   expect(deleteRefusal(noReply)).toBe("Not deleted: the app couldn't get through. Nothing was changed; try again in a minute.");
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
   expect(deleteRefusal(noReply)).toBe("Not deleted: you're offline. Nothing was changed; try again when the internet is back.");
-  expect(searchTerm("+91 98290 41122")).toBe("9829041122");
-  expect(searchTerm("Anil")).toBe("Anil");
-  expect(searchTerm("98290-41122")).toBe("9829041122");
+});
+
+test("search asks for a phone number as its 10 digits, whatever is typed in front of it; part of a number as typed", () => {
+  expect(["+91 98290 41122", "098290 41122", "91 98290 41122", "98290-41122", "+91 98290", "0982", "91 982", "Anil"].map(searchTerm))
+    .toEqual(["9829041122", "9829041122", "9829041122", "9829041122", "98290", "0982", "91982", "Anil"]);
 });
