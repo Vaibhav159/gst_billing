@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
@@ -67,7 +67,16 @@ export function AppLayout() {
   if (unsure) return <><OfflineBanner /><div className="p-6"><ListSkeleton what="the app" /></div></>;
   const page = to ? <Navigate to={to} replace /> : <Outlet />;
   // on a desktop the skip link focuses the page, so <main> takes focus there; a page that fails to draw shows a way home instead
-  const main = <main id="app-main" tabIndex={isDesktop ? -1 : undefined} className={cn("flex-1 min-h-0 overflow-y-auto", isDesktop ? "outline-none" : "overscroll-contain")}><PageFrame><ScreenBoundary key={pathname} onHome={() => navigate("/")}>{page}</ScreenBoundary></PageFrame></main>;
+  // a page's code loads on demand (routes.tsx): the skeleton shows only when nothing is on screen yet. Moving between pages
+  // is a transition, so the page you're on stays until the next one's code is in. A page whose code can't load (a new
+  // release, the line down) fails inside its ScreenBoundary, which offers Reload.
+  const main = (
+    <main id="app-main" tabIndex={isDesktop ? -1 : undefined} className={cn("flex-1 min-h-0 overflow-y-auto", isDesktop ? "outline-none" : "overscroll-contain")}>
+      <Suspense fallback={<div className="p-6"><ListSkeleton what="this page" /></div>}>
+        <PageFrame><ScreenBoundary key={pathname} onHome={() => navigate("/")}>{page}</ScreenBoundary></PageFrame>
+      </Suspense>
+    </main>
+  );
   return (
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
