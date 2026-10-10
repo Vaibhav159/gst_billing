@@ -176,6 +176,19 @@ test("the 14 boxes and a continued page's header hold one line each: a line brea
   expect(p.short[2]).toBe("Buyer : Anil Gupta");
 });
 
+test("a line break inside a name or a line's note reads as a space, so each prints on one line, and the plan counts one: 30 lines break as 18 and 12", () => {
+  // names reach v3 with breaks only from v2's imports; the firm's name sits in a slot of fixed height that the plan never counts
+  const p = printBill(bill({
+    firm: { ...(wireDetail().firm as object), name: "KIRAN GOLD\nHOUSE" },
+    customer: { ...(wireDetail().customer as object), name: "Anil\r\nGupta" },
+    lines: Array.from({ length: 30 }, (_, i) => ({ ...WIRE_LINES[1], id: i + 1, product_name: "Gold Pendant\n22K", note: "Peacock\ndesign" })),
+  }), { showBank: true });
+  expect(p.firm.name).toBe("KIRAN GOLD HOUSE");
+  expect(p.parties.map((x) => x.name)).toEqual(["Anil Gupta", "Anil Gupta"]);
+  expect(p.lines[0]).toMatchObject({ name: "Gold Pendant 22K", note: "Peacock design" });
+  expect(p.pages.map((x) => x.lines.length)).toEqual([18, 12]);
+});
+
 test("the last page's fixed part fits a sheet only up to a limit (the ponytail at lastExtra): with 28 HSN groups beside the bank block, the totals stand alone on a fourth page", () => {
   const groups = Array.from({ length: 28 }, (_, i) => String(711301 + i));
   const p = printBill(bill({

@@ -58,8 +58,9 @@ export const JURISDICTION = "Udaipur";
  * the one ₹-aware text piece (Ruling 1E-5), and the model keeps it as typed. The rest is the model's own words and
  * figures (amountText, rateText without its ₹, bill numbers, HSN codes, GSTINs), which never hold a ₹.
  * Line breaks someone typed (v2's address boxes and 1D's note are textareas; react-pdf starts a new line at each) arrive
- * settled (Ruling 1E-9): an address as one entry of `lines` per printed line, one-line slots (the 14 boxes, `short`)
- * with each break read as a space, and the bill's `note` with its breaks kept.
+ * settled (Ruling 1E-9): an address as one entry of `lines` per printed line, one-line slots (the firm's, the customer's
+ * and an item's names, a line's note, the 14 boxes, `short`) with each break read as a space, and the bill's `note` with
+ * its breaks kept.
  */
 export type FreeText = string;
 export type PrintLine = { sl: string; name: FreeText; note: FreeText; hsn: string; qty: string; rate: string; per: string; amount: string };
@@ -110,7 +111,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
   const f = d.firm;
   const c = d.customer;
   const walkin = c.type === "walkin";
-  const name = walkin ? WALKIN_NAME : c.name;
+  const name = walkin ? WALKIN_NAME : oneLine(c.name);
   // the address's printed lines, then the city after the last, unless a part of the address (between commas) is the city
   const address = linesOf(c.address);
   const city = c.city.trim();
@@ -126,7 +127,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     ? [["Bank Name", f.bank_name], ["A/c No.", f.bank_account_number], ["Branch & IFS Code", [f.bank_branch_name, f.bank_ifsc_code].filter(Boolean).join(" & ")]] as [string, string][]
     : null;
   const lines: PrintLine[] = d.lines.map((l, i) => ({
-    sl: String(i + 1), name: l.product_name, note: l.note, hsn: l.hsn_code, qty: qty(Number(l.quantity), l.unit),
+    sl: String(i + 1), name: oneLine(l.product_name), note: oneLine(l.note), hsn: l.hsn_code, qty: qty(Number(l.quantity), l.unit),
     rate: rateText(l.rate).replace("₹", ""), per: l.unit, amount: amountText(l.taxable),
   }));
   const taxes = taxLines(d).map((t) => ({ key: t.key, head: t.head, rate: t.rate, amount: amountText(t.value) }));
@@ -140,7 +141,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     id: d.id, number: d.invoice_number, dated: date(d.invoice_date), file: billPdfName(d), cancelled: d.status === "cancelled",
     qr: qrPayload(d),
     firm: {
-      name: f.name, gstin: f.gst_number,
+      name: oneLine(f.name), gstin: f.gst_number,
       lines: [...linesOf(f.address), f.gst_number ? `GSTIN/UIN: ${f.gst_number}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
       pan: f.pan_number, signature: f.signature_url, bank,
     },
