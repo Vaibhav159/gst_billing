@@ -223,27 +223,89 @@ test("someone who can't add customers is told so on Save, and nothing is sent", 
   expect(calls.some((c) => c.method === "POST")).toBe(false);
 });
 
-test("the desktop's new-customer sheet opens on the name typed in the customer box, ready to finish it; Back closes it", async () => {
-  // jsdom has no layout, so every offsetParent is null and the sheet's focus step would see only the field focused
-  // already. Here it sees what a browser does: every field in the form is on screen
-  const offsetParent = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetParent")!;
-  Object.defineProperty(HTMLElement.prototype, "offsetParent", { configurable: true, get(this: HTMLElement) { return this.isConnected ? document.body : null; } });
-  try {
-    const user = handClock();
-    const onClose = vi.fn();
-    serve({ "GET customers/": NONE });
-    mount([{ path: "/", element: <NewCustomerSheet open initialName="Kamal Jain" homeState="RAJASTHAN" onClose={onClose} onSaved={() => {}} /> }], ["/"]);
-    const sheet = await screen.findByRole("dialog", { name: "New customer" });
-    expect(sheet).toHaveTextContent("Saved to Customers and picked for this bill. You stay on the bill.");
-    const name = within(sheet).getByLabelText(/Name on the bill/);
-    expect(name).toHaveValue("Kamal Jain");
-    await pass(400); // past the sheet's own focus step and its guard against a double tap's second tap
-    expect(name).toHaveFocus();
-    await user.click(within(sheet).getByRole("button", { name: "Back" }));
-    expect(onClose).toHaveBeenCalled();
-  } finally {
-    Object.defineProperty(HTMLElement.prototype, "offsetParent", offsetParent);
-  }
+test("a name the server refuses is said under Name in the app's words, and the cursor goes there with the words read out", async () => {
+  const user = handClock();
+  const onSaved = vi.fn();
+  serve({ "GET customers/": NONE, "POST customers/": () => ({ status: 400, data: { name: ["customer with this Customer Name already exists."] } }) });
+  mount([{ path: "/", element: <NewCustomerForm initialName="Kamal Jain" homeState="RAJASTHAN" onSaved={onSaved} /> }], ["/"]);
+  const name = screen.getByLabelText(/Name on the bill/);
+  // what a screen reader reads as the cursor lands: the field's description at that moment
+  let heard = "";
+  name.addEventListener("focus", () => { heard = document.getElementById(name.getAttribute("aria-describedby") ?? "")?.textContent ?? ""; });
+  await user.click(screen.getByRole("button", { name: "Save and use on this bill" }));
+  await waitFor(() => expect(name).toHaveFocus());
+  expect(heard).toBe("There's already a customer called Kamal Jain. Add the area or the father's name to tell them apart.");
+  expect(name).toHaveAttribute("aria-invalid", "true");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Added /)).not.toBeInTheDocument();
+  expect(onSaved).not.toHaveBeenCalled();
+});
+
+test("what the server refuses that has no place in the form is said above the buttons, so nothing it said is lost", async () => {
+  const user = handClock();
+  serve({ "GET customers/": NONE, "POST customers/": () => ({ status: 400, data: { name: ["customer with this Customer Name already exists."], state_name: ["\"XX\" is not a valid choice."] } }) });
+  mount([{ path: "/", element: <NewCustomerForm initialName="Kamal Jain" homeState="RAJASTHAN" onSaved={() => {}} /> }], ["/"]);
+  await user.click(screen.getByRole("button", { name: "Save and use on this bill" }));
+  const note = await screen.findByRole("alert");
+  expect(note).toHaveTextContent("Not saved");
+  expect(note).toHaveTextContent("State: \"XX\" is not a valid choice.");
+  expect(screen.getByText("There's already a customer called Kamal Jain. Add the area or the father's name to tell them apart.")).toBeInTheDocument();
+  expect(screen.getByLabelText(/Name on the bill/)).toHaveFocus();
+});
+
+test("a phone number or GSTIN typed in the customer box starts its own box in the new-customer form; anything else starts the name", async () => {
+  handClock();
+  serve({ "GET customers/": NONE });
+  const form = (typed: string) => mount([{ path: "/", element: <NewCustomerForm initialName={typed} homeState="RAJASTHAN" onSaved={() => {}} /> }], ["/"]);
+  let view = form("98290 41122");
+  expect(screen.getByLabelText("Mobile number")).toHaveValue("98290 41122");
+  expect(screen.getByLabelText(/Name on the bill/)).toHaveValue("");
+  view.unmount();
+  view = form("27xtzps7585p1zb");
+  expect(screen.getByLabelText("GSTIN")).toHaveValue("27XTZPS7585P1ZB");
+  expect(screen.getByText("Valid GSTIN · Maharashtra (27) · PAN XTZPS7585P")).toBeInTheDocument();
+  expect(screen.getByLabelText(/Name on the bill/)).toHaveValue("");
+  view.unmount();
+  form("Kamal Jain");
+  expect(screen.getByLabelText(/Name on the bill/)).toHaveValue("Kamal Jain");
+  expect(screen.getByLabelText("Mobile number")).toHaveValue("");
+  expect(screen.getByLabelText("GSTIN")).toHaveValue("");
+});
+
+/** The desktop's new-customer sheet as the bill form opens it: from a button, with what was typed in the customer box. */
+function NewFromBill() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Add a customer</button>
+      <NewCustomerSheet open={open} initialName="Kamal Jain" homeState="RAJASTHAN" onClose={() => setOpen(false)} onSaved={() => setOpen(false)} />
+    </>
+  );
+}
+
+test("the desktop's new-customer sheet opens on the name typed in the customer box, and gives the cursor back to what opened it after Back or Esc", async () => {
+  const user = handClock();
+  serve({ "GET customers/": NONE });
+  mount([{ path: "/", element: <NewFromBill /> }], ["/"]);
+  const opener = screen.getByRole("button", { name: "Add a customer" });
+  await user.click(opener);
+  const sheet = await screen.findByRole("dialog", { name: "New customer" });
+  expect(sheet).toHaveTextContent("Saved to Customers and picked for this bill. You stay on the bill.");
+  const name = within(sheet).getByLabelText(/Name on the bill/);
+  expect(name).toHaveValue("Kamal Jain");
+  await pass(400); // past the sheet's own focus step and its guard against a double tap's second tap
+  expect(name).toHaveFocus();
+  await user.click(within(sheet).getByRole("button", { name: "Back" }));
+  await pass(400); // the sheet animates out
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
+  await user.click(opener);
+  await screen.findByRole("dialog", { name: "New customer" });
+  await pass(400);
+  await user.keyboard("{Escape}");
+  await pass(400);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
 });
 
 test("the fix sheet: the PAN is checked, saved to the customer alone, and the bill hears of it", async () => {
@@ -261,7 +323,7 @@ test("the fix sheet: the PAN is checked, saved to the customer alone, and the bi
   await user.click(within(sheet).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ pan_number: "ABCDE1234F" })));
   expect(calls.find((c) => c.method === "PATCH")!.data).toEqual({ pan_number: "ABCDE1234F" });
-  expect(await screen.findByText("Added Anil Gupta's PAN")).toBeInTheDocument();
+  expect(await screen.findByText("Added the PAN for Anil Gupta")).toBeInTheDocument();
   expect(screen.getByText("It's in Customers now; this bill shows it.")).toBeInTheDocument();
 });
 
@@ -306,7 +368,47 @@ test("the fix sheet for an address wants the shop or house, street and area", as
   await user.type(within(sheet).getByLabelText("Address"), ", 8 Laxmi Road");
   await user.click(within(sheet).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(calls.find((c) => c.method === "PATCH")!.data).toEqual({ address: "Pune, 8 Laxmi Road" }));
-  expect(await screen.findByText("Added Kulkarni Jewellers's address")).toBeInTheDocument();
+  expect(await screen.findByText("Added the address for Kulkarni Jewellers")).toBeInTheDocument();
+});
+
+test("the fix sheet says a PAN the server refuses under the field, and puts the cursor there with the words read out", async () => {
+  const user = handClock();
+  const onSaved = vi.fn();
+  serve({ "PATCH customers/7/": () => ({ status: 400, data: { pan_number: ["Enter a valid PAN."] } }) });
+  mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer(ANIL)} field="pan" open onClose={() => {}} onSaved={onSaved} /> }], ["/"]);
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  await pass(400);
+  const pan = within(sheet).getByLabelText("PAN");
+  let heard = "";
+  pan.addEventListener("focus", () => { heard = document.getElementById(pan.getAttribute("aria-describedby") ?? "")?.textContent ?? ""; });
+  await user.type(pan, "ABCDE1234F");
+  await user.click(within(sheet).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(pan).toHaveFocus());
+  expect(heard).toBe("Enter a valid PAN.");
+  expect(pan).toHaveAttribute("aria-invalid", "true");
+  expect(within(sheet).queryByRole("alert")).not.toBeInTheDocument();
+  expect(onSaved).not.toHaveBeenCalled();
+});
+
+test("the fix sheet keeps what's typed when the save doesn't get through, says so, and Try again sends it", async () => {
+  const user = handClock();
+  const onSaved = vi.fn();
+  let down = true;
+  const calls = serve({ "PATCH customers/7/": (c: Call) => (down ? { status: 503 } : { status: 200, data: { ...ANIL, ...(c.data as object) } }) });
+  mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer(ANIL)} field="pan" open onClose={() => {}} onSaved={onSaved} /> }], ["/"]);
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  await pass(400);
+  await user.type(within(sheet).getByLabelText("PAN"), "ABCDE1234F");
+  await user.click(within(sheet).getByRole("button", { name: "Save" }));
+  const note = await within(sheet).findByRole("alert");
+  expect(note).toHaveTextContent("Not saved: the app couldn't get through");
+  expect(note).toHaveTextContent("Nothing was changed. What you typed is still here. Try again in a minute.");
+  expect(within(sheet).getByLabelText("PAN")).toHaveValue("ABCDE1234F");
+  down = false;
+  await user.click(within(sheet).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ pan_number: "ABCDE1234F" })));
+  expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2);
+  expect(await screen.findByText("Added the PAN for Anil Gupta")).toBeInTheDocument();
 });
 
 test("the phone's customer sheet opens on the list, searches, and adds a new customer without leaving the bill", async () => {
@@ -344,4 +446,32 @@ test("on the phone's sheet the search says it's searching, then that it failed; 
   await act(async () => { answer(); });
   expect(await within(sheet).findByText("Couldn't search: the app couldn't get through")).toBeInTheDocument();
   expect(within(sheet).getByRole("button", { name: "Add “Kamal” as a new customer" })).toBeEnabled();
+});
+
+test("on the phone's sheet, closing a new customer asks first once something is typed, the city and the state too; not for what came from the search box", async () => {
+  const user = handClock();
+  phone(true);
+  const onClose = vi.fn();
+  serve({ "GET customers/": customers });
+  mount([{ path: "/", element: <CustomerSheet open onClose={onClose} firmId={3} homeState="RAJASTHAN" value={null} onPick={() => {}} /> }], ["/"]);
+  const sheet = await screen.findByRole("dialog", { name: "Customer" });
+  await pass(400);
+  await user.type(within(sheet).getByRole("searchbox", { name: "Search customers" }), "98290 41122");
+  await pass(250);
+  await user.click(within(sheet).getByRole("button", { name: "Add “98290 41122” as a new customer" }));
+  const form = await screen.findByRole("dialog", { name: "New customer" });
+  expect(within(form).getByLabelText("Mobile number")).toHaveValue("98290 41122");
+  await user.type(within(form).getByLabelText("City"), "Pune");
+  await user.keyboard("{Escape}");
+  expect(within(form).getByRole("alert")).toHaveTextContent("Discard this customer?");
+  await user.click(within(form).getByRole("button", { name: "Keep editing" }));
+  await user.clear(within(form).getByLabelText("City"));
+  await user.selectOptions(within(form).getByLabelText("State"), "GUJARAT");
+  await user.keyboard("{Escape}");
+  expect(within(form).getByRole("alert")).toHaveTextContent("Discard this customer?");
+  await user.click(within(form).getByRole("button", { name: "Keep editing" }));
+  await user.selectOptions(within(form).getByLabelText("State"), "RAJASTHAN");
+  // only the number from the search box is there: it closes without asking
+  await user.keyboard("{Escape}");
+  expect(onClose).toHaveBeenCalled();
 });

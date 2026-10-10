@@ -111,6 +111,11 @@ export function effectivePan(panNumber: string | null | undefined, gstin: string
 }
 
 /* ── Indian mobile numbers ─────────────────────────────── */
+/** Whether what's typed reads as a phone number rather than a name: digits, spaces and dashes (a + in front too), 3 digits or more. */
+export function looksLikePhone(raw: string | null | undefined): boolean {
+  const t = (raw ?? "").trim();
+  return /^\+?[\d\s-]+$/.test(t) && t.replace(/\D/g, "").length >= 3;
+}
 /** The digits of a mobile number as typed: "+91 98290 41122" and "098290 41122" give "9829041122". */
 export function mobileDigits(raw: string | null | undefined): string {
   let d = (raw ?? "").replace(/\D/g, "");

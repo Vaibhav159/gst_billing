@@ -6,7 +6,7 @@ import { skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, typ
 import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { plural, toPaise } from "@/core/format";
-import { effectivePan, hasGstin, mobileDigits } from "@/core/ids";
+import { effectivePan, hasGstin, looksLikePhone, mobileDigits } from "@/core/ids";
 import type { PaymentMode } from "@/core/sales/types";
 import type { FirmId } from "@/core/scope";
 
@@ -181,7 +181,7 @@ const ORDERING: Record<CustomerSort, string> = { recent: "-last_bill", name: "na
 /** What search is asked for: a phone number typed in groups, or with +91, 91 or 0 in front, as its 10 digits; part of one as typed. */
 export function searchTerm(q: string): string {
   const t = q.trim();
-  return /^\+?[\d\s-]+$/.test(t) && t.replace(/\D/g, "").length >= 3 ? mobileDigits(t.replace(/^\+91/, "")) : t;
+  return looksLikePhone(t) ? mobileDigits(t.replace(/^\+91/, "")) : t;
 }
 /** All the customers a list's filters match, every page (page_size 1000), for an export. */
 export async function fetchAllCustomers(params: Record<string, string | number>): Promise<CustomerRow[]> {

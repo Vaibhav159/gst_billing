@@ -6,14 +6,15 @@
 // - A customer's PAN or address, added from a bill (PROTO pages/sales/parts.jsx CustomerFixSheet).
 // The combobox and FailNote are the kit's (@/core/ui), and failText is Selling's (@/core/sales/words): one home each.
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { UserPlus } from "lucide-react";
-import { customerSaveErrors, useCustomerSearch, useRecentCustomers, useSaveCustomer, useWalkin, type Customer, type CustomerBody, type CustomerRow } from "@/core/api/customers";
+import { customerSaveErrors, useCustomerSearch, useRecentCustomers, useSaveCustomer, useWalkin, type Customer, type CustomerBody, type CustomerField, type CustomerRow } from "@/core/api/customers";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { dateShort, inr, mobileText } from "@/core/format";
-import { checkGstin, cleanGstin, cleanPan, mobileDigits, mobileProblem, PAN_PROBLEM, PAN_RE, panProblem, stateLabel, stateOptions } from "@/core/ids";
+import { checkGstin, cleanGstin, cleanPan, looksLikePhone, mobileDigits, mobileProblem, PAN_PROBLEM, PAN_RE, panProblem, stateLabel, stateOptions } from "@/core/ids";
 import { andList, failText, type FailText } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
 import { Avatar, Button, Combobox, Dialog, FailNote, Field, Input, ListRow, SearchInput, Select, Sheet, useToast, type ComboItem, type ComboOption } from "@/core/ui";
@@ -188,7 +189,7 @@ export function CustomerSheet({ open, onClose, firmId, homeState, value, onPick 
 /* ── A new customer, without leaving the bill ──────────── */
 
 export type NewCustomerFormProps = {
-  /** What was typed in the customer box, to start the name with. */
+  /** What was typed in the customer box: a phone number starts Mobile number, a GSTIN the GSTIN, anything else the name. */
   initialName?: string;
   /** Prefix for the fields' ids ("nc": nc-name, nc-phone…), so two forms on one page don't clash. */
   idBase?: string;
@@ -204,6 +205,22 @@ export type NewCustomerFormProps = {
 type FormField = "name" | "phone" | "gstin" | "pan";
 
 /**
+ * What was typed in the customer box, in the box it belongs in (as /customers/new?phone=&gstin= does): a phone number in
+ * Mobile number, a GSTIN (one failing only its check character too) in GSTIN, anything else in the name.
+ */
+function startFrom(typed: string): { name: string; phone: string; gstin: string } {
+  const t = typed.trim();
+  const compact = t.replace(/[\s-]/g, "").toUpperCase();
+  const g = checkGstin(compact).status;
+  if (g === "valid" || g === "check") return { name: "", phone: "", gstin: compact };
+  if (looksLikePhone(t)) return { name: "", phone: t, gstin: "" };
+  return { name: t, phone: "", gstin: "" };
+}
+
+/** What a save can refuse that the form has no place to say under a field: said above its buttons, by name. */
+const ELSEWHERE: Partial<Record<CustomerField, string>> = { address: "Address", city: "City", state: "State", email: "Email", firms: "Firms", type: "Type" };
+
+/**
  * GSTIN, name on the bill, mobile, address, city, state and PAN (PROTO pages/sales/parts.jsx NewCustomerForm), saved to
  * Customers and handed back to the bill. A number or GSTIN another customer has is named once it's found, with "Use …
  * instead". A GSTIN that fails only its check character warns, saves as typed and stays B2B (part 1 design, decision 3).
@@ -213,13 +230,15 @@ export function NewCustomerForm({ initialName = "", idBase = "nc", homeState, on
   const { isPhone } = useView();
   const { show } = useToast();
   const save$ = useSaveCustomer();
+  const [start] = useState(() => startFrom(initialName));
   // no city to start with (Call 13): the firm's state, not its town
-  const [v, setV] = useState({ name: initialName, phone: "", gstin: "", address: "", city: "", state: homeState, pan: "" });
+  const [v, setV] = useState({ ...start, address: "", city: "", state: homeState, pan: "" });
   const [err, setErr] = useState<Partial<Record<FormField, string>>>({});
   const [tried, setTried] = useState(false);
   const [fail, setFail] = useState<FailText | null>(null);
   const set = (k: keyof typeof v, x: string) => { setV((o) => ({ ...o, [k]: x })); if (tried) setErr((e) => ({ ...e, [k]: "" })); setFail(null); };
-  const typed = Boolean(v.phone.trim() || v.gstin.trim() || v.address.trim() || v.city.trim() || v.pan.trim() || v.state !== homeState || v.name.trim() !== initialName.trim());
+  // anything beyond what came from the customer box, for the sheet around the form to ask before throwing it away
+  const typed = v.name.trim() !== start.name || v.phone.trim() !== start.phone || v.gstin !== start.gstin || Boolean(v.address.trim() || v.city.trim() || v.pan.trim()) || v.state !== homeState;
   // a layout effect, so the sheet knows before the next key (an Esc right after typing still asks)
   useLayoutEffect(() => { onTyped?.(typed); }, [typed]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onTyped?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -241,15 +260,19 @@ export function NewCustomerForm({ initialName = "", idBase = "nc", homeState, on
     if (g.status !== "valid" && panProblem(v.pan)) e.pan = panProblem(v.pan);
     return e;
   };
+  /** Shows the problems and puts the cursor on the first: drawn first, so a screen reader reads its words as it lands. */
+  const showProblems = (e: Partial<Record<FormField, string>>): boolean => {
+    flushSync(() => setErr(e));
+    const first = (["name", "phone", "gstin", "pan"] as const).find((k) => e[k]);
+    if (first) document.getElementById(`${idBase}-${first}`)?.focus();
+    return Boolean(first);
+  };
   const save = () => {
     if (save$.isPending) return;
     setTried(true);
     setFail(null);
     if (!can("customer.edit")) { setErr({ name: whyNot("customer.edit") }); return; }
-    const e = validate();
-    setErr(e);
-    const first = (["name", "phone", "gstin", "pan"] as const).find((k) => e[k]);
-    if (first) { document.getElementById(`${idBase}-${first}`)?.focus(); return; }
+    if (showProblems(validate())) return;
     const name = v.name.trim().replace(/\s+/g, " ");
     const address = v.address.trim();
     // no `businesses`: none ticked means every firm, and the server refuses an empty list (Ruling 1C-2)
@@ -263,11 +286,14 @@ export function NewCustomerForm({ initialName = "", idBase = "nc", homeState, on
         onSaved(c);
       },
       onError: (x) => {
-        // the server's words under the field it names; anything else above the buttons, with Try again
+        // the server's words under the field it names, with the cursor on the first; what it refused that has no place
+        // here, or a save that didn't get through, above the buttons with Try again: nothing it said is lost
         const { problem, fields } = customerSaveErrors(x, name);
         const shown = { name: fields.name, phone: fields.phone, gstin: fields.gstin, pan: fields.pan };
-        if (Object.values(shown).some(Boolean)) setErr(shown);
-        else setFail(failText(problem));
+        const elsewhere = (Object.keys(ELSEWHERE) as CustomerField[]).filter((k) => fields[k]).map((k) => `${ELSEWHERE[k]}: ${fields[k]}`);
+        if (elsewhere.length) setFail({ ...failText(problem), body: elsewhere.join(" ") });
+        else if (!Object.values(shown).some(Boolean)) setFail(failText(problem));
+        showProblems(shown);
       },
     });
   };
@@ -275,19 +301,21 @@ export function NewCustomerForm({ initialName = "", idBase = "nc", homeState, on
   const gHint = sameGstin ? `${sameGstin.name} already has this GSTIN.` : g.status === "valid" ? `Valid GSTIN · ${stateLabel(g.state)} · PAN ${g.pan}`
     : g.status === "check" ? g.warning : g.status === "short" ? `${g.length} of 15 characters` : g.status === "invalid" ? g.problem
       : "Only for a registered business. The state and PAN come from it.";
-  // a name typed in the customer box lands in the name, to finish it; with none, the GSTIN, which fills the most.
-  // data-autofocus too: the sheet around the form puts the cursor there once it has opened
-  const focusName = !isPhone && Boolean(initialName);
-  const focusGstin = !isPhone && !initialName;
+  // the cursor starts where the typing goes on: the name when something came from the customer box (to finish it, or
+  // to type it beside the number or GSTIN), else the GSTIN, which fills the most. data-autofocus, not autoFocus: the
+  // sheet around the form puts the cursor there once it has noted what opened it, so closing gives the cursor back
+  // (autoFocus would take it before that, and closing would drop it to the page)
+  const focusName = !isPhone && Boolean(initialName.trim());
+  const focusGstin = !isPhone && !initialName.trim();
   return (
     <div className="flex flex-col gap-4">
       <Field label="GSTIN" htmlFor={`${idBase}-gstin`} error={err.gstin} hint={gHint}>
         <Input id={`${idBase}-gstin`} value={v.gstin} maxLength={15} inputClassName="uppercase tnum" autoComplete="off" spellCheck={false}
-          autoFocus={focusGstin} data-autofocus={focusGstin ? "" : undefined} onChange={(e) => set("gstin", cleanGstin(e.target.value))} />
+          data-autofocus={focusGstin ? "" : undefined} onChange={(e) => set("gstin", cleanGstin(e.target.value))} />
       </Field>
       {sameGstin ? <Button size="sm" variant="outline" className="self-start -mt-2" onClick={() => onSaved(sameGstin)}>{`Use ${sameGstin.name} instead`}</Button> : null}
       <Field label="Name on the bill" htmlFor={`${idBase}-name`} required error={err.name}>
-        <Input id={`${idBase}-name`} value={v.name} autoComplete="off" autoFocus={focusName} data-autofocus={focusName ? "" : undefined} onChange={(e) => set("name", e.target.value)} />
+        <Input id={`${idBase}-name`} value={v.name} autoComplete="off" data-autofocus={focusName ? "" : undefined} onChange={(e) => set("name", e.target.value)} />
       </Field>
       <Field label="Mobile number" htmlFor={`${idBase}-phone`} error={err.phone} hint={samePhone ? `This number belongs to ${samePhone.name}.` : "10 digits, for sending bills on WhatsApp. Optional."}>
         <Input id={`${idBase}-phone`} type="tel" inputMode="tel" value={v.phone} autoComplete="off" onChange={(e) => set("phone", e.target.value)} />
@@ -361,28 +389,30 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   useEffect(() => { if (open && customer) { setVal(field === "pan" ? customer.pan_number : customer.address); setErr(""); setFail(null); } }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!customer || !field) return null;
   const busy = save$.isPending;
+  const id = `fix-${field}`;
+  /** Says what's wrong under the field and puts the cursor there: drawn first, so a screen reader reads it as it lands. */
+  const refuse = (words: string) => { flushSync(() => setErr(words)); document.getElementById(id)?.focus(); };
   const save = () => {
     if (busy) return;
-    if (!can("customer.edit")) { setErr(whyNot("customer.edit")); return; }
+    if (!can("customer.edit")) { refuse(whyNot("customer.edit")); return; }
     const t = field === "pan" ? val.trim().toUpperCase() : val.trim();
-    if (field === "pan" && !PAN_RE.test(t)) { setErr(PAN_PROBLEM); return; }
-    if (field === "address" && t.length < 6) { setErr("Type the shop or house, street and area."); return; }
+    if (field === "pan" && !PAN_RE.test(t)) { refuse(PAN_PROBLEM); return; }
+    if (field === "address" && t.length < 6) { refuse("Type the shop or house, street and area."); return; }
     setFail(null);
     save$.mutate({ id: customer.id, body: field === "pan" ? { pan_number: t } : { address: t } }, {
       onSuccess: (c) => {
-        show({ title: field === "pan" ? `Added ${customer.name}'s PAN` : `Added ${customer.name}'s address`, body: "It's in Customers now; this bill shows it." });
+        show({ title: field === "pan" ? `Added the PAN for ${customer.name}` : `Added the address for ${customer.name}`, body: "It's in Customers now; this bill shows it." });
         onSaved?.(c);
         onClose();
       },
       onError: (x) => {
         const { problem, fields } = customerSaveErrors(x, customer.name);
         const mine = fields[field];
-        if (mine) setErr(mine);
+        if (mine) refuse(mine);
         else setFail(failText(problem));
       },
     });
   };
-  const id = `fix-${field}`;
   return (
     <Sheet open={open} onClose={busy ? () => {} : onClose} title={field === "pan" ? `${customer.name}'s PAN` : `${customer.name}'s address`} width={420}
       description={field === "pan" ? "Income Tax Rule 114B: a bill over ₹2,00,000 needs the buyer's PAN (or Form 60)." : "CGST Rule 46: a B2B tax invoice shows the buyer's address."}

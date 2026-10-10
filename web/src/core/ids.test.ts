@@ -1,4 +1,4 @@
-import { checkGstin, cleanGstin, cleanPan, effectivePan, emailProblem, formatMobile, GST_STATES, gstinCheckDigit, gstinPan, hasGstin, mobileDigits, mobileProblem, panProblem, stateCodeOf, stateLabel, stateOptions, stateTitle } from "./ids";
+import { checkGstin, cleanGstin, cleanPan, effectivePan, emailProblem, formatMobile, GST_STATES, gstinCheckDigit, gstinPan, hasGstin, looksLikePhone, mobileDigits, mobileProblem, panProblem, stateCodeOf, stateLabel, stateOptions, stateTitle } from "./ids";
 
 // Known-real: v2's test vectors (a firm's own GSTIN and GSTN's documented example), and the prototype's Kulkarni Jewellers
 const REAL = ["08AAGPL3375F1ZO", "27AAPFU0939F1ZV", "27XTZPS7585P1ZB"];
@@ -52,6 +52,11 @@ test("mobile numbers: +91 and a leading 0 drop, ten digits read in two groups, a
   expect(mobileProblem("98290411229999")).toBe("A mobile number has 10 digits; this has 14.");
   expect(mobileProblem("5829041122")).toBe("Indian mobile numbers start with 6, 7, 8 or 9. Check the first digit.");
   expect(mobileProblem("98290 41122")).toBe("");
+});
+
+test("what's typed reads as a phone number when it's digits, spaces and dashes (a + in front too), 3 digits or more", () => {
+  expect(["98290 41122", "+91 98290-41122", "982", " 0294 241 2345 "].map(looksLikePhone)).toEqual([true, true, true, true]);
+  expect(["98", "Anil", "Shop 123", "27XTZPS7585P1ZB", "", null].map(looksLikePhone)).toEqual([false, false, false, false, false, false]);
 });
 
 test("email: empty is fine; a half-typed one says how it should look", () => {
