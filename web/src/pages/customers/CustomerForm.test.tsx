@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { matchRoutes } from "react-router";
-import { GSTIN_CHECK_WARNING } from "@/core/ids";
+import { GSTIN_CHECK_WARNING, PAN_PROBLEM } from "@/core/ids";
 import { appRoutes } from "@/core/router/routes";
 import CustomerForm from "./CustomerForm";
 import { ANIL, mount, NO_BILLS, serve, VIEWER, type Call } from "./testing";
@@ -140,6 +140,26 @@ test("editing opens on the field a link names (?focus=pan), saves only through P
   fireEvent.keyDown(window, { key: "s", ctrlKey: true });
   await waitFor(() => expect(router.state.location.pathname).toBe("/customers/7"));
   expect(calls.find((c) => c.method === "PATCH")!.data).toMatchObject({ pan_number: "ABCDE1234F", mobile_number: "9829041122", businesses: [3] });
+});
+
+test("a PAN stored before v3 checked them (v2's imports kept “N/A”) shows as it is, says what it is from the start, and a cleared box saves", async () => {
+  const calls = serve({
+    "GET customers/7/": { ...ANIL, pan_number: "N/A" }, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS,
+    "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }),
+  });
+  const { router } = mount(routes, ["/customers/7", "/customers/7/edit"]);
+  const pan = await screen.findByLabelText("PAN");
+  expect(pan).toHaveValue("N/A");
+  expect(pan).toHaveAccessibleDescription("“N/A” isn't a PAN. Clear it, or type the PAN.");
+  // what the person types is checked as any PAN is
+  await userEvent.type(pan, "x");
+  await userEvent.tab();
+  expect(pan).toHaveAccessibleDescription(PAN_PROBLEM);
+  await userEvent.clear(pan);
+  expect(pan).not.toHaveAttribute("aria-invalid");
+  await userEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/customers/7"));
+  expect(calls.find((c) => c.method === "PATCH")!.data).toMatchObject({ pan_number: "", name: "Anil Gupta" });
 });
 
 test("a state the server keeps in another spelling (JAMMU & KASHMIR) is its GSTIN's own state: no mismatch, and it saves in the picker's spelling", async () => {

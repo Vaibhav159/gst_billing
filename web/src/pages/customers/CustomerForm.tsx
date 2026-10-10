@@ -160,13 +160,17 @@ function Form({ existing, firms, home, query, back }: { existing: Customer | nul
   if (g.status === "short" || g.status === "invalid") errs.gstin = g.problem;
   else if (v.type === "business" && g.status === "empty") errs.gstin = "A business customer needs its GSTIN: without one, its bills block GSTR-1. Add the GSTIN, or choose Person.";
   if (gValid && g.state !== v.state) errs.state = `This GSTIN is registered in ${stateLabel(g.state)}. Pick that state, or check the GSTIN.`;
-  if (!gValid && panProblem(v.pan)) errs.pan = panProblem(v.pan);
+  // a PAN stored before v3 checked them (v2's imports kept "N/A") shows as it is, said in words of its own from the
+  // start, as any save sends it and the server refuses it; what the person types gets the usual words
+  const panStored = existing !== null && v.pan === existing.pan_number;
+  if (!gValid && panProblem(v.pan)) errs.pan = panStored ? `“${v.pan.trim()}” isn't a PAN. Clear it, or type the PAN.` : panProblem(v.pan);
   if (!v.firms.length) errs.firms = "Tick at least one firm so they show first somewhere.";
   for (const [k, msg] of Object.entries(serverErrs) as [CustomerField, string][]) if (!errs[k]) errs[k] = msg;
-  // empty required fields wait for a save attempt; typed (or cleared) values are checked on leaving the field
+  // empty required fields wait for a save attempt; typed (or cleared) values are checked on leaving the field; a stored
+  // PAN that isn't one is said from the start
   const show = (k: CustomerField): string => {
     const has = (x: Values) => { const val = x[k as keyof Values]; return Array.isArray(val) ? true : Boolean(String(val ?? "").trim()); };
-    return tried || (k === "name" && dupName) || serverErrs[k] || (touched[k] && (k === "firms" || has(v) || has(initial))) ? errs[k] ?? "" : "";
+    return tried || (k === "name" && dupName) || (k === "pan" && panStored) || serverErrs[k] || (touched[k] && (k === "firms" || has(v) || has(initial))) ? errs[k] ?? "" : "";
   };
   const gstinErr = errs.gstin && (tried || touched.gstin || v.gstin.length === 15 || serverErrs.gstin) ? errs.gstin : "";
 
