@@ -69,6 +69,35 @@ test("an unknown address shows the not-found page with a way home", async () => 
   expect(screen.getByRole("link", { name: /home/i })).toHaveAttribute("href", "/");
 });
 
+test("something outside a page's own boundary that fails to draw (the shell, sign-in, search) shows the same words and Reload, never React Router's error page", async () => {
+  const reported = vi.spyOn(console, "error").mockImplementation(() => {}); // React and React Router report the error, as they should
+  const reload = vi.fn();
+  vi.stubGlobal("location", { ...window.location, reload });
+  try {
+    let broken = true;
+    function Shell() { if (broken) throw new Error("the shell broke"); return <p>the home page</p>; }
+    // the app's own root route, around a shell that throws while it draws
+    const [root] = appRoutes;
+    const router = createMemoryRouter([{ element: root.element, errorElement: root.errorElement, children: [{ path: "*", element: <Shell /> }] }], { initialEntries: ["/sales"] });
+    render(inApp(router));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Something went wrong on this page");
+    expect(alert).toHaveTextContent("Nothing you saved is affected. Reload the app, or go back to the home page and try again.");
+    expect(screen.queryByText(/Unexpected Application Error/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/the shell broke/)).not.toBeInTheDocument(); // no message, no stack trace
+    await userEvent.click(within(alert).getByRole("button", { name: "Reload the app" }));
+    expect(reload).toHaveBeenCalledTimes(1);
+    // once it draws again, the home page is a button away
+    broken = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Go to the home page" }));
+    expect(await screen.findByText("the home page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+  } finally {
+    vi.unstubAllGlobals();
+    reported.mockRestore();
+  }
+});
+
 test("the second click of a double click doesn't land on the page that just opened", async () => {
   const router = mount("/sales");
   await screen.findByRole("heading", { level: 1, name: "Bills" });

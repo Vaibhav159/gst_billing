@@ -1,6 +1,7 @@
 import { Navigate, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
+import { AppFailed } from "@/core/shell/ScreenBoundary";
 import Login from "@/pages/core/Login";
 import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
@@ -75,6 +76,8 @@ function V2Redirect({ to }: { to: (p: Record<string, string>) => string }) {
 
 export const appRoutes: RouteObject[] = [{
   element: <RootLayout />,
+  // a page has its own ScreenBoundary; anything else that fails to draw lands here
+  errorElement: <AppFailed />,
   children: [
     { path: "/login", element: <Login /> },
     // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
