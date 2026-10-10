@@ -10,7 +10,9 @@ from billing.models import AuditLog, BinnedInvoice, Business, Customer
 
 logger = logging.getLogger(__name__)
 
-EXCLUDED_FIELDS = {"updated_at", "created_at", "id", "workspace_id"}
+# Left out of an edit's `changes` (the snapshot Undo reads keeps them). firm_snapshot is JSON: v2's Audit log
+# page renders each change as a React child, which a JSON object crashes, and a firm change says it already.
+EXCLUDED_FIELDS = {"updated_at", "created_at", "id", "workspace_id", "firm_snapshot"}
 
 
 def snapshot_of(instance) -> dict:

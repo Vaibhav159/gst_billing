@@ -345,6 +345,18 @@ class FirmChangeTest(TestCase):
             ("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", None)])
         self.assertEqual((kept.payment_mode, put_kept.payment_mode), ("cash", "bank"))  # the saves did go through
 
+    def test_the_audit_row_of_a_firm_change_leaves_the_frozen_firm_out(self):
+        # Task 5's re-review: the frozen firm's JSON among the audit row's changes crashed v2's Audit log page (it
+        # renders each change as a React child), and v3's activity would show the raw word "firm_snapshot". The
+        # snapshot that Undo reads still keeps it.
+        bill = self.frozen_bill("1")
+        r = self.owner.patch(reverse("invoice-detail", args=[bill.pk]), {"business": self.meera.pk}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        entry = AuditLog.objects.get(action="updated", entity_id=bill.pk)
+        self.assertEqual(entry.changes, {"business": {"old": str(self.kgh.pk), "new": str(self.meera.pk)}})
+        self.assertEqual(entry.details, "Updated business")
+        self.assertEqual(entry.snapshot["firm_snapshot"], firm_snapshot(self.kgh))
+
     def test_v2s_line_replace(self):
         kept, moved = self.frozen_bill("1"), self.frozen_bill("2")
         priced = [{**line(), "cgst": "150", "sgst": "150", "igst": "0", "amount": "10300"}]
