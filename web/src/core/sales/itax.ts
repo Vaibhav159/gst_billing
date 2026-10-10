@@ -9,13 +9,13 @@ import type { BillStatus, CustomerType, ItaxFlag, PaymentMode } from "./types";
 /** ₹2,00,000 in paise: the cash limit for one bill (Sec 269ST, at or over) and the PAN threshold (Rule 114B, over). */
 export const ITAX_LIMIT = 20000000;
 
-/** pan: the PAN to go by (typed, or from a GSTIN that checks out: effectivePan). */
-export type ItaxBill = {
+/** What itaxFlags reads off a bill. pan: the PAN to go by (typed, or from a GSTIN that checks out: effectivePan). */
+export type ItaxInput = {
   status: BillStatus; payment_mode: PaymentMode; total: number;
   customer: { name: string; type: CustomerType; pan: string; gst_number: string; address: string };
 };
 
-export function itaxFlags(b: ItaxBill): ItaxFlag[] {
+export function itaxFlags(b: ItaxInput): ItaxFlag[] {
   if (b.status === "cancelled") return [];
   const c = b.customer;
   const out: ItaxFlag[] = [];

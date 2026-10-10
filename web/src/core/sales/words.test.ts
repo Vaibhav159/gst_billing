@@ -96,13 +96,20 @@ test("a reason someone typed, never the old “No reason given”", () => {
   expect(realReason(" Entered twice ")).toBe("Entered twice");
 });
 
-test("failures in the app's words: offline, the server, or the server's own reason", () => {
-  expect(failText({ kind: "offline", message: "You're offline" }, "cancelled")).toEqual({ title: "Not cancelled: you're offline", body: "Nothing was changed. Try again when the internet is back." });
-  expect(failText({ kind: "unreachable", message: "" }, "saved")).toEqual({ title: "Not saved: the app couldn't get through", body: "Nothing was changed. What you typed is still here. Try again in a minute." });
-  expect(failText({ kind: "conflict", message: "September 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be cancelled." }, "cancelled"))
-    .toEqual({ title: "Not cancelled", body: "September 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be cancelled." });
+test("a send or an Undo that didn't go through: offline, the server, or the server's own reason", () => {
   expect(sendFailure({ kind: "offline", message: "" })).toEqual({ tone: "neg", title: "Not sent: you're offline", body: "Nothing was marked as sent. Send it when the internet is back." });
+  expect(sendFailure({ kind: "unreachable", message: "" })).toEqual({ tone: "neg", title: "The bill wasn't sent", body: "Nothing was marked as sent. Try again in a minute." });
+  // a refusal says the server's own words (contract §2.10)
+  expect(sendFailure({ kind: "conflict", message: "KGH/2026-27/31 is cancelled, so it can't be sent." }))
+    .toEqual({ tone: "neg", title: "The bill wasn't sent", body: "KGH/2026-27/31 is cancelled, so it can't be sent." });
   expect(restoreFailure({ kind: "unreachable", message: "" }, "KGH/2026-27/27").body).toBe("KGH/2026-27/27 stays deleted. Restore it from the Audit log in a minute.");
+  expect(restoreFailure({ kind: "offline", message: "" }, "KGH/2026-27/27"))
+    .toEqual({ tone: "neg", title: "Not restored: you're offline", body: "KGH/2026-27/27 stays deleted. Restore it from the Audit log when you're back online." });
+  // a refusal says the server's own words (contract §3.2)
+  expect(restoreFailure({ kind: "conflict", message: "KGH/2026-27/27 is back already: it was restored from the Audit log." }, "KGH/2026-27/27"))
+    .toEqual({ tone: "neg", title: "Not restored", body: "KGH/2026-27/27 is back already: it was restored from the Audit log." });
+  expect(restoreFailure({ kind: "unreachable", message: "" }, "3 bills", true))
+    .toEqual({ tone: "neg", title: "Not restored", body: "3 bills stay deleted. Restore them from the Audit log in a minute." });
 });
 
 test("scope words: filed months, how many firms, the year, and who can", () => {
@@ -114,4 +121,7 @@ test("scope words: filed months, how many firms, the year, and who can", () => {
   expect(fyLabel("2025-26")).toBe("FY 2025-26 (1 Apr 2025 to 31 Mar 2026)");
   expect(whoCan("bill.create")).toBe("the owner and counter staff");
   expect(whoCan("bill.edit")).toBe("the owner");
+  // only those two: for an action the accountant or a viewer may do, its role words would differ from whyNot's
+  // @ts-expect-error customer.edit isn't one of the actions whoCan words
+  whoCan("customer.edit");
 });

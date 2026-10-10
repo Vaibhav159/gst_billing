@@ -19,6 +19,9 @@ test("digits alone take the firm's format only when it uses full numbers on that
   expect(storedNumber("MO/26/9", { prefix: "KGH", fy: "2026-27", full: true })).toBe("MO/26/9");
   // the server drops leading zeros as it formats (int(text)), so this says what it will store
   expect(storedNumber("034", { prefix: "KGH", fy: "2026-27", full: true })).toBe("KGH/2026-27/34");
+  expect(storedNumber("000", { prefix: "KGH", fy: "2026-27", full: true })).toBe("KGH/2026-27/0");
+  // and keeps every digit (Python's int is exact): 16 digits are past what a JavaScript number holds exactly
+  expect(storedNumber("9007199254740993", { prefix: "KGH", fy: "2026-27", full: true })).toBe("KGH/2026-27/9007199254740993");
 });
 
 test("a number's shape in the server's words", () => {

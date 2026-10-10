@@ -19,18 +19,20 @@ export function billPdfName(d: BillDetail): string {
   return pdfName({ invoice_number: d.invoice_number, fy: d.fy, prefix: d.firm.invoice_prefix, firmName: d.firm.name }, same.findIndex((x) => x.id === d.id) + 1);
 }
 
-/** One distinct name per bill for a batch: a name two bills would share gets "_2" on the later one. */
+/**
+ * One distinct name per bill for a batch: a name two bills would share, in any case (one file on Windows, and one number
+ * to the server, whose duplicates ignore case), gets "_2" on the later one, in its own spelling as billPdfName gives it.
+ */
 export function fileNames(bills: PdfBill[]): Map<number, { name: string; renamed: boolean }> {
   const groups = new Map<string, PdfBill[]>();
   for (const b of bills) {
-    const name = pdfName(b);
-    groups.set(name, [...(groups.get(name) ?? []), b]);
+    const key = pdfName(b).toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), b]);
   }
   const out = new Map<number, { name: string; renamed: boolean }>();
-  for (const [name, list] of groups) {
-    const base = name.replace(/\.pdf$/, "");
+  for (const list of groups.values()) {
     [...list].sort((a, c) => (a.invoice_date < c.invoice_date ? -1 : a.invoice_date > c.invoice_date ? 1 : a.id - c.id))
-      .forEach((b, i) => out.set(b.id, { name: i === 0 ? name : `${base}_${i + 1}.pdf`, renamed: i > 0 }));
+      .forEach((b, i) => out.set(b.id, { name: pdfName(b, i + 1), renamed: i > 0 }));
   }
   return out;
 }

@@ -212,8 +212,12 @@ export function fyLabel(fy: string): string {
   const y = Number(fy.slice(0, 4));
   return `FY ${fy} (1 Apr ${y} to 31 Mar ${y + 1})`;
 }
-/** Who may do something, in words: "the owner and counter staff" (PROTO SalesList.jsx:273). */
-export function whoCan(action: Action): string {
+/**
+ * Who may make or change bills, in words: "the owner and counter staff" (PROTO SalesList.jsx:273). Only these two
+ * actions: for one the accountant or a viewer may do, this would say "accountant" and "view only" where whyNot says
+ * "the accountant" and "view-only users".
+ */
+export function whoCan(action: Extract<Action, "bill.create" | "bill.edit">): string {
   const all = perms.perms as Record<Role, "*" | string[]>;
   return andList((Object.keys(all) as Role[]).filter((r) => can(all[r], action)).map((r) => (r === "owner" ? "the owner" : ROLES[r].label.toLowerCase())));
 }

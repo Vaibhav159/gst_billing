@@ -13,15 +13,19 @@ export function sameNumber(a: string | null | undefined, b: string | null | unde
   return String(a ?? "").trim().toUpperCase() === String(b ?? "").trim().toUpperCase();
 }
 
-/** A firm's own format: "KGH/2026-27/34", or "34" for a firm without a prefix. */
-export function fullNumber(prefix: string, fy: string, n: number): string {
+/** A firm's own format: "KGH/2026-27/34", or "34" for a firm without a prefix. n: the counter, or its digits without leading zeros. */
+export function fullNumber(prefix: string, fy: string, n: number | string): string {
   return prefix ? `${prefix}/${fy}/${n}` : String(n);
 }
 
-/** What a typed number is stored as: digits alone take the firm's format when it uses full numbers on that date (NextNumber.full_number); anything else is kept as typed. */
+/**
+ * What a typed number is stored as: digits alone take the firm's format when it uses full numbers on that date
+ * (NextNumber.full_number); anything else is kept as typed. Leading zeros go, as the server's int() drops them, and the
+ * digits stay text, so a long number keeps every one (a JavaScript number is exact only to 15 digits).
+ */
 export function storedNumber(text: string, { prefix, fy, full }: { prefix: string; fy: string; full: boolean }): string {
   const t = text.trim();
-  return full && /^\d+$/.test(t) ? fullNumber(prefix, fy, Number(t)) : t;
+  return full && /^\d+$/.test(t) ? fullNumber(prefix, fy, t.replace(/^0+(?=\d)/, "")) : t;
 }
 
 /** What's wrong with a typed number's shape, in the server's words (contract §2.3), or "". stored: what it would be saved as. */

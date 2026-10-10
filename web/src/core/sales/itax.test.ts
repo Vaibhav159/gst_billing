@@ -1,6 +1,6 @@
-import { itaxFlags, ITAX_LIMIT } from "./itax";
+import { itaxFlags, ITAX_LIMIT, type ItaxInput } from "./itax";
 
-const bill = (over: Partial<Parameters<typeof itaxFlags>[0]> = {}, customer: Partial<Parameters<typeof itaxFlags>[0]["customer"]> = {}) => ({
+const bill = (over: Partial<ItaxInput> = {}, customer: Partial<ItaxInput["customer"]> = {}): ItaxInput => ({
   status: "active" as const, payment_mode: "bank" as const, total: 10000000,
   ...over,
   customer: { name: "Lalit Jain", type: "person" as const, pan: "", gst_number: "", address: "12 Station Road", ...customer },
@@ -21,10 +21,11 @@ test("over ₹2,00,000 without a PAN asks for it (Rule 114B); exactly ₹2,00,00
   expect(itaxFlags(bill({ total: ITAX_LIMIT }))).toEqual([]);
 });
 
-test("a walk-in over ₹2,00,000 says to put the bill in the buyer's name", () => {
+test("a walk-in over ₹2,00,000 says to put the bill in the buyer's name; exactly ₹2,00,000 doesn't", () => {
   expect(itaxFlags(bill({ total: 25000000 }, { name: "Walk-in Customer", type: "walkin" }))).toEqual([
     { kind: "walkin_limit", short: "Walk-in over ₹2 lakh", text: "A bill over ₹2,00,000 needs the buyer's PAN (Rule 114B). Put the bill in the buyer's name, with their PAN, not Walk-in." },
   ]);
+  expect(itaxFlags(bill({ total: ITAX_LIMIT }, { name: "Walk-in Customer", type: "walkin" }))).toEqual([]);
 });
 
 test("a business without an address is flagged (CGST Rule 46); a cancelled bill carries nothing", () => {

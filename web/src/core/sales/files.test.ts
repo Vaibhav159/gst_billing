@@ -19,3 +19,13 @@ test("the second bill with a number gets _2, by date", () => {
   expect(names.get(388)).toEqual({ name: "KGH_2026-27_17.pdf", renamed: false });
   expect(names.get(412)).toEqual({ name: "KGH_2026-27_17_2.pdf", renamed: true });
 });
+
+test("numbers that differ only in case are one file on Windows (and one number to the server), so the later gets _2 in its own spelling", () => {
+  const names = fileNames([
+    { id: 412, invoice_number: "kgh/2026-27/17", invoice_date: "2026-09-12", fy: "2026-27", prefix: "KGH", firmName: "" },
+    { id: 388, invoice_number: "KGH/2026-27/17", invoice_date: "2026-09-10", fy: "2026-27", prefix: "KGH", firmName: "" },
+  ]);
+  expect(names.get(388)).toEqual({ name: "KGH_2026-27_17.pdf", renamed: false });
+  // the name billPdfName gives this bill alone, after the other in its duplicates
+  expect(names.get(412)).toEqual({ name: "kgh_2026-27_17_2.pdf", renamed: true });
+});
