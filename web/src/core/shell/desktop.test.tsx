@@ -18,6 +18,7 @@ import { AppRoutes } from "@/App";
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
     data: config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }, { id: 4, name: "MEERA ORNAMENTS (SANDBOX)", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("preferences/") ? { data: { defaultBusinessId: "3" } } : {} })) as AxiosAdapter;

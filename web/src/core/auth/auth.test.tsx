@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { AxiosAdapter, InternalAxiosRequestConfig } from "axios";
@@ -23,7 +23,7 @@ function Probe() {
 }
 const mount = () => render(<QueryClientProvider client={new QueryClient()}><AuthProvider><Probe /></AuthProvider></QueryClientProvider>);
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 afterEach(() => { vi.restoreAllMocks(); window.history.pushState({}, "", "/"); });
 
 test("signing in stores the tokens and loads who this is from /api/me/", async () => {
@@ -430,4 +430,62 @@ test("a refresh still out at Sign out and refused afterwards doesn't turn the si
   await act(async () => { await router.navigate(-1); }); // Back, to the page before
   await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
   expect(router.state.location.search).toBe("");
+});
+
+// Ruling 39: a reload doesn't undo a sign-out on purpose. The mark is per tab: a new tab is still a first visit.
+
+/** The app's page goes away and starts again in the same tab: a fresh AuthProvider, the same storage. */
+const reload = () => cleanup();
+
+test("after Sign out on purpose, a fresh start in the same tab keeps the sign-in page plain, deep link or not", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  reload();
+  mountRouted(["/customers/9?tab=bills"]); // the next person opens a link in this tab
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+});
+
+test("a sign-out heard from another tab marks this tab too: a fresh start here keeps the sign-in page plain", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  inAnotherTab(SIGN_OUT);
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  reload();
+  mountRouted(["/customers/9"]);
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+});
+
+test("the mark is this tab's own: a new tab after a sign-out is a first visit and keeps the address it came for", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  reload();
+  sessionStorage.clear(); // a new tab: the same localStorage, its own sessionStorage
+  mountRouted(["/customers/9"]);
+  expect(await screen.findByText("at:/login?next=%2Fcustomers%2F9")).toBeInTheDocument();
+});
+
+test("signing in here clears the mark: later, a fresh start while signed out is a first visit again", async () => {
+  setTokens("a", "r");
+  api.defaults.adapter = ((config) => (config.url === "token/" ? reply(config, 200, { access: "b", refresh: "rb" })
+    : reply(config, 200, config.headers.Authorization === "Bearer a" ? ME : KAILASH))) as AxiosAdapter;
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  await act(async () => { screen.getByText("in").click(); }); // Kailash signs in on this tab
+  expect(await screen.findByText("who:Kailash Mehta")).toBeInTheDocument();
+  reload();
+  localStorage.clear(); // his session is gone by the time this tab starts again, though no one signed out here
+  mountRouted(["/customers/9"]);
+  expect(await screen.findByText("at:/login?next=%2Fcustomers%2F9")).toBeInTheDocument();
 });

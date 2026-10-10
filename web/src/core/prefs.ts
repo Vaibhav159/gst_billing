@@ -7,6 +7,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 export type Prefs = { defaultBusinessId?: string; phoneMode?: "easy" | "expert"; [key: string]: unknown };
 
 /** Each person's preferences as the server last gave them, kept on this device so the next load starts from them. */
+// The copy outlives sign-out by design (staff sign out every shift on the counter PC), so nothing secret belongs in preferences.
 const keptKey = (id: number) => `gst3.prefs.${id}`;
 function readKept(id: number): Prefs | undefined {
   try {

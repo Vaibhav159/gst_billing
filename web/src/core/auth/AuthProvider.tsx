@@ -10,7 +10,7 @@ type Status = "loading" | "signed-in" | "signed-out" | "error";
 type SignIn = { ok: true } | { ok: false; problem: ApiProblem };
 export type AuthValue = {
   me: Me | null; status: Status; startProblem: ApiProblem | null; expiredFrom: string | null;
-  /** Signed out on purpose, here or on another tab, since anyone last signed in: the sign-in page keeps no page for whoever is next. */
+  /** Signed out on purpose, here or on another tab, since anyone last signed in on this tab (it survives a reload): the sign-in page keeps no page for whoever is next. */
   signedOutOnPurpose: boolean;
   signIn(username: string, password: string): Promise<SignIn>; signOut(): void; retryStart(): void;
   can(a: Action): boolean; whyNot(a: Action, what?: string): string;
@@ -23,6 +23,14 @@ function readMe(): Me | null { try { const s = localStorage.getItem(ME_KEY); ret
 function saveMe(me: Me | null) { try { if (me) localStorage.setItem(ME_KEY, JSON.stringify(me)); else localStorage.removeItem(ME_KEY); } catch { /* storage refused */ } }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice }; }
+
+/**
+ * This tab saw a sign-out on purpose (Ruling 39). Per tab, in sessionStorage: a reload or a link opened here still starts
+ * the next person on a plain sign-in page, while a new tab is a first visit. Signing in here clears it.
+ */
+const MARK_KEY = "gst3.signedOutHere";
+function readMark(): boolean { try { return sessionStorage.getItem(MARK_KEY) !== null; } catch { return false; } }
+function saveMark(on: boolean) { try { if (on) sessionStorage.setItem(MARK_KEY, "1"); else sessionStorage.removeItem(MARK_KEY); } catch { /* storage refused: the mark lasts this page */ } }
 
 /** The user id an access token names (SimpleJWT's user_id claim), read without asking the server. Null when it can't be read. */
 function tokenUser(access: string | null): string | null {
@@ -57,7 +65,7 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
   const [status, setStatus] = useState<Status>(() => (!getTokens().access ? "signed-out" : remembered() ? "signed-in" : "loading"));
   const [startProblem, setStartProblem] = useState<ApiProblem | null>(null);
   const [expiredFrom, setExpiredFrom] = useState<string | null>(null);
-  const [onPurpose, setOnPurpose] = useState(false);
+  const [onPurpose, setOnPurpose] = useState(readMark);
   /** The person this tab last showed (signing out forgets them), for the callbacks below. */
   const shown = useRef(me);
   /** The access token whose owner this tab knows, or is asking /api/me/ about. */
@@ -72,8 +80,8 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     clearTokens(); saveMe(null); qc.clear(); setMe(null); setStatus("signed-out");
   }, [qc]);
   // On a shared counter computer the next person mustn't land on this person's page: a sign-out here, or one heard
-  // from another tab (which can't be told from a session that ran out there), leaves the sign-in page plain.
-  const signOut = useCallback(() => { setOnPurpose(true); forget(); }, [forget]);
+  // from another tab (which can't be told from a session that ran out there), leaves the sign-in page plain, reloads included.
+  const signOut = useCallback(() => { saveMark(true); setOnPurpose(true); forget(); }, [forget]);
 
   /** This tab's person is now `m`. Someone other than the person shown clears the cache and, unless this tab signed them in, is announced. */
   const adopt = useCallback((m: Me, announce: boolean) => {
@@ -83,7 +91,7 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     // what's on screen refetches for the new person (clear() would leave a mounted list showing the last person's rows)
     if (other) { void qc.resetQueries(); qc.getMutationCache().clear(); }
     shown.current = next;
-    saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null); setOnPurpose(false);
+    saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null); setOnPurpose(false); saveMark(false);
     if (other && announce) switched.current?.(next);
   }, [qc]);
 
