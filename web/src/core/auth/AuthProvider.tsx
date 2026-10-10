@@ -147,6 +147,23 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     return () => window.removeEventListener("storage", onStorage);
   }, [signOut, start]);
 
+  // Back or Forward to this page from the browser's back/forward cache: it's as it was left, and it heard no storage
+  // events meanwhile, so what's stored now decides. Signed out since, here or elsewhere (the tokens are gone), or a
+  // sign-out on purpose in this tab since (its mark): the person shown and their data go. A different token since
+  // (someone else's sign-in, or a refresh): ask who it is now, as for another tab's.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      const { access } = getTokens();
+      const marked = readMark();
+      if (marked) setOnPurpose(true);
+      if (!access || (marked && shown.current)) forget();
+      else if (access !== checked.current) start();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, [forget, start]);
+
   const signIn = useCallback(async (username: string, password: string): Promise<SignIn> => {
     let mine: string | null = null;
     try {

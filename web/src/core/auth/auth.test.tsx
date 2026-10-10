@@ -489,3 +489,73 @@ test("signing in here clears the mark: later, a fresh start while signed out is 
   mountRouted(["/customers/9"]);
   expect(await screen.findByText("at:/login?next=%2Fcustomers%2F9")).toBeInTheDocument();
 });
+
+// A page the browser brings back from its back/forward cache is as it was left, and heard no storage events meanwhile
+
+/** Back (or Forward) to this page from the browser's cache: the same page, with whatever the storage holds now. */
+const backFromCache = (persisted = true) => act(() => { window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted })); });
+/** Someone signed out while this page sat in the cache: the tokens went, and the page heard nothing. */
+const signedOutMeanwhile = () => SIGN_OUT.forEach(([key]) => localStorage.removeItem(key));
+
+test("back from the browser's cache after a sign-out it didn't hear, the page forgets the person and their data", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  const client = mountTab();
+  await waitFor(() => expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument());
+  client.setQueryData(["bills"], ["KGH/31"]);
+  signedOutMeanwhile();
+  backFromCache(false); // an ordinary page load's pageshow: nothing to catch up on
+  expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument();
+  backFromCache();
+  expect(screen.getByText("status:signed-out")).toBeInTheDocument();
+  expect(screen.getByText("who:-")).toBeInTheDocument();
+  expect(client.getQueryData(["bills"])).toBeUndefined();
+});
+
+test("back from the cache after a sign-out on purpose in this tab, the page forgets the person, and the sign-in page stays plain", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  // this tab went on to a fresh copy of the app, where Rakesh signed out on purpose (the mark), then he signed in
+  // again on v2, which shares the tokens but not the mark; then came Back here
+  sessionStorage.setItem("gst3.signedOutHere", "1");
+  setTokens("a2", "r2");
+  backFromCache(false);
+  expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument();
+  backFromCache();
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  expect(screen.getByText("who:-")).toBeInTheDocument();
+});
+
+test("back from the cache with someone else's sign-in stored, the page asks who it is now and drops the old person's data", async () => {
+  setTokens("a", "r");
+  const s = server({ a: ME, b: KAILASH });
+  const client = mountTab();
+  await waitFor(() => expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument());
+  client.setQueryData(["bills"], ["KGH/31 for Rakesh"]);
+  // nothing changed while it was away: nothing to ask
+  const asked = s.asked.length;
+  backFromCache();
+  await act(() => new Promise<void>((r) => { setTimeout(r, 20); }));
+  expect(s.asked.length).toBe(asked);
+  expect(client.getQueryData(["bills"])).toEqual(["KGH/31 for Rakesh"]);
+  setTokens("b", "rb"); // Rakesh signed out and Kailash signed in while this page sat in the cache
+  backFromCache();
+  expect(await screen.findByText("who:Kailash Mehta")).toBeInTheDocument();
+  expect(client.getQueryData(["bills"])).toBeUndefined();
+});
+
+test("back from the cache to the sign-in page, with someone signed in since outside this app, the tab follows that sign-in and keeps it", async () => {
+  setTokens("a", "r");
+  server({ a: ME, b: KAILASH });
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); }); // the mark is set
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  setTokens("b", "rb"); // this tab went on to v2, where Kailash signed in (v2 leaves this app's mark alone), then came Back
+  backFromCache();
+  expect(await screen.findByText("who:Kailash Mehta")).toBeInTheDocument();
+  expect(localStorage.getItem("gst_access_token")).toBe("b");
+  expect(sessionStorage.getItem("gst3.signedOutHere")).toBeNull();
+});
