@@ -39,7 +39,8 @@ class Command(BaseCommand):
             self.stdout.write("Dry run: nothing changed. Run again with --apply.")
 
     def _forward(self, apply):
-        bills = list(Invoice.objects.sales().filter(status=BILL_CANCELLED).select_related("business", "customer"))
+        # Past cacheops: a report shows the database (_repair.scope's rule), and --apply moves what it read.
+        bills = list(Invoice.objects.nocache().sales().filter(status=BILL_CANCELLED).select_related("business", "customer"))
         for inv in bills:
             self.stdout.write(f"  {inv.business.name} {inv.invoice_number} of {inv.invoice_date}: cancelled "
                               f"({inv.cancel_reason or 'no reason given'})")
@@ -51,8 +52,8 @@ class Command(BaseCommand):
 
     def _chosen_places(self):
         """Bills whose place of supply was chosen by hand: v2 files them under the customer's state."""
-        chosen = (Invoice.objects.sales().counted().exclude(place_of_supply__isnull=True).exclude(place_of_supply="")
-                  .select_related("business", "customer"))
+        chosen = (Invoice.objects.nocache().sales().counted().exclude(place_of_supply__isnull=True)
+                  .exclude(place_of_supply="").select_related("business", "customer"))
         moved = [(inv, default_place_of_supply(inv.business, inv.customer)) for inv in chosen]
         moved = [(inv, usual) for inv, usual in moved if usual != inv.place_of_supply]
         for inv, usual in moved:

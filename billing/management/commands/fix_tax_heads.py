@@ -24,7 +24,7 @@ from django.db import transaction
 
 from billing.management.commands._repair import fresh_lines, invalidate, log_repair
 from billing.models import Invoice, LineItem
-from billing.tax_rules import normalize_tax_heads, supply_interstate
+from billing.tax_rules import _chosen, normalize_tax_heads, supply_interstate
 
 
 class Command(BaseCommand):
@@ -71,6 +71,8 @@ class Command(BaseCommand):
         for inv, li, interstate, total in wrong:
             seen_invoices.add(inv.id)
             should = "IGST" if interstate else "CGST+SGST"
+            if chosen := _chosen(inv):
+                should += f" (place of supply {chosen})"  # it decided, not the parties' states
             now = "IGST" if (li.igst or 0) > 0 else "CGST+SGST"
             self.stdout.write(
                 f"  #{inv.invoice_number:<18} {inv.business.gst_number[:2]}→"

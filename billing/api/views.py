@@ -1145,11 +1145,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             # 3. Save the header through save(): a queryset update() skipped
             #    simple-history (this is the hot edit path, so the history table
             #    missed most real total changes) and surfaced a duplicate number
-            #    as a raw 500 instead of the create path's clean 409.
+            #    as a raw 500 instead of the create path's clean 409. v2's
+            #    columns, and a changed firm clears the frozen one (Ruling 1A-23).
             invoice.total_amount = new_total
             try:
                 with transaction.atomic():
-                    invoice.save()
+                    invoice.save_from_v2()
             except IntegrityError:
                 # The lines were already replaced above; a 409 must undo that
                 # too, or the invoice keeps the new lines under the old number.

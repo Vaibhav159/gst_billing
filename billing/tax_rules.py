@@ -154,9 +154,21 @@ def default_place_of_supply(business, customer):
     return state_code(customer) or state_code(business)
 
 
+def _chosen(invoice):
+    """The bill's own place of supply (v3), trimmed; "" when it has none, which keeps today's rule."""
+    return (getattr(invoice, "place_of_supply", None) or "").strip()
+
+
+def _crosses(chosen, business):
+    """A chosen place against the firm's state: IGST when they differ. A firm with no state counts
+    as local, as is_interstate counts an unknown side."""
+    firm = state_code(business)
+    return bool(firm) and chosen != firm
+
+
 def place_of_supply(invoice):
     """The state code a bill's supply goes to: its own choice (v3), else default_place_of_supply."""
-    return (invoice.place_of_supply or "").strip() or default_place_of_supply(invoice.business, invoice.customer)
+    return _chosen(invoice) or default_place_of_supply(invoice.business, invoice.customer)
 
 
 def supply_interstate(invoice):
@@ -167,11 +179,10 @@ def supply_interstate(invoice):
     unchanged, so every older bill reads as it always has. The builder, the parties following
     a header change, is_igst_applicable and GSTR-1 all ask this.
     """
-    chosen = (invoice.place_of_supply or "").strip()
+    chosen = _chosen(invoice)
     if not chosen:
         return is_interstate(invoice.business, invoice.customer)
-    firm = state_code(invoice.business)
-    return bool(firm) and chosen != firm
+    return _crosses(chosen, invoice.business)
 
 
 def classify_b2c(business, invoice):
@@ -189,13 +200,12 @@ def classify_b2c(business, invoice):
 
     customer = invoice.customer
     cust_gstin = clean_gstin(getattr(customer, "gst_number", ""))
-    chosen = (getattr(invoice, "place_of_supply", None) or "").strip()
+    chosen = _chosen(invoice)
     if cust_gstin:
         return "b2b", None, chosen or cust_gstin[:2], False
     if chosen:
         # The bill's own place of supply (v3): what was delivered where, whatever the buyer's state.
-        firm = state_code(business)
-        inter = bool(firm) and chosen != firm
+        inter = _crosses(chosen, business)
         if inter and (invoice.total_amount or 0) > B2CL_THRESHOLD:
             return "b2cl", True, chosen, False
         return "b2cs", inter, chosen, False

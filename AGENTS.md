@@ -106,7 +106,7 @@ Before writing any code, stop at the first rung that holds:
 
 1. **YAGNI** — Does this need to be built at all?
 2. **Reuse existing helpers** — Don't re-invent what's already here:
-   - *Tax logic*: Import `billing/tax_rules.py` or `@/utils/taxRules.ts` (`is_interstate`, `normalize_tax_heads`). Never hand-roll tax placement or GSTIN prefix guessing.
+   - *Tax logic*: Import `billing/tax_rules.py` or `@/utils/taxRules.ts` (`supply_interstate(invoice)` and `place_of_supply(invoice)` for a bill, which honour its own place of supply; `is_interstate` for parties with no bill yet, such as a new purchase; `normalize_tax_heads`). Never hand-roll tax placement or GSTIN prefix guessing.
    - *UI* (v2, `sweet-rebuild-suite-main/`): Check `@/components/ui/` (49 shadcn primitives) and `@/utils/utils` (`cn`) before writing raw components. In `web/` (v3) use the kit, `@/core/ui`: see [`web/AGENTS.md`](web/AGENTS.md).
    - *API calls* (v2): Use the configured `@/utils/api` axios instance (handles JWT auth & refresh token rotation). Don't invoke raw `axios`. In `web/` (v3) it's `@/core/api/client` with TanStack Query: see [`web/AGENTS.md`](web/AGENTS.md).
    - *Data fetching*: In `sweet-rebuild-suite-main/` (v2), follow the existing hook pattern (`src/hooks/useDataStore.ts`) and don't introduce TanStack Query or new state managers there. `web/` (v3, being built on branch `v3`) uses TanStack Query as its only data layer, through `web/src/core/api/`.

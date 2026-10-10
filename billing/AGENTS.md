@@ -35,8 +35,11 @@ Settings modules: `gst_billing/settings.py` (dev, `DEBUG = True`),
 
 ## Patterns
 
-- **Deciding IGST vs CGST+SGST** — DO: `tax_rules.is_interstate(business, customer)`,
-  which falls back to `state_name` for unregistered/B2C parties.
+- **Deciding IGST vs CGST+SGST** — DO: for a bill, `tax_rules.supply_interstate(invoice)`
+  (and `place_of_supply(invoice)` for its state code): the bill's own place of supply when it
+  has one, else `is_interstate(business, customer)`, which falls back to `state_name` for
+  unregistered/B2C parties. `is_interstate` alone is for parties with no bill yet, such as a
+  new purchase.
   DON'T: the `Invoice.is_igst_applicable` property at `models.py:373` — it reads
   GSTIN prefixes only, so a B2C interstate sale returns `False` and books
   CGST+SGST. It is still fine as a *display* hint on registered parties; it is

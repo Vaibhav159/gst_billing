@@ -35,10 +35,12 @@ from billing.constants import (
     UNIT_GMS,
 )
 from billing.tax_rules import (
+    _chosen,
     direction_known,
     normalize_state_name,
     normalize_tax_heads,
     rate_as_percent,
+    state_code,
     supply_interstate,
 )
 
@@ -426,6 +428,24 @@ class Invoice(AbstractBaseModel):
         """
         return [f.name for f in cls._meta.concrete_fields if not f.primary_key and f.name not in cls.V3_FIELDS]
 
+    def save_from_v2(self, **kwargs):
+        """Save as v2's paths do (PATCH and PUT, the line replace, the admin): v2_columns() only.
+
+        One v3 column besides: when this save changes the firm, the firm frozen on the bill would
+        name the old one, so it goes to NULL and the bill reads its new firm live (Ruling 1A-23).
+        Only v3's move freezes the new firm.
+        """
+        fields = self.v2_columns()
+        loaded = getattr(self, "_loaded_parties", None)
+        # The firm before this save: as read, or as stored for a bill built rather than read (the
+        # admin's history revert builds one from a historical row).
+        before = loaded[0] if loaded else (
+            type(self).objects.nocache().filter(pk=self.pk).values_list("business_id", flat=True).first())
+        if str(before) != str(self.business_id):
+            self.firm_snapshot = None
+            fields.append("firm_snapshot")  # Ruling 1A-23: the one v3 column v2's paths write, and only to NULL
+        self.save(update_fields=fields, **kwargs)
+
     class Meta:
         # Every report filters on some combination of these three, and the
         # table had no indexes at all beyond the implicit FK ones.
@@ -485,10 +505,11 @@ class Invoice(AbstractBaseModel):
         re-filed for the new direction (M14: a sale moved to an out-of-state
         buyer stayed CGST+SGST), totals unchanged; when nothing says where the
         supply goes, the heads on file stay, as bulk import keeps a file's
-        heads for an unknown direction. save(), not update(), so cacheops
+        heads for an unknown direction. A chosen place of supply says it only
+        against a firm whose state is known. save(), not update(), so cacheops
         drops the cached lines.
         """
-        known = bool(self.place_of_supply) or direction_known(self.business, self.customer)
+        known = direction_known(self.business, self.customer) or bool(_chosen(self) and state_code(self.business))
         interstate = supply_interstate(self)
         for li in self.lineitem_set.all():
             changed = []

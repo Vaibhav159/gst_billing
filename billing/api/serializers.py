@@ -191,11 +191,12 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         # DRF's default ends in a plain save(), which writes the v3 columns back as they were read
-        # and so can undo a cancel that landed in between (Ruling 1A-16). Invoice has no
-        # many-to-many fields for DRF's default to set.
+        # and so can undo a cancel that landed in between (Ruling 1A-16); a changed firm also
+        # clears the frozen one (Ruling 1A-23). Invoice has no many-to-many fields for DRF's
+        # default to set.
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        instance.save(update_fields=Invoice.v2_columns())
+        instance.save_from_v2()
         return instance
 
     def get_source_file_url(self, obj):

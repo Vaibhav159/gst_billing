@@ -33,9 +33,10 @@ class PeriodLockAdminMixin:
         self._assert(obj, "edit" if change else "create")
         if change and isinstance(obj, Invoice):
             # v2's columns only (Ruling 1A-16): a full save would undo a cancel that landed after the
-            # read, and a history revert would bring back an old status.
+            # read, and a history revert would bring back an old status. A changed firm clears the
+            # frozen one (Ruling 1A-23).
             obj._history_user = request.user  # as SimpleHistoryAdmin.save_model sets it
-            obj.save(update_fields=Invoice.v2_columns())
+            obj.save_from_v2()
             return
         super().save_model(request, obj, form, change)
 
@@ -107,8 +108,9 @@ class CustomerAdmin(admin.ModelAdmin):
 @admin.register(LineItem)
 class LineItemAdmin(PeriodLockAdminMixin, admin.ModelAdmin):
     # The customer is the invoice's (LineItem.save), and a line stays on its
-    # invoice (H5): editable here, they made the drift H6 removed.
-    readonly_fields = ("customer",)
+    # invoice (H5): editable here, they made the drift H6 removed. The note is
+    # v3's, read-only outside sales/ (part 1 API contract, section 7).
+    readonly_fields = ("customer", "note")
 
     def get_readonly_fields(self, request, obj=None):
         return (*super().get_readonly_fields(request, obj), *(("invoice",) if obj else ()))
@@ -158,7 +160,7 @@ class LineItemAdmin(PeriodLockAdminMixin, admin.ModelAdmin):
 class LineInline(admin.TabularInline):
     model = LineItem
     extra = 1
-    readonly_fields = ("customer",)  # the invoice's (LineItem.save)
+    readonly_fields = ("customer", "note")  # the invoice's (LineItem.save); the note is v3's (contract §7)
 
 
 @admin.register(Invoice)
