@@ -198,13 +198,15 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
  * bold count fewer: a business's name often comes in capitals, as the GST portal spells it.
  */
 // ponytail: the plan counts characters, not widths, so a line of capitals right at a count's edge (a 40-character item name
-// heavy in M and W) and a figure too wide for its narrow column (a quantity over 9,999 g, a rate over ₹99,99,999) wrap
-// unseen; `safety` holds about one such line a page. Upgrade: measure each text with Times's own widths.
+// heavy in M and W) and a rate too wide for its narrow column (over ₹99,99,999) wrap unseen; `safety` holds about one
+// such line a page. Upgrade: measure each text with Times's own widths.
 export const PAGE_FIT = {
   page: 800.5, title: 72.3, titleNext: 24.4, head: 27.2, closing: 20,
   /** A later page's header: its padding and rule, then a line of it; a line of each half (271 pt) holds shortChars. */
   shortHead: 11, shortLine: 9.6, shortChars: 50,
   row: 18, rowPad: 6, nameLine: 10.2, noteLine: 8.6, nameChars: 40, noteChars: 55,
+  /** A quantity's column (55 pt) holds "1,234.567 gms" on a line; 10 kg and more ("12,345.678 gms") takes two. */
+  qtyChars: 13,
   /** The 14 boxes a line each; a row of them grows by a line for each line more its longer value wraps to (113 pt, bold). */
   meta: 173.3, metaLine: 10.1, metaChars: 16,
   /** The firm's name (11 pt, bold) and a party's (bold) wrap sooner than the blocks' other lines. */
@@ -216,9 +218,14 @@ export const PAGE_FIT = {
 /** The printed lines a text takes in a column `per` characters wide: each line typed wraps on its own (Ruling 1E-9). */
 const wraps = (text: string, per: number) => text.split("\n").reduce((a, s) => a + Math.max(1, Math.ceil(s.length / per)), 0);
 
+/** A line's row, as tall as its tallest cell: the name with its note, or a quantity too wide for its column's one line. */
 function lineHeight(l: PrintLine): number {
   const F = PAGE_FIT;
-  return Math.max(F.row, F.rowPad + F.nameLine * wraps(l.name, F.nameChars) + (l.note ? F.noteLine * wraps(l.note, F.noteChars) : 0));
+  return Math.max(
+    F.row,
+    F.rowPad + F.nameLine * wraps(l.name, F.nameChars) + (l.note ? F.noteLine * wraps(l.note, F.noteChars) : 0),
+    F.rowPad + F.nameLine * wraps(l.qty, F.qtyChars),
+  );
 }
 
 /** The first page's firm, consignee and buyer blocks beside the 14 boxes, as tall as the taller side. */
@@ -244,10 +251,14 @@ function shortHeight(b: Omit<PrintBill, "pages">): number {
 // (30 without), or about 18 beside a 500-character note, it doesn't: the totals then stand alone on a last page that is still
 // too tall, and react-pdf spills it onto one more sheet, with no copy mark and a wrong "Page n of N". Upgrade: carry the HSN
 // summary on to a next page.
-/** The last page's part after its lines: tax rows, the note, the words, HSN summary and footer. */
+/**
+ * The last page's part after its lines: tax rows, the note, the words, HSN summary and footer, and a line more of the
+ * Total row (`closing`) when its quantity, in bold, wraps in its column as a line's does.
+ */
 function lastExtra(b: Omit<PrintBill, "pages">): number {
   const F = PAGE_FIT;
   return F.taxRow * b.taxes.length + (b.note ? F.rowPad + F.nameLine * wraps(b.note, F.nameChars) : 0)
+    + F.nameLine * (wraps(b.total.qty, F.qtyChars) - 1)
     + F.footer + F.hsnRow * b.hsn.length + (b.firm.bank ? F.bank : 0) + F.infoLine * (wraps(b.words, F.wordsChars) - 1);
 }
 

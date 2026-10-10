@@ -68,6 +68,25 @@ test("a signature that can't be fetched prints none, and is asked for again next
   expect(calls).toHaveLength(2);
 });
 
+test("a PDF made while the firm's signature couldn't be read is handed out but not kept: the next ask makes it again, with the signature", async () => {
+  let up = false;
+  serveWith((c) => (up && c.url.startsWith("media/signatures/later.png?") ? { status: 200, data: PNG } : { status: 404 }));
+  const d = bill({ firm: { ...(wireDetail().firm as object), signature_url: "/api/media/signatures/later.png?sig=a1" } });
+  const without = await billFile(d, { copies: "original", showBank: true });
+  expect(made()[0].bills[0].firm.signature).toBeNull();
+  up = true;
+  const signed = await billFile(d, { copies: "original", showBank: true });
+  expect(signed).not.toBe(without);
+  expect(made()[1].bills[0].firm.signature).toMatch(/^data:image\/png;base64,/);
+  // once it carries the signature, it's kept
+  expect(await billFile(d, { copies: "original", showBank: true })).toBe(signed);
+  expect(pdf).toHaveBeenCalledTimes(2);
+  // a firm with no signature has none to wait for: its file is kept at once
+  const plain = bill();
+  const kept = await billFile(plain, { copies: "original", showBank: true });
+  expect(await billFile(plain, { copies: "original", showBank: true })).toBe(kept);
+});
+
 test("while the print page shows a bill, a send from it carries the page's bank choice; elsewhere there's none", () => {
   const { rerender, unmount } = renderHook(({ show }) => useSendBankChoice(412, show), { initialProps: { show: false } });
   expect([sendBankChoice(412), sendBankChoice(413)]).toEqual([false, undefined]);

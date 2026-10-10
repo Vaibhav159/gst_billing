@@ -6,8 +6,8 @@ import type { Statement } from "@/core/api/customers";
 import { date, inr, plural } from "@/core/format";
 import { PAY } from "@/core/sales/words";
 // The built-in Helvetica has no ₹ (it would print as "¹"): the one-glyph Tinos font carries it, as v2's Tally invoice
-// does, registered once for every PDF by core/print (Ruling 1E-6)
-import "@/core/print/pdfRupee";
+// does, registered once for every PDF by core/print (Ruling 1E-6), whose RupeeText draws typed text that can hold one
+import { RUPEE_FONT, RupeeText } from "@/core/print/pdfRupee";
 import { notCounted, SETTLED } from "./lib";
 
 /** What the PDF shows: the statement as the page has it, and the words around it. */
@@ -40,7 +40,7 @@ const s = StyleSheet.create({
 
 /** ₹ in its own font, then the amount: "₹87,083.21". */
 function Rupees({ paise, bold }: { paise: number; bold?: boolean }) {
-  return <Text style={bold ? s.bold : undefined}><Text style={{ fontFamily: "RupeeSign" }}>₹</Text>{inr(paise).replace("₹", "")}</Text>;
+  return <Text style={bold ? s.bold : undefined}><Text style={{ fontFamily: RUPEE_FONT }}>₹</Text>{inr(paise).replace("₹", "")}</Text>;
 }
 
 export function StatementDocument({ data }: { data: StatementPdfData }) {
@@ -53,9 +53,9 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
         <View style={s.head}>
           <View style={s.who}>
             <Text style={s.title}>Statement of bills</Text>
-            <Text style={s.name}>{c.name}</Text>
+            <RupeeText style={s.name}>{c.name}</RupeeText>
             {ids ? <Text style={s.muted}>{ids}</Text> : null}
-            {c.address ? <Text style={s.muted}>{c.address}</Text> : null}
+            {c.address ? <RupeeText style={s.muted}>{c.address}</RupeeText> : null}
           </View>
           <View style={s.right}>
             <Text style={s.bold}>{data.periodLabel}</Text>
@@ -67,7 +67,7 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
         <Text style={s.note}>A register of bills, not a ledger. Cash and UPI bills were paid when they were made. Udhaar bills are listed as billed on credit: the app doesn't record payments received, so it can't say what is still owed and shows no balance.</Text>
         <View style={[s.row, s.th]} fixed>
           <Text style={s.cDate}>Date</Text><Text style={s.cNo}>Bill no.</Text><Text style={s.cFirm}>Firm</Text><Text style={s.cMode}>Payment mode</Text>
-          <Text style={s.cAmt}>Amount (<Text style={{ fontFamily: "RupeeSign" }}>₹</Text>)</Text><Text style={s.cPaid}>Payment</Text>
+          <Text style={s.cAmt}>Amount (<Text style={{ fontFamily: RUPEE_FONT }}>₹</Text>)</Text><Text style={s.cPaid}>Payment</Text>
         </View>
         {st.bills.map((b) => (
           <View key={b.id} style={s.row} wrap={false}>
@@ -79,7 +79,7 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
             <Text style={s.cPaid}>{SETTLED[b.paid]}</Text>
           </View>
         ))}
-        {!st.bills.length ? <Text style={[s.muted, { paddingVertical: 8 }]}>No bills to {c.name} in {data.periodLabel}.</Text> : null}
+        {!st.bills.length ? <RupeeText style={[s.muted, { paddingVertical: 8 }]}>{`No bills to ${c.name} in ${data.periodLabel}.`}</RupeeText> : null}
         <View style={s.totals} wrap={false}>
           <View style={s.totalRow}><Text style={s.bold}>Billed · {plural(t.bills, "bill")}{notCounted(t.cancelled)}</Text><Rupees paise={t.billed} bold /></View>
           <View style={s.totalRow}><Text>Paid at billing · {plural(t.paid_at_billing.bills, "bill")} · cash, UPI or both</Text><Rupees paise={t.paid_at_billing.total} /></View>
@@ -87,7 +87,7 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
           {t.not_recorded.bills ? <View style={s.totalRow}><Text>Not recorded (from Tally) · {plural(t.not_recorded.bills, "bill")}</Text><Rupees paise={t.not_recorded.total} /></View> : null}
         </View>
         <View style={s.foot} fixed>
-          <Text style={s.footWho}>{c.name} · {data.periodLabel} · {data.scope}</Text>
+          <RupeeText style={s.footWho}>{`${c.name} · ${data.periodLabel} · ${data.scope}`}</RupeeText>
           <Text style={s.footPage} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
         </View>
       </Page>

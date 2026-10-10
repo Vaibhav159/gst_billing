@@ -2,45 +2,22 @@
 // component called with its props, down to DOCUMENT, PAGE, VIEW and TEXT): fast, exact, and independent of react-pdf's
 // layout engine and fonts. And real files through makeBillPdf, read as bytes for what a PDF keeps in plain text: its
 // page count (more pages than planned would mean a planned page overflowed), its fonts, and its Subject.
-import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
+import type { ReactElement } from "react";
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { BillDocument } from "./BillDocument";
 import { makeBillPdf } from "./make";
 import { copyPages, printBill } from "./model";
+import {
+  buyerWith, expand, firmWith, flat, IGST, LONG_BUYER, nodes, pdfText, raw, rows, rupeeTexts, sheetsIn, TRANSPORTED, TWO_LINE_ADDRESSES, WALKIN,
+  words, type PdfNode,
+} from "./testing";
 
-type PdfNode = { type: string; props: Record<string, unknown>; children: (PdfNode | string)[] };
-/** The tree react-pdf would lay out: function components called, primitives ("PAGE", "TEXT"…) kept with their props. */
-function expand(node: ReactNode): (PdfNode | string)[] {
-  if (node == null || typeof node === "boolean") return [];
-  if (typeof node === "string" || typeof node === "number") return [String(node)];
-  if (Array.isArray(node)) return node.flatMap(expand);
-  if (!isValidElement(node)) return [];
-  const el = node as ReactElement<Record<string, unknown>>;
-  if (el.type === Fragment) return expand(el.props.children as ReactNode);
-  if (typeof el.type === "function") return expand((el.type as (p: unknown) => ReactNode)(el.props));
-  const { children, ...props } = el.props;
-  return [{ type: String(el.type), props, children: expand(children as ReactNode) }];
-}
-const nodes = (n: PdfNode | string, type: string): PdfNode[] => (typeof n === "string" ? [] : [...(n.type === type ? [n] : []), ...n.children.flatMap((c) => nodes(c, type))]);
-/** A node's words: each TEXT's strings run together as react-pdf draws them, one space between separate texts. */
-function raw(n: PdfNode | string): string {
-  return typeof n === "string" ? n : n.children.map(raw).join(n.type === "TEXT" ? "" : " ");
-}
-const words = (n: PdfNode | string) => raw(n).replace(/\s+/g, " ").trim();
 const pagesOf = (el: ReactElement) => nodes(expand(el)[0], "PAGE");
-/** A style as react-pdf reads it: a list of styles merged, the later winning. */
-const flat = (style: unknown): Record<string, unknown> => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
 const bill = (over: Record<string, unknown> = {}) => toBillDetail(wireDetail(over));
-const long = Array.from({ length: 60 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}` }));
-
-/** A PDF's bytes as text (jsdom's Blob reads through a FileReader; compressed streams don't survive, plain objects do). */
-async function bytes(blob: Blob): Promise<string> {
-  const buf = await new Promise<ArrayBuffer>((done) => { const r = new FileReader(); r.onload = () => done(r.result as ArrayBuffer); r.readAsArrayBuffer(blob); });
-  return new TextDecoder("latin1").decode(buf);
-}
-/** The sheets react-pdf made: its page tree's count. */
-const sheetsIn = (pdf: string) => Number(pdf.match(/\/Type \/Pages\s*\/Count (\d+)/)?.[1]);
+const long = rows(60);
+/** A table's rows, each as its cells' words: rows of five texts or more (the goods' heading, the HSN summary's rows). */
+const tableRows = (n: PdfNode) => nodes(n, "VIEW").filter((v) => v.children.length >= 5 && v.children.every((c) => typeof c !== "string" && c.type === "TEXT")).map((v) => v.children.map(words));
 
 test("all three copies: three A4 pages in order, each marked for its holder", () => {
   const p = printBill(bill(), { showBank: true });
@@ -110,8 +87,7 @@ test("every ₹ someone typed prints in the RupeeSign font, never in Times (Ruli
     "12 Sandbox Bazaar, ₹ Gali, Jaipur", "Shop 4, ₹ Market, Udaipur", "Bank Name : ₹ Bank", "₹ 87,083.21",
   ]) expect(text).toContain(w);
   // a text that holds a ₹ holds only that ₹, in RupeeSign: one for each ₹ on the page (the buyer's address prints twice)
-  const signs = nodes(page, "TEXT").filter((t) => t.children.some((c) => typeof c === "string" && c.includes("₹")));
-  expect(signs.map((t) => [t.children, flat(t.props.style).fontFamily])).toEqual(Array.from({ length: 9 }, () => [["₹"], "RupeeSign"]));
+  expect(rupeeTexts(page).map((t) => [t.children, flat(t.props.style).fontFamily])).toEqual(Array.from({ length: 9 }, () => [["₹"], "RupeeSign"]));
 });
 
 test("a later page's short header bolds what the paper bolds: the firm's name, the number, the date and the buyer's name (Ruling 1E-10)", () => {
@@ -148,7 +124,7 @@ test("lines typed apart print apart (Ruling 1E-9): an address's two lines as two
 
 test("a real PDF: A4, as many pages as planned (none overflowed), Times with the one-glyph Tinos ₹, and the QR's text as its Subject", async () => {
   const p = printBill(bill({ lines: long }), { showBank: true });
-  const pdf = await bytes(await makeBillPdf([p], "all", { title: "Tax Invoice KGH/2026-27/31", subject: p.qr }));
+  const pdf = await pdfText(await makeBillPdf([p], "all", { title: "Tax Invoice KGH/2026-27/31", subject: p.qr }));
   expect(pdf.startsWith("%PDF-")).toBe(true);
   expect(pdf.match(/\/Type \/Pages\s*\/Count (\d+)/)?.[1]).toBe("9"); // 3 pages × all three copies
   expect(pdf).toMatch(/\/MediaBox \[0 0 595\.28\d* 841\.89\d*\]/);
@@ -158,22 +134,36 @@ test("a real PDF: A4, as many pages as planned (none overflowed), Times with the
   expect(pdf).toContain("(KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21)");
 }, 30_000);
 
-/**
- * Ruling 1E-9's bill, as model.test.ts plans it (copied: a test never imports another test): the firm's and the buyer's
- * addresses typed on two lines each, and 30 one-line rows (23 and 7).
- */
-const TWO_LINE_ADDRESSES = {
-  firm: { ...(wireDetail().firm as object), address: "12 Sandbox Bazaar\nJaipur, Rajasthan" },
-  customer: { ...(wireDetail().customer as object), address: "Shop 12, Ground Floor\nBapu Bazaar" },
-  lines: Array.from({ length: 30 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}` })),
-};
-const rows = (n: number, over: Record<string, unknown> = {}) => Array.from({ length: n }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}`, ...over }));
-const firm = (over: Record<string, unknown>) => ({ ...(wireDetail().firm as object), ...over });
-const buyer = (over: Record<string, unknown>) => ({ ...(wireDetail().customer as object), ...over });
-const WALKIN = { id: 9, name: "Walk-in Customer", type: "walkin", address: "", city: "", state_name: "RAJASTHAN", state_code: "08", gst_number: "", gstin_valid: null, pan_number: "", pan: "", mobile_number: "", email: "" };
+test("an inter-state bill sets out IGST: the HSN summary's five columns and one tax row by slab", () => {
+  const p = printBill(bill(IGST), { showBank: true });
+  const [page] = pagesOf(<BillDocument bills={[p]} copies={copyPages("original")} title="t" />);
+  const table = tableRows(page);
+  expect(table.slice(table.findIndex((r) => r[0] === "HSN/SAC"))).toEqual([
+    ["HSN/SAC", "Taxable Value", "IGST Rate", "IGST Amount", "Total Tax Amount"],
+    ["711319", "80,396.81", "3%", "2,411.90", "2,411.90"],
+    ["711319", "4,150.00", "3%", "124.50", "124.50"],
+    ["Total", "84,546.81", "", "2,536.40", "2,536.40"],
+  ]);
+  expect(words(page)).toContain("IGST 3% 2,536.40"); // the tax row: its head, rate and amount in their columns
+  expect(words(page)).not.toMatch(/CGST|SGST/);
+});
+
+test("the firm's signature, handed in as data (make.ts fetches it), sits between the firm's name and Authorised Signatory", () => {
+  const p = printBill(bill({ firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=abc" }) }), { showBank: false });
+  const drawn = { ...p, firm: { ...p.firm, signature: "data:image/png;base64,iVBORw0KGgo=" } };
+  const [page] = pagesOf(<BillDocument bills={[drawn]} copies={copyPages("original")} title="t" />);
+  const sign = nodes(page, "VIEW").find((v) => v.children.some((c) => typeof c !== "string" && c.type === "IMAGE"));
+  expect(sign?.children.map((c) => (typeof c !== "string" && c.type === "IMAGE" ? `image ${String(c.props.src)}` : words(c)))).toEqual([
+    "for KIRAN GOLD HOUSE", "image data:image/png;base64,iVBORw0KGgo=", "Authorised Signatory",
+  ]);
+  expect(words(page)).not.toContain("Company's Bank Details");
+});
+
 const NOTE_500 = Array.from({ length: 12 }, (_, i) => `Item ${i + 1} weighed at the counter and hallmarked.`).join(" ").slice(0, 500);
 const ADDRESS = "Shop 12, Ground Floor, Sardarpura Main Road, near Jagdish Chowk\nOpposite the old clock tower, Bapu Bazaar";
 const HSN = Array.from({ length: 26 }, (_, i) => String(711301 + i));
+/** A line of silver sold by the gram, 10 kg and more: its quantity wraps in its column. */
+const HEAVY = { quantity: "12345.678" };
 
 /**
  * Shapes at the edges of PAGE_FIT's estimates (pre-flight F17a), each with a page planned full: the plan's character
@@ -182,18 +172,20 @@ const HSN = Array.from({ length: 26 }, (_, i) => String(711301 + i));
  */
 const SHAPES: [string, Record<string, unknown>][] = [
   ["both addresses typed on two lines, and a note on three (Ruling 1E-9)", { ...TWO_LINE_ADDRESSES, notes: "Hallmarked\nBIS 916\nSize 14" }],
-  ["45 long item names and notes, each wrapping", { lines: rows(45, { product_name: "Gold Necklace 22K, Kundan and Meenakari work with matching earrings", note: "Hallmarked BIS 916, weighed with the buyer at the counter, stones counted and listed" }) }],
-  ["the longest note beside addresses typed long and on two lines", { notes: NOTE_500, firm: firm({ address: ADDRESS }), customer: buyer({ address: ADDRESS }), lines: rows(40) }],
-  ["26 HSN groups, with the bank: the last page's part nearly a sheet", { lines: HSN.map((hsn_code, i) => ({ ...WIRE_LINES[0], id: i + 1, hsn_code })), hsn_summary: HSN.map((hsn_code) => ({ ...(wireDetail().hsn_summary as object[])[0], hsn_code })) }],
-  ["a long firm name and a business buyer's long name: a later page's header wraps", { firm: firm({ name: "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS" }), customer: buyer({ type: "business", name: "SHREE GANESH GEMS AND JEWELLERS PRIVATE LIMITED", gst_number: "08AAKFS4821M1ZQ" }), lines: rows(64) }],
-  ["a walk-in's goods sent by a transporter: the boxes wrap past the parties", { customer: WALKIN, notes: "Hallmarked by BIS, size 14.", lines: rows(28), eway: { eway_bill_number: "123456789012", transporter_name: "SHREE GANESH ROADWAYS AND LOGISTICS COMPANY", transporter_gstin: "08AAKFS4821M1ZQ", vehicle_number: "RJ14AB1234", vehicle_type: "Regular", transport_mode: "Road", distance_km: 1200, may_be_needed: false } }],
-  ["a business buyer's name in capitals that wraps in both party blocks", { customer: buyer({ type: "business", name: "M/S SHREE MAHAVEER JEWELLERS AND ORNAMENT MANUFACTURERS", gst_number: "08AAKFS4821M1ZQ" }), lines: rows(26) }],
+  ["45 long item names and notes, each wrapping", { lines: rows(45, () => ({ product_name: "Gold Necklace 22K, Kundan and Meenakari work with matching earrings", note: "Hallmarked BIS 916, weighed with the buyer at the counter, stones counted and listed" })) }],
+  ["the longest note beside addresses typed long and on two lines", { notes: NOTE_500, firm: firmWith({ address: ADDRESS }), customer: buyerWith({ address: ADDRESS }), lines: rows(40) }],
+  ["26 HSN groups, with the bank: the last page's part nearly a sheet", { lines: rows(26, (i) => ({ hsn_code: HSN[i] })), hsn_summary: HSN.map((hsn_code) => ({ ...(wireDetail().hsn_summary as object[])[0], hsn_code })) }],
+  ["a long firm name and a business buyer's long name: a later page's header wraps", { firm: firmWith({ name: "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS" }), customer: { ...LONG_BUYER, name: "SHREE GANESH GEMS AND JEWELLERS PRIVATE LIMITED" }, lines: rows(64) }],
+  ["a walk-in's goods sent by a transporter: the boxes wrap past the parties", { customer: WALKIN, eway: TRANSPORTED, notes: "Hallmarked by BIS, size 14.", lines: rows(28) }],
+  ["a business buyer's name in capitals that wraps in both party blocks", { customer: LONG_BUYER, lines: rows(26) }],
+  ["26 lines, 3 of them 12,345.678 gms: a quantity of 10 kg wraps in its column", { lines: rows(26, (i) => (i < 3 ? HEAVY : {})) }],
+  ["64 lines, 3 of 10 kg and more on a later page, and the total's quantity wrapping too", { lines: rows(64, (i) => (i >= 30 && i < 33 ? HEAVY : {})) }],
 ];
 
 test.each(SHAPES)("a real PDF has exactly the pages planned: %s", async (_, over) => {
   const p = printBill(bill(over), { showBank: true });
   expect(p.pages.length).toBeGreaterThan(1);
-  const pdf = await bytes(await makeBillPdf([p], "original", { title: "t" }));
+  const pdf = await pdfText(await makeBillPdf([p], "original", { title: "t" }));
   expect(sheetsIn(pdf)).toBe(p.pages.length);
   expect(pdf).not.toMatch(/\/BaseFont \/Helvetica/);
 }, 30_000);

@@ -41,6 +41,7 @@ export function ShareHost() {
     if (current.current !== a) return;
     current.current = null;
     setAsk(null);
+    setSharing(null); // the host lets the PDF go
     a.done(r);
   }, []);
   useEffect(() => {

@@ -1,14 +1,9 @@
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { amountText, COPY_OPTIONS, copiesWords, copyPages, planPages, printBill } from "./model";
+import { firmWith, IGST, LONG_BUYER, rows, TRANSPORTED, TWO_LINE_ADDRESSES, WALKIN } from "./testing";
 
 const bill = (over: Record<string, unknown> = {}) => toBillDetail(wireDetail(over));
-const IGST = {
-  interstate: true, cgst: "0.00", sgst: "0.00", igst: "2536.40", place_of_supply: "24",
-  lines: WIRE_LINES.map((l) => ({ ...l, cgst: "0.00", sgst: "0.00", igst: l.tax })),
-  slabs: [{ gst_percent: "3", taxable: "84546.81", cgst: "0.00", sgst: "0.00", igst: "2536.40", tax: "2536.40" }],
-  hsn_summary: [{ hsn_code: "711319", gst_percent: "3", unit: "gms", quantity: "12.345", taxable: "80396.81", cgst: "0.00", sgst: "0.00", igst: "2411.90", tax: "2411.90" }],
-};
 
 test("copies are chosen at print: one, or all three, each with its CGST Rule 48 mark", () => {
   expect(COPY_OPTIONS.map((o) => o.label)).toEqual(["Original", "Duplicate", "Triplicate", "All three"]);
@@ -147,16 +142,6 @@ test("the HSN summary follows the heads the bill stored, as its tax rows do: CGS
   expect([exempt.igst, exempt.taxes, exempt.hsn.map((h) => h.rate)]).toEqual([true, [{ key: "i0", head: "IGST", rate: "0%", amount: "0.00" }], ["0%", "0%"]]);
 });
 
-/**
- * Ruling 1E-9's bill, for Task 3's real-PDF test to make too, proving the file has exactly the planned pages: the firm's
- * and the buyer's addresses typed on two lines each (v2's address boxes are textareas), and 30 one-line rows.
- */
-const TWO_LINE_ADDRESSES = {
-  firm: { ...(wireDetail().firm as object), address: "12 Sandbox Bazaar\nJaipur, Rajasthan" },
-  customer: { ...(wireDetail().customer as object), address: "Shop 12, Ground Floor\nBapu Bazaar" },
-  lines: Array.from({ length: 30 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}` })),
-};
-
 test("an address typed on two lines prints as two lines, in the firm's block and both parties', and the first page makes room: 30 lines break as 23 and 7", () => {
   const p = printBill(bill(TWO_LINE_ADDRESSES), { showBank: true });
   expect(p.firm.lines.slice(0, 3)).toEqual(["12 Sandbox Bazaar", "Jaipur, Rajasthan", "GSTIN/UIN: 08ABCPK1234F1Z5"]);
@@ -210,31 +195,44 @@ test("the last page's fixed part fits a sheet only up to a limit (the ponytail a
   expect(p.pages.map((x) => x.lines.length)).toEqual([25, 2, 1, 0]);
 });
 
-/** A business buyer whose name, in capitals as the GST portal spells it, is too long for one line of its block. */
-const LONG_BUYER = { ...(wireDetail().customer as object), type: "business", name: "M/S SHREE MAHAVEER JEWELLERS AND ORNAMENT MANUFACTURERS", gst_number: "08AAKFS4821M1ZQ" };
-const oneLineRows = (n: number) => Array.from({ length: n }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 }));
-
 test("names in capitals too long for a line wrap where they print, and the first page makes room: the firm's (in its header) and a business buyer's (in both party blocks): 26 lines break as 23 and 3", () => {
-  const p = printBill(bill({ firm: { ...(wireDetail().firm as object), name: "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS PVT LTD" }, customer: LONG_BUYER, lines: oneLineRows(26) }), { showBank: true });
+  const p = printBill(bill({ firm: firmWith({ name: "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS PVT LTD" }), customer: LONG_BUYER, lines: rows(26) }), { showBank: true });
   expect(p.pages.map((x) => x.lines.length)).toEqual([23, 3]);
   // short names leave the first page its 25
-  expect(printBill(bill({ lines: oneLineRows(26) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 1]);
+  expect(printBill(bill({ lines: rows(26) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 1]);
 });
 
 test("a box beside the parties that wraps (a transporter with its GSTIN) can stand taller than them, and a walk-in's first page makes room: 28 lines break as 25 and 3", () => {
-  const p = printBill(bill({
-    customer: { id: 9, name: "Walk-in Customer", type: "walkin", address: "", city: "", state_name: "RAJASTHAN", state_code: "08", gst_number: "", gstin_valid: null, pan_number: "", pan: "", mobile_number: "", email: "" },
-    eway: { eway_bill_number: "123456789012", transporter_name: "SHREE GANESH ROADWAYS AND LOGISTICS COMPANY", transporter_gstin: "08AAKFS4821M1ZQ", vehicle_number: "RJ14AB1234", vehicle_type: "Regular", transport_mode: "Road", distance_km: 1200, may_be_needed: false },
-    notes: "Hallmarked by BIS, size 14.", lines: oneLineRows(28),
-  }), { showBank: true });
+  const p = printBill(bill({ customer: WALKIN, eway: TRANSPORTED, notes: "Hallmarked by BIS, size 14.", lines: rows(28) }), { showBank: true });
   expect(p.meta[10]).toEqual(["Dispatched through", "SHREE GANESH ROADWAYS AND LOGISTICS COMPANY (08AAKFS4821M1ZQ)"]);
   expect(p.pages.map((x) => x.lines.length)).toEqual([25, 3]);
 });
 
 test("a later page's header that wraps (a long firm name, a business buyer's long name) takes room from that page: 64 lines break as 25, 37 and 2, where short names give 25, 38 and 1", () => {
-  const p = printBill(bill({ firm: { ...(wireDetail().firm as object), name: "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS" }, customer: { ...LONG_BUYER, name: "SHREE GANESH GEMS AND JEWELLERS PRIVATE LIMITED" }, lines: oneLineRows(64) }), { showBank: true });
+  const p = printBill(bill({ firm: firmWith({ name: "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS" }), customer: { ...LONG_BUYER, name: "SHREE GANESH GEMS AND JEWELLERS PRIVATE LIMITED" }, lines: rows(64) }), { showBank: true });
   expect(p.pages.map((x) => x.lines.length)).toEqual([25, 37, 2]);
-  expect(printBill(bill({ lines: oneLineRows(64) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 38, 1]);
+  expect(printBill(bill({ lines: rows(64) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 38, 1]);
+});
+
+/** A line of silver sold by the gram, 10 kg and more: "12,345.678 gms" is too wide for the Quantity column's one line. */
+const HEAVY = { quantity: "12345.678" };
+
+test("a quantity of 10 kg and more wraps in its column, and its row takes two lines: 26 lines, 3 of them 12,345.678 gms, break as 23 and 3, and 64 with 3 such on page 2 as 25, 36 and 3", () => {
+  const p = printBill(bill({ lines: rows(26, (i) => (i < 3 ? HEAVY : {})) }), { showBank: true });
+  expect(p.lines[0].qty).toBe("12,345.678 gms");
+  expect(p.pages.map((x) => x.lines.length)).toEqual([23, 3]);
+  expect(printBill(bill({ lines: rows(64, (i) => (i >= 30 && i < 33 ? HEAVY : {})) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 36, 3]);
+  // 1,234.567 gms still fits on a line
+  expect(printBill(bill({ lines: rows(26, () => ({ quantity: "1234.567" })) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 1]);
+});
+
+test("a total of 10 kg and more wraps in the Total row, and the last page makes room for it: 45 lines of 1 kg break as 25, 19 and 1, where 45 of 200 g (9 kg) break as 25 and 20", () => {
+  const kg = printBill(bill({ lines: rows(45, () => ({ quantity: "1000.000" })) }), { showBank: true });
+  expect(kg.total.qty).toBe("45,000.000 gms");
+  expect(kg.pages.map((x) => x.lines.length)).toEqual([25, 19, 1]);
+  const light = printBill(bill({ lines: rows(45, () => ({ quantity: "200.000" })) }), { showBank: true });
+  expect(light.total.qty).toBe("9,000.000 gms");
+  expect(light.pages.map((x) => x.lines.length)).toEqual([25, 20]);
 });
 
 test("a firm without a GSTIN prints no bare GSTIN, in its block or a continued page's header, and its QR code leaves the field empty", () => {

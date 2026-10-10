@@ -1,7 +1,8 @@
 // react-pdf writes a real PDF here, through the same makeStatementPdf the page uses. Under jsdom its compressed streams
 // don't read back byte for byte, so the checks look at the PDF's plain-text parts: the header, the fonts and the pages.
 import type { Statement } from "@/core/api/customers";
-import type { StatementPdfData } from "./statementDoc";
+import { expand, flat, rupeeTexts, type PdfNode } from "@/core/print/testing";
+import { StatementDocument, type StatementPdfData } from "./statementDoc";
 import { statementFileName } from "./statementFiles";
 import { makeStatementPdf } from "./statementPdf";
 
@@ -40,6 +41,13 @@ test("a long statement runs on to more pages", async () => {
   const pdf = await text(await makeStatementPdf(data(Array.from({ length: 80 }, (_, i) => bill(100 + i, "billing")))));
   expect(pdf.match(/\/Type \/Page\b/g)!.length).toBeGreaterThan(1);
 }, 30_000);
+
+test("a ₹ typed in the customer's name or address prints in the RupeeSign font wherever it prints, as the totals' ₹ does (Ruling 1E-5)", () => {
+  const d = data([]);
+  const doc = expand(<StatementDocument data={{ ...d, customer: { ...d.customer, name: "₹ Gupta Jewellers", address: "Shop 4, ₹ Market, Udaipur" } }} />)[0] as PdfNode;
+  // the name at the top, in the line saying there are no bills and in the foot of each page; the address; the three totals; "Amount (₹)"
+  expect(rupeeTexts(doc).map((t) => [t.children, flat(t.props.style).fontFamily])).toEqual(Array.from({ length: 8 }, () => [["₹"], "RupeeSign"]));
+});
 
 test("the file is named after the customer and the period", () => {
   expect(statementFileName("Anil Gupta", "FY 2026-27")).toBe("Anil-Gupta_statement_FY-2026-27.pdf");

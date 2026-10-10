@@ -5,6 +5,8 @@
 import { Font, Text, type Styles } from "@react-pdf/renderer";
 import rupeeSignFont from "./rupeeSignFont";
 
+// ponytail: only the ₹ has a font of its own, so Devanagari (a name typed in Hindi) and emoji print garbled, as in v2's
+// invoice. Upgrade: Noto Sans Devanagari as a fallback family, about 187 kB, in the PDF's on-demand chunk only.
 export const RUPEE_FONT = "RupeeSign";
 Font.register({ family: RUPEE_FONT, src: rupeeSignFont });
 

@@ -44,18 +44,28 @@ function dataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/** One PDF of these bills: each bill, each copy, each page, in that order. subject: what the QR code carries (one bill). */
-export async function makeBillPdf(bills: PrintBill[], copies: Copies, meta: { title: string; subject?: string }): Promise<Blob> {
+/** The PDF of these bills, and whether a firm's signature couldn't be read for it (it then prints without one). */
+async function draw(bills: PrintBill[], copies: Copies, meta: { title: string; subject?: string }): Promise<{ blob: Blob; unsigned: boolean }> {
   const [{ pdf }, { BillDocument }, drawn] = await Promise.all([
     import("@react-pdf/renderer"),
     import("./BillDocument"),
     Promise.all(bills.map(async (b) => ({ ...b, firm: { ...b.firm, signature: await signatureData(b.firm.signature) } }))),
   ]);
-  return pdf(createElement(BillDocument, { bills: drawn, copies: copyPages(copies), ...meta }) as Parameters<typeof pdf>[0]).toBlob();
+  const blob = await pdf(createElement(BillDocument, { bills: drawn, copies: copyPages(copies), ...meta }) as Parameters<typeof pdf>[0]).toBlob();
+  return { blob, unsigned: drawn.some((b, i) => Boolean(bills[i].firm.signature) && !b.firm.signature) };
+}
+
+/** One PDF of these bills: each bill, each copy, each page, in that order. subject: what the QR code carries (one bill). */
+export async function makeBillPdf(bills: PrintBill[], copies: Copies, meta: { title: string; subject?: string }): Promise<Blob> {
+  return (await draw(bills, copies, meta)).blob;
 }
 
 const made = new WeakMap<BillDetail, Map<string, Promise<PdfFile>>>();
-/** One bill's PDF, named by its number (billPdfName). Made once per answer from the server and choice; a failure isn't kept. */
+/**
+ * One bill's PDF, named by its number (billPdfName). Made once per answer from the server and choice. A failure isn't
+ * kept, and nor is a file made while the firm's signature couldn't be read: it goes out without it, and the next ask
+ * tries again, as the paper on screen shows the signature.
+ */
 export function billFile(d: BillDetail, opts: PdfOptions): Promise<PdfFile> {
   const key = `${opts.copies}|${opts.showBank}`;
   let byChoice = made.get(d);
@@ -63,10 +73,13 @@ export function billFile(d: BillDetail, opts: PdfOptions): Promise<PdfFile> {
   const kept = byChoice.get(key);
   if (kept) return kept;
   const b = printBill(d, { showBank: opts.showBank });
-  const p = makeBillPdf([b], opts.copies, { title: `Tax Invoice ${d.invoice_number}`, subject: b.qr })
-    .then((blob) => ({ blob, name: b.file, sheets: b.pages.length * copyPages(opts.copies).length }));
   const choices = byChoice;
-  p.catch(() => { if (choices.get(key) === p) choices.delete(key); });
+  const p = draw([b], opts.copies, { title: `Tax Invoice ${d.invoice_number}`, subject: b.qr }).then(({ blob, unsigned }) => {
+    if (unsigned) forget();
+    return { blob, name: b.file, sheets: b.pages.length * copyPages(opts.copies).length };
+  });
+  const forget = () => { if (choices.get(key) === p) choices.delete(key); };
+  p.catch(forget);
   byChoice.set(key, p);
   return p;
 }

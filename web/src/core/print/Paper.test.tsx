@@ -7,6 +7,7 @@ import { toBillDetail } from "@/core/sales/wire";
 import { renderApp } from "@/test/render";
 import { COPY_MARKS, printBill } from "./model";
 import { A4_W, Paper, PrintCopy, ScaledPaper } from "./Paper";
+import { firmWith, IGST } from "./testing";
 
 const bill = (over: Record<string, unknown> = {}) => printBill(toBillDetail(wireDetail(over)), { showBank: true });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -113,16 +114,7 @@ test("a line typed twice in an address prints twice, each in its place: lines ar
 });
 
 test("an inter-state bill sets out IGST in the HSN summary; bank details off print no bank block; the firm's signature sits above the signatory", () => {
-  const d = toBillDetail(wireDetail({
-    interstate: true, cgst: "0.00", sgst: "0.00", igst: "2536.40", place_of_supply: "24",
-    lines: WIRE_LINES.map((l) => ({ ...l, cgst: "0.00", sgst: "0.00", igst: l.tax })),
-    slabs: [{ gst_percent: "3", taxable: "84546.81", cgst: "0.00", sgst: "0.00", igst: "2536.40", tax: "2536.40" }],
-    hsn_summary: [
-      { hsn_code: "711319", gst_percent: "3", unit: "gms", quantity: "12.345", taxable: "80396.81", cgst: "0.00", sgst: "0.00", igst: "2411.90", tax: "2411.90" },
-      { hsn_code: "711319", gst_percent: "3", unit: "pcs", quantity: "1.000", taxable: "4150.00", cgst: "0.00", sgst: "0.00", igst: "124.50", tax: "124.50" },
-    ],
-    firm: { ...(wireDetail().firm as object), signature_url: "/api/media/signatures/3.png?s=abc" },
-  }));
+  const d = toBillDetail(wireDetail({ ...IGST, firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=abc" }) }));
   const p = printBill(d, { showBank: false });
   render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
   const paper = screen.getByRole("document");
