@@ -1,4 +1,5 @@
 // Signs in once through the real sign-in page and saves the session for the other specs.
+const fs = require("fs");
 const { test: setup } = require("@playwright/test");
 const { AUTH, easyIfExpertSaved, signIn, typesPassword } = require("./session");
 
@@ -14,5 +15,10 @@ setup("sign in", async ({ page }) => {
   // a phone run that stopped part-way can leave Expert saved for this user: every project starts from Easy, or from no
   // saved mode at all (CI's), which stays so
   await easyIfExpertSaved(page.request, await page.evaluate(() => localStorage.getItem("gst_access_token")));
-  await page.context().storageState({ path: AUTH });
+  // nor from a copy of it kept on this device: the app keeps each person's preferences as it last saw them
+  // (gst3.prefs.<id>), maybe Expert from that run. They're left out of what's saved rather than removed from the page,
+  // which could write its copy back if its own request for them answers late
+  const state = await page.context().storageState();
+  for (const o of state.origins) o.localStorage = o.localStorage.filter((i) => !i.name.startsWith("gst3.prefs."));
+  fs.writeFileSync(AUTH, JSON.stringify(state, null, 2));
 });

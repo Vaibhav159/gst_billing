@@ -42,9 +42,10 @@ with that storage state, so specs start logged in. Shared helpers in
 Its own config, `v3.config.js`, and specs in `tests-v3/`, run against v3's Vite
 (`web/`, with `/api` proxied to the server by `VITE_API_TARGET`). `setup` signs in
 through the real sign-in page, puts Easy back if a stopped run left Expert saved,
-and writes `.auth-v3.json` (git-ignored); `desktop` (1440×900) and `phone`
-(390×844, touch) start signed in. `tests-v3/session.js` has the session's path,
-the sign-in and the API calls the specs make beside the app's. Also `workers: 1`,
+and writes `.auth-v3.json` (git-ignored) without the app's kept copy of the
+preferences; `desktop` (1440×900) and `phone` (390×844, touch) start signed in.
+`tests-v3/session.js` has the session's path, the sign-in, `opened(page)` and the
+API calls the specs make beside the app's. Also `workers: 1`,
 `retries: 0`: one user for every spec, and the phone spec saves Easy or Expert on
 the server. CI runs it as the `web-e2e` job.
 
@@ -81,7 +82,9 @@ Pitfalls:
 - Signed out: `test.use({ storageState: SIGNED_OUT })` in a `describe`.
   `browser.newContext()` would take the project's signed-in session too.
 - The first click inside a page must come at least 300 ms after the page
-  opened, or the page frame drops it as a double click's second click.
-  Playwright's auto-wait doesn't cover this. A page that slides in happens to
-  take about that long to settle, but one opened with `page.goto` can be
-  clicked at once: wait 300 ms there before the first click inside it.
+  opened, or the page frame drops it as a double click's second click
+  (Ruling 59). Playwright's auto-wait doesn't cover this. Once the test has
+  seen the new page open (its address, its tab or its title), call
+  `await opened(page)` from `session.js` before the first click inside it,
+  however the page opened: a link, a tab, Back or `page.goto`. Clicks in the
+  shell around the page (the top bar, the phone's tabs) aren't held back.

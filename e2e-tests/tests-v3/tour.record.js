@@ -1,8 +1,8 @@
 // A tour of what part 0 built, for the shop owner to watch: v3.record.config.js records each one as a video, and the
-// stills go beside it. 600 ms between steps, so a person can follow; that also keeps the first click inside a page
-// clear of the page frame's 300 ms guard (AGENTS.md).
+// stills go beside it. 600 ms between steps, so a person can follow. As in every spec, the first click inside a page
+// that just opened waits with opened(): the page frame drops a click within 300 ms of its page opening (AGENTS.md).
 const { test, expect } = require("@playwright/test");
-const { easyIfExpertSaved, savedToken, signIn, typesPassword } = require("./session");
+const { easyIfExpertSaved, opened, savedToken, signIn, typesPassword } = require("./session");
 
 typesPassword(test);
 
@@ -144,6 +144,7 @@ test.describe(() => {
     await still(page, "phone-2-more"); // Easy's More, the switch to Expert at the top
 
     // Expert: its home is Today, with search in the header
+    await opened(page); // Easy's More opened last
     await page.getByRole("button", { name: /^Switch to Expert/ }).click();
     await expect(page).toHaveURL((url) => url.pathname === "/");
     await expect(tab("Home")).toHaveAttribute("aria-current", "page");
@@ -153,6 +154,7 @@ test.describe(() => {
     await visitTabs();
 
     // and back to Easy, from Expert's More
+    await opened(page); // Expert's More opened last
     await page.getByRole("button", { name: /^Switch to Easy/ }).click();
     await expect(page).toHaveURL((url) => url.pathname === "/e");
     await expect(tab("Home")).toHaveAttribute("aria-current", "page");

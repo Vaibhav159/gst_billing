@@ -1,5 +1,6 @@
-// The session the setup saves and the specs start from, who signs in, and the API calls a spec makes beside the app's.
-// Passwords come from env or from the sandbox's logins file, and are never printed.
+// The session the setup saves and the specs start from, who signs in, the API calls a spec makes beside the app's, and
+// the wait before a click inside a page that just opened. Passwords come from env or from the sandbox's logins file,
+// and are never printed.
 const fs = require("fs");
 const path = require("path");
 const { expect } = require("@playwright/test");
@@ -42,6 +43,18 @@ async function signIn(page) {
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
+/**
+ * The page frame drops a click that lands within 300 ms of its page opening, as a double click's second click
+ * (web/src/core/router/PageFrame.tsx, Ruling 59), and Playwright's auto-wait doesn't know that. Once a test has seen a
+ * new page open (its address, its tab or its title), call this before the first click inside it, however it opened: a
+ * link, a tab, Back or page.goto. It lets the frame note the page's opening (an effect React runs after painting), then
+ * waits 320 ms, a little past the guard.
+ */
+async function opened(page) {
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  await page.waitForTimeout(320);
+}
+
 /** The saved session's access token. */
 function savedToken() {
   const { origins } = JSON.parse(fs.readFileSync(AUTH, "utf8"));
@@ -58,4 +71,4 @@ async function easyIfExpertSaved(request, token) {
   expect(put.ok()).toBe(true);
 }
 
-module.exports = { AUTH, SIGNED_OUT, typesPassword, signIn, savedToken, easyIfExpertSaved };
+module.exports = { AUTH, SIGNED_OUT, typesPassword, signIn, opened, savedToken, easyIfExpertSaved };
