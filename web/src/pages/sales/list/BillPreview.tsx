@@ -1,6 +1,6 @@
 // The bill beside the table (PROTO sales/SalesList.jsx:837-907): its figures and status at a glance, its items and who
 // made it once its own answer comes. The list's row draws it at once; the bill's answer fills in the rest.
-import { Ban, ChevronDown, ChevronUp, Lock, MoreHorizontal, Printer, Send, X } from "lucide-react";
+import { Ban, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, Printer, Send, X } from "lucide-react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { problemOf } from "@/core/api/errors";
@@ -26,7 +26,8 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
   const qc = useQueryClient();
   const detail = useBillDetail(id);
   const d = detail.data ?? null;
-  const b: BillRow | BillDetail | null = d ?? row;
+  // a bill deleted since the list loaded answers null: it's gone, whatever the row still says
+  const b: BillRow | BillDetail | null = detail.data === null ? null : d ?? row;
   const close = <IconButton size="sm" label="Close preview" icon={X} onClick={onClose} />;
   // the bill's own answer failed (a deleted bill's answer is null, not a failure): say so, never a skeleton for ever, and
   // ask again through the client (Ruling 1B-11)
@@ -70,7 +71,10 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
         <div className="flex flex-wrap gap-1.5">
           <TaxTypeBadge bill={b} />
           <StatusCell bill={b} max={3} />
-          {!cancelled ? (b.sent ? <Badge tone="sale" icon={Send}>Sent {sentWhen(b.sent)}</Badge> : <Badge tone="brand">Not sent yet</Badge>) : null}
+          {/* a paper bill the customer already has: no nag to send it (as the list's Send cell) */}
+          {cancelled ? null : b.sent ? <Badge tone="sale" icon={Send}>Sent {sentWhen(b.sent)}</Badge>
+            : b.paper ? <Badge tone="muted" icon={FileText} title="Entered from the paper bill book: the customer has the paper bill">On paper</Badge>
+              : <Badge tone="brand">Not sent yet</Badge>}
         </div>
         {cancelled ? <Banner tone="neg" icon={Ban} title="Cancelled">{realReason(b.cancel_reason) ? `“${realReason(b.cancel_reason)}”.` : "No reason was given."} It stays in GSTR-1 with its number.</Banner> : null}
         {!cancelled && b.checks.length ? (
@@ -101,7 +105,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
         {d ? (
           <DL rows={[
             b.paper ? ["Typed in by", `${maker} on ${date(dayOf(b.created_at))}`] : ["Made by", `${maker} · ${timeOf(b.created_at)}`],
-            ["Sent", b.sent ? `${sentLine(b.sent)}${cancelled ? ", before it was cancelled" : ""}` : "Not yet"],
+            ["Sent", b.sent ? `${sentLine(b.sent)}${cancelled ? ", before it was cancelled" : ""}` : b.paper ? "The customer has the paper bill" : "Not yet"],
             d.eway.eway_bill_number ? ["E-way bill", <span key="e" className="tnum">{ewayNumberText(d.eway.eway_bill_number)}</span>] : null,
           ]} />
         ) : null}
@@ -110,7 +114,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
       <div className="px-5 py-3 border-t border-rule flex flex-wrap items-center gap-2">
         <ButtonLink to={`/sales/${b.id}`} variant="primary" size="sm">Open full bill</ButtonLink>
         <ButtonLink to={`/sales/${b.id}/print`} size="sm" icon={Printer}>Print or PDF</ButtonLink>
-        {!cancelled && can("bill.send") ? <Button size="sm" icon={Send} disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} onClick={() => send(b)}>{b.sent ? "Send again" : "Send"}</Button> : null}
+        {!cancelled && !(b.paper && !b.sent) && can("bill.send") ? <Button size="sm" icon={Send} disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} onClick={() => send(b)}>{b.sent ? "Send again" : "Send"}</Button> : null}
       </div>
     </aside>
   );

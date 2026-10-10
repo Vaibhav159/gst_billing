@@ -237,6 +237,41 @@ export function useRestoreBill() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async (binId: number) => toBillDetail((await api.post(`bin/${binId}/restore/`)).data), onSuccess: (d) => keepBill(qc, d) });
 }
+
+/**
+ * Several bills to the bin, one at a time, then one refresh of every bill screen, not one per bill. Each bill's outcome
+ * goes to onEach as it comes: its bin row, or null when it had gone already (a 404: deleted elsewhere, or a try whose
+ * answer was lost), and the batch carries on past it. Any other failure stops the batch there and rejects with it.
+ */
+export function useDeleteBills() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, reason, onEach }: { ids: number[]; reason: string; onEach: (id: number, binned: BinRow | null) => void }) => {
+      for (const id of ids) {
+        let binned: BinRow | null = null;
+        try { binned = toBinRow((await api.delete(`sales/${id}/`, { data: { reason } })).data); }
+        catch (e) { if (problemOf(e).kind !== "notfound") throw e; }
+        onEach(id, binned);
+      }
+    },
+    onSettled: () => invalidateSales(qc),
+  });
+}
+/** Several bills back from the bin (by bin row ids), as useDeleteBills sends them: one refresh at the end; a bin row that has gone (404) gives null. */
+export function useRestoreBins() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ binIds, onEach }: { binIds: number[]; onEach: (binId: number, bill: BillDetail | null) => void }) => {
+      for (const binId of binIds) {
+        let bill: BillDetail | null = null;
+        try { bill = toBillDetail((await api.post(`bin/${binId}/restore/`)).data); }
+        catch (e) { if (problemOf(e).kind !== "notfound") throw e; }
+        onEach(binId, bill);
+      }
+    },
+    onSettled: () => invalidateSales(qc),
+  });
+}
 export function useRenumberBill() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async ({ id, invoice_number }: { id: number; invoice_number: string }) => toRenumberResult((await api.post(`sales/${id}/renumber/`, { invoice_number })).data), onSuccess: () => invalidateSales(qc) });
@@ -254,7 +289,26 @@ export function useFixHeads() {
   return useMutation({ mutationFn: async (id: number) => toBillDetail((await api.post(`sales/${id}/fix-heads/`)).data), onSuccess: (d) => keepBill(qc, d) });
 }
 export type SendVia = "whatsapp" | "share";
-/** Records a send: how, and the number typed for this bill ("" for the customer's own). */
+/**
+ * A send just recorded, written into every list, page and bill on this device that holds the bill, so each reads "Sent"
+ * at once, before (or without) its refresh.
+ */
+function putSent(qc: QueryClient, id: number, sent: Sent | null): void {
+  if (!sent) return;
+  const has = (rows: { id: number }[]) => rows.some((r) => r.id === id);
+  const row = <T extends { id: number; sent: Sent | null }>(r: T): T => (r.id === id ? { ...r, sent } : r);
+  const page = (p: SalesPage): SalesPage => (has(p.results) ? { ...p, results: p.results.map(row) } : p);
+  // (undefined leaves a query as it was: one that doesn't hold the bill isn't touched)
+  qc.setQueriesData<InfiniteData<SalesPage>>({ queryKey: ["sales", "list"] }, (d) => (d && d.pages.some((p) => has(p.results)) ? { ...d, pages: d.pages.map(page) } : undefined));
+  qc.setQueriesData<SalesPage>({ queryKey: ["sales", "page"] }, (d) => (d && has(d.results) ? page(d) : undefined));
+  qc.setQueriesData<BillRow[]>({ queryKey: ["sales", "today"] }, (d) => (d && has(d) ? d.map(row) : undefined));
+  qc.setQueriesData<BillOutcome>({ queryKey: billQuery(id).queryKey }, (d) => {
+    if (d?.kind !== "bill") return undefined;
+    const o: BillOutcome = { kind: "bill", bill: row(d.bill) }; // (typed first, as keepBill's)
+    return o;
+  });
+}
+/** Records a send: how, and the number typed for this bill ("" for the customer's own). Its answer shows at once (putSent). */
 export function useRecordSent() {
   const qc = useQueryClient();
   return useMutation({
@@ -262,7 +316,7 @@ export function useRecordSent() {
       const d = (await api.post(`sales/${id}/sent/`, { via, to })).data;
       return { id: Number(d?.id ?? id), sent: toSent(d?.sent) };
     },
-    onSuccess: () => invalidateSales(qc),
+    onSuccess: (r) => { putSent(qc, r.id, r.sent); invalidateSales(qc); },
   });
 }
 

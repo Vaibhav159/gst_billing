@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { problemOf } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { useRecordSent, useShopSettings } from "@/core/api/sales";
@@ -36,11 +37,24 @@ export function useSendReady(): boolean {
 }
 
 /**
+ * The bills with a send on its way, per app (its QueryClient): one press, one send, whichever button pressed it (a row's
+ * Send, S, the preview's Send, a menu, a toast). A send holds its bill from the moment WhatsApp is asked until its
+ * record settles, and lets go sooner when nothing was recorded or it went wrong.
+ */
+const inFlight = new WeakMap<QueryClient, Set<number>>();
+function sendingIn(qc: QueryClient): Set<number> {
+  let s = inFlight.get(qc);
+  if (!s) { s = new Set(); inFlight.set(qc, s); }
+  return s;
+}
+
+/**
  * Send a bill on WhatsApp and record it (PROTO sales/parts.jsx:185-205). Someone who can't send is told why; a customer
  * with no mobile on record (a walk-in) needs a number first, and nothing is marked sent without one; offline, or before
  * the shop's message has loaded, nothing opens. The chat opens within the press itself, then the send is recorded. A
  * record that fails after the chat opened says so, with Mark as sent, which records it again and never reopens WhatsApp
- * (Ruling 1B-14). Resolves true once it's recorded at the first try.
+ * (Ruling 1B-14). A second send of a bill whose send is on its way does nothing (inFlight); a send that goes wrong says
+ * so. Resolves true once it's recorded at the first try; never rejects.
  */
 export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<boolean> {
   const { can, whyNot } = useAuth();
@@ -49,6 +63,7 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
   const net = useNetwork();
   const { ready, template, standard } = useShopMessage();
   const { mutateAsync: record } = useRecordSent();
+  const qc = useQueryClient();
   return useCallback((b, opts = {}) => {
     if (!can("bill.send")) { show({ tone: "neg", title: "You can't send bills", body: whyNot("bill.send") }); return Promise.resolve(false); }
     const own = mobileOf(b.customer.mobile_number);
@@ -61,19 +76,27 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
     // the bill's exact total, as its PDF prints it: nothing is rounded to the rupee (Ruling 1B-12)
     const message = billMessage(template, { invoice_number: b.invoice_number, invoice_date: b.invoice_date, total: b.total_amount, firm: b.business_name, customer: b.customer });
     const again = Boolean(b.sent);
+    const sending = sendingIn(qc);
+    if (sending.has(b.id)) return Promise.resolve(false);
+    sending.add(b.id);
+    const done = () => { sending.delete(b.id); };
     return deliver({ billId: b.id, invoiceNumber: b.invoice_number, mobile, message, isPhone }).then((d) => {
-      if (!d) return false;
+      if (!d) { done(); return false; }
       opts.onOpened?.();
       const mark = async (retry: boolean): Promise<boolean> => {
+        // the record holds the bill too (Mark as sent's own record included), until it settles
+        sending.add(b.id);
         try {
           await record({ id: b.id, via: d.via, to: to.replace(/\s/g, "") });
         } catch (e) {
+          done();
           const f = notMarkedSent(problemOf(e), b.invoice_number);
           // one press records it once: a quick second press posts nothing (a failure again brings a new toast)
           let pressed = false;
           show({ tone: f.tone, title: f.title, body: f.body, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
           return false;
         }
+        done();
         opts.onRecorded?.();
         if (retry) show({ title: `${b.invoice_number} marked as sent` });
         else if (!opts.quiet) {
@@ -84,6 +107,11 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
         return true;
       };
       return mark(false);
+    }, (e: unknown) => {
+      // it went wrong on its way to WhatsApp: nothing was recorded, and the press can be tried again
+      done();
+      show(sendFailure(problemOf(e)));
+      return false;
     });
-  }, [can, whyNot, show, isPhone, net, ready, template, standard, record]);
+  }, [can, whyNot, show, isPhone, net, ready, template, standard, record, qc]);
 }

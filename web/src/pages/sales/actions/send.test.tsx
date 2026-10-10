@@ -278,9 +278,12 @@ test("Mark as sent pressed twice in a row records the send once", async () => {
 });
 
 test("a double click on Send opens one chat and records one send", async () => {
-  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  // the server takes its time, as a real one does: the second click comes while the send is on its way
+  let recorded: (w: unknown) => void = () => {};
+  const { calls } = serve([["POST", "sales/412/sent/", () => new Promise((resolve) => { recorded = resolve; })]]);
   renderApp(<SendCell bill={row()} />);
   await userEvent.dblClick(await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" })));
+  await act(async () => { recorded({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } }); });
   expect(window.open).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
   expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1);
@@ -374,4 +377,6 @@ test("a send that goes wrong before it's recorded leaves Send free for another p
   await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
   expect(window.open).toHaveBeenCalledTimes(2);
   expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
+  // the press that went wrong said so: nothing was marked as sent
+  expect(screen.getByText("The bill wasn't sent")).toBeInTheDocument();
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Check, FileText, Printer, Send } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -23,19 +23,9 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   const send = useSendBill();
   const ready = useSendReady();
   const [ask, setAsk] = useState(false);
-  // one send per press: the second press of a double click, or a press before the list shows the bill as sent, sends
-  // nothing (two chats, two records). The guard holds the bill's id, not just "sending": a cell drawn for another bill
-  // sends that one, and the bill's own news (its id or its send) clears it. A send that wasn't recorded (offline, a
-  // number to ask for, the record failed) frees it, and so does one that went wrong on its way.
-  const sending = useRef<number | null>(null);
-  useEffect(() => { sending.current = null; }, [bill.id, bill.sent]);
-  const sendOnce = () => {
-    const id = bill.id;
-    if (sending.current === id) return;
-    sending.current = id;
-    const free = () => { if (sending.current === id) sending.current = null; };
-    void send(bill, { onNeedNumber: () => setAsk(true) }).then((ok) => { if (!ok) free(); }, free);
-  };
+  // one press, one send: useSendBill holds the bill while its send is on its way, whichever button pressed it, and its
+  // record shows the bill as sent at once
+  const sendIt = () => { void send(bill, { onNeedNumber: () => setAsk(true) }); };
   if (bill.status === "cancelled") return null;
   if (bill.paper && !bill.sent) {
     return <span className={cn("inline-flex items-center gap-1 text-muted shrink-0", isPhone ? "min-h-11 px-2" : "text-sm px-2")} title="Entered from the paper bill book: the customer has the paper bill"><FileText size={15} aria-hidden="true" />On paper</span>;
@@ -53,7 +43,7 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
     return (
       <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
         <Menu title={`${bill.invoice_number} was sent`} width={260} items={[
-          { label: "Send again on WhatsApp", hint: `Sent ${when} to ${to}${bill.sent.count > 1 ? ` · ${bill.sent.count} times` : ""}`, icon: Send, disabled: !ready, onSelect: () => void send(bill, { onNeedNumber: () => setAsk(true) }) },
+          { label: "Send again on WhatsApp", hint: `Sent ${when} to ${to}${bill.sent.count > 1 ? ` · ${bill.sent.count} times` : ""}`, icon: Send, disabled: !ready, onSelect: sendIt },
         ]} trigger={(p) => (
           <button type="button" {...p} tabIndex={tabIndex} data-row-send="" aria-label={`Sent ${when}. Options for ${bill.invoice_number}`}
             className={cn("inline-flex items-center justify-center gap-1 rounded-ctl text-sale font-semibold hover:bg-sale-tint transition-colors active:scale-[0.97]", isPhone ? "min-h-11 min-w-[72px] px-2" : "h-8 px-2 text-sm")}>
@@ -75,7 +65,7 @@ export function SendCell({ bill, compact = false, tabIndex }: { bill: BillRow | 
   }
   return (
     <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
-      <Button size="sm" variant="secondary" icon={compact ? undefined : Send} tabIndex={tabIndex} data-row-send="" onClick={sendOnce}
+      <Button size="sm" variant="secondary" icon={compact ? undefined : Send} tabIndex={tabIndex} data-row-send="" onClick={sendIt}
         disabled={!ready} title={ready ? undefined : "Getting the shop's WhatsApp message"} aria-label={`Send ${bill.invoice_number} on WhatsApp`}>Send</Button>
       {dialog}
     </span>

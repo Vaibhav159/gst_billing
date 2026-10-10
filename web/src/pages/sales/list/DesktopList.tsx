@@ -121,8 +121,13 @@ export function DesktopList({ m }: { m: ListModel }) {
     gstin: tableW >= 1000,
     firm: m.firmId === "all" && tableW >= 960,
   }), [byDate, hasPreview, tableW, m.firmId]);
-  const cols = 6 + Number(show.taxable) + Number(show.gst) + Number(show.paid) - Number(show.compact);
-  const setPreview = useCallback((id: number | null) => m.set({ bill: id }), [m.set]); // eslint-disable-line react-hooks/exhaustive-deps
+  // tick, time, number, customer, total, status, actions, and the columns the width allows: a day row spans them all
+  const cols = 7 + Number(show.taxable) + Number(show.gst) + Number(show.paid) - Number(show.compact);
+  // one function for every row, through a ref as onKeyStable: m.set follows the address (React Router's setSearchParams
+  // is new with each change), so a preview move would otherwise redraw every memoized row
+  const setRef = useRef(m.set);
+  setRef.current = m.set;
+  const setPreview = useCallback((id: number | null) => setRef.current({ bill: id }), []);
 
   // a new filter starts a new selection; a bill that left the list (deleted, cancelled away) leaves it too
   useEffect(() => { setSelected(new Set()); }, [m.firmId, m.effMonth, m.state.customer, m.state.paid, m.state.status, m.dq]);
@@ -146,16 +151,8 @@ export function DesktopList({ m }: { m: ListModel }) {
   };
   const move = (d: -1 | 1) => { if (pIndex >= 0) goRow(pIndex + d, { openPreview: true }); };
   const toggle = useCallback((id: number, on: boolean) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n; }), []);
-  // one send per press, as the row's own Send: a second press of the preview's Send (or S) before the list shows the bill
-  // as sent sends nothing (two chats, two records); the list's news frees it, as does a send not recorded or gone wrong
-  const sendingId = useRef<number | null>(null);
-  useEffect(() => { sendingId.current = null; }, [rows]);
-  const send = (b: BillRow | BillDetail) => {
-    if (sendingId.current === b.id) return;
-    sendingId.current = b.id;
-    const free = () => { if (sendingId.current === b.id) sendingId.current = null; };
-    void sendBill(b, { onNeedNumber: () => dialogs.open("whatsapp", b) }).then((ok) => { if (!ok) free(); }, free);
-  };
+  // (one press, one send: useSendBill holds a bill while its send is on its way, whichever button pressed it)
+  const send = (b: BillRow | BillDetail) => { void sendBill(b, { onNeedNumber: () => dialogs.open("whatsapp", b) }); };
 
   /** Keys on a focused row (Linear-style). Inside the row, ← → step through its own buttons. */
   const onRowKey = (e: KeyboardEvent<HTMLTableRowElement>) => {

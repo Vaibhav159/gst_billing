@@ -24,6 +24,10 @@ test("a GST rate reads as a percent from either kind of link", () => {
   expect(gstRateParam("0.0025")).toBe("0.25");
   expect(gstRateParam("1.5")).toBe("1.5");
   expect(gstRateParam("x")).toBeNull();
+  // a rate that's no slab either way stays as written: never a guess by its size (AGENTS.md: no magnitude tests for rates)
+  expect(gstRateParam("7")).toBe("7");
+  expect(gstRateParam("0.07")).toBe("0.07");
+  expect(gstRateParam("2.5%")).toBe("2.5");
 });
 
 test("writing keeps the drill-down words and drops the link words the list now holds itself", () => {

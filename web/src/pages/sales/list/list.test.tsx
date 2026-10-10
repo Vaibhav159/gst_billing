@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router";
 import type { Me } from "@/core/auth/AuthProvider";
@@ -32,14 +32,20 @@ beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"], sh
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 /**
- * From here the timers are the test's too: a search's pause (300 ms) passes when the test says, so nothing waits on real
- * time (Ruling 1B-10). They still move with real time, for Testing Library's own waits.
+ * From here the clock moves only when the test says (Ruling 1B-10), however busy the machine: a search's pause (300 ms)
+ * passes when the test says. Testing Library's async helpers wait on timers this clock never runs, so the steps after it
+ * are fireEvent and pass().
  */
-function typingClock() {
+function handClock() {
   const now = Date.now();
   vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], shouldAdvanceTime: true, now });
-  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
+}
+/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
+async function pass(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }
 
 test("the list asks for the firm and year in view, and shows what they add up to, day by day", async () => {
@@ -53,6 +59,8 @@ test("the list asks for the firm and year in view, and shows what they add up to
   expect(screen.getByText("₹1,18,639.25")).toBeInTheDocument();
   expect(screen.getByText("Today, 08 Oct 2026").closest("tr")).toHaveTextContent("Today, 08 Oct 2026 · 2 bills · ₹1,18,639.25");
   expect(screen.getByText("Yesterday, 07 Oct 2026").closest("tr")).toHaveTextContent("Yesterday, 07 Oct 2026 · 0 bills · ₹0.00 · 1 cancelled");
+  // a day row spans every column, the actions too
+  expect(screen.getByText("Today, 08 Oct 2026").closest("td")!.colSpan).toBe(document.querySelectorAll("thead th").length);
   expect([...document.querySelectorAll("tr[data-row]")].map((r) => r.getAttribute("data-row"))).toEqual(["413", "412", "405"]);
   expect(screen.getByText("Showing all 2 bills · 1 cancelled bill also listed")).toBeInTheDocument();
   // the summary names the cancelled bill apart, as not counted, in one sentence
@@ -64,7 +72,7 @@ test("the list asks for the firm and year in view, and shows what they add up to
   expect(screen.getByText("Filed for both firms: April to August. Bills in those months can't be changed or deleted.")).toBeInTheDocument();
 });
 
-test("filters live in the address and ask again: a saved view, the status, and a search that looks through the whole year", async () => {
+test("filters live in the address and ask again: a saved view and the status", async () => {
   const { calls } = server();
   mount();
   await userEvent.click(await screen.findByRole("button", { name: "Needs a check: 3 bills" }));
@@ -74,13 +82,24 @@ test("filters live in the address and ask again: a saved view, the status, and a
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "Status" }), "cancelled");
   await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ status: "cancelled" }));
   await userEvent.click(screen.getByRole("button", { name: /^September 2026/ }));
-  const user = typingClock();
-  await user.type(screen.getByRole("searchbox", { name: /Search sales bills/ }), "anil");
-  act(() => { vi.advanceTimersByTime(300); }); // typing has paused: the search asks
-  expect(await screen.findByText(/Searching all of FY 2026-27, not just September 2026\./)).toBeInTheDocument();
-  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", q: "anil", facets: 1, status: "cancelled" }));
-  await user.click(screen.getByRole("button", { name: "Only September" }));
-  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", q: "anil" }));
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", status: "cancelled" }));
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales?month=2026-09&status=cancelled");
+});
+
+// (the brief's one test, in two: each loads the page once fewer, so a busy machine keeps it inside the 5 s a test has)
+test("a search looks through the whole year, not just the month picked, with its filters; Only narrows it back", async () => {
+  const { calls } = server();
+  mount("/sales?month=2026-09&status=cancelled");
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", status: "cancelled" }));
+  handClock();
+  const box = screen.getByRole("searchbox", { name: /Search sales bills/ });
+  for (const typed of ["a", "an", "ani", "anil"]) fireEvent.change(box, { target: { value: typed } });
+  await pass(300); // typing has paused: the search asks
+  expect(screen.getByText(/Searching all of FY 2026-27, not just September 2026\./)).toBeInTheDocument();
+  expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", q: "anil", facets: 1, status: "cancelled" });
+  fireEvent.click(screen.getByRole("button", { name: "Only September" }));
+  await pass(0);
+  expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", q: "anil" });
 });
 
 test("on a row, ↓ moves with the preview, Esc closes it, and Enter opens the bill", async () => {
@@ -177,10 +196,12 @@ test("a link's bill opens in the preview; with more than 160 bills still to come
 test("the preview's Send waits for the shop's WhatsApp message, then sends the bill once however fast it's pressed", async () => {
   vi.spyOn(window, "open").mockImplementation(() => null);
   let settings: (w: unknown) => void = () => {};
+  // the record takes its time, as a real server's does: the second click comes while the send is on its way
+  let recorded: (w: unknown) => void = () => {};
   const { calls } = server(ROWS, {}, [
     ["GET", "sales/412/", () => wireDetail()],
     ["GET", "shop-settings/", () => new Promise((resolve) => { settings = resolve; })],
-    ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })],
+    ["POST", "sales/412/sent/", () => new Promise((resolve) => { recorded = resolve; })],
   ]);
   mount("/sales?bill=412");
   const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/31" });
@@ -189,6 +210,7 @@ test("the preview's Send waits for the shop's WhatsApp message, then sends the b
   await act(async () => { settings({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null }); });
   await waitFor(() => expect(send).toBeEnabled());
   await userEvent.dblClick(send);
+  await act(async () => { recorded({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } }); });
   await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
   expect(window.open).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
@@ -217,4 +239,128 @@ test("a link's bill that isn't in the list and doesn't load says it couldn't, no
   down = false;
   await userEvent.click(within(pane).getByRole("button", { name: "Try again" }));
   expect(await within(pane).findByText(/^This bill isn't here any more\./)).toBeInTheDocument();
+});
+
+/* ── Fix round 1 (the task review) ── */
+
+/** Ticks the two bills of today and opens Delete for them, past the dialog's guard against the click that opened it. */
+async function deleteBoth() {
+  await userEvent.click(await screen.findByRole("checkbox", { name: "Select KGH/2026-27/32" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
+  await userEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Delete 2 sales bills?" });
+  act(() => { vi.advanceTimersByTime(400); });
+  return dialog;
+}
+const deletes = (calls: Call[]) => calls.filter((c) => c.method === "DELETE").map((c) => c.url);
+
+test("a delete that stops part-way says how far it got and is then about what's left; Try again deletes only those", async () => {
+  let bin = 50;
+  let failOnce = true;
+  const { calls } = server(ROWS, {}, [["DELETE", /^sales\/\d+\/$/, (c) => {
+    const id = Number(c.url.split("/")[1]);
+    if (id === 412 && failOnce) { failOnce = false; refuse(500, {}); }
+    return wireBin({ id: (bin += 1), original_id: id });
+  }]]);
+  mount();
+  const dialog = await deleteBoth();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  // 413 went and 412 didn't: never "Not deleted" while one went
+  expect(await within(dialog).findByText("Stopped after 1 of 2")).toBeInTheDocument();
+  expect(within(dialog).getByText("The other bill is still in Sales. Try again in a minute.")).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Delete 1 sales bill?" })).toBe(dialog);
+  expect(within(within(dialog).getByRole("list", { name: "Bills to delete" })).getAllByRole("listitem").map((li) => li.textContent)).toEqual([expect.stringContaining("KGH/2026-27/31")]);
+  expect(screen.getByText("Deleted 1 bill")).toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/412/"]));
+  // one toast for the whole delete, whose Undo brings back both
+  expect(await screen.findByText("Deleted 2 bills")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText("Deleted 1 bill")).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+test("a bill someone deleted already counts as gone: the delete carries on to the rest and says so", async () => {
+  const { calls } = server(ROWS, {}, [
+    ["DELETE", "sales/413/", () => refuse(404, { detail: "Not found." })],
+    ["DELETE", "sales/412/", () => wireBin({ id: 51, original_id: 412 })],
+  ]);
+  mount();
+  const dialog = await deleteBoth();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  await waitFor(() => expect(deletes(calls)).toEqual(["sales/413/", "sales/412/"]));
+  expect(await screen.findByText("Deleted 1 bill")).toBeInTheDocument();
+  expect(screen.getByText("It's in the Audit log, where it can be restored. 1 bill was deleted already.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+test("bills deleted together ask for the list and the period chips once afterwards; their Undo too, carrying on past a bin row that has gone", async () => {
+  let bin = 50;
+  const { calls } = server(ROWS, {}, [
+    ["DELETE", /^sales\/\d+\/$/, (c) => wireBin({ id: (bin += 1), original_id: Number(c.url.split("/")[1]) })],
+    ["POST", /^bin\/\d+\/restore\/$/, (c) => (c.url === "bin/52/restore/" ? refuse(404, { detail: "That deleted bill isn't in the bin any more." }) : wireDetail())],
+  ]);
+  mount();
+  await userEvent.click(await screen.findByRole("checkbox", { name: "Select all 2 bills and 1 cancelled bill shown" }));
+  await userEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills and 1 cancelled bill…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Delete 2 sales bills and 1 cancelled bill?" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills and 1 cancelled bill" }));
+  expect(await screen.findByText("Deleted 2 bills and 1 cancelled bill")).toBeInTheDocument();
+  const from = calls.findIndex((c) => c.method === "DELETE");
+  expect(deletes(calls)).toHaveLength(3);
+  await waitFor(() => expect(lists(calls.slice(from))).toHaveLength(1));
+  expect(calls.slice(from).filter(isFacets)).toHaveLength(1);
+  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  expect(await screen.findByText("Restored 2 bills")).toBeInTheDocument();
+  expect(screen.getByText("Back in Sales and in the GST figures. 1 bill wasn't in the bin any more.")).toBeInTheDocument();
+  expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/", "bin/53/restore/"]);
+  const back = calls.findIndex((c) => c.url.startsWith("bin/"));
+  await waitFor(() => expect(lists(calls.slice(back))).toHaveLength(1));
+  expect(calls.slice(back).filter(isFacets)).toHaveLength(1);
+});
+
+test("one bill sends once whichever button sends it: the row's Send then S make one chat and one record, and the row reads Sent at once", async () => {
+  vi.spyOn(window, "open").mockImplementation(() => null);
+  let recorded: (w: unknown) => void = () => {};
+  let hold = false;
+  const { calls } = salesServer([
+    // the list's refresh after the record never comes back: the row reads Sent from the record's own answer
+    ["GET", "sales/", (c) => (isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : hold ? new Promise(() => {}) : wirePage(ROWS))],
+    ["POST", "sales/412/sent/", () => new Promise((resolve) => { recorded = resolve; })],
+  ]);
+  mount();
+  const row = await waitFor(() => { const r = document.querySelector<HTMLElement>('tr[data-row="412"]'); expect(r).not.toBeNull(); return r!; });
+  const send = within(row).getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" });
+  await waitFor(() => expect(send).toBeEnabled());
+  await userEvent.click(send);
+  act(() => row.focus());
+  await userEvent.keyboard("s");
+  expect(window.open).toHaveBeenCalledTimes(1);
+  hold = true;
+  await act(async () => { recorded({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } }); });
+  expect(await within(row).findByRole("button", { name: "Sent at 12:31. Options for KGH/2026-27/31" })).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1);
+  expect(window.open).toHaveBeenCalledTimes(1);
+});
+
+test("a row whose bill was deleted elsewhere previews as deleted, with Open it and no Send", async () => {
+  server(ROWS, {}, [["GET", "sales/412/", () => refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin({ id: 11, original_id: 412, invoice_number: "KGH/2026-27/31" }) })]]);
+  mount("/sales?bill=412");
+  const pane = await screen.findByRole("complementary", { name: "Preview of a bill" });
+  expect(await within(pane).findByText(/^This bill was deleted\./)).toBeInTheDocument();
+  expect(within(pane).getByRole("link", { name: "Open it" })).toHaveAttribute("href", "/sales/412");
+  expect(within(pane).queryByRole("button", { name: /^Send/ })).not.toBeInTheDocument();
+});
+
+test("an unsent paper bill's preview says On paper, with no Send to nag", async () => {
+  const paper = wireRow({ id: 420, invoice_number: "KGH/2026-27/20", counter: 20, paper: true, created_at: "2026-10-08T12:00:00+05:30" });
+  server([paper, ...ROWS], {}, [["GET", "sales/420/", () => wireDetail({ ...paper })]]);
+  mount("/sales?bill=420");
+  const pane = await screen.findByRole("complementary", { name: "Preview of bill KGH/2026-27/20" });
+  expect(await within(pane).findByText("12.345 gms × ₹6,512.50/gms")).toBeInTheDocument();
+  expect(within(pane).getByText("On paper")).toBeInTheDocument();
+  expect(within(pane).queryByText("Not sent yet")).not.toBeInTheDocument();
+  expect(within(pane).queryByText("Not yet")).not.toBeInTheDocument();
+  expect(within(pane).getByText("The customer has the paper bill")).toBeInTheDocument();
+  expect(within(pane).queryByRole("button", { name: /^Send/ })).not.toBeInTheDocument();
 });

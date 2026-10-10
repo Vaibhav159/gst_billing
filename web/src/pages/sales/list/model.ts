@@ -42,14 +42,15 @@ export const SEGMENT_LINK: Record<string, Segment> = { b2b: "b2b", b2cl: "b2cl",
 const SLABS = [0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28, 40];
 /**
  * ?gst_rate= from a link, as a percent ("3"): the GST checks send a percent (3, 0.25), other pages a fraction (0.03).
- * The 11 slabs don't overlap between the two readings, so the slab decides (PROTO sales/lib.js:188-204).
+ * The 11 slabs don't overlap between the two readings, so the slab decides (PROTO sales/lib.js:188-204). A rate that's
+ * no slab either way stays as written: never a guess by its size (AGENTS.md: no magnitude tests for rates).
  */
 export function gstRateParam(raw: string | null): string | null {
   if (raw == null || raw.trim() === "") return null;
   const v = Number(raw.replace("%", ""));
   if (!Number.isFinite(v) || v < 0) return null;
   const pick = [v, v * 100].find((r) => SLABS.some((s) => Math.abs(s - r) < 1e-9));
-  return String(Number((pick ?? (v > 1 ? v : v * 100)).toFixed(4)));
+  return String(Number((pick ?? v).toFixed(4)));
 }
 
 /** 1 April to 31 March of an FY ("2026-27"). */

@@ -1,9 +1,10 @@
 import { act, render, screen } from "@testing-library/react";
 import { useBoxWidth } from "./useBoxWidth";
 
+/** A box with 12 px of padding each side: its content box is 24 px narrower than its client box. */
 function Box() {
   const [ref, w] = useBoxWidth();
-  return <div ref={ref}>{`${w} px`}</div>;
+  return <div ref={ref} style={{ paddingLeft: 12, paddingRight: 12 }}>{`${w} px`}</div>;
 }
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -13,8 +14,8 @@ test("a box reads a desktop's 1400 px until it has been measured", () => {
   expect(screen.getByText("1400 px")).toBeInTheDocument();
 });
 
-test("a box is measured as it's laid out and followed as it changes; the watch stops when the box goes", () => {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1100 } as DOMRect);
+test("a box is measured as it's laid out and followed as it changes, each time its content box rounded; the watch stops when the box goes", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1124);
   let resize: (width: number) => void = () => {};
   const watched: Element[] = [];
   const disconnect = vi.fn();
@@ -34,7 +35,7 @@ test("a box is measured as it's laid out and followed as it changes; the watch s
 });
 
 test("a browser without ResizeObserver keeps the width measured as the box was laid out", () => {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 980 } as DOMRect);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1004);
   vi.stubGlobal("ResizeObserver", undefined);
   render(<Box />);
   expect(screen.getByText("980 px")).toBeInTheDocument();
