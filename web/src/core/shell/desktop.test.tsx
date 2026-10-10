@@ -648,14 +648,19 @@ test("a key pressed while a sheet is still animating closed works", async () => 
 
 test("a key pressed while a menu or dialog is still animating closed works", async () => {
   renderApp(<ScopeProvider><DesktopShell openPalette={() => {}}><Where /></DesktopShell></ScopeProvider>, { path: "/sales" });
+  // each key goes straight after Esc, with nothing awaited between, and the menu or dialog is still on its way out
+  // right after the key: so the key landed inside the closing animation (130 ms for a menu, 170 ms for a dialog)
+  const press = (init: KeyboardEventInit) => fireEvent.keyDown(document.activeElement ?? document.body, init);
   await userEvent.click(screen.getByRole("button", { name: /account/i }));
-  await screen.findByRole("menu");
-  await userEvent.keyboard("{Escape}");
-  expect(document.querySelector('[role="menu"][data-closing]')).not.toBeNull(); // still on screen, on its way out
-  await userEvent.keyboard("?");
-  const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
-  await userEvent.keyboard("{Escape}");
+  const menu = await screen.findByRole("menu");
+  fireEvent.keyDown(menu, { key: "Escape" });
+  press({ key: "?" });
+  expect(menu).toBeInTheDocument();
+  expect(menu).toHaveAttribute("data-closing");
+  const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  press({ key: "n", code: "KeyN", altKey: true });
+  expect(dialog).toBeInTheDocument();
   expect(dialog).toHaveAttribute("data-closing");
-  await userEvent.keyboard("{Alt>}n{/Alt}");
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/new");
 });
