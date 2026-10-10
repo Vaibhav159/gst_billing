@@ -101,12 +101,23 @@ test("something outside a page's own boundary that fails to draw (the shell, sig
 test("the second click of a double click doesn't land on the page that just opened", async () => {
   const router = mount("/sales");
   await screen.findByRole("heading", { level: 1, name: "Bills" });
-  await act(async () => { await router.navigate("/customers"); });
-  const h1 = await screen.findByRole("heading", { level: 1, name: "Customers" });
-  const spy = vi.fn();
-  h1.addEventListener("click", spy);
-  await userEvent.click(h1);
-  expect(spy).not.toHaveBeenCalled();
+  // the clock moves only when the test says, so a busy runner can't carry the click past the 300 ms
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    await act(async () => { await router.navigate("/customers"); });
+    const h1 = screen.getByRole("heading", { level: 1, name: "Customers" });
+    const spy = vi.fn();
+    h1.addEventListener("click", spy);
+    act(() => { vi.advanceTimersByTime(299); });
+    fireEvent.click(h1);
+    expect(spy).not.toHaveBeenCalled();
+    // from 300 ms on, a click is a click
+    act(() => { vi.advanceTimersByTime(1); });
+    fireEvent.click(h1);
+    expect(spy).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 /* ── Beyond the brief: the page frame's Back and the unsaved-changes guard ── */
