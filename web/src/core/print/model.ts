@@ -59,8 +59,8 @@ export const JURISDICTION = "Udaipur";
  * figures (amountText, rateText without its ₹, bill numbers, HSN codes, GSTINs), which never hold a ₹.
  * Line breaks someone typed (v2's address boxes and 1D's note are textareas; react-pdf starts a new line at each) arrive
  * settled (Ruling 1E-9): an address as one entry of `lines` per printed line, one-line slots (the firm's, the customer's
- * and an item's names, a line's note, the 14 boxes, `short`) with each break read as a space, and the bill's `note` with
- * its breaks kept.
+ * and an item's names, a line's note, the 14 boxes, `short`, whose bill number and GSTINs can keep a spreadsheet's breaks
+ * from v2's bulk import) with each break read as a space, and the bill's `note` with its breaks kept.
  */
 export type FreeText = string;
 export type PrintLine = { sl: string; name: FreeText; note: FreeText; hsn: string; qty: string; rate: string; per: string; amount: string };
@@ -171,9 +171,9 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
       ["Motor Vehicle No.", e.vehicle_number], ["Terms of Delivery", terms],
     ] as [string, string][]).map(([k, v]): [string, string] => [k, oneLine(v)]),
     short: [
-      [{ text: firmName, bold: true }, ...(f.gst_number ? [{ text: ` · GSTIN ${f.gst_number}` }] : [])],
-      [{ text: "Invoice No. " }, { text: d.invoice_number, bold: true }, { text: " · Dated " }, { text: date(d.invoice_date), bold: true }],
-      [{ text: "Buyer : " }, { text: name, bold: true }, ...(c.gst_number ? [{ text: ` · GSTIN ${c.gst_number}` }] : [])],
+      [{ text: firmName, bold: true }, ...(f.gst_number ? [{ text: ` · GSTIN ${oneLine(f.gst_number)}` }] : [])],
+      [{ text: "Invoice No. " }, { text: oneLine(d.invoice_number), bold: true }, { text: " · Dated " }, { text: date(d.invoice_date), bold: true }],
+      [{ text: "Buyer : " }, { text: name, bold: true }, ...(c.gst_number ? [{ text: ` · GSTIN ${oneLine(c.gst_number)}` }] : [])],
       pos ? [{ text: `Place of Supply : ${pos}` }] : [],
     ],
     lines, taxes, note: d.notes,

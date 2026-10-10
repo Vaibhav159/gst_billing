@@ -171,9 +171,20 @@ test("a note typed on three lines keeps its breaks for the paper, and the plan c
 });
 
 test("the 14 boxes and a continued page's header hold one line each: a line break typed there reads as a space", () => {
-  const p = printBill(bill({ notes: "Hallmarked\nBIS 916\nSize 14", customer: { ...(wireDetail().customer as object), name: "Anil\nGupta" } }), { showBank: true });
+  // v2's bulk import stores a spreadsheet's bill number and GSTINs as they are, line breaks too
+  const p = printBill(bill({
+    notes: "Hallmarked\nBIS 916\nSize 14", invoice_number: "KGH/2026-27/\n31",
+    firm: { ...(wireDetail().firm as object), gst_number: "08ABCPK1234F1Z5\n" },
+    customer: { ...(wireDetail().customer as object), name: "Anil\nGupta", gst_number: "08AAKFS4821M1ZQ\r\n" },
+  }), { showBank: true });
   expect(p.meta[5]).toEqual(["Other References", "Hallmarked BIS 916 Size 14"]);
-  expect(p.short[2]).toEqual([{ text: "Buyer : " }, { text: "Anil Gupta", bold: true }]);
+  // the Invoice No. box and a later page's header read the number alike
+  expect(p.meta[0]).toEqual(["Invoice No.", "KGH/2026-27/ 31"]);
+  expect(p.short.slice(0, 3)).toEqual([
+    [{ text: "KIRAN GOLD HOUSE", bold: true }, { text: " · GSTIN 08ABCPK1234F1Z5" }],
+    [{ text: "Invoice No. " }, { text: "KGH/2026-27/ 31", bold: true }, { text: " · Dated " }, { text: "08 Oct 2026", bold: true }],
+    [{ text: "Buyer : " }, { text: "Anil Gupta", bold: true }, { text: " · GSTIN 08AAKFS4821M1ZQ" }],
+  ]);
 });
 
 test("a line break inside a name, a line's note or the bank's details reads as a space, so each prints on one line, and the plan counts one: 30 lines break as 18 and 12", () => {
