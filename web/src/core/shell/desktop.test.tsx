@@ -629,3 +629,17 @@ test("with a menu or a dialog open, shortcuts wait, except Ctrl K", async () => 
   await userEvent.keyboard("{Alt>}n{/Alt}");
   expect(screen.getByTestId("where")).toHaveTextContent(/^\/sales$/);
 });
+
+test("a key pressed while a menu or dialog is still animating closed works", async () => {
+  renderApp(<ScopeProvider><DesktopShell openPalette={() => {}}><Where /></DesktopShell></ScopeProvider>, { path: "/sales" });
+  await userEvent.click(screen.getByRole("button", { name: /account/i }));
+  await screen.findByRole("menu");
+  await userEvent.keyboard("{Escape}");
+  expect(document.querySelector('[role="menu"][data-closing]')).not.toBeNull(); // still on screen, on its way out
+  await userEvent.keyboard("?");
+  const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+  await userEvent.keyboard("{Escape}");
+  expect(dialog).toHaveAttribute("data-closing");
+  await userEvent.keyboard("{Alt>}n{/Alt}");
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/new");
+});

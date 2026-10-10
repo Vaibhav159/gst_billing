@@ -90,7 +90,7 @@ export function Menu({ trigger, items, align = "end", width = 248, title = "Acti
       {mounted && pos ? (
         <Portal>
           <div className={cn("absolute inset-0 z-pop", closing ? "pointer-events-none" : "pointer-events-auto")} onMouseDown={(e) => { if (e.target === e.currentTarget) close(false); }}>
-            <div ref={list} role="menu" onKeyDown={onKey} style={{ top: pos.top, left: pos.left, width, transformOrigin: align === "end" ? "top right" : "top left" }}
+            <div ref={list} role="menu" data-closing={closing ? "" : undefined} onKeyDown={onKey} style={{ top: pos.top, left: pos.left, width, transformOrigin: align === "end" ? "top right" : "top left" }}
               className={cn("absolute card shadow-pop py-1.5 max-h-[420px] overflow-y-auto", closing ? "anim-pop-out" : "anim-pop")}>
               {items.map((it, i) => {
                 if ("divider" in it) return <div key={i} className="h-px bg-rule my-1.5" />;

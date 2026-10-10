@@ -21,8 +21,9 @@ export function useShortcuts({ enabled, openPalette, openShortcuts }: { enabled:
       const typing = (e.target as Element | null)?.closest?.("input, textarea, select, [contenteditable=true]");
       const L = live.current;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); L.openPalette(); return; }
-      // a menu or dialog open has the keys (the shortcuts list would open under a menu, a new bill behind a dialog)
-      if (typing || document.querySelector('[role="menu"], [role="dialog"]')) return;
+      // a menu or dialog open has the keys (the shortcuts list would open under a menu, a new bill behind a dialog);
+      // one on its way out doesn't (data-closing, as PageFrame reads dialogs)
+      if (typing || document.querySelector('[role="menu"]:not([data-closing]), [role="dialog"]:not([data-closing])')) return;
       const go = (perm: Action, to: string, what: string) => { if (L.can(perm)) navigate(to); else L.show({ tone: "brand", title: `You can't ${what}`, body: L.whyNot(perm) }); };
       // e.code, not e.key: on a Mac, Option+N types a dead key and Option+P types π
       if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyN") { e.preventDefault(); go("bill.create", "/sales/new", "make bills"); }
