@@ -330,9 +330,18 @@ export function customerSaveErrors(error: unknown, typedName = ""): { problem: A
   }
   return { problem, fields };
 }
-/** Why a delete didn't happen: the prototype's words when the server counted the bills (v2's 409 has `protected`). */
+/**
+ * Why a delete didn't happen: the prototype's words when the server counted the bills (v2's 409 has `protected`). When
+ * only lines on other customers' bills still name the customer (old data, from before a line followed its bill), it
+ * says so, with the count of those bills from the server's words (billing/api/mixins.py), not `protected`.
+ */
 export function deleteRefusal(error: unknown): string {
   const res = (error as { response?: { status?: number; data?: unknown } } | null)?.response;
+  const lines = res?.status === 409 ? /lines on (\d+) invoice/i.exec(str(obj(res.data).error)) : null;
+  if (lines) {
+    const k = Number(lines[1]);
+    return `Lines on ${plural(k, "bill")} of ${k === 1 ? "another customer" : "other customers"} still name it, so it can't be deleted. Merge it into the right customer instead.`;
+  }
   const n = res?.status === 409 ? Number(obj(res.data).protected) : NaN;
   if (Number.isFinite(n) && n > 0) return `Has ${plural(n, "bill")}. Merge it into the right customer instead.`;
   const p = problemOf(error);

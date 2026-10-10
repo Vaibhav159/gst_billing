@@ -254,6 +254,12 @@ test("refusals read as the form's fields; a taken name and a customer with bills
     pan: "A PAN has 10 characters: 5 letters, 4 digits, then a letter (like ABCDE1234F).", phone: "Ensure this field has no more than 12 characters.",
   });
   expect(deleteRefusal(refuse(409, { error: "Cannot delete: 3 invoice(s) still reference this record.", protected: 3 }))).toBe("Has 3 bills. Merge it into the right customer instead.");
+  // no bills of their own: only lines on other customers' bills still name them (old data, before a line followed its
+  // bill), counted by the bills in the server's words, not by everything it protects (the bin's bills too)
+  const LINES = "Cannot delete: lines on 2 invoice(s) of other parties still name this record. An administrator re-points them with manage.py fix_line_customers.";
+  expect(deleteRefusal(refuse(409, { error: LINES, protected: 2 }))).toBe("Lines on 2 bills of other customers still name it, so it can't be deleted. Merge it into the right customer instead.");
+  expect(deleteRefusal(refuse(409, { error: `${LINES} 1 bill(s) in the bin reference it too.`, protected: 3 }))).toBe("Lines on 2 bills of other customers still name it, so it can't be deleted. Merge it into the right customer instead.");
+  expect(deleteRefusal(refuse(409, { error: LINES.replace("2 invoice(s)", "1 invoice(s)"), protected: 1 }))).toBe("Lines on 1 bill of another customer still name it, so it can't be deleted. Merge it into the right customer instead.");
   const noReply = new AxiosError("Network Error", "ERR_NETWORK");
   expect(deleteRefusal(noReply)).toBe("Not deleted: the app couldn't get through. Nothing was changed; try again in a minute.");
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
