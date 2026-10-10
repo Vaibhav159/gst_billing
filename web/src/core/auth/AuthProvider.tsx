@@ -136,12 +136,13 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
 
   /**
    * The sign-in stored now, followed (Ruling 30). What's stored decides, not the event that told this tab: a sign-out
-   * heard after a newer sign-in must not wipe that sign-in. No tokens: signed out, to a plain sign-in page. A token this
-   * tab hasn't checked (someone else's sign-in, or a refresh): ask who it is now.
+   * heard after a newer sign-in must not wipe that sign-in. No tokens: signed out, to a plain sign-in page, unless this
+   * page never had a token to check (it was signed out already: nothing to sign out of, and no mark to set). A token
+   * this tab hasn't checked (someone else's sign-in, or a refresh): ask who it is now.
    */
   const follow = useCallback(() => {
     const { access } = getTokens();
-    if (!access) signOut();
+    if (!access) { if (checked.current !== null) signOut(); }
     else if (access !== checked.current) start();
   }, [signOut, start]);
 
@@ -157,8 +158,14 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
 
   // Back or Forward to this page from the browser's back/forward cache: it's as it was left, and it heard no storage
   // events while it was away, so it follows what's stored now as if it had (Ruling 42). An unchanged session stays.
+  // A sign-out on purpose in this tab meanwhile counts, as on a reload; only ever to set it: a mark this tab's storage
+  // refused to keep lives on in memory (Ruling 44).
   useEffect(() => {
-    const onShow = (e: PageTransitionEvent) => { if (e.persisted) follow(); };
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      if (readMark()) setOnPurpose(true);
+      follow();
+    };
     window.addEventListener("pageshow", onShow);
     return () => window.removeEventListener("pageshow", onShow);
   }, [follow]);

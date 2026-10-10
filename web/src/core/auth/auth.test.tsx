@@ -524,6 +524,8 @@ test("back from the cache after a sign-out on purpose here and a sign-in again o
   sessionStorage.setItem("gst3.signedOutHere", "1");
   setTokens("a2", "r2");
   backFromCache(false);
+  // a question would reach the server only after axios's own promise steps: give it the time before saying none came
+  await act(() => new Promise<void>((r) => { setTimeout(r, 20); }));
   expect(s.asked).not.toContain("a2");
   backFromCache();
   await waitFor(() => expect(s.asked).toContain("a2")); // who is this token's?
@@ -600,4 +602,64 @@ test("back from the cache to the sign-in page, with someone signed in since outs
   expect(await screen.findByText("who:Kailash Mehta")).toBeInTheDocument();
   expect(localStorage.getItem("gst_access_token")).toBe("b");
   expect(sessionStorage.getItem("gst3.signedOutHere")).toBeNull();
+});
+
+// Ruling 44: a restore reads the mark as a reload does, and a page with no sign-in of its own signs nothing out
+
+test("back from the cache with the mark set meanwhile, a newer sign-in that the server refuses ends on a plain sign-in page, as a reload does", async () => {
+  window.history.pushState({}, "", "/sales/31"); // the client reports the browser's address
+  setTokens("a", "r");
+  // Rakesh's token works; a later one doesn't, and neither does its refresh
+  api.defaults.adapter = ((config) => (config.headers.Authorization === "Bearer a" ? reply(config, 200, ME) : reply(config, 401, { detail: "Token is invalid or expired" }))) as AxiosAdapter;
+  vi.spyOn(axios, "post").mockRejectedValue(new AxiosError("x", "401", {} as InternalAxiosRequestConfig, null, { status: 401, data: { detail: "Token is blacklisted" }, statusText: "", headers: {}, config: {} } as never));
+  const router = mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  // while this page sat in the cache, this tab signed out on purpose (in a fresh copy of the app: the mark), then someone
+  // signed in on v2, which shares the tokens but not the mark, and the server has since refused that sign-in
+  sessionStorage.setItem("gst3.signedOutHere", "1");
+  setTokens("b", "rb");
+  backFromCache();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+  expect(router.state.location.search).toBe(""); // whoever signs in next starts at home, not on Rakesh's page
+  // a reload of this tab says the same
+  reload();
+  const again = mountRouted(["/sales/31"]);
+  await waitFor(() => expect(again.state.location.pathname).toBe("/login"));
+  expect(again.state.location.search).toBe("");
+});
+
+test("a sign-out this tab couldn't write down still holds after a restore from the cache: the next link opened here starts plain", async () => {
+  setTokens("a", "r");
+  server({ a: ME });
+  // this tab's storage refuses the mark: the sign-out is remembered for this page only
+  const tabStorage = Object.getPrototypeOf(sessionStorage) as Storage;
+  const write = tabStorage.setItem;
+  vi.spyOn(tabStorage, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+    if (this === sessionStorage) throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    write.call(this, key, value);
+  });
+  const router = mountRouted(["/sales/31"]);
+  expect(await screen.findByText("who:Rakesh Soni")).toBeInTheDocument();
+  await act(async () => { screen.getByText("out").click(); });
+  expect(await screen.findByText("at:/login")).toBeInTheDocument();
+  expect(sessionStorage.getItem("gst3.signedOutHere")).toBeNull();
+  backFromCache(); // nothing stored says "on purpose", and that mustn't undo what this page knows
+  await act(async () => { await router.navigate("/customers/9"); }); // the next person opens a link in this tab
+  await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+  expect(router.state.location.search).toBe("");
+});
+
+test("a page that never had a sign-in to check signs nothing out and leaves no mark, back from the cache or told by another tab", async () => {
+  server({});
+  localStorage.setItem("gst3.theme", "pearl"); // something stored, but no sign-in
+  mountRouted(["/sales/31"]);
+  expect(await screen.findByText("at:/login?next=%2Fsales%2F31")).toBeInTheDocument();
+  backFromCache(); // nothing changed while it was away
+  localStorage.clear(); // then another tab clears all storage, with no sign-in in it
+  act(() => { window.dispatchEvent(new StorageEvent("storage", { key: null })); });
+  expect(sessionStorage.getItem("gst3.signedOutHere")).toBeNull();
+  // so a link opened later in this tab still goes on to its page after signing in
+  reload();
+  mountRouted(["/customers/9"]);
+  expect(await screen.findByText("at:/login?next=%2Fcustomers%2F9")).toBeInTheDocument();
 });
