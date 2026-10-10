@@ -31,9 +31,10 @@ test("a dialog's own field (initialFocus) has focus straight after opening, unde
   function Probe() {
     const [open, setOpen] = useState(false);
     const field = useRef<HTMLInputElement>(null);
+    // mounted only while open, as search is: a dialog mounted closed would open as an update, which StrictMode doesn't re-run
     return <>
       <Button onClick={() => setOpen(true)}>Open</Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title="Search" initialFocus={field}><input ref={field} aria-label="Name" /></Dialog>
+      {open && <Dialog open onClose={() => setOpen(false)} title="Search" initialFocus={field}><input ref={field} aria-label="Name" /></Dialog>}
     </>;
   }
   // StrictMode runs a new dialog's effects, cleans them up and runs them again, as development builds do
