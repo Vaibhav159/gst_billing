@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { onlineManager, QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { focusManager, onlineManager, QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { AxiosError, type AxiosAdapter, type InternalAxiosRequestConfig } from "axios";
 import { createMemoryRouter, MemoryRouter, RouterProvider, type RouteObject } from "react-router";
 import { api } from "@/core/api/client";
@@ -80,14 +80,18 @@ test("offline, a reply to a request sent before the connection dropped doesn't h
 
 test("offline, a load says you're offline rather than still loading, and shows the data once the internet is back", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  onlineManager.setOnline(false); // as after the browser's "offline" event
+  // as after the browser's "offline" event: TanStack holds requests, and the app knows it's offline
+  onlineManager.setOnline(false);
+  act(() => __setNetState("offline"));
   try {
     let answer: (bills: string) => void = () => {};
     wrap(<Loader fn={() => new Promise<string>((r) => { answer = r; })} />);
     expect(await screen.findByText("You're offline")).toBeInTheDocument();
+    // no Try again: TanStack sends the load by itself once the device is back, and until then refetch() does nothing
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(1500); });
     expect(screen.queryByText(/Still loading/)).not.toBeInTheDocument();
-    act(() => onlineManager.setOnline(true));
+    act(() => { onlineManager.setOnline(true); __setNetState("online"); });
     // back online the request goes out: placeholder rows, and the slow note only after 1.4 s of that, not at once
     expect(await screen.findByText(/^Loading the bills/)).toBeInTheDocument();
     expect(screen.queryByText(/Still loading/)).not.toBeInTheDocument();
@@ -96,6 +100,33 @@ test("offline, a load says you're offline rather than still loading, and shows t
   } finally {
     onlineManager.setOnline(true);
     vi.useRealTimers();
+  }
+});
+
+test("a load TanStack holds between tries while the tab is hidden isn't offline: it stays loading, and carries on when the tab is back", async () => {
+  let tries = 0;
+  // the first try gets no reply (the server is restarting); the second gets the bills
+  api.defaults.adapter = ((config) => (++tries === 1
+    ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config))
+    : Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: "31 bills" }))) as AxiosAdapter;
+  function Retried() {
+    const q = useQuery({ queryKey: ["hidden"], queryFn: async () => (await api.get<string>("sales/")).data, retry: 1, retryDelay: 10 });
+    return <QueryView query={q} what="the bills">{(d) => <p>got {d}</p>}</QueryView>;
+  }
+  focusManager.setFocused(false); // the person is on another tab
+  try {
+    const client = new QueryClient();
+    render(<QueryClientProvider client={client}><MemoryRouter><Retried /></MemoryRouter></QueryClientProvider>);
+    // the second try is due, and TanStack holds it until the tab is back
+    await waitFor(() => expect(client.getQueryCache().find({ queryKey: ["hidden"] })?.state.fetchStatus).toBe("paused"));
+    await act(() => new Promise<void>((r) => { setTimeout(r, 20); })); // and the page has drawn it
+    expect(tries).toBe(1);
+    expect(screen.queryByText("You're offline")).not.toBeInTheDocument();
+    expect(screen.getByText(/^Loading the bills/)).toBeInTheDocument();
+    act(() => focusManager.setFocused(true));
+    expect(await screen.findByText("got 31 bills")).toBeInTheDocument();
+  } finally {
+    focusManager.setFocused(undefined);
   }
 });
 
