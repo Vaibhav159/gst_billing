@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { AxiosError } from "axios";
@@ -10,7 +10,7 @@ import type { AxiosAdapter } from "axios";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";
 import { appRoutes } from "@/core/router/routes";
-import { ToastProvider } from "@/core/ui";
+import { Sheet, ToastProvider } from "@/core/ui";
 import { DesktopShell } from "./DesktopShell";
 import { FirmPicker } from "./ScopePickers";
 import { ScopeProvider, useScope, type FirmId } from "@/core/scope";
@@ -628,6 +628,22 @@ test("with a menu or a dialog open, shortcuts wait, except Ctrl K", async () => 
   expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
   await userEvent.keyboard("{Alt>}n{/Alt}");
   expect(screen.getByTestId("where")).toHaveTextContent(/^\/sales$/);
+});
+
+test("a key pressed while a sheet is still animating closed works", async () => {
+  function Filters() {
+    const [open, setOpen] = useState(false);
+    return <><Where /><button type="button" onClick={() => setOpen(true)}>Filter</button><Sheet open={open} onClose={() => setOpen(false)} title="Filter bills"><p>Owing</p></Sheet></>;
+  }
+  renderApp(<ScopeProvider><DesktopShell openPalette={() => {}}><Filters /></DesktopShell></ScopeProvider>, { path: "/sales" });
+  await userEvent.click(screen.getByRole("button", { name: "Filter" }));
+  const sheet = await screen.findByRole("dialog", { name: "Filter bills" });
+  fireEvent.keyDown(sheet, { key: "Escape" });
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "n", code: "KeyN", altKey: true });
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/new");
+  // and the key landed while the sheet was on its way out: it still is
+  expect(sheet).toBeInTheDocument();
+  expect(sheet).toHaveAttribute("data-closing");
 });
 
 test("a key pressed while a menu or dialog is still animating closed works", async () => {

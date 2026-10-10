@@ -199,6 +199,20 @@ test("with a real layout, focus starts in the first field (not Close) and Tab wr
   }
 });
 
+test("a closing sheet says so, as a closing dialog does, on desktop and on phones", async () => {
+  function Probe() { const [open, setOpen] = useState(true); return <Sheet open={open} onClose={() => setOpen(false)} title="Filter customers"><p>Owing</p></Sheet>; }
+  for (const onPhone of [false, true]) {
+    phone(onPhone);
+    const { unmount } = wrap(<Probe />);
+    const sheet = screen.getByRole("dialog", { name: "Filter customers" });
+    expect(sheet).not.toHaveAttribute("data-closing");
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    expect(sheet, onPhone ? "phone" : "desktop").toHaveAttribute("data-closing");
+    await waitFor(() => expect(sheet).not.toBeInTheDocument());
+    unmount();
+  }
+});
+
 test("a sheet is a side panel on desktop and a bottom sheet on phones", () => {
   const ui = <Sheet open onClose={() => {}} title="Filter customers" width={420}><p>Owing</p></Sheet>;
   const { unmount } = wrap(ui);

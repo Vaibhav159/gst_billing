@@ -7,7 +7,7 @@ import type { AxiosAdapter } from "axios";
 import { api } from "@/core/api/client";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { AppRoutes } from "@/App";
-import { Page, ToastProvider, useToast, type ToastApi } from "@/core/ui";
+import { Page, Sheet, ToastProvider, useToast, type ToastApi } from "@/core/ui";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { stubAuth } from "@/test/render";
 import { PageFrame } from "./PageFrame";
@@ -432,4 +432,39 @@ test("every v2 address lands on its own new address; v2's number link stays a pa
   const router = mount("/billing/invoice/kgh/2026-27/31");
   await screen.findByRole("heading", { level: 1, name: "Bills" });
   expect(router.state.location.pathname).toBe("/billing/invoice/kgh/2026-27/31");
+});
+
+test("a sheet on its way out as the page changes doesn't keep focus from the new page's title", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  // a sheet outside the page (the shell's, as search will be): picking a place closes it and opens that page
+  function WithSheet() {
+    const [open, setOpen] = useState(false);
+    const navigate = useNavigate();
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>Go to</button>
+        <Outlet />
+        <Sheet open={open} onClose={() => setOpen(false)} title="Go to">
+          <button type="button" onClick={() => { setOpen(false); navigate("/customers"); }}>Customers</button>
+        </Sheet>
+      </>
+    );
+  }
+  try {
+    const router = createMemoryRouter([{ element: <WithSheet />, children: [{ element: <AppLayout />, children: [
+      { path: "/sales", element: <Page title="Bills">The bills</Page> },
+      { path: "/customers", element: <Page title="Customers">The customers</Page> },
+    ] }] }], { initialEntries: ["/sales"] });
+    render(inApp(router));
+    await screen.findByRole("heading", { level: 1, name: "Bills" });
+    afterADoubleTap();
+    fireEvent.click(screen.getByRole("button", { name: "Go to" }));
+    const sheet = await screen.findByRole("dialog", { name: "Go to" });
+    afterADoubleTap();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Customers" }));
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Customers" });
+    await waitFor(() => expect(h1).toHaveFocus());
+  } finally {
+    vi.useRealTimers();
+  }
 });

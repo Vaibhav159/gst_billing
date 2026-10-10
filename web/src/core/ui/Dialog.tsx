@@ -91,7 +91,8 @@ export function Sheet({ open, onClose, title, description, children, footer, wid
     <Portal>
       <div onClickCapture={guard} className={cn("absolute inset-0 z-sheet flex justify-end", closing ? "pointer-events-none" : "pointer-events-auto")}>
         <div className={cn("absolute inset-0 bg-scrim/50", closing ? "anim-fade-out" : "anim-fade")} onClick={onClose} aria-hidden="true" />
-        <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id + "t"} tabIndex={-1} style={{ width }}
+        {/* data-closing while it animates out, as Dialog: the shortcuts and the page frame pass over a sheet on its way out */}
+        <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id + "t"} tabIndex={-1} style={{ width }} data-closing={closing ? "" : undefined}
           className={cn("relative h-full max-w-full flex flex-col bg-card border-l border-line shadow-pop outline-none", closing ? "anim-side-out" : "anim-side")}>
           <div className="flex items-start gap-3 px-6 pt-5 pb-3 border-b border-rule">
             <div className="flex-1 min-w-0">
