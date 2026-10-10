@@ -8,7 +8,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   AlertTriangle, Ban, Banknote, ChevronDown, FileText, GitMerge, IdCard, Info, MapPin, MessageCircle, MoreHorizontal, MoreVertical, NotebookPen, Pencil, Plus, ReceiptText, RotateCw, Store,
-  Trash2, UserPlus, UserRound,
+  Trash2, UserPlus, UserRound, WifiOff,
 } from "lucide-react";
 import { deleteRefusal, useDeleteCustomer, useItaxBills, useStatement, type Customer, type ItaxBill, type ItaxKind, type LastBill, type StatementBill } from "@/core/api/customers";
 import { useNetwork } from "@/core/api/network";
@@ -113,11 +113,11 @@ function useDetail(c: Customer) {
     fig, allFig, since, last, plabel, prange, options, trend, scope, taxWay, key: `${period}|${firmId}`,
     // the firm picked's, by name ("KIRAN GOLD HOUSE's"); without its name, neutral words, never "the firm picked's"
     whose: typeof firmId === "number" && named ? `${scopeName(firms, firmId)}'s` : "one firm's",
-    // after "It has no bills" / "None": the statement is the firm picked's, so it says whose bills it looked at
-    noneIn: typeof firmId === "number" && scope ? ` in ${scope}` : "",
+    // after "It has no bills", "None" and "Has 3 bills": the statement is the firm picked's, so it says whose bills it looked at
+    inScope: typeof firmId === "number" && scope ? ` in ${scope}` : "",
     usual: firms.filter((f) => c.businesses.includes(f.id)),
-    // why what needs the bills is off until they come
-    away: offline ? "Needs the internet" : "Waits for the bills to load",
+    // why what needs the bills (Delete) is off until they come: what happened, and what to do
+    away: offline ? "Needs the internet" : st.isError ? "The bills didn't load. Use Try again." : "Waits for the bills to load",
   };
 }
 type D = ReturnType<typeof useDetail>;
@@ -136,7 +136,7 @@ function Detail({ c }: { c: Customer }) {
   return (
     <>
       {isPhone ? <PhoneDetail c={c} d={d} openDelete={() => setDel(true)} /> : <DesktopDetail c={c} d={d} openDelete={() => setDel(true)} />}
-      <DeleteCustomer c={c} bills={`None${d.noneIn}`} open={del} onClose={() => setDel(false)} />
+      <DeleteCustomer c={c} bills={`None${d.inScope}`} open={del} onClose={() => setDel(false)} />
     </>
   );
 }
@@ -176,14 +176,20 @@ function ComplianceNotes({ c, bills }: { c: Customer; bills: ItaxBill[] }) {
   );
 }
 
-/** The income-tax notes, or, when the checks couldn't load, a note that says so: a page with no notes never reads as nothing to fix. */
+/**
+ * The income-tax notes, or, when the checks couldn't load, a note that says so: a page with no notes never reads as
+ * nothing to fix. Offline, a check that failed or waits says so, with no Try again (as StaleNote and QueryView): TanStack
+ * asks again by itself once the device is back.
+ */
 function IncomeTaxNotes({ c, q }: { c: Customer; q: D["itax"] }) {
+  const offline = useNetwork() === "offline";
   if (q.data) return <ComplianceNotes c={c} bills={q.data} />;
-  if (!q.isError) return null;
+  if (!q.isError && !(offline && q.isPaused)) return null;
   return (
-    <Banner tone="muted" icon={AlertTriangle} title="Couldn't check their bills for income tax"
-      actions={<Button size="sm" icon={RotateCw} loading={q.isFetching} onClick={() => void q.refetch()}>Try again</Button>}>
-      Bills that need the buyer's PAN or address, or took ₹2,00,000 or more in cash, show here once the check loads.
+    <Banner tone="muted" icon={offline ? WifiOff : AlertTriangle} title="Couldn't check their bills for income tax"
+      actions={offline ? undefined : <Button size="sm" icon={RotateCw} loading={q.isFetching} onClick={() => void q.refetch()}>Try again</Button>}>
+      {offline ? "You're offline, so the check can't run. It runs when you're back online."
+        : "Bills that need the buyer's PAN or address, or took ₹2,00,000 or more in cash, show here once the check loads."}
     </Banner>
   );
 }
@@ -264,7 +270,7 @@ function useMoreItems(c: Customer, d: D, openDelete: () => void): MenuItem[] {
   // customer with bills in another firm, and the dialog says so (Call 11)
   const hint = !owner ? whyNot("customer.merge", "delete customers")
     : !d.ready ? d.away
-      : has ? `Has ${billsWithCancelled(d.allFig.count, d.allFig.cancelled)}. Merge it into the right customer instead.` : `It has no bills${d.noneIn}`;
+      : has ? `Has ${billsWithCancelled(d.allFig.count, d.allFig.cancelled)}${d.inScope}. Merge it into the right customer instead.` : `It has no bills${d.inScope}`;
   return [
     { label: "All bills in Sales", icon: ReceiptText, hint: "With every filter and export there", to: `/sales?customer=${c.id}` },
     { label: "Merge into another customer…", icon: GitMerge, disabled: true, hint: owner ? "Comes in part 4, with Records and admin" : whyNot("customer.merge", "merge customers") },
@@ -308,13 +314,17 @@ function GstinProblem({ c, className }: { c: Customer; className?: string }) {
   );
 }
 
-/** The GSTIN or PAN cell. The PAN shown is the one that counts (the server's `pan`: typed, else the GSTIN's). */
+/**
+ * The GSTIN or PAN cell. The PAN shown is the one that counts (the server's `pan`: typed, else the GSTIN's), under a GSTIN
+ * that doesn't check out too: there it's the one typed, as the app never reads a PAN from such a GSTIN.
+ */
 function IdCell({ c, className }: { c: Customer; className?: string }) {
   const g = checkGstin(c.gst_number);
   const pan = c.pan || (g.status === "valid" ? g.pan : "");
+  const panLine = pan ? <span className="flex items-center gap-1">PAN <span className="tnum">{pan}</span><CopyButton value={pan} label="PAN" /></span> : null;
   const sub = !c.gst_number ? (c.pan ? "No GSTIN" : "Needed for a bill over ₹2,00,000")
-    : g.status === "valid" ? <span className="flex items-center gap-1">PAN <span className="tnum">{pan}</span><CopyButton value={pan} label="PAN" /></span>
-      : <GstinProblem c={c} />;
+    : g.status === "valid" ? panLine
+      : <>{panLine}<GstinProblem c={c} /></>;
   return (
     <InfoCell className={className} label={c.gst_number ? "GSTIN · B2B bills" : "PAN · B2C bills"} sub={sub}>
       {c.gst_number ? <span className="flex items-center gap-1"><span className="tnum">{c.gst_number}</span><CopyButton value={c.gst_number} label="GSTIN" /></span>
@@ -331,7 +341,6 @@ function DesktopDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: ()
   const items = useMoreItems(c, d, openDelete);
   const k = useContact(c, asLast(d.last));
   const walkin = c.type === "walkin";
-  const failed = d.st.isError && !d.loaded;
   return (
     <Page icon={UserRound} breadcrumbs={[{ label: "Customers", to: "/customers" }]} title={c.name}
       context={[walkin ? "Walk-in record" : d.since ? `Customer since ${date(d.since)}` : null, walkin ? null : c.city, d.last ? `last bill ${date(d.last.invoice_date)}` : null].filter(Boolean).join(" · ")}
@@ -339,9 +348,10 @@ function DesktopDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: ()
         {k.items.length ? <Menu title={`WhatsApp ${c.name}`} width={320} items={k.items} trigger={(p) => <Button {...p} icon={MessageCircle} iconRight={ChevronDown}>WhatsApp</Button>} /> : null}
         {walkin ? null : can("customer.edit") ? <ButtonLink to={`/customers/${c.id}/edit`} icon={Pencil}>Edit</ButtonLink> : <Button icon={Pencil} disabled title={whyNot("customer.edit", "change customers")}>Edit</Button>}
         <Menu title={c.name} width={300} items={items} trigger={(p) => <Button {...p} icon={MoreHorizontal}>More</Button>} />
-        {can("bill.create") && !failed
+        {/* a bill needs the customer, not their past bills: it stays on when those didn't load */}
+        {can("bill.create")
           ? <ButtonLink variant="primary" icon={Plus} to={`/sales/new?customer=${c.id}`}>{`New bill for ${c.name}`}</ButtonLink>
-          : <Button variant="primary" icon={Plus} disabled title={can("bill.create") ? d.away : whyNot("bill.create", "make bills")}>{`New bill for ${c.name}`}</Button>}
+          : <Button variant="primary" icon={Plus} disabled title={whyNot("bill.create", "make bills")}>{`New bill for ${c.name}`}</Button>}
       </>}
       banner={<ScopeBanner d={d} />}>
       <WalkinBanner c={c} />
@@ -451,7 +461,6 @@ function PhoneDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: () =
   const items = useMoreItems(c, d, openDelete);
   const k = useContact(c, asLast(d.last));
   const walkin = c.type === "walkin";
-  const failed = d.st.isError && !d.loaded;
   return (
     <Page title={c.name} back="/customers" phoneSubtitle={walkin ? "Cash sales without a name" : [mobileText(c.mobile_number) || "No phone", c.city].filter(Boolean).join(" · ")}
       phoneActions={<>
@@ -459,8 +468,7 @@ function PhoneDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: () =
         <Menu title={c.name} items={walkin ? [...items, { divider: true }, { label: "Statement", icon: FileText, hint: "Bills for a period, as a PDF", to: `/customers/${c.id}/statement` }] : items}
           trigger={(p) => <IconButton {...p} label={`More for ${c.name}`} icon={MoreVertical} />} />
       </>}
-      actionBar={can("bill.create") ? (failed ? <Button variant="primary" size="lg" icon={Plus} disabled title={d.away}>{`New bill for ${walkin ? "walk-in" : firstName(c.name)}`}</Button>
-        : <ButtonLink to={`/sales/new?customer=${c.id}`} variant="primary" size="lg" icon={Plus}>{`New bill for ${walkin ? "walk-in" : firstName(c.name)}`}</ButtonLink>) : null}>
+      actionBar={can("bill.create") ? <ButtonLink to={`/sales/new?customer=${c.id}`} variant="primary" size="lg" icon={Plus}>{`New bill for ${walkin ? "walk-in" : firstName(c.name)}`}</ButtonLink> : null}>
       {walkin ? null : <QuickActions c={c} last={asLast(d.last)} />}
       <ScopeBanner d={d} />
       <WalkinBanner c={c} />

@@ -270,6 +270,33 @@ test("with all firms picked, Export still waits when the list of firms can't loa
   expect(exp).toHaveAttribute("title", "The firms didn't load. Reload the page to export.");
 });
 
+test("with all firms picked, Export also waits while the list of firms loads, and comes on once it has", async () => {
+  localStorage.setItem("gst3.scope.1", "all");
+  let firmsCome = () => {};
+  const held = new Promise<void>((resolve) => { firmsCome = resolve; });
+  serve({ "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
+  mount(routes, ["/customers"]);
+  // the rows come first: all firms needs no firm's name
+  const exp = await screen.findByRole("button", { name: "Export 3 customers" });
+  expect(exp).toBeDisabled();
+  expect(exp).toHaveAttribute("title", "Waits for the list of firms to load");
+  await act(async () => { firmsCome(); });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Export 3 customers" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Export 3 customers" })).toHaveAttribute("title", "A spreadsheet of the customers shown below");
+});
+
+test("on a phone, Export in the ⋯ menu waits for the list of firms too, and says so", async () => {
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  localStorage.setItem("gst3.scope.1", "all");
+  serve({ "GET businesses/": () => new Promise(() => {}), "GET customers/": list() });
+  mount(routes, ["/customers"]);
+  await screen.findByText("3 of 29 match");
+  await userEvent.click(screen.getByRole("button", { name: "Import or export customers" }));
+  const exp = await screen.findByRole("menuitem", { name: /Export 3 customers/ });
+  expect(exp).toBeDisabled();
+  expect(exp).toHaveTextContent("Waits for the list of firms to load");
+});
+
 test("a row that has focus opens with Enter; Enter on a control inside it is that control's", async () => {
   const { router } = (serve({ "GET customers/": list() }), mount(routes, ["/customers"]));
   const row = (await screen.findByText("Anil Gupta")).closest("tr")!;

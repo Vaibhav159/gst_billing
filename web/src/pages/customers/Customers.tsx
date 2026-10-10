@@ -31,6 +31,8 @@ const GST_OPTS = [{ value: "any" as const, label: "All" }, { value: "yes" as con
 const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
 /** Why Export is off when the list of firms didn't load: the file would have no firm to name its figures by. */
 const NO_FIRMS = "The firms didn't load. Reload the page to export.";
+/** Why Export is off while that list is still coming. */
+const FIRMS_LOADING = "Waits for the list of firms to load";
 /**
  * On a desktop the list's states sit in its card, under the toolbar, so a search that fails keeps the search box. There,
  * QueryView's skeleton and failure card drop their own frame, and its notes keep the card's margins.
@@ -48,7 +50,7 @@ function once(rows: CustomerRow[]): CustomerRow[] {
 }
 function useCustomersPage() {
   const { firmId, setFirmId, fy } = useScope();
-  const { firms, error: firmsFailed } = useFirms();
+  const { firms, loading: firmsLoading, error: firmsFailed } = useFirms();
   const net = useNetwork();
   const period = fyPeriod(fy);
   const [q, setQ] = useState("");
@@ -87,8 +89,10 @@ function useCustomersPage() {
     firms, firmId, setFirmId, period, q, setQ, term, gst, setGst, state, setState, usual, setUsual, sort, setSort, list, shown, count, total, summary,
     chips, clearAll, describe, justSaved, ready, offline: net === "offline",
     // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
-    // list of firms it waits even for all firms, as the file names each customer's usual firms
-    exportable: ready && scopeKnown && !firmsFailed,
+    // list of firms (still coming, or failed) it waits even for all firms, as the file names each customer's usual firms
+    exportable: ready && scopeKnown && !firmsLoading && !firmsFailed,
+    // why Export is off once the rows are on screen
+    exportWait: firmsFailed ? NO_FIRMS : FIRMS_LOADING,
     params: filters.firmId === null ? null : customerListParams(filters), scope: scopeName(firms, firmId), home: homeState(firms, firmId),
   };
 }
@@ -197,7 +201,7 @@ function DesktopCustomers({ d }: { d: D }) {
       context={d.ready ? `${plural(d.total, "customer")} · sales figures for ${d.period.label} (${d.period.range}), ${d.scope}` : d.offline ? "Waiting for the internet" : failed ? "The list didn't load" : "Loading the list…"}
       actions={<>
         {can("customer.edit") ? (d.ready ? <ButtonLink to="/import?type=customers" icon={Upload}>Import</ButtonLink> : <Button icon={Upload} disabled title={away}>Import</Button>) : null}
-        <Button icon={Download} onClick={() => void exp.run()} loading={exp.busy} disabled={!d.exportable} title={d.exportable ? "A spreadsheet of the customers shown below" : d.ready ? NO_FIRMS : away}>{d.ready ? `Export ${plural(d.count, "customer")}` : "Export"}</Button>
+        <Button icon={Download} onClick={() => void exp.run()} loading={exp.busy} disabled={!d.exportable} title={d.exportable ? "A spreadsheet of the customers shown below" : d.ready ? d.exportWait : away}>{d.ready ? `Export ${plural(d.count, "customer")}` : "Export"}</Button>
         {can("customer.edit") && !failed
           ? <ButtonLink to="/customers/new?from=list" variant="primary" icon={UserPlus}>Add customer</ButtonLink>
           : <Button variant="primary" icon={UserPlus} disabled title={failed ? away : whyNot("customer.edit", "add customers")}>Add customer</Button>}
@@ -290,7 +294,7 @@ function PhoneCustomers({ d }: { d: D }) {
     <Page title="Customers" phoneSubtitle={d.ready ? `${plural(d.total, "customer")} · ${d.period.label} sales · ${scopeName(d.firms, d.firmId, true)}` : d.offline ? "Waiting for the internet" : failed ? "The list didn't load" : "Loading…"}
       phoneActions={<Menu title="Customers" items={[
         { label: "Import customers", icon: Upload, disabled: !can("customer.edit"), hint: can("customer.edit") ? "From a spreadsheet, with a check before anything is added" : whyNot("customer.edit", "import customers"), onSelect: () => navigate("/import?type=customers") },
-        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.ready ? NO_FIRMS : "Waits for the list to load", onSelect: () => void exp.run() },
+        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.ready ? d.exportWait : "Waits for the list to load", onSelect: () => void exp.run() },
       ]} trigger={(p) => <IconButton {...p} label="Import or export customers" icon={MoreVertical} />} />}
       actionBar={can("customer.edit") ? (failed ? <Button variant="primary" size="lg" icon={UserPlus} disabled title="Needs the internet">Add customer</Button> : <ButtonLink to="/customers/new?from=list" variant="primary" size="lg" icon={UserPlus}>Add customer</ButtonLink>) : null}>
       <SearchInput value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers" data-page-search="" />

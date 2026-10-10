@@ -64,6 +64,24 @@ test("the customer's details, and the year's figures worked out from one all-tim
   expect(statementCalls(calls)).toHaveLength(1); // the switch asks nothing
 });
 
+test("the period switch moves with the arrow keys: Right and Left move the check and the focus", async () => {
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  await screen.findByText("Sales · FY 2026-27");
+  const fy = screen.getByRole("radio", { name: /FY 2026-27/ });
+  const all = screen.getByRole("radio", { name: /All time/ });
+  act(() => fy.focus());
+  await userEvent.keyboard("{ArrowRight}");
+  expect(all).toHaveAttribute("aria-checked", "true");
+  expect(fy).toHaveAttribute("aria-checked", "false");
+  await waitFor(() => expect(all).toHaveFocus());
+  expect(screen.getByText("Sales · All time")).toBeInTheDocument();
+  await userEvent.keyboard("{ArrowLeft}");
+  expect(fy).toHaveAttribute("aria-checked", "true");
+  await waitFor(() => expect(fy).toHaveFocus());
+  expect(screen.getByText("Sales · FY 2026-27")).toBeInTheDocument();
+});
+
 test("another customer opened from here (search) starts at the year again, not at the last one's period", async () => {
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET customers/30/": { ...ANIL, id: 30, name: "Rekha Soni" }, "GET customers/30/statement/": statement([]), "GET sales/": flags([]) });
   // Rekha first, so her record is on hand when she's opened again: her page shows at once, with no loading in between
@@ -166,6 +184,34 @@ test("income-tax checks that can't load say so, with Try again", async () => {
   expect(screen.queryByText("Couldn't check their bills for income tax")).not.toBeInTheDocument();
 });
 
+test("offline, a failed income-tax check says the device is offline and offers no Try again (it runs again by itself)", async () => {
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": () => ({ status: 503 }) });
+  mount(routes, ["/customers/7"]);
+  expect(await screen.findByText("Couldn't check their bills for income tax")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  onlineManager.setOnline(false);
+  act(() => __setNetState("offline"));
+  expect(screen.getByText("You're offline, so the check can't run. It runs when you're back online.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+});
+
+test("opened offline, the income-tax check that waits for the internet says so: no notes never reads as nothing to fix", async () => {
+  let customerComes = () => {};
+  const held = new Promise<void>((resolve) => { customerComes = resolve; });
+  const calls = serve({ "GET customers/7/": async () => { await held; return { status: 200, data: ANIL }; }, "GET customers/7/statement/": statement(), "GET sales/": flags([[1, "KGH/2026-27/18", "pan"]]) });
+  mount(routes, ["/customers/7"]);
+  await waitFor(() => expect(calls.some((c) => c.url === "customers/7/")).toBe(true));
+  // the connection drops while the customer is on its way: the checks, asked once it comes, wait for the internet
+  onlineManager.setOnline(false);
+  await act(async () => { customerComes(); });
+  expect(await screen.findByRole("heading", { level: 1, name: "Anil Gupta" })).toBeInTheDocument();
+  // (the reply that landed marks the server reachable; a real browser that's offline stays offline, jsdom's never is)
+  act(() => __setNetState("offline"));
+  expect(screen.getByText("You're offline, so the check can't run. It runs when you're back online.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  expect(calls.some((c) => c.url === "sales/")).toBe(false);
+});
+
 test("the walk-in record says what it is: no Edit, Add a customer, and its big bills ask for the buyer", async () => {
   const WALKIN = { ...ANIL, id: 1, name: "Walk-in Customer", customer_type: "walkin", type: "walkin", mobile_number: "", city: "" };
   serve({ "GET customers/1/": WALKIN, "GET customers/1/statement/": statement(), "GET sales/": flags([[9, "KGH/2026-27/9", "walkin_limit"]]) });
@@ -229,6 +275,15 @@ test("a GSTIN that fails its check character shows as a problem to fix, with the
   expect(await screen.findByText("GSTIN · B2B bills")).toBeInTheDocument();
   expect(screen.getByText("Its last character doesn't match, so you may have mistyped one character.")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Check the GSTIN" })).toHaveAttribute("href", "/customers/7/edit?focus=gstin");
+});
+
+test("a GSTIN that fails its check character keeps the PAN typed for them in view, with Copy", async () => {
+  serve({ "GET customers/7/": { ...ANIL, gst_number: "08AAAAA0000A1Z5", pan_number: "AAAAA0000A", pan: "AAAAA0000A", type: "business" }, "GET customers/7/statement/": statement([]), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  const cell = (await screen.findByText("GSTIN · B2B bills")).parentElement!;
+  expect(cell).toHaveTextContent("PAN AAAAA0000A");
+  expect(within(cell).getByRole("button", { name: "Copy PAN AAAAA0000A" })).toBeInTheDocument();
+  expect(cell).toHaveTextContent("Its last character doesn't match, so you may have mistyped one character.");
 });
 
 test("on a phone too, a GSTIN that fails its check character says so, with Check the GSTIN", async () => {
@@ -295,7 +350,28 @@ test("a customer with bills can't be deleted, and says how many", async () => {
   await userEvent.click(screen.getByRole("button", { name: "More" }));
   const del = await screen.findByRole("menuitem", { name: /Delete customer/ });
   expect(del).toBeDisabled();
-  expect(del).toHaveTextContent("Has 3 bills and 1 cancelled. Merge it into the right customer instead.");
+  // the statement is the firm picked's, so the count says whose bills it is, as "It has no bills in …" does
+  expect(del).toHaveTextContent("Has 3 bills and 1 cancelled in KIRAN GOLD HOUSE. Merge it into the right customer instead.");
+});
+
+test("when the bills can't load, Delete says what happened and how to fix it, and New bill stays on", async () => {
+  serve({ "GET customers/30/": { ...ANIL, id: 30, name: "Rekha Soni" }, "GET customers/30/statement/": () => ({ status: 503 }), "GET sales/": flags([]) });
+  mount(routes, ["/customers/30"]);
+  expect(await screen.findByText("Couldn't load Rekha Soni's bills")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "New bill for Rekha Soni" })).toHaveAttribute("href", "/sales/new?customer=30");
+  await userEvent.click(screen.getByRole("button", { name: "More" }));
+  const del = await screen.findByRole("menuitem", { name: /Delete customer/ });
+  expect(del).toBeDisabled();
+  expect(del).toHaveTextContent("The bills didn't load. Use Try again.");
+  expect(del).not.toHaveTextContent("Waits for the bills to load");
+});
+
+test("on a phone too, New bill stays on when the bills can't load", async () => {
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  serve({ "GET customers/30/": { ...ANIL, id: 30, name: "Rekha Soni" }, "GET customers/30/statement/": () => ({ status: 503 }), "GET sales/": flags([]) });
+  mount(routes, ["/customers/30"]);
+  expect(await screen.findByText("Couldn't load Rekha Soni's bills")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "New bill for Rekha" })).toHaveAttribute("href", "/sales/new?customer=30");
 });
 
 test("the server's refusal of a delete (bills in another firm) is said in the dialog", async () => {
