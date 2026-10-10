@@ -1,7 +1,7 @@
 // Customers: everyone the firms bill, with this year's sales in the firm picked (PROTO pages/records/Customers.jsx).
 // Every figure names its period and firms, and the summary line follows the filters. No balances: the app doesn't
 // record payments received. The duplicate-customers banner ("Review and merge") comes with Merge in part 4.
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowUpDown, Download, MoreVertical, Search, SlidersHorizontal, Upload, UserPlus, Users, X } from "lucide-react";
 import {
@@ -13,7 +13,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, dateShort, mobileText, plural, todayIST } from "@/core/format";
 import { stateOptions, stateTitle } from "@/core/ids";
-import { cancelledNote, failText } from "@/core/sales/words";
+import { failText } from "@/core/sales/words";
 import { useFirms, useScope } from "@/core/scope";
 import {
   Badge, Button, ButtonLink, Card, EmptyState, Field, IconButton, ListRow, ListSkeleton, Menu, Money, Page, QueryView, SearchInput, Segmented, Select, Sheet, StaleNote,
@@ -22,7 +22,7 @@ import {
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { customersCsv } from "./exportCsv";
-import { downloadFile, fyPeriod, homeState, scopeName, tableState, useJustSaved } from "./lib";
+import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, tableState, useJustSaved } from "./lib";
 import { CustomerRowMenu, FirmChips, MoreButton } from "./listParts";
 import { WhyNote } from "./parts";
 
@@ -37,11 +37,6 @@ const NO_FIRMS = "The firms didn't load. Reload the page to export.";
  */
 const IN_CARD = "[&>.card]:border-0 [&>.card]:rounded-none [&>.rounded-card]:mx-5 [&>.rounded-card]:mb-3 [&>p]:px-5 [&>p]:pb-4";
 
-/** " · 1 cancelled bill not counted" after the bills, or "" with none (Selling's words, @/core/sales/words). */
-function notCounted(n: number): string {
-  const note = cancelledNote(n, "not counted");
-  return note ? ` · ${note}` : "";
-}
 /** Each customer once: one can come again on the next page when the order moved between the two asks. */
 function once(rows: CustomerRow[]): CustomerRow[] {
   const seen = new Set<number>();
@@ -51,11 +46,6 @@ function once(rows: CustomerRow[]): CustomerRow[] {
     return true;
   });
 }
-/** Enter on a row that has focus (Back puts it there) opens it; Enter on a link or button inside the row is that control's. */
-function openOnEnter(open: () => void) {
-  return (e: KeyboardEvent<HTMLElement>) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); };
-}
-
 function useCustomersPage() {
   const { firmId, setFirmId, fy } = useScope();
   const { firms, error: firmsFailed } = useFirms();

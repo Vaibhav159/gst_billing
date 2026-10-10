@@ -1,11 +1,12 @@
 // Small helpers the customer screens share (PROTO pages/records/data.js and shared.jsx). What other plans use as well has
 // its home in core: PAY, PAY_SHORT, cancelledNote and failText in @/core/sales/words, useDebounced in @/core/useDebounced.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useCustomer, useCustomerSearch, type Customer, type CustomerRow } from "@/core/api/customers";
 import { problemOf } from "@/core/api/errors";
 import { mobileText, plural, rangeLabel, todayIST } from "@/core/format";
 import { checkGstin, GST_STATES, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
+import { cancelledNote } from "@/core/sales/words";
 import type { Firm, FirmId } from "@/core/scope";
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
@@ -41,6 +42,15 @@ export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 /** "14 bills and 1 cancelled". */
 export function billsWithCancelled(active: number, cancelled: number): string {
   return `${plural(active, "bill")}${cancelled ? ` and ${cancelled} cancelled` : ""}`;
+}
+/** " · 1 cancelled bill not counted" after the bills, or "" with none (Selling's words, @/core/sales/words). */
+export function notCounted(n: number): string {
+  const note = cancelledNote(n, "not counted");
+  return note ? ` · ${note}` : "";
+}
+/** Enter on a row that has focus (Back puts it there) opens it; Enter on a link or button inside the row is that control's. */
+export function openOnEnter(open: () => void) {
+  return (e: ReactKeyboardEvent<HTMLElement>) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); };
 }
 /** "98290 41122 · GSTIN 08AB… · Udaipur, Rajasthan", or the walk-in's line (PROTO sales/lib.js customerLine). */
 export function customerLine(c: Pick<Customer, "type" | "mobile_number" | "gst_number" | "city" | "state_name">): string {
