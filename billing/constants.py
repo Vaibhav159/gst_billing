@@ -63,6 +63,12 @@ BILL_ACTIVE = "active"
 BILL_CANCELLED = "cancelled"
 BILL_STATUS_CHOICES = [(BILL_ACTIVE, "Active"), (BILL_CANCELLED, "Cancelled")]
 
+# How a bill was sent: WhatsApp from a desktop (wa.me), or the phone's share sheet.
+SENT_VIA_CHOICES = [("whatsapp", "WhatsApp"), ("share", "Share sheet")]
+
+# A customer's type (v3). "" infers it: business with a GSTIN, else person.
+CUSTOMER_TYPES = [("walkin", "Walk-in"), ("person", "Person"), ("business", "Business")]
+
 # The line keys v2's audit log keeps for a deleted bill. v2's undo recreates a
 # line from every one of them, so they never grow (S§0.3); v3 keeps the rest of
 # a deleted bill in the bin (BinnedInvoice.data).

@@ -1,4 +1,5 @@
 import base64
+import re
 from decimal import Decimal
 
 from rest_framework import serializers
@@ -15,6 +16,12 @@ def signed_url(file):
     it, since bill scans became private.
     """
     return sign_media_path(file.name) if file else None
+
+
+PAN_SHAPE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+# Contract 6.2's words, for whatever is wrong with a PAN or a customer type (Ruling 1A-5).
+PAN_WORDS = "A PAN has 10 characters: 5 letters, 4 digits, then a letter (like ABCDE1234F)."
+TYPE_WORDS = "Choose walk-in, person or business."
 
 
 def _gst_number(value):
@@ -76,13 +83,30 @@ class CustomerSerializer(serializers.ModelSerializer):
         max_digits=12, decimal_places=2, read_only=True
     )
     invoice_count = serializers.IntegerField(read_only=True)
+    # v3: the effective type (walkin, person, business) and the PAN on record.
+    type = serializers.CharField(source="kind", read_only=True)
+    pan = serializers.CharField(read_only=True)
 
     class Meta:
         model = Customer
         fields = "__all__"
         # M2M to Business is optional on create — many customers are added
         # without immediately linking to a business
-        extra_kwargs = {"businesses": {"required": False}}
+        extra_kwargs = {
+            "businesses": {"required": False},
+            "customer_type": {"error_messages": {"invalid_choice": TYPE_WORDS, "null": TYPE_WORDS}},
+            # Too long (a GSTIN typed in the PAN box) or not text: what a PAN is, never DRF's words.
+            "pan_number": {"error_messages": {"max_length": PAN_WORDS, "invalid": PAN_WORDS}},
+        }
+
+    def validate_pan_number(self, value):
+        """Stored upper-cased, and only when it is a PAN: v2's form checked the same in the browser."""
+        if not value or not value.strip():
+            return value
+        pan = value.strip().upper()
+        if not PAN_SHAPE.match(pan):
+            raise serializers.ValidationError(PAN_WORDS)
+        return pan
 
     def validate_gst_number(self, value):
         # "NA", "URP" and the like are stored as no GSTIN: kept, they were

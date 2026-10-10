@@ -19,7 +19,7 @@ from billing.models import BinnedInvoice, Invoice
 from billing.params import fy_param
 from billing.period_lock import closed_months
 from billing.services.bin import bin_bill, bin_row, live_bin, restore_from_bin
-from billing.services.sales import cancel_bill
+from billing.services.sales import cancel_bill, mobile_of, record_send, sent_block
 from billing.text import person, stamp
 
 from .permissions import V3Permission
@@ -46,9 +46,9 @@ SAY_WHY = "Say why in a few words. It goes into the audit log."
 
 
 class Reason(serializers.CharField):
-    """A reason refused in the contract's one sentence, `words`, whatever is wrong with it: missing
-    when it's needed, null, blank, not text, too long or a null character. Never DRF's own words
-    (Ruling 1A-5)."""
+    """A reason (or other text, like a send's number) refused in the contract's one sentence, `words`,
+    whatever is wrong with it: missing when it's needed, null, blank, not text, too long or a null
+    character. Never DRF's own words (Ruling 1A-5)."""
 
     def __init__(self, words, **kwargs):
         self.words = words
@@ -73,6 +73,25 @@ class DeleteSerializer(serializers.Serializer):
         return value or ""  # null is no reason
 
 
+SAY_HOW = "Say how it was sent: whatsapp or share."
+TYPE_A_MOBILE = "Type a 10-digit mobile number, like 98290 41122."
+
+
+class SentSerializer(serializers.Serializer):
+    # Missing, null or anything but the two ways gets the one sentence (Ruling 1A-5).
+    via = serializers.ChoiceField(
+        choices=["whatsapp", "share"],
+        error_messages={"required": SAY_HOW, "null": SAY_HOW, "invalid_choice": SAY_HOW},
+    )
+    # Optional; null, not text or a null character is no number either.
+    to = Reason(TYPE_A_MOBILE, required=False, allow_blank=True, default="")
+
+    def validate_to(self, value):
+        if value.strip() and not mobile_of(value):
+            raise serializers.ValidationError(TYPE_A_MOBILE)
+        return mobile_of(value)
+
+
 class Pages(PageNumberPagination):
     page_size = 40
     page_size_query_param = "page_size"
@@ -88,7 +107,13 @@ class SalesViewSet(viewsets.GenericViewSet):
     permission_classes = [V3Permission]
     queryset = Invoice.objects.sales().select_related("customer", "business")
     lookup_value_regex = r"\d+"
-    v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete"}
+    v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete", "sent": "bill.send"}
+
+    @action(detail=True, methods=["post"])
+    def sent(self, request, pk=None):
+        data = valid(SentSerializer, request.data)
+        invoice = record_send(self.get_object(), request.user, data["via"], data["to"])
+        return Response({"id": invoice.pk, "sent": sent_block(invoice)})
 
     def destroy(self, request, pk=None):
         """To the bin with a reason; 200 with the bin row, whose id Restore and Undo use.

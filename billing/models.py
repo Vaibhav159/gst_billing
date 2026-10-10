@@ -21,11 +21,13 @@ from billing.constants import (
     BILL_CANCELLED,
     BILL_STATUS_CHOICES,
     BILLING_DECIMAL_PLACE_PRECISION,
+    CUSTOMER_TYPES,
     GST_CODE,
     GST_TAX_RATE,
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_OUTWARD,
+    SENT_VIA_CHOICES,
     STATE_CHOICES,
     UNIT_CHOICES,
     UNIT_GMS,
@@ -233,6 +235,12 @@ class Customer(AbstractBaseModel):
         null=True,
         choices=STATE_CHOICES,
     )
+    # v3 (part 1). Blank infers the type: business with a GSTIN, else person.
+    customer_type = models.CharField(
+        max_length=10, blank=True, default="", db_default="", choices=CUSTOMER_TYPES,
+        help_text="Walk-in (the counter's record for cash sales without a name), person or business.",
+    )
+    city = models.CharField(max_length=100, blank=True, default="", db_default="")
 
     def __str__(self):
         return self.name
@@ -244,6 +252,23 @@ class Customer(AbstractBaseModel):
     @property
     def state_code(self):
         return get_state_code_from_state_name(self.state_name)
+
+    @property
+    def kind(self):
+        """The customer's effective type: walkin, person or business (customer_type, else inferred)."""
+        from billing.tax_rules import has_gstin
+
+        return self.customer_type or ("business" if has_gstin(self.gst_number) else "person")
+
+    @property
+    def pan(self):
+        """The PAN on record: typed, or read from a GSTIN that passes its check digit (Rule 114B)."""
+        from billing.gstin import validate
+
+        if (self.pan_number or "").strip():
+            return self.pan_number.strip().upper()
+        gstin = (self.gst_number or "").strip().upper()
+        return gstin[2:12] if gstin and validate(gstin)[0] else ""
 
 
 class InvoiceQuerySet(models.QuerySet):
@@ -336,6 +361,14 @@ class Invoice(AbstractBaseModel):
     # The id of the cancelled bill this one makes again. A plain id, not a foreign key: that
     # bill may sit in the bin and come back under the same id (design decision 6).
     replaces = models.IntegerField(null=True, blank=True)
+    # Sends: the first, the latest, how many, how, and a one-off number (a walk-in's) that is
+    # never saved to the customer. Columns, not a child table: a child row would trip v2's
+    # deletes, and "not sent yet" needs only sent_at IS NULL.
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    sent_count = models.PositiveIntegerField(default=0, db_default=0)
+    sent_to = models.CharField(max_length=15, blank=True, default="", db_default="")
+    sent_via = models.CharField(max_length=10, blank=True, default="", db_default="", choices=SENT_VIA_CHOICES)
 
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
@@ -368,7 +401,8 @@ class Invoice(AbstractBaseModel):
 
     # Fields only v3's own endpoints write. v2's serializers show them read-only, and v2's
     # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
-    V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces")
+    V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces",
+                 "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via")
 
     @classmethod
     def v2_columns(cls):
