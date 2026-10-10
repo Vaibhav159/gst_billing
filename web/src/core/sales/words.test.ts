@@ -35,13 +35,13 @@ test("the GST label follows the heads actually stored, slab by slab", () => {
   expect(gstLabel({ ...b, line_count: 0, gst_percents: [] })).toBe("No items");
 });
 
-test("tax lines by slab: CGST and SGST at half the rate, or IGST at the rate", () => {
+test("tax lines by slab: CGST and SGST at half the rate, or IGST at the rate; the head and the rate also apart, for the printed bill's two columns", () => {
   const slab = (gst_percent: string, cgst: number, sgst: number, igst: number) => ({ gst_percent, taxable: 0, cgst, sgst, igst, tax: cgst + sgst + igst });
   expect(taxLines({ slabs: [slab("3", 126820, 126820, 0), slab("0.25", 16371, 16371, 0)], igst: 0, cgst: 143191, sgst: 143191, interstate: false })).toEqual([
-    { key: "c3", label: "CGST 1.5%", value: 126820 }, { key: "s3", label: "SGST 1.5%", value: 126820 },
-    { key: "c0.25", label: "CGST 0.125%", value: 16371 }, { key: "s0.25", label: "SGST 0.125%", value: 16371 },
+    { key: "c3", head: "CGST", rate: "1.5%", label: "CGST 1.5%", value: 126820 }, { key: "s3", head: "SGST", rate: "1.5%", label: "SGST 1.5%", value: 126820 },
+    { key: "c0.25", head: "CGST", rate: "0.125%", label: "CGST 0.125%", value: 16371 }, { key: "s0.25", head: "SGST", rate: "0.125%", label: "SGST 0.125%", value: 16371 },
   ]);
-  expect(taxLines({ slabs: [slab("3", 0, 0, 241190)], igst: 241190, cgst: 0, sgst: 0, interstate: true })).toEqual([{ key: "i3", label: "IGST 3%", value: 241190 }]);
+  expect(taxLines({ slabs: [slab("3", 0, 0, 241190)], igst: 241190, cgst: 0, sgst: 0, interstate: true })).toEqual([{ key: "i3", head: "IGST", rate: "3%", label: "IGST 3%", value: 241190 }]);
 });
 
 test("a rate reads as stored: two decimals, a third only when it isn't 0", () => {

@@ -30,8 +30,11 @@ export const STATUS: Record<StatusFilter, string> = {
 };
 
 type Heads = { igst: number; cgst: number; sgst: number; interstate: boolean };
-/** The heads as stored decide the label: IGST if any was charged, CGST + SGST if they were, else the bill's direction. */
-const storedIgst = (b: Heads) => (b.igst > 0 ? true : b.cgst + b.sgst > 0 ? false : b.interstate);
+/**
+ * The heads as stored decide the label: IGST if any was charged, CGST + SGST if they were, else the bill's direction.
+ * The printed bill's HSN summary reads it too (plan 1E's print model).
+ */
+export const storedIgst = (b: Heads): boolean => (b.igst > 0 ? true : b.cgst + b.sgst > 0 ? false : b.interstate);
 
 /** "3% · CGST+SGST", "IGST 3%", "3% + 0.25% · CGST+SGST" (PROTO sales/lib.js:124-129). */
 export function gstLabel(b: Heads & { line_count: number; gst_percents: string[] }): string {
@@ -53,15 +56,18 @@ export function rateText(rate: string): string {
   return `₹${groupIN(Number(m[1]))}.${frac.endsWith("0") ? frac.slice(0, 2) : frac}`;
 }
 
-/** Tax heads by slab, from what is stored (PROTO sales/lib.js:131-148): [{ key, label: "CGST 1.5%", value }]. */
-export function taxLines(b: Heads & { slabs: Slab[] }): { key: string; label: string; value: number }[] {
+/** A tax row: label "CGST 1.5%", and its head and rate apart, as the printed bill sets them in two columns (plan 1E). */
+export type TaxLine = { key: string; head: "CGST" | "SGST" | "IGST"; rate: string; label: string; value: number };
+/** Tax heads by slab, from what is stored (PROTO sales/lib.js:131-148): [{ key, head: "CGST", rate: "1.5%", label: "CGST 1.5%", value }]. */
+export function taxLines(b: Heads & { slabs: Slab[] }): TaxLine[] {
   const igstBill = storedIgst(b);
-  const out: { key: string; label: string; value: number }[] = [];
+  const out: TaxLine[] = [];
+  const add = (key: string, head: TaxLine["head"], rate: string, value: number) => out.push({ key, head, rate, label: `${head} ${rate}`, value });
   for (const s of b.slabs) {
-    if (s.igst || (igstBill && !s.cgst && !s.sgst)) out.push({ key: `i${s.gst_percent}`, label: `IGST ${s.gst_percent}%`, value: s.igst });
+    if (s.igst || (igstBill && !s.cgst && !s.sgst)) add(`i${s.gst_percent}`, "IGST", `${s.gst_percent}%`, s.igst);
     if (s.cgst || s.sgst || (!igstBill && !s.igst)) {
-      out.push({ key: `c${s.gst_percent}`, label: `CGST ${halfPercent(s.gst_percent)}`, value: s.cgst });
-      out.push({ key: `s${s.gst_percent}`, label: `SGST ${halfPercent(s.gst_percent)}`, value: s.sgst });
+      add(`c${s.gst_percent}`, "CGST", halfPercent(s.gst_percent), s.cgst);
+      add(`s${s.gst_percent}`, "SGST", halfPercent(s.gst_percent), s.sgst);
     }
   }
   return out;
