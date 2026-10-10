@@ -41,6 +41,21 @@ class QuickSearchTest(BaseAPITestCase):
         r = self.client.get(reverse("quick-search"), {"q": "n"})
         self.assertEqual(r.data, {"customers": [], "invoices": [], "products": []})
 
+    def test_customer_hit_carries_mobile_number(self):
+        # v3's search shows the mobile under the name; an add-only field v2 ignores
+        r = self.client.get(reverse("quick-search"), {"q": "Test Customer"})
+        cust = next(c for c in r.data["customers"] if c["name"] == "Test Customer")
+        self.assertEqual(cust["mobile_number"], "9876543211")
+        r = self.client.get(reverse("quick-search"), {"q": "narendra"})
+        cust = next(c for c in r.data["customers"] if c["name"] == "NARENDRA JI QS")
+        self.assertEqual(cust["mobile_number"], "")
+
+    def test_product_hit_carries_gst_tax_rate(self):
+        # the rate as stored, a fraction (0.18 is 18%), for v3's "GST 18%"
+        r = self.client.get(reverse("quick-search"), {"q": "Test Product"})
+        prod = next(p for p in r.data["products"] if p["name"] == "Test Product")
+        self.assertEqual(D(prod["gst_tax_rate"]), D("0.18"))
+
 
 class CaptureInboxTest(BaseAPITestCase):
     def _snap(self, **extra):

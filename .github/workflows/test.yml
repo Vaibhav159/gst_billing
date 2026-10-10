@@ -218,6 +218,123 @@ jobs:
           path: e2e-tests/playwright-report/
           retention-days: 7
 
+  web:
+    name: Web v3 (typecheck + unit tests + build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        working-directory: web
+        run: npm ci
+      - name: Typecheck
+        working-directory: web
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: web
+        run: npm test -- --run
+      - name: Build
+        working-directory: web
+        run: npx vite build
+
+  web-e2e:
+    name: Web v3 E2E (Playwright + WCAG 2.2 AA)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gst_test
+          POSTGRES_PASSWORD: gst_test_local
+          POSTGRES_DB: gst_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gst_test"
+          --health-interval 5s
+    env:
+      DJANGO_SETTINGS_MODULE: gst_billing.production_settings
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: gst_test
+      DB_USER: gst_test
+      DB_PASSWORD: gst_test_local
+      DJANGO_SECRET_KEY: ci-test-key-not-secret
+      DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: "*"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install backend deps
+        run: |
+          pip install uv
+          uv venv
+          # Install from pyproject.toml so CI tracks declared deps automatically.
+          # `setuptools` is needed by some transitive deps that still import
+          # `pkg_resources` at runtime (uv's venv doesn't include it by default).
+          # Pin <81 because setuptools 81+ removed the vendored `pkg_resources`.
+          uv pip install . gunicorn 'setuptools<81'
+      - name: Migrate + seed
+        run: |
+          source .venv/bin/activate
+          mkdir -p logs
+          python manage.py migrate --noinput
+          python manage.py shell -c "
+          from django.contrib.auth.models import User
+          from billing.models import Business, Customer, Product
+          u, _ = User.objects.get_or_create(username='testuser', defaults={'is_superuser': True, 'is_staff': True})
+          u.set_password('testpass2026'); u.save()
+          b, _ = Business.objects.get_or_create(name='TEST JEWELLERS', defaults={'gst_number':'08TEST1234A1ZA','address':'Test','state_name':'RAJASTHAN','pan_number':'TEST1234A','mobile_number':'9999999999'})
+          c, _ = Customer.objects.get_or_create(name='TEST CUSTOMER', defaults={'state_name':'RAJASTHAN','mobile_number':'8888888888'})
+          c.businesses.add(b)
+          Product.objects.get_or_create(name='Gold Ornaments', defaults={'hsn_code':'711319','gst_tax_rate':0.03})
+          "
+      - name: Start backend
+        run: |
+          source .venv/bin/activate
+          gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 2 --daemon
+          sleep 3
+          curl -s -o /dev/null -w "Django: %{http_code}\n" http://localhost:8000/api/profile/ || true
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+      - name: Start v3 (Vite, /api to gunicorn)
+        working-directory: web
+        run: |
+          VITE_DEV_HOST=127.0.0.1 VITE_DEV_PORT=8081 VITE_API_TARGET=http://127.0.0.1:8000 nohup npx vite > /tmp/vite-v3.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8081/ >/dev/null 2>&1 && break; sleep 1; done
+          curl -fs -o /dev/null -w "v3: %{http_code}\n" http://127.0.0.1:8081/ || { cat /tmp/vite-v3.log; exit 1; }
+          curl -s -o /dev/null -w "me via proxy: %{http_code}\n" http://127.0.0.1:8081/api/me/
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e-tests/package-lock.json') }}
+      - name: Install Playwright
+        working-directory: e2e-tests
+        timeout-minutes: 8
+        run: |
+          npm ci
+          npx playwright install chromium
+      - name: Run v3 E2E
+        working-directory: e2e-tests
+        timeout-minutes: 15
+        env:
+          BASE_URL_V3: http://127.0.0.1:8081
+          E2E_USER: testuser
+          E2E_PASS: testpass2026
+          E2E_SEARCH: TEST
+          E2E_SEARCH_HIT: TEST CUSTOMER
+        run: npx playwright test -c v3.config.js
+
   deps-audit:
     # Dependabot bumps versions monthly; nothing audited what was already
     # deployed. Six shipped packages carried published advisories (audit D6).
@@ -238,6 +355,11 @@ jobs:
           pip-audit -r /tmp/req.txt --disable-pip --strict
       - name: npm audit the shipped frontend deps
         working-directory: sweet-rebuild-suite-main
+        run: |
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+      - name: npm audit the v3 web deps
+        working-directory: web
         run: |
           npm ci --ignore-scripts
           npm audit --omit=dev --audit-level=high

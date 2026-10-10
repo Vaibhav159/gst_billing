@@ -20,7 +20,7 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear, Trim
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -36,16 +36,20 @@ from rest_framework.views import APIView
 
 from billing.cache import invalidate
 from billing.constants import (
+    BILL_CANCELLED,
     DOWNLOAD_SHEET_FIELD_NAMES,
     INVOICE_TYPE_INWARD,
     INVOICE_TYPE_OUTWARD,
+    V2_LINE_SNAPSHOT_FIELDS,
 )
-from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice, LineItem, Product
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, FiledPeriod, Invoice, LineItem, Product
 from billing.period_lock import assert_period_unlocked
 from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
+from billing.services.bin import bin_bill, restore_from_bin, v2_snapshot
 from billing.services.bulk_import import run_bulk_import
 from billing.services.line_items import build_line_items
+from billing.services.sales import CANCELLED_WORDS
 from billing.tax_rules import GSTIN_SHAPE, itc_refusal
 from billing.utils import (
     AIInvoiceProcessingError,
@@ -56,8 +60,8 @@ from billing.utils import (
     process_product_csv,
 )
 
-from .mixins import AuditLogMixin, ProtectedDeleteMixin
-from .permissions import AdminOnlyPermission, RoleBasedPermission, get_user_role
+from .mixins import AuditLogMixin, ProtectedDeleteMixin, mark_undone
+from .permissions import AdminOnlyPermission, RoleBasedPermission, V3PermissionIfPlaced, get_user_role, sale_or_purchase
 from .serializers import (
     AuditLogSerializer,
     BusinessSerializer,
@@ -126,8 +130,8 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             return response
 
         # Bulk fetch metrics to avoid N+1 subqueries
-        # Total revenue (outward) and purchases (inward)
-        invoices = Invoice.objects.filter(business_id__in=business_ids)
+        # Total revenue (outward) and purchases (inward); a cancelled bill counts in neither.
+        invoices = Invoice.objects.counted().filter(business_id__in=business_ids)
 
         # Apply date filters
         start_date = request.query_params.get("start_date")
@@ -194,8 +198,8 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         start_date = request.query_params.get("start_date")
         end_date = request.query_params.get("end_date")
 
-        # Base query
-        query = Invoice.objects.all()
+        # Base query: the bills that count (a cancelled one counts in no figure)
+        query = Invoice.objects.counted()
 
         # Apply filters
         if start_date:
@@ -237,7 +241,9 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     audit_entity = "customer"
     queryset = Customer.objects.all().prefetch_related("businesses").order_by("name")
     serializer_class = CustomerSerializer
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "customer.edit", "update": "customer.edit", "partial_update": "customer.edit",
+                  "destroy": "customer.merge"}
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     def perform_create(self, serializer):
@@ -268,8 +274,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         if not customer_ids:
             return response
 
-        # Bulk fetch metrics for all customers on the page
-        invoices = Invoice.objects.filter(customer_id__in=customer_ids)
+        # Bulk fetch metrics for all customers on the page; a cancelled bill counts in neither
+        invoices = Invoice.objects.counted().filter(customer_id__in=customer_ids)
 
         # Apply date filters
         start_date = request.query_params.get("start_date")
@@ -345,8 +351,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         business_id = request.query_params.get("business")
         limit = int(request.query_params.get("limit", 5))
 
-        # Base query - focus on outward invoices (sales)
-        query = Invoice.objects.filter(type_of_invoice="outward")
+        # Base query - focus on outward invoices (sales) that count
+        query = Invoice.objects.counted().filter(type_of_invoice="outward")
 
         # Apply filters
         if start_date:
@@ -505,7 +511,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             moving = list(Invoice.objects.filter(customer=source).select_related("business"))
             for invoice in moving:
                 invoice.customer = target
-                invoice.save()
+                # The customer only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
+                invoice.save(update_fields=["customer", "updated_at"])
             invoices_transferred = len(moving)
             # Every line follows its own invoice (H6). Moving lines by their
             # customer field left a drifted line on the source's invoice behind
@@ -515,6 +522,12 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             )
             for business in source.businesses.all():
                 target.businesses.add(business)
+            # Its deleted bills follow too, under the target's name, which the bin list shows and searches:
+            # the bin protects the customer, and a restore needs one.
+            for binned in BinnedInvoice.objects.filter(customer=source):
+                binned.customer = target
+                binned.data = {**binned.data, "customer_name": target.name}
+                binned.save(update_fields=["customer", "data"])
             source_name = source.name
             source_id = source.pk
             source.delete()
@@ -569,7 +582,7 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
         from django.db.models.functions import Lower
 
         product_names_lower = [name.lower() for name in product_names]
-        line_items = LineItem.objects.annotate(
+        line_items = LineItem.objects.counted().annotate(
             product_name_lower=Lower("product_name")
         ).filter(product_name_lower__in=product_names_lower)
 
@@ -655,8 +668,8 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
             "sort_by", "amount"
         )  # 'amount' or 'quantity'
 
-        # Base query - focus on outward invoices (sales)
-        query = LineItem.objects.filter(invoice__type_of_invoice="outward")
+        # Base query - focus on outward invoices (sales) that count
+        query = LineItem.objects.counted().filter(invoice__type_of_invoice="outward")
 
         # Apply filters
         if start_date:
@@ -736,7 +749,7 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         product = self.get_object()
         rows = (
-            LineItem.objects.filter(product_name=product.name)
+            LineItem.objects.counted().filter(product_name=product.name)
             .values("hsn_code")
             .annotate(
                 lines=Count("id"),
@@ -765,7 +778,16 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
 @method_decorator(csrf_exempt, name="dispatch")
 class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "invoice"
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    # For people placed in a v3 group: a sale needs the bill.* key, a purchase the purchase.* one.
+    v3_actions = {
+        "create": sale_or_purchase("bill.create", "purchase.create"),
+        "update": sale_or_purchase("bill.edit", "purchase.edit"),
+        "partial_update": sale_or_purchase("bill.edit", "purchase.edit"),
+        "update_line_items": sale_or_purchase("bill.edit", "purchase.edit", under="invoice"),
+        "eway_bill": sale_or_purchase("bill.edit", "purchase.edit"),
+        "destroy": sale_or_purchase("bill.delete", "purchase.delete"),
+    }
     queryset = (
         Invoice.objects.all()
         .select_related("customer", "business")
@@ -1031,25 +1053,21 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         assert_period_unlocked(instance.business_id, instance.invoice_date, "delete")
+        if instance.type_of_invoice == INVOICE_TYPE_OUTWARD:
+            # A sale goes to the bin (design decision 6): its number stays used and it can come
+            # back under its own id. The "deleted" audit row is written as before.
+            bin_bill(instance, self.request.user)
+            return
         super().perform_destroy(instance)
 
-    _LINE_SNAPSHOT_FIELDS = (
-        "product_name", "hsn_code", "gst_tax_rate", "quantity", "rate",
-        "cgst", "sgst", "igst", "amount", "unit",
-    )
+    _LINE_SNAPSHOT_FIELDS = V2_LINE_SNAPSHOT_FIELDS
 
     def _full_snapshot(self, instance):
         # The header alone is not an invoice. Line items cascade away on delete
         # and were never recorded, so undoing a deleted invoice recreated a row
         # with the old total and zero lines — an "empty invoice" that counted
         # in dashboards but vanished from GSTR rate and HSN tables.
-        data = super()._full_snapshot(instance)
-        data["line_items"] = [
-            {f: (str(getattr(li, f)) if getattr(li, f) is not None else None)
-             for f in self._LINE_SNAPSHOT_FIELDS}
-            for li in instance.lineitem_set.all()
-        ]
-        return data
+        return v2_snapshot(instance)
 
     @action(detail=True, methods=["post"])
     def update_line_items(self, request, pk=None):
@@ -1267,7 +1285,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         for field in fields:
             if field in request.data:
                 setattr(invoice, field, request.data[field])
-        invoice.save()
+        # Its own columns only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
+        invoice.save(update_fields=[*fields, "updated_at"])
 
         with contextlib.suppress(Exception):
             AuditLog.objects.create(
@@ -1282,7 +1301,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def totals(self, request):
         """Get total amounts for invoices with the same filters as list"""
-        queryset = self.get_queryset()
+        queryset = self.get_queryset().counted()
 
         # Calculate totals
         inward_total = (
@@ -1323,8 +1342,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         """Get monthly totals for invoices (outward and inward)"""
         from django.db.models.functions import ExtractMonth, ExtractYear
 
-        # Use the same queryset as list to apply filters
-        queryset = self.get_queryset()
+        # Use the same queryset as list to apply filters, without cancelled bills
+        queryset = self.get_queryset().counted()
 
         # Annotate with month and year
         queryset = queryset.annotate(
@@ -1350,8 +1369,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def distribution(self, request):
         """Get distribution of invoices by type"""
-        # Use the same queryset as list to apply filters
-        queryset = self.get_queryset()
+        # Use the same queryset as list to apply filters, without cancelled bills
+        queryset = self.get_queryset().counted()
 
         # Calculate totals by type
         from django.db.models import Count
@@ -1382,7 +1401,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def stats(self, request):
         """Get consolidated dashboard stats"""
-        queryset = self.get_queryset()
+        # Figures leave cancelled bills out; the recent list keeps them, marked by `status`.
+        listed = self.get_queryset()
+        queryset = listed.counted()
 
         results = {}
         # 1. Totals
@@ -1539,7 +1560,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         # 5. Recent Invoices
         recent_invoices = InvoiceListSerializer(
-            queryset.order_by("-created_at")[:5], many=True
+            listed.order_by("-created_at")[:5], many=True
         ).data
         results["recent_invoices"] = recent_invoices
 
@@ -1638,8 +1659,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         """
         from django.db.models import Case, When
         from django.db.models.functions import ExtractYear
-        empty_inv = Invoice.objects.filter(lineitem__isnull=True).count()
-        no_hsn = LineItem.objects.filter(
+        # A cancelled bill needs no items or HSN fixed; it still holds its number,
+        # so the duplicate groups below keep it.
+        empty_inv = Invoice.objects.counted().filter(lineitem__isnull=True).count()
+        no_hsn = LineItem.objects.counted().filter(
             Q(hsn_code__isnull=True) | Q(hsn_code="")
         ).count()
 
@@ -1798,7 +1821,9 @@ class LineItemViewSet(viewsets.ModelViewSet):
     queryset = LineItem.objects.all().select_related("invoice")
     serializer_class = LineItemSerializer
     pagination_class = StandardResultsSetPagination
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "bill.edit", "update": "bill.edit", "partial_update": "bill.edit",
+                  "destroy": "bill.edit", "create_for_invoice": "bill.edit"}
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -1862,7 +1887,8 @@ class LineItemViewSet(viewsets.ModelViewSet):
                         "amount", flat=True
                     )
                 )
-                invoice_obj.save()
+                # The total only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
+                invoice_obj.save(update_fields=["total_amount", "updated_at"])
 
                 # Return the serialized line item
                 serializer = self.get_serializer(line_item)
@@ -2291,12 +2317,20 @@ class ReportView(APIView):
         return self.generate_csv_response(start_date, end_date, invoice_type)
 
 
+def _csv_import_needs(request, view, obj=None):
+    """csv/import/'s v3 key: customers need customer.edit, products product.edit, and bills
+    bill.create (process_invoice_csv writes only sales)."""
+    kind = request.data.get("import_type") or request.data.get("type") or "invoice"
+    return {"customer": "customer.edit", "product": "product.edit"}.get(kind, "bill.create")
+
+
 class CSVImportView(APIView):
     """
     API endpoint for importing data from CSV files.
     Supports importing invoices, customers, and products.
     """
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"POST": _csv_import_needs}
 
     parser_classes = [MultiPartParser]
 
@@ -2378,6 +2412,14 @@ class CSVImportView(APIView):
             )
 
 
+def _bulk_import_needs(request, view, obj=None):
+    """invoices/bulk-import/'s v3 key: purchase.import when every row is a purchase (type
+    "INWARD", as run_bulk_import reads it), bill.create when any row is a sale."""
+    rows = request.data.get("invoices") if isinstance(request.data, dict) else None
+    purchases = isinstance(rows, list) and all(isinstance(row, dict) and row.get("type") == "INWARD" for row in rows)
+    return "purchase.import" if purchases else "bill.create"
+
+
 class BulkInvoiceImportView(APIView):
     """
     API endpoint for bulk importing invoices from parsed Excel data.
@@ -2387,7 +2429,8 @@ class BulkInvoiceImportView(APIView):
     bulk_create for line items, dropping ~200 round-trips for a 23-invoice import
     down to ~10. Wrapped in a single transaction for atomicity.
     """
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"POST": _bulk_import_needs}
 
     def post(self, request):
         return run_bulk_import(request)
@@ -2652,7 +2695,8 @@ class AIInvoiceCreateView(APIView):
     """
     API endpoint for creating invoices from AI-extracted data.
     """
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"POST": sale_or_purchase("bill.create", "purchase.create")}
 
     # Accept both JSON (legacy / non-AI flows) and multipart (AI Import
     # which now ships the original source image alongside the extracted
@@ -2665,6 +2709,15 @@ class AIInvoiceCreateView(APIView):
     @transaction.atomic
     def post(self, request):
         return create_from_ai(request)
+
+def _renumbered_since(entry):
+    """{"invoice_number", "business"} when a later change to the invoice renumbered it or moved it
+    to another firm: undoing an older edit must not silently reverse that (S§0.4)."""
+    later = AuditLog.objects.filter(entity="invoice", entity_id=entry.entity_id, pk__gt=entry.pk)
+    if any({"invoice_number", "business"} & set(changes or {}) for changes in later.values_list("changes", flat=True)):
+        return {"invoice_number", "business"}
+    return set()
+
 
 def _restore_logs(entity, entity_id):
     """The log an undo of a delete writes for the record it restores.
@@ -2776,12 +2829,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             return None
 
         def _undone(response, log):
-            # Recorded on the entry, in the same transaction, so the undo can't
-            # be used twice (H7). In the snapshot, which the browser never sees,
-            # under a key no model field has, so the restore loops skip it.
-            entry.snapshot = {**(entry.snapshot or {}), "_undo": {
-                "at": timezone.localtime().isoformat(), "by": request.user.pk, "log": log.pk}}
-            entry.save(update_fields=["snapshot"])
+            # Recorded on the entry, in the same transaction, so the undo can't be used twice (H7).
+            mark_undone(entry, request.user, log)
             return response
 
         try:
@@ -2803,6 +2852,14 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         {"error": "already_undone", "detail": "This delete was already undone."},
                         status=status.HTTP_409_CONFLICT,
                     )
+                binned = (BinnedInvoice.objects.filter(audit_log_id=entry.pk, restored_at__isnull=True).first()
+                          if entry.action == "deleted" and entry.entity == "invoice" else None)
+                if binned is not None:
+                    # A sale v3 moved to the bin comes back from there, under its own id; the
+                    # restore marks this entry used. A closed month is still v2's 400 here.
+                    assert_period_unlocked(binned.business_id, binned.invoice_date, "create")
+                    obj = restore_from_bin(binned, request.user, via="audit_log")
+                    return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
                 if entry.action == "deleted" and entry.snapshot:
                     # Recreate the deleted object
                     snap = entry.snapshot
@@ -2849,21 +2906,29 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     return _undone(Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk}), log)
 
                 elif entry.action == "updated" and entry.snapshot:
-                    # Revert to the snapshot state
+                    # Revert to the snapshot state. Row-locked, so a cancel can't land between the
+                    # check below and the save (Ruling 1A-16).
                     try:
-                        obj = model.objects.get(pk=entry.entity_id)
+                        obj = model.objects.select_for_update().get(pk=entry.entity_id)
                     except model.DoesNotExist:
                         return Response({"error": "Record no longer exists"}, status=404)
 
                     snap = entry.snapshot
                     if model is Invoice:
+                        if obj.status == BILL_CANCELLED:
+                            return Response({"error": "cancelled", "detail": CANCELLED_WORDS},
+                                            status=status.HTTP_409_CONFLICT)
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
                         assert_period_unlocked(snap.get("business"), snap.get("invoice_date"), "edit")
                     field_names = {f.name for f in model._meta.concrete_fields}
                     # The total is the lines' sum, and the lines may have
                     # changed since the snapshot: copying it back left a header
                     # of 1,030 over lines of 2,060 (M9). Re-summed below.
-                    skip = {"id", "total_amount"} if model is Invoice else {"id"}
+                    # Nor does it write back what only v3's actions set (a cancel,
+                    # a send…), or a number a later renumber or move replaced.
+                    skip = {"id"}
+                    if model is Invoice:
+                        skip |= {"total_amount", *Invoice.V3_FIELDS, *_renumbered_since(entry)}
                     for k, v in snap.items():
                         if k not in field_names or k in skip:
                             continue
@@ -2875,7 +2940,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                                 setattr(obj, k, None if field.null else "")
                             else:
                                 setattr(obj, k, v)
-                    obj.save(**({"recalc_total": True} if model is Invoice else {}))
+                    obj.save(**({"recalc_total": True, "update_fields": Invoice.v2_columns()} if model is Invoice else {}))
                     log = AuditLog.objects.create(
                         action="updated",
                         entity=entry.entity,
@@ -2893,17 +2958,21 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         if model is Invoice:
                             assert_period_unlocked(obj.business_id, obj.invoice_date, "delete")
                         name = str(obj)
-                        obj.delete()
-                        log = AuditLog.objects.create(
-                            action="deleted",
-                            entity=entry.entity,
-                            entity_id=entry.entity_id,
-                            entity_name=name,
-                            user=request.user if request.user.is_authenticated else None,
-                            details=f"Deleted via undo (was created at {entry.timestamp})",
-                        )
+                        details = f"Deleted via undo (was created at {entry.timestamp})"
+                        if model is Invoice and obj.type_of_invoice == INVOICE_TYPE_OUTWARD:
+                            _binned, log = bin_bill(obj, request.user, details=details)  # a sale goes to the bin
+                        else:
+                            obj.delete()
+                            log = AuditLog.objects.create(
+                                action="deleted",
+                                entity=entry.entity,
+                                entity_id=entry.entity_id,
+                                entity_name=name,
+                                user=request.user if request.user.is_authenticated else None,
+                                details=details,
+                            )
                         return _undone(Response({"message": f"Deleted {entry.entity}: {name}"}), log)
-                    except model.DoesNotExist:
+                    except (model.DoesNotExist, Http404):  # Http404: bin_bill found it gone (Ruling 1A-17)
                         return Response({"error": "Record already deleted"}, status=404)
 
                 else:

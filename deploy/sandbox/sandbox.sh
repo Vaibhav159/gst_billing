@@ -5,7 +5,7 @@
 #
 #   ./sandbox.sh init     generate secrets once (DB password, Django key)
 #   ./sandbox.sh up       build + start db, redis, web, nginx (127.0.0.1:8060)
-#   ./sandbox.sh dev      also start Vite with hot reload   (127.0.0.1:5174)
+#   ./sandbox.sh dev      also start Vite: v2 on 127.0.0.1:5174, v3 on 127.0.0.1:5180
 #   ./sandbox.sh seed     load synthetic data; logins -> $ENV_DIR/logins.txt
 #   ./sandbox.sh reseed   wipe the sandbox data and seed again
 #   ./sandbox.sh build    rebuild images (after dependency changes)
@@ -64,7 +64,7 @@ case "$cmd" in
         ;;
     dev)
         need_env
-        dc --profile dev up -d vite
+        dc --profile dev up -d vite vite-v3
         dc --profile dev ps
         ;;
     build)

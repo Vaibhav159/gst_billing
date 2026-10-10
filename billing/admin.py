@@ -1,10 +1,16 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.admin.utils import unquote
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 from django.utils.safestring import mark_safe
 from rest_framework.exceptions import APIException
 from simple_history.admin import SimpleHistoryAdmin
 
+from billing.constants import INVOICE_TYPE_OUTWARD
 from billing.period_lock import assert_period_unlocked
+from billing.services.bin import bin_bill
 
 
 class PeriodLockAdminMixin:
@@ -25,17 +31,46 @@ class PeriodLockAdminMixin:
 
     def save_model(self, request, obj, form, change):
         self._assert(obj, "edit" if change else "create")
+        if change and isinstance(obj, Invoice):
+            # v2's columns only (Ruling 1A-16): a full save would undo a cancel that landed after the
+            # read, and a history revert would bring back an old status.
+            obj._history_user = request.user  # as SimpleHistoryAdmin.save_model sets it
+            obj.save(update_fields=Invoice.v2_columns())
+            return
         super().save_model(request, obj, form, change)
 
     def delete_model(self, request, obj):
         self._assert(obj, "delete")
+        if isinstance(obj, Invoice) and obj.type_of_invoice == INVOICE_TYPE_OUTWARD:
+            # Every delete of a sale goes to the bin, the admin's too (Ruling 1A-7). Its month was
+            # checked just above, in v2's words, inside this delete's transaction.
+            bin_bill(obj, request.user, check_month=False)
+            return
         super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # "Delete selected" went straight to queryset.delete(): no month lock, and no bin for a sale.
+        for obj in queryset:
+            self.delete_model(request, obj)
+
+    def response_action(self, request, queryset):
+        # One transaction, as the delete view has: a refused bill leaves nothing deleted, nor logged so.
+        with transaction.atomic():
+            return super().response_action(request, queryset)
 
     def save_formset(self, request, form, formset, change):
         self._assert(form.instance, "edit")
         super().save_formset(request, form, formset, change)
 
-from billing.models import Business, Customer, Invoice, LineItem
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem
+
+
+def _undoable_delete(bill_id):
+    """Whether the Audit log offers Undo for this bill's delete, as AuditLogSerializer.can_undo works it
+    out: a "deleted" entry with a snapshot, not used, and not restored before the marker existed."""
+    entries = AuditLog.objects.filter(entity="invoice", entity_id=bill_id, action="deleted", snapshot__isnull=False)
+    before = AuditLog.objects.filter(entity="invoice", action="created", details=f"Restored via undo (was #{bill_id})")
+    return entries.exclude(snapshot__has_key="_undo").exists() and not before.exists()
 
 
 @admin.register(Business)
@@ -161,3 +196,19 @@ class InvoiceAdmin(PeriodLockAdminMixin, SimpleHistoryAdmin):
         ),
     )
     inlines = [LineInline]
+
+    def history_form_view(self, request, object_id, version_id, extra_context=None):
+        # Reverting a deleted bill would save a row that isn't there: a 500, since v2's saves name
+        # their columns. Say where it comes back from, with its lines, instead (Ruling 1A-7).
+        bill_id = unquote(object_id)
+        if request.method == "POST" and not Invoice.objects.filter(pk=bill_id).exists():
+            if BinnedInvoice.objects.live().filter(original_id=bill_id).exists():
+                words = "This bill was deleted. Restore it from the bin instead."
+            elif _undoable_delete(bill_id):
+                words = "This bill was deleted. Restore it with Undo in the Audit log instead."
+            else:  # deleted in the admin, say, or its Undo used already: back under another id (review M6)
+                words = "This bill was deleted and has no Undo, so it can't be reverted."
+            self.message_user(request, words, messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:billing_invoice_history", args=[object_id],
+                                                current_app=self.admin_site.name))
+        return super().history_form_view(request, object_id, version_id, extra_context)

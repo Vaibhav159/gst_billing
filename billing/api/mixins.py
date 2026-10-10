@@ -1,14 +1,50 @@
 import logging
 
-from django.db.models import ProtectedError
+from django.db import transaction
+from django.db.models import JSONField, ProtectedError
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 
-from billing.models import AuditLog
+from billing.models import AuditLog, BinnedInvoice, Business, Customer
 
 logger = logging.getLogger(__name__)
 
 EXCLUDED_FIELDS = {"updated_at", "created_at", "id", "workspace_id"}
+
+
+def snapshot_of(instance) -> dict:
+    """Every concrete field as the audit log keeps it, for undo.
+
+    Text, except a JSON field, which stays JSON: as str() a firm snapshot became
+    "{'name': ...}", and an undo wrote that string back into the field (S§0.4).
+    A foreign key is its id (business_id), never its __str__, so undo can restore it.
+    """
+    data = {}
+    for field in instance._meta.concrete_fields:
+        if field.is_relation and field.many_to_one:
+            value = getattr(instance, field.attname, None)
+        else:
+            value = getattr(instance, field.name, None)
+        if value is None or isinstance(field, JSONField):
+            data[field.name] = value
+        else:
+            data[field.name] = str(value)
+    return data
+
+
+def mark_undone(entry, user, log, via=None):
+    """Spend an audit entry's Undo: v2's undo and v3's restore each mark it, so neither runs twice (H7).
+
+    The marker lives in the snapshot, which the browser never sees, under a key no model field has,
+    so the restore loops skip it; `log` is the row the undo wrote. v3's restore adds `via` ("bin" or
+    "audit_log"), so a later refusal can say what brought the bill back; v2's marker has no such key.
+    """
+    marker = {"at": timezone.localtime().isoformat(), "by": getattr(user, "pk", None), "log": log.pk}
+    if via:
+        marker["via"] = via
+    entry.snapshot = {**(entry.snapshot or {}), "_undo": marker}
+    entry.save(update_fields=["snapshot"])
 
 
 class AuditLogMixin:
@@ -22,33 +58,12 @@ class AuditLogMixin:
     def get_entity_name(self, instance) -> str:
         return str(instance)
 
-    def _field_value(self, instance, field):
-        """
-        Return the snapshot value for one model field.
-
-        For FK fields, return the FK column value (the ID), not the related
-        instance's __str__ — otherwise undo can't restore the relation. e.g.
-        for `business`, we want `business_id`'s integer, not "LODHA JEWELLERS".
-        """
-        if field.is_relation and field.many_to_one:
-            return getattr(instance, field.attname, None)  # e.g. business_id
-        return getattr(instance, field.name, None)
-
     def _snapshot(self, instance) -> dict:
-        data = {}
-        for field in instance._meta.concrete_fields:
-            if field.name not in EXCLUDED_FIELDS:
-                value = self._field_value(instance, field)
-                data[field.name] = str(value) if value is not None else None
-        return data
+        return {k: v for k, v in snapshot_of(instance).items() if k not in EXCLUDED_FIELDS}
 
     def _full_snapshot(self, instance) -> dict:
         """Full snapshot including all fields for undo."""
-        data = {}
-        for field in instance._meta.concrete_fields:
-            value = self._field_value(instance, field)
-            data[field.name] = str(value) if value is not None else None
-        return data
+        return snapshot_of(instance)
 
     def _compute_changes(self, old_snapshot: dict, new_snapshot: dict) -> dict:
         changes = {}
@@ -127,12 +142,29 @@ class ProtectedDeleteMixin:
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError as e:
+            # Bills in the bin still need their customer and firm for a restore: say so (Task 3 review, M1).
+            binned = sum(isinstance(o, BinnedInvoice) for o in e.protected_objects)
+            rest = [o for o in e.protected_objects if not isinstance(o, BinnedInvoice)]
             # Invoices, and since H6 invoice lines: count the invoices either way.
-            n = len({getattr(o, "invoice_id", o.pk) for o in e.protected_objects})
-            if all(hasattr(o, "invoice_id") for o in e.protected_objects):
+            n = len({getattr(o, "invoice_id", o.pk) for o in rest})
+            if not rest:
+                message = (f"Cannot delete: {binned} bill(s) in the bin still reference this record. "
+                           "Restore and reassign them first.")
+            elif all(hasattr(o, "invoice_id") for o in rest):
                 # Only lines: their invoices belong to someone else now.
                 message = (f"Cannot delete: lines on {n} invoice(s) of other parties still name this record. "
                            "An administrator re-points them with manage.py fix_line_customers.")
             else:
                 message = f"Cannot delete: {n} invoice(s) still reference this record. Reassign or delete them first."
-            return Response({"error": message, "protected": n}, status=status.HTTP_409_CONFLICT)
+            if rest and binned:
+                message += f" {binned} bill(s) in the bin reference it too."
+            return Response({"error": message, "protected": n + binned}, status=status.HTTP_409_CONFLICT)
+
+    def perform_destroy(self, instance):
+        # Bin rows back in Sales already (restored, or brought back by v2's undo) protect nothing, so they
+        # go with the customer or firm; one transaction, so a delete still refused keeps them (review M1).
+        key = {Customer: "customer", Business: "business"}.get(type(instance))
+        with transaction.atomic():
+            if key:
+                BinnedInvoice.objects.settled().filter(**{key: instance}).delete()
+            super().perform_destroy(instance)

@@ -3,6 +3,7 @@ import tempfile
 from io import StringIO
 from unittest import mock
 
+from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connections
@@ -10,7 +11,9 @@ from django.test import TestCase, override_settings
 
 from billing.constants import B2CL_THRESHOLD
 from billing.management.commands.seed_sandbox import Command
-from billing.models import Business, FiledPeriod, Invoice, InwardCapture, LineItem
+from billing.models import Business, FiledPeriod, Invoice, InwardCapture, LineItem, UserPreference
+from billing.roles import ROLES as V3_ROLES
+from billing.roles import role_of
 from billing.tax_rules import is_interstate
 
 
@@ -44,7 +47,21 @@ class SeedSandboxTest(TestCase):
 
     def test_books_are_internally_consistent(self):
         logins = self._seed("--print-credentials").strip().splitlines()
-        self.assertEqual(len(logins), 5)
+        self.assertEqual(len(logins), 7)
+        roles = [line.split("\t")[0] for line in logins]
+        self.assertIn("accountant", roles)
+        self.assertIn("staff", roles)
+        self.assertEqual(role_of(User.objects.get(username="sandbox_accountant")), "accountant")
+        staff = User.objects.get(username="sandbox_staff")
+        self.assertEqual(role_of(staff), "staff")
+        kiran = Business.objects.get(name="KIRAN GOLD HOUSE (SANDBOX)")
+        self.assertEqual(UserPreference.objects.get(user=staff).data["defaultBusinessId"], str(kiran.id))
+        for username, role in (
+            ("sandbox_owner", "owner"), ("sandbox_accountant", "accountant"), ("sandbox_staff", "staff"),
+        ):
+            # The groups v3 assigns each role (roles.ROLES), v2's included, so v2 and a rollback agree.
+            groups = User.objects.get(username=username).groups.values_list("name", flat=True)
+            self.assertCountEqual(groups, V3_ROLES[role]["groups"], username)
 
         for inv in Invoice.objects.prefetch_related("lineitem_set"):
             lines = list(inv.lineitem_set.all())

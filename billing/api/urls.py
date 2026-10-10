@@ -11,9 +11,11 @@ from .inward_bills import (
     InwardCaptureDetailView,
     InwardCaptureListCreateView,
 )
+from .me import MeView
 from .media import SignedMediaView
 from .preferences import PreferencesView
 from .reconciliation import ReconciliationView
+from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
 from .views import (
     AIInvoiceCreateView,
@@ -41,6 +43,8 @@ router.register(r"line-items", LineItemViewSet)
 router.register(r"products", ProductViewSet)
 router.register(r"audit-logs", AuditLogViewSet)
 router.register(r"filed-periods", FiledPeriodViewSet)
+router.register(r"sales", SalesViewSet, basename="sale")
+router.register(r"bin", BinViewSet, basename="bin")
 
 urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them
@@ -77,6 +81,7 @@ urlpatterns = [
     # GSTIN validation + taxpayer autofill (see billing/gstin.py)
     path("gstin/<str:gstin>/", GstinLookupView.as_view(), name="gstin-lookup"),
     path("profile/", ProfileView.as_view(), name="profile"),
+    path("me/", MeView.as_view(), name="me"),
     path("users/", UserManagementView.as_view(), name="user-management"),
     path("preferences/", PreferencesView.as_view(), name="preferences"),
     path("media/<path:subpath>", SignedMediaView.as_view(), name="signed-media"),

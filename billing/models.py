@@ -1,4 +1,5 @@
 import math
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -17,12 +18,18 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
+    BILL_ACTIVE,
+    BILL_CANCELLED,
+    BILL_STATUS_CHOICES,
     BILLING_DECIMAL_PLACE_PRECISION,
+    CUSTOMER_TYPES,
     GST_CODE,
     GST_TAX_RATE,
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_OUTWARD,
+    PAN_SHAPE,
+    SENT_VIA_CHOICES,
     STATE_CHOICES,
     UNIT_CHOICES,
     UNIT_GMS,
@@ -230,6 +237,12 @@ class Customer(AbstractBaseModel):
         null=True,
         choices=STATE_CHOICES,
     )
+    # v3 (part 1). Blank infers the type: business with a GSTIN, else person.
+    customer_type = models.CharField(
+        max_length=10, blank=True, default="", db_default="", choices=CUSTOMER_TYPES,
+        help_text="Walk-in (the counter's record for cash sales without a name), person or business.",
+    )
+    city = models.CharField(max_length=100, blank=True, default="", db_default="")
 
     def __str__(self):
         return self.name
@@ -241,6 +254,48 @@ class Customer(AbstractBaseModel):
     @property
     def state_code(self):
         return get_state_code_from_state_name(self.state_name)
+
+    @property
+    def kind(self):
+        """The customer's effective type: walkin, person or business (customer_type, else inferred)."""
+        from billing.tax_rules import has_gstin
+
+        return self.customer_type or ("business" if has_gstin(self.gst_number) else "person")
+
+    @property
+    def pan(self):
+        """The PAN on record for Rule 114B: the typed one when it is PAN-shaped once upper-cased and stripped
+        to letters and digits; else the one in a GSTIN that passes its check digit; else "". v2's imports
+        store placeholders like "N/A" unchecked, and those are no PAN (Ruling 1A-20)."""
+        from billing.gstin import validate
+
+        typed = re.sub(r"[^0-9A-Z]", "", (self.pan_number or "").upper())
+        if PAN_SHAPE.fullmatch(typed):
+            return typed
+        gstin = (self.gst_number or "").strip().upper()
+        return gstin[2:12] if gstin and validate(gstin)[0] else ""
+
+
+class InvoiceQuerySet(models.QuerySet):
+    """Invoice.objects: the shared ways of narrowing bills (design decision 5)."""
+
+    def sales(self):
+        """Outward bills only: what the shop sold."""
+        return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD)
+
+    def counted(self):
+        """The bills every figure counts: all but the cancelled ones.
+
+        A cancelled bill keeps its number (lists, Table 13) but leaves every total. The list,
+        detail and edit views keep the plain manager; anything that adds bills up calls this.
+        """
+        return self.exclude(status=BILL_CANCELLED)
+
+
+class LineItemQuerySet(models.QuerySet):
+    def counted(self):
+        """Lines of the bills that count: Invoice.objects.counted()'s twin for line sums."""
+        return self.exclude(invoice__status=BILL_CANCELLED)
 
 
 class Invoice(AbstractBaseModel):
@@ -297,6 +352,29 @@ class Invoice(AbstractBaseModel):
         help_text="How the invoice was settled; blank = not recorded.",
     )
 
+    # v3 (part 1). Lifecycle fields: only v3's own endpoints change them; v2's
+    # serializers show them read-only and v2's undo of an old edit leaves them be.
+    status = models.CharField(
+        max_length=10, choices=BILL_STATUS_CHOICES, default=BILL_ACTIVE, db_default=BILL_ACTIVE, db_index=True,
+        help_text="Active, or cancelled: a cancelled bill keeps its number but counts in no figure.",
+    )
+    cancel_reason = models.CharField(max_length=255, blank=True, default="", db_default="")
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    # The id of the cancelled bill this one makes again. A plain id, not a foreign key: that
+    # bill may sit in the bin and come back under the same id (design decision 6).
+    replaces = models.IntegerField(null=True, blank=True)
+    # Sends: the first, the latest, how many, how, and a one-off number (a walk-in's) that is
+    # never saved to the customer. Columns, not a child table: a child row would trip v2's
+    # deletes, and "not sent yet" needs only sent_at IS NULL.
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    sent_count = models.PositiveIntegerField(default=0, db_default=0)
+    sent_to = models.CharField(max_length=15, blank=True, default="", db_default="")
+    sent_via = models.CharField(max_length=10, blank=True, default="", db_default="", choices=SENT_VIA_CHOICES)
+
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
     # audit trail of what the OCR actually saw. Nothing else writes
@@ -323,6 +401,22 @@ class Invoice(AbstractBaseModel):
     )
 
     history = HistoricalRecords()
+
+    objects = InvoiceQuerySet.as_manager()
+
+    # Fields only v3's own endpoints write. v2's serializers show them read-only, and v2's
+    # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
+    V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces",
+                 "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via")
+
+    @classmethod
+    def v2_columns(cls):
+        """What v2's saves write: every column but the id and V3_FIELDS (Ruling 1A-16).
+
+        A plain save() writes every column as it was read, so a cancel that landed in between
+        would be undone. v2's paths pass this as update_fields; v3's own writes save() as usual.
+        """
+        return [f.name for f in cls._meta.concrete_fields if not f.primary_key and f.name not in cls.V3_FIELDS]
 
     class Meta:
         # Every report filters on some combination of these three, and the
@@ -497,6 +591,8 @@ class Invoice(AbstractBaseModel):
 
 
 class LineItem(AbstractBaseModel):
+    objects = LineItemQuerySet.as_manager()
+
     # PROTECT, like Invoice.customer, and always the invoice's customer
     # (Invoice.save re-points the lines). As CASCADE, deleting a customer whose
     # invoices had moved to someone else deleted those invoices' lines, filed
@@ -666,7 +762,7 @@ class LineItem(AbstractBaseModel):
         # quantity as 1.000 gm, rate as 1 / g
 
         line_item_data = (
-            cls.objects.filter(
+            cls.objects.counted().filter(
                 invoice__invoice_date__range=[start_date, end_date],
                 invoice__business=business,
             )
@@ -829,6 +925,72 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.entity} #{self.entity_id}"
+
+
+class BinQuerySet(models.QuerySet):
+    def live(self):
+        """Deleted bills still in the bin: not restored here, and not brought back by v2's undo.
+
+        After a rollback v2 knows nothing of this table: its undo brings a bill back under a new id
+        and marks the "deleted" audit row used (`_undo`), leaving the row here stale. The bin list,
+        the number series and the admin read the bin through this, so a stale row lists nowhere and
+        holds no number (Ruling 1A-6).
+        """
+        undone = AuditLog.objects.filter(pk=models.OuterRef("audit_log_id"), snapshot__has_key="_undo")
+        return self.filter(restored_at__isnull=True).exclude(models.Exists(undone))
+
+    def settled(self):
+        """live()'s complement: rows back in Sales already, which protect no customer or firm."""
+        return self.exclude(pk__in=self.model.objects.live().values("pk"))
+
+
+class BinnedInvoice(models.Model):
+    """A deleted sales bill, kept so its number stays used and it can come back (design decision 6).
+
+    Deleting moves the bill and its lines here and out of the Invoice table, so v2 (after a
+    rollback) sees it as deleted, as it sees its own deletes. `data` holds every field of the
+    bill and of each line, v3's included; v2's audit row keeps only v2's keys. No database
+    foreign keys: v2's deletes must never trip over this table.
+    """
+
+    KIND_DELETED = "deleted"
+    KIND_CANCELLED = "cancelled"  # set aside by prepare_v2_rollback, for v2
+
+    objects = BinQuerySet.as_manager()
+
+    original_id = models.IntegerField(db_index=True)
+    business = models.ForeignKey(Business, on_delete=models.PROTECT, db_constraint=False, related_name="+")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, db_constraint=False, related_name="+")
+    invoice_number = models.CharField(max_length=255, blank=True, default="", db_default="")
+    invoice_date = models.DateField()
+    type_of_invoice = models.CharField(
+        max_length=255, choices=INVOICE_TYPE_CHOICES, default=INVOICE_TYPE_OUTWARD, db_default=INVOICE_TYPE_OUTWARD,
+    )
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=BILLING_DECIMAL_PLACE_PRECISION, default=0, db_default=0,
+    )
+    kind = models.CharField(
+        max_length=10, choices=[(KIND_DELETED, "Deleted"), (KIND_CANCELLED, "Cancelled, set aside for v2")],
+        default=KIND_DELETED, db_default=KIND_DELETED,
+    )
+    reason = models.CharField(max_length=255, blank=True, default="", db_default="")
+    data = models.JSONField(default=dict, help_text="Every field of the bill and its lines, as text.")
+    audit_log_id = models.IntegerField(null=True, blank=True, help_text="The v2-shaped 'deleted' audit row.")
+    deleted_at = models.DateTimeField(auto_now_add=True)
+    deleted_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    restored_at = models.DateTimeField(null=True, blank=True)
+    restored_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+
+    class Meta:
+        ordering = ["-deleted_at", "-id"]
+        indexes = [models.Index(fields=["business", "invoice_date"])]
+
+    def __str__(self):
+        return f"{self.invoice_number} (deleted)"
 
 
 class ITCReclaimLedger(AbstractBaseModel):

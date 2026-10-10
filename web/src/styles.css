@@ -1,0 +1,337 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Layout concept: the working app (top nav on desktop, bottom tabs on phones)
+   sits inside a quiet prototype frame; money and dates carry the hierarchy.
+   Obsidian is today's gold-on-black look, refined. Pearl is the app's existing
+   light theme. Tokens are RGB channels so Tailwind can apply alpha. */
+:root {
+  --ground: 9 9 11;
+  --bar: 11 11 13;
+  --card: 19 19 22;
+  --field: 14 14 16;
+  --raised: 26 26 30;
+  --line: 38 38 43;
+  --ctl-line: 97 97 105; /* field borders: 3:1 against the card and the field */
+  --rule: 34 34 38;
+  --fg: 245 243 239;
+  --fg2: 180 180 190;
+  --muted: 154 154 165;
+  --brand: 246 183 35;
+  --brand-hover: 248 199 85;
+  --brand-tint: 26 21 8;
+  --brand-line: 90 69 18;
+  --brand-sel: 42 35 18;
+  --onbrand: 9 9 11;
+  --amber: 227 154 91;
+  --amber-tint: 30 21 13;
+  --amber-line: 74 50 28;
+  --sale: 32 176 110;
+  --sale-tint: 15 26 20;
+  --sale-line: 27 58 42;
+  --neg: 242 139 139;
+  --neg-tint: 42 20 20;
+  --neg-line: 90 38 38;
+  --danger: 220 40 40;
+  --file: 201 167 255;
+  --file-tint: 27 21 40;
+  --file-line: 61 47 92;
+  --scrim: 0 0 0;
+  --shadow-pop: 0 18px 48px -12px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.4);
+  --shadow-frame: 0 40px 90px -24px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(255 255 255 / 0.07);
+  color-scheme: dark;
+}
+
+.theme-pearl {
+  --ground: 246 244 239;
+  --bar: 255 255 255;
+  --card: 255 255 255;
+  --field: 250 249 246;
+  --raised: 239 236 230;
+  --line: 226 222 214;
+  --ctl-line: 145 144 148; /* field borders: 3:1 against the card and the field */
+  --rule: 236 233 226;
+  --fg: 26 26 34;
+  --fg2: 74 74 87;
+  --muted: 98 98 110; /* 4.7:1 or better on every Pearl fill, selected rows included */
+  --brand: 81 57 198;
+  --brand-hover: 67 48 168;
+  --brand-tint: 240 237 251;
+  --brand-line: 207 199 242;
+  --brand-sel: 231 226 250;
+  --onbrand: 255 255 255;
+  --amber: 140 80 6;
+  --amber-tint: 253 244 227;
+  --amber-line: 240 212 155;
+  --sale: 18 112 54;
+  --sale-tint: 234 246 238;
+  --sale-line: 187 226 200;
+  --neg: 180 35 24;
+  --neg-tint: 253 236 234;
+  --neg-line: 244 194 188;
+  --danger: 217 45 32;
+  --file: 29 78 216; /* filing in Pearl: deep blue, apart from the violet buttons and the green "ready" */
+  --file-tint: 234 240 253;
+  --file-line: 191 208 247;
+  --scrim: 20 20 30;
+  --shadow-pop: 0 18px 40px -14px rgb(30 25 60 / 0.28), 0 2px 6px rgb(30 25 60 / 0.1);
+  color-scheme: light;
+}
+
+/* Today's other three themes, refined: muted text passes AA, and sales,
+   purchases and the main buttons stay three different colours in each. */
+.theme-sapphire {
+  --ground: 7 10 19;
+  --bar: 5 8 15;
+  --card: 12 17 29;
+  --field: 9 13 23;
+  --raised: 17 24 40;
+  --line: 33 38 49;
+  --ctl-line: 89 97 113; /* field borders: 3:1 against the card and the field */
+  --rule: 28 33 44;
+  --fg: 241 245 249;
+  --fg2: 184 194 210;
+  --muted: 139 150 170;
+  --brand: 14 165 233;
+  --brand-hover: 56 189 248;
+  --brand-tint: 8 25 38;
+  --brand-line: 16 74 104;
+  --brand-sel: 10 36 54;
+  --onbrand: 7 10 19;
+  --amber: 246 183 35;
+  --amber-tint: 26 21 8;
+  --amber-line: 90 69 18;
+  --sale: 32 176 110;
+  --sale-tint: 12 26 22;
+  --sale-line: 25 64 48;
+  --neg: 242 139 139;
+  --neg-tint: 40 18 22;
+  --neg-line: 90 38 44;
+  --danger: 220 40 40;
+  --file: 201 167 255;
+  --file-tint: 24 20 44;
+  --file-line: 61 47 100;
+  color-scheme: dark;
+}
+.theme-ember {
+  --ground: 13 12 12;
+  --bar: 10 9 9;
+  --card: 21 20 20;
+  --field: 16 15 15;
+  --raised: 28 26 26;
+  --line: 40 37 37;
+  --ctl-line: 104 97 95; /* field borders: 3:1 against the card and the field */
+  --rule: 35 33 33;
+  --fg: 245 242 238;
+  --fg2: 190 182 178;
+  --muted: 160 150 146;
+  --brand: 229 99 67;
+  --brand-hover: 238 130 100;
+  --brand-tint: 34 17 13;
+  --brand-line: 110 48 33;
+  --brand-sel: 48 22 16;
+  --onbrand: 13 12 12;
+  --amber: 246 183 35;
+  --amber-tint: 26 21 8;
+  --amber-line: 90 69 18;
+  --sale: 32 176 110;
+  --sale-tint: 15 26 20;
+  --sale-line: 27 58 42;
+  --neg: 255 138 160;
+  --neg-tint: 42 18 24;
+  --neg-line: 96 36 52;
+  --danger: 220 40 40;
+  --file: 201 167 255;
+  --file-tint: 27 21 40;
+  --file-line: 61 47 92;
+  color-scheme: dark;
+}
+.theme-forest {
+  --ground: 9 17 13;
+  --bar: 7 13 10;
+  --card: 15 26 21;
+  --field: 12 21 17;
+  --raised: 21 36 29;
+  --line: 33 44 39;
+  --ctl-line: 88 104 96; /* field borders: 3:1 against the card and the field */
+  --rule: 28 38 33;
+  --fg: 233 240 219;
+  --fg2: 180 196 186;
+  --muted: 139 160 149;
+  --brand: 51 204 115;
+  --brand-hover: 92 219 145;
+  --brand-tint: 12 34 22;
+  --brand-line: 28 96 58;
+  --brand-sel: 16 46 30;
+  --onbrand: 9 17 13;
+  --amber: 246 183 35;
+  --amber-tint: 30 24 9;
+  --amber-line: 90 69 18;
+  --sale: 110 231 183;
+  --sale-tint: 14 34 28;
+  --sale-line: 32 84 66;
+  --neg: 242 139 139;
+  --neg-tint: 40 20 20;
+  --neg-line: 90 38 38;
+  --danger: 220 40 40;
+  --file: 201 167 255;
+  --file-tint: 26 22 40;
+  --file-line: 61 47 92;
+  color-scheme: dark;
+}
+
+@layer base {
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: rgb(var(--ground));
+    color: rgb(var(--fg));
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #root { height: 100%; }
+  ::selection { background: rgb(var(--brand) / 0.32); color: rgb(var(--fg)); }
+  input, textarea, select { caret-color: rgb(var(--brand)); }
+  :focus { outline: none; }
+  :focus-visible { outline: 2px solid rgb(var(--brand)); outline-offset: 2px; }
+  a { text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  button { -webkit-user-select: none; user-select: none; }
+  h1, h2, h3 { text-wrap: balance; }
+  * { scrollbar-width: thin; scrollbar-color: rgb(var(--line)) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  input::placeholder, textarea::placeholder { color: rgb(var(--muted)); opacity: 1; }
+  input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  select { background-image: none; }
+  table { font-variant-numeric: tabular-nums; }
+}
+
+@layer components {
+  .tnum { font-variant-numeric: tabular-nums; }
+  .caps { font-size: 12px; line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; color: rgb(var(--muted)); }
+  .card { background: rgb(var(--card)); border: 1px solid rgb(var(--line)); border-radius: 14px; }
+  .ctl {
+    min-height: 44px; width: 100%; border-radius: 12px; border: 1px solid rgb(var(--ctl-line));
+    background: rgb(var(--field)); color: rgb(var(--fg)); padding: 0 12px; font: inherit;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .ctl:hover { border-color: rgb(var(--muted) / 0.85); }
+  /* 16 px on phones so iOS doesn't zoom the page when a field takes focus */
+  [data-view="expert"] .ctl, [data-view="easy"] .ctl { font-size: 16px; }
+  /* Easy: every field big enough for older eyes and thumbs (56 px, 17 px text) */
+  [data-view="easy"] .ctl { min-height: 56px; font-size: 17px; }
+  [data-view="easy"] .caps { font-size: 13px; line-height: 18px; }
+  .ctl:focus, .ctl:focus-visible { outline: none; border-color: rgb(var(--brand) / 0.7); box-shadow: 0 0 0 3px rgb(var(--brand) / 0.18); }
+  .ctl[aria-invalid="true"] { border-color: rgb(var(--neg) / 0.8); }
+  .ctl:disabled { opacity: 1; color: rgb(var(--muted)); background: rgb(var(--raised)); cursor: not-allowed; }
+  textarea.ctl { padding: 10px 12px; line-height: 1.45; }
+  .link { color: rgb(var(--brand)); font-weight: 600; text-decoration: none; border-radius: 6px; }
+  .link:hover { text-decoration: underline; }
+  .money-sym { font-size: 0.78em; margin-right: 0.06em; }
+  .money-paise { font-size: 0.72em; }
+  .kbd { display: inline-flex; align-items: center; min-width: 20px; height: 20px; padding: 0 6px; border: 1px solid rgb(var(--line)); border-radius: 6px; font-size: 11px; color: rgb(var(--fg2)); background: rgb(var(--raised)); font-family: inherit; }
+  /* The row you're on in a list you move through (search, pickers, menus): a soft fill and a short
+     gold bar at the left edge. A ring here read as a selected chip and jumped about under the mouse. */
+  .row-on, .row-focus:focus-visible { position: relative; background-color: rgb(var(--fg) / 0.065); }
+  .row-on::before, .row-focus:focus-visible::before { content: ""; position: absolute; left: 0; top: 50%; height: min(26px, calc(100% - 16px)); transform: translateY(-50%); width: 3px; border-radius: 999px; background: rgb(var(--brand)); }
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes slide-left { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pop-in { from { transform: scale(0.97); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toast-in { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.anim-sheet { animation: sheet-up 0.26s cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+.anim-side { animation: slide-left 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.anim-pop { animation: pop-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.anim-fade { animation: fade-in 0.16s ease-out backwards; }
+.anim-toast { animation: toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.anim-pulse { animation: pulse-soft 1.6s ease-in-out infinite; }
+.anim-spin { animation: spin 0.9s linear infinite; }
+
+/* Entrances fill "backwards" only: once they finish, the element has no
+   leftover transform (an identity matrix still traps position: fixed
+   children, the bug the review found). Exits fill "both" until unmount. */
+/* Motion: short, state-carrying. Pages slide on phones (push forward, pop back)
+   and rise on desktop; overlays animate in and out; changed values bump;
+   new rows flash once; success draws its tick. All end on transform: none. */
+@keyframes page-push { from { transform: translateX(28%); opacity: 0.35; } to { transform: none; opacity: 1; } }
+@keyframes page-pop { from { transform: translateX(-28%); opacity: 0.35; } to { transform: none; opacity: 1; } }
+@keyframes page-rise { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes sheet-down { from { transform: none; } to { transform: translateY(100%); } }
+@keyframes pop-out { from { transform: none; opacity: 1; } to { transform: scale(0.97); opacity: 0; } }
+@keyframes side-out { from { transform: none; opacity: 1; } to { transform: translateX(32px); opacity: 0; } }
+@keyframes flash { from { background-color: rgb(var(--brand) / 0.16); } to { background-color: transparent; } }
+@keyframes bump { 0% { transform: none; } 40% { transform: scale(1.045); } 100% { transform: none; } }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes ring-in { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes rise-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+.anim-page-push { animation: page-push 0.28s cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+.anim-page-pop { animation: page-pop 0.28s cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+.anim-page-rise { animation: page-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.anim-fade-out { animation: fade-out 0.15s ease-in both; }
+.anim-sheet-out { animation: sheet-down 0.2s cubic-bezier(0.4, 0, 1, 1) both; }
+.anim-pop-out { animation: pop-out 0.13s ease-in both; }
+.anim-side-out { animation: side-out 0.18s ease-in both; }
+.anim-toast-out { animation: pop-out 0.16s ease-in both; }
+.anim-flash { animation: flash 1.4s ease-out backwards; }
+.anim-bump { display: inline-block; animation: bump 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.anim-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 0.24s 0.06s cubic-bezier(0.65, 0, 0.35, 1) forwards; }
+.anim-ring { animation: ring-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.anim-rise { animation: rise-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
+.fold[data-open="true"] { grid-template-rows: 1fr; }
+.fold > * { overflow: hidden; min-height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .anim-flash { animation: none !important; background-color: rgb(var(--brand-sel) / 0.55); }
+}
+
+/* Phone action bars: under 360 px the secondary buttons keep their icon and lose their words
+   (their names stay for screen readers), so the main button always fits (Display size: Large). */
+[data-actionbar] { container: actionbar / inline-size; }
+[data-actionbar][data-compact] > :is(button, a):not([data-variant="primary"]):has(svg) > .btn-label { display: none; }
+[data-actionbar][data-compact] > :is(button, a):not([data-variant="primary"]):has(svg) { flex: 0 0 auto; padding-left: 14px; padding-right: 14px; }
+@container actionbar (max-width: 340px) {
+  [data-actionbar] > :is(button, a):not([data-variant="primary"]):has(svg) > .btn-label { display: none; }
+  [data-actionbar] > :is(button, a):not([data-variant="primary"]):has(svg) { flex: 0 0 auto; padding-left: 14px; padding-right: 14px; }
+}
+
+/* The overlay layer exists only while something is in it (an empty full-screen layer confuses
+   accessibility checkers and swallows nothing, but there's no reason to keep it in the way). */
+.overlay-layer:empty { display: none; }
+.overlay-layer { visibility: hidden; }
+.overlay-layer > * { visibility: visible; }
+
+/* A phone on its side (under 500 px tall): tabs keep their icons and lose their words, action-bar
+   buttons stop stretching across a 844 px row. */
+@media (max-height: 499px) {
+  [data-view="expert"] .phone-tabs a, [data-view="easy"] .phone-tabs a { min-height: 44px; gap: 0; }
+  [data-view="expert"] .phone-tabs .tab-label, [data-view="easy"] .phone-tabs .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  [data-actionbar] { justify-content: center; }
+  [data-actionbar] > * { max-width: 360px; }
+}
+
+/* Printing from the browser (Ctrl P; the print page's own Print prints the PDF). The text size zooms #root and gives
+   it pixel sizes (device.ts), and the overlay layer copies the zoom (Overlay.tsx): a printed page takes none of them.
+   Where a bill's paper is on screen, its full-size copy (PrintCopy) prints instead of the app, one A4 sheet per paper,
+   with the grey heading rows the PDF has; PrintCopy also makes the sheet A4 without margins while it's mounted. */
+[data-print-copy] { display: none; }
+@media print {
+  html, body { height: auto !important; background: #fff !important; }
+  #root { zoom: 1 !important; width: auto !important; height: auto !important; }
+  .overlay-layer { zoom: 1 !important; }
+  body:has([data-print-copy]) > :not([data-print-copy]) { display: none !important; }
+  [data-print-copy] { display: block !important; }
+  [data-print-copy] [data-paper] { box-shadow: none !important; min-height: 296mm !important; break-after: page; print-color-adjust: exact; }
+}

@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 BILLING_DECIMAL_PLACE_PRECISION = 3
@@ -55,6 +56,30 @@ INVOICE_TYPE_OUTWARD = "outward"
 INVOICE_TYPE_CHOICES = (
     (INVOICE_TYPE_OUTWARD, "Outward"),
     (INVOICE_TYPE_INWARD, "Inward"),
+)
+
+# A bill's status (v3). A cancelled bill keeps its number and stays in GSTR-1's
+# Table 13, but no figure counts it (design decision 5).
+BILL_ACTIVE = "active"
+BILL_CANCELLED = "cancelled"
+BILL_STATUS_CHOICES = [(BILL_ACTIVE, "Active"), (BILL_CANCELLED, "Cancelled")]
+
+# How a bill was sent: WhatsApp from a desktop (wa.me), or the phone's share sheet.
+SENT_VIA_CHOICES = [("whatsapp", "WhatsApp"), ("share", "Share sheet")]
+
+# A customer's type (v3). "" infers it: business with a GSTIN, else person.
+CUSTOMER_TYPES = [("walkin", "Walk-in"), ("person", "Person"), ("business", "Business")]
+
+# A PAN's shape: 5 letters, 4 digits, then a letter. Use fullmatch. The customer serializer checks a new PAN
+# with it, and Customer.pan reads a stored one with it (web/src/core/ids.ts PAN_RE is the client's copy).
+PAN_SHAPE = re.compile(r"[A-Z]{5}[0-9]{4}[A-Z]")
+
+# The line keys v2's audit log keeps for a deleted bill. v2's undo recreates a
+# line from every one of them, so they never grow (S§0.3); v3 keeps the rest of
+# a deleted bill in the bin (BinnedInvoice.data).
+V2_LINE_SNAPSHOT_FIELDS = (
+    "product_name", "hsn_code", "gst_tax_rate", "quantity", "rate",
+    "cgst", "sgst", "igst", "amount", "unit",
 )
 
 DOWNLOAD_SHEET_FIELD_NAMES = [

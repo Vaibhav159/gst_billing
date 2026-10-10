@@ -15,6 +15,7 @@ from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.utils import timezone
 from rest_framework.response import Response
 
+from billing.constants import BILL_CANCELLED
 from billing.models import Business, Invoice, LineItem
 from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_by_month
 
@@ -42,7 +43,7 @@ def _readings(number):
             for i, m in enumerate(runs)]
 
 
-def document_series(numbers, elsewhere=()):
+def document_series(numbers, elsewhere=(), cancelled=()):
     """Table 13 rows for one kind of document: the month's number series.
 
     The counter is the run of digits that runs through the FY's numbers: in
@@ -52,11 +53,17 @@ def document_series(numbers, elsewhere=()):
     (`elsewhere`: a back-dated invoice); the range then splits into two rows
     there instead of counting phantom cancellations in both months (review of
     H11). A number with no digits is a series of one.
+
+    `cancelled` are the month's cancelled bills' numbers: in the series, and
+    counted as cancelled, so a cancelled first or last number keeps its row's
+    range instead of dropping out of it (design decision 5).
     """
     numbers = list(dict.fromkeys(numbers))
-    elsewhere = [n for n in dict.fromkeys(elsewhere) if n not in set(numbers)]
+    void = [n for n in dict.fromkeys(cancelled) if n not in set(numbers)]
+    month = numbers + void
+    elsewhere = [n for n in dict.fromkeys(elsewhere) if n not in set(month)]
     shared = {}
-    for number in numbers + elsewhere:
+    for number in month + elsewhere:
         for key, _, _ in _readings(number):
             shared[key] = shared.get(key, 0) + 1
     used_elsewhere = {}
@@ -65,7 +72,7 @@ def document_series(numbers, elsewhere=()):
             used_elsewhere.setdefault(key, []).append(counter)
 
     series, singles = {}, []
-    for number in numbers:
+    for number in month:
         readings = _readings(number)
         if not readings:
             singles.append(number)
@@ -93,10 +100,12 @@ def document_series(numbers, elsewhere=()):
         runs.append(counters[start:])
         for run in runs:
             total = run[-1] - run[0] + 1
+            live = sum(1 for counter in run if issued[counter] not in void)
             rows.append({"from": issued[run[0]], "to": issued[run[-1]], "totnum": total,
-                         "cancel": total - len(run), "net_issue": len(run)})
+                         "cancel": total - live, "net_issue": live})
     for number in sorted(singles):
-        rows.append({"from": number, "to": number, "totnum": 1, "cancel": 0, "net_issue": 1})
+        dead = number in void
+        rows.append({"from": number, "to": number, "totnum": 1, "cancel": int(dead), "net_issue": int(not dead)})
     return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
 
 
@@ -121,7 +130,7 @@ def _months(items):
 
 def gst_summary(view, request):
     """Server-side GST summary for GSTR-1/3B — grouped by rate slab and HSN."""
-    queryset = view.get_queryset()
+    queryset = view.get_queryset().counted()
     invoice_ids = list(queryset.values_list("id", flat=True))
     items = LineItem.objects.filter(invoice_id__in=invoice_ids)
     # business_id from query string — used for the per-business ECRRS ledger
@@ -436,7 +445,7 @@ def gst_summary(view, request):
 
 def gstr_export(view, request):
     """Export GSTR-1, GSTR-3B, and 2B matching data in GST portal format."""
-    queryset = view.get_queryset()
+    queryset = view.get_queryset().counted()
     invoice_ids = list(queryset.values_list("id", flat=True))
 
     # Prefetch line items so the per-invoice loops below don't fire one
@@ -692,11 +701,12 @@ def gstr1_portal_json(view, request):
     UQC = {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
            "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM"}
 
+    month_bills = Invoice.objects.filter(
+        business=business, type_of_invoice="outward",
+        invoice_date__year=year, invoice_date__month=month,
+    )
     invoices = (
-        Invoice.objects.filter(
-            business=business, type_of_invoice="outward",
-            invoice_date__year=year, invoice_date__month=month,
-        )
+        month_bills.counted()
         .select_related("customer")
         .prefetch_related("lineitem_set")
         .order_by("invoice_date", "id")
@@ -854,7 +864,8 @@ def gstr1_portal_json(view, request):
         .exclude(invoice_number="")
         .values_list("invoice_number", flat=True)
     )
-    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number], elsewhere)
+    cancelled = month_bills.filter(status=BILL_CANCELLED).exclude(invoice_number="").values_list("invoice_number", flat=True)
+    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number], elsewhere, cancelled)
     if docs:
         file_obj["doc_issue"] = {"doc_det": [{"doc_num": 1, "docs": docs}]}
     for d in docs:

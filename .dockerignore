@@ -71,5 +71,7 @@ gst_bill.bak
 backups/
 e2e-tests/
 sweet-rebuild-suite-main/node_modules/
+web/node_modules/
+web/dist/
 sweet-rebuild-suite-main/ios/
 *.dump

@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from billing.api.media import sign_media_path
+from billing.constants import PAN_SHAPE
 from billing.models import Business, Customer, FiledPeriod, Invoice, ITCReclaimLedger, LineItem, Product
 
 
@@ -15,6 +16,11 @@ def signed_url(file):
     it, since bill scans became private.
     """
     return sign_media_path(file.name) if file else None
+
+
+# Contract 6.2's words, for whatever is wrong with a PAN or a customer type (Ruling 1A-5).
+PAN_WORDS = "A PAN has 10 characters: 5 letters, 4 digits, then a letter (like ABCDE1234F)."
+TYPE_WORDS = "Choose walk-in, person or business."
 
 
 def _gst_number(value):
@@ -76,13 +82,30 @@ class CustomerSerializer(serializers.ModelSerializer):
         max_digits=12, decimal_places=2, read_only=True
     )
     invoice_count = serializers.IntegerField(read_only=True)
+    # v3: the effective type (walkin, person, business) and the PAN on record.
+    type = serializers.CharField(source="kind", read_only=True)
+    pan = serializers.CharField(read_only=True)
 
     class Meta:
         model = Customer
         fields = "__all__"
         # M2M to Business is optional on create — many customers are added
         # without immediately linking to a business
-        extra_kwargs = {"businesses": {"required": False}}
+        extra_kwargs = {
+            "businesses": {"required": False},
+            "customer_type": {"error_messages": {"invalid_choice": TYPE_WORDS, "null": TYPE_WORDS}},
+            # Too long (a GSTIN typed in the PAN box) or not text: what a PAN is, never DRF's words.
+            "pan_number": {"error_messages": {"max_length": PAN_WORDS, "invalid": PAN_WORDS}},
+        }
+
+    def validate_pan_number(self, value):
+        """Stored upper-cased, and only when it is a PAN: v2's form checked the same in the browser."""
+        if not value or not value.strip():
+            return value
+        pan = value.strip().upper()
+        if not PAN_SHAPE.fullmatch(pan):
+            raise serializers.ValidationError(PAN_WORDS)
+        return pan
 
     def validate_gst_number(self, value):
         # "NA", "URP" and the like are stored as no GSTIN: kept, they were
@@ -161,8 +184,18 @@ class InvoiceSerializer(serializers.ModelSerializer):
         # The total is derived from the lines; a PATCH used to persist any
         # figure at all, breaking the invariant every export and GSTR table
         # depends on.
-        read_only_fields = ("total_amount", "workspace_id")
+        # The v3 fields too: only v3's endpoints (cancel, renumber, send…) change them.
+        read_only_fields = ("total_amount", "workspace_id", *Invoice.V3_FIELDS)
         extra_kwargs = {"source_file": {"write_only": True}, "source_preview": {"write_only": True}}
+
+    def update(self, instance, validated_data):
+        # DRF's default ends in a plain save(), which writes the v3 columns back as they were read
+        # and so can undo a cancel that landed in between (Ruling 1A-16). Invoice has no
+        # many-to-many fields for DRF's default to set.
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save(update_fields=Invoice.v2_columns())
+        return instance
 
     def get_source_file_url(self, obj):
         return signed_url(obj.source_file)
@@ -197,6 +230,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "is_igst_applicable",
             "total_tax",
             "line_item_count",
+            "status",
             "created_at",
             "updated_at",
         ]

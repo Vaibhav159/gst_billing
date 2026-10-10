@@ -1,7 +1,8 @@
 import contextlib
 
+from django.contrib.auth.models import User
 from django.db.models import Sum
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import m2m_changed, post_delete, post_save
 from django.dispatch import receiver
 
 from billing.models import Invoice, LineItem
@@ -34,3 +35,10 @@ def update_invoice_total_on_line_item_delete(sender, instance, **kwargs):
     # Cascade delete — the invoice went first.
     with contextlib.suppress(Invoice.DoesNotExist):
         _resync_invoice_total(instance.invoice)
+
+
+@receiver(m2m_changed, sender=User.groups.through)
+def forget_group_names(sender, instance, **kwargs):
+    """billing.roles.group_names reads a user's groups once; a change to them is read again."""
+    if isinstance(instance, User):
+        instance.__dict__.pop("_group_names", None)

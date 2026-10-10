@@ -36,3 +36,58 @@ with that storage state, so specs start logged in. Shared helpers in
   record in the spec.
 - Money assertions belong in `money-paths.spec.js`; keep totals and tax-head
   checks there rather than scattering them.
+
+## v3 (`web/`)
+
+Its own config, `v3.config.js`, and specs in `tests-v3/`, run against v3's Vite
+(`web/`, with `/api` proxied to the server by `VITE_API_TARGET`). `setup` signs in
+through the real sign-in page, puts Easy back if a stopped run left Expert saved,
+and writes `.auth-v3.json` (git-ignored) without the app's kept copy of the
+preferences; `desktop` (1440×900) and `phone` (390×844, touch) start signed in.
+`tests-v3/session.js` has the session's path, the sign-in, `opened(page)` and the
+API calls the specs make beside the app's. `tests-v3/sales-data.js` makes and
+removes the bills a spec needs through the API, as the signed-in user:
+`client(request)`, `newBill(api, { firm?, customer?, rate?, lines? })`,
+`removeBill(api, id)`. Also `workers: 1`,
+`retries: 0`: one user for every spec, and the phone spec saves Easy or Expert on
+the server. CI runs it as the `web-e2e` job.
+
+- `BASE_URL_V3`: v3's Vite (default `http://127.0.0.1:5180`, the sandbox's).
+- `E2E_USER` + `E2E_PASS`: who signs in (CI: `testuser`). Without them,
+  `LOGINS_FILE` (role, username, password, tab-separated) and `E2E_ROLE` (default
+  `owner`); the specs never print the password.
+- `E2E_SEARCH` + `E2E_SEARCH_HIT`: a word to type in Ctrl K, and a row only the
+  server's search returns for it (CI `TEST` and `TEST CUSTOMER`, the sandbox
+  `Sharma` and `Priya Sharma`). The app lists its own pages, actions and firms,
+  so one of those proves nothing about the server.
+- `CHROMIUM_PATH`: a browser to launch instead of Playwright's own download.
+
+On the sandbox VM:
+
+```bash
+BASE_URL_V3=http://127.0.0.1:5180 LOGINS_FILE=/home/ubuntu/gst-billing-sandbox/env/logins.txt E2E_ROLE=owner \
+E2E_SEARCH=Sharma E2E_SEARCH_HIT="Priya Sharma" \
+CHROMIUM_PATH=~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell npx playwright test -c v3.config.js
+```
+
+Pitfalls:
+
+- A spec file whose tests type a password calls `typesPassword(test)` from
+  `session.js` at its top level: no trace, and a test that fails goes to
+  `about:blank` first, so the page snapshot Playwright writes to
+  `error-context.md` can't show the password field. `trace` is a worker option,
+  which a `describe` can't set, so such a test gets a file of its own. While the
+  password is in its field, wait with `page.waitForURL`, never with
+  `expect(page)` or `expect(locator)`: a failed one snapshots the page into
+  `error-context.md` there and then, password included. Type a password only
+  through `signIn`: a `fill` that fails logs `fill("<the value>")` in its
+  error, and `signIn` passes the error on without the value.
+- Signed out: `test.use({ storageState: SIGNED_OUT })` in a `describe`.
+  `browser.newContext()` would take the project's signed-in session too.
+- The first click inside a page must come at least 300 ms after the page
+  opened, or the page frame drops it as a double click's second click
+  (Ruling 59). Playwright's auto-wait doesn't cover this. Once the test has
+  seen the new page open (its address, its tab or its title), call
+  `await opened(page)` from `session.js` before the first click inside it,
+  however the page opened: a link, a tab, Back or `page.goto`. Clicks in the
+  shell around the page (the top bar, the phone's tabs) aren't held back.
