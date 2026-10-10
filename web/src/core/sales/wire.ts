@@ -21,7 +21,7 @@ const customerType = (v: W): CustomerType => (v === "walkin" || v === "business"
 const segment = (v: W): Segment => (v === "b2b" || v === "b2cl" ? v : "b2cs");
 const CHECKS: CheckCode[] = ["no_lines", "no_hsn", "duplicate", "heads_mismatch", "tax_mismatch"];
 const ITAX: ItaxKind[] = ["cash_limit", "pan", "walkin_limit", "b2b_address"];
-const ACTIONS: AuditAction[] = ["created", "updated", "cancelled", "renumbered", "moved", "deleted", "restored", "sent", "printed", "exported", "merged"];
+const ACTIONS: AuditAction[] = ["created", "imported", "updated", "cancelled", "renumbered", "moved", "deleted", "restored", "sent", "printed", "exported", "merged"];
 
 export function toPerson(w: W): Person {
   return w && w.id != null ? { id: whole(w.id), name: text(w.name) } : null;

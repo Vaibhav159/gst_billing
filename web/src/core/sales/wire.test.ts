@@ -51,6 +51,15 @@ test("an income-tax flag or a check this app doesn't know yet is left out, never
   expect(row.checks).toEqual(["no_hsn"]);
 });
 
+test("a bill's history keeps every action the contract lists, v2's Excel import as its own (Ruling 1B-13); one this app doesn't know reads as an edit", () => {
+  const ACTIONS = ["created", "imported", "updated", "cancelled", "renumbered", "moved", "deleted", "restored", "sent", "printed", "exported", "merged"];
+  const read = (action: string) => toBillDetail(wireDetail({
+    history: { created_by: null, activity: [{ at: "2026-09-02T11:20:00+05:30", by: "Kailash Mehta", action, details: "Imported from Excel (2 items, total: 45210.00)" }] },
+  })).history.activity[0].action;
+  expect(ACTIONS.map(read)).toEqual(ACTIONS);
+  expect(read("rescued")).toBe("updated");
+});
+
 test("an answer with fields left out reads as empty, never a crash", () => {
   expect(toBillDetail(undefined)).toMatchObject({
     id: 0, invoice_number: "", counter: null, total_amount: 0, payment_mode: "", status: "active", sent: null, itax: [],

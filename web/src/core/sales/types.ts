@@ -14,7 +14,8 @@ export type BillStatus = "active" | "cancelled";
 export type Segment = "b2b" | "b2cl" | "b2cs";
 /** What makes a bill "Need a check" (never on a cancelled bill). */
 export type CheckCode = "no_lines" | "no_hsn" | "duplicate" | "heads_mismatch" | "tax_mismatch";
-export type AuditAction = "created" | "updated" | "cancelled" | "renumbered" | "moved" | "deleted" | "restored" | "sent" | "printed" | "exported" | "merged";
+/** What a bill's history row records (contract §2.2). imported: v2's Excel bulk import made the bill, "Imported from Excel" in its history (Ruling 1B-13). */
+export type AuditAction = "created" | "imported" | "updated" | "cancelled" | "renumbered" | "moved" | "deleted" | "restored" | "sent" | "printed" | "exported" | "merged";
 export type Copies = "original" | "duplicate" | "triplicate" | "all";
 export type TransportMode = "Road" | "Rail" | "Air" | "Ship";
 export type VehicleType = "Regular" | "ODC";

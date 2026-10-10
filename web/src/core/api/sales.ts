@@ -1,8 +1,9 @@
 // The sales/, bin/ and shop-settings/ endpoints (contract §2, §3, §5) as TanStack Query hooks, each answer read through
 // core/sales/wire.ts into paise-based types. A list that follows a firm asks nothing until the firm is known (firmId !==
-// null), not even on Try again, so it never asks for every firm first (part 0 carry). Writes take the app client's
-// defaults (core/api/query.ts): no retry and no queue, so offline a save fails at once. After any bill write, every
-// bill, bin, customer and search query asks again.
+// null), so it never asks for every firm first (part 0 carry); a page's Try again goes through the client
+// (qc.refetchQueries, invalidateQueries), which passes over a list still waiting. Writes take the app client's defaults
+// (core/api/query.ts): no retry and no queue, so offline a save fails at once. After any bill write, every bill, bin,
+// customer and search query asks again, except a bill whose own answer the write brought back.
 import { queryOptions, skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { todayIST } from "@/core/format";
 import type { BillDetail, BillInput, BillRow, BillStatus, BinRow, EwayInput, SalesPage, Segment, Sent, ShopSettings } from "@/core/sales/types";
@@ -57,8 +58,11 @@ export const salesKeys = {
   v2Invoice: (id: number | null) => ["sales", "v2-invoice", id] as const,
   v2Purchase: (number: string) => ["sales", "v2-purchase", number] as const,
 };
-// A list that can't ask yet (no firm known) has skipToken for its queryFn: unlike enabled: false, a refetch() or
-// QueryView's Try again can't make it ask either, and its key (null for the firm) never holds every firm's answer.
+// A list that can't ask yet (no firm known) has skipToken for its queryFn, and its key (null for the firm) never holds
+// every firm's answer. TanStack counts it as disabled, so qc.refetchQueries and qc.invalidateQueries pass it over, and a
+// page's Try again goes through them. The hook's own refetch() wouldn't ask either, but it would end the list in an
+// error ("Missing queryFn") and log one, so nothing calls it. (QueryView offers Try again only after an error, which a
+// list still waiting never has.)
 
 /**
  * The bills list, 40 at a time: the summary covers the whole filtered set and comes with the first page, as do the
@@ -185,16 +189,22 @@ export function useShopSettings() {
   return useQuery(shopSettingsQuery);
 }
 
-/** After any bill write: every bill list and bill, the bin, customers' figures and search results ask again. */
-export function invalidateSales(qc: QueryClient): void {
-  for (const queryKey of [salesKeys.all, ["bin"], ["customers"], ["search"]]) void qc.invalidateQueries({ queryKey });
+/**
+ * After any bill write: every bill list and bill, the bin, customers' figures and search results ask again. keep: the
+ * bill whose own answer the write brought back (keepBill), already in place, so its page doesn't ask for it again (as
+ * plan 1C's customer save keeps its customer).
+ */
+export function invalidateSales(qc: QueryClient, keep?: number): void {
+  void qc.invalidateQueries({ queryKey: salesKeys.all, predicate: (q) => !(keep !== undefined && q.queryKey[1] === "bill" && q.queryKey[2] === keep) });
+  for (const queryKey of [["bin"], ["customers"], ["search"]]) void qc.invalidateQueries({ queryKey });
 }
 
-/** A bill's own answer goes straight to its page. */
+/** A write that answers with the bill: its page shows that answer at once, and everything else asks again. */
 function keepBill(qc: QueryClient, d: BillDetail) {
   // typed first: TanStack 5.104's setQueryData<T>() with an object literal reads the union's other member wrongly
   const o: BillOutcome = { kind: "bill", bill: d };
   qc.setQueryData(billQuery(d.id).queryKey, o);
+  invalidateSales(qc, d.id);
 }
 
 export function useSaveShopSettings() {
@@ -207,11 +217,11 @@ export function useSaveShopSettings() {
 
 export function useCreateBill() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (body: BillInput) => toBillDetail((await api.post("sales/", body)).data), onSuccess: (d) => { keepBill(qc, d); invalidateSales(qc); } });
+  return useMutation({ mutationFn: async (body: BillInput) => toBillDetail((await api.post("sales/", body)).data), onSuccess: (d) => keepBill(qc, d) });
 }
 export function useUpdateBill() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, body }: { id: number; body: BillInput }) => toBillDetail((await api.put(`sales/${id}/`, body)).data), onSuccess: (d) => { keepBill(qc, d); invalidateSales(qc); } });
+  return useMutation({ mutationFn: async ({ id, body }: { id: number; body: BillInput }) => toBillDetail((await api.put(`sales/${id}/`, body)).data), onSuccess: (d) => keepBill(qc, d) });
 }
 export function useCancelBill() {
   const qc = useQueryClient();
@@ -225,7 +235,7 @@ export function useDeleteBill() {
 /** Back from the bin under the bill's own id (binId is the bin row's id). */
 export function useRestoreBill() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (binId: number) => toBillDetail((await api.post(`bin/${binId}/restore/`)).data), onSuccess: (d) => { keepBill(qc, d); invalidateSales(qc); } });
+  return useMutation({ mutationFn: async (binId: number) => toBillDetail((await api.post(`bin/${binId}/restore/`)).data), onSuccess: (d) => keepBill(qc, d) });
 }
 export function useRenumberBill() {
   const qc = useQueryClient();
@@ -237,11 +247,11 @@ export function useMoveBill() {
 }
 export function useSaveEway() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, eway }: { id: number; eway: EwayInput }) => toBillDetail((await api.put(`sales/${id}/eway/`, eway)).data), onSuccess: (d) => { keepBill(qc, d); invalidateSales(qc); } });
+  return useMutation({ mutationFn: async ({ id, eway }: { id: number; eway: EwayInput }) => toBillDetail((await api.put(`sales/${id}/eway/`, eway)).data), onSuccess: (d) => keepBill(qc, d) });
 }
 export function useFixHeads() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (id: number) => toBillDetail((await api.post(`sales/${id}/fix-heads/`)).data), onSuccess: (d) => { keepBill(qc, d); invalidateSales(qc); } });
+  return useMutation({ mutationFn: async (id: number) => toBillDetail((await api.post(`sales/${id}/fix-heads/`)).data), onSuccess: (d) => keepBill(qc, d) });
 }
 export type SendVia = "whatsapp" | "share";
 /** Records a send: how, and the number typed for this bill ("" for the customer's own). */

@@ -118,7 +118,9 @@ to step past them; in the e2e suite, `opened(page)` waits.
 
 - `renderApp(ui, { path, me })` (`src/test/render.tsx`) renders inside the
   app's providers with a MemoryRouter, signed in as the owner (`me: null` is
-  signed out; `stubAuth()` for a tree of your own).
+  signed out; `stubAuth()` for a tree of your own). Its cache is
+  `testQueryClient()`: the app's own defaults, so a save made offline fails at
+  once, as in production; a hook test's own wrapper uses it too.
 - A page that uses `useUnsavedGuard` needs a data router: render it with
   `createMemoryRouter` and `RouterProvider`, not `renderApp`.
 - Answer requests with `api.defaults.adapter`; never reach the network. A phone

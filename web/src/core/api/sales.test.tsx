@@ -1,20 +1,21 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { refuse, salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow } from "@/core/sales/fixtures";
 import type { BillInput } from "@/core/sales/types";
 import { toBinRow, toSalesPage } from "@/core/sales/wire";
 import type { FirmId } from "@/core/scope";
+import { testQueryClient } from "@/test/render";
 import { problemOf } from "./errors";
-import { queryClient } from "./query";
 import {
-  billQuery, cachedBillNumber, rowsOf, salesKeys, salesParams, shopSettingsQuery, useBill, useBillDetail, useBin, useCancelBill, useCheckNumber,
+  billQuery, cachedBillNumber, rowsOf, SALES_PAGE_SIZE, salesKeys, salesParams, shopSettingsQuery, useBill, useBillDetail, useBin, useCancelBill, useCheckNumber,
   useCreateBill, useDeleteBill, useFixHeads, useMoveBill, useNextNumber, usePaperBook, useRecordSent, useRenumberBill, useRestoreBill, useSalesFacets,
   useSalesList, useSalesPage, useSaveEway, useSaveShopSettings, useShopSettings, useTodaysBills, useUpdateBill, type SalesQuery,
 } from "./sales";
 
+/** A new cache with the app's defaults (saves never retry or queue), as renderApp's; a failed read isn't tried again. */
 function setup() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const qc = testQueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   return { qc, wrapper };
 }
@@ -53,18 +54,25 @@ test("a list waits for the firm, then asks for that firm's bills, 40 at a time, 
   expect(result.current.hasNextPage).toBe(false);
 });
 
-test("a list that can't ask yet asks nothing, even when told to try again: never every firm's bills", async () => {
-  vi.spyOn(console, "error").mockImplementation(() => {}); // TanStack's note that a query with nothing to ask was told to fetch
+test("a list that can't ask yet asks nothing, even when the page tries again: never every firm's bills", async () => {
   const { calls } = salesServer([["GET", "sales/", () => wirePage([wireRow()])]]);
   const { qc, wrapper } = setup();
   // every firm's bills are in the cache already: a list that isn't ready must not show them as its own
   qc.setQueryData(salesKeys.list("all", {}), { pages: [toSalesPage(wirePage([wireRow()]))], pageParams: [1] });
   const list = renderHook(() => useSalesList(null, {}), { wrapper });
-  const facets = renderHook(() => useSalesFacets(null, "2026-27"), { wrapper });
-  const page = renderHook(() => useSalesPage(null, { customer_id: 7 }), { wrapper });
-  await act(async () => { await Promise.all([list.result.current.refetch(), facets.result.current.refetch(), page.result.current.refetch()]); });
+  renderHook(() => useSalesFacets(null, "2026-27"), { wrapper });
+  renderHook(() => useSalesPage(null, { customer_id: 7 }), { wrapper });
+  const waiting = [salesKeys.list(null, {}), salesKeys.facets(null, "2026-27"), salesKeys.page(null, { customer_id: 7 }, SALES_PAGE_SIZE)];
+  // a page's Try again goes through the client, which passes over a query that can't ask yet, even one it names. (A
+  // hook's own refetch() wouldn't ask either, but it would end the list in an error, "Missing queryFn".)
+  await act(async () => {
+    for (const queryKey of waiting) await qc.refetchQueries({ queryKey });
+    await qc.invalidateQueries({ queryKey: salesKeys.all });
+  });
   expect(calls).toHaveLength(0);
   expect(list.result.current.data).toBeUndefined();
+  // still waiting for the firm, not failed (the cache's own state: a hook redraws only for what its screen has read)
+  for (const key of waiting) expect(qc.getQueryState(key)).toMatchObject({ status: "pending", fetchStatus: "idle", error: null });
 });
 
 test("another filter keeps the list on screen until its answer comes; a new firm or year never shows the last one's bills and money", async () => {
@@ -168,15 +176,23 @@ test("a bill and the shop's settings asked for outside a screen (print, a send's
   expect(calls.filter((c) => c.method === "GET" && c.url === "shop-settings/")).toHaveLength(1);
 });
 
-test("a new bill's own answer goes straight to its page; then every bill, the bin, customers and search ask again", async () => {
-  const { calls } = salesServer([["POST", "sales/", () => wireDetail()]]);
+test("a new bill's own answer goes straight to its page, which doesn't ask again; every other bill, the bin, customers and search do", async () => {
+  const { calls } = salesServer([["POST", "sales/", () => wireDetail()], ["GET", "sales/412/", () => wireDetail()], ["GET", "sales/", () => wirePage([wireRow()])]]);
   const { qc, wrapper } = setup();
-  const spy = vi.spyOn(qc, "invalidateQueries");
+  // the bill's page and a list are open, and the bin, customers and search have answers on this device
+  const bill = renderHook(() => useBill(412), { wrapper });
+  const list = renderHook(() => useSalesList(3, {}), { wrapper });
+  await waitFor(() => expect(bill.result.current.isSuccess && list.result.current.isSuccess).toBe(true));
+  const others = [["bin", "list", {}], ["customers", "count"], ["search", "kgh"]];
+  for (const key of others) qc.setQueryData(key, {});
   const { result } = renderHook(() => useCreateBill(), { wrapper });
   await act(async () => { await result.current.mutateAsync(INPUT); });
   expect(calls.find((c) => c.method === "POST")?.body).toEqual(INPUT);
   expect(qc.getQueryData(salesKeys.one(412))).toMatchObject({ kind: "bill", bill: { id: 412, invoice_number: "KGH/2026-27/31", total_amount: 8708321 } });
-  expect(spy.mock.calls.map(([f]) => f?.queryKey)).toEqual([["sales"], ["bin"], ["customers"], ["search"]]);
+  await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url === "sales/")).toHaveLength(2));
+  expect(calls.filter((c) => c.url === "sales/412/")).toHaveLength(1);
+  expect(qc.getQueryState(salesKeys.one(412))?.isInvalidated).toBe(false);
+  for (const key of others) expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
 });
 
 test("cancel posts the reason; afterwards bills, the bin, customers and search ask again", async () => {
@@ -249,8 +265,7 @@ test("changes go to the contract's addresses: change a bill, restore one, renumb
 
 test("a write made offline goes at once and fails at once, as the app's client says: no retry, no queue", async () => {
   const { calls } = salesServer([["POST", "sales/412/cancel/", () => refuse(0, null)]]);
-  const qc = new QueryClient({ defaultOptions: queryClient.getDefaultOptions() });
-  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  const { wrapper } = setup();
   onlineManager.setOnline(false);
   try {
     const { result } = renderHook(() => useCancelBill(), { wrapper });
