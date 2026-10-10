@@ -96,8 +96,9 @@ function useCustomersPage() {
   return {
     firms, firmId, setFirmId, period, q, setQ, term, gst, setGst, state, setState, usual, setUsual, sort, setSort, list, shown, count, total, summary,
     chips, clearAll, describe, justSaved, ready, offline: net === "offline",
-    // Export asks for the list's own filters, once it can ask, and names the firm its figures are for
-    exportable: ready && scopeKnown,
+    // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
+    // list of firms it waits even for all firms, as the file names each customer's usual firms
+    exportable: ready && scopeKnown && !firmsFailed,
     params: filters.firmId === null ? null : customerListParams(filters), scope: scopeName(firms, firmId), home: homeState(firms, firmId),
   };
 }

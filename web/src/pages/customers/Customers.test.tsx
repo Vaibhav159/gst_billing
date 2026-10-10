@@ -260,6 +260,16 @@ test("when the list of firms can't load, the figures never say “All firms” f
   expect(exp).toHaveAttribute("title", "The firms didn't load. Reload the page to export.");
 });
 
+test("with all firms picked, Export still waits when the list of firms can't load: the file would leave out each customer's usual firms", async () => {
+  localStorage.setItem("gst3.scope.1", "all");
+  serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/": list() });
+  mount(routes, ["/customers"]);
+  expect(await screen.findByText("29 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), All firms")).toBeInTheDocument();
+  const exp = screen.getByRole("button", { name: "Export 3 customers" });
+  expect(exp).toBeDisabled();
+  expect(exp).toHaveAttribute("title", "The firms didn't load. Reload the page to export.");
+});
+
 test("a row that has focus opens with Enter; Enter on a control inside it is that control's", async () => {
   const { router } = (serve({ "GET customers/": list() }), mount(routes, ["/customers"]));
   const row = (await screen.findByText("Anil Gupta")).closest("tr")!;
@@ -371,6 +381,14 @@ test("Call and WhatsApp only for an Indian mobile number: none for no number or 
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   }
+});
+
+test("a number stored with the country code twice gets no Call or WhatsApp, as the form refuses it", async () => {
+  serve({ "GET customers/": list(1, [{ ...ANIL, mobile_number: "+91 91 98290 41122", figures: FIG }]) });
+  mount(routes, ["/customers"]);
+  await userEvent.click(await screen.findByLabelText("Actions for Anil Gupta"));
+  expect(await screen.findByRole("menuitem", { name: /Statement/ })).toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: /Message|Resend/ })).not.toBeInTheDocument();
 });
 
 test("offline before the list came, it says so, with no count and nothing to export", async () => {

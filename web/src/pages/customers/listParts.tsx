@@ -53,8 +53,9 @@ export function useContact(c: Pick<Customer, "name" | "mobile_number">, last: La
   const { can, whyNot } = useAuth();
   const { show } = useToast();
   const digits = mobileDigits(c.mobile_number);
-  // @/core/ids's rule for a mobile number: none, a landline or a short one gets no Call and no WhatsApp
-  if (!digits || mobileProblem(digits)) return { tel: null, items: [] };
+  // @/core/ids's rule for a mobile number, on the number as stored (as the form checks it): none, a landline, a short
+  // one or the country code twice gets no Call and no WhatsApp
+  if (!digits || mobileProblem(c.mobile_number)) return { tel: null, items: [] };
   const chat = () => {
     const w = window.open(`https://wa.me/91${digits}`, "_blank");
     if (w) w.opener = null;
