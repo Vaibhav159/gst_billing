@@ -25,6 +25,12 @@ class PeriodLockAdminMixin:
 
     def save_model(self, request, obj, form, change):
         self._assert(obj, "edit" if change else "create")
+        if change and isinstance(obj, Invoice):
+            # v2's columns only (Ruling 1A-16): a full save would undo a cancel that landed after the
+            # read, and a history revert would bring back an old status.
+            obj._history_user = request.user  # as SimpleHistoryAdmin.save_model sets it
+            obj.save(update_fields=Invoice.v2_columns())
+            return
         super().save_model(request, obj, form, change)
 
     def delete_model(self, request, obj):

@@ -5,6 +5,7 @@ check the month (assert_sales_open), write it and its audit row in one transacti
 """
 
 from django.db import transaction
+from django.http import Http404
 from django.utils import timezone
 
 from billing.constants import BILL_ACTIVE, BILL_CANCELLED
@@ -30,8 +31,15 @@ def log(invoice, user, action, details="", changes=None, snapshot=None):
 
 
 def locked_bill(invoice):
-    """The bill again, row-locked for the rest of the transaction (two clicks can't both pass)."""
-    return Invoice.objects.select_for_update(of=("self",)).select_related("customer", "business").get(pk=invoice.pk)
+    """The bill again, row-locked for the rest of the transaction (two clicks can't both pass).
+
+    A bill another request deleted since this one found it is the plain 404, not a 500 (Ruling 1A-17).
+    """
+    bill = (Invoice.objects.select_for_update(of=("self",)).select_related("customer", "business")
+            .filter(pk=invoice.pk).first())
+    if bill is None:
+        raise Http404("No Invoice matches the given query.")
+    return bill
 
 
 def refuse_cancelled(invoice, words=CANCELLED_WORDS):

@@ -509,7 +509,8 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             moving = list(Invoice.objects.filter(customer=source).select_related("business"))
             for invoice in moving:
                 invoice.customer = target
-                invoice.save()
+                # The customer only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
+                invoice.save(update_fields=["customer", "updated_at"])
             invoices_transferred = len(moving)
             # Every line follows its own invoice (H6). Moving lines by their
             # customer field left a drifted line on the source's invoice behind
@@ -1280,7 +1281,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         for field in fields:
             if field in request.data:
                 setattr(invoice, field, request.data[field])
-        invoice.save()
+        # Its own columns only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
+        invoice.save(update_fields=[*fields, "updated_at"])
 
         with contextlib.suppress(Exception):
             AuditLog.objects.create(
@@ -1881,7 +1883,8 @@ class LineItemViewSet(viewsets.ModelViewSet):
                         "amount", flat=True
                     )
                 )
-                invoice_obj.save()
+                # The total only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
+                invoice_obj.save(update_fields=["total_amount", "updated_at"])
 
                 # Return the serialized line item
                 serializer = self.get_serializer(line_item)
@@ -2895,9 +2898,10 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     return _undone(Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk}), log)
 
                 elif entry.action == "updated" and entry.snapshot:
-                    # Revert to the snapshot state
+                    # Revert to the snapshot state. Row-locked, so a cancel can't land between the
+                    # check below and the save (Ruling 1A-16).
                     try:
-                        obj = model.objects.get(pk=entry.entity_id)
+                        obj = model.objects.select_for_update().get(pk=entry.entity_id)
                     except model.DoesNotExist:
                         return Response({"error": "Record no longer exists"}, status=404)
 
@@ -2928,7 +2932,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                                 setattr(obj, k, None if field.null else "")
                             else:
                                 setattr(obj, k, v)
-                    obj.save(**({"recalc_total": True} if model is Invoice else {}))
+                    obj.save(**({"recalc_total": True, "update_fields": Invoice.v2_columns()} if model is Invoice else {}))
                     log = AuditLog.objects.create(
                         action="updated",
                         entity=entry.entity,

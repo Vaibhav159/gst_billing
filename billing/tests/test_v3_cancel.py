@@ -1,12 +1,19 @@
 """Cancelling a sale (plan 1A, Task 2): POST /api/sales/{id}/cancel/, and what v2's paths do with it."""
 
+from decimal import Decimal
+from unittest.mock import patch
+
+from django.contrib import admin
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
+from billing.admin import InvoiceAdmin
 from billing.api.mixins import snapshot_of
+from billing.api.sales import SalesViewSet
 from billing.constants import BILL_ACTIVE, BILL_CANCELLED
 from billing.models import AuditLog, FiledPeriod, Invoice, UserPreference
+from billing.period_lock import assert_period_unlocked
 from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, person, sale
 
 
@@ -84,6 +91,20 @@ class CancelTest(TestCase):
         purchase.refresh_from_db()
         self.assertEqual(purchase.status, BILL_ACTIVE)
 
+    def test_a_bill_deleted_after_it_was_found_is_a_404(self):
+        # Ruling 1A-17: another request deletes the bill between get_object() and the row lock.
+        found = SalesViewSet.get_object
+
+        def found_then_deleted(view):
+            bill = found(view)
+            Invoice.objects.filter(pk=bill.pk).delete()
+            return bill
+
+        with patch.object(SalesViewSet, "get_object", found_then_deleted):
+            r = self.cancel()
+        self.assertEqual((r.status_code, r.data), (404, {"detail": "No Invoice matches the given query."}))
+        self.assertFalse(AuditLog.objects.filter(action="cancelled").exists())
+
 
 class V2PathsAndCancelTest(TestCase):
     def setUp(self):
@@ -132,3 +153,95 @@ class V2PathsAndCancelTest(TestCase):
     def test_a_json_field_is_snapshotted_as_json(self):
         pref = UserPreference(user=User.objects.get(pk=self.owner.pk), data={"defaultBusinessId": "3"})
         self.assertEqual(snapshot_of(pref)["data"], {"defaultBusinessId": "3"})
+
+
+class V2SavesKeepACancelTest(TestCase):
+    """A cancel that lands while a v2 path holds the bill stays (Ruling 1A-16): v2's saves never
+    write the v3 columns. Each probe cancels the bill as another request would, after the path
+    has read the bill and before it saves it."""
+
+    def setUp(self):
+        self.owner = person("kailash", *ROLE_GROUPS["owner"])
+        self.client = client_for(self.owner)
+        self.cust = buyer()
+        self.bill = sale(firm(), self.cust, "1", "2026-10-08")
+
+    def cancel_meanwhile(self):
+        Invoice.objects.filter(pk=self.bill.pk).update(status=BILL_CANCELLED, cancel_reason="Customer returned it")
+
+    def at_the_month_check(self, where="billing.api.views"):
+        """The review's probe: these paths check the month between reading the bill and saving it."""
+
+        def check(*args, **kwargs):
+            self.cancel_meanwhile()
+            return assert_period_unlocked(*args, **kwargs)
+
+        return patch(f"{where}.assert_period_unlocked", check)
+
+    def just_before_the_save(self):
+        """For a path that checks the month before it reads the bill: the cancel lands just before the write."""
+        save = Invoice.save
+
+        def cancelled_then_saved(invoice, *args, **kwargs):
+            if invoice.pk == self.bill.pk:
+                self.cancel_meanwhile()
+            return save(invoice, *args, **kwargs)
+
+        return patch.object(Invoice, "save", cancelled_then_saved)
+
+    def assert_still_cancelled(self):
+        self.bill.refresh_from_db()
+        self.assertEqual((self.bill.status, self.bill.cancel_reason), (BILL_CANCELLED, "Customer returned it"))
+
+    def test_a_patch(self):
+        with self.at_the_month_check():
+            r = self.client.patch(reverse("invoice-detail", args=[self.bill.pk]), {"payment_mode": "cash"},
+                                  format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assert_still_cancelled()
+        self.assertEqual(self.bill.payment_mode, "cash")
+
+    def test_the_eway_post(self):
+        with self.at_the_month_check():
+            r = self.client.post(reverse("invoice-eway-bill", args=[self.bill.pk]), {"vehicle_number": "RJ14AB1234"},
+                                 format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assert_still_cancelled()
+        self.assertEqual(self.bill.vehicle_number, "RJ14AB1234")
+
+    def test_the_undo_of_an_edit(self):
+        self.client.patch(reverse("invoice-detail", args=[self.bill.pk]), {"payment_mode": "cash"}, format="json")
+        edit = AuditLog.objects.get(action="updated", entity_id=self.bill.pk)
+        with self.at_the_month_check():
+            r = self.client.post(reverse("auditlog-undo", args=[edit.pk]))
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assert_still_cancelled()
+        self.assertEqual(self.bill.payment_mode, "")
+
+    def test_the_admin(self):
+        # Also the path of the admin's history revert (SimpleHistoryAdmin.history_form_view).
+        stale = Invoice.objects.get(pk=self.bill.pk)
+        stale.payment_mode = "bank"
+        request = RequestFactory().post("/admin/")
+        request.user = self.owner
+        with self.at_the_month_check("billing.admin"):
+            InvoiceAdmin(Invoice, admin.site).save_model(request, stale, form=None, change=True)
+        self.assert_still_cancelled()
+        self.assertEqual(self.bill.payment_mode, "bank")
+
+    def test_a_customer_merge(self):
+        target = buyer("ANIL GUPTA")
+        with self.just_before_the_save():
+            r = self.client.post(reverse("customer-merge"), {"source_id": self.cust.pk, "target_id": target.pk},
+                                 format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assert_still_cancelled()
+        self.assertEqual(self.bill.customer_id, target.pk)
+
+    def test_adding_a_line(self):
+        with self.just_before_the_save():
+            r = self.client.post(reverse("invoice-line-items", args=[self.bill.pk]),
+                                 {"product_name": "Silver", "quantity": "1", "rate": "5000"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assert_still_cancelled()
+        self.assertEqual(self.bill.total_amount, Decimal("10300") + Decimal(r.data["amount"]))

@@ -370,6 +370,15 @@ class Invoice(AbstractBaseModel):
     # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
     V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces")
 
+    @classmethod
+    def v2_columns(cls):
+        """What v2's saves write: every column but the id and V3_FIELDS (Ruling 1A-16).
+
+        A plain save() writes every column as it was read, so a cancel that landed in between
+        would be undone. v2's paths pass this as update_fields; v3's own writes save() as usual.
+        """
+        return [f.name for f in cls._meta.concrete_fields if not f.primary_key and f.name not in cls.V3_FIELDS]
+
     class Meta:
         # Every report filters on some combination of these three, and the
         # table had no indexes at all beyond the implicit FK ones.

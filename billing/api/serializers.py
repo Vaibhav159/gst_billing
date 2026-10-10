@@ -165,6 +165,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
         read_only_fields = ("total_amount", "workspace_id", *Invoice.V3_FIELDS)
         extra_kwargs = {"source_file": {"write_only": True}, "source_preview": {"write_only": True}}
 
+    def update(self, instance, validated_data):
+        # DRF's default ends in a plain save(), which writes the v3 columns back as they were read
+        # and so can undo a cancel that landed in between (Ruling 1A-16). Invoice has no
+        # many-to-many fields for DRF's default to set.
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save(update_fields=Invoice.v2_columns())
+        return instance
+
     def get_source_file_url(self, obj):
         return signed_url(obj.source_file)
 
