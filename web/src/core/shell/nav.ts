@@ -1,6 +1,6 @@
 // Where the shells go. Desktop: every section in the top bar (overflow under More).
 // Phone Expert: five bottom tabs. Phone Easy: the same five slots with big labels.
-import { Building2, Camera, DatabaseBackup, History, Home, MoreHorizontal, Package, ReceiptText, Settings as SettingsIcon, ShieldCheck, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Building2, Camera, DatabaseBackup, History, Home, Landmark, LayoutDashboard, MoreHorizontal, Package, ReceiptText, Settings as SettingsIcon, ShieldCheck, ShoppingBag, Users, type LucideIcon } from "lucide-react";
 import type { Action } from "@/core/auth/permissions";
 
 /** A page in the top bar or under More. need: the permission that shows it (none: everyone who can look). */
@@ -15,6 +15,8 @@ export const DESKTOP_NAV: NavItem[] = [
   { label: "GST", to: "/gst", section: "gst" },
   { label: "Reports", to: "/reports", section: "reports" },
 ];
+/** Each top-bar section's icon, where it shows as a row: folded under the top bar's More, and in search's Pages. */
+export const NAV_ICON: Record<string, LucideIcon> = { dashboard: LayoutDashboard, sales: ReceiptText, purchases: ShoppingBag, customers: Users, gst: Landmark, reports: BarChart3 };
 export const MORE_NAV: NavItem[] = [
   { label: "Products", to: "/products", section: "products", icon: Package },
   { label: "Firms", to: "/firms", section: "firms", icon: Building2 },

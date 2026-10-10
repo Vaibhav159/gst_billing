@@ -1,13 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { BarChart3, ChevronDown, Landmark, LayoutDashboard, ReceiptText, ShoppingBag, Users, type LucideIcon } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { Menu } from "@/core/ui";
-import { DESKTOP_NAV, MORE_NAV } from "./nav";
+import { DESKTOP_NAV, MORE_NAV, NAV_ICON } from "./nav";
 
 /** Top nav with a gold underline that slides to the current section. */
-export const NAV_ICON: Record<string, LucideIcon> = { dashboard: LayoutDashboard, sales: ReceiptText, purchases: ShoppingBag, customers: Users, gst: Landmark, reports: BarChart3 };
 export function NavBar({ section, inMore: inMoreList }: { section: string; inMore: boolean }) {
   const { can } = useAuth();
   const ref = useRef<HTMLElement>(null);

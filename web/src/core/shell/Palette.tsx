@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Building2, Camera, CornerDownLeft, FileText, Landmark, LayoutDashboard, Package, Plus, ReceiptText, Search, ShoppingBag, Truck, UserRound, Users, type LucideIcon } from "lucide-react";
+import { Building2, Camera, CornerDownLeft, FileText, Package, Plus, Search, ShoppingBag, Truck, UserRound, type LucideIcon } from "lucide-react";
 import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
@@ -12,13 +12,12 @@ import { date, inr, mobileText, pct, toPaise } from "@/core/format";
 import { useFirms, type Firm } from "@/core/scope";
 import { Button, Dialog, Kbd, optionClass } from "@/core/ui";
 import { useView } from "@/core/view";
-import { ALT, DESKTOP_NAV, MORE_NAV } from "./nav";
+import { ALT, DESKTOP_NAV, MORE_NAV, NAV_ICON } from "./nav";
 import { recentVisits } from "./recent";
 
 /** A row: where it goes, under which heading. Actions show their hint as a key; other rows as a second line. */
 type Result = { group: string; label: string; hint?: string; icon?: LucideIcon; to: string };
 
-const PAGE_ICON: Record<string, LucideIcon> = { dashboard: LayoutDashboard, sales: ReceiptText, purchases: ShoppingBag, customers: Users, gst: Landmark, reports: BarChart3 };
 /** An opened record's icon, by the first part of its address. */
 const RECENT_ICON: Record<string, LucideIcon> = { sales: FileText, customers: UserRound, purchases: ShoppingBag, products: Package, suppliers: Truck };
 
@@ -103,7 +102,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
       can("product.edit") && { group: "Actions", label: "Add a product", icon: Package, to: "/products/new" },
     ] as (Result | false)[]).filter((a): a is Result => Boolean(a));
     const pages: Result[] = [
-      ...DESKTOP_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: PAGE_ICON[n.section], to: n.to })),
+      ...DESKTOP_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: NAV_ICON[n.section], to: n.to })),
       ...MORE_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: n.icon, to: n.to })),
     ];
     const match = (s: string) => !t || s.toLowerCase().includes(t);
