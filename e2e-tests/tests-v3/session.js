@@ -5,8 +5,11 @@ const fs = require("fs");
 const path = require("path");
 const { expect } = require("@playwright/test");
 
-/** The signed-in session (git-ignored): one absolute path for the config, the setup and the specs. */
-const AUTH = path.join(__dirname, "..", ".auth-v3.json");
+/**
+ * The signed-in session (git-ignored): one absolute path for the config, the setup and the specs. E2E_AUTH_FILE moves
+ * it, so runs against two sandboxes from one checkout keep their sessions apart.
+ */
+const AUTH = process.env.E2E_AUTH_FILE ? path.resolve(process.env.E2E_AUTH_FILE) : path.join(__dirname, "..", ".auth-v3.json");
 /** A signed-out browser: no cookies, nothing stored. */
 const SIGNED_OUT = { cookies: [], origins: [] };
 

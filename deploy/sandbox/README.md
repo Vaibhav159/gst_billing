@@ -86,6 +86,41 @@ opens on KIRAN, its default firm).
   v3's code: the images build from, and the web container mounts `billing/`
   and `gst_billing/` from, the checkout whose `sandbox.sh` you run.
 
+## A second sandbox (`gst-sandbox-2`)
+
+A second, independent copy for a second e2e lane or another branch: its own
+compose project, database, Redis, volumes (`gst-sandbox-2_*`, including the
+Vite `node_modules`), image tags (`gst-sandbox-2-web:dev`, `-nginx:dev`) and
+seed. Run it from its own worktree (on this VM `v3wt/sbx2`, branch `v3-sbx2`),
+since the images build from, and the containers mount, the checkout whose
+`sandbox.sh` you run.
+
+| | `gst-sandbox` | `gst-sandbox-2` |
+|---|---|---|
+| nginx | 8060 | 8160 |
+| v2 Vite | 5174 | 5274 |
+| v3 Vite | 5180 | 5280 |
+| logins | `env/logins.txt` | `env/logins-2.txt` |
+| e2e lock | `locks/e2e-gst-sandbox.lock` | `locks/e2e-gst-sandbox-2.lock` |
+
+```bash
+export GST_SANDBOX_PROJECT=gst-sandbox-2
+export GST_SANDBOX_ENV_DIR=/home/ubuntu/projects/gst-billing-sandbox/env  # the worktree's parent isn't the workspace
+deploy/sandbox/sandbox.sh up && deploy/sandbox/sandbox.sh dev && deploy/sandbox/sandbox.sh seed
+```
+
+- With no variables set, `sandbox.sh` and `compose.yaml` drive `gst-sandbox`
+  exactly as before. `GST_SANDBOX_PROJECT` takes only `gst-sandbox` or
+  `gst-sandbox-N` (N 2–9); `gst-sandbox-N` gets 8060/5174/5180 + 100×(N−1) and
+  `logins-N.txt`. `GST_SANDBOX_NGINX_PORT`, `GST_SANDBOX_VITE_PORT`,
+  `GST_SANDBOX_VITE3_PORT` and `GST_SANDBOX_LOGINS` override them; 80, 8000
+  and 5432 are refused.
+- Both share `sandbox.env` (DB password, Django key) and the capped builder.
+- e2e against it: `BASE_URL_V3=http://127.0.0.1:5280`,
+  `LOGINS_FILE=<env>/logins-2.txt`, under
+  `flock <workspace>/locks/e2e-gst-sandbox-2.lock`. Running both lanes from
+  one checkout? Give each its own `E2E_AUTH_FILE` and `--output` directory.
+
 ## Differences from production, on purpose
 
 | | Production | Sandbox |

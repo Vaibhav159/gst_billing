@@ -1,4 +1,5 @@
 // v3 end-to-end tests. Locally: BASE_URL_V3=http://127.0.0.1:5180 (the sandbox), LOGINS_FILE=../../env/logins.txt
+// (the second sandbox: BASE_URL_V3=http://127.0.0.1:5280, LOGINS_FILE=<env>/logins-2.txt; see deploy/sandbox/README.md)
 // E2E_ROLE=owner E2E_SEARCH=Sharma E2E_SEARCH_HIT="Priya Sharma" CHROMIUM_PATH=~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell.
 // In CI: BASE_URL_V3=http://127.0.0.1:8081 E2E_USER=testuser E2E_PASS=testpass2026 E2E_SEARCH=TEST E2E_SEARCH_HIT="TEST CUSTOMER".
 const { defineConfig, devices } = require("@playwright/test");
