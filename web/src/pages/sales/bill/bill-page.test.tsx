@@ -1,12 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { billQuery, salesKeys } from "@/core/api/sales";
+import { queryClient as appClient } from "@/core/api/query";
+import { billQuery, invalidateSales, salesKeys, type BillOutcome } from "@/core/api/sales";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
-import { refuse, salesServer, wireBin, wireDetail, wirePage, wireRow } from "@/core/sales/fixtures";
-import { toPaperBook, toSalesPage } from "@/core/sales/wire";
+import { Refusal, refuse, salesServer, wireBin, wireDetail, wirePage, wireRow } from "@/core/sales/fixtures";
+import { toBillDetail, toPaperBook, toSalesPage } from "@/core/sales/wire";
 import { LOCKED_REASON } from "@/core/sales/words";
 import { ToastProvider } from "@/core/ui";
 import { renderApp, stubAuth, testQueryClient } from "@/test/render";
@@ -21,7 +22,7 @@ const mount = (path: string, me?: Partial<Me>) => renderApp(
   </Routes>, { path, me });
 const status = (text: string) => screen.getByText(text).closest("[role=status]") as HTMLElement;
 
-afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.restoreAllMocks(); });
+afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.restoreAllMocks(); act(() => { onlineManager.setOnline(true); }); });
 
 test("a bill's page: its number and firm, the exact total, the items, parties, what happened and the customer's other bills", async () => {
   const { calls } = salesServer([
@@ -340,7 +341,8 @@ test("the next paper bill takes focus when the paper book asked again answers, e
   mountWith(qc, "/sales/413?saved=new");
   await screen.findByText("Saved KGH/2026-27/34");
   const panel = status("Saved KGH/2026-27/34");
-  await waitFor(() => expect(within(panel).getByRole("link", { name: "Back to the paper book" })).toHaveFocus());
+  // while it's asked, focus waits rather than landing on the way back and jumping to Next a moment later
+  expect(within(panel).getByRole("link", { name: "Back to the paper book" })).not.toHaveFocus();
   await act(async () => { fresh(paperBook(35)); });
   const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
   await waitFor(() => expect(next).toHaveFocus());
@@ -471,4 +473,171 @@ test("the saved panel's words follow a send made from it: a new bill's say Whats
   expect(await within(edited).findByText("Changes saved and the corrected bill sent")).toBeInTheDocument();
   expect(edited).not.toHaveTextContent("send the corrected one");
   expect(within(edited).getByRole("button", { name: "Send again" })).toBe(corrected);
+});
+
+/* ── Task 9's last minors (1B Task 10) ── */
+
+const BOOK_KEY = salesKeys.paperBook(3, "2026-09");
+/** As a paper save leaves the cache (keepBill): the saved bill in place, the paper book from before the save (34 next), every other bill screen asked again. */
+function savedKeeping(qc: QueryClient) {
+  const saved: BillOutcome = { kind: "bill", bill: toBillDetail(wireDetail(PAPER_34)) };
+  qc.setQueryData(billQuery(413).queryKey, saved);
+  qc.setQueryData(BOOK_KEY, toPaperBook(paperBook(34)));
+  invalidateSales(qc, 413);
+}
+
+test("offline as the panel comes up, the paper book's ask waits: the number just saved is never offered, and the next one comes and takes focus once the device is back", async () => {
+  salesServer([["GET", "sales/413/", () => wireDetail(PAPER_34)], ["GET", "sales/paper-book/", () => paperBook(35)]]);
+  const qc = testQueryClient();
+  savedKeeping(qc);
+  onlineManager.setOnline(false);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  await waitFor(() => expect(qc.getQueryState(BOOK_KEY)?.fetchStatus).toBe("paused"));
+  expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument();
+  act(() => { onlineManager.setOnline(true); });
+  const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
+  await waitFor(() => expect(next).toHaveFocus());
+});
+
+test("a paper book ask that gets no reply, its one more try held until the device is back, never offers the number just saved", async () => {
+  let drop: () => void = () => {};
+  let asked = 0;
+  salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => { asked += 1; return asked === 1 ? new Promise((_, no) => { drop = () => no(new Refusal(0, {})); }) : paperBook(35); }],
+  ]);
+  // the app's own retry (once, after no reply), without its wait before the try
+  const app = appClient.getDefaultOptions();
+  const qc = new QueryClient({ defaultOptions: { ...app, queries: { ...app.queries, retryDelay: 0 } } });
+  savedKeeping(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  await waitFor(() => expect(asked).toBe(1));
+  // the device goes offline and no reply comes: the one more try waits for the device to be back
+  onlineManager.setOnline(false);
+  act(() => { drop(); });
+  await waitFor(() => expect(qc.getQueryState(BOOK_KEY)?.fetchStatus).toBe("paused"));
+  expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument();
+  act(() => { onlineManager.setOnline(true); });
+  expect(await within(panel).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  expect(asked).toBe(2);
+});
+
+test("a paper book that can't be asked again says so in a line with Try again; once it answers, the next paper bill comes and takes focus", async () => {
+  let down = true;
+  const { calls } = salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => (down ? refuse(500, {}) : paperBook(35))],
+  ]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  expect(await within(panel).findByText("Couldn't load the paper book's next number.")).toBeInTheDocument();
+  expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument();
+  await waitFor(() => expect(within(panel).getByRole("link", { name: "Back to the paper book" })).toHaveFocus());
+  down = false;
+  await userEvent.click(within(panel).getByRole("button", { name: "Try again" }));
+  const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
+  await waitFor(() => expect(next).toHaveFocus());
+  expect(within(panel).queryByText("Couldn't load the paper book's next number.")).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/paper-book/")).toHaveLength(2);
+});
+
+test("focus waits for the paper book's answer, then lands once, on the next paper bill; asking again later leaves it where it is, and gives it back to Next when Next had it", async () => {
+  let asked = 0;
+  let answer: (w: unknown) => void = () => {};
+  salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => { asked += 1; return new Promise((resolve) => { answer = resolve; }); }],
+  ]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  const back = within(panel).getByRole("link", { name: "Back to the paper book" });
+  await waitFor(() => expect(asked).toBe(1));
+  // while it's asked, nothing in the panel takes focus (it would land on the way back, then jump to Next)
+  expect(panel).not.toContainElement(document.activeElement as HTMLElement);
+  await act(async () => { answer(paperBook(35)); });
+  const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
+  await waitFor(() => expect(next).toHaveFocus());
+  // the person moves to the way back; asking again later (a reconnect, another write on this device) leaves focus there
+  await userEvent.tab();
+  expect(back).toHaveFocus();
+  act(() => { void qc.invalidateQueries({ queryKey: BOOK_KEY }); });
+  await waitFor(() => expect(asked).toBe(2));
+  await act(async () => { answer(paperBook(35)); });
+  expect(await within(panel).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  expect(back).toHaveFocus();
+  // on the page's title (where a closing dialog leaves it when its opener has gone), it stays there too
+  const title = screen.getByRole("heading", { level: 1 });
+  act(() => { title.focus(); });
+  act(() => { void qc.invalidateQueries({ queryKey: BOOK_KEY }); });
+  await waitFor(() => expect(asked).toBe(3));
+  await act(async () => { answer(paperBook(35)); });
+  expect(await within(panel).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  expect(title).toHaveFocus();
+  // on Next, asking again hides it for a moment: focus would be left nowhere, so Next has it again when it comes back
+  act(() => { within(panel).getByRole("link", { name: "Next paper bill · 35" }).focus(); });
+  act(() => { void qc.invalidateQueries({ queryKey: BOOK_KEY }); });
+  await waitFor(() => expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument());
+  await act(async () => { answer(paperBook(36)); });
+  const later = await within(panel).findByRole("link", { name: "Next paper bill · 36" });
+  await waitFor(() => expect(later).toHaveFocus());
+});
+
+test("a person who moves to the way back while the paper book is asked stays there when it answers", async () => {
+  let answer: (w: unknown) => void = () => {};
+  salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => new Promise((resolve) => { answer = resolve; })],
+  ]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  const back = within(panel).getByRole("link", { name: "Back to the paper book" });
+  act(() => { back.focus(); });
+  await act(async () => { answer(paperBook(35)); });
+  expect(await within(panel).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  expect(back).toHaveFocus();
+});
+
+test("an edited bill whose corrected copy went before the panel came up (a reload, a switch of layout) isn't asked for it again; one sent only before the edit still is", async () => {
+  const CREATED = { at: "2026-10-08T10:42:05+05:30", by: "Rakesh Soni", action: "created", details: "Anil Gupta · ₹87,083.21" };
+  const EDITED = { at: "2026-10-08T12:00:00+05:30", by: "Kailash Mehta", action: "updated", details: "Gold Ring 22K: 12.345 gms" };
+  let sent = { at: "2026-10-08T11:00:00+05:30", last_at: "2026-10-08T12:41:00+05:30", count: 2, via: "whatsapp", to: "" };
+  salesServer([["GET", "sales/412/", () => wireDetail({ sent, history: { created_by: { id: 2, name: "Rakesh Soni" }, activity: [
+    ...(sent.last_at > EDITED.at ? [{ at: sent.last_at, by: "Kailash Mehta", action: "sent", details: "WhatsApp" }] : []), EDITED,
+    { at: sent.at, by: "Rakesh Soni", action: "sent", details: "WhatsApp" }, CREATED,
+  ] } })]]);
+  let view = mount("/sales/412?saved=edit");
+  await screen.findByText("Changes saved and the corrected bill sent");
+  const panel = status("Changes saved and the corrected bill sent");
+  expect(panel).toHaveTextContent("Written to the audit log, with what changed.");
+  expect(panel).not.toHaveTextContent("send the corrected one");
+  expect(within(panel).getByRole("link", { name: "Print" })).toHaveAttribute("href", "/sales/412/print");
+  expect(within(panel).queryByRole("button", { name: /^Send/ })).not.toBeInTheDocument();
+  view.unmount();
+  // a switch to the phone's layout mounts the panel again: the same
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  view = mount("/sales/412?saved=edit");
+  expect(await screen.findByText("Changes saved and the corrected bill sent")).toBeInTheDocument();
+  expect(screen.queryByText(/send the corrected one/)).not.toBeInTheDocument();
+  view.unmount();
+  (window as unknown as { __phone?: boolean }).__phone = false;
+  // sent only before the edit: the customer has the old bill
+  sent = { ...sent, last_at: "2026-10-08T11:30:00+05:30" };
+  mount("/sales/412?saved=edit");
+  await screen.findByText("Changes saved");
+  const owed = status("Changes saved");
+  expect(owed).toHaveTextContent("Written to the audit log, with what changed. Anil Gupta has the old bill; send the corrected one.");
+  expect(within(owed).getByRole("button", { name: "Send the corrected bill" })).toBeInTheDocument();
 });

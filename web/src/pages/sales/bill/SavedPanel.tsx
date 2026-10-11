@@ -1,41 +1,51 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, BookOpenText, MessageCircle, Printer, Send } from "lucide-react";
-import { usePaperBook } from "@/core/api/sales";
+import { salesKeys, usePaperBook } from "@/core/api/sales";
 import { cn } from "@/core/cn";
 import { date, inr, mobileText, monthLabel } from "@/core/format";
 import type { BillDetail } from "@/core/sales/types";
-import { Button, ButtonLink, SuccessMark } from "@/core/ui";
+import { Button, ButtonLink, SuccessMark, type ButtonLinkProps } from "@/core/ui";
 import type { Detail } from "./useDetail";
 
 /**
  * Right after a save (?saved=new|edit, &sent=1 when the save sent it; plan 1D), one panel says what happened and owns
  * the next step: Send, or Print when there's no number to send to (PROTO sales/BillDetail.jsx:137-201). It takes focus,
  * so the keyboard goes on from here. A paper bill's next step is the next paper bill: the same firm and date, and the
- * paper book's next number, once the paper book has answered since the save. An unsent paper bill is never asked to be
- * sent: after an edit its step is Print. A send made while it shows changes what it says. The total is the bill's exact
- * one (Ruling 1B-12).
+ * paper book's next number, once the paper book has answered since the save; when it can't, the panel says so. An unsent
+ * paper bill is never asked to be sent: after an edit its step is Print. A send made while it shows, or any time after
+ * the edit, changes what it says. The total is the bill's exact one (Ruling 1B-12).
  */
 export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; phone?: boolean }) {
+  const qc = useQueryClient();
   const acts = useRef<HTMLDivElement>(null);
   const paper = b.paper && d.saved !== "edit";
   const ym = b.invoice_date.slice(0, 7);
   const book = usePaperBook(paper ? b.business : null, paper ? ym : null);
   // the bill's last send when the panel came up: a send made while it shows moves it on
   const [lastAtFirst] = useState(() => b.sent?.last_at ?? "");
+  // The next step takes focus once, unless the person has put it somewhere: on a paper bill not until the paper book has
+  // answered (it would land on the way back, then jump to Next), and Send once the shop's message is in. A later answer
+  // leaves focus be, except after Try again, or when asking again hid Next while it had focus (focus was left nowhere).
+  const landed = useRef(false);
   useEffect(() => {
     const box = acts.current;
+    if (landed.current || !box || (paper && (book.fetchStatus !== "idle" || book.isPending))) return;
+    const step = box.querySelector<HTMLElement>("a[href], button:not([disabled])");
+    if (!step) return;
+    landed.current = true;
     const a = document.activeElement;
-    // the next step takes focus (again once the paper book's next number is in, or Send once the shop's message is),
-    // unless the person has moved on
-    if (!box || (a && a !== document.body && !box.contains(a) && !a.hasAttribute("data-page-title"))) return;
-    box.querySelector<HTMLElement>("a[href], button:not([disabled])")?.focus({ preventScroll: true });
-  }, [book.data, book.isFetching, d.ready]);
+    if (a && a !== document.body && !a.hasAttribute("data-page-title")) return;
+    step.focus({ preventScroll: true });
+  }, [book.fetchStatus, book.status, d.ready]);
   const c = b.customer;
   const shell = cn("card border-sale-line anim-rise flex gap-4", phone ? "flex-col items-stretch p-4" : "items-center px-5 py-4");
   if (paper) {
-    // the save asks the paper book again: until that answer is in, the book still names the number just saved as the
-    // next one, so nothing is offered; nor when asking again failed
-    const next = book.isSuccess && !book.isFetching && !book.data.locked ? book.data.next : null;
+    // the save asks the paper book again: until that answer is in (asked, or held while offline), the book still names
+    // the number just saved as the next one, so nothing is offered; nor when asking again failed, which the panel says
+    const next = book.isSuccess && book.fetchStatus === "idle" && !book.data.locked ? book.data.next : null;
+    // Ruling 1B-11: asked again through the client
+    const retry = () => { landed.current = false; void qc.refetchQueries({ queryKey: salesKeys.paperBook(b.business, ym) }); };
     return (
       <div role="status" className={shell}>
         <div className="flex items-center gap-4 min-w-0 flex-1">
@@ -43,10 +53,11 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
           <div className="min-w-0">
             <p className="text-lg font-semibold">Saved {b.invoice_number}</p>
             <p className="text-fg2">From the paper book, dated {date(b.invoice_date)}: {inr(b.total_amount)} · {c.name}. It goes into {monthLabel(ym, { long: true, year: false })}&apos;s GSTR-1.</p>
+            {book.isError ? <p className="text-sm text-muted mt-1">Couldn&apos;t load the paper book&apos;s next number. <Button size="sm" variant="link" loading={book.isFetching} onClick={retry}>Try again</Button></p> : null}
           </div>
         </div>
         <div ref={acts} className={cn("flex gap-2", phone ? "flex-col" : "shrink-0")}>
-          {next ? <ButtonLink to={`/sales/new?paper=1&firm=${b.business}&date=${b.invoice_date}&number=${next.counter}`} variant="primary" size="lg" icon={ArrowRight} full={phone}>{`Next paper bill · ${next.counter}`}</ButtonLink> : null}
+          {next ? <NextLink landed={landed} to={`/sales/new?paper=1&firm=${b.business}&date=${b.invoice_date}&number=${next.counter}`} variant="primary" size="lg" icon={ArrowRight} full={phone}>{`Next paper bill · ${next.counter}`}</NextLink> : null}
           <ButtonLink to={`/sales/paper?firm=${b.business}&month=${ym}`} size="lg" icon={BookOpenText} full={phone}>Back to the paper book</ButtonLink>
         </div>
       </div>
@@ -54,9 +65,13 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
   }
   const edit = d.saved === "edit";
   const sentHere = Boolean(b.sent) && b.sent?.last_at !== lastAtFirst;
-  // sent: the save sent it (&sent=1), a send was made while the panel shows, or (a new bill) it was sent at all. An edited
-  // bill sent before the edit still owes the customer its corrected copy
-  const sent = Boolean(b.sent) && (d.sentNow || sentHere || !edit);
+  // an edit's corrected copy went if a send came after the bill's latest edit (its history's "updated" rows, "Edited" on
+  // the page), whenever that was: a reload, or a switch of layout that mounts the panel again, doesn't ask for it again
+  const edits = b.history.activity.filter((a) => a.action === "updated").map((a) => Date.parse(a.at));
+  const sentAfterEdit = Boolean(b.sent) && edits.length > 0 && Date.parse(b.sent?.last_at ?? "") > Math.max(...edits);
+  // sent: the save sent it (&sent=1), a send was made while the panel shows, or (a new bill) it was sent at all, or (an
+  // edit) since the edit. An edited bill sent only before the edit still owes the customer its corrected copy
+  const sent = Boolean(b.sent) && (d.sentNow || sentHere || !edit || sentAfterEdit);
   const who = c.type === "walkin" ? (b.sent?.to ? `+91 ${mobileText(b.sent.to)}` : "the customer") : c.name;
   const title = edit ? (sent ? "Changes saved and the corrected bill sent" : "Changes saved") : sent && phone ? "Saved and handed to WhatsApp" : `Saved ${b.invoice_number}`;
   const body = edit
@@ -91,4 +106,15 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
       <div ref={acts} className={phone ? "" : "shrink-0"}>{actions}</div>
     </div>
   );
+}
+
+/**
+ * The next paper bill's link. Asking the paper book again hides it; if it had focus then, focus would be left nowhere,
+ * so the panel's focus lands again once the book answers. React runs a removed component's layout cleanup before it
+ * takes the link out of the page, so the cleanup can still tell.
+ */
+function NextLink({ landed, ...link }: ButtonLinkProps & { landed: MutableRefObject<boolean> }) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  useLayoutEffect(() => () => { if (ref.current !== null && ref.current === document.activeElement) landed.current = false; }, [landed]);
+  return <ButtonLink ref={ref} {...link} />;
 }
