@@ -8,6 +8,7 @@ from rest_framework.exceptions import APIException, ValidationError
 from billing.cache import uncached
 from billing.media import sign_media_path
 from billing.models import CapturePage, InwardCapture
+from billing.params import id_param
 from billing.text import money, person, stamp
 
 
@@ -86,8 +87,13 @@ def purchase_files(invoice):
     return files
 
 
+def capture_id_param(value):
+    return id_param({"capture": str(value)}, "capture", "That photo isn't in the inbox any more.")
+
+
 @transaction.atomic
 def consume_capture(capture_id, invoice):
+    capture_id = capture_id_param(capture_id)
     capture = capture_queryset().select_for_update(of=("self",)).filter(pk=capture_id).first()
     if capture is None or capture.discarded_at:
         raise ValidationError({"capture": ["That photo isn't in the inbox any more."]})

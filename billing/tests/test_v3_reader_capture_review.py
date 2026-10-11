@@ -12,6 +12,7 @@ from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from PIL import Image
+from rest_framework.exceptions import ValidationError
 
 from billing.models import AiRead, CapturePage, Customer, Invoice, InwardCapture, LineItem
 from billing.services.ai_reader import cleaned_read
@@ -187,3 +188,27 @@ class ReaderCaptureReviewTests(TestCase):
         capture = InwardCapture(pk=98765)
         self.assertEqual(self.legacy_bill(capture).status_code, 400)
         self.assertFalse(Invoice.objects.exists())
+
+    def test_capture_consumption_rejects_malformed_and_huge_ids(self):
+        from billing.services.capture_reads import consume_capture
+        invoice = sale(self.business, buyer(), "ID/1", date(2026, 9, 1), kind="inward")
+        for value in ("bad", "9" * 200, {"id": 1}, [1], True, "-1", "1.5"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError) as refused:
+                    consume_capture(value, invoice)
+                self.assertEqual(refused.exception.detail, {"capture": ["That photo isn't in the inbox any more."]})
+
+    def test_legacy_capture_create_and_extract_refuse_bad_id_without_writes(self):
+        for value in ("bad", "9" * 200, '{"id": 1}', "[1]", "-1", "1.5"):
+            with self.subTest(value=value):
+                response = self.legacy_bill(InwardCapture(pk=1), capture_id=value)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, {"capture": ["That photo isn't in the inbox any more."]})
+                with patch("billing.utils.AIInvoiceProcessor.process_invoice_image") as reader:
+                    response = self.client.post("/api/inward-bills/extract/", {"capture_id": value}, format="multipart")
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, {"capture": ["That photo isn't in the inbox any more."]})
+                reader.assert_not_called()
+        self.assertFalse(Invoice.objects.exists())
+        self.assertFalse(LineItem.objects.exists())
+        self.assertFalse(Customer.objects.filter(name="Synthetic supplier").exists())

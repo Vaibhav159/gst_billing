@@ -331,7 +331,9 @@ class InwardBillExtractView(APIView):
         file = request.FILES.get("file") or request.FILES.get("image")
         capture_id = request.data.get("capture_id")
         if file is None and capture_id:
-            cap = InwardCapture.objects.filter(id=capture_id, discarded_at__isnull=True).first()
+            from billing.services.capture_reads import capture_id_param
+
+            cap = InwardCapture.objects.filter(id=capture_id_param(capture_id), discarded_at__isnull=True).first()
             if cap is None or not cap.image:
                 return Response({"error": "Capture not found."}, status=status.HTTP_404_NOT_FOUND)
             from django.core.files.uploadedfile import SimpleUploadedFile
