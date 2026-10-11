@@ -17,6 +17,7 @@ from .preferences import PreferencesView
 from .reconciliation import ReconciliationView
 from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
+from .shop import ShopSettingsView
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
@@ -58,6 +59,7 @@ urlpatterns = [
     path("inward-captures/<int:pk>/", InwardCaptureDetailView.as_view(), name="inward-capture-detail"),
     path("search/quick/", QuickSearchView.as_view(), name="quick-search"),
     path("reconciliation/", ReconciliationView.as_view(), name="reconciliation"),
+    path("shop-settings/", ShopSettingsView.as_view(), name="shop-settings"),
     path("inward-bills/<int:pk>/", InwardBillDetailView.as_view(), name="inward-bill-detail"),
     path("", include(router.urls)),
     path(

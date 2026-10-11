@@ -1,0 +1,74 @@
+"""/api/shop-settings/: the shop's printing and sharing defaults (part 1 API contract, section 5)."""
+
+from django.db import transaction
+from django.utils import timezone
+from rest_framework import serializers
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from billing.models import AuditLog, ShopSetting
+from billing.text import person, stamp
+
+from .permissions import V3Permission
+from .sales import valid
+
+COPIES_WORDS = "Choose Original, Duplicate, Triplicate or All three."
+BANK_WORDS = "Choose whether bills show the bank details."
+MESSAGE_LONG = "Keep the message to 500 characters."
+MESSAGE_WORDS = "Write a message, or put back the standard one."  # the prototype's Settings words
+
+
+class ShareMessage(serializers.CharField):
+    """The message sent with each bill, refused in the contract's words when it's too long and in the prototype's
+    for anything else it can't keep (blank, null, not text, a null character): never DRF's (Ruling 1A-5)."""
+
+    def run_validation(self, data=serializers.empty):
+        try:
+            return super().run_validation(data)
+        except serializers.ValidationError:
+            too_long = isinstance(data, str) and len(data.strip()) > self.max_length
+            raise serializers.ValidationError(MESSAGE_LONG if too_long else MESSAGE_WORDS) from None
+
+
+class ShopSettingSerializer(serializers.ModelSerializer):
+    share_message = ShareMessage(max_length=500)
+
+    class Meta:
+        model = ShopSetting
+        fields = ["copies", "show_bank", "share_message"]
+        extra_kwargs = {
+            "copies": {"error_messages": {"invalid_choice": COPIES_WORDS, "null": COPIES_WORDS}},
+            "show_bank": {"error_messages": {"invalid": BANK_WORDS, "null": BANK_WORDS}},
+        }
+
+
+def shown(setting):
+    """ShopSettings (contract 5)."""
+    return {"copies": setting.copies, "show_bank": setting.show_bank, "share_message": setting.share_message,
+            "updated_at": stamp(setting.updated_at), "updated_by": person(setting.updated_by)}
+
+
+class ShopSettingsView(APIView):
+    """Anyone reads them; only the owner changes them ("Make these the default" on the print page)."""
+
+    permission_classes = [V3Permission]
+    v3_actions = {"PUT": "settings.edit"}
+
+    def get(self, request):
+        return Response(shown(ShopSetting.load()))  # the defaults until someone saves: reading never writes
+
+    def put(self, request):
+        data = valid(ShopSettingSerializer, request.data, partial=True)  # any of the three
+        with transaction.atomic():
+            # The row locked, so two saves at once can't both make it or lose each other's change.
+            setting = ShopSetting.objects.select_for_update().get_or_create(pk=1)[0]
+            changed = [key for key, value in data.items() if getattr(setting, key) != value]
+            for key, value in data.items():
+                setattr(setting, key, value)
+            setting.updated_at, setting.updated_by = timezone.now(), request.user
+            setting.save()
+            if changed:
+                AuditLog.objects.create(action="updated", entity="settings", entity_id=setting.pk,
+                                        entity_name="Shop settings", user=request.user,
+                                        details=f"Changed {', '.join(changed)}")
+        return Response(shown(setting))

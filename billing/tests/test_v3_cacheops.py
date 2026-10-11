@@ -131,6 +131,37 @@ class ReadsAroundTheCacheTest(TransactionTestCase):
         self.assertFalse(BinnedInvoice.objects.live().filter(pk=self.binned.pk).exists())  # the restore happened
         self.assertEqual(LineItem.objects.filter(invoice_id=self.binned.original_id).count(), 1)
 
+    def test_v3s_customer_reads_never_touch_the_cache(self):
+        # 1A Task 9: the customers list with figures (its orders and filters), a statement, the shop settings.
+        self.anil.businesses.add(self.kgh)
+        customers, statement = reverse("customer-list"), reverse("customer-statement", args=[self.anil.pk])
+        reads = [
+            (customers, {"figures": "1"}),
+            (customers, {"figures": "1", "figures_business_id": self.kgh.pk, "start_date": "2026-09-01",
+                         "end_date": "2026-09-30", "ordering": "-last_bill"}),
+            (customers, {"figures": "1", "ordering": "-sales", "has_gstin": "1", "type": "business",
+                         "state_name": "RAJASTHAN", "search": "Rathore"}),
+            (customers, {"figures": "1", "business_id": self.kgh.pk, "type": "person", "page_size": "1"}),
+            (statement, {}),
+            (statement, {"business_id": self.kgh.pk, "start_date": "2026-09-01", "end_date": "2026-09-30"}),
+            (reverse("customer-statement", args=[self.rathore.pk]), {}),
+            (reverse("shop-settings"), {}),
+        ]
+        with cacheops_on() as touched:
+            for url, params in reads:
+                with self.subTest(url=url, params=params):
+                    r = self.client.get(url, params)
+                    self.assertEqual(r.status_code, 200)
+                    self.assertTrue(r.data.get("bills") or r.data.get("results") or r.data.get("copies"))
+            r = self.client.put(reverse("shop-settings"), {"copies": "all"}, format="json")
+            self.assertEqual((r.status_code, self.client.get(reverse("shop-settings")).data["copies"]), (200, "all"))
+        self.assertEqual(touched, [])
+        # The control: v2's own list, without figures, still reads customers through the cache, so the stand-in
+        # sees a customer read and the test above couldn't pass with none recordable.
+        with cacheops_on() as touched:
+            self.assertEqual(self.client.get(customers).status_code, 200)
+        self.assertIn("billing_customer", {table for _op, tables in touched for table in tables})
+
 
 class WritesInvalidateTest(TestCase):
     """v3's writes keep v2's cached reads right (Ruling 1A-34): a write cacheops can't see (a queryset update(), a

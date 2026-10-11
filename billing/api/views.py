@@ -14,6 +14,7 @@ from django.db.models import (
     F,
     IntegerField,
     OuterRef,
+    Prefetch,
     Q,
     Subquery,
     Sum,
@@ -34,7 +35,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.cache import invalidate
+from billing.cache import invalidate, uncached
 from billing.constants import (
     BILL_CANCELLED,
     DOWNLOAD_SHEET_FIELD_NAMES,
@@ -43,11 +44,20 @@ from billing.constants import (
     V2_LINE_SNAPSHOT_FIELDS,
 )
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, FiledPeriod, Invoice, LineItem, Product
+from billing.params import PICK_A_FIRM, date_param, id_param, text_param
 from billing.period_lock import assert_period_unlocked
 from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bin import bin_bill, restore_from_bin, v2_snapshot
 from billing.services.bulk_import import run_bulk_import
+from billing.services.customers import (
+    FIGURE_ORDERINGS,
+    customer_figures,
+    figures_summary,
+    filter_customers,
+    order_by_figures,
+)
+from billing.services.customers import statement as customer_statement
 from billing.services.line_items import build_line_items
 from billing.services.sales import CANCELLED_WORDS
 from billing.tax_rules import GSTIN_SHAPE, itc_refusal
@@ -61,7 +71,14 @@ from billing.utils import (
 )
 
 from .mixins import AuditLogMixin, ProtectedDeleteMixin, mark_undone
-from .permissions import AdminOnlyPermission, RoleBasedPermission, V3PermissionIfPlaced, get_user_role, sale_or_purchase
+from .permissions import (
+    AdminOnlyPermission,
+    RoleBasedPermission,
+    V3Permission,
+    V3PermissionIfPlaced,
+    get_user_role,
+    sale_or_purchase,
+)
 from .serializers import (
     AuditLogSerializer,
     BusinessSerializer,
@@ -236,6 +253,14 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         return Response(result)
 
 
+class SearchReadingPastNul(filters.SearchFilter):
+    """DRF's search, with a null character read past as v3's other searches read it, not refused in DRF's words
+    (Ruling 1A-5)."""
+
+    def get_search_terms(self, request):
+        return filters.search_smart_split(text_param(request.query_params, self.search_param))
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "customer"
@@ -244,7 +269,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
     v3_actions = {"create": "customer.edit", "update": "customer.edit", "partial_update": "customer.edit",
                   "destroy": "customer.merge"}
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [SearchReadingPastNul, filters.OrderingFilter]
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
@@ -267,19 +292,29 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
 
     # Removed caching to ensure fresh data
     def list(self, request, *args, **kwargs):
+        figures = request.query_params.get("figures") == "1"
+        scope = self._figures_scope()  # read before any query: what it can't use is a 400
         response = super().list(request, *args, **kwargs)
 
         # Get customer IDs from current page
         customer_ids = [item["id"] for item in response.data.get("results", [])]
+        if figures:
+            # v3's figures (part 1 API contract 6.1): each row's, and the summary over every matching customer.
+            per_customer = customer_figures(customer_ids, *scope)
+            for item in response.data["results"]:
+                item["figures"] = per_customer[item["id"]]
+            response.data["summary"] = figures_summary(self.filter_queryset(self.get_queryset()), *scope,
+                                                       count=response.data["count"])
         if not customer_ids:
             return response
 
         # Bulk fetch metrics for all customers on the page; a cancelled bill counts in neither
         invoices = Invoice.objects.counted().filter(customer_id__in=customer_ids)
+        if figures:
+            invoices = invoices.nocache()  # v3's list reads around cacheops (Ruling 1A-34)
 
         # Apply date filters
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
+        _firm, start_date, end_date = scope
         if start_date:
             invoices = invoices.filter(invoice_date__gte=start_date)
         if end_date:
@@ -309,11 +344,25 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
 
         return response
 
+    def _figures_scope(self):
+        """(firm, start, end) for v3's figures and orders: figures_business_id (with figures=1), and start_date and
+        end_date, v2's period, which the figures count too. A firm that isn't an id or a date it can't read is a 400
+        in the contract's words, never a 500 (Rulings 1A-5, 1A-28)."""
+        params = self.request.query_params
+        firm = id_param(params, "figures_business_id", PICK_A_FIRM) if params.get("figures") == "1" else None
+        return firm, date_param(params, "start_date"), date_param(params, "end_date")
+
     def get_queryset(self):
         queryset = super().get_queryset()
+        params = self.request.query_params
+        if params.get("figures") == "1":
+            # v3's list reads around cacheops, its firms too: its figures and orders come from bills, which a cached
+            # customer query never sees change (Ruling 1A-34). A row shows only its firms' ids.
+            queryset = queryset.nocache().prefetch_related(None).prefetch_related(
+                Prefetch("businesses", queryset=uncached(Business).only("pk")))
 
-        # Apply search filter manually for more control
-        search_term = self.request.query_params.get("search", "")
+        # Apply search filter manually for more control (null characters dropped: psycopg refuses them)
+        search_term = text_param(params, "search")
         if search_term:
             queryset = queryset.filter(
                 Q(name__icontains=search_term)
@@ -322,11 +371,31 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
             )
 
         # Filter by business_id
-        business_id = self.request.query_params.get("business_id")
-        if business_id:
+        business_id = id_param(params, "business_id", PICK_A_FIRM)
+        if business_id is not None:
             queryset = queryset.filter(businesses__id=business_id)
 
+        return filter_customers(queryset, params)  # v3's: a GSTIN or none, the state, the effective type
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        params = self.request.query_params
+        if params.get("figures") == "1" and params.get("ordering") in FIGURE_ORDERINGS:
+            queryset = order_by_figures(queryset, params["ordering"], *self._figures_scope())  # newest bill or most sold
         return queryset
+
+    @action(detail=True, methods=["get"], permission_classes=[V3Permission])
+    def statement(self, request, pk=None):
+        """The customer's sales in a period: a register of bills, not a ledger (part 1 API contract 6.3)."""
+        params = request.query_params
+        start, end = date_param(params, "start_date"), date_param(params, "end_date")
+        if start and end and start > end:
+            raise ValidationError({"end_date": ["The start date is after the end date."]})
+        firm = id_param(params, "business_id", PICK_A_FIRM)  # the bills' firm, not the customer's usual one
+        customer = uncached(Customer).filter(pk=pk).first() if pk.isascii() and pk.isdigit() else None
+        if customer is None:
+            raise Http404("No Customer matches the given query.")
+        return Response(customer_statement(customer, start, end, firm))
 
     @action(detail=False, methods=["get"])
     def search(self, request):

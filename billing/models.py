@@ -1034,6 +1034,33 @@ class BinnedInvoice(models.Model):
         return f"{self.invoice_number} (deleted)"
 
 
+DEFAULT_SHARE_MESSAGE = "Namaste {customer}, your bill {number} for {total} from {firm} is attached. Thank you!"
+
+
+class ShopSetting(models.Model):
+    """The shop's printing and sharing defaults: one row, pk 1 (design decision 8).
+
+    Copies and bank details are chosen at each print; these are what the print page starts on.
+    Part 4's Settings screen adds to it. Round-off is not a setting (design decision 2).
+    """
+
+    COPIES = [("original", "Original"), ("duplicate", "Duplicate"), ("triplicate", "Triplicate"), ("all", "All three")]
+
+    copies = models.CharField(max_length=10, choices=COPIES, default="original", db_default="original")
+    show_bank = models.BooleanField(default=True, db_default=True)
+    share_message = models.CharField(max_length=500, default=DEFAULT_SHARE_MESSAGE, db_default=DEFAULT_SHARE_MESSAGE)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    updated_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+
+    @classmethod
+    def load(cls):
+        """The row, or an unsaved one with the defaults: reading never writes (Ruling 1A-16). The person is
+        joined, so one v2 deleted reads as nobody (Ruling 1A-6)."""
+        return cls.objects.filter(pk=1).select_related("updated_by").first() or cls(pk=1)
+
+
 class ITCReclaimLedger(AbstractBaseModel):
     """
     Tracks the Electronic Credit Reversal & Reclaimed Statement (ECRRS)
