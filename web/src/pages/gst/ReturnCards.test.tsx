@@ -269,3 +269,20 @@ it("labels the downloadable GSTR-3B interest for the CA to check on the portal",
   renderApp(<Gstr3bCard month={month()} data={ledger()} />);
   expect(screen.getByText("Interest in the GSTR-3B JSON: worked out to today; check on the portal.")).toBeVisible();
 });
+
+it("checks: no 'All 0 pass', the restore hint without detail, and no dash for a missing bill total", () => {
+  const deleted: Check = { ...duplicate, kind: "deleted", blocks: false, text: "A bill was deleted", detail: "", more_bills: 0, bills: [{ id: null, bin_id: 4, invoice_number: "KGH/2026-27/27", invoice_date: "2026-09-24", customer_name: "Walk-in Customer", status: "deleted" }] };
+  renderApp(<Checks month={month({ checks: { blockers: [], notes: [deleted], passes: [] } })} onFix={vi.fn()} />);
+  expect(screen.queryByText(/All 0 pass/)).not.toBeInTheDocument();
+  expect(screen.getByText(/1 note/)).toBeVisible();
+  expect(screen.getByText(/If it was a real sale, restore it from the Audit log/)).toBeVisible();
+  expect(screen.getByText(/KGH\/2026-27\/27/)).not.toHaveTextContent("—");
+});
+
+it("B2B rows without a bill id keep unique keys", () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const bill = { ...duplicate.bills[0], id: null, bin_id: 4, status: "deleted" as const };
+  renderApp(<Gstr1Card data={{ ...sections, b2b: [{ ...sections.b2b[0], bill }, { ...sections.b2b[0], bill: { ...bill, bin_id: 5 } }] }} month={month()} section="b2b" onSection={vi.fn()} />);
+  expect(error.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+  error.mockRestore();
+});

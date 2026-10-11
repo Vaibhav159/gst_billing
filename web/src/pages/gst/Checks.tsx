@@ -9,7 +9,7 @@ import { Button, Card } from "@/core/ui";
 export function Checks({ month, onFix }: { month: Month; onFix: (check: Check) => void }) {
   const { can } = useAuth();
   const { blockers, notes, passes } = month.checks;
-  const subtitle = [blockers.length ? plural(blockers.length, "blocker") : null, blockers.length ? `${passes.length} pass` : `All ${passes.length} pass`, notes.length ? plural(notes.length, "note") : null].filter(Boolean).join(" · ");
+  const subtitle = [blockers.length ? plural(blockers.length, "blocker") : null, !passes.length ? null : blockers.length ? `${passes.length} pass` : `All ${passes.length} pass`, notes.length ? plural(notes.length, "note") : null].filter(Boolean).join(" · ");
   const fix = (check: Check) => {
     switch (check.kind) {
       case "duplicate": return can("bill.edit") ? "Fix" : null;
@@ -40,8 +40,8 @@ export function Checks({ month, onFix }: { month: Month; onFix: (check: Check) =
               {check.blocks ? <XCircle size={18} className="text-neg shrink-0 mt-0.5" aria-hidden="true" /> : <Info size={18} className="text-fg2 shrink-0 mt-0.5" aria-hidden="true" />}
               <div className="flex-1 min-w-0">
                 <p className="font-medium">{check.text}</p>
-                {check.detail ? <p className="text-sm text-muted mt-0.5">{check.detail}{check.kind === "deleted" ? can("bill.delete") ? " If it was a real sale, restore it from the Audit log." : " If it was a real sale, the owner can restore it from the Audit log." : ""}</p> : null}
-                {bills.length ? <ul className="mt-1 text-sm text-fg2 flex flex-col gap-0.5">{bills.map((bill, index) => <li key={bill.id ?? `bin:${bill.bin_id}:${index}`} className="tnum">{bill.invoice_number}{bill.status === "deleted" ? <> · <span>Deleted</span></> : null} · {dateShort(bill.invoice_date)} · {bill.customer_name} · {inr(bill.total_amount)}{bill.typed ? <span className="text-neg"> · typed by hand</span> : null}</li>)}</ul> : null}
+                {check.detail || check.kind === "deleted" ? <p className="text-sm text-muted mt-0.5">{[check.detail, check.kind === "deleted" ? can("bill.delete") ? "If it was a real sale, restore it from the Audit log." : "If it was a real sale, the owner can restore it from the Audit log." : ""].filter(Boolean).join(" ")}</p> : null}
+                {bills.length ? <ul className="mt-1 text-sm text-fg2 flex flex-col gap-0.5">{bills.map((bill, index) => <li key={bill.id ?? `bin:${bill.bin_id}:${index}`} className="tnum">{bill.invoice_number}{bill.status === "deleted" ? <> · <span>Deleted</span></> : null} · {dateShort(bill.invoice_date)} · {bill.customer_name}{bill.total_amount !== undefined ? <> · {inr(bill.total_amount)}</> : null}{bill.typed ? <span className="text-neg"> · typed by hand</span> : null}</li>)}</ul> : null}
                 {check.more_bills > 0 ? <p className="text-sm text-muted mt-1">{plural(check.more_bills, "more bill")}</p> : null}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
                   {action ? <Button size="sm" data-fix={check === first ? "" : undefined} variant={check.blocks ? "primary" : "secondary"} onClick={() => onFix(check)}>{action}</Button> : null}
