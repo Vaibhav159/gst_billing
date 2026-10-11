@@ -27,7 +27,12 @@ const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(m
  */
 /** The scoped Needs attention reader loads after the shell; until then Ctrl K opens the same palette without it (Ruling P5-8). */
 export const attentionPaletteCode = { load: () => import("./AttentionPalette") };
-const AttentionPalette = lazy(() => attentionPaletteCode.load().then(m => ({ default: m.AttentionPalette })));
+const AttentionFeed = lazy(attentionPaletteCode.load);
+
+function ScopedPalette(props: { open: boolean; onClose(): void }) {
+  const [attention, setAttention] = useState<Parameters<typeof Palette>[0]["attention"]>();
+  return <><Palette {...props} attention={attention} /><Suspense fallback={null}><AttentionFeed onItems={setAttention} /></Suspense></>;
+}
 
 export function RootLayout() {
   const { view } = useView();
@@ -92,7 +97,7 @@ export function AppLayout({ onShown }: { onShown?: () => void }) {
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
         {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"} openPalette={openPalette}>{main}</PhoneShell>}
-        <Suspense fallback={<Palette open={palette} onClose={() => setPalette(false)} />}><AttentionPalette open={palette} onClose={() => setPalette(false)} /></Suspense>
+        <ScopedPalette open={palette} onClose={() => setPalette(false)} />
         <ShareHost />
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>
