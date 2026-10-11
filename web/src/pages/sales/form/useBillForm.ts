@@ -11,7 +11,7 @@ import { useCustomer, type Customer } from "@/core/api/customers";
 import { draftSettled, forgetDraft } from "@/core/api/drafts";
 import { lineErrors, linesErrors, problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
-import { invalidateSales, salesKeys, useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesFacets, useSalesPage, useUpdateBill } from "@/core/api/sales";
+import { invalidateSales, salesKeys, useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesMonths, useSalesPage, useUpdateBill } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { addMonths, fyOf, monthLabel, monthOf, todayIST } from "@/core/format";
 import { GST_STATES } from "@/core/ids";
@@ -215,10 +215,10 @@ export function useBillForm(start: Start) {
 
   /* ── the date: the firm's closed months (contract: the facets' `locked`) ── */
   const fyNow = fyOf(today);
-  const facetsNow = useSalesFacets(f.firmId, fyNow);
+  const facetsNow = useSalesMonths(f.firmId, fyNow);
   const lastFyAsked = Boolean(f.date) && fyOf(f.date) !== fyNow;
-  const facetsLast = useSalesFacets(lastFyAsked ? f.firmId : null, prevFy(fyNow));
-  const months = useMemo(() => [...(facetsNow.data?.months ?? []), ...(facetsLast.data?.months ?? [])], [facetsNow.data, facetsLast.data]);
+  const facetsLast = useSalesMonths(lastFyAsked ? f.firmId : null, prevFy(fyNow));
+  const months = useMemo(() => [...(facetsNow.data ?? []), ...(facetsLast.data ?? [])], [facetsNow.data, facetsLast.data]);
   const locked: Locked = useCallback((ym) => months.some((m) => m.month === ym && m.locked), [months]);
   const lockKnown = useCallback((ym: string) => months.some((m) => m.month === ym), [months]);
   const dateError = edit && bill && f.date === bill.invoice_date ? "" : dateProblem({ iso: f.date, today, firmName, locked, known: lockKnown, paper: f.paper && !edit });
@@ -280,7 +280,7 @@ export function useBillForm(start: Start) {
   const cashOver = itax.some((x) => x.kind === "cash_limit");
   const cashBlock = cashOver && !cashAnyway;
   const twinAsked = !edit && Boolean(cust) && cust?.type !== "walkin" && figs.total > 0 && Boolean(f.date) && !dateError;
-  const sameDay = useSalesPage(f.firmId, { customer_id: cust?.id, start_date: f.date, end_date: f.date }, 10, twinAsked);
+  const sameDay = useSalesPage(f.firmId, { customer_id: cust?.id, start_date: f.date, end_date: f.date, summary: 0 }, 10, twinAsked);
   const twinRow = twinAsked ? (sameDay.data?.results ?? []).find((b) => b.status !== "cancelled" && b.total_amount === figs.total) : undefined;
   const twin = twinRow ? { invoice_number: twinRow.invoice_number, total: twinRow.total_amount } : null;
   const checks = checksOf({

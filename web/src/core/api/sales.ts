@@ -49,6 +49,7 @@ export const salesKeys = {
   all: ["sales"] as const,
   list: (firmId: FirmId | null, query: SalesQuery, scopeFy = query.fy) => ["sales", "list", firmId, query, scopeFy] as const,
   facets: (firmId: FirmId | null, fy: string) => ["sales", "facets", firmId, fy, todayIST()] as const,
+  months: (firmId: FirmId | null, fy: string) => ["sales", "months", firmId, fy, todayIST()] as const,
   page: (firmId: FirmId | null, query: SalesQuery, pageSize: number) => ["sales", "page", firmId, query, pageSize] as const,
   today: (day: string) => ["sales", "today", day] as const,
   one: (id: number | null) => ["sales", "bill", id] as const,
@@ -96,6 +97,15 @@ export function useSalesFacets(firmId: FirmId | null, fy: string) {
     queryKey: salesKeys.facets(firmId, fy),
     staleTime: 5 * 60_000,
     queryFn: firmId === null ? skipToken : async ({ signal }) => toFacets((await api.get("sales/", { params: salesParams(firmId, { fy, facets: true }, 1, 1), signal })).data?.facets),
+  });
+}
+
+/** The form's closed months, kept apart from the list's complete facets and view counts. */
+export function useSalesMonths(firmId: FirmId | null, fy: string) {
+  return useQuery({
+    queryKey: salesKeys.months(firmId, fy),
+    staleTime: 5 * 60_000,
+    queryFn: firmId === null ? skipToken : async ({ signal }) => toFacets((await api.get("sales/", { params: salesParams(firmId, { fy, facets: "months", summary: 0 }, 1, 1), signal })).data?.facets).months,
   });
 }
 
