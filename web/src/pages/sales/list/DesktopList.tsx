@@ -16,6 +16,7 @@ import { SendCell } from "../actions/SendCell";
 import { StatusCell } from "../actions/StatusCell";
 import { useBillMenu } from "../actions/useBillMenu";
 import { useSendBill } from "../actions/useSendBill";
+import { QrCheckButton } from "../print/QrCheck";
 import { BillPreview } from "./BillPreview";
 import { CustomerFilter } from "./CustomerFilter";
 import { DeleteManyDialog } from "./DeleteManyDialog";
@@ -233,7 +234,7 @@ export function DesktopList({ m }: { m: ListModel }) {
   return (
     <Page icon={ReceiptText} title="Sales" context={`Sales bills of ${m.inView} · ${m.state.month === "years" ? "all years" : `FY ${m.fy}`}`}
       actions={<>
-        {/* plan 1E puts "Check a QR code" first here */}
+        <QrCheckButton />
         <ButtonLink to="/sales/paper" icon={BookOpenText} title="Type in bills from the paper bill book, with their own numbers and dates">Paper bills</ButtonLink>
         <Menu width={340} title="Export" items={exportItems} trigger={(p) => <Button {...p} icon={Download} iconRight={ChevronDown} disabled={!m.load.ready} title={m.load.failed ? "Exports the bills, so it waits until they load" : undefined}>Export</Button>} />
         {can("bill.create")

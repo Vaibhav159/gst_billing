@@ -16,6 +16,7 @@ import { lazyPage } from "./lazyPage";
 
 // pages whose code loads when they first open (Ruling 1B-4): react-pdf and printing stay out of the first download
 const PrintPage = lazyPage(() => import("@/pages/sales/print/PrintPage"));
+const ScanPage = lazyPage(() => import("@/pages/sales/print/ScanPage"));
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -34,7 +35,7 @@ const PAGES: Record<string, string[]> = {
   sales: ["/sales/batch", "/sales/export", "/sales/:id/edit"],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
-    "/capture", "/import", "/scan", "/suppliers", "/suppliers/:id",
+    "/capture", "/import", "/suppliers", "/suppliers/:id",
   ],
   gst: ["/gst", "/reports", "/reports/:kind"],
   records: [
@@ -103,6 +104,8 @@ export const appRoutes: RouteObject[] = [{
         { path: "/billing/invoice/:bizSlug/:fy/:slug", element: <V2NumberLink /> }, // v2's links by bill number
         // part 1E: print and share, a page with no phone tabs (the prototype's hideNav)
         { path: "/sales/:id/print", element: <PrintPage />, handle: { hideNav: true } },
+        // part 1E: a bill's QR code checked, on a page of its own (More's link and v2's QR scanner; Ruling 1E-7)
+        { path: "/scan", element: <ScanPage /> },
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,

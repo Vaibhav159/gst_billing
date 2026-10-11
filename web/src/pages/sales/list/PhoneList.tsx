@@ -11,6 +11,7 @@ import { PAY, PAY_FILTER, PAY_SHORT, STATUS, cancelledNote, dayCount, dayGroups,
 import { Button, ButtonLink, Chip, IconButton, LoadError, Menu, Money, Page, SearchInput, Skeleton, StaleNote, type MenuItem } from "@/core/ui";
 import { SendCell } from "../actions/SendCell";
 import { StatusCell } from "../actions/StatusCell";
+import { useQrCheck } from "../print/QrCheck";
 import { FilterSheet } from "./FilterSheet";
 import type { ListModel } from "./model";
 import { ChipCount, DrillBanner, FilterSet, ListEmpty, ListRoleNote, PastYearBanner, SearchScope, useFlash } from "./parts";
@@ -85,8 +86,9 @@ export function PhoneList({ m }: { m: ListModel }) {
   const x = m.state.status === "cancelled";
   const failed = Boolean(m.load.failed);
   const foot = s ? listFooter(s.bills, s.cancelled, rows, { cancelledOnly: x, newest: m.state.sort.key === "date" && m.state.sort.dir === "desc", step: true }) : null;
-  // plan 1E puts "Check a QR code" first here
+  const qr = useQrCheck();
   const moreItems: MenuItem[] = [
+    qr.item,
     { label: "Bills from the paper book", hint: "Type in last month's paper bills", icon: BookOpenText, onSelect: () => navigate("/sales/paper") },
   ];
   return (
@@ -159,6 +161,7 @@ export function PhoneList({ m }: { m: ListModel }) {
             </div>
           )}
       <FilterSheet m={m} open={filterOpen} onClose={() => setFilterOpen(false)} />
+      {qr.dialog}
     </Page>
   );
 }
