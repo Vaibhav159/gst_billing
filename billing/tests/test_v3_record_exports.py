@@ -63,6 +63,31 @@ class RecordExportTests(TransactionTestCase):
         self.assertFalse(any(cell.data_type == "f" for row in book.active for cell in row))
         response.close()
 
+    def test_formula_prefixes_are_protected_in_csv_and_xlsx(self):
+        unsafe = ("\t=1+1", "\r=1+1", " =1+1", " \t\r+1", "  -1", "  @SUM(1,1)",
+                  "\tplain", "\rplain")
+        for value in (*unsafe, "  Jewellery shop"):
+            self.customer.name = value
+            self.customer.save(update_fields=["name"])
+            expected = "'" + value if value in unsafe else value
+            for format_name in ("csv", "xlsx"):
+                with self.subTest(value=value, format=format_name):
+                    response = self.call("sales", format=format_name, fy="2026-27")
+                    try:
+                        if format_name == "csv":
+                            rows = self.rows(response)
+                            self.assertEqual(rows[1][3], expected)
+                            self.assertEqual(rows[1][11], "103.00")
+                        else:
+                            book = load_workbook(BytesIO(b"".join(response.streaming_content)))
+                            # XML readers normalize carriage returns to line feeds.
+                            self.assertEqual(book.active.cell(2, 4).value, expected.replace("\r", "\n"))
+                            self.assertEqual(book.active.cell(2, 4).data_type, "s")
+                            self.assertEqual(book.active.cell(2, 12).value, 103)
+                            self.assertEqual(book.active.cell(2, 12).data_type, "n")
+                    finally:
+                        response.close()
+
     def test_purchase_columns_and_part2_blank_fallback(self):
         rows = self.rows(self.call("purchases", format="csv", fy="2026-27"))
         self.assertEqual(rows[0], ["Date", "Supplier bill no.", "Firm", "Supplier", "GSTIN", "Taxable",
