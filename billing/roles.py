@@ -46,7 +46,7 @@ ACTION_WHAT = {
     "bill.create": "make bills", "bill.edit": "change bills", "bill.delete": "delete bills", "bill.cancel": "cancel bills", "bill.send": "send bills",
     "capture": "take photos of supplier bills", "purchase.create": "add purchases", "purchase.edit": "change purchases", "purchase.delete": "delete purchases",
     "customer.edit": "add or change customers", "product.edit": "add or change products", "firm.edit": "change firm details",
-    "gst.file": "mark returns filed", "gst.lock": "lock or unlock a month", "gst.download": "download returns for the portal",
+    "gst.file": "mark returns filed", "gst.lock": "lock a month again", "gst.unlock": "unlock a filed month", "gst.download": "download returns for the portal",
     "users.manage": "manage users", "settings.edit": "change settings", "backup.download": "download backups", "backup.restore": "restore a backup",
     "audit.view": "see the Audit log", "audit.restore": "restore from the Audit log", "audit.undo": "undo changes from the Audit log", "reports.export": "export reports",
     "customer.merge": "merge customers", "capture.discard": "remove captured photos", "purchase.import": "import bills from a file", "supplier.edit": "add or change suppliers", "rates.edit": "set today's rates", "view": "see this",

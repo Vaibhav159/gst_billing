@@ -1,6 +1,6 @@
 import math
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -1279,3 +1279,69 @@ class AiRead(models.Model):
     pages = models.PositiveSmallIntegerField(default=1, db_default=1)
     capture = models.ForeignKey(InwardCapture, null=True, blank=True, on_delete=models.DO_NOTHING,
                                 db_constraint=False, related_name="+")
+
+
+class FilingRecord(models.Model):
+    """Immutable return snapshot; only portal filing details can be corrected."""
+    business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    kind = models.CharField(max_length=6, choices=[("gstr1", "GSTR-1"), ("gstr1a", "GSTR-1A"), ("gstr3b", "GSTR-3B")])
+    filed_on = models.DateField()
+    arn = models.CharField(max_length=15, blank=True, default="")
+    cash_igst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    cash_cgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    cash_sgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    cash_total = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    late_fee = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    interest = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    credit_left_igst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    credit_left_cgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    credit_left_sgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    figures = models.JSONField(default=dict)
+    bills = models.JSONField(default=dict)
+    file = models.JSONField(default=dict)
+    marked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    marked_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    updated_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["business", "year", "month", "kind"], name="uniq_filing_record")]
+
+
+class FilingMonth(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    unlocked_at = models.DateTimeField(null=True)
+    unlocked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    unlock_reason = models.CharField(max_length=255, default="", blank=True)
+    relocked_at = models.DateTimeField(null=True)
+    relocked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    legacy_frozen_at = models.DateTimeField(null=True)
+    legacy_snapshot = models.JSONField(null=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["business", "year", "month"], name="uniq_filing_month")]
+
+
+class OpeningCredit(models.Model):
+    business = models.OneToOneField(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    as_of = models.DateField(default=date(2025, 4, 1))
+    igst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    cgst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    sgst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    updated_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ReturnDownload(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    kind = models.CharField(max_length=11, choices=[(key, key) for key in ("gstr1", "gstr1_filed", "gstr1a", "amend", "gstr3b", "bundle")])
+    by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    at = models.DateTimeField(auto_now_add=True)
+    via = models.CharField(max_length=8, choices=[("download", "download"), ("share", "share")], default="download")
+    fingerprint = models.CharField(max_length=64)
