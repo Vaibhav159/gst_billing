@@ -195,6 +195,7 @@ def _sent_refusal(change, source, target):
 
 def _preview(source, target, bills, bins, drafts):
     sales = [bill for bill in bills if bill.type_of_invoice == INVOICE_TYPE_OUTWARD]
+    purchases = [bill for bill in bills if bill.type_of_invoice == INVOICE_TYPE_INWARD]
     changes = [change for bill in sales if bill.status != BILL_CANCELLED if (change := _change(bill, target))]
     sent = [change for change in changes if change["sent"] or change["paper"]]
     closed = _closed_bills(bills)
@@ -202,6 +203,19 @@ def _preview(source, target, bills, bins, drafts):
     refusal = None
     if source.kind == "walkin" or target.kind == "walkin":
         refusal = {"code": "walkin", "detail": WALKIN_WORDS, "months": [], "bills": []}
+    elif purchases and clean_gstin(source.gst_number) != clean_gstin(target.gst_number):
+        numbers = _join_words([bill.invoice_number for bill in purchases])
+        source_gstin = clean_gstin(source.gst_number) or "no GSTIN"
+        target_gstin = clean_gstin(target.gst_number) or "no GSTIN"
+        noun = "purchase bill" if len(purchases) == 1 else "purchase bills"
+        words = (f"Can't merge: under {target.name} ({target_gstin}), {noun} {numbers} "
+                 f"from {source.name} ({source_gstin}) would have a different supplier GSTIN. "
+                 "The supplier's bills wouldn't match your purchase records. Keep both customers.")
+        purchase_changes = [{"bill": bill_ref(bill), "sent": bool(bill.sent_at), "paper": bill.paper,
+                             "sent_at": stamp(bill.sent_at), "sent_via": bill.sent_via,
+                             "heads": None, "segment": None, "gstin_changes": True,
+                             "words": "Supplier GSTIN changes"} for bill in purchases]
+        refusal = {"code": "sent_changes", "detail": words, "months": [], "bills": purchase_changes}
     elif closed:
         names = _join_words([date.fromisoformat(month + "-01").strftime("%B %Y") for month in months])
         many = len(closed) != 1
@@ -218,7 +232,7 @@ def _preview(source, target, bills, bins, drafts):
              "bills": {"count": sum(bill.status != BILL_CANCELLED for bill in sales),
                        "cancelled": sum(bill.status == BILL_CANCELLED for bill in sales),
                        "numbers": [bill.invoice_number for bill in sales]},
-             "purchases": sum(bill.type_of_invoice == INVOICE_TYPE_INWARD for bill in bills),
+             "purchases": len(purchases),
              "bin": sum(row.restored_at is None for row in bins), "drafts": len(drafts), "changes": changes,
              "firms_added": _firms_added(source, target),
              "keeps": f"{target.name} keeps its name, phone, GSTIN and address."}, closed)
