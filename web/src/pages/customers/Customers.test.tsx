@@ -140,6 +140,11 @@ test("a search that can't get through keeps the search box and what was typed, s
   await pass(250);
   expect(screen.getByText("Couldn't load customers")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  // only the search failed, after the list had come: the header's actions don't depend on it, so they stay on (Export
+  // asks the server itself)
+  expect(screen.getByRole("link", { name: "Add customer" })).toHaveAttribute("href", "/customers/new?from=list");
+  expect(screen.getByRole("link", { name: "Import" })).toHaveAttribute("href", "/import?type=customers");
+  expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
   // the toolbar is the same one, so the box keeps what was typed and its focus, and the filters stay too
   expect(screen.getByRole("searchbox", { name: "Search customers (press /)" })).toBe(box);
   expect(box).toHaveValue("Kul");
@@ -342,15 +347,30 @@ test("the figures wait for the firm's name, so they never show under another one
   expect(calls.find((c) => c.params.figures === 1)!.params.figures_business_id).toBe(3);
 });
 
-test("a customer just added comes first and flashes, though the order puts them further down", async () => {
+test("a customer just added comes first and flashes, though the order puts them further down; their figures, not counted on this visit, read as not known", async () => {
   markSaved("customer", 30);
   serve({ "GET customers/": list(), "GET customers/30/": { ...ANIL, id: 30, name: "Rekha Soni", mobile_number: "9876543210" } });
   mount(routes, ["/customers"]);
   const first = await screen.findByText("Rekha Soni");
   const row = first.closest("tr")!;
   expect(row).toHaveClass("anim-flash");
-  expect(row).toHaveTextContent("No bills yet");
   expect(screen.getAllByRole("row")[1]).toBe(row);
+  // sales, bills, last bill and udhaar: a dash each, never "No bills", "0", "No bills yet" or "None" (one edited, from
+  // further down the list, may have years of bills)
+  expect(within(row).getAllByRole("cell").slice(2, 6).map((c) => c.textContent)).toEqual(["—", "—", "—", "—"]);
+  expect(row).not.toHaveTextContent(/No bills|None/);
+});
+
+test("on a phone too, a customer just saved shows their figures as not known, not as none", async () => {
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  markSaved("customer", 30);
+  serve({ "GET customers/": list(), "GET customers/30/": { ...ANIL, id: 30, name: "Rekha Soni", mobile_number: "9876543210" } });
+  mount(routes, ["/customers"]);
+  const row = (await screen.findByText("Rekha Soni")).closest<HTMLElement>("[data-row]")!;
+  expect(row).toHaveClass("anim-flash");
+  expect(row).toHaveTextContent("98765 43210");
+  expect(row).toHaveTextContent("—");
+  expect(row).not.toHaveTextContent(/No bills|no bills yet/);
 });
 
 test("a saved customer is read once per visit, React's StrictMode double render included", () => {

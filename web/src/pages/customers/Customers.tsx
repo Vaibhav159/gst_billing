@@ -33,6 +33,8 @@ const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
 const NO_FIRMS = "The firms didn't load. Reload the page to export.";
 /** Why Export is off while that list is still coming. */
 const FIRMS_LOADING = "Waits for the list of firms to load";
+/** A figure not known on this visit, as the prototype shows one. */
+const UNKNOWN = <span className="text-muted">—</span>;
 /**
  * On a desktop the list's states sit in its card, under the toolbar, so a search that fails keeps the search box. There,
  * QueryView's skeleton and failure card drop their own frame, and its notes keep the card's margins.
@@ -79,6 +81,14 @@ function useCustomersPage() {
   const describe = [...chips.map((c) => c.label), term ? `matching “${term}”` : ""].filter(Boolean).join(", ");
   // rows are on screen: fresh, kept while a new search or filter asks, or kept after asking again failed
   const ready = list.data !== undefined;
+  // nothing to show: the list, or the search or filter asked last, didn't load
+  const failed = list.isError && !list.data;
+  // once the list has come on this visit, a search or filter that fails leaves the header's actions on: Add customer and
+  // Import don't depend on it, and Export asks the server itself. Before it has come, a failure means the customers
+  // can't be reached at all, so they wait
+  const [came, setCame] = useState(false);
+  if (ready && !came) setCame(true);
+  const actionsOn = ready || (failed && came);
   // the customer just added comes first and flashes, even when its place in the order is further down
   const justSaved = useJustSaved("customer");
   const waiting = justSaved !== null && ready && !rows.some((r) => r.id === justSaved) && !describe;
@@ -87,11 +97,11 @@ function useCustomersPage() {
   const total = everyone.data ?? count;
   return {
     firms, firmId, setFirmId, period, q, setQ, term, gst, setGst, state, setState, usual, setUsual, sort, setSort, list, shown, count, total, summary,
-    chips, clearAll, describe, justSaved, ready, offline: net === "offline",
+    chips, clearAll, describe, justSaved, ready, failed, actionsOn, offline: net === "offline",
     // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
     // list of firms (still coming, or failed) it waits even for all firms, as the file names each customer's usual firms
-    exportable: ready && named && !firmsLoading && !firmsFailed,
-    // why Export is off once the rows are on screen
+    exportable: actionsOn && named && !firmsLoading && !firmsFailed,
+    // why Export is off once the header's actions are on
     exportWait: firmsFailed ? NO_FIRMS : FIRMS_LOADING,
     params: filters.firmId === null ? null : customerListParams(filters), scope, home: homeState(firms, firmId),
   };
@@ -195,18 +205,17 @@ function DesktopCustomers({ d }: { d: D }) {
   const { can, whyNot } = useAuth();
   const navigate = useNavigate();
   const exp = useExport(d);
-  const failed = d.list.isError && !d.list.data;
   const away = d.offline ? "Needs the internet" : "Waits for the list to load";
   const firmCol = typeof d.firmId === "number" ? ` · ${scopeName(d.firms, d.firmId, true)}` : "";
   return (
     <Page icon={Users} title="Customers"
-      context={d.ready ? `${plural(d.total, "customer")} · sales figures for ${d.period.label} (${d.period.range}), ${d.scope}` : d.offline ? "Waiting for the internet" : failed ? "The list didn't load" : "Loading the list…"}
+      context={d.ready ? `${plural(d.total, "customer")} · sales figures for ${d.period.label} (${d.period.range}), ${d.scope}` : d.offline ? "Waiting for the internet" : d.failed ? "The list didn't load" : "Loading the list…"}
       actions={<>
-        {can("customer.edit") ? (d.ready ? <ButtonLink to="/import?type=customers" icon={Upload}>Import</ButtonLink> : <Button icon={Upload} disabled title={away}>Import</Button>) : null}
-        <Button icon={Download} onClick={() => void exp.run()} loading={exp.busy} disabled={!d.exportable} title={d.exportable ? "A spreadsheet of the customers shown below" : d.ready ? d.exportWait : away}>{d.ready ? `Export ${plural(d.count, "customer")}` : "Export"}</Button>
-        {can("customer.edit") && !failed
+        {can("customer.edit") ? (d.actionsOn ? <ButtonLink to="/import?type=customers" icon={Upload}>Import</ButtonLink> : <Button icon={Upload} disabled title={away}>Import</Button>) : null}
+        <Button icon={Download} onClick={() => void exp.run()} loading={exp.busy} disabled={!d.exportable} title={d.exportable ? "A spreadsheet of the customers shown below" : d.actionsOn ? d.exportWait : away}>{d.ready ? `Export ${plural(d.count, "customer")}` : "Export"}</Button>
+        {can("customer.edit") && (!d.failed || d.actionsOn)
           ? <ButtonLink to="/customers/new?from=list" variant="primary" icon={UserPlus}>Add customer</ButtonLink>
-          : <Button variant="primary" icon={UserPlus} disabled title={failed ? away : whyNot("customer.edit", "add customers")}>Add customer</Button>}
+          : <Button variant="primary" icon={UserPlus} disabled title={can("customer.edit") ? away : whyNot("customer.edit", "add customers")}>Add customer</Button>}
       </>}>
       {!can("customer.edit") ? <WhyNote className="-mt-3">{whyNot("customer.edit", "add or change customers")}</WhyNote> : null}
       <Card pad={false}>
@@ -246,6 +255,7 @@ function DesktopCustomers({ d }: { d: D }) {
                 </thead>
                 <tbody>
                   {d.shown.map((c) => {
+                    // null: not counted on this visit (a customer just saved, from further down the list), so not known
                     const f = c.figures;
                     // compared in the GST table's spelling, so a "Rajasthan" stored by hand isn't another state
                     const igst = Boolean(d.home) && Boolean(c.state_name) && tableState(c.state_name) !== d.home;
@@ -263,10 +273,10 @@ function DesktopCustomers({ d }: { d: D }) {
                           {c.gst_number ? <span className="tnum">{c.gst_number}</span> : <span className="text-muted">No GSTIN</span>}
                           <span className="block text-xs text-muted mt-0.5">{stateTitle(c.state_name) || "No state"}{igst ? " · IGST on bills" : ""}</span>
                         </Td>
-                        <Td align="right">{f?.bills ? <Money value={f.total} /> : <span className="text-muted">No bills</span>}</Td>
-                        <Td align="right">{f?.bills || <span className="text-muted">0</span>}</Td>
-                        <Td>{f?.last_bill ? <><span className="block tnum">{date(f.last_bill.invoice_date)}</span><span className="block text-xs text-muted tnum mt-0.5">{f.last_bill.invoice_number}</span></> : <span className="text-muted">No bills yet</span>}</Td>
-                        <Td align="right">{f?.udhaar_bills ? <><Money value={f.udhaar_total} /><span className="block text-xs text-muted mt-0.5">{plural(f.udhaar_bills, "bill")}</span></> : <span className="text-muted">None</span>}</Td>
+                        <Td align="right">{!f ? UNKNOWN : f.bills ? <Money value={f.total} /> : <span className="text-muted">No bills</span>}</Td>
+                        <Td align="right">{!f ? UNKNOWN : f.bills || <span className="text-muted">0</span>}</Td>
+                        <Td>{!f ? UNKNOWN : f.last_bill ? <><span className="block tnum">{date(f.last_bill.invoice_date)}</span><span className="block text-xs text-muted tnum mt-0.5">{f.last_bill.invoice_number}</span></> : <span className="text-muted">No bills yet</span>}</Td>
+                        <Td align="right">{!f ? UNKNOWN : f.udhaar_bills ? <><Money value={f.udhaar_total} /><span className="block text-xs text-muted mt-0.5">{plural(f.udhaar_bills, "bill")}</span></> : <span className="text-muted">None</span>}</Td>
                         <Td onClick={(e) => e.stopPropagation()}><CustomerRowMenu c={c} last={f?.last_bill ?? null} /></Td>
                       </Tr>
                     );
@@ -289,16 +299,15 @@ function PhoneCustomers({ d }: { d: D }) {
   const navigate = useNavigate();
   const exp = useExport(d);
   const [sheet, setSheet] = useState(false);
-  const failed = d.list.isError && !d.list.data;
   const sortLabel = SORTS.find((s) => s.value === d.sort)!.label;
   const chip = "inline-flex items-center gap-1.5 min-h-11 px-3.5 rounded-full border whitespace-nowrap shrink-0 transition-[background-color,border-color,transform] duration-150 active:scale-[0.97]";
   return (
-    <Page title="Customers" phoneSubtitle={d.ready ? `${plural(d.total, "customer")} · ${d.period.label} sales · ${scopeName(d.firms, d.firmId, true)}` : d.offline ? "Waiting for the internet" : failed ? "The list didn't load" : "Loading…"}
+    <Page title="Customers" phoneSubtitle={d.ready ? `${plural(d.total, "customer")} · ${d.period.label} sales · ${scopeName(d.firms, d.firmId, true)}` : d.offline ? "Waiting for the internet" : d.failed ? "The list didn't load" : "Loading…"}
       phoneActions={<Menu title="Customers" items={[
         { label: "Import customers", icon: Upload, disabled: !can("customer.edit"), hint: can("customer.edit") ? "From a spreadsheet, with a check before anything is added" : whyNot("customer.edit", "import customers"), onSelect: () => navigate("/import?type=customers") },
-        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.ready ? d.exportWait : "Waits for the list to load", onSelect: () => void exp.run() },
+        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.actionsOn ? d.exportWait : "Waits for the list to load", onSelect: () => void exp.run() },
       ]} trigger={(p) => <IconButton {...p} label="Import or export customers" icon={MoreVertical} />} />}
-      actionBar={can("customer.edit") ? (failed ? <Button variant="primary" size="lg" icon={UserPlus} disabled title="Needs the internet">Add customer</Button> : <ButtonLink to="/customers/new?from=list" variant="primary" size="lg" icon={UserPlus}>Add customer</ButtonLink>) : null}>
+      actionBar={can("customer.edit") ? (d.failed && !d.actionsOn ? <Button variant="primary" size="lg" icon={UserPlus} disabled title="Needs the internet">Add customer</Button> : <ButtonLink to="/customers/new?from=list" variant="primary" size="lg" icon={UserPlus}>Add customer</ButtonLink>) : null}>
       <SearchInput value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers" data-page-search="" />
       <FirmChips firms={d.firms} value={d.firmId} onChange={d.setFirmId} />
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar">
@@ -321,13 +330,14 @@ function PhoneCustomers({ d }: { d: D }) {
         </div>
         <Card pad={false}>
           {d.shown.length ? d.shown.map((c) => {
+            // null: not counted on this visit (a customer just saved, from further down the list), so not known
             const f = c.figures;
             return (
               <div key={c.id} data-row={c.id} tabIndex={-1} onKeyDown={openOnEnter(() => navigate(`/customers/${c.id}`))}
                 className={cn("flex items-center border-t border-rule first:border-t-0 outline-none row-focus", c.id === d.justSaved && "anim-flash")}>
                 <ListRow to={`/customers/${c.id}`} className="!border-t-0 flex-1 min-w-0 !pr-1" chevron={false} title={c.name}
-                  subtitle={c.type === "walkin" ? "Cash sales without a name" : `${mobileText(c.mobile_number) || "No phone"} · ${f?.last_bill ? `last ${dateShort(f.last_bill.invoice_date)}` : "no bills yet"}`}
-                  right={f?.bills ? <Money value={f.total} /> : <span className="text-muted">No bills</span>}
+                  subtitle={c.type === "walkin" ? "Cash sales without a name" : `${mobileText(c.mobile_number) || "No phone"}${f ? ` · ${f.last_bill ? `last ${dateShort(f.last_bill.invoice_date)}` : "no bills yet"}` : ""}`}
+                  right={!f ? UNKNOWN : f.bills ? <Money value={f.total} /> : <span className="text-muted">No bills</span>}
                   rightSub={f?.bills ? `${plural(f.bills, "bill")}${f.udhaar_bills ? ` · ${f.udhaar_bills} udhaar` : ""}` : d.period.label} />
                 <span className="pr-1 shrink-0"><CustomerRowMenu c={c} last={f?.last_bill ?? null} /></span>
               </div>

@@ -64,23 +64,27 @@ test("the list waits for the firm to be known: nothing is asked while firmId is 
   expect(calls.map((c) => c.params.figures_business_id)).toEqual([3]);
 });
 
-test("a query that can't ask yet (no firm or customer known) has a key of its own and asks nothing, even on Try again", async () => {
-  vi.spyOn(console, "error").mockImplementation(() => {}); // TanStack's note that a query with nothing to ask was told to fetch
+test("a query that can't ask yet (no firm or customer known) has a key of its own and asks nothing, even when every query is asked again", async () => {
   const calls = serve({ "GET customers/": page([ANIL]), "GET customers/7/statement/": {}, "GET customers/null/": ANIL, "GET sales/": page([]) });
   const { qc, wrapper: w } = wrapper();
   // every firm's answers are in the cache already: a query that isn't ready must not show them as its own
   qc.setQueryData(customerKeys.list(customerListParams({ ...FILTERS, firmId: "all" })), { pages: [toCustomerPage(page([ANIL]))], pageParams: [1] });
   qc.setQueryData(customerKeys.recent("all"), [{ ...toCustomer(ANIL), figures: null }]);
   qc.setQueryData(customerKeys.statement(7, {}), toStatement({}));
-  const list = renderHook(() => useCustomerList({ ...FILTERS, firmId: null }), { wrapper: w });
-  const recent = renderHook(() => useRecentCustomers(null), { wrapper: w });
-  const statement = renderHook(() => useStatement(7, null), { wrapper: w });
-  // nor do a customer and their income-tax flags before there's a customer
-  const one = renderHook(() => useCustomer(null), { wrapper: w });
-  const itax = renderHook(() => useItaxBills(null), { wrapper: w });
-  expect([list.result.current.data, recent.result.current.data, statement.result.current.data]).toEqual([undefined, undefined, undefined]);
-  await act(async () => { await Promise.all([list, recent, statement, one, itax].map((h) => h.result.current.refetch())); });
+  const waiting = [
+    renderHook(() => useCustomerList({ ...FILTERS, firmId: null }), { wrapper: w }),
+    renderHook(() => useRecentCustomers(null), { wrapper: w }),
+    renderHook(() => useStatement(7, null), { wrapper: w }),
+    // nor do a customer and their income-tax flags before there's a customer
+    renderHook(() => useCustomer(null), { wrapper: w }),
+    renderHook(() => useItaxBills(null), { wrapper: w }),
+  ];
+  expect(waiting.map((h) => h.result.current.data)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  // every query asked again through the client, as the app's Try again does (Ruling 1B-11): one with skipToken is passed
+  // over, where its own refetch() would end it in an error
+  await act(async () => { await qc.refetchQueries(); });
   expect(calls).toEqual([]);
+  expect(waiting.map((h) => `${h.result.current.status} ${h.result.current.fetchStatus}`)).toEqual(Array(5).fill("pending idle"));
 });
 
 test("a new search keeps the rows on screen until its answer comes", async () => {
