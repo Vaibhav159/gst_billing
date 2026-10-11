@@ -42,6 +42,11 @@ def get_product(pk, lock=False):
 
 class CatalogList(APIView):
     permission_classes = [V3Permission]
+    v3_actions = {"POST": "product.edit"}
+
+    def post(self, request):
+        return write_product(request)
+
     def get(self, request):
         params = request.query_params
         period = scope(params)
@@ -98,5 +103,164 @@ class CatalogList(APIView):
 
 class CatalogDetail(APIView):
     permission_classes = [V3Permission]
+    v3_actions = {"PUT": "product.edit", "DELETE": "product.edit"}
+
+    def put(self, request, pk):
+        return write_product(request, pk)
+
+    def delete(self, request, pk):
+        return delete_product(request, pk)
+
     def get(self, request, pk):
         return Response(product_detail(get_product(pk), request.query_params))
+
+
+def validate_product(data, instance=None):
+    """Full product form: strict shapes and contract words; off-slab legacy values may stay."""
+    import re
+
+    from billing.constants import UNIT_CHOICES
+    from billing.services.catalog import per_unit
+    from billing.tax_rules import normalize_rate
+
+    if not isinstance(data, dict):
+        raise ValidationError({"detail": "Send a product as an object."})
+    errors = {}
+    values = {}
+    for key, maximum, missing, length in (
+        ("name", 255, "Enter the product's name, as it should print on bills.", "Keep the name to 255 characters."),
+        ("hsn_code", 8, "Enter the HSN code. Every bill line needs one for GSTR-1.", ""),
+        ("purity", 20, "Keep the purity short, like 22K or 925 (20 characters at most).", "Keep the purity short, like 22K or 925 (20 characters at most)."),
+        ("description", 1000, "Keep the description to 1,000 characters.", "Keep the description to 1,000 characters."),
+    ):
+        value = data.get(key, "")
+        if not isinstance(value, str) or "\x00" in value:
+            errors[key] = [missing]
+            continue
+        value = " ".join(value.split()) if key == "name" else value.strip()
+        values[key] = value
+        if not value and key in ("name", "hsn_code"):
+            errors[key] = [missing]
+        elif key == "hsn_code" and re.fullmatch(r"[0-9]{4,8}", value) is None:
+            errors[key] = [f"HSN codes have 4 to 8 digits; this has {len(value)}."]
+        elif len(value) > maximum:
+            errors[key] = [length]
+    unit = data.get("unit", "gms")
+    if not isinstance(unit, str) or unit not in dict(UNIT_CHOICES):
+        errors["unit"] = ["Pick a unit from the list."]
+        unit = "gms"
+    values["default_unit"] = unit
+    kind = data.get("kind")
+    if kind == "":
+        kind = None
+    if kind is not None and (not isinstance(kind, str) or kind not in KINDS):
+        errors["kind"] = ["Pick a kind from the list."]
+    else:
+        values["kind"] = kind
+    bought = data.get("purchase_only", False)
+    if not isinstance(bought, bool):
+        errors["purchase_only"] = ["Choose whether this product is Bought only."]
+    else:
+        values["purchase_only"] = bought
+    raw = data.get("gst_percent")
+    if raw is None or raw == "":
+        errors["gst_percent"] = ["Choose the GST rate. There's no default, so a wrong rate can't slip onto bills."]
+    else:
+        try:
+            rate = Decimal(str(raw))
+            same = instance is not None and rate == Decimal(percent(instance.gst_tax_rate))
+            if not rate.is_finite() or (rate not in GST_SLABS and not same):
+                raise ValueError
+            values["gst_tax_rate"] = instance.gst_tax_rate if same else normalize_rate(rate)
+        except (InvalidOperation, ValueError):
+            errors["gst_percent"] = ["Choose one of the GST rates: 0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28 or 40%."]
+    raw = data.get("usual_rate")
+    values["usual_rate"] = None
+    if raw is not None and raw != "":
+        try:
+            rate = Decimal(str(raw))
+            if not rate.is_finite() or not 0 < rate < 100000000 or rate.as_tuple().exponent < -3:
+                raise ValueError
+            values["usual_rate"] = rate
+        except (InvalidOperation, ValueError):
+            errors["usual_rate"] = [f"Type the rate {per_unit(unit)}, like 6470.00, or leave it empty."]
+    if "name" not in errors and (instance is None or values["name"].lower() != instance.name.lower()):
+        twin = uncached(Product).filter(name__iexact=values["name"]).exclude(pk=instance.pk if instance else None).values_list("name", flat=True).first()
+        if twin:
+            errors["name"] = [f"There's already a product called {twin}. Names that differ only in capital letters confuse the bill form; use a different name."]
+    if errors:
+        raise ValidationError(errors)
+    return values
+
+
+def write_product(request, pk=None):
+    from django.db import IntegrityError, transaction
+
+    from billing.api.mixins import EXCLUDED_FIELDS, snapshot_of
+    from billing.models import AuditLog
+    from billing.services.audit import change_rows
+    from billing.services.catalog import catalog_names_lock, per_unit
+    from billing.text import inr
+
+    try:
+        with transaction.atomic():
+            catalog_names_lock()
+            product = get_product(pk, lock=True) if pk is not None else None
+            values = validate_product(request.data, product)
+            old = snapshot_of(product) if product else None
+            if product is None:
+                product = Product.objects.create(**values)
+                changes = []
+                details = f"HSN {product.hsn_code} · GST {percent(product.gst_tax_rate)}% · {per_unit(product.default_unit)}"
+                if product.usual_rate is not None:
+                    details += f" · {inr(product.usual_rate)}"
+                AuditLog.objects.create(entity="product", entity_id=product.pk, entity_name=product.name,
+                                        user=request.user, action="created", details=details, snapshot=snapshot_of(product))
+            else:
+                changed = [key for key, value in values.items() if getattr(product, key) != value]
+                for key in changed:
+                    setattr(product, key, values[key])
+                changes = []
+                if changed:
+                    product.save(update_fields=[*changed, "updated_at"])
+                    fresh = snapshot_of(product)
+                    raw = {key: {"old": old[key], "new": fresh[key]} for key in changed if key not in EXCLUDED_FIELDS}
+                    changes = change_rows(Product, raw)
+                    details = " · ".join(f"{c['field']} {c['from']} → {c['to']}" for c in changes)
+                    AuditLog.objects.create(entity="product", entity_id=product.pk, entity_name=product.name,
+                                            user=request.user, action="updated", details=details, changes=raw, snapshot=old)
+            result = product_detail(product, request.query_params)
+            if pk is not None:
+                result["changes"] = changes
+            return Response(result, status=201 if pk is None else 200)
+    except IntegrityError:
+        # A v2 writer does not share the catalog lock; exact-name uniqueness still gives words.
+        validate_product(request.data)
+        raise ValidationError({"name": ["Enter the product's name, as it should print on bills."]}) from None
+
+
+def delete_product(request, pk):
+    from django.db import transaction
+
+    from billing.api.mixins import snapshot_of
+    from billing.models import AuditLog
+    from billing.refusals import Refusal
+    from billing.services.catalog import catalog_names_lock, product_uses
+
+    with transaction.atomic():
+        catalog_names_lock()
+        product = get_product(pk, lock=True)
+        uses = product_uses(product)
+        if any(uses.values()):
+            parts = [f"{count} {label if count == 1 else plural}" for key, label, plural in (
+                ("sales", "sales bill", "sales bills"), ("cancelled", "cancelled bill", "cancelled bills"),
+                ("purchases", "purchase bill", "purchase bills"), ("bin", "bill in the bin", "bills in the bin"))
+                     if (count := uses[key])]
+            words = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+            raise Refusal(f"{product.name} is on {words}, so it can't be deleted. Mark it Bought only to hide it from sales bills instead.",
+                          "in_use", uses={**uses, "drafts": 0, "captures": 0})
+        entry = AuditLog.objects.create(entity="product", entity_id=product.pk, entity_name=product.name,
+                                       user=request.user, action="deleted", details=f"HSN {product.hsn_code} · on no bills · restorable",
+                                       snapshot=snapshot_of(product))
+        product.delete()
+        return Response({"audit_id": entry.pk})

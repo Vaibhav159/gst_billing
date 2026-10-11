@@ -1,7 +1,9 @@
 """Part 4 catalog: scoped history, exact words and reversible master writes."""
 
+from decimal import Decimal
+
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -204,3 +206,154 @@ class CatalogReadTests(CatalogCase):
         other = firm("Other firm", gstin="08AAAAA0000A1Z5")
         self.assertEqual(self.ask(f"{self.product.pk}/", {"fy": "2026-27", "business_id": other.pk}).data["sold"]["bills"], 0)
         self.assertEqual(self.ask(params={"fy": "2026-27", "ordering": "-sold"}).data["results"][0]["id"], self.product.pk)
+
+
+class CatalogWriteTests(CatalogCase):
+    def payload(self, **changes):
+        return {"name": "Gold necklace 22K", "hsn_code": "711319", "gst_percent": "3", "unit": "gms", "kind": "gold",
+                "purity": "22K", "usual_rate": "6470.00", "purchase_only": False, "description": "", **changes}
+
+    def test_create_trims_name_keeps_decimal_slab_and_audit_snapshot(self):
+        response = self.ask(method="post", data=self.payload(name="  Diamond   ring  ", hsn_code="7102", gst_percent="0.25"))
+        self.assertEqual(response.status_code, 201, response.data)
+        product = Product.objects.get(pk=response.data["id"])
+        self.assertEqual((product.name, product.gst_tax_rate, response.data["usual_rate"]),
+                         ("Diamond ring", Decimal("0.0025"), "6470.000"))
+        entry = AuditLog.objects.get(entity="product", entity_id=product.pk)
+        self.assertEqual(entry.snapshot["name"], "Diamond ring")
+        self.assertEqual(entry.action, "created")
+        self.assertIn("HSN 7102 · GST 0.25% · per g · ₹6,470.00", entry.details)
+
+    def test_put_logs_changes_and_noop_does_not_write(self):
+        payload = self.payload(name="Silver", hsn_code="7113", kind="", purity="", usual_rate=None)
+        response = self.ask(f"{self.product.pk}/", method="put", data=payload)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["changes"], [])
+        self.assertFalse(AuditLog.objects.filter(entity="product").exists())
+        payload["usual_rate"] = "6470"
+        response = self.ask(f"{self.product.pk}/", method="put", data=payload)
+        self.assertEqual(response.data["changes"], [{"key": "usual_rate", "field": "Usual rate", "from": "None", "to": "₹6,470.00"}])
+        self.assertEqual(AuditLog.objects.get(entity="product").changes["usual_rate"], {"old": None, "new": "6470"})
+        with CaptureQueriesContext(connection) as queries:
+            self.ask(f"{self.product.pk}/", method="put", data=payload)
+        self.assertFalse(any(q["sql"].startswith(("UPDATE", "INSERT")) for q in queries))
+
+    def test_null_blank_and_omitted_kind_infer_and_effective_kind_is_read_only(self):
+        for number, kind in enumerate((None, "", "omitted")):
+            with self.subTest(kind=kind):
+                payload = self.payload(name=f"Gem {number}", hsn_code="7102", kind=kind, kind_effective="silver")
+                if kind == "omitted":
+                    payload.pop("kind")
+                response = self.ask(method="post", data=payload)
+                self.assertEqual(response.status_code, 201, response.data)
+                pk = response.data["id"]
+                self.assertIsNone(Product.objects.get(pk=pk).kind)
+                self.assertEqual((response.data["kind"], response.data["kind_effective"], response.data["kind_set"]),
+                                 (None, "diamond", False))
+                response = self.ask(f"{pk}/", method="put", data={**payload, "kind": "gold"})
+                self.assertEqual((response.data["kind"], response.data["kind_effective"], response.data["kind_set"]),
+                                 ("gold", "gold", True))
+                response = self.ask(f"{pk}/", method="put", data=payload)
+                self.assertIsNone(response.data["kind"])
+                self.assertIsNone(Product.objects.get(pk=pk).kind)
+                self.assertEqual(response.data["kind_effective"], "diamond")
+
+    def test_exact_validation_words_and_odd_values(self):
+        cases = [
+            ({"name": ""}, "name", "Enter the product's name, as it should print on bills."),
+            ({"name": []}, "name", "Enter the product's name, as it should print on bills."),
+            ({"hsn_code": ""}, "hsn_code", "Enter the HSN code. Every bill line needs one for GSTR-1."),
+            ({"hsn_code": "12x"}, "hsn_code", "HSN codes have 4 to 8 digits; this has 3."),
+            ({"gst_percent": ""}, "gst_percent", "Choose the GST rate. There's no default, so a wrong rate can't slip onto bills."),
+            ({"gst_percent": "NaN"}, "gst_percent", "Choose one of the GST rates: 0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28 or 40%."),
+            ({"gst_percent": []}, "gst_percent", "Choose one of the GST rates: 0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28 or 40%."),
+            ({"unit": {}}, "unit", "Pick a unit from the list."),
+            ({"kind": []}, "kind", "Pick a kind from the list."),
+            ({"kind": False}, "kind", "Pick a kind from the list."),
+            ({"kind": "stone"}, "kind", "Pick a kind from the list."),
+            ({"usual_rate": "NaN"}, "usual_rate", "Type the rate per g, like 6470.00, or leave it empty."),
+            ({"usual_rate": "100000000"}, "usual_rate", "Type the rate per g, like 6470.00, or leave it empty."),
+            ({"usual_rate": "1.0001"}, "usual_rate", "Type the rate per g, like 6470.00, or leave it empty."),
+            ({"purity": "x" * 21}, "purity", "Keep the purity short, like 22K or 925 (20 characters at most)."),
+        ]
+        for values, key, words in cases:
+            with self.subTest(values=values):
+                response = self.ask(method="post", data=self.payload(**values))
+                self.assertEqual((response.status_code, str(response.data[key][0])), (400, words))
+        self.assertEqual(Product.objects.count(), 1)
+
+    def test_twins_can_edit_and_off_slab_must_be_unchanged(self):
+        Product.objects.create(name="SILVER", hsn_code="7113")
+        payload = self.payload(name="Silver", hsn_code="7113")
+        response = self.ask(f"{self.product.pk}/", method="put", data=payload)
+        self.assertEqual(response.status_code, 200, response.data)
+        response = self.ask(method="post", data=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("There's already a product called", str(response.data["name"][0]))
+        Product.objects.filter(pk=self.product.pk).update(gst_tax_rate=Decimal("0.07"))
+        payload["gst_percent"] = "7"
+        self.assertEqual(self.ask(f"{self.product.pk}/", method="put", data=payload).status_code, 200)
+        payload["gst_percent"] = "8"
+        self.assertEqual(self.ask(f"{self.product.pk}/", method="put", data=payload).status_code, 400)
+
+    def test_permissions_delete_use_refusal_and_unused_snapshot(self):
+        staff = person("catalog-staff", "v3_staff", "editor")
+        response = self.ask(method="post", data=self.payload(), user=staff)
+        self.assertEqual((response.status_code, response.data["needs"]), (403, "product.edit"))
+        response = self.ask(f"{self.product.pk}/", method="delete")
+        self.assertEqual((response.status_code, response.data["code"]), (409, "in_use"))
+        self.assertEqual(response.data["uses"]["sales"], 2)
+        self.assertIn("Mark it Bought only to hide it from sales bills instead.", response.data["detail"])
+        unused = Product.objects.create(name="Unused", hsn_code="7113")
+        response = self.ask(f"{unused.pk}/", method="delete")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(AuditLog.objects.get(pk=response.data["audit_id"]).snapshot["name"], "Unused")
+        self.assertFalse(Product.objects.filter(pk=unused.pk).exists())
+
+    def test_name_edit_preserves_old_lines_and_audit_failure_rolls_back(self):
+        from unittest.mock import patch
+
+        payload = self.payload(name="Silver renamed", hsn_code="7113")
+        response = self.ask(f"{self.product.pk}/", method="put", data=payload)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["earlier_names"], ["Silver"])
+        self.assertEqual(response.data["uses"]["sales"], 2)
+        self.assertTrue(LineItem.objects.filter(product_name="Silver").exists())
+        with patch("billing.models.AuditLog.objects.create", side_effect=RuntimeError("audit failed")), \
+                self.assertRaisesRegex(RuntimeError, "audit failed"):
+            self.ask(method="post", data=self.payload(name="Should roll back"))
+        self.assertFalse(Product.objects.filter(name="Should roll back").exists())
+
+
+class CatalogConcurrencyTests(TransactionTestCase):
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_case_insensitive_creates_are_serialized_on_postgres(self):
+        import threading
+
+        from django.db import close_old_connections, connections
+
+        self.owner = person("catalog-race-owner", "admin")
+        barrier = threading.Barrier(2)
+        responses, errors = [], []
+
+        def create(name):
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                responses.append(CatalogCase.ask(self, method="post", data={
+                    "name": name, "hsn_code": "7113", "gst_percent": "3"}).status_code)
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                connections.close_all()
+
+        threads = [threading.Thread(target=create, args=(name,)) for name in ("Gold ring", "GOLD RING")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(responses), [201, 400])
+        self.assertEqual(Product.objects.count(), 1)
+        self.assertEqual(AuditLog.objects.filter(entity="product").count(), 1)

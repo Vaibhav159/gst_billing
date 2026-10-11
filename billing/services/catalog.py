@@ -209,3 +209,19 @@ def product_detail(product, params):
             "line_count": sales.count(), "hsn_on_bills": hsn_on_bills(product, names),
             "uses": product_uses(product, names), "earlier_names": [name for name in names if name != product.name],
             "updated_at": stamp(product.updated_at)}
+
+
+def catalog_names_lock():
+    """Serialize v3 name checks, including audit restores, while keeping exact-case DB uniqueness.
+
+    PostgreSQL is production and CI. SQLite's test database serializes writes itself.
+    """
+    from django.db import connection
+
+    if connection.vendor == "postgresql":
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(41001)")
+
+
+def per_unit(unit):
+    return "per piece" if unit in ("pcs", "nos", "unit") else f"per {'g' if unit == 'gms' else unit}"
