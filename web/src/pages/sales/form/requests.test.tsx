@@ -106,8 +106,8 @@ test("a counter bill typed and saved, then what follows", async () => {
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   expect(router.state.location.pathname).toBe("/sales/501");
-  // A saved sale refreshes Records' shared firm queries, including the mounted slim list.
-  expect(calls.slice(savingAt).map((c) => `${c.method} ${c.url}`)).toEqual(["POST sales/", "GET firms/"]);
+  // A saved sale refreshes firm numbers and figures, not the mounted slim list, which carries neither.
+  expect(calls.slice(savingAt).map((c) => `${c.method} ${c.url}`)).toEqual(["POST sales/"]);
 });
 
 test("leaving a new bill with a change not kept yet", async () => {
