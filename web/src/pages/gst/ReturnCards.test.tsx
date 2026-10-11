@@ -1,0 +1,185 @@
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { renderApp } from "@/test/render";
+import { monthFixture } from "@/core/gst/fixtures";
+import type { Check, Gstr1, Month } from "@/core/gst/types";
+import { Checks } from "./Checks";
+import { Gstr1Card } from "./Gstr1Card";
+
+const duplicate = {
+  kind: "duplicate", blocks: true, text: "Bill number KGH/2026-27/17 is used twice", detail: "", more_bills: 1, customer: null, suggested: 391,
+  bills: [
+    { id: 388, invoice_number: "KGH/2026-27/17", invoice_date: "2026-09-09", customer_name: "Anita Mehta", status: "active", total_amount: 4521000, typed: false },
+    { id: 391, invoice_number: "KGH/2026-27/17", invoice_date: "2026-09-10", customer_name: "Hemant Dave", status: "active", total_amount: 1250000, typed: true },
+  ],
+} satisfies Check;
+// Hand-worked fixtures: 1,000 × 3% = 30, split 15/15; 400 × 0.25% = 1.
+const sections = {
+  b2b: [{ bill: duplicate.bills[0], customer: { id: 4, name: "Anita Mehta", gst_number: "08ABCDE1234F1Z5", state_code: "08", state_name: "RAJASTHAN" }, place_of_supply: "08", rates: ["3"], taxable: 100000, igst: 0, cgst: 1500, sgst: 1500, total: 103000 }],
+  b2cl: [{ bill: { ...duplicate.bills[1], invoice_number: "KGH/2026-27/18" }, customer: { id: 5, name: "Hemant Dave" }, place_of_supply: "24", place_of_supply_name: "GUJARAT", total: 20600000, rates: [{ rate: "3", taxable: 20000000, igst: 600000 }] }],
+  b2cs: [{ place_of_supply: "08", place_of_supply_name: "RAJASTHAN", interstate: false, rate: "0.25", bills: 1, taxable: 40000, igst: 0, cgst: 50, sgst: 50 }],
+  nil: [{ supply: "INTRAB2C", bills: 1, value: 120000 }],
+  by_rate: [{ rate: "0.25", taxable: 40000, igst: 0, cgst: 50, sgst: 50, tax: 100, value: 40100, bills: 1 }],
+  hsn: { b2b: [], b2c: [{ hsn: "710239", description: "Diamonds", uqc: "CTM", quantity: "6.400", rate: "0.25", taxable: 40000, igst: 0, cgst: 50, sgst: 50, service: false, bills: 1 }] },
+  docs: [{ from: "KGH/2026-27/17", to: "KGH/2026-27/34", total: 18, cancelled: 1, net: 17 }],
+  docs_notes: ["Numbers used in another month of the year (a back-dated bill) split the series into 2 rows, so nothing counts as cancelled twice."],
+  cancelled: [{ bill: { id: null, bin_id: 4, invoice_number: "KGH/2026-27/27", invoice_date: "2026-09-24", customer_name: "Walk-in Customer", status: "deleted" }, kind: "deleted", total: 12500, reason: "Entered twice by mistake", on: "2026-10-03" }],
+  amendments: { b2ba: 0, b2cla: 0, b2csa: 0 },
+} satisfies Gstr1;
+function month(overrides: Partial<Month> = {}): Month {
+  return { business: 3, firm: { id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "08VRHFA2322D1ZI", state_code: "08" }, month: "2026-09", fy: "2026-27", stage: "blocked", running: { from: "2026-09-01", to: "2026-09-30" }, due: { gstr1: "2026-10-11", gstr3b: "2026-10-20", file_from: "2026-10-01" }, record: { gstr1: null, gstr1a: null, gstr3b: null, legacy: false, unlocked: null, relocked: null, locked_by: null, locked_on: null }, checks: { blockers: [duplicate], notes: [], passes: ["Every line has an HSN code and a GST rate"] }, gstr1: null, gstr3b: null, late: null, since_filing: null, amendments: null, amended_in: null, download: null, prev_gstr3b_missing: null, ...overrides };
+}
+afterEach(() => { (window as unknown as { __phone: boolean }).__phone = false; vi.useRealTimers(); });
+
+it("shows the named blocker, exact paise, every returned bill and more count; only an editor gets Fix", () => {
+  const onFix = vi.fn();
+  const { unmount } = renderApp(<Checks month={month()} onFix={onFix} />);
+  expect(screen.getByText(duplicate.text)).toBeVisible();
+  expect(screen.getByText(/₹45,210.00/)).toBeVisible();
+  expect(screen.getByText(/typed by hand/)).toBeVisible();
+  expect(screen.getByText(/1 more bill/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Fix" }));
+  expect(onFix).toHaveBeenCalledWith(duplicate);
+  unmount();
+  renderApp(<Checks month={month()} onFix={onFix} />, { me: { role: "viewer", permissions: ["view"] } });
+  expect(screen.queryByRole("button", { name: "Fix" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /Open.*bills/ })).toBeVisible();
+});
+
+it("keeps B2B portal figures and links, with accessible seven-tab navigation", () => {
+  const change = vi.fn();
+  renderApp(<Gstr1Card data={sections} month={month()} section="b2b" onSection={change} />);
+  const table = screen.getByRole("table", { name: /B2B bills/ });
+  expect(within(table).getAllByText("₹1,030.00")).toHaveLength(2);
+  expect(within(table).getByRole("link", { name: "KGH/2026-27/17" })).toHaveAttribute("href", "/sales/388");
+  expect(screen.getAllByRole("tab")).toHaveLength(7);
+  fireEvent.keyDown(screen.getByRole("tab", { name: /^B2B / }), { key: "ArrowRight" });
+  expect(change).toHaveBeenCalledWith("b2cl");
+});
+
+it("keeps the diamond slab at 0.25%, displays nil Table 8, and exposes all three heads", () => {
+  renderApp(<Gstr1Card data={sections} month={month()} section="b2c" onSection={vi.fn()} />);
+  expect(screen.getByText("0.25%")).toBeVisible();
+  expect(screen.getByRole("table", { name: /Nil-rated supplies/ })).toHaveTextContent("₹1,200.00");
+  const row = within(screen.getByRole("table", { name: /B2C summary/ })).getAllByRole("row")[1];
+  expect(row).toHaveTextContent("₹400.00₹0.00₹0.50₹0.50");
+});
+
+it("keeps CTM and exact filed quantity; exposes documents notes and deleted bill reasons", () => {
+  const first = renderApp(<Gstr1Card data={sections} month={month()} section="hsn" onSection={vi.fn()} />);
+  expect(screen.getByText("CTM")).toBeVisible();
+  expect(screen.getByText("6.400")).toBeVisible();
+  expect(screen.getByText(/PCS for pieces, NOS for numbers, CTM for carats/)).toBeVisible();
+  expect(screen.queryByText(/no carat unit/)).not.toBeInTheDocument();
+  first.unmount();
+  const second = renderApp(<Gstr1Card data={sections} month={month()} section="docs" onSection={vi.fn()} />);
+  expect(screen.getByText(sections.docs_notes[0])).toBeVisible();
+  expect(screen.getByRole("table")).toHaveTextContent("18117");
+  second.unmount();
+  renderApp(<Gstr1Card data={sections} month={month()} section="cancelled" onSection={vi.fn()} />);
+  expect(screen.getByText(/Entered twice by mistake/)).toBeVisible();
+  expect(screen.getByText("Deleted · in the bin")).toBeVisible();
+});
+
+it("shows a phone HSN sheet with label/value lists and no wide table", () => {
+  vi.useFakeTimers(); (window as unknown as { __phone: boolean }).__phone = true;
+  renderApp(<Gstr1Card data={sections} month={month()} section="hsn" onSection={vi.fn()} phone />);
+  fireEvent.click(screen.getByRole("button", { name: /HSN summary/ }));
+  act(() => vi.advanceTimersByTime(400));
+  const sheet = screen.getByRole("dialog", { name: "HSN summary" });
+  expect(within(sheet).getByText("CTM · 6.400")).toBeVisible();
+  expect(within(sheet).queryByRole("table")).not.toBeInTheDocument();
+});
+
+it("shows mixed-rate B2CL once per bill and keeps each slab's taxable value and IGST", () => {
+  const mixed = { ...sections, b2cl: [{ ...sections.b2cl[0], total: 20650125, rates: [{ rate: "3", taxable: 20000000, igst: 600000 }, { rate: "0.25", taxable: 50000, igst: 125 }] }] };
+  renderApp(<Gstr1Card data={mixed} month={month()} section="b2cl" onSection={vi.fn()} />);
+  const table = screen.getByRole("table", { name: /B2CL bills/ });
+  const rows = within(table).getAllByRole("row");
+  expect(rows[1]).toHaveTextContent("₹2,06,501.25");
+  expect(rows[2]).toHaveTextContent("0.25%₹500.00₹1.25");
+  expect(rows[3]).toHaveTextContent("₹2,00,500.00₹6,001.25");
+  expect(within(table).getAllByRole("link", { name: "KGH/2026-27/18" })).toHaveLength(1);
+});
+
+it("shows the by-rate total and a correctly scoped link for the diamond bills", () => {
+  renderApp(<Gstr1Card data={sections} month={month()} section="rate" onSection={vi.fn()} />);
+  const table = screen.getByRole("table", { name: /Sales by GST rate/ });
+  const rows = within(table).getAllByRole("row");
+  expect(rows[1]).toHaveTextContent("0.25%₹400.00₹0.00₹0.50₹0.50₹1.00₹401.00");
+  expect(within(table).getByRole("link", { name: "Open the 1 bill at 0.25%" })).toHaveAttribute("href", "/sales?firm=3&month=2026-09&gst_rate=0.25");
+});
+
+it("shows a total for both HSN groups without summing incompatible quantities", () => {
+  renderApp(<Gstr1Card data={sections} month={month()} section="hsn" onSection={vi.fn()} />);
+  const table = screen.getByRole("table", { name: /HSN totals/ });
+  expect(table).toHaveTextContent("₹400.00₹0.00₹0.50₹0.50");
+});
+
+it("keeps as-filed controls optional and emits the choice without recalculating the snapshot", () => {
+  const onAsFiled = vi.fn();
+  const filing = { id: 81, business: 3, month: "2026-09", kind: "gstr1" as const, filed_on: "2026-10-10", arn: "", cash: null, cash_worked_out: null, late_fee: null, interest: null, credit_left: null, marked_by: { id: 1, name: "Kailash" }, marked_at: "2026-10-10T17:00:00+05:30", updated_by: null, updated_at: null, legacy: false };
+  const recorded = month(); recorded.record.gstr1 = filing;
+  renderApp(<Gstr1Card data={sections} month={recorded} section="b2b" onSection={vi.fn()} onAsFiled={onAsFiled} />);
+  fireEvent.click(screen.getByRole("radio", { name: "As filed" }));
+  expect(onAsFiled).toHaveBeenCalledWith(true);
+});
+
+it("uses the selected as-filed bill count in the rate total instead of live books", () => {
+  const recorded = monthFixture();
+  recorded.gstr1!.bills = 3;
+  recorded.gstr1!.as_filed = { bills: 2, taxable: 40000, tax: 100, at: "2026-10-10T17:00:00+05:30" };
+  renderApp(<Gstr1Card data={sections} month={recorded} section="rate" onSection={vi.fn()} asFiled />);
+  const rows = within(screen.getByRole("table", { name: /Sales by GST rate/ })).getAllByRole("row");
+  const cells = within(rows[rows.length - 1]).getAllByRole("cell");
+  expect(cells[cells.length - 1]).toHaveTextContent(/^2$/);
+  expect(screen.getByText(/September 2026 · 2 sales bills · as filed/)).toBeVisible();
+});
+
+
+it("labels deleted check bills and links the owner to the bin ID instead of the original bill ID", () => {
+  const deleted: Check = { ...duplicate, kind: "deleted", blocks: false, text: "A bill was deleted", detail: "It remains in Documents issued.", more_bills: 0, bills: [{ ...duplicate.bills[0], id: 388, bin_id: 4, status: "deleted" }] };
+  const m = month({ checks: { blockers: [], notes: [deleted], passes: [] } });
+  const view = renderApp(<Checks month={m} onFix={vi.fn()} />);
+  expect(screen.getByText("Deleted", { exact: true })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open the deleted bill" })).toHaveAttribute("href", "/audit?restore=4");
+  expect(screen.queryByRole("link", { name: "Open the bill" })).not.toBeInTheDocument();
+  view.unmount();
+  delete (deleted.bills[0] as typeof duplicate.bills[0] & { bin_id?: number }).bin_id;
+  renderApp(<Checks month={m} onFix={vi.fn()} />);
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+});
+
+it("shows deleted check bills without a link for viewers and accountants who can only view audit", () => {
+  const deleted: Check = { ...duplicate, kind: "deleted", blocks: false, text: "A bill was deleted", detail: "It remains in Documents issued.", more_bills: 0, bills: [{ ...duplicate.bills[0], id: 388, bin_id: 4, status: "deleted" }] };
+  const m = month({ checks: { blockers: [], notes: [deleted], passes: [] } });
+  const viewer = renderApp(<Checks month={m} onFix={vi.fn()} />, { me: { role: "viewer", permissions: ["view"] } });
+  expect(screen.getByText("Deleted", { exact: true })).toBeVisible();
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Open the Audit log" })).not.toBeInTheDocument();
+  viewer.unmount();
+  renderApp(<Checks month={m} onFix={vi.fn()} />, { me: { role: "accountant", permissions: ["view", "audit.view"] } });
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Open the Audit log" })).not.toBeInTheDocument();
+});
+
+
+it.each(["b2b", "b2cl", "cancelled"] as const)("routes deleted %s references to the owner's bin row and leaves other roles unlinked", (section) => {
+  const bill = { ...duplicate.bills[0], id: 388, bin_id: 4, status: "deleted" as const };
+  const data: Gstr1 = { ...sections, b2b: [{ ...sections.b2b[0], bill }], b2cl: [{ ...sections.b2cl[0], bill }], cancelled: [{ ...sections.cancelled[0], bill }] };
+  const owner = renderApp(<Gstr1Card data={data} month={month()} section={section} onSection={vi.fn()} asFiled />);
+  expect(screen.getByRole("link", { name: bill.invoice_number })).toHaveAttribute("href", "/audit?restore=4");
+  expect(screen.getByText(section === "cancelled" ? "Deleted · in the bin" : "Deleted")).toBeVisible();
+  owner.unmount();
+  const viewer = renderApp(<Gstr1Card data={data} month={month()} section={section} onSection={vi.fn()} asFiled />, { me: { role: "viewer", permissions: ["view"] } });
+  expect(screen.getByText(bill.invoice_number)).toBeVisible();
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  viewer.unmount();
+  const accountant = renderApp(<Gstr1Card data={data} month={month()} section={section} onSection={vi.fn()} asFiled />, { me: { role: "accountant", permissions: ["view", "audit.view"] } });
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  if (section === "cancelled") expect(screen.getByText(/The owner can restore a deleted bill from the Audit log/)).toBeVisible();
+  accountant.unmount();
+  delete (bill as { bin_id?: number }).bin_id;
+  renderApp(<Gstr1Card data={data} month={month()} section={section} onSection={vi.fn()} asFiled />);
+  expect(screen.queryByRole("link", { name: bill.invoice_number })).not.toBeInTheDocument();
+});
