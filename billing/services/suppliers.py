@@ -62,8 +62,11 @@ def scoped_purchases(firm=None, fy=None):
 
 
 def tax_total():
+    """Each line's heads rounded to paise before adding, as bill_reads.sums and the credit ledger do."""
+    from billing.services.purchase_reads import Paise
+
     tax = uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")\
-        .annotate(tax=Sum(F("cgst") + F("sgst") + F("igst"))).values("tax")
+        .annotate(tax=Sum(Paise(F("cgst")) + Paise(F("sgst")) + Paise(F("igst")), output_field=DECIMAL)).values("tax")
     return Coalesce(Subquery(tax), Value(ZERO), output_field=DECIMAL)
 
 
