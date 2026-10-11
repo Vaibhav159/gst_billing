@@ -1,20 +1,11 @@
 import rows from './rows.json';
-import { toPaise } from '@/core/format';
+import type { Board, RateRow, RatesData } from '@/core/api/dashboard';
+export type { Board, RateRow } from '@/core/api/dashboard';
+export type Rates = RatesData;
 export type RateKey = 'gold-24K' | 'gold-22K' | 'gold-18K' | 'silver-999' | 'silver-925';
-export type RateRow = { key: RateKey; label: string; sub: string; per: number; per_label: string };
-export const RATE_ROWS = rows as RateRow[];
-export type Quoted = Record<RateKey, number>;
-export type QuoteInput = Record<RateKey, number | null>;
-export type WireBoard = {
-  id: number; on: string; set_at: string; set_by: { id: number; name: string } | null;
-  quoted: Record<RateKey, string>; per_gram: Record<RateKey, string>;
-};
-export type Board = Omit<WireBoard, 'quoted'> & { quoted: Quoted };
-export type WireRates = { today: string; rows: RateRow[]; latest: WireBoard | null; previous: WireBoard | null; set_today: boolean; in_force?: WireBoard | null };
-export type Rates = Omit<WireRates, 'latest' | 'previous' | 'in_force'> & { latest: Board | null; previous: Board | null; in_force?: Board | null };
-export function boardOf(b: WireBoard | null): Board | null {
-  return b && { ...b, quoted: Object.fromEntries(RATE_ROWS.map(r => [r.key, toPaise(b.quoted[r.key])!])) as Quoted };
-}
+export const RATE_ROWS = rows as (RateRow & { key: RateKey })[];
+export type Quoted = Board['quoted'];
+export type QuoteInput = Record<string, number | null>;
 /** Accept the shared product mapper's output; never infer kind from a name or HSN. */
 export function rateKey(product: unknown): RateKey | null {
   if (!product || typeof product !== 'object' || !('kind_effective' in product) || !('purity' in product)) return null;

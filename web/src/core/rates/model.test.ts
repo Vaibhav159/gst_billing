@@ -1,4 +1,5 @@
-import { RATE_ROWS, boardOf, changed, moved, perGram, quotedErrors, rateKey } from './model';
+import { toBoard as boardOf } from '@/core/dashboard/wire';
+import { RATE_ROWS, changed, moved, perGram, quotedErrors, rateKey } from './model';
 import { rateSlip, rateNote } from './slip';
 import { wireBoard } from './testing';
 
@@ -13,7 +14,7 @@ test('quotes become paise; per-gram precision and the typed quote stay exact', (
   const wire = wireBoard(); wire.quoted['silver-999'] = '72610.49'; wire.per_gram['silver-999'] = '72.610';
   const b = boardOf(wire)!;
   expect(b.quoted['silver-999']).toBe(7261049); expect(b.per_gram['silver-999']).toBe('72.610');
-  expect(perGram(7261050, 1000)).toBe('72.611'); expect(boardOf(null)).toBeNull();
+  expect(perGram(7261050, 1000)).toBe('72.611');
 });
 test('kind_effective alone selects a row; no kind, name or HSN inference', () => {
   expect(rateKey({ kind: null, kind_effective: 'gold', purity: '22K' })).toBe('gold-22K');
