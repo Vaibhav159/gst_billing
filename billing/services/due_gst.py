@@ -104,18 +104,19 @@ def collect_gst(firms, today, keys, with_returns):
     ids = [f.pk for f in firms]
     ended = today.replace(day=1) - timedelta(days=1)
     month = ended.strftime("%Y-%m")
-    # Contract §11 leaves the Python envelope open. The controller must confirm this tuple at 3A landing.
-    stages, latest = month_stages(ids, [month], today=today)
-    months = {month}
-    if "gst.file" in keys:
-        for firm in firms:
-            floor = max(latest.get(firm.pk) or "0000-00", f"{fy_of(today) - 1}-03")
-            months.update(m for m in month_keys(date(fy_of(today) - 1, 4, 1), ended) if m > floor)
+    # One month_stages call covers every month the scan can reach (P5-3); its stages already fold in v2's
+    # whole-month locks, so a locked month is "filed" and never re-checked (P5-2).
+    scan = list(month_keys(date(fy_of(today) - 1, 4, 1), ended)) if "gst.file" in keys else [month]
+    found = month_stages(ids, scan, today=today)
+    stages, latest = found["stages"], found["latest_gstr1"]
+    # Blocker text is read only for months month_stages found blocked, plus this month's open bills.
+    months = set()
+    for firm in firms:
+        floor = max(latest.get(firm.pk) or "0000-00", f"{fy_of(today) - 1}-03") if "gst.file" in keys else "0000-00"
+        months.update(m for m in scan if m > floor and stages.get((firm.pk, m)) == "blocked")
     if "bill.edit" in keys:
         months.add(today.strftime("%Y-%m"))
-    # Earlier scanned months are strictly after latest_gstr1, so cannot have a recorded GSTR-1.
-    # The current month needs blocker text only; neither needs a second stage calculation.
-    blocks = gstr1_blockers(ids, sorted(months)) if with_returns or keys & {"gst.file", "bill.edit"} else {}
+    blocks = gstr1_blockers(ids, sorted(months)) if months and (with_returns or keys & {"gst.file", "bill.edit"}) else {}
     need_positions = with_returns or ("gst.file" in keys and (due_dates(ended.year, ended.month)["gstr3b"] - today).days <= 15)
     positions = {f.pk: month_position(f, ended.year, ended.month) for f in firms} if need_positions else {}
     risk = credit_at_risk_summary(ids, today=today) if "gst.file" in keys else {"count": 0}

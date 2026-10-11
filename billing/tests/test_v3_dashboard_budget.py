@@ -76,10 +76,10 @@ def shop(db):
     return users
 
 
-def request(user, path):
+def request(user, path, today=date(2026, 10, 8)):
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION="Bearer " + str(AccessToken.for_user(user)))
-    with patch("billing.api.dashboard.timezone.localdate", return_value=date(2026, 10, 8)), wire_bytes() as seen:
+    with patch("billing.api.dashboard.timezone.localdate", return_value=today), wire_bytes() as seen:
         answer = client.get(path)
     assert answer.status_code == 200, answer.content
     return answer.json(), seen
@@ -114,14 +114,16 @@ def test_viewer_dashboard_and_operational_due_budgets(shop):
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(find_spec("billing.services.filing") is None or find_spec("billing.services.audit") is None,
-                    reason="X-40: requires 2A, 3A and 4A's shared audit mapper")
+@pytest.mark.skipif(find_spec("billing.services.filing") is None,
+                    reason="X-40: a hard gate from the moment 3A lands (P5-3); changes are [] until 4A (P5-7)")
 def test_full_predecessor_budgets(shop):
-    for role, path, queries, size in [("owner", "/api/dashboard/", 14, 40000),
-        ("owner", "/api/due-next/?returns=1", 24, 120000),
-        ("staff", "/api/due-next/", 10, 90000),
-        ("viewer", "/api/due-next/?returns=1", 12, 25000)]:
-        data, seen = request(shop[role], path)
+    # The last row is P5-3's worst case: no filing recorded, early April, so all 12 months of last FY are scanned.
+    for role, path, queries, size, today in [("owner", "/api/dashboard/", 14, 40000, date(2026, 10, 8)),
+        ("owner", "/api/due-next/?returns=1", 24, 120000, date(2026, 10, 8)),
+        ("staff", "/api/due-next/", 10, 90000, date(2026, 10, 8)),
+        ("viewer", "/api/due-next/?returns=1", 12, 25000, date(2026, 10, 8)),
+        ("owner", "/api/due-next/?returns=1", 24, 120000, date(2027, 4, 3))]:
+        data, seen = request(shop[role], path, today)
         if "returns=1" in path:
             assert data["returns"] is not None
         assert seen["queries"] <= queries, seen
