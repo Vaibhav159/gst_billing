@@ -104,6 +104,28 @@ test("in a real dialog, a box with nothing listed keeps no Esc: one Esc closes t
   }
 });
 
+test("Esc while nothing is listed yet still shuts the list: matches that come after don't drop it open, and the key goes on", async () => {
+  let answer: (o: ComboItem<number>[]) => void = () => {};
+  /** A search box whose matches come later (the sales list's customer filter, waiting on the server). */
+  function Later() {
+    const [q, setQ] = useState("");
+    const [options, setOptions] = useState<ComboItem<number>[]>([]);
+    answer = setOptions;
+    return <Combobox id="cb" ariaLabel="Customer" listLabel="Customers" query={q} onQuery={setQ} options={options} onPick={() => {}} />;
+  }
+  const outside = vi.fn();
+  renderApp(<div onKeyDown={(e) => outside(e.key)}><Later /></div>);
+  const box = screen.getByRole("combobox", { name: "Customer" });
+  await userEvent.type(box, "an");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  await userEvent.keyboard("{Escape}");
+  // nothing on screen to close, so the key goes on (to a dialog around the box, say)
+  expect(outside).toHaveBeenCalledWith("Escape");
+  act(() => answer([{ key: "a", title: "Anil Gupta", value: 1 }]));
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(box).toHaveAttribute("aria-expanded", "false");
+});
+
 test("a box focused as its page opens waits for the person: its list opens on an arrow key", async () => {
   renderApp(<Picker onPick={() => {}} autoFocus />);
   const box = screen.getByRole("combobox", { name: "Customer" });

@@ -80,11 +80,13 @@ export default function CustomerForm() {
   const location = useLocation();
   const navigate = useNavigate();
   const startKey = editId ?? `new?${query.get("name") ?? ""}&${query.get("phone") ?? ""}&${query.get("gstin") ?? ""}`;
-  const here = { key: startKey, query, path: location.pathname, url: `${location.pathname}${location.search}`, idx: historyIndex() };
-  const [shown, setShown] = useState(here);
+  const here = { key: startKey, query, path: location.pathname, url: `${location.pathname}${location.search}`, at: location.key };
+  const [shown, setShown] = useState(() => ({ ...here, idx: historyIndex() }));
   const [dirty, setDirty] = useState(false);
   const asking = shown.key !== startKey && dirty && shown.path === here.path;
-  if ((shown.url !== here.url || shown.idx !== here.idx) && !asking) { setShown(here); if (shown.key !== startKey) setDirty(false); }
+  // the router on another entry (a link, Back or Forward): its place in the tab's history is read then, and only then. A
+  // render while the browser puts back a Back the guard stopped would read the entry being left
+  if (shown.at !== here.at && !asking) { setShown({ ...here, idx: historyIndex() }); if (shown.key !== startKey) setDirty(false); }
   // Stay: back to the form's own entry by the steps between (a link, Back or Forward), so no entry in the tab's history
   // is lost; a history without numbers (in memory) has the form's address put back in place
   const stay = () => {
@@ -95,7 +97,7 @@ export default function CustomerForm() {
   const restart = asking ? (
     // the words of the form's guard (useUnsavedGuard)
     <ConfirmDialog open title="Leave without saving?" confirmLabel="Leave" cancelLabel="Stay" tone="danger" onClose={stay}
-      onConfirm={() => { setShown(here); setDirty(false); }}>Your changes aren't saved. Leave this page and lose them?</ConfirmDialog>
+      onConfirm={() => { setShown({ ...here, idx: historyIndex() }); setDirty(false); }}>Your changes aren't saved. Leave this page and lose them?</ConfirmDialog>
   ) : null;
   if (missing) return <MissingRecord icon={UserRound} title="This customer isn't on file" to="/customers" label="All customers" />;
   if (existing?.type === "walkin") {

@@ -25,7 +25,7 @@ function Picker({ onNew }: { onNew: (t: string) => void }) {
 /**
  * A clock the test moves (Ruling 1C-4) for tests that type with userEvent: the 250 ms pause before a search asks, and a
  * sheet's 350 ms guard against a double tap's second tap, pass when the test says (move); typing moves it only as far as
- * each key needs. (testing.tsx's typingClock is the strict one, which no real time moves.)
+ * each key needs. (testing.tsx's handClock is the strict one, which no real time moves.)
  */
 function typingClock() {
   vi.useFakeTimers({ shouldAdvanceTime: true });

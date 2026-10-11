@@ -35,11 +35,14 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
     else if (e.key === "Enter") { if (open && items[active]) { e.preventDefault(); pick(items[active]); } }
     else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey) { if (open && query.trim() && items[active]) { e.preventDefault(); pick(items[active]); } else setOpen(false); }
   };
-  // Esc with the list on screen closes only the list. It's taken on the key's way down (capture): a dialog around the box
-  // (useFocusTrap) listens on its own element, which a key reaches before React's bubbling handlers, so it would close
-  // the dialog first. With no list on screen (shut, or nothing to show), Esc goes on.
+  // Esc shuts the list, drawn or not, so matches that come later (a search still out) don't drop it open. A list on
+  // screen keeps the key, taken on its way down (capture): a dialog around the box (useFocusTrap) listens on its own
+  // element, which a key reaches before React's bubbling handlers, so it would close the dialog first. With nothing on
+  // screen, Esc goes on.
   const onKeyDownCapture = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape" && listed) { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+    if (e.key !== "Escape" || !open) return;
+    setOpen(false);
+    if (listed) { e.preventDefault(); e.stopPropagation(); }
   };
   let k = -1;
   return (
