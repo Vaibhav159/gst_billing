@@ -397,7 +397,7 @@ def save_eway(invoice, user, data):
     return invoice
 
 
-def refile_heads(invoice, user):
+def refile_heads(invoice, user, *, details="Tax heads re-filed for the place of supply"):
     """POST sales/{id}/fix-heads/: each line's tax onto the heads the bill's place of supply gives,
     every line's tax (and so the total) kept. One write for every line that moves; none when none does."""
     from billing.services.bill_reads import lines_of
@@ -416,5 +416,5 @@ def refile_heads(invoice, user):
         if moved:
             LineItem.objects.bulk_update(moved, ["cgst", "sgst", "igst", "updated_at"])
             invalidate(LineItem)  # bulk_update sends no signal
-            log(invoice, user, "updated", "Tax heads re-filed for the place of supply")
+            log(invoice, user, "updated", details)
     return invoice

@@ -74,6 +74,7 @@ CLOSED_WORDS = {
     "restore": "a deleted bill can't go back into it",
     "renumber": "its bills can't be renumbered",
     "move": "its bills can't move to another firm",
+    "merge": "its bills can't move to another customer",
 }
 
 

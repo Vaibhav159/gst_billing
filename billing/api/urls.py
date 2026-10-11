@@ -6,6 +6,7 @@ from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .catalog import CatalogDetail, CatalogList
+from .customer_merge import CustomerDuplicatesView, CustomerMergeView
 from .drafts import DraftViewSet
 from .firms import FirmDetailView, FirmSignatureView, FirmsView
 from .gst import (
@@ -121,6 +122,9 @@ urlpatterns = [
     path("catalog/<int:pk>/", CatalogDetail.as_view(), name="catalog-detail"),
     path("setup/", SetupView.as_view(), name="setup"),
     re_path(r"^registry/(?P<gstin>[^/]{1,20})/$", RegistryView.as_view(), name="registry"),
+    path("customers/duplicates/", CustomerDuplicatesView.as_view(), name="customer-duplicates"),
+    path("customers/<int:pk>/merge-preview/", CustomerMergeView.as_view(http_method_names=["get", "head", "options"]), name="customer-merge-preview"),
+    path("customers/<int:pk>/merge-into/", CustomerMergeView.as_view(http_method_names=["post", "options"]), name="customer-merge-into"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",
