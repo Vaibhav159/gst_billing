@@ -110,18 +110,19 @@ def filter_customers(customers, params):
 
 
 def order_by_figures(customers, ordering, firm=None, start=None, end=None):
-    """customers/'s two v3 orders (6.1): -last_bill puts the newest active sale in the firm (any date) first, and
+    """customers/'s two v3 orders (6.1): -last_bill puts the newest active sale in the firm (any date) first, as each
+    row's last_bill reads it (the latest date, then of customers last billed on one day the one billed last), and
     -sales the most sold in the firm and period. Customers with none come after them by name, and the walk-in
     record last."""
     if ordering == "-sales":
         bills = scoped_sales(firm, start, end).counted().filter(customer=OuterRef("pk"))
-        figure = Subquery(bills.values("customer").annotate(sold=Sum("total_amount")).values("sold").order_by())
+        keys = {"sold": Subquery(bills.values("customer").annotate(sold=Sum("total_amount")).values("sold").order_by())}
     else:
-        bills = scoped_sales(firm).counted().filter(customer=OuterRef("pk"))
-        figure = Subquery(bills.order_by(*NEWEST).values("invoice_date")[:1])
+        newest = scoped_sales(firm).counted().filter(customer=OuterRef("pk")).order_by(*NEWEST)
+        keys = {"last_day": Subquery(newest.values("invoice_date")[:1]), "last_made": Subquery(newest.values("pk")[:1])}
     walkin_last = Case(When(customer_type="walkin", then=Value(1)), default=Value(0), output_field=IntegerField())
-    return customers.alias(walkin_last=walkin_last, figure=figure).order_by(
-        "walkin_last", F("figure").desc(nulls_last=True), "name")
+    return customers.alias(walkin_last=walkin_last, **keys).order_by(
+        "walkin_last", *(F(key).desc(nulls_last=True) for key in keys), "name")
 
 
 def _count_total(group):

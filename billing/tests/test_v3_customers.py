@@ -10,7 +10,7 @@ from django.urls import reverse
 
 from billing.constants import BILL_CANCELLED
 from billing.gstin import check_digit
-from billing.models import AuditLog, Customer, Invoice, ShopSetting
+from billing.models import DEFAULT_SHARE_MESSAGE, AuditLog, Customer, Invoice, ShopSetting
 from billing.services.bin import bin_bill
 from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, line, person, sale
 
@@ -192,6 +192,23 @@ class CustomerFiguresTest(TestCase):
                          ["Anil Gupta", "Rathore Gems", "Aadi Traders", "Bharat Jewellers", "Walk-in Customer"])
         self.assertEqual(self.names(ordering="-last_bill", **period),  # any date: Bharat's August bill is its last
                          ["Rathore Gems", "Anil Gupta", "Bharat Jewellers", "Aadi Traders", "Walk-in Customer"])
+
+    def test_of_customers_last_billed_on_one_day_the_one_billed_last_comes_first(self):
+        # Review fix 1: -last_bill sorts as each row's own last_bill reads it, the latest date and then the bill made
+        # last; the bill form's recent customers come from this order. A paper bill copied in last but dated earlier
+        # sorts by its date.
+        aadi, bharat, zoya, chetan = (buyer(n) for n in ("Aadi Traders", "Bharat Jewellers", "Zoya Gems", "Chetan Soni"))
+        for number, who in (("11", aadi), ("12", bharat), ("13", zoya)):
+            sale(self.kgh, who, number, "2026-10-09")
+        sale(self.kgh, chetan, "14", "2026-10-01", paper=True)
+        order = ["Zoya Gems", "Bharat Jewellers", "Aadi Traders", "Rathore Gems", "Anil Gupta", "Chetan Soni",
+                 "Walk-in Customer"]
+        for scope in ({}, {"figures_business_id": self.kgh.pk}):
+            with self.subTest(scope=scope):
+                rows = self.rows(ordering="-last_bill", **scope)["results"]
+                self.assertEqual([c["name"] for c in rows], order)
+                last = [(c["figures"]["last_bill"]["invoice_date"], c["figures"]["last_bill"]["id"]) for c in rows[:-1]]
+                self.assertEqual(last, sorted(last, reverse=True))  # the rows' own last_bill, newest first
 
     def test_the_orders_need_figures(self):
         # Contract 6.1: -last_bill and -sales need figures=1; without it the list keeps v2's order, which reads
@@ -475,6 +492,30 @@ class ShopSettingsTest(TestCase):
         entry = AuditLog.objects.get(entity="settings")
         self.assertEqual((entry.action, entry.entity_id, entry.entity_name, entry.user, entry.details),
                          ("updated", 1, "Shop settings", self.owner, "Changed share_message"))
+
+    def test_a_save_that_changes_nothing_writes_nothing(self):
+        # Review fix 1: the "last changed" stamp agrees with the audit log. On a fresh database the row is made with
+        # the defaults and no stamp, so everyone reads exactly what they read before.
+        owner, url = client_for(self.owner), reverse("shop-settings")
+        defaults = owner.get(url).data
+        self.assertEqual(owner.put(url, {"copies": "original", "show_bank": True}, format="json").data, defaults)
+        self.assertEqual((owner.get(url).data, defaults["updated_at"], defaults["updated_by"]), (defaults, None, None))
+        saved = owner.put(url, {"copies": "all"}, format="json").data
+        other = client_for(person("vimla", *ROLE_GROUPS["owner"], first_name="Vimla", last_name="Jain"))
+        with CaptureQueriesContext(connection) as seen:
+            again = other.put(url, {"copies": "all", "share_message": DEFAULT_SHARE_MESSAGE}, format="json").data
+        self.assertEqual(again, saved)  # still Kailash's change, at its time
+        self.assertEqual(writes(seen.captured_queries), [])
+        self.assertEqual(list(AuditLog.objects.filter(entity="settings").values_list("details", flat=True)),
+                         ["Changed copies"])
+
+    def test_a_save_of_the_same_when_its_last_changer_was_deleted(self):
+        # Ruling 1A-6: the answer names the last changer, whom v2 may have deleted since (no database constraint).
+        owner, url = client_for(self.owner), reverse("shop-settings")
+        owner.put(url, {"copies": "all"}, format="json")
+        ShopSetting.objects.filter(pk=1).update(updated_by_id=424242)
+        r = owner.put(url, {"copies": "all"}, format="json")
+        self.assertEqual((r.status_code, r.data["copies"], r.data["updated_by"]), (200, "all", None))
 
     def test_refusals_are_in_the_apps_words(self):
         # Ruling 1A-5: never DRF's own words, and nothing saved.

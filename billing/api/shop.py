@@ -60,14 +60,18 @@ class ShopSettingsView(APIView):
     def put(self, request):
         data = valid(ShopSettingSerializer, request.data, partial=True)  # any of the three
         with transaction.atomic():
-            # The row locked, so two saves at once can't both make it or lose each other's change.
-            setting = ShopSetting.objects.select_for_update().get_or_create(pk=1)[0]
+            # The row locked, so two saves at once can't both make it or lose each other's change. A save that
+            # changes nothing writes nothing, so the "last changed" stamp agrees with the audit log; on a fresh
+            # database the row is made with the defaults and no stamp, which reads exactly as before. The last changer
+            # is joined (only the row locked), so one v2 deleted since answers as nobody (Ruling 1A-6).
+            setting = (ShopSetting.objects.select_related("updated_by").select_for_update(of=("self",))
+                       .get_or_create(pk=1)[0])
             changed = [key for key, value in data.items() if getattr(setting, key) != value]
-            for key, value in data.items():
-                setattr(setting, key, value)
-            setting.updated_at, setting.updated_by = timezone.now(), request.user
-            setting.save()
             if changed:
+                for key in changed:
+                    setattr(setting, key, data[key])
+                setting.updated_at, setting.updated_by = timezone.now(), request.user
+                setting.save()
                 AuditLog.objects.create(action="updated", entity="settings", entity_id=setting.pk,
                                         entity_name="Shop settings", user=request.user,
                                         details=f"Changed {', '.join(changed)}")
