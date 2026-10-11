@@ -14,7 +14,7 @@ const missing = vi.hoisted(() => {
 });
 vi.mock("@/core/shell/PaletteRecords", () => missing.arrival);
 
-test("a failed records chunk keeps Search's box and shows its own FailNote without changing the page", async () => {
+test.each(["meena", ""])("a failed records chunk keeps Search's box (%j) and gives truthful reload words, including after reopening", async (typed) => {
   fakeToday();
   const reported = vi.spyOn(console, "error").mockImplementation(() => {});
   const qc = testQueryClient();
@@ -25,16 +25,18 @@ test("a failed records chunk keeps Search's box and shows its own FailNote witho
     const main = screen.getByRole("main");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const box = screen.getByRole("combobox");
-    fireEvent.change(box, { target: { value: "meena" } });
+    fireEvent.change(box, { target: { value: typed } });
     await act(async () => missing.fail(new TypeError("Failed to fetch dynamically imported module")));
     const note = await screen.findByRole("alert", {}, { timeout: 5000 });
     const dialog = screen.getByRole("dialog", { name: "Search" });
     expect(dialog).toContainElement(note);
     expect(note).toHaveTextContent("Search couldn't load");
     expect(note).toHaveTextContent("Reload the page");
+    if (typed) expect(note).toHaveTextContent("What you typed is still in the box.");
+    else expect(note).not.toHaveTextContent("What you typed is still in the box.");
     expect(within(dialog).getByRole("combobox")).toHaveFocus();
-    expect(box).toHaveValue("meena");
-    expect(within(dialog).getByRole("button", { name: "Reload the page" })).toBeInTheDocument();
+    expect(box).toHaveValue(typed);
+    expect(within(dialog).queryByRole("button", { name: "Reload the page" })).not.toBeInTheDocument();
     expect(screen.queryByText("Something went wrong on this page")).not.toBeInTheDocument();
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("main")).toBe(main);
@@ -43,5 +45,12 @@ test("a failed records chunk keeps Search's box and shows its own FailNote witho
     fireEvent.keyDown(within(dialog).getByRole("combobox"), { key: "Escape" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const reopened = screen.getByRole("dialog", { name: "Search" });
+    expect(within(reopened).getByRole("combobox")).toHaveValue("");
+    const reopenedNote = await within(reopened).findByRole("alert", {}, { timeout: 5000 });
+    expect(reopenedNote).toHaveTextContent("Reload the page to search again.");
+    expect(reopenedNote).not.toHaveTextContent("What you typed is still in the box.");
+    expect(within(reopened).queryByRole("button", { name: "Reload the page" })).not.toBeInTheDocument();
   } finally { reported.mockRestore(); vi.useRealTimers(); qc.clear(); }
 });

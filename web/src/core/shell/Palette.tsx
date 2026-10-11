@@ -1,21 +1,20 @@
 // Search's frame opens synchronously; only its records load on demand (Ruling 1E-20).
 import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
-import { Button, Dialog, FailNote, Kbd } from "@/core/ui";
+import { Dialog, FailNote, Kbd } from "@/core/ui";
 import { useView } from "@/core/view";
 import type { PaletteRecordsHandle } from "./PaletteRecords";
 
 export const paletteCode = { load: () => import("./PaletteRecords") };
 const PaletteRecords = lazy(paletteCode.load);
 
-class RecordsBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class RecordsBoundary extends Component<{ children: ReactNode; hasText: boolean }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   render() {
     if (!this.state.failed) return this.props.children;
     return <>
-      <FailNote error={{ title: "Search couldn't load", body: "Reload the page to search again. What you typed is still in the box." }} />
-      <div><Button size="sm" onClick={() => window.location.reload()}>Reload the page</Button></div>
+      <FailNote error={{ title: "Search couldn't load", body: `Reload the page to search again.${this.props.hasText ? " What you typed is still in the box." : ""}` }} />
       <ul id="palette-list" role="listbox" aria-label="Results" className="hidden" />
     </>;
   }
@@ -40,7 +39,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
             value={q} onChange={(e) => { setQ(e.target.value); setI(0); }} onKeyDown={(e) => records.current?.onKey(e)}
             placeholder="Customer, phone, bill number, a page, or “udhaar sep”" className="ctl pl-11" />
         </div>
-        <RecordsBoundary>
+        <RecordsBoundary hasText={Boolean(q)}>
           <Suspense fallback={<><p role="status" className="px-3 py-6 text-center text-muted">Loading search…</p><ul id="palette-list" role="listbox" aria-label="Results" className="hidden" /></>}>
             <PaletteRecords ref={records} open={open} q={q} i={i} setI={setI} input={input} onClose={onClose} />
           </Suspense>

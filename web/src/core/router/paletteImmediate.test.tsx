@@ -1,4 +1,4 @@
-// Reviewer's palettekeys/palettewait probes, with assertions and a controlled records download (Ruling 1E-20).
+// The pending-page probe owns and releases its records gate; cold typing is in paletteTyping.test.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router";
@@ -31,33 +31,9 @@ function inAppLayout(pages: RouteObject[]): RouteObject[] {
   return [{ element: root.element, errorElement: root.errorElement, children: [{ element: signedIn.element, children: pages }] }];
 }
 
-test("Ctrl K immediately owns the keys while records load, then searches every letter already typed", async () => {
-  const user = fakeToday();
-  const { calls } = salesServer([["GET", "search/quick/", () => ({ customers: [{ id: 7, name: "Meena Jain", mobile_number: "9414126508", gst_number: "", recent_invoices: [] }], invoices: [], products: [] })]]);
-  // The review probe's focused page box; keep the records download as this test's only uncontrolled code load.
-  const { qc } = mount(inAppLayout([{ path: "/sales", element: <Page title="Bills"><input type="search" aria-label="Search sales bills" /></Page> }]), "/sales");
-  try {
-    const pageBox = await screen.findByRole("searchbox", { name: /Search sales bills/ }, { timeout: 5000 });
-    act(() => { vi.advanceTimersByTime(400); pageBox.focus(); });
-    fireEvent.keyDown(pageBox, { key: "k", ctrlKey: true });
-    const dialog = screen.getByRole("dialog", { name: "Search" });
-    const box = within(dialog).getByRole("combobox");
-    expect(box).toHaveFocus();
-    await user.keyboard("meena");
-    expect(box).toHaveValue("meena");
-    expect(pageBox).toHaveValue("");
-    expect(within(dialog).getByText("Loading search…")).toBeInTheDocument();
-    expect(calls.filter((c) => c.url === "search/quick/")).toHaveLength(0);
-    await act(async () => records.arrive());
-    expect(await within(dialog).findByRole("option", { name: /^Meena Jain/ }, { timeout: 5000 })).toBeInTheDocument();
-    expect(calls.filter((c) => c.url === "search/quick/").map((c) => c.params.q)).toEqual(["meena"]);
-    expect(box).toHaveFocus();
-    expect(box).toHaveValue("meena");
-  } finally { await act(async () => records.arrive()); qc.clear(); }
-});
-
 test("Search opens synchronously while a lazy page move is still pending", async () => {
   fakeToday();
+  await act(async () => records.arrive());
   salesServer();
   let arrive!: () => void;
   const Later = lazyPage(() => new Promise<{ default: () => JSX.Element }>((resolve) => { arrive = () => resolve({ default: () => <Page title="Later page">later</Page> }); }));

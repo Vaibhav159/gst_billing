@@ -11,7 +11,7 @@ import { appRoutes } from "@/core/router/routes";
 import { IconButton, Page, ToastProvider } from "@/core/ui";
 import { renderApp, stubAuth } from "@/test/render";
 import { AppLayout } from "./AppLayout";
-import { Palette } from "./Palette";
+import { Palette, paletteCode } from "./Palette";
 import { noteVisit, recentVisits } from "./recent";
 
 const calls: string[] = [];
@@ -21,6 +21,8 @@ const MEENA = {
     recent_invoices: [{ id: 32, invoice_number: "KGH/2026-27/32", invoice_date: "2026-10-08", total_amount: "38412.50", type_of_invoice: "outward", business_id: 3 }] }],
   invoices: [], products: [],
 };
+// Each test can start cold: compile the records before its clock, without relying on an earlier test opening Search.
+beforeAll(async () => { await paletteCode.load(); });
 beforeEach(() => {
   localStorage.clear(); calls.length = 0;
   api.defaults.adapter = ((config) => {
@@ -42,8 +44,9 @@ test("empty, it offers recent records, actions the role allows, and pages", asyn
   expect(screen.getByRole("option", { name: /New sales bill/ })).toBeInTheDocument();
 }, 15_000); // the file's first draw of search: past 5 s on a busy 2-CPU machine
 
-test("a view-only person isn't offered actions they can't do", () => {
+test("a view-only person isn't offered actions they can't do", async () => {
   mount("viewer");
+  expect(await screen.findByRole("option", { name: "Dashboard" }, { timeout: 5000 })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /New sales bill/ })).not.toBeInTheDocument();
 });
 
@@ -64,6 +67,7 @@ test("typing searches customers and bills once, after a pause, and Enter opens t
 test("arrow keys move the highlight and the input says which option is active", async () => {
   mount();
   const input = screen.getByRole("combobox");
+  await screen.findByRole("option", { name: /^New sales bill/ }, { timeout: 5000 });
   await userEvent.keyboard("{ArrowDown}");
   const active = input.getAttribute("aria-activedescendant");
   expect(active).toBeTruthy();
@@ -288,9 +292,13 @@ test("when the server can't be searched it says what wasn't, firms still show, n
     asked.push((config.params as { q: string }).q);
     return down ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config, MEENA);
   }) as AxiosAdapter;
-  const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
   const user = typingClock();
   mount();
+  // The firms already loaded before the line dropped, even when this is the first Search opened in the test file.
+  await screen.findByRole("option", { name: "Dashboard" }, { timeout: 5000 });
+  await move(0);
+  onLine.mockReturnValue(false);
   // the browser's word, once the app listens for it: a query that waits for the network would wait here
   act(() => { window.dispatchEvent(new Event("offline")); });
   const box = screen.getByRole("combobox");
@@ -338,7 +346,7 @@ test("Home and End jump to the ends, pointing moves the highlight, and choosing 
   function Reports() { order.push("page"); return <p>reports page</p>; }
   renderApp(<Routes><Route path="*" element={<Palette open onClose={() => { order.push("closed"); }} />} /><Route path="/reports" element={<Reports />} /></Routes>);
   const box = screen.getByRole("combobox");
-  const options = screen.getAllByRole("option");
+  const options = await screen.findAllByRole("option", {}, { timeout: 5000 });
   await userEvent.keyboard("{End}");
   expect(box).toHaveAttribute("aria-activedescendant", options[options.length - 1].id);
   expect(options[options.length - 1]).toHaveTextContent("Settings");
@@ -356,26 +364,27 @@ test("Home and End jump to the ends, pointing moves the highlight, and choosing 
   expect(order[0]).toBe("closed");
 }, 15_000); // every row and many role queries: past 5 s on a busy 2-CPU machine
 
-test("on a desktop the footer shows the keys and what to try; a phone's sheet has neither", () => {
+test("on a desktop the footer shows the keys and what to try; a phone's sheet has neither", async () => {
   const view = mount();
   let dialog = screen.getByRole("dialog", { name: "Search" });
   expect(dialog).toHaveTextContent("Try “udhaar sep”, “kiran gstr1” or “new anil”");
   expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", "Customer, phone, bill number, a page, or “udhaar sep”");
-  expect(screen.getByRole("option", { name: /^New sales bill/ }).querySelector("kbd")).toHaveTextContent(/N$/);
+  expect((await screen.findByRole("option", { name: /^New sales bill/ }, { timeout: 5000 })).querySelector("kbd")).toHaveTextContent(/N$/);
   view.unmount();
   (window as unknown as { __phone?: boolean }).__phone = true;
   mount();
   dialog = screen.getByRole("dialog", { name: "Search" });
+  await screen.findByRole("option", { name: /^New sales bill/ }, { timeout: 5000 });
   expect(dialog).not.toHaveTextContent("Try “udhaar sep”");
   expect(dialog.querySelector("kbd")).toBeNull();
 });
 
-test("Opened recently: this person's newest five records, each under its own icon", () => {
+test("Opened recently: this person's newest five records, each under its own icon", async () => {
   noteVisit(2, { to: "/sales/99", label: "KGH/2026-27/99" });
   const mine: [string, string][] = [["/sales/31", "KGH/2026-27/31"], ["/customers/7", "Meena Jain"], ["/purchases/9", "UBS/26-27/0850"], ["/products/5", "Gold chain"], ["/suppliers/4", "Jaipur Gem Exporters"], ["/sales/32", "KGH/2026-27/32"]];
   for (const [to, label] of mine) noteVisit(1, { to, label });
   mount();
-  const rows = screen.getAllByRole("option").slice(0, 6);
+  const rows = (await screen.findAllByRole("option", {}, { timeout: 5000 })).slice(0, 6);
   expect(rows.map((r) => r.textContent)).toEqual(["KGH/2026-27/32", "Jaipur Gem Exporters", "Gold chain", "UBS/26-27/0850", "Meena Jain", "New sales billAlt N"]);
   const icons = ["lucide-file-text", "lucide-truck", "lucide-package", "lucide-shopping-bag", "lucide-user-round"];
   rows.slice(0, 5).forEach((r, k) => expect(r.querySelector("svg")).toHaveClass(icons[k]));
