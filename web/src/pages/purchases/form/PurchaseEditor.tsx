@@ -28,15 +28,20 @@ import { emptyLine, fillEmpty, fromRead, newLine, payloadOf, purchaseErrors, typ
 export type PurchaseEditorProps = {
   initial: PurchaseValues; original?: PurchaseDetail; read?: PurchaseRead; capture?: number; photo?: ReactNode;
   onSaved: (purchase: PurchaseDetail) => void; onReview?: (body: PurchaseInput) => void; onFocusGroup?: (group: ReadGroup | 'buyer') => void;
+  confirmed?: Partial<Record<ReadGroup, boolean>>; onConfirm?: (group: ReadGroup) => void;
+  disabled?: boolean; onDirtyChange?: (dirty: boolean) => void; onBusyChange?: (busy: boolean) => void;
 };
 const GROUP_WORDS: Record<ReadGroup, string> = { supplier: 'supplier', gstin: 'GSTIN', bill_no: 'bill number', date: 'date', amounts: 'quantities and rates' };
 /** Shared editor for typed bills, captures and an import row. onReview returns a body without saving a bill. */
-export function PurchaseEditor({ initial, original, read: initialRead, capture, photo, onSaved, onReview, onFocusGroup }: PurchaseEditorProps) {
+export function PurchaseEditor({ initial, original, read: initialRead, capture, photo, onSaved, onReview, onFocusGroup,
+  confirmed: sharedConfirmed, onConfirm, disabled: externallyBusy = false, onDirtyChange, onBusyChange }: PurchaseEditorProps) {
   const { can, whyNot } = useAuth(); const { isPhone } = useView(); const { firms } = useFirms();
   const allowed = can(original ? 'purchase.edit' : 'purchase.create');
   const readOnly = !allowed || Boolean(original?.locked);
   const [v, setV] = useState(initial); const base = useRef(JSON.stringify(initial));
-  const [read, setRead] = useState(initialRead); const [confirmed, setConfirmed] = useState<Partial<Record<ReadGroup, boolean>>>({});
+  const [read, setRead] = useState(initialRead); const [localConfirmed, setConfirmed] = useState<Partial<Record<ReadGroup, boolean>>>({});
+  const confirmed = sharedConfirmed ?? localConfirmed;
+  const [touched, setTouched] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({}); const [problem, setProblem] = useState<ApiProblem | null>(null);
   const [file, setFile] = useState<File | null>(null); const [readFile, setReadFile] = useState<File | null>(null); const [saved, setSaved] = useState<PurchaseDetail | null>(null); const [done, setDone] = useState(false);
   const [supplierSheet, setSupplierSheet] = useState(false);
@@ -47,9 +52,11 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
   const create = useCreatePurchase(); const update = useUpdatePurchase(); const attach = usePurchaseFiles(); const reader = useReadPurchase();
   const busyRef = useRef(false); const busy = create.isPending || update.isPending || attach.isPending;
   const readBusy = reading || reader.isPending;
-  const disabled = readOnly || busy || readBusy || Boolean(saved);
-  const dirty = !done && !readOnly && (JSON.stringify(v) !== base.current || Boolean(file));
+  const disabled = readOnly || busy || readBusy || externallyBusy || Boolean(saved);
+  const dirty = !done && !readOnly && (touched || Object.values(confirmed).some(Boolean) || JSON.stringify(v) !== base.current || Boolean(file));
   const guard = useUnsavedGuard(dirty);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => { if (Object.values(confirmed).some(Boolean)) setTouched(true); }, [confirmed]);
   const firm = firms.find(f => f.id === v.business);
   const supplierQuery = useSupplier(v.supplier || null); const supplier = supplierQuery.data?.supplier;
   const noGstin = Boolean(supplier && !hasGstin(supplier.gst_number));
@@ -72,16 +79,19 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
   const claim = v.itc_eligible && !noGstin && !lapsed && !beforeLedger;
   const buyer = v.buyer_gstin.trim().toUpperCase(); const mismatch = Boolean(buyer && firm && buyer !== firm.gstin);
   const words = beforeLedger ? beforeLedgerWords : creditWords({ eligible: v.itc_eligible, supplier: supplier?.name, noGstin, lapsed, month: chosenMonth || undefined, firm: firm?.short, option: option?.month !== v.invoice_date.slice(0, 7) ? option : undefined });
-  const set = (patch: Partial<PurchaseValues>) => { setV(old => ({ ...old, ...patch })); setProblem(null); };
-  const confirm = (key: ReadGroup) => setConfirmed(old => ({ ...old, [key]: true }));
-  const setLine = (i: number, patch: Partial<FormLine>) => setV(old => ({ ...old, lines: old.lines.map((l, j) => j === i ? { ...l, ...patch } : l) }));
+  const set = (patch: Partial<PurchaseValues>) => { setTouched(true); setV(old => ({ ...old, ...patch })); setProblem(null); };
+  const confirm = (key: ReadGroup) => { if (disabled) return; setTouched(true); if (onConfirm) onConfirm(key); else setConfirmed(old => ({ ...old, [key]: true })); };
+  const setLine = (i: number, patch: Partial<FormLine>) => { confirm('amounts'); setV(old => ({ ...old, lines: old.lines.map((l, j) => j === i ? { ...l, ...patch } : l) })); };
   useEffect(() => {
     if (!memory.data?.line || original) return;
     const line = memory.data.line;
     setV(old => old.supplier === v.supplier && old.lines.length === 1 && emptyLine(old.lines[0]) ? { ...old, lines: [{ ...old.lines[0], ...line, fromMemory: true }] } : old);
   }, [memory.data, original, v.supplier]);
   const completed = (p: PurchaseDetail) => { setDone(true); base.current = JSON.stringify(v); setSaved(p); };
-  useEffect(() => { if (done && saved) onSaved(saved); }, [done, saved, onSaved]);
+  const notified = useRef<number | null>(null);
+  useEffect(() => { if (done && saved && notified.current !== saved.id) { notified.current = saved.id; onSaved(saved); } }, [done, saved, onSaved]);
+  // Publish the saved result before the shell re-enables read/discard actions.
+  useEffect(() => { onBusyChange?.(busy || readBusy); }, [busy, readBusy, onBusyChange]);
   const attachSaved = async (p: PurchaseDetail) => {
     if (!file) { completed(p); return; }
     try { completed(await attach.mutateAsync({ id: p.id, file })); }
@@ -111,7 +121,7 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
     const key = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void submitRef.current(); }
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); setV(old => old.lines.length < 200 ? { ...old, lines: [...old.lines, newLine()] } : old); }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); confirm('amounts'); setV(old => old.lines.length < 200 ? { ...old, lines: [...old.lines, newLine()] } : old); }
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [disabled, isPhone]);
@@ -129,9 +139,9 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
       setReadProblem(p.kind === 'offline' ? `You're offline, so the ${kind} can't be read. Type the bill in, or try again when you're back online.` : p.kind === 'server' || p.kind === 'unreachable' ? `The ${kind} couldn't be read just now. Nothing was filled in; try again in a moment.` : p.message);
     } finally { readingRef.current = false; setReading(false); }
   };
-  const checkNote = (group: ReadGroup) => pending.includes(group) ? <div className="flex items-center justify-between gap-3 rounded-ctl border border-brand-line bg-brand-tint px-3 text-sm"><span>Check this: read with medium confidence</span><Button size="sm" variant="link" onClick={() => confirm(group)}>Looks right</Button></div> : null;
+  const checkNote = (group: ReadGroup) => pending.includes(group) ? <div className="flex items-center justify-between gap-3 rounded-ctl border border-brand-line bg-brand-tint px-3 text-sm"><span>Check this: read with medium confidence</span><Button size="sm" variant="link" disabled={disabled} onClick={() => confirm(group)}>Looks right</Button></div> : null;
   const saveLabel = onReview ? 'Use these changes' : original ? 'Save changes' : capture ? 'Save as purchase' : 'Save purchase';
-  const saveButton = !readOnly && !saved ? <Button variant="primary" full loading={busy} disabled={readBusy} onClick={() => void submit()}>{problem ? 'Try saving again' : saveLabel}</Button> : null;
+  const saveButton = !readOnly && !saved ? <Button variant="primary" full loading={busy} disabled={disabled} onClick={() => void submit()}>{problem ? 'Try saving again' : saveLabel}</Button> : null;
   const totals = <Card title="Totals" subtitle={supplier && firm ? noGstin ? `${supplier.name} has no GSTIN: no GST on this bill` : inter ? `${supplier.name} is in ${supplier.state_name}: IGST` : `Same state as ${firm.short}: CGST + SGST` : "Pick the firm and supplier to see whether it's CGST + SGST or IGST."}>
     <dl className="flex flex-col gap-3">{[['Taxable value', figures.taxable], ...(inter ? [['IGST', figures.igst]] : [['CGST', figures.cgst], ['SGST', figures.sgst]]), ['Total on the bill', figures.total]].map(([label, value]) => <div key={label} className="flex justify-between gap-3"><dt>{label}</dt><dd><Money value={Number(value)} strong /></dd></div>)}</dl>
     {figures.pending > 0 && <p className="text-sm text-amber">Some items have no GST slab yet, so their GST isn't in these totals.</p>}
@@ -139,9 +149,11 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
     {!isPhone && <div className="mt-4">{saveButton}</div>}
   </Card>;
   const lockedMonth = original?.credit.month;
+  const usedPurchase = problem?.code === 'capture_used' ? (problem.body as { purchase?: { id?: number } }).purchase : null;
   return <>{guard}
     {readOnly && <Banner tone="file" title={original?.locked ? `${monthLabel(lockedMonth!, { long: true })}'s GSTR-3B is filed` : 'You can look, but not change this purchase'}>{original?.locked ? `Have the owner unlock ${monthLabel(lockedMonth!, { long: true })} in GST returns first.` : whyNot(original ? 'purchase.edit' : 'purchase.create')}</Banner>}
     {saved && problem ? <Banner tone="neg" title="Purchase saved; its file was not attached" actions={<><Button onClick={() => void attachSaved(saved)} loading={attach.isPending}>Try attaching again</Button><Button onClick={() => completed(saved)}>Open the purchase</Button></>}>{problem.message}</Banner> : problem && <Banner tone="neg" title={saveFailure(problem).title}>{saveFailure(problem).body}</Banner>}
+    {usedPurchase?.id && <Link className="link" to={`/purchases/${usedPurchase.id}`}>Open the purchase</Link>}
     {original?.needs_review && !readOnly && <Banner tone="brand" title="Read from a photo: needs a check">Compare the GST slab, quantities and rates with the photo, then save. Saving clears “Needs a check”.</Banner>}
     {read?.notes.map(note => <Banner key={note} tone="brand">{note}</Banner>)}
     <div className={isPhone ? 'flex flex-col gap-4' : 'grid grid-cols-[minmax(0,1fr)_340px] gap-5 items-start'}>
@@ -160,9 +172,9 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Field label="Bought by" htmlFor="pf-firm" error={errors.business}><Select id="pf-firm" value={String(v.business || '')} disabled={disabled} options={[{ value: '', label: 'Choose a firm' }, ...firms.map(f => ({ value: String(f.id), label: f.name }))]} onChange={e => set({ business: Number(e.target.value), itc_month: undefined, buyer_ack: false, duplicate_ok: false })} /></Field>
             <Field label="Supplier" htmlFor="pf-supplier" error={errors.supplier}><SupplierPicker value={v.supplier || null} disabled={disabled} onChange={s => { set({ supplier: s.id, duplicate_ok: false }); confirm('supplier'); confirm('gstin'); }} />{checkNote('supplier')}<div role="group" aria-label="Supplier GSTIN"><p className="text-sm text-muted">{supplier?.gst_number || read?.supplier.gst_number || 'No GSTIN'}</p>{checkNote('gstin')}</div></Field>
-            {read && !v.supplier && <div className="lg:col-span-2"><Button onClick={() => setSupplierSheet(true)}>Add {read.supplier.name} as a supplier</Button></div>}
+            {read && !v.supplier && <div className="lg:col-span-2"><Button disabled={disabled} onClick={() => setSupplierSheet(true)}>Add {read.supplier.name} as a supplier</Button></div>}
             <Field label="Supplier's bill number" htmlFor="pf-billno" error={errors.invoice_number}><Input id="pf-billno" value={v.invoice_number} maxLength={50} disabled={disabled} onChange={e => { set({ invoice_number: e.target.value, duplicate_ok: false }); confirm('bill_no'); }} />{checkNote('bill_no')}
-              {!v.invoice_number && memory.data?.next_number && <Button variant="link" size="sm" onClick={() => set({ invoice_number: memory.data!.next_number! })}>Use {memory.data.next_number}</Button>}
+              {!v.invoice_number && memory.data?.next_number && <Button variant="link" size="sm" disabled={disabled} onClick={() => { set({ invoice_number: memory.data!.next_number! }); confirm('bill_no'); }}>Use {memory.data.next_number}</Button>}
             </Field>
             <Field label="Bill date" htmlFor="pf-date" error={errors.invoice_date}>{disabled ? <Input id="pf-date" value={date(v.invoice_date)} disabled /> : <DateField id="pf-date" value={v.invoice_date} today={todayIST()} onChange={iso => { set({ invoice_date: iso ?? '', itc_month: undefined, duplicate_ok: false }); confirm('date'); }} offReason={day => day > todayIST() ? 'Check the date on the bill.' : ''} label="Bill date" />}{checkNote('date')}</Field>
             <div className="lg:col-span-2 flex flex-col gap-3">
@@ -180,8 +192,8 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
         <Card title="Items" subtitle="Quantity with its unit, the supplier's rate, and the GST slab printed on the bill">
           {noGstin && <Banner title={`${supplier?.name} has no GSTIN`}>Every line is 0% and there's no input tax credit.<Button variant="link" onClick={() => setSupplierSheet(true)} disabled={disabled}>Add their GSTIN</Button></Banner>}
           {checkNote('amounts')}
-          {v.lines.map((line, i) => <PurchaseLine key={i} line={line} index={i} supplier={v.supplier} errors={errors} noGstin={noGstin} disabled={disabled} change={patch => setLine(i, patch)} remove={() => set({ lines: v.lines.length > 1 ? v.lines.filter((_, j) => j !== i) : [newLine()] })} />)}
-          {!disabled && <Button icon={Plus} disabled={v.lines.length >= 200} onClick={() => set({ lines: [...v.lines, newLine()] })}>Add another item</Button>}
+          {v.lines.map((line, i) => <PurchaseLine key={i} line={line} index={i} supplier={v.supplier} errors={errors} noGstin={noGstin} disabled={disabled} change={patch => setLine(i, patch)} remove={() => { set({ lines: v.lines.length > 1 ? v.lines.filter((_, j) => j !== i) : [newLine()] }); confirm('amounts'); }} />)}
+          {!disabled && <Button icon={Plus} disabled={v.lines.length >= 200} onClick={() => { set({ lines: [...v.lines, newLine()] }); confirm('amounts'); }}>Add another item</Button>}
           {errors.lines && <p role="alert" className="text-neg">{errors.lines}</p>}
         </Card>
         <Card title={capture ? 'Payment and credit' : 'Payment, credit and photo'}>
