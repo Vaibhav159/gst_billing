@@ -151,7 +151,7 @@ export function startPaper({ firmId, date, number, remembered, lastMonth }: { fi
 /** Duplicate (?from=): the customer, place of supply and items; today's date, the next number, and no payment yet. */
 export function startCopy(bill: BillDetail, today: string): Start {
   const customer = customerFromBill(bill.customer);
-  const lines = linesFromBill(bill.lines);
+  const lines = linesFromBill(bill.lines).map(({ savedId: _savedId, ...line }) => line);
   return base({ ...blankForm(bill.business, today), customer, posOverride: posOverrideOf(bill.firm.state_code, customer, bill.place_of_supply), lines: lines.length ? lines : [blankLine()] }, {
     firmSource: "copy", origin: { kind: "copy", number: bill.invoice_number, customer: bill.customer.name, date: bill.invoice_date },
   });

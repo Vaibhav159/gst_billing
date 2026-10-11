@@ -14,7 +14,7 @@ import { toBillDetail, toPaperBook } from "@/core/sales/wire";
 import { ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { LINE_COLS } from "./lines";
-import { startCopy, startDraft, startEdit, startNew, startRemake, toDraftData, type Start } from "./model";
+import { startCopy, startDraft, startEdit, startNew, startPaper, startRemake, toDraftData, type Start } from "./model";
 import { useBillForm } from "./useBillForm";
 import { useDraftKeeping } from "./useDraftKeeping";
 import { ACCOUNTANT, ANIL, BIG, formServer, fakeToday, mountForm, RING, SavedElsewhere, STAFF, TODAY, wireBook, wireNext } from "./testing";
@@ -620,6 +620,7 @@ test("a draft a bill was made from already: nothing is made, the server's words 
   expect(keptDraft(D)).toBeNull();
   // a try again sends the same draft_id, so it can never make a second bill; a bill that has left Sales has no link
   bill = null;
+  await waitFor(() => expect(result.current.form.waitingForNext).toBe(false));
   await act(async () => { await result.current.form.save(); });
   expect(calls.filter((c) => c.method === "POST").map((c) => (c.body as { draft_id: string }).draft_id)).toEqual([D, D]);
   expect(result.current.form.saveError).toEqual({ kind: "draft_saved", title: "Not saved", body: words });
@@ -877,4 +878,42 @@ test("a change, then Discard draft, then the page closed before the form moves o
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
   expect(keptDraft(D)).toBeNull();
+});
+
+
+test("T9 leftovers: a paper date typed before the book answers stays typed", async () => {
+  const user = fakeToday();
+  let answer = () => {};
+  formServer([["GET", "sales/paper-book/", () => new Promise((ok) => { answer = () => ok(wireBook()); })]]);
+  mountForm("/sales/new?paper=1&firm=3");
+  const date = await screen.findByLabelText("Date on the paper bill");
+  await user.clear(date);
+  await user.type(date, "15 Sep 2026");
+  await user.tab();
+  expect(date).toHaveValue("15 Sep 2026");
+  await act(async () => { answer(); });
+  await waitFor(() => expect(screen.getByLabelText("Number on the paper bill")).toHaveValue("34"));
+  expect(date).toHaveValue("15 Sep 2026");
+  expect(screen.getByText(/KIRAN GOLD HOUSE · No./)).toHaveTextContent("15 Sep 2026");
+});
+
+test.each([false, true])("T9 leftovers: save itself holds for the next number (paper: %s)", async (paper) => {
+  fakeToday();
+  let answer = () => {};
+  const path = paper ? "sales/paper-book/" : "sales/next-number/";
+  const { calls } = formServer([["GET", path, () => new Promise((ok) => { answer = () => ok(paper ? wireBook() : wireNext(3, TODAY)); })]]);
+  const copy = startCopy(toBillDetail(wireDetail()), TODAY);
+  const start = paper ? { ...copy, form: { ...copy.form, ...startPaper({ firmId: 3, date: "2026-09-15", number: "", remembered: "", lastMonth: "2026-09" }).form, customer: copy.form.customer, lines: copy.form.lines } } : copy;
+  const { result } = renderHook(() => useBillForm(start), { wrapper: inRouter });
+  await waitFor(() => expect(result.current.firms).toHaveLength(2));
+  await waitFor(() => expect(result.current.waitingForNext).toBe(true));
+  act(() => { result.current.setPayment("bank"); });
+  act(() => { expect(result.current.openReview()).toEqual({ ok: true }); });
+  await act(async () => { expect(await result.current.save()).toEqual({ refused: null }); });
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+  expect(result.current.reviewOpen).toBe(true);
+  await act(async () => { answer(); });
+  await waitFor(() => expect(result.current.waitingForNext).toBe(false));
+  await act(async () => { await result.current.save(); });
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ invoice_number: "34" });
 });

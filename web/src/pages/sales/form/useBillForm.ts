@@ -102,6 +102,8 @@ export function useBillForm(start: Start) {
 
   /* ── setters: any change clears what the server last refused ── */
   const set = useCallback((patch: Partial<FormState> | ((o: FormState) => Partial<FormState>)) => {
+    // A day typed or picked wins over a paper book still on its way.
+    if (typeof patch !== "function" && "date" in patch) setBookDate(false);
     setSaveError(null);
     setServerProblem(null);
     setF((o) => ({ ...o, ...(typeof patch === "function" ? patch(o) : patch) }));
@@ -291,8 +293,8 @@ export function useBillForm(start: Start) {
 
   /* ── editing: what changes, and whether anything has ── */
   const startSig = useRef(JSON.stringify(start.form, (k, v) => (k === "key" ? undefined : v)));
-  const dirty = JSON.stringify(f, (k, v) => (k === "key" ? undefined : v)) !== startSig.current;
-  const changes = edit && bill && reviewOpen ? changesOf(bill, f, { firmName, number: stored, pos, inter: tt.inter, total: figs.total, customerName: cust?.name ?? "" }) : [];
+  const changes = edit && bill ? changesOf(bill, f, { firmName, number: waitingForNext ? "Getting the next number" : stored, pos, inter: tt.inter, total: figs.total, customerName: cust?.name ?? "" }) : [];
+  const dirty = edit ? changes.length > 0 : JSON.stringify(f, (k, v) => (k === "key" ? undefined : v)) !== startSig.current;
   // the customer has the bill already, and a change changes its total: the saved page offers to send the corrected one.
   // Never for a bill nothing was changed on, whose stored total v3's maths puts a paisa off (Ruling 1D-16)
   const sentNote = edit && bill?.sent && changes.length > 0 && bill.total_amount !== figs.total ? bill : null;
@@ -313,7 +315,7 @@ export function useBillForm(start: Start) {
   /** Saves from the review. Resolves with the first field the server refused, for the form to take the person to (null otherwise). */
   const save = async ({ numberOverride }: { numberOverride?: string } = {}): Promise<{ refused: string | null }> => {
     const none = { refused: null };
-    if (saving || !reviewOpen) return none;
+    if (saving || !reviewOpen || waitingForNext) return none;
     if (firstError) { setReviewOpen(false); return { refused: firstError }; }
     if (f.payment == null) { setSaveError({ kind: "payment", title: "How was it paid?", body: "Pick one above: it goes on the bill and in your cash and bank split." }); return none; }
     if (cashBlock) { setSaveError({ kind: "cash", title: "Cash of ₹2,00,000 or more", body: "Switch to Part cash, part UPI, or tick that you're saving it as all cash anyway." }); return none; }

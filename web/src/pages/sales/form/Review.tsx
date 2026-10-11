@@ -90,7 +90,7 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const month = F.f.date ? monthLabel(monthOf(F.f.date), { long: true, year: false }) : "";
   const seg = SEGMENTS[segmentOf(c.gst_number, F.tt.inter, F.figs.total)].label;
   const nextText = edit && F.bill
-    ? (sending !== F.bill.invoice_number ? `It becomes ${sending}. The change is written to the audit log.` : "The bill keeps its number. The change is written to the audit log.")
+    ? (sending !== F.bill.invoice_number ? `${sending ? `It becomes ${sending}` : "It takes its new number"}. The change is written to the audit log.` : "The bill keeps its number. The change is written to the audit log.")
     : `It goes into ${month}'s GSTR-1 as a ${seg} sale${sending ? ` as ${sending}` : ""}.`;
   const primaryLabel = F.saving ? "Saving…" : clash ? (offer ? `Save as ${offer}` : "Change the number") : failed ? "Try again" : edit ? "Save changes" : "Save bill";
   // the paper bill's own number never changes by itself: a typed number that's taken is changed by hand

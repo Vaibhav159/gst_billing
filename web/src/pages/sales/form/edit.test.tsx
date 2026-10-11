@@ -7,7 +7,7 @@ import { appRoutes } from "@/core/router/routes";
 import { refuse, wireBin, wireDetail, WIRE_LINES, type Route } from "@/core/sales/fixtures";
 import { toBillDetail, toBinRow } from "@/core/sales/wire";
 import EditBillPage from "./EditBillPage";
-import { asksOnClose, formServer, fakeToday, mountForm, settle, STAFF } from "./testing";
+import { asksOnClose, formServer, fakeToday, mountForm, settle, STAFF, wireNext } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -359,4 +359,46 @@ test("a deleted bill shows what was on it; one deleted from a filed month says w
   expect(await screen.findByText("KGH/2026-27/27 was deleted")).toBeInTheDocument();
   expect(screen.getByText("A deleted bill can't be changed. September 2026 is filed and locked, so the bill can't come back into it. The owner can unlock the month in GST returns first.")).toBeInTheDocument();
   expect(screen.queryByText(/Restore it/)).not.toBeInTheDocument();
+});
+
+
+test("T9 leftovers: a moved edit names the pending number without empty words or arrows", async () => {
+  const user = fakeToday();
+  let answer = () => {};
+  formServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/next-number/", ({ params }) => new Promise((ok) => { answer = () => ok(wireNext(Number(params.business_id), String(params.invoice_date))); })],
+  ]);
+  mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
+  await user.selectOptions(screen.getByLabelText("Firm"), "2");
+  await user.click(screen.getByRole("button", { name: "Check and save changes" }));
+  const review = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
+  expect(review).toHaveTextContent("It takes its new number. The change is written to the audit log.");
+  expect(within(review).getByRole("list", { name: "What changes" })).toHaveTextContent("Bill number: KGH/2026-27/31 →becomes Getting the next number");
+  expect(within(review).getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await act(async () => { answer(); });
+  await waitFor(() => expect(review).toHaveTextContent("It becomes 9. The change is written to the audit log."));
+});
+
+test("T9 leftovers: typing weight and rate back clears the status and both leave prompts", async () => {
+  const user = fakeToday();
+  const { router } = await openEdit();
+  const weight = screen.getByRole("textbox", { name: "Line 1 weight in grams" });
+  const rate = screen.getByRole("textbox", { name: "Line 1 rate per gram" });
+  await user.clear(weight);
+  await user.type(weight, "12.345");
+  await user.clear(rate);
+  await user.type(rate, "6512.50");
+  await user.tab();
+  expect(screen.getByText("No changes yet")).toBeInTheDocument();
+  expect(asksOnClose()).toBe(false);
+  const { dialog } = await reviewChanges(user);
+  expect(dialog).toHaveTextContent("Nothing has changed yet");
+  expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await settle();
+  await user.click(screen.getByRole("link", { name: "Cancel" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/412"));
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
 });

@@ -40,6 +40,14 @@ test("a copy keeps the customer and items, with today's date and no payment; mak
   expect(again).toMatchObject({ replaces: 412, origin: { kind: "remake", number: "KGH/2026-27/31", reason: "Wrong weight" }, form: { payment: "bank", notes: "Order 77" } });
 });
 
+test.each([["a copy", startCopy], ["a remake", startRemake]] as const)("%s starts new lines without the source bill's saved ids", (_, start) => {
+  const source = bill();
+  const copied = start(source, "2026-10-09");
+  expect(copied.form.lines).toHaveLength(source.lines.length);
+  for (const line of copied.form.lines) expect(line).not.toHaveProperty("savedId");
+  expect(startEdit(source).form.lines.map((line) => line.savedId)).toEqual([901, 902]);
+});
+
 test("a bill being changed opens as saved; one that came in with an amount only opens as 1 × its value; one missing HSN shows its problems at once", () => {
   const s = startEdit(bill());
   expect(s).toMatchObject({ mode: "edit", firmSource: "bill", origin: null, tried: false, form: { number: "KGH/2026-27/31", numberTyped: false, date: "2026-10-08", payment: "cash" } });
