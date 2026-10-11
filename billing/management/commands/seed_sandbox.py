@@ -206,6 +206,7 @@ class Command(BaseCommand):
             if opts["gst"]:
                 from billing.services.gst_seed import seed_gst
                 seed_gst(firms, User.objects.get(username="sandbox_owner"), self.today)
+            self._records()
         self.stderr.write(
             f"Seeded {len(firms)} firms, {len(parties['all'])} parties, {Product.objects.count()} products, "
             f"{n_out} outward + {n_in} inward invoices, {n_locked} filed months, {n_caps} captures."
@@ -329,6 +330,33 @@ class Command(BaseCommand):
             Product.objects.create(name=name, hsn_code=hsn, gst_tax_rate=D(rate), default_unit=unit)
 
     # ── invoices ──────────────────────────────────────────────────────────
+    def _records(self):
+        """Part 4's synthetic recording cases; repeatable without changing any bill."""
+        from billing.api.mixins import snapshot_of
+        from billing.services.catalog import effective_kind
+        user = User.objects.filter(username="sandbox_owner").first()
+        for product in Product.objects.all():
+            product.kind = effective_kind(product)
+            product.purity = "22K" if product.kind == "gold" else "925" if product.kind == "silver" else ""
+            product.usual_rate = Decimal("6470.000") if product.kind == "gold" else Decimal("85.000") if product.kind == "silver" else None
+            product.save(update_fields=["kind", "purity", "usual_rate"])
+        product = Product.objects.filter(name="Gold Ornaments 22K").first()
+        if product:
+            before = snapshot_of(product)
+            product.name = "Gold jewellery 22K"
+            product.save(update_fields=["name"])
+            AuditLog.objects.get_or_create(entity="product", entity_id=product.pk, action="updated", entity_name=product.name,
+                defaults={"user": user, "changes": {"name": {"old": before["name"], "new": product.name}},
+                          "snapshot": before, "details": "Renamed; older bills keep their names"})
+        Product.objects.get_or_create(name="GOLD JEWELLERY 22K", defaults={"hsn_code": "711319", "kind": "gold", "purity": "22K", "usual_rate": Decimal("6470.000")})
+        Product.objects.get_or_create(name="Unused packing box", defaults={"hsn_code": "4819", "gst_tax_rate": Decimal("0.18"), "kind": "packing", "purchase_only": True, "default_unit": "pcs"})
+        for name in ("Sample duplicate one", "Sample duplicate two"):
+            Customer.objects.get_or_create(name=name, defaults={"mobile_number": "9000000042", "customer_type": "person", "state_name": "RAJASTHAN"})
+        business = Business.objects.order_by("pk").first()
+        if business:
+            business.bank_account_number = ""
+            business.save(update_fields=["bank_account_number"])
+
     def _line(self, key, qty=None, rate=None):
         name, hsn, gst, unit, (lo, hi), (qlo, qhi) = PRODUCTS[key]
         if qty is None:
