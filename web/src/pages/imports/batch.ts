@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/core/api/client';
 import type { LineInput, PaymentMode } from '@/core/sales/types';
 import type { PurchaseRead, AiReads } from '@/core/captures/types';
@@ -23,9 +23,6 @@ export function useBatchImport(kind: ImportKind) {
   return useMutation({ mutationFn: (body: ImportBody) => batchRequest(kind, body), onSuccess: async (result, body) => {
     if (!body.dry_run && result.ok && !result.dry_run) await Promise.all(['purchases', 'sales', 'suppliers', 'customers', 'search', 'gst'].map(key => qc.invalidateQueries({ queryKey: [key] })));
   } });
-}
-export function useReadMeter(enabled = true) {
-  return useQuery({ queryKey: ['ai-reads'], enabled, queryFn: async ({ signal }) => (await api.get<ReadMeter>('ai-reads/', { signal })).data });
 }
 export function useReadBill() {
   const qc = useQueryClient();
