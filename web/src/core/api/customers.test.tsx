@@ -32,7 +32,7 @@ test("a customer reads the same whatever the server left out: the type and PAN a
 
 test("the list asks for this year's figures in the firm picked, 20 at a time, and money comes back in paise", async () => {
   expect(customerListParams({ ...FILTERS, q: "98290 41122", gst: "no", state: "RAJASTHAN", usualFirm: 4, sort: "sales" })).toEqual({
-    figures: 1, page_size: 20, start_date: "2026-04-01", end_date: "2026-10-08", ordering: "-sales", figures_business_id: 3,
+    role: "customers", figures: 1, page_size: 20, start_date: "2026-04-01", end_date: "2026-10-08", ordering: "-sales", figures_business_id: 3,
     search: "9829041122", has_gstin: 0, state_name: "RAJASTHAN", business_id: 4,
   });
   const calls = serve({
@@ -159,7 +159,7 @@ test("search asks from 2 characters, a phone typed in groups as its digits, with
   const { result } = renderHook(() => useCustomerSearch("+91 98290 41122", { size: 5 }), { wrapper: w });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   // one request: the two above, still showing, never asked
-  expect(calls.map((c) => c.params)).toEqual([{ search: "9829041122", figures: 1, page_size: 5 }]);
+  expect(calls.map((c) => c.params)).toEqual([{ role: "customers", search: "9829041122", figures: 1, page_size: 5 }]);
   expect(result.current.data).toMatchObject([{ id: 7, name: "Anil Gupta", figures: { total: 8708321 } }]);
 });
 
@@ -175,11 +175,11 @@ test("recent customers are the five the firm billed last, never the walk-in; the
   expect(renderHook(() => useRecentCustomers(null), { wrapper: w }).result.current.fetchStatus).toBe("idle");
   const recent = renderHook(() => useRecentCustomers(3), { wrapper: w });
   await waitFor(() => expect(recent.result.current.isSuccess).toBe(true));
-  expect(calls[0].params).toEqual({ figures: 1, ordering: "-last_bill", page_size: 6, figures_business_id: 3 });
+  expect(calls[0].params).toEqual({ role: "customers", figures: 1, ordering: "-last_bill", page_size: 6, figures_business_id: 3 });
   expect(recent.result.current.data!.map((r) => r.id)).toEqual([2, 4, 5, 6, 7]);
   const walkin = renderHook(() => useWalkin(), { wrapper: w });
   await waitFor(() => expect(walkin.result.current.isSuccess).toBe(true));
-  expect(calls[1].params).toEqual({ type: "walkin", page_size: 1 });
+  expect(calls[1].params).toEqual({ role: "customers", type: "walkin", page_size: 1 });
   expect(walkin.result.current.data).toMatchObject({ id: 1, name: "Walk-in Customer", type: "walkin" });
   // a server that doesn't know type=walkin answers with its first customer, who isn't the walk-in record
   serve({ "GET customers/": page([ANIL]) });
@@ -298,4 +298,20 @@ test("equivalent phone searches reuse the term sent to the server", async () => 
   expect(result.current.isSuccess).toBe(true);
   expect(calls).toHaveLength(1);
   expect(result.current.isFetching).toBe(false);
+});
+
+test("the sales customer list, count, search, recent, walk-in and export all request the customer role", async () => {
+  const calls = serve({ "GET customers/": page([ANIL]) });
+  const { wrapper: w } = wrapper();
+  const hooks = [
+    renderHook(() => useCustomerList(FILTERS), { wrapper: w }),
+    renderHook(() => useCustomerCount(), { wrapper: w }),
+    renderHook(() => useCustomerSearch("Anil"), { wrapper: w }),
+    renderHook(() => useRecentCustomers(3), { wrapper: w }),
+    renderHook(() => useWalkin(), { wrapper: w }),
+  ];
+  await waitFor(() => expect(hooks.every((h) => h.result.current.isSuccess)).toBe(true));
+  await fetchAllCustomers({ search: "Anil" });
+  expect(calls).toHaveLength(6);
+  expect(calls.map((call) => call.params.role)).toEqual(Array(6).fill("customers"));
 });

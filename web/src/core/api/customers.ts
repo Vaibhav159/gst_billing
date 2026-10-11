@@ -187,14 +187,14 @@ export function searchTerm(q: string): string {
 export async function fetchAllCustomers(params: Record<string, string | number>): Promise<CustomerRow[]> {
   const rows: CustomerRow[] = [];
   for (let page = 1; ; page++) {
-    const p = toCustomerPage((await api.get("customers/", { params: { ...params, page, page_size: 1000 } })).data);
+    const p = toCustomerPage((await api.get("customers/", { params: { ...params, role: "customers", page, page_size: 1000 } })).data);
     rows.push(...p.rows);
     if (!p.next) return rows;
   }
 }
 /** customers/'s parameters for the list (contract §6.1). */
 export function customerListParams(f: CustomerListFilters): Record<string, string | number> {
-  const p: Record<string, string | number> = { figures: 1, page_size: LIST_PAGE, start_date: f.from, end_date: f.to, ordering: ORDERING[f.sort] };
+  const p: Record<string, string | number> = { role: "customers", figures: 1, page_size: LIST_PAGE, start_date: f.from, end_date: f.to, ordering: ORDERING[f.sort] };
   if (typeof f.firmId === "number") p.figures_business_id = f.firmId;
   if (f.q.trim()) p.search = searchTerm(f.q);
   if (f.gst !== "any") p.has_gstin = f.gst === "yes" ? 1 : 0;
@@ -224,7 +224,7 @@ export function useCustomerList(f: CustomerListFilters) {
 }
 /** How many customers there are, filters aside ("3 of 29 match"). */
 export function useCustomerCount(enabled = true) {
-  return useQuery({ queryKey: customerKeys.count(), queryFn: !enabled ? skipToken : async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { page_size: 1 }, signal })).data).count });
+  return useQuery({ queryKey: customerKeys.count(), queryFn: !enabled ? skipToken : async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { role: "customers", page_size: 1 }, signal })).data).count });
 }
 // A query that isn't ready to ask (no customer, firm or period yet) has skipToken for its queryFn: unlike enabled: false,
 // a refetch() or QueryView's Try again can't make it ask either, so it never asks for every firm or for customers/null/.
@@ -259,7 +259,7 @@ export function useCustomerSearch(term: string, { size = 8, enabled = true, figu
   const t = searchTerm(term);
   return useQuery({
     queryKey: customerKeys.search(t, size, figures), enabled: enabled && t.length >= 2, staleTime: 30_000,
-    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { search: t, ...(figures ? { figures: 1 } : {}), page_size: size }, signal })).data).rows,
+    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { role: "customers", search: t, ...(figures ? { figures: 1 } : {}), page_size: size }, signal })).data).rows,
   });
 }
 /** The five customers a firm billed last (never the walk-in record). Waits for the firm. */
@@ -267,7 +267,7 @@ export function useRecentCustomers(firmId: FirmId | null, enabled = true) {
   return useQuery({
     queryKey: customerKeys.recent(firmId), enabled, staleTime: 30_000,
     queryFn: firmId === null ? skipToken : async ({ signal }) => {
-      const params: Record<string, string | number> = { figures: 1, ordering: "-last_bill", page_size: 6 };
+      const params: Record<string, string | number> = { role: "customers", figures: 1, ordering: "-last_bill", page_size: 6 };
       if (typeof firmId === "number") params.figures_business_id = firmId;
       return toCustomerPage((await api.get("customers/", { params, signal })).data).rows.filter((r) => r.type !== "walkin" && r.figures?.last_bill).slice(0, 5);
     },
@@ -277,7 +277,7 @@ export function useRecentCustomers(firmId: FirmId | null, enabled = true) {
 export function useWalkin(enabled = true) {
   return useQuery({
     queryKey: customerKeys.walkin(), enabled, staleTime: 5 * 60_000,
-    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { type: "walkin", page_size: 1 }, signal })).data).rows.find((r) => r.type === "walkin") ?? null,
+    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { role: "customers", type: "walkin", page_size: 1 }, signal })).data).rows.find((r) => r.type === "walkin") ?? null,
   });
 }
 /** A particular walk-in's figures. Names can repeat: read every matching page and pick only this customer's ID. */
@@ -292,7 +292,7 @@ export function useWalkinFigures(customer: Customer | null, firm: FirmId | null)
 
 /* ── Writing ───────────────────────────────────────────── */
 const refreshedBySave = (keep?: number) => (q: Query) =>
-  q.queryKey[0] === "sales" || q.queryKey[0] === "search" || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
+  ["sales", "search", "suppliers", "purchases"].includes(String(q.queryKey[0])) || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
 /** Adds a customer (no id) or changes one (PATCH, any fields). Answers the saved customer. */
 export function useSaveCustomer() {
   const qc = useQueryClient();
