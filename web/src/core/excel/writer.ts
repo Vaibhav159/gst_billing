@@ -19,13 +19,15 @@ export function uniqueSheetNames(names: string[]): string[] {
 }
 
 const decimal = /^-?\d+(?:\.\d+)?$/;
-const safeText = (text: string) => /^[\t\r\n]|^\s*[=+@-]/.test(text) ? `'${text}` : text;
+// CSV only: a lone "-" or a sign before a digit or space can't start a formula unless operators follow.
+const inert = /^[-+](?:[\d ][^=+\-*/^&(|!@]*)?$/;
+const safeCsv = (text: string) => /^[\t\r\n]|^\s*[=+@-]/.test(text) && !inert.test(text) ? `'${text}` : text;
 const isNumber = (cell: Cell) => cell.num && decimal.test(String(cell.v));
 
 export function csvText(rows: readonly (readonly (Cell | string | number)[])[]): string {
   const lines = rows.map(row => row.map(value => {
     const cell = typeof value === "object" ? value : { v: value, num: typeof value === "number" };
-    const text = isNumber(cell) ? String(cell.v) : safeText(String(cell.v));
+    const text = isNumber(cell) ? String(cell.v) : safeCsv(String(cell.v));
     return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }).join(","));
   return `\ufeff${lines.join("\r\n")}\r\n`;
@@ -61,7 +63,8 @@ export async function excelBlob(sheets: Sheet[]): Promise<Blob> {
         const numeric = isNumber(cell) && text.replace(/^-?0*|\./g, "").length <= 15;
         const scale = text.includes(".") ? text.split(".")[1].length : 0;
         const s = style(cell.kind ?? row.kind, cell, r % 2 === 0);
-        output[XLSX.utils.encode_cell({ r, c })] = { v: numeric ? Number(text) : isNumber(cell) ? text : safeText(text), t: numeric ? "n" : "s", s, ...(numeric ? { z: `#,##0${scale ? `.${"0".repeat(scale)}` : ""}` } : {}) };
+        // String cells are never evaluated, so their text is stored exactly as given.
+        output[XLSX.utils.encode_cell({ r, c })] = { v: numeric ? Number(text) : text, t: numeric ? "n" : "s", s, ...(numeric ? { z: `#,##0${scale ? `.${"0".repeat(scale)}` : ""}` } : {}) };
         const span = cell.span ?? 1;
         if (span > 1) {
           merges.push({ s: { r, c }, e: { r, c: c + span - 1 } });

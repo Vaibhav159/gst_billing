@@ -12,12 +12,20 @@ test("CSV quotes separators and protects formulas while typed negative decimals 
     .toBe('\ufeff\'=1+1,\' +SUM(A1),\'@x,"a,b","a""b","a\nb",-0.25,00123\r\n');
 });
 
+test("CSV leaves a lone dash and signed numbers or words alone but still guards formulas that start with a sign", () => {
+  expect(csvText([["-", "-5 left", "+ 1", "+91 98290", "-SUM(A1)", "+A1", "-"]]))
+    .toBe("\ufeff-,-5 left,+ 1,+91 98290,'-SUM(A1),'+A1,-\r\n");
+  // A digit after the sign doesn't exempt text that goes on to build a formula.
+  expect(csvText([["-2+3+cmd|' /C calc'!A0", "+1-1", " -"]])).toBe("\ufeff'-2+3+cmd|' /C calc'!A0,'+1-1,' -\r\n");
+});
+
 test("the XLSX round trip preserves decimal scale, money, identifiers, merges and text safety", async () => {
   const XLSX = await import("xlsx-js-style");
   const sheets: Sheet[] = [{ name: "Sales", cols: [120, 120, 120], rows: [
     { kind: "title", cells: [{ v: "Sales", span: 3 }] },
     { kind: "data", cells: [{ v: "00123" }, { v: "12.345", num: true }, { v: "6512.500", num: true }] },
     { kind: "total", cells: [{ v: "=HYPERLINK(1)" }, { v: "-0.25", num: true }, { v: "123456789012345.67", num: true }] },
+    { kind: "data", cells: [{ v: "-" }, { v: "+91 98290" }, { v: "@home" }] },
   ] }];
   const before = JSON.stringify(sheets);
   const blob = await excelBlob(sheets);
@@ -27,10 +35,12 @@ test("the XLSX round trip preserves decimal scale, money, identifiers, merges an
   expect(sheet.A2).toMatchObject({ t: "s", v: "00123" });
   expect(sheet.B2).toMatchObject({ t: "n", v: 12.345, z: "#,##0.000" });
   expect(sheet.C2).toMatchObject({ t: "n", v: 6512.5, z: "#,##0.000" });
-  expect(sheet.A3).toMatchObject({ t: "s", v: "'=HYPERLINK(1)" });
+  // XLSX string cells are never evaluated, so they keep their text exactly, with no apostrophe.
+  expect(sheet.A3).toMatchObject({ t: "s", v: "=HYPERLINK(1)" });
   expect(sheet.A3.f).toBeUndefined();
   expect(sheet.B3).toMatchObject({ t: "n", v: -0.25 });
   expect(sheet.C3).toMatchObject({ t: "s", v: "123456789012345.67" });
+  expect([sheet.A4, sheet.B4, sheet.C4].map(cell => [cell.t, cell.v, cell.f])).toEqual([["s", "-", undefined], ["s", "+91 98290", undefined], ["s", "@home", undefined]]);
   expect(sheet["!merges"]).toEqual([{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }]);
   expect(JSON.stringify(sheets)).toBe(before);
 });
