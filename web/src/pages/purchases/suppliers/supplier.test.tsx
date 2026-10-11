@@ -77,3 +77,45 @@ test('supplier fields and dismissal stay disabled until a submitted save settles
   expect(screen.getByLabelText('Supplier name')).toBeEnabled();
   expect(screen.getByLabelText('Supplier name')).toHaveValue('Submitted supplier');
 });
+test('a late registry answer for a GSTIN since edited fills nothing', async () => {
+  let reply!: (r: {status:number;data:unknown}) => void;
+  serve({ 'GET gstin/08AAGPL3375F1ZO/': () => new Promise(resolve => { reply = resolve; }) });
+  renderApp(<SupplierSheet open onClose={() => {}} initial={{ gst_number: '08AAGPL3375F1ZO' }} />);
+  await waitFor(() => expect(reply).toBeTypeOf('function'));
+  fireEvent.change(screen.getByLabelText('GSTIN'), { target: { value: '08AAGPL3375F1Z' } });
+  reply({ status: 200, data: { gstin: '08AAGPL3375F1ZO', valid: true, source: 'provider', trade_name: 'Registry name', address: 'Registry address', state_name: 'RAJASTHAN', pan: 'AAGPL3375F' } });
+  await tick(400);
+  expect(screen.getByLabelText('Address')).toHaveValue('');
+  expect(screen.getByLabelText('Supplier name')).toHaveValue('');
+});
+test('the GSTIN check is announced through one region that is always on the page', async () => {
+  let reply!: (r: {status:number;data:unknown}) => void;
+  serve({ 'GET gstin/08AAGPL3375F1ZO/': () => new Promise(resolve => { reply = resolve; }) });
+  const { container } = renderApp(<SupplierSheet open onClose={() => {}} />);
+  const region = container.ownerDocument.getElementById('sup-gstin-status')!;
+  expect(region).toHaveAttribute('role', 'status');
+  expect(region).toHaveTextContent('');
+  fireEvent.change(screen.getByLabelText('GSTIN'), { target: { value: '08AAGPL3375F1ZO' } });
+  await waitFor(() => expect(reply).toBeTypeOf('function'));
+  expect(container.ownerDocument.getElementById('sup-gstin-status')).toBe(region);
+  expect(region).toHaveTextContent('Checking the GSTIN…');
+  reply({ status: 200, data: { gstin: '08AAGPL3375F1ZO', valid: true, source: 'provider', status: 'Active', trade_name: 'Registry name' } });
+  await waitFor(() => expect(region).toHaveTextContent('Active · Registry name (GST registry)'));
+  expect(container.ownerDocument.getElementById('sup-gstin-status')).toBe(region);
+});
+test('an edit sends only the supplier fields, not the id or extra keys it was opened with', async () => {
+  const calls = serve({ 'PUT suppliers/21/': { ...blank } });
+  const initial = { id: 21, name: 'Local refiner', gst_number: '', state_name: 'RAJASTHAN', city: '', address: '', pan_number: '', mobile_number: '', email: '', gstin_valid: true } as never;
+  renderApp(<SupplierSheet open onClose={() => {}} initial={initial} />);
+  await tick(400);
+  fireEvent.click(screen.getByRole('button', { name: 'Save supplier' }));
+  await waitFor(() => expect(calls.some(c => c.method === 'PUT')).toBe(true));
+  expect(Object.keys(calls.find(c => c.method === 'PUT')!.data).sort()).toEqual(['address', 'city', 'email', 'gst_number', 'mobile_number', 'name', 'pan_number', 'state_name']);
+});
+test('a refusal on a field the sheet does not show still says it was not saved', async () => {
+  serve({ 'POST suppliers/': () => ({ status: 400, data: { mobile: ['Phone numbers have 10 digits.'] } }) });
+  renderApp(<SupplierSheet open onClose={() => {}} initial={{ name: 'Local refiner' }} />);
+  await tick(400);
+  fireEvent.click(screen.getByRole('button', { name: 'Add supplier' }));
+  expect(await screen.findByText('Not saved')).toBeVisible();
+});

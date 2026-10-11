@@ -5,18 +5,21 @@ import { useGstinRegistry } from '@/core/api/registry';
 import { problemOf } from '@/core/api/errors';
 import { checkGstin, cleanGstin, gstinPlaceholder, stateOptions } from '@/core/ids';
 import { toSupplierRef } from '@/core/purchases/wire';
-import { Banner, Button, Field, Input, Select, Sheet, Textarea } from '@/core/ui';
+import { Banner, Button, Field, Input, Select, Sheet, Textarea, cn } from '@/core/ui';
 import type { SupplierInput, SupplierRef } from '@/core/purchases/types';
 
 export type SupplierSheetProps = { open: boolean; onClose: () => void; initial?: Partial<SupplierInput> & { id?: number }; onSaved?: (supplier: SupplierRef) => void };
 const blank: SupplierInput = { name: '', gst_number: '', state_name: '', city: '', address: '', mobile_number: '', pan_number: '', email: '' };
+const keys = Object.keys(blank) as (keyof SupplierInput)[];
+// only the SupplierInput fields: an id, or anything else a caller opened the sheet with, never reaches the request
+const inputOf = (x?: Partial<SupplierInput>): SupplierInput => Object.fromEntries(keys.map(k => [k, x?.[k] ?? blank[k]])) as SupplierInput;
 export function SupplierSheet(props: SupplierSheetProps) {
   return props.open ? <SupplierFields key={props.initial?.id ?? 'new'} {...props} /> : null;
 }
 function SupplierFields({ open, onClose, initial, onSaved }: SupplierSheetProps) {
   const { can, whyNot } = useAuth();
   const allowed = can('supplier.edit');
-  const [v, setV] = useState<SupplierInput>({ ...blank, ...initial });
+  const [v, setV] = useState<SupplierInput>(() => inputOf(initial));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [clash, setClash] = useState<SupplierRef | null>(null);
   const save = useSaveSupplier();
@@ -38,7 +41,7 @@ function SupplierFields({ open, onClose, initial, onSaved }: SupplierSheetProps)
     setErrors(e);
     if (Object.keys(e).length) return;
     try {
-      const supplier = await save.mutateAsync({ id: initial?.id, body: { ...v, name: v.name.trim(), gst_number: gstinPlaceholder(g) ? '' : g, ...(check.status === 'valid' ? { state_name: check.state } : {}) } });
+      const supplier = await save.mutateAsync({ id: initial?.id, body: { ...inputOf(v), name: v.name.trim(), gst_number: gstinPlaceholder(g) ? '' : g, ...(check.status === 'valid' ? { state_name: check.state } : {}) } });
       onSaved?.(supplier); onClose();
     } catch (error) {
       const problem = problemOf(error); setErrors(problem.fields ?? {});
@@ -51,7 +54,7 @@ function SupplierFields({ open, onClose, initial, onSaved }: SupplierSheetProps)
     footer={<><Button disabled={save.isPending} onClick={onClose}>Cancel</Button>{allowed && <Button variant="primary" loading={save.isPending} onClick={() => void submit()}>{save.isError ? 'Try again' : initial?.id ? 'Save supplier' : 'Add supplier'}</Button>}</>}>
     <div className="flex flex-col gap-4">
       {!allowed && <Banner title="You can look, but not change this supplier">{whyNot('supplier.edit')}</Banner>}
-      {save.isError && !Object.values(errors).some(Boolean) && <Banner tone="neg" title="Not saved">{problemOf(save.error).message}</Banner>}
+      {save.isError && !keys.some(k => errors[k]) && <Banner tone="neg" title="Not saved">{problemOf(save.error).message}</Banner>}
       {clash && <Banner actions={<Button disabled={disabled} onClick={() => { onSaved?.(clash); onClose(); }}>Use {clash.name}</Button>}>Use {clash.name} instead of adding it again.</Banner>}
       <Field label="Supplier name" htmlFor="sup-name" error={errors.name}><Input id="sup-name" value={v.name} disabled={disabled} maxLength={255} onChange={e => set('name', e.target.value)} /></Field>
       <Field label="GSTIN" htmlFor="sup-gstin" error={errors.gst_number} hint="15 characters, on the top of their bill. Leave it empty, or type URP, if they aren't registered."><Input id="sup-gstin" value={v.gst_number} disabled={disabled} maxLength={15} onChange={e => {
@@ -59,9 +62,11 @@ function SupplierFields({ open, onClose, initial, onSaved }: SupplierSheetProps)
         setClash(null); save.reset(); setErrors(old => ({ ...old, gst_number: '' }));
         setV(old => ({ ...old, gst_number: next, ...(c.status === 'valid' ? { state_name: c.state, pan_number: c.pan } : {}) }));
       }} /></Field>
-      {registry.isFetching && <p role="status" className="text-sm text-muted">Checking the GSTIN…</p>}
-      {r?.valid && (r.status?.trim().toLowerCase() === 'cancelled' ? <Banner tone="neg" title="Registration cancelled">{r.trade_name || r.legal_name || g} (GST registry). Check the registration before claiming credit on this supplier's bills.</Banner> : <p role="status" className="text-sm text-sale">{r.source === 'checksum' ? 'The GST registry did not answer; the state and PAN come from the number.' : `${r.status || 'Found'} · ${r.trade_name || r.legal_name || ''} (GST registry)`}</p>)}
-      {registry.isError && <p role="status" className="text-sm text-muted">The GST registry didn't answer; the state and PAN come from the number.</p>}
+      {r?.valid && r.status?.trim().toLowerCase() === 'cancelled' && <Banner tone="neg" title="Registration cancelled">{r.trade_name || r.legal_name || g} (GST registry). Check the registration before claiming credit on this supplier's bills.</Banner>}
+      {/* always on the page, so screen readers announce each change of the GSTIN check */}
+      <p id="sup-gstin-status" role="status" className={cn('text-sm', r?.valid && !registry.isFetching ? 'text-sale' : 'text-muted')}>{registry.isFetching ? 'Checking the GSTIN…'
+        : r?.valid ? r.status?.trim().toLowerCase() === 'cancelled' ? '' : r.source === 'checksum' ? 'The GST registry did not answer; the state and PAN come from the number.' : `${r.status || 'Found'} · ${r.trade_name || r.legal_name || ''} (GST registry)`
+        : registry.isError ? "The GST registry didn't answer; the state and PAN come from the number." : ''}</p>
       <div className="grid grid-cols-2 gap-4">
         <Field label="State" htmlFor="sup-state" error={errors.state_name}><Select id="sup-state" value={v.state_name} options={[{ value: '', label: 'Choose a state' }, ...stateOptions()]} disabled={disabled || check.status === 'valid'} onChange={e => set('state_name', e.target.value)} /></Field>
         <Field label="City" htmlFor="sup-city" error={errors.city}><Input id="sup-city" value={v.city} disabled={disabled} onChange={e => set('city', e.target.value)} /></Field>
