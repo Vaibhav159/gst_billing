@@ -425,7 +425,7 @@ class InwardCaptureListCreateView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
-        qs = InwardCapture.objects.select_related("business").order_by("-created_at")
+        qs = InwardCapture.objects.filter(discarded_at__isnull=True).select_related("business").order_by("-created_at")
         status_f = request.query_params.get("status", "new")
         if status_f and status_f != "all":
             qs = qs.filter(status=status_f)
