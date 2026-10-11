@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.api.account_access import AccountAccess
+from billing.api.auth import DynamicScopedRateThrottle
 from billing.api.permissions import V3Permission
 from billing.services.people import account_row, change_account, change_person, create_person, people_rows
 
@@ -28,6 +29,12 @@ class PeopleActionView(APIView):
 
 class AccountView(APIView):
     permission_classes = [AccountAccess]
+    throttle_scope = "password"
+
+    def get_throttles(self):
+        # A phone change checks the current password, so it shares own-password's guess limit.
+        data = self.request.data if self.request.method == "PATCH" else None
+        return [DynamicScopedRateThrottle()] if isinstance(data, dict) and "phone" in data else []
 
     def get(self, request):
         return Response(account_row(request.user))

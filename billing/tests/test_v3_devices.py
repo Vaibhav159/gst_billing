@@ -61,6 +61,26 @@ def test_own_password_reissues_same_session_and_revokes_every_old_token():
     assert AuditLog.objects.filter(action="password").get().details == "Changed by themself · other devices signed out"
 
 
+def test_own_password_guesses_are_throttled_per_person():
+    user = person("maya", "admin")
+    client, _ = login(user)
+    for _ in range(10):
+        assert client.post("/api/account/password/", {"current": "wrong", "password": "Harbour873!"}).status_code == 400
+    assert client.post("/api/account/password/", {"current": "Forest927!", "password": "Harbour873!"}).status_code == 429
+    user.refresh_from_db()
+    assert user.check_password("Forest927!")
+
+
+def test_own_phone_change_keeps_this_device_and_signs_out_the_others():
+    user = person("maya", "admin")
+    first, _ = login(user)
+    second, _ = login(user)
+    response = first.patch("/api/account/", {"phone": "9829017210", "current": "Forest927!"}, format="json")
+    assert response.status_code == 200, response.data
+    assert first.get("/api/me/").status_code == 200
+    assert second.get("/api/me/").status_code == 401
+
+
 @pytest.mark.parametrize("body", [[], None, {"current": []}, {"current": "Forest927!", "password": {}}])
 def test_password_odd_body_is_400(body):
     user = person("maya", "admin")

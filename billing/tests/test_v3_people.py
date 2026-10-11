@@ -197,6 +197,9 @@ class PeopleTest(TestCase):
         response = self.post("allow")
         self.assertTrue(response.data["active"])
         self.assertEqual(response.data["role"], "staff")
+        allowed = AuditLog.objects.filter(entity="user", entity_id=self.staff.pk, action="allowed").count()
+        self.assertEqual(self.post("allow").status_code, 200)
+        self.assertEqual(AuditLog.objects.filter(entity="user", entity_id=self.staff.pk, action="allowed").count(), allowed)
         self.staff.refresh_from_db()
         self.assertTrue(self.staff.check_password("x"))
         another = SignInSession.objects.create(user=self.staff, device="Safari on Mac")
@@ -214,7 +217,7 @@ class PeopleTest(TestCase):
                 self.new_person()
             self.assertFalse(User.objects.filter(username="pooja_s").exists())
             with self.assertRaisesRegex(RuntimeError, "audit unavailable"):
-                self.client.patch("/api/account/", {"first_name": "Changed", "phone": "9829017210"}, format="json")
+                self.client.patch("/api/account/", {"first_name": "Changed", "phone": "9829017210", "current": "x"}, format="json")
         self.owner.refresh_from_db()
         self.assertEqual(self.owner.first_name, "Kailash")
         self.assertEqual(self.client.get("/api/account/").data["phone"], "")
@@ -231,7 +234,7 @@ class PeopleTest(TestCase):
         self.assertEqual(row["last_active"], "2026-10-08T16:48:59+05:30")
 
     def test_account_owner_phone_is_masked_in_audit_and_non_owner_cannot_write_it(self):
-        response = self.client.patch("/api/account/", {"first_name": "Kailashji", "phone": "9829017210"}, format="json")
+        response = self.client.patch("/api/account/", {"first_name": "Kailashji", "phone": "9829017210", "current": "x"}, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["phone"], "9829017210")
         self.assertTrue(response.data["phone_allowed"])
@@ -248,6 +251,43 @@ class PeopleTest(TestCase):
         self.assertIsNone(row["phone"])
         self.assertFalse(row["phone_allowed"])
 
+    def test_own_phone_change_needs_current_password_and_signs_out_other_devices(self):
+        from billing.models import SignInSession, UserSecurity
+
+        here = SignInSession.objects.create(user=self.owner, device="Chrome on Windows")
+        there = SignInSession.objects.create(user=self.owner, device="Safari on Mac")
+        self.owner._session_id = str(here.pk)
+        client = client_for(self.owner)
+        for extra, words in (({}, "Enter your current password."), ({"current": 5}, "Enter your current password."),
+                             ({"current": "wrong"}, "That isn't your current password. Check Caps Lock and try again.")):
+            response = client.patch("/api/account/", {"first_name": "Kailashji", "phone": "9829017210", **extra}, format="json")
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.data, {"current": [words]})
+        self.owner.refresh_from_db()
+        self.assertEqual(self.owner.first_name, "Kailash")
+        there.refresh_from_db()
+        self.assertIsNone(there.signed_out_at)
+        self.assertFalse(AuditLog.objects.filter(entity="user", entity_id=self.owner.pk).exists())
+        response = client.patch("/api/account/", {"phone": "9829017210", "current": "x"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(UserSecurity.objects.get(user=self.owner).phone, "9829017210")
+        here.refresh_from_db()
+        there.refresh_from_db()
+        self.assertIsNone(here.signed_out_at)
+        self.assertIsNotNone(there.signed_out_at)
+        self.assertEqual(there.ended_how, "signed_out")
+        entry = AuditLog.objects.get(entity="user", entity_id=self.owner.pk)
+        self.assertEqual(entry.details, "phone · other devices signed out")
+        # An unchanged phone or a profile-only change asks for nothing.
+        self.assertEqual(client.patch("/api/account/", {"phone": "9829017210", "last_name": "M"}, format="json").status_code, 200)
+
+    def test_phone_change_shares_the_password_throttle(self):
+        for _ in range(10):
+            self.assertEqual(self.client.patch("/api/account/", {"phone": "9829017210", "current": "wrong"}, format="json").status_code, 400)
+        self.assertEqual(self.client.patch("/api/account/", {"phone": "9829017210", "current": "x"}, format="json").status_code, 429)
+        self.assertEqual(self.client.post("/api/account/password/", {"current": "x", "password": "Indigo83724"}, format="json").status_code, 429)
+        self.assertEqual(self.client.patch("/api/account/", {"first_name": "Kailashji"}, format="json").status_code, 200)
+
     def test_account_validation_and_read_only_fields(self):
         cases = [({"first_name": ""}, "first_name", "Enter your first name. It shows in the Audit log next to your changes."),
                  ({"email": "broken"}, "email", "That email looks incomplete. It should look like name@example.com."),
@@ -260,6 +300,9 @@ class PeopleTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["role"], "owner")
         self.assertEqual(response.data["username"], "kailash")
+        self.assertFalse(AuditLog.objects.filter(entity="user", entity_id=self.owner.pk).exists())
+        self.assertEqual(self.client.patch("/api/account/", {"first_name": "Kailash"}, format="json").status_code, 200)
+        self.assertFalse(AuditLog.objects.filter(entity="user", entity_id=self.owner.pk).exists())
         for body in ([], {"email": []}, {"phone": {}}, {"last_name": None}):
             self.assertEqual(self.client.patch("/api/account/", body, format="json").status_code, 400)
 

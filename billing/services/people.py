@@ -10,7 +10,7 @@ from django.db.models import Max
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
-from billing.cache import uncached
+from billing.cache import invalidate, uncached
 from billing.models import Business, SignInSession, UserPreference, UserSecurity
 from billing.refusals import Refusal
 from billing.roles import ROLES, needs_role_choice, role_of
@@ -238,6 +238,8 @@ def change_person(actor, pk, action, data):
         security.save(update_fields=["stopped_at", "stopped_by"])
         audit_user(actor, user, "stopped", "Signed out everywhere · bills and history kept")
     elif action == "allow":
+        if old["active"] and old["stopped_at"] is None:
+            return old
         user.is_active = True
         user.save(update_fields=["is_active"])
         security = security_for(user)
@@ -254,10 +256,19 @@ def masked_phone(phone):
     return phone[:2] + "••••••" + phone[-2:] if phone else "None"
 
 
+def checked_current(user, data):
+    # R4B-2: a stolen session must not be able to point password codes at a new phone.
+    current = data.get("current")
+    if not isinstance(current, str) or not current:
+        raise ValidationError({"current": ["Enter your current password."]})
+    if not user.check_password(current):
+        raise ValidationError({"current": ["That isn't your current password. Check Caps Lock and try again."]})
+
+
 @transaction.atomic
 def change_account(actor, data):
     data = body_object(data)
-    user = target_user(actor.pk)
+    user = uncached(User).select_for_update().get(pk=actor.pk)
     values = {}
     if "first_name" in data:
         values["first_name"] = text_field(data, "first_name", "Enter your first name. It shows in the Audit log next to your changes.", required=True)
@@ -272,17 +283,27 @@ def change_account(actor, data):
         if not isinstance(phone, str) or (phone and not re.fullmatch(r"[0-9]{10}", phone)):
             n = sum(ch in "0123456789" for ch in phone) if isinstance(phone, str) else 0
             raise ValidationError({"phone": [f"A mobile number has 10 digits; this has {n}."]})
+        security = security_for(user)
+        if security.phone != phone:
+            checked_current(user, data)
     changes = {key: {"old": getattr(user, key) or "None", "new": value or "None"}
                for key, value in values.items() if getattr(user, key) != value}
     for key, value in values.items():
         setattr(user, key, value)
     if values:
         user.save(update_fields=list(values))
-    if "phone" in data:
-        security = security_for(user)
-        if security.phone != phone:
-            changes["phone"] = {"old": masked_phone(security.phone), "new": masked_phone(phone)}
-            security.phone = phone
-            security.save(update_fields=["phone"])
-    audit_user(actor, user, "updated", ", ".join(changes), changes)
+    details = ", ".join(changes)
+    if "phone" in data and security.phone != phone:
+        changes["phone"] = {"old": masked_phone(security.phone), "new": masked_phone(phone)}
+        security.phone = phone
+        security.save(update_fields=["phone"])
+        others = uncached(SignInSession).filter(user_id=user.pk, signed_out_at__isnull=True)
+        current = getattr(actor, "_session_id", None)
+        if current:
+            others = others.exclude(pk=current)
+        others.update(signed_out_at=timezone.now(), signed_out_by=user, ended_how="signed_out")
+        invalidate(SignInSession)
+        details = ", ".join(changes) + " · other devices signed out"
+    if changes:
+        audit_user(actor, user, "updated", details, changes)
     return account_row(user)
