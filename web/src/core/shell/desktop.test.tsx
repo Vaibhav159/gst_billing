@@ -13,7 +13,8 @@ import { appRoutes } from "@/core/router/routes";
 import { Sheet, ToastProvider } from "@/core/ui";
 import { DesktopShell } from "./DesktopShell";
 import { FirmPicker } from "./ScopePickers";
-import { ScopeProvider, useScope, type FirmId } from "@/core/scope";
+import { ScopeProvider, useFirms, useScope, type FirmId } from "@/core/scope";
+import { salesServer } from "@/core/sales/fixtures";
 import { AppRoutes } from "@/App";
 
 beforeEach(() => {
@@ -475,6 +476,22 @@ function Seen() {
   return null;
 }
 const scoped = () => renderApp(<ScopeProvider><Seen /><FirmPicker /></ScopeProvider>, { path: "/sales" });
+
+test.each([
+  ["missing", {}, ""],
+  ["null", { invoice_prefix: null }, ""],
+  ["present", { invoice_prefix: "KGH" }, "KGH"],
+])("a firm's %s bill-number prefix is available for PDF names", async (_, prefix, expected) => {
+  salesServer([["GET", "businesses/", () => ({ results: [{ id: 3, name: "KIRAN GOLD HOUSE", ...prefix }] })]]);
+  function FirmRead() {
+    const { firms } = useFirms();
+    return <output aria-label="Firms">{JSON.stringify(firms)}</output>;
+  }
+  renderApp(<FirmRead />);
+  await waitFor(() => expect(JSON.parse(screen.getByLabelText("Firms").textContent!)).toEqual([
+    { id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gstin: "", state: "", prefix: expected },
+  ]));
+});
 
 test("the next load shows the usual firm from its first paint, before the server answers, and never All firms (Ruling 38)", async () => {
   const server = slowPrefs();

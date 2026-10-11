@@ -19,6 +19,7 @@ import { lazyPage } from "./lazyPage";
 const PrintPage = lazyPage(() => import("@/pages/sales/print/PrintPage"));
 const ScanPage = lazyPage(() => import("@/pages/sales/print/ScanPage"));
 const BatchPrint = lazyPage(() => import("@/pages/sales/print/BatchPrint"));
+const BulkExport = lazyPage(() => import("@/pages/sales/print/BulkExport"));
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -34,7 +35,7 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 /** Every page in the prototype (PROTO/pages/<area>/index.js) that a later part builds, by area. Sign-in and More are already built (below). */
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
-  sales: ["/sales/export"],
+  sales: [],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
     "/capture", "/import", "/suppliers", "/suppliers/:id",
@@ -110,6 +111,7 @@ export const appRoutes: RouteObject[] = [{
         // part 1E: a bill's QR code checked, on a page of its own (More's link and v2's QR scanner; Ruling 1E-7)
         { path: "/scan", element: <ScanPage /> },
         { path: "/sales/batch", element: <BatchPrint /> },
+        { path: "/sales/export", element: <BulkExport /> },
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,

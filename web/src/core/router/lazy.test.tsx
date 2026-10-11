@@ -151,3 +151,7 @@ test("the print page loads on demand too, and hides the phone's tabs as a form d
 test("batch print is a page of its own, loaded on demand", () => {
   expect(isLazy(route("/sales/batch")?.element)).toBe(true);
 });
+
+test("bulk PDFs is a page of its own, loaded on demand", () => {
+  expect(isLazy(route("/sales/export")?.element)).toBe(true);
+});

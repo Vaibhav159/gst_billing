@@ -5,8 +5,11 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";
 import { usePrefs } from "@/core/prefs";
 
-/** A firm (a business on the server). short: its name's first word, title-cased: "KIRAN GOLD HOUSE (SANDBOX)" gives "Kiran". */
-export type Firm = { id: number; name: string; short: string; gstin: string; state: string };
+/**
+ * A firm (a business on the server). short: its name's first word, title-cased: "KIRAN GOLD HOUSE (SANDBOX)" gives "Kiran".
+ * prefix: its bill numbers' prefix ("KGH"), which names a PDF of a bare number (plan 1E).
+ */
+export type Firm = { id: number; name: string; short: string; gstin: string; state: string; prefix?: string };
 export type FirmId = number | "all";
 
 // ponytail: the first word stands in for a short name, so two firms that share one ("SHREE …") look alike on the
@@ -16,14 +19,14 @@ export function shortName(name: string): string {
   return w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : name;
 }
 
-type ApiBusiness = { id: number; name?: string | null; gst_number?: string | null; state_name?: string | null };
+type ApiBusiness = { id: number; name?: string | null; gst_number?: string | null; state_name?: string | null; invoice_prefix?: string | null };
 function toFirms(data: unknown): Firm[] {
   const d = data as { results?: unknown } | null;
   // the API pages its lists; an older or unpaged answer is the array itself
   const rows = (Array.isArray(d) ? d : Array.isArray(d?.results) ? d.results : []) as ApiBusiness[];
   return rows.map((b) => {
     const name = (b.name ?? "").trim();
-    return { id: b.id, name, short: shortName(name), gstin: b.gst_number ?? "", state: b.state_name ?? "" };
+    return { id: b.id, name, short: shortName(name), gstin: b.gst_number ?? "", state: b.state_name ?? "", prefix: b.invoice_prefix ?? "" };
   });
 }
 
