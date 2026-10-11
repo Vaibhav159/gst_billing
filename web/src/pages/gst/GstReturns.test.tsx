@@ -1,4 +1,5 @@
 import { act, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { useLocation } from 'react-router';
 import { useState } from 'react';
 import { expect, test, vi, beforeEach, afterAll } from 'vitest';
 import { renderApp } from '@/test/render';
@@ -172,3 +173,37 @@ test('the second-press Share button accepts one handoff while the share sheet is
   expect(screen.queryByRole('dialog',{name:'Your return file is ready'})).not.toBeInTheDocument();
   expect(saveFile).not.toHaveBeenCalled();
 });
+const filedGstr1=(m:ReturnType<typeof monthFixture>)=>{m.record.gstr1={id:81,business:3,month:m.month,kind:'gstr1',filed_on:'2026-10-07',arn:'AA0810260345671',cash:null,cash_worked_out:null,late_fee:null,interest:null,credit_left:null,marked_by:{id:1,name:'Kailash'},marked_at:'2026-10-07T12:00:00+05:30',updated_by:null,updated_at:null,legacy:false};return m;};
+test('a rejected save shows once, in its dialog, and Cancel leaves no file banner or old retry behind',async()=>{
+  const m=filedGstr1(monthFixture({stage:'gstr1'}));
+  serve({'GET gst/year/':yearFixture(),'GET gst/month/':m,'GET gst/month/gstr1/':sectionsFixture(),'GET gst/month/gstr3b/':ledgerFixture(),'GET gst/files/gstr3b/':()=>({status:503,data:{detail:'The file service is down.'}}),'POST gst/months/unlock/':()=>({status:400,data:{detail:'September is already unlocked.'}})});
+  renderApp(<GstReturns/>,{path:'/gst?firm=3&month=2026-09'});
+  fireEvent.click(await screen.findByRole('button',{name:'GSTR-3B file'}));
+  expect(await screen.findByText('The file wasn’t made')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:"Unlock September's sales bills…"}));
+  await screen.findByRole('dialog',{name:"Unlock September's sales bills?"});
+  vi.setSystemTime(Date.now()+400);
+  fireEvent.change(screen.getByLabelText(/Reason for unlocking/),{target:{value:'Wrong GSTIN'}});
+  fireEvent.click(screen.getByRole('button',{name:'Unlock September'}));
+  await waitFor(()=>expect(screen.getAllByText(/September is already unlocked/)).toHaveLength(1));
+  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.queryByText(/file wasn.t made/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/September is already unlocked/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Try again'})).not.toBeInTheDocument();
+},15000);
+test('a failed fix lookup has its own words and no download retry',async()=>{
+  const m=monthFixture({stage:'blocked'});m.checks.blockers=[{kind:'duplicate',blocks:true,text:'Bill number used twice',detail:'',bills:[{id:388,invoice_number:'KGH/2026-27/17',invoice_date:'2026-09-09',customer_name:'Anita',status:'active'}],more_bills:0,customer:null,suggested:391}];
+  serve({'GET gst/year/':yearFixture(),'GET gst/month/':m,'GET gst/month/gstr1/':sectionsFixture(),'GET gst/month/gstr3b/':ledgerFixture(),'GET sales/391/':()=>({status:500,data:{detail:'Server error.'}})});
+  renderApp(<GstReturns/>,{path:'/gst?firm=3&month=2026-09&fix=1'});
+  expect(await screen.findByText("Couldn't open that")).toBeInTheDocument();
+  expect(screen.queryByText(/file wasn.t made/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Try again'})).not.toBeInTheDocument();
+},15000);
+test('an owner fixing a deleted bill goes to its bin row',async()=>{
+  const m=monthFixture({stage:'blocked'});m.checks.blockers=[{kind:'deleted',blocks:true,text:'A bill was deleted',detail:'',bills:[{id:null,bin_id:4,invoice_number:'KGH/2026-27/27',invoice_date:'2026-09-24',customer_name:'Walk-in',status:'deleted'}],more_bills:0,customer:null,suggested:null}];
+  server(m);
+  function Where(){const l=useLocation();return <output data-testid="where">{l.pathname+l.search}</output>;}
+  renderApp(<><GstReturns/><Where/></>,{path:'/gst?firm=3&month=2026-09&fix=1'});
+  await waitFor(()=>expect(screen.getByTestId('where')).toHaveTextContent('/audit?restore=4'));
+},15000);
