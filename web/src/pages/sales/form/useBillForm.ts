@@ -8,7 +8,7 @@ import { flushSync } from "react-dom";
 import { useNavigate } from "react-router";
 import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useCustomer, type Customer } from "@/core/api/customers";
-import { draftSettled, forgetDraft } from "@/core/api/drafts";
+import { draftSettled, forgetDraft, newDraftId } from "@/core/api/drafts";
 import { lineErrors, linesErrors, problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { invalidateSales, salesKeys, useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesMonths, useSalesPage, useUpdateBill } from "@/core/api/sales";
@@ -69,7 +69,7 @@ export function serverErrorsOf(p: ApiProblem | null, sent: FormLine[]): Record<s
   return out;
 }
 
-export function useBillForm(start: Start) {
+export function useBillForm(start: Start, formKey?: string) {
   const { can, whyNot } = useAuth();
   const { firms } = useFirms();
   const net = useNetwork();
@@ -323,10 +323,14 @@ export function useBillForm(start: Start) {
     if (net === "offline") { setSaveError({ kind: "offline", ...failText({ kind: "offline", message: "" }) }); return none; }
     const number = numberOverride ?? numberText;
     // only a new bill takes an unfinished bill with it (toBillInput sends draft_id on a POST only)
-    const draft = edit ? null : draftId;
+    const draft = edit ? null : draftId ?? newDraftId();
     const body = toBillInput(f, { mode: start.mode, pos, number, draftId: draft, replaces: start.replaces });
-    setSaving(true);
-    setSaveError(null);
+    flushSync(() => {
+      setSaving(true);
+      setSaveError(null);
+      if (draft && !draftId) setDraftId(draft);
+    });
+    if (draft && !draftId) navigate(`/sales/new?draft=${draft}`, { replace: true, state: { formKey } });
     let ended: (how: SaveEnd) => void = () => {};
     saveEnd.current = new Promise<SaveEnd>((r) => { ended = r; });
     try {
