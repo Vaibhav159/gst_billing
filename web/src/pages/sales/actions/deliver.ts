@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { queryClient } from "@/core/api/query";
 import { billQuery, shopSettingsQuery } from "@/core/api/sales";
-import { canShareFiles, saveFile } from "@/core/print/files";
+import { canShareFiles, pdfCodeMissing, saveFile } from "@/core/print/files";
 import { billLog, useLogPrint } from "@/core/print/log";
-import { billFile, pdfCodeMissing, sendBankChoice, sendFile, type PdfFile } from "@/core/print/make";
+import type { PdfFile } from "@/core/print/make";
+import { sendBankChoice, sendFile } from "@/core/print/send";
 import { sharePdf, tell } from "@/core/print/ShareHost";
 import { waLink } from "@/core/sales/share";
 import type { BillDetail, Copies } from "@/core/sales/types";
@@ -34,6 +35,7 @@ async function pdfFor(billId: number, purpose: "send" | "share"): Promise<Made> 
   ]);
   if (o.kind !== "bill") throw new Unmade("bill");
   const copies: Copies = purpose === "share" && settings ? settings.copies : "original";
+  const { billFile } = await import("@/core/print/make");
   return { file: await billFile(o.bill, { copies, showBank: chosen ?? settings?.show_bank ?? true }), bill: o.bill, copies };
 }
 

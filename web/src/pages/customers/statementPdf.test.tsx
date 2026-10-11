@@ -46,6 +46,17 @@ test("a ₹ typed in the customer's name or address prints in the RupeeSign font
   expect(rupeeTexts(doc).map((t) => [t.children, flat(t.props.style).fontFamily])).toEqual(Array.from({ length: 8 }, () => [["₹"], "RupeeSign"]));
 });
 
+test("a ₹ in a firm's name prints in the bill's RupeeSign font: the header's scope and every row, including cancelled bills", () => {
+  const d = data([
+    { ...bill(17, "billing"), business_name: "₹ Gold House" },
+    { ...bill(18, "udhaar"), business_name: "₹ Silver House" },
+    { ...bill(19, "cancelled"), business_name: "₹ Gems" },
+  ]);
+  const doc = expand(<StatementDocument data={{ ...d, scope: "₹ Gold House" }} />)[0] as PdfNode;
+  // the scope in the header and footer; three firm names; three totals; "Amount (₹)"
+  expect(rupeeTexts(doc).map((t) => [t.children, flat(t.props.style).fontFamily])).toEqual(Array.from({ length: 9 }, () => [["₹"], "RupeeSign"]));
+});
+
 test("the file is named after the customer and the period", () => {
   expect(statementFileName("Anil Gupta", "FY 2026-27")).toBe("Anil-Gupta_statement_FY-2026-27.pdf");
   expect(statementFileName("M/s Shree Gems & Co.", "September 2026")).toBe("M-s-Shree-Gems-Co_statement_September-2026.pdf");

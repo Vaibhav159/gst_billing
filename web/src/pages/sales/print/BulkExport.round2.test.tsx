@@ -71,6 +71,32 @@ test("a Print generation failure uses FailNote and keeps Trying visible during a
   await ready();
 });
 
+test("Print's missing PDF code keeps its reload instruction in the failure note without a separate button", async () => {
+  vi.mocked(makeBillPdf).mockRejectedValueOnce(new TypeError("Failed to fetch dynamically imported module"));
+  serve(); open();
+  const title = await screen.findByText("The batch wasn't made");
+  expect(title.closest('[role="alert"]')).toHaveTextContent("The part of the app that makes PDFs didn't load. Reload the page, then try again.");
+  expect(screen.queryByRole("button", { name: "Reload the page" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Print 3" })).toBeDisabled();
+});
+
+test.each([
+  [404, 4, "were deleted after being picked"],
+  [503, 5, "didn't load"],
+] as const)("Print names every one of its %i failures, including more than three bills", async (status, count, ending) => {
+  const rows = rowsOf(count);
+  serve(rows, () => refuse(status, {}));
+  open();
+  const numbers = rows.map((row) => row.invoice_number);
+  const title = `${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)} ${ending}`;
+  const note = await screen.findByText(title);
+  expect(note.closest('[role="alert"]')).not.toBeNull();
+  expect(screen.queryByText(`${count} bills ${ending}`)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: `Print ${count}` })).toBeDisabled();
+  expect(makeBillPdf).not.toHaveBeenCalled();
+});
+
 test("a failed refresh keeps cached Print details ready and explains them with StaleNote", async () => {
   let failed = false;
   const rows = rowsOf(1);
@@ -125,6 +151,25 @@ test("Stop while reading says the zip was stopped, without claiming a partial zi
     expect(makeBillPdf).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
   } finally { await act(async () => finish(wireDetail(rows[30]))); }
+});
+
+test("going offline while reading a zip says nothing was made even after finished reads", async () => {
+  const rows = rowsOf(40);
+  let finish!: (detail: unknown) => void;
+  const { calls } = serve(rows, ({ url }) => url === "sales/35/" ? new Promise((done) => { finish = done; }) : wireDetail(rows.find((r) => url === `sales/${r.id}/`)));
+  open(); await ready(30);
+  vi.mocked(makeBillPdf).mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(screen.getByText("Reading bills:")).toHaveTextContent("Reading bills: 34 of 40");
+  act(() => __setNetState("offline"));
+  await act(async () => finish(wireDetail(rows[34])));
+  expect(await screen.findByText("You're offline, so nothing was made")).toBeInTheDocument();
+  expect(screen.queryByText(/the zip stopped after/)).not.toBeInTheDocument();
+  expect(billAsks(calls)).toHaveLength(35);
+  expect(makeBillPdf).not.toHaveBeenCalled();
+  expect(zipFiles).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
 });
 
 test("Stop after a file was made says the partial zip was discarded and names every ticked bill", async () => {

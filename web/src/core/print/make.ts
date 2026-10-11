@@ -2,10 +2,13 @@
 // make the same file twice), or many bills in one file. react-pdf and the document load on demand, the first time a
 // PDF is made, so neither is in the app's first download (Ruling 1B-4).
 import { isAxiosError } from "axios";
-import { createElement, useEffect } from "react";
+import { createElement } from "react";
 import { api, noAppReply } from "@/core/api/client";
 import type { BillDetail, Copies } from "@/core/sales/types";
 import { copyPages, printBill, type PrintBill } from "./model";
+
+export { pdfCodeMissing } from "./files";
+export { sendBankChoice, sendFile, useSendBankChoice, useSendFile } from "./send";
 
 export type PdfOptions = { copies: Copies; showBank: boolean };
 /**
@@ -55,15 +58,6 @@ function dataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/**
- * react-pdf's code (or the bill's document) didn't come: each browser's words for a module that didn't load, or Vite's
- * for a stylesheet one needs. After a deploy the files this page knows are gone, and a browser keeps a failed load, so
- * only a reload brings them: Try again can't.
- */
-export function pdfCodeMissing(e: unknown): boolean {
-  return e instanceof Error && /dynamically imported module|Importing a module script failed|Unable to preload CSS/i.test(e.message);
-}
-
 /** The PDF of these bills, and whether a firm's signature it went without may come next time (Signature's `again`). */
 async function draw(bills: PrintBill[], copies: Copies, meta: { title: string; subject?: string }): Promise<{ blob: Blob; again: boolean }> {
   const [{ pdf }, { BillDocument }, signs] = await Promise.all([
@@ -106,33 +100,4 @@ export function billFile(d: BillDetail, opts: PdfOptions): Promise<PdfFile> {
   p.catch(forget);
   byChoice.set(key, p);
   return p;
-}
-
-const sendBank = new Map<number, boolean>();
-/** While the print page shows a bill, a send from it carries the page's bank-details choice (deliver reads it). */
-export function useSendBankChoice(billId: number, showBank: boolean): void {
-  useEffect(() => {
-    sendBank.set(billId, showBank);
-    return () => { sendBank.delete(billId); };
-  }, [billId, showBank]);
-}
-export function sendBankChoice(billId: number): boolean | undefined {
-  return sendBank.get(billId);
-}
-
-const sendFiles = new Map<number, PdfFile>();
-/**
- * While the print page shows a bill, the Original it made, as the page shows it: a send from the page hands it out at
- * once, so a phone's share sheet opens within the press itself, and a refresh that changed nothing on paper keeps it. One
- * that went without the firm's signature isn't handed out: the send makes it again, to try for the signature.
- */
-export function useSendFile(billId: number, file: PdfFile | null): void {
-  useEffect(() => {
-    if (!file || file.again) return undefined;
-    sendFiles.set(billId, file);
-    return () => { if (sendFiles.get(billId) === file) sendFiles.delete(billId); };
-  }, [billId, file]);
-}
-export function sendFile(billId: number): PdfFile | undefined {
-  return sendFiles.get(billId);
 }

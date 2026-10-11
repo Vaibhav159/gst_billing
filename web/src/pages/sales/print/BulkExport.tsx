@@ -397,7 +397,6 @@ export default function BulkExport() {
             {coming && !unread.length ? <p role="status" className="text-sm text-muted">Loading the picked bills…</p> : null}
             {printKey && !printed.value && !printed.failed ? <p role="status" className="text-sm text-muted">Getting the bills ready to print…</p> : null}
             <FailNote error={printed.failed || printed.retrying ? { title: "The batch wasn't made", body: printWhy.body } : null} onRetry={printWhy.again ? printed.retry : undefined} busy={printed.retrying} />
-            {printed.failed && !printWhy.again ? <Button size="sm" onClick={() => window.location.reload()}>Reload the page</Button> : null}
             {job ? <JobPanel job={job} offline={net === "offline"} onReadRetry={() => void run(job.list, job.unread.filter((r) => r.problem.kind !== "notfound"), job)} onRetry={(list) => void run(list, [], job)} onStop={() => { stop.current = true; cancelRead.current?.(); }} onSave={saveReady} onClose={() => setJob(null)} /> : null}
             {firmsError ? <LoadError problem={firmsProblem!} what="the firms" retry={() => { void qc.refetchQueries({ queryKey: ["firms"] }); }} /> : q.isError ? <LoadError problem={problemOf(q.error)} what="the bills" retry={() => { void q.refetch(); }} />
               : q.isPending && (query || firmsLoading || scope === null) ? <ListSkeleton what="the bills" rows={4} />
@@ -457,7 +456,7 @@ function JobPanel({ job, offline, onReadRetry, onRetry, onStop, onSave, onClose 
     );
   }
   if (job.offline) {
-    const title = job.n ? `You're offline, so the zip stopped after ${job.n} of ${job.total}` : "You're offline, so nothing was made";
+    const title = job.made.length ? `You're offline, so the zip stopped after ${job.n} of ${job.total}` : "You're offline, so nothing was made";
     return <Banner tone="neg" title={title} actions={offline ? undefined : <Button size="sm" variant="primary" icon={RotateCw} onClick={() => onRetry(job.failed)}>Try again</Button>}>
       The PDFs are made from the shop&apos;s records, which need the internet. Try again when it&apos;s back to make the whole zip.
     </Banner>;
@@ -477,12 +476,12 @@ function JobPanel({ job, offline, onReadRetry, onRetry, onStop, onSave, onClose 
 }
 
 
-/** Print keeps the batch words; the zip names every failed bill and says where reading stopped. */
+/** Both notes name every failed bill; the zip says where reading stopped. */
 function ReadNote({ unread, offline, busy, onRetry, zip = false }: { unread: Unread[]; offline: boolean; busy?: boolean; onRetry: () => void; zip?: boolean }) {
   const gone = unread.filter((r) => r.problem.kind === "notfound");
   const failed = unread.filter((r) => r.problem.kind !== "notfound");
   const why = !failed.length ? null : offline ? OFFLINE : failed.find((r) => r.problem.kind !== "offline")?.problem ?? failed[0]?.problem;
-  const numbers = (rows: Unread[]) => zip ? andList(rows.map((r) => r.row.invoice_number)) : named(rows.map((r) => r.row.invoice_number));
+  const numbers = (rows: Unread[]) => andList(rows.map((r) => r.row.invoice_number));
   const body = !why ? "" : !zip ? notLoadedWords(why, failed.length === 1, true)
     : why.kind === "offline" ? "You're offline, so the zip waits for this bill. It loads by itself when the internet is back, or untick it to make the zip without it."
       : why.kind === "unreachable" || why.kind === "server" ? "The app couldn't reach the shop's records just now, so reading the zip's bills stopped here. Try again, or untick this bill to make the zip without it."

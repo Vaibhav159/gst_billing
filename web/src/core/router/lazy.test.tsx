@@ -25,6 +25,11 @@ vi.mock("@/core/print/make", async (real) => ({
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((r) => [r, ...all(r.children ?? [])]);
 const isLazy = (el: unknown) => isValidElement(el) && (el.type as { $$typeof?: symbol }).$$typeof === Symbol.for("react.lazy");
 const route = (path: string) => all(appRoutes).find((r) => r.path === path);
+
+test("home keeps loading up front, so the shell's shown effect cannot mistake its skeleton for home", () => {
+  expect(isValidElement(route("/")?.element)).toBe(true);
+  expect(isLazy(route("/")?.element)).toBe(false);
+});
 /** The whole app at `path` (or `routes` in place of the app's own), signed in as the owner, as App renders it. */
 function mount(path: string, routes: RouteObject[] = appRoutes) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });

@@ -61,7 +61,7 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
           <View style={s.right}>
             <Text style={s.bold}>{data.periodLabel}</Text>
             {data.periodRange && data.periodRange !== data.periodLabel ? <Text style={s.muted}>{data.periodRange}</Text> : null}
-            <Text style={s.muted}>{data.scope}</Text>
+            <RupeeText style={s.muted}>{data.scope}</RupeeText>
             <Text style={s.muted}>Made on {data.made}</Text>
           </View>
         </View>
@@ -74,7 +74,7 @@ export function StatementDocument({ data }: { data: StatementPdfData }) {
           <View key={b.id} style={s.row} wrap={false}>
             <Text style={s.cDate}>{date(b.invoice_date)}</Text>
             <Text style={s.cNo}>{b.invoice_number}</Text>
-            <Text style={s.cFirm}>{b.business_name}</Text>
+            <RupeeText style={s.cFirm}>{b.business_name}</RupeeText>
             <Text style={s.cMode}>{PAY[b.payment_mode] ?? PAY[""]}</Text>
             <Text style={b.status === "cancelled" ? [s.cAmt, s.struck] : s.cAmt}>{inr(b.total_amount).replace("₹", "")}</Text>
             <Text style={s.cPaid}>{SETTLED[b.paid]}</Text>
