@@ -1,4 +1,5 @@
 from datetime import date
+from importlib.util import find_spec
 from unittest.mock import patch
 
 import pytest
@@ -82,3 +83,43 @@ def test_year_rounds_stored_totals_once_across_months():
     with patch("billing.api.dashboard.timezone.localdate", return_value=date(2026, 10, 8)):
         data = client.get("/api/dashboard/").json()
     assert data["year"]["sales"]["total"] == "2.01"
+
+
+@pytest.mark.django_db
+def test_dashboard_gst_rounds_each_head_per_line_to_the_paisa():
+    """P5-6 / X-55: two stored 0.025 heads are 0.03 + 0.03, not 0.05."""
+    from billing.models import LineItem
+    f, c = firm(), buyer(address="street")
+    bill = sale(f, c, "1", date(2026, 10, 8), line(rate="1", gst="0.05"), line(rate="1", gst="0.05"))
+    LineItem.objects.filter(invoice=bill).update(cgst="0.025", sgst="0", igst="0")
+    client = client_for(person("dash-paisa-viewer", "viewer"))
+    with patch("billing.api.dashboard.timezone.localdate", return_value=date(2026, 10, 8)):
+        data = client.get("/api/dashboard/", {"business_id": f.pk}).json()
+    assert data["month"]["sales"]["tax"] == "0.06"
+    assert data["last30"]["sales"]["tax"] == "0.06"
+    assert data["year"]["months"][-1]["sales"]["tax"] == "0.06"
+
+
+@pytest.mark.django_db
+@pytest.mark.skipif(find_spec("billing.services.filing") is None, reason="X-40: 3A makes sums() round each line (X-55)")
+def test_dashboard_gst_matches_figures_of_sums():
+    from billing.models import LineItem
+    from billing.services.bill_reads import figures, sums
+    f, c = firm(), buyer(address="street")
+    bill = sale(f, c, "1", date(2026, 10, 8), line(rate="1", gst="0.05"), line(rate="1", gst="0.05"))
+    LineItem.objects.filter(invoice=bill).update(cgst="0.025", sgst="0", igst="0")
+    client = client_for(person("dash-sums-viewer", "viewer"))
+    with patch("billing.api.dashboard.timezone.localdate", return_value=date(2026, 10, 8)):
+        data = client.get("/api/dashboard/", {"business_id": f.pk}).json()
+    assert data["month"]["sales"]["tax"] == figures(sums(LineItem.objects.filter(invoice=bill)))["tax"]
+
+
+@pytest.mark.django_db
+@pytest.mark.skipif(find_spec("billing.services.audit") is not None, reason="4A landed: the real mapper test runs instead")
+def test_latest_changes_is_empty_until_part_4_lands():
+    """P5-7: the dashboard does not wait on 4A; an auditor sees an empty list, not an error."""
+    from billing.services.dashboard import latest_changes
+    assert latest_changes() == []
+    client = client_for(person("dash-audit-owner", "admin"))
+    with patch("billing.api.dashboard.timezone.localdate", return_value=date(2026, 10, 8)):
+        assert client.get("/api/dashboard/").json()["changes"] == []

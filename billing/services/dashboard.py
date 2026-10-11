@@ -34,8 +34,11 @@ def month_keys(start, end):
 
 
 def latest_changes():
-    from billing.services.audit import entry_row, read_entries
-    rows = read_entries().exclude(entity__in=["backup", "gst_file"]).exclude(action__in=["printed", "exported", "downloaded"])
+    try:
+        from billing.services.audit import entry_row, read_entries
+    except ImportError:  # X-40 / design §4.4 item 6: empty until part 4's shared mapper lands.
+        return []
+    rows = read_entries().exclude(entity__in=["backup", "report", "gst_file"]).exclude(action__in=["printed", "exported", "downloaded"])
     rows = rows.defer("details", "changes").annotate(
         short_details=Left("details", 160),
         role_changed=Case(When(changes__has_key="role", then=Value(True)), default=Value(False), output_field=BooleanField()),
@@ -89,7 +92,8 @@ def dashboard(user, firms, year, today):
         windows["last30"] = (today - timedelta(days=29), today)
     queries = {}
     line_queries = {}
-    tax = sum((Coalesce(F(h), ZERO) for h in ("cgst", "sgst", "igst")), ZERO)
+    # X-55: each head is rounded to the paisa per line before adding, as bill_reads.sums() does.
+    tax = sum((Coalesce(Round(F(h), 2), ZERO) for h in ("cgst", "sgst", "igst")), ZERO)
     for key, period in windows.items():
         where = Q(invoice_date__range=period)
         queries[key + "_count"] = Count("pk", filter=where)

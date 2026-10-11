@@ -85,7 +85,8 @@ def test_audit_fixture_words_shop_scope_and_narrow_details():
     assert {k: mapped[k] for k in expected} == expected
     for i in range(4):
         AuditLog.objects.create(action="created", entity="customer", entity_id=i, entity_name="Buyer", details="x" * 10000)
-    for action, entity in [("printed", "invoice"), ("exported", "report"), ("downloaded", "gst_file"), ("created", "backup")]:
+    for action, entity in [("printed", "invoice"), ("exported", "report"), ("downloaded", "gst_file"), ("created", "backup"),
+                           ("created", "report"), ("created", "gst_file")]:
         AuditLog.objects.create(action=action, entity=entity, entity_id=1, entity_name="Read")
     rows = latest_changes()
     assert len(rows) == 4
