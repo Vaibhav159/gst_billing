@@ -1,5 +1,5 @@
 // Printing's lines in the audit log (contract §2.2, as v2's bulk PDFs wrote them): the one home for the print page, a
-// share's download (pages/sales/actions/deliver.ts) and batch print.
+// share's download (pages/sales/actions/deliver.ts), batch print and bulk PDFs.
 import { useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
@@ -31,5 +31,13 @@ export function batchLog(action: PrintLog["action"], { what, span, pages, copies
   return {
     action, entity_id: 0, entity_name: `${action === "printed" ? "Batch print" : "Combined PDF"} (${what})`,
     details: `${span} · ${plural(pages, "page")}${copies === "all" ? " · three copies each" : ""}`,
+  };
+}
+
+/** A bulk zip's line: every bill firm by firm, the chosen period and the file's name. */
+export function exportLog({ what, span, period, name }: { what: string; span: string; period: string; name: string }): PrintLog {
+  return {
+    action: "exported", entity_id: 0, entity_name: `Bulk PDFs (${what})`,
+    details: `${span} · ${period} · ${name}`,
   };
 }

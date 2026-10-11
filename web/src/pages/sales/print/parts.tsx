@@ -2,12 +2,41 @@
 // switch, and several bills in words. Their lines in the audit log are core/print/log.ts's.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import type { ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { plural } from "@/core/format";
 import { pdfCodeMissing } from "@/core/print/make";
 import { hasBank, type PrintBill } from "@/core/print/model";
 import type { FirmOnBill } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
 import { Switch } from "@/core/ui";
+
+/**
+ * A batch takes up to this many bills (Ruling 1E-16): about 90 pages with all three copies. Its PDF is made here, on the
+ * browser's main thread, at about a tenth of a second a page, when the page opens and again after every choice, and its
+ * papers are drawn twice (on screen and for the browser's own print). Each bill is also a request (Neon's free plan).
+ */
+export const MAX_BILLS = 30;
+
+/** Bills by number where it's known, the rest counted: "KGH/2026-27/32 and MO/2026-27/7", "KGH/2026-27/32 and 1 more bill", "4 bills". */
+export function named(numbers: (string | null)[]): string {
+  const known = numbers.filter((n): n is string => Boolean(n));
+  if (known.length > 3) return plural(numbers.length, "bill");
+  const rest = numbers.length - known.length;
+  return andList([...known, rest ? plural(rest, known.length ? "more bill" : "bill") : ""]);
+}
+
+/**
+ * The bills that didn't load, what happened and what to do. Offline they come by themselves once the internet is back;
+ * a refusal's own words (a 429 already says when to try again) stand as they are. rest: other bills can print meanwhile.
+ */
+export function notLoadedWords(p: ApiProblem, one: boolean, rest: boolean): string {
+  const them = one ? "it" : "them";
+  const meanwhile = rest ? " to print the rest" : "";
+  if (p.kind === "offline") return `You're offline, so the batch waits for ${them}. ${one ? "It loads by itself" : "They load by themselves"} when the internet is back, or leave ${them} out${meanwhile}.`;
+  if (p.kind === "unreachable" || p.kind === "server") return `The app couldn't reach the shop's records just now, so the batch waits for ${them}. Try again, or leave ${them} out${meanwhile}.`;
+  return rest ? `${p.message} You can leave ${them} out to print the rest.` : p.message;
+}
 
 /**
  * What `make` makes for `key` (null: nothing to make yet), made again when the key changes, on retry or on remake. Only

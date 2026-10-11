@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
+import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";
 import { usePrefs } from "@/core/prefs";
@@ -35,14 +36,14 @@ const NO_FIRMS: Firm[] = [];
  * Every firm, asked for once a visit: staleTime Infinity, so nothing asks again on a timer, on focus or on a remount
  * (the database is Neon's free plan). error: the list couldn't load, which is not the same as a shop with no firm.
  */
-export function useFirms(): { firms: Firm[]; loading: boolean; error: boolean } {
+export function useFirms(): { firms: Firm[]; loading: boolean; error: boolean; problem: ApiProblem | null } {
   const { status } = useAuth();
   const q = useQuery({
     queryKey: ["firms"], enabled: status === "signed-in", staleTime: Infinity,
     // ponytail: one page of 100 is every firm a shop has; a bigger list would need the next pages
     queryFn: async ({ signal }) => toFirms((await api.get("businesses/", { params: { page_size: 100 }, signal })).data),
   });
-  return { firms: q.data ?? NO_FIRMS, loading: q.isPending, error: q.isError };
+  return { firms: q.data ?? NO_FIRMS, loading: q.isPending, error: q.isError, problem: q.isError ? problemOf(q.error) : null };
 }
 
 /**

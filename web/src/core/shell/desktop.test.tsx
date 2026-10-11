@@ -14,7 +14,7 @@ import { Sheet, ToastProvider } from "@/core/ui";
 import { DesktopShell } from "./DesktopShell";
 import { FirmPicker } from "./ScopePickers";
 import { ScopeProvider, useFirms, useScope, type FirmId } from "@/core/scope";
-import { salesServer } from "@/core/sales/fixtures";
+import { refuse, salesServer } from "@/core/sales/fixtures";
 import { AppRoutes } from "@/App";
 
 beforeEach(() => {
@@ -491,6 +491,34 @@ test.each([
   await waitFor(() => expect(JSON.parse(screen.getByLabelText("Firms").textContent!)).toEqual([
     { id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gstin: "", state: "", prefix: expected },
   ]));
+});
+
+function FirmProblem() {
+  return <output aria-label="Firm query">{JSON.stringify(useFirms())}</output>;
+}
+
+test.each([
+  { name: "refusal", status: 403, online: true, body: { detail: "Ask the owner for access", code: "firm_access" }, expected: { kind: "forbidden", message: "Ask the owner for access", code: "firm_access", body: { detail: "Ask the owner for access", code: "firm_access" } } },
+  { name: "server failure", status: 503, online: true, body: {}, expected: { kind: "server", message: "The app couldn't get through", body: {} } },
+  { name: "unreachable server", status: 0, online: true, body: {}, expected: { kind: "unreachable", message: "The app couldn't get through" } },
+  { name: "offline request", status: 0, online: false, body: {}, expected: { kind: "offline", message: "You're offline" } },
+])("the firm query exposes the real problem for a $name and keeps its error flag", async ({ status, online, body, expected }) => {
+  const connection = vi.spyOn(navigator, "onLine", "get").mockReturnValue(online);
+  try {
+    salesServer([["GET", "businesses/", () => refuse(status, body)]]);
+    renderApp(<FirmProblem />);
+    await waitFor(() => expect(JSON.parse(screen.getByLabelText("Firm query").textContent!)).toEqual({
+      firms: [], loading: false, error: true, problem: expected,
+    }));
+  } finally { connection.mockRestore(); }
+});
+
+test("the firm query has no problem when its read succeeds", async () => {
+  salesServer([["GET", "businesses/", () => ({ results: [] })]]);
+  renderApp(<FirmProblem />);
+  await waitFor(() => expect(JSON.parse(screen.getByLabelText("Firm query").textContent!)).toEqual({
+    firms: [], loading: false, error: false, problem: null,
+  }));
 });
 
 test("the next load shows the usual firm from its first paint, before the server answers, and never All firms (Ruling 38)", async () => {

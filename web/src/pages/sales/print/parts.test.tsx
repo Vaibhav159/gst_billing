@@ -1,10 +1,29 @@
 import { screen } from "@testing-library/react";
 import type { Me } from "@/core/auth/AuthProvider";
 import { renderApp } from "@/test/render";
-import { BankSwitch, billsSpan, byFirm } from "./parts";
+import { BankSwitch, billsSpan, byFirm, MAX_BILLS, named, notLoadedWords } from "./parts";
 
 const NO_ACCOUNT = { name: "KIRAN GOLD HOUSE", bank_name: "", bank_account_number: " " };
 const STAFF: Partial<Me> = { role: "staff", permissions: ["view", "bill.create", "bill.send", "customer.edit"] };
+
+test("print pages share the 30-bill cap and name missing bills when known, counting the rest", () => {
+  expect(MAX_BILLS).toBe(30);
+  expect(named(["KGH/2026-27/32", "MO/2026-27/7"])).toBe("KGH/2026-27/32 and MO/2026-27/7");
+  expect(named(["KGH/2026-27/32", null])).toBe("KGH/2026-27/32 and 1 more bill");
+  expect(named([null, null])).toBe("2 bills");
+  expect(named(["31", "32", "33", "34", null])).toBe("5 bills");
+});
+
+test("print pages share the missing-bill explanation for offline, failed and refused reads", () => {
+  expect(notLoadedWords({ kind: "offline", message: "You're offline" }, true, true)).toBe("You're offline, so the batch waits for it. It loads by itself when the internet is back, or leave it out to print the rest.");
+  expect(notLoadedWords({ kind: "offline", message: "You're offline" }, false, false)).toBe("You're offline, so the batch waits for them. They load by themselves when the internet is back, or leave them out.");
+  for (const kind of ["unreachable", "server"] as const) {
+    expect(notLoadedWords({ kind, message: "The app couldn't get through" }, false, true)).toBe("The app couldn't reach the shop's records just now, so the batch waits for them. Try again, or leave them out to print the rest.");
+  }
+  const refused = { kind: "throttled" as const, message: "Too many tries. Wait a minute, then try again." };
+  expect(notLoadedWords(refused, true, false)).toBe(refused.message);
+  expect(notLoadedWords(refused, true, true)).toBe(`${refused.message} You can leave it out to print the rest.`);
+});
 
 test("a firm with no bank account: nothing to switch, and why; the owner can add one, but a bill keeps the firm as the app made it", () => {
   const { unmount } = renderApp(<BankSwitch firm={{ ...NO_ACCOUNT, frozen: false }} firmId={3} checked onChange={() => {}} />);

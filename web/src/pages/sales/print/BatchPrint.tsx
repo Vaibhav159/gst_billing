@@ -18,14 +18,8 @@ import { Paper, PrintCopy, ScaledPaper } from "@/core/print/Paper";
 import type { BillDetail, Copies, ShopSettings } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
 import { Banner, Button, ButtonLink, Card, EmptyState, FailNote, LoadError, Money, Page, Segmented, Skeleton, StaleNote, Switch, useToast } from "@/core/ui";
-import { billsSpan, unmade, useMade, whatPrints } from "./parts";
+import { billsSpan, MAX_BILLS, named, notLoadedWords, unmade, useMade, whatPrints } from "./parts";
 
-/**
- * A batch takes up to this many bills (Ruling 1E-16): about 90 pages with all three copies. Its PDF is made here, on the
- * browser's main thread, at about a tenth of a second a page, when the page opens and again after every choice, and its
- * papers are drawn twice (on screen and for the browser's own print). Each bill is also a request (Neon's free plan).
- */
-const MAX_BILLS = 30;
 const COPIES: { value: Copies; label: string }[] = [{ value: "original", label: "Original only" }, { value: "all", label: "All three" }];
 const CRUMBS = [{ label: "Sales", to: "/sales" }];
 const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
@@ -60,28 +54,8 @@ function whyUnloaded(unloaded: Unloaded[]): ApiProblem | null {
   return unloaded.find((r) => r.failed.kind !== "offline")?.failed ?? unloaded[0]?.failed ?? null;
 }
 
-/**
- * The bills that didn't load, what happened and what to do. Offline they come by themselves once the internet is back;
- * a refusal's own words (a 429 already says when to try again) stand as they are. rest: other bills can print meanwhile.
- */
-function notLoadedWords(p: ApiProblem, one: boolean, rest: boolean): string {
-  const them = one ? "it" : "them";
-  const meanwhile = rest ? " to print the rest" : "";
-  if (p.kind === "offline") return `You're offline, so the batch waits for ${them}. ${one ? "It loads by itself" : "They load by themselves"} when the internet is back, or leave ${them} out${meanwhile}.`;
-  if (p.kind === "unreachable" || p.kind === "server") return `The app couldn't reach the shop's records just now, so the batch waits for ${them}. Try again, or leave ${them} out${meanwhile}.`;
-  return rest ? `${p.message} You can leave ${them} out to print the rest.` : p.message;
-}
-
 /** The Print button's words: "Print all 9 pages", "Print 1 page", or just "Print" with nothing to print yet. */
 const printWords = (pages: number) => (pages === 0 ? "Print" : pages === 1 ? "Print 1 page" : `Print all ${pages} pages`);
-
-/** Bills by number where it's known, the rest counted: "KGH/2026-27/32 and MO/2026-27/7", "KGH/2026-27/32 and 1 more bill", "4 bills". */
-function named(numbers: (string | null)[]): string {
-  const known = numbers.filter((n): n is string => Boolean(n));
-  if (known.length > 3) return plural(numbers.length, "bill");
-  const rest = numbers.length - known.length;
-  return andList([...known, rest ? plural(rest, known.length ? "more bill" : "bill") : ""]);
-}
 
 // a bill's paper and what it prints (whatPrints, Ruling 1E-8), worked out once per answer from the server and bank choice
 const drawings = new WeakMap<BillDetail, Map<boolean, { paper: PrintBill; prints: string }>>();

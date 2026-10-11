@@ -5,7 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { refuse, salesServer, wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { testQueryClient } from "@/test/render";
-import { batchLog, billLog, useLogPrint } from "./log";
+import { batchLog, billLog, exportLog, useLogPrint } from "./log";
 
 const BILL = toBillDetail(wireDetail());
 
@@ -22,6 +22,13 @@ test("many bills' line, as v2's bulk PDFs wrote it (entity_id 0): the bills firm
   });
   expect(batchLog("exported", { what: "1 bill", span: "KGH/2026-27/31", pages: 1, copies: "original" })).toEqual({
     action: "exported", entity_id: 0, entity_name: "Combined PDF (1 bill)", details: "KGH/2026-27/31 · 1 page",
+  });
+});
+
+test("a bulk zip's line names all bills by firm, its period and its file, against entity_id 0", () => {
+  const span = "3 bills from 2 firms: KIRAN GOLD HOUSE (KGH/2026-27/31, KGH/2026-27/32) and MEERA ORNAMENTS (MO/2026-27/7)";
+  expect(exportLog({ what: "3 bills", span, period: "Oct 2026", name: "Sales_PDFs_Oct2026_KGH-MO.zip" })).toEqual({
+    action: "exported", entity_id: 0, entity_name: "Bulk PDFs (3 bills)", details: `${span} · Oct 2026 · Sales_PDFs_Oct2026_KGH-MO.zip`,
   });
 });
 

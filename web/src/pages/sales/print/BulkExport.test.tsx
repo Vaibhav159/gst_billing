@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { onlineManager, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryClient } from "@/core/api/query";
 import { __setNetState } from "@/core/api/network";
 import { billQuery, type BillOutcome } from "@/core/api/sales";
 import { makeBillPdf } from "@/core/print/make";
@@ -46,7 +47,7 @@ function Cache() { qc = useQueryClient(); return null; }
 const open = (path = "/sales/export?firm=all&month=2026-10") => renderApp(<ScopeProvider><Cache /><BulkExport /></ScopeProvider>, { path, me: { role: "viewer", permissions: ["view"] } });
 async function ready(n = 3) {
   await screen.findByRole("table", { name: "Files that will be made" });
-  act(() => vi.setSystemTime(new Date("2026-10-08T10:00:01+05:30")));
+  act(() => vi.setSystemTime(Math.max(Date.now(), new Date("2026-10-08T10:00:01+05:30").getTime())));
   await waitFor(() => expect(screen.getByRole("button", { name: `Print ${n}` })).toBeEnabled());
 }
 const billAsks = (calls: Call[]) => calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url);
@@ -59,8 +60,9 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   vi.mocked(makeBillPdf).mockReset().mockResolvedValue(new Blob(["%PDF-1.3"], { type: "application/pdf" }));
   vi.mocked(zipFiles).mockClear();
+  zipped.files = [];
 });
-afterEach(() => { cleanup(); qc?.clear(); vi.restoreAllMocks(); vi.useRealTimers(); act(() => __setNetState("online")); });
+afterEach(() => { cleanup(); qc?.clear(); vi.restoreAllMocks(); vi.useRealTimers(); act(() => { __setNetState("online"); onlineManager.setOnline(true); }); });
 
 test("the month's bills, firm by firm, every file named first; duplicates renamed; firm=all overrides the usual firm", async () => {
   localStorage.setItem("gst3.scope.1", "3");
@@ -96,6 +98,7 @@ test("zip makes Originals one at a time under the shown names; Save the zip deli
   expect(calls.filter((c) => c.url === "audit-logs/log/")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Save the zip" }));
   expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+  expect(screen.getByText("Sales_PDFs_Oct2026_KGH-MO.zip downloaded. Written to the audit log.")).toBeInTheDocument();
   await waitFor(() => expect(calls.find((c) => c.url === "audit-logs/log/")?.body).toMatchObject({ action: "exported", entity_id: 0, entity_name: "Bulk PDFs (2 bills)", details: expect.stringContaining("Sales_PDFs_Oct2026_KGH-MO.zip") }));
   expect(billAsks(calls)).toHaveLength(3);
 });
@@ -128,7 +131,7 @@ test("unreadable details block every PDF, name the bill, and Try again refetches
   });
   open();
   const note = await screen.findByText(/KGH\/2026-27\/31 didn't load/);
-  expect(note).toBeInTheDocument();
+  expect(note.closest('[role="alert"]')).not.toBeNull();
   expect(makeBillPdf).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Print 3" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Download as zip" })).toBeDisabled();
@@ -159,6 +162,8 @@ test("a failed PDF is named and retry makes only it, retaining its previewed dup
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   expect(await screen.findByText("Made 2 of 3. 1 bill couldn't be made")).toBeInTheDocument();
   expect(screen.getByText(/These couldn't be made just now: KGH\/2026-27\/31/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save the zip" }));
+  expect(screen.getByText(/Sales_PDFs_Oct2026_KGH-MO.zip downloaded. Written to the audit log./)).toBeInTheDocument();
   vi.mocked(makeBillPdf).mockReset().mockResolvedValue(new Blob(["pdf"]));
   fireEvent.click(screen.getByRole("button", { name: "Try it again" }));
   expect(await screen.findByText("1 PDF made")).toBeInTheDocument();
@@ -175,6 +180,7 @@ test("Stop ends after the current PDF and never offers an unfinished zip", async
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
   await act(async () => finish(new Blob(["pdf"])));
   expect(await screen.findByText("Stopped after 1 of 3")).toBeInTheDocument();
+  expect(screen.getByText("The partial zip was discarded. Start again to make every selected bill.")).toBeInTheDocument();
   expect(makeBillPdf).toHaveBeenCalledOnce();
   expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
 });
@@ -203,16 +209,18 @@ test("print caps at 30 and zip at 300, counts the rest and never reads or makes 
   const rows = Array.from({ length: 301 }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
   const { calls } = serve(rows);
   open(); await ready(30);
-  expect(screen.getByText(/Print the first 30.*other 271 bills/)).toBeInTheDocument();
-  expect(screen.getByText(/Export the first 300.*other 1 bill.*another run/)).toBeInTheDocument();
+  expect(screen.getByText(/Print the first 30.*KGH\/2026-27\/30.*bill numbers from 31/)).toBeInTheDocument();
+  expect(screen.getByText(/Export the first 300.*KGH\/2026-27\/300.*bill numbers from 301/)).toBeInTheDocument();
   expect(vi.mocked(makeBillPdf).mock.lastCall?.[0]).toHaveLength(30);
-  expect(billAsks(calls)).toHaveLength(300);
+  expect(billAsks(calls)).toHaveLength(30);
   vi.mocked(makeBillPdf).mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await waitFor(() => expect(zipped.files).toHaveLength(300), { timeout: 30000 });
   expect(await screen.findByText("300 PDFs made")).toBeInTheDocument();
   expect(makeBillPdf).toHaveBeenCalledTimes(300);
   expect(zipped.files).toHaveLength(300);
+  expect(billAsks(calls)).toHaveLength(300);
+  expect(billAsks(calls)).not.toContain("sales/301/");
   fireEvent.click(screen.getByRole("button", { name: "Save the zip" }));
   await waitFor(() => expect(calls.find((c) => c.url === "audit-logs/log/")?.body).toMatchObject({ details: expect.stringContaining("KGH/2026-27/300") }));
 }, 45000); // 300 yielded files and a 301-row preview on the shared two-CPU machine
@@ -281,7 +289,7 @@ test("PDF code that cannot load says to reload instead of retrying a missing mod
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await screen.findByText("Made 0 of 3. 3 bills couldn't be made");
   expect(screen.getByText(/The part of the app that makes PDFs didn't load/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Reload the app" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reload the page" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Try these 3 again" })).not.toBeInTheDocument();
 });
 
@@ -303,4 +311,214 @@ test("changing the selection during a held PDF discards the old job; unmount dis
   view.unmount();
   await act(async () => finish(new Blob(["old pdf"])));
   expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+});
+
+
+test("opening or browsing months reads only Print's first 30 details", async () => {
+  const rows = Array.from({ length: 40 }, (_, i) => wireRow({ id: i + 1, counter: i + 1 }));
+  const september = rows.map((r) => ({ ...r, id: Number(r.id) + 100, invoice_date: "2026-09-08" }));
+  const { calls } = serve(rows, ({ url }) => wireDetail({ id: Number(url.split("/")[1]) }), ({ params }) => wirePage(params.month === "2026-09" ? september : rows));
+  open(); await ready(30);
+  expect(billAsks(calls)).toHaveLength(30);
+  expect(billAsks(calls)).not.toContain("sales/31/");
+  fireEvent.change(screen.getByRole("combobox", { name: "Month" }), { target: { value: "2026-09" } });
+  await waitFor(() => expect(billAsks(calls)).toContain("sales/130/"));
+  await ready(30);
+  expect(billAsks(calls)).toHaveLength(60);
+  expect(billAsks(calls)).not.toContain("sales/131/");
+});
+
+test("a failed detail past Print's cap is read only on ZIP press, blocks the zip, and retries only that cached query", async () => {
+  const rows = Array.from({ length: 32 }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
+  let failed = true;
+  let finish!: () => void;
+  const { calls } = serve(rows, ({ url }) => {
+    const id = Number(url.split("/")[1]);
+    if (id === 31 && failed) return new Promise<void>((done) => { finish = done; }).then(() => refuse(500, {}));
+    return wireDetail(rows[id - 1]);
+  });
+  open(); await ready(30);
+  expect(billAsks(calls)).toHaveLength(30);
+  vi.mocked(makeBillPdf).mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(billAsks(calls)).not.toContain("sales/32/");
+  await act(async () => finish());
+  const note = await screen.findByText("KGH/2026-27/31 didn't load");
+  expect(note.closest('[role="alert"]')).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Print 30" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
+  expect(makeBillPdf).not.toHaveBeenCalled();
+  const asked = vi.spyOn(qc, "refetchQueries");
+  const count = billAsks(calls).length;
+  act(() => vi.setSystemTime(new Date("2026-10-08T10:02:00+05:30")));
+  failed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(screen.getByRole("button", { name: "Trying…" })).toHaveAttribute("aria-busy", "true");
+  await waitFor(() => expect(zipped.files).toHaveLength(32), { timeout: 5000 });
+  await screen.findByText("32 PDFs made");
+  expect(asked.mock.calls).toEqual([[{ queryKey: billQuery(31).queryKey }]]);
+  expect(billAsks(calls).slice(count)).toEqual(["sales/31/"]);
+});
+
+test("a ready Print stays ready offline and reconnecting does not remake it", async () => {
+  serve(); open(); await ready();
+  const count = vi.mocked(makeBillPdf).mock.calls.length;
+  act(() => __setNetState("offline"));
+  expect(screen.getByRole("button", { name: "Print 3" })).toBeEnabled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Print 3" }));
+  expect(window.open).toHaveBeenCalledWith("blob:x", "_blank");
+  act(() => __setNetState("online"));
+  await ready();
+  expect(makeBillPdf).toHaveBeenCalledTimes(count);
+});
+
+test("a deleted picked bill is named as deleted and cannot be retried", async () => {
+  serve(ROWS, ({ url }) => {
+    if (url === "sales/388/") refuse(404, { code: "deleted", binned: { id: 388, invoice_number: "KGH/2026-27/31" } });
+    return wireDetail();
+  });
+  open();
+  const note = await screen.findByText(/KGH\/2026-27\/31.*deleted/);
+  expect(note.closest('[role="alert"]')).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  expect(makeBillPdf).not.toHaveBeenCalled();
+});
+
+test("unloaded bills offline use the shared wait words without Try again", async () => {
+  serve(ROWS, () => refuse(500, {})); open();
+  await screen.findByText(/didn't load/);
+  act(() => __setNetState("offline"));
+  expect(screen.getByText(/They load by themselves when the internet is back/).closest('[role="alert"]')).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+});
+
+test("revisiting stale list and bill queries refreshes them using the app's cache age", async () => {
+  const { calls } = serve(); open(); await ready();
+  const listCount = calls.filter((c) => c.url === "sales/").length;
+  act(() => vi.setSystemTime(new Date("2026-10-08T10:01:00+05:30")));
+  fireEvent.click(screen.getByRole("radio", { name: "Not sent yet" }));
+  await ready();
+  fireEvent.click(screen.getByRole("radio", { name: "All bills" }));
+  await ready();
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/").length).toBeGreaterThan(listCount + 1));
+  expect(billAsks(calls).length).toBeGreaterThan(3);
+});
+
+
+test("new list and detail reads keep the app's one retry on a server error", async () => {
+  let list = 0;
+  let detail = 0;
+  const next = wireRow({ id: 999, invoice_number: "KGH/2026-27/99" });
+  serve(ROWS, ({ url }) => {
+    if (url === "sales/999/" && detail++ === 0) refuse(503, {});
+    return wireDetail(url === "sales/999/" ? next : ROWS.find((r) => url === `sales/${r.id}/`));
+  }, ({ params }) => {
+    if (params.credit && list++ === 0) refuse(503, {});
+    return wirePage(params.credit ? [next] : ROWS);
+  });
+  open(); await ready();
+  qc.setDefaultOptions({ ...qc.getDefaultOptions(), queries: { ...queryClient.getDefaultOptions().queries, retryDelay: 0 } });
+  fireEvent.click(screen.getByRole("radio", { name: "Udhaar" }));
+  await ready(1);
+  expect(list).toBe(2);
+  expect(detail).toBe(2);
+});
+
+
+test("a ZIP press refreshes stale Print details without cancelling its own job", async () => {
+  let total = "87083.21";
+  serve(ROWS, ({ url }) => wireDetail({ ...ROWS.find((r) => url === `sales/${r.id}/`), total_amount: total }));
+  open(); await ready();
+  total = "87084.21";
+  act(() => vi.setSystemTime(new Date("2026-10-08T10:01:00+05:30")));
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await screen.findByText("3 PDFs made");
+  expect(zipped.files).toHaveLength(3);
+  expect(screen.getByRole("button", { name: "Save the zip" })).toBeEnabled();
+});
+
+test("a ready ZIP also discards a changed cached bill beyond Print's first 30", async () => {
+  const rows = Array.from({ length: 31 }, (_, i) => wireRow({ id: i + 1, counter: i + 1 }));
+  serve(rows); open(); await ready(30);
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(zipped.files).toHaveLength(31), { timeout: 5000 });
+  await screen.findByText("31 PDFs made");
+  const changed: BillOutcome = { kind: "bill", bill: toBillDetail(wireDetail({ ...rows[30], total_amount: "999.99" })) };
+  act(() => qc.setQueryData(billQuery(31).queryKey, changed));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument());
+});
+
+
+test("a slow retry of a Print detail keeps the failure note visible with Trying", async () => {
+  let failed = true;
+  let finish!: (data: unknown) => void;
+  serve(ROWS, ({ url }) => {
+    if (url === "sales/388/") {
+      if (failed) refuse(500, {});
+      return new Promise((done) => { finish = done; });
+    }
+    return wireDetail();
+  });
+  open(); await screen.findByText(/didn't load/);
+  failed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(screen.getByRole("button", { name: "Trying…" })).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByText(/didn't load/).closest('[role="alert"]')).not.toBeNull();
+  await act(async () => finish(wireDetail(ROWS[2])));
+  await ready();
+});
+
+test("Stop releases a ZIP detail read paused offline by the app's retry policy", async () => {
+  const rows = Array.from({ length: 31 }, (_, i) => wireRow({ id: i + 1, counter: i + 1 }));
+  let finish!: () => void;
+  serve(rows, ({ url }) => {
+    if (url === "sales/31/") return new Promise<void>((done) => { finish = done; }).then(() => refuse(503, {}));
+    return wireDetail(rows[Number(url.split("/")[1]) - 1]);
+  });
+  open(); await ready(30);
+  qc.setDefaultOptions({ ...qc.getDefaultOptions(), queries: { ...queryClient.getDefaultOptions().queries, retryDelay: 0 } });
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  act(() => { onlineManager.setOnline(false); __setNetState("offline"); });
+  await act(async () => finish());
+  await waitFor(() => expect(qc.getQueryState(billQuery(31).queryKey)?.fetchStatus).toBe("paused"));
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await screen.findByText("The partial zip was discarded. Start again to make every selected bill.");
+  expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
+  expect(qc.getQueryState(billQuery(31).queryKey)?.fetchStatus).toBe("idle");
+});
+
+test("an offline ZIP detail failure resumes on reconnect without retrying successful reads", async () => {
+  const rows = Array.from({ length: 31 }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
+  let finish!: () => void;
+  let failed = true;
+  const { calls } = serve(rows, ({ url }) => {
+    if (url === "sales/31/" && failed) return new Promise<void>((done) => { finish = done; }).then(() => { throw Object.assign(new Error("network"), { isAxiosError: true }); });
+    return wireDetail(rows[Number(url.split("/")[1]) - 1]);
+  });
+  open(); await ready(30);
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  act(() => __setNetState("offline"));
+  await act(async () => finish());
+  await screen.findByText(/It loads by itself when the internet is back/);
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  const count = billAsks(calls).length;
+  failed = false; online.mockReturnValue(true);
+  act(() => __setNetState("online"));
+  await waitFor(() => expect(zipped.files).toHaveLength(31), { timeout: 5000 });
+  await screen.findByText("31 PDFs made");
+  expect(billAsks(calls).slice(count)).toEqual(["sales/31/"]);
+});
+
+test("cap instructions scope the number range to a firm so later firms are not hidden", async () => {
+  const rows = Array.from({ length: 40 }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
+  rows.push(wireRow({ id: 101, business: 2, business_name: "MEERA ORNAMENTS", counter: 1, invoice_number: "MO/2026-27/1" }));
+  serve(rows); open(); await ready(30);
+  expect(screen.getByText(/pick KIRAN GOLD HOUSE and set the bill numbers from 31/)).toBeInTheDocument();
+  expect(screen.getByText(/Clear the number range before picking any later firm/)).toBeInTheDocument();
 });
