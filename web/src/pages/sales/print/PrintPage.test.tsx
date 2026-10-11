@@ -311,20 +311,30 @@ test("a paper bill never presses for a send: its copy is offered beside Print an
 
 test("the PDF follows the bill on screen: a refresh that changed what prints makes it again; one that changed nothing that prints keeps the one made (Ruling 1E-8)", async () => {
   let detail = wireDetail({ firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=abc" }) });
-  salesServer([["GET", "sales/412/", () => detail], ["GET", "shop-settings/", () => SETTINGS]]);
+  salesServer([["GET", "sales/412/", () => detail], ["GET", "shop-settings/", () => SETTINGS], ["POST", "audit-logs/log/", () => ({ ok: true })]]);
   const qc = testQueryClient();
   openWith(qc);
-  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(1));
+  const pdf = await screen.findByRole("button", { name: "PDF" });
+  // An invocation only starts generation; refresh after the page actually holds the made file.
+  await waitFor(() => expect(pdf).toBeEnabled());
+  expect(billFile).toHaveBeenCalledTimes(1);
+  const first = (await vi.mocked(billFile).mock.results[0].value).blob;
   // sent meanwhile, and the signature's link signed afresh: the bill changed, but not what it prints
   detail = { ...detail, sent: SENT, firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=def" }) };
   await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
   expect(await screen.findByRole("button", { name: "Send again" })).toBeInTheDocument();
   expect(billFile).toHaveBeenCalledTimes(1);
+  await userEvent.click(pdf);
+  expect(URL.createObjectURL).toHaveBeenLastCalledWith(first);
   // changed elsewhere: its note
   detail = { ...detail, notes: "Hallmarked by BIS" };
   await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
-  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(2));
+  await waitFor(() => { expect(billFile).toHaveBeenCalledTimes(2); expect(pdf).toBeEnabled(); });
   expect(vi.mocked(billFile).mock.calls[1][0]).toMatchObject({ id: 412, notes: "Hallmarked by BIS" });
+  const replacement = (await vi.mocked(billFile).mock.results[1].value).blob;
+  expect(replacement).not.toBe(first);
+  await userEvent.click(pdf);
+  expect(URL.createObjectURL).toHaveBeenLastCalledWith(replacement);
 });
 
 test("offline: a print page with no bill yet says so, and the bill comes when the internet is back; a PDF that can't be made says why and offers Try again", async () => {
