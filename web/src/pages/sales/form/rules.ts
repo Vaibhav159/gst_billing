@@ -2,6 +2,10 @@
 // a line's problems, dates typed day-first, which months can take a bill, the checks beside the total, and what an edit
 // changes. Pure: the form hook gathers what the server has said (the firm's locked months, the next number, whether a
 // typed number is free) and hands it in.
+import { rateKey, type Rates } from "@/core/rates/model";
+import { rateNote, rateSlip } from "@/core/rates/slip";
+import type { Reference } from "@/core/rates/RateReference";
+import type { SaleProduct } from "./products";
 import type { Customer } from "@/core/api/customers";
 import { addMonths, date, dateShort, fyMonths, fyOf, inr, monthLabel, monthOf, possessive, qty as qtyLabel, unitDecimals } from "@/core/format";
 import { hasGstin } from "@/core/ids";
@@ -288,4 +292,15 @@ export function changesOf(bill: BillDetail, f: FormState, now: { firmName: strin
   if (out.length === (tax ? 1 : 0)) return [];
   if (bill.total_amount !== now.total) out.push(["Total", inr(bill.total_amount), inr(now.total)]);
   return out;
+}
+
+/** Saved bill lines have no product id: only a unique exact catalogue name can supply a reference. */
+export function lineRateReference(line: FormLine, products: SaleProduct[] | undefined, rates: Rates | undefined, date: string): Reference | null {
+  if (line.custom || !["g", "gms"].includes(line.unit) || !rates?.in_force || rates.in_force.on > date) return null;
+  const matches = products?.filter(p => line.productId !== null ? p.id === line.productId : p.name === line.name) ?? [];
+  const product = matches.length === 1 ? matches[0] : null;
+  const key = rateKey(product);
+  if (!key) return null;
+  const board = rates.in_force;
+  return { note: rateNote(board, key, date, rates.today), slip: rateSlip({ product, unit: line.unit, rate: line.rate, board }) };
 }

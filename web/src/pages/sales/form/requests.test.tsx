@@ -4,6 +4,7 @@ import { __resetDrafts, type DraftData } from "@/core/api/drafts";
 import { __setNetState } from "@/core/api/network";
 import { __resetDeviceDrafts } from "@/core/deviceDrafts";
 import { wireDetail, type Route } from "@/core/sales/fixtures";
+import { wireRates } from "@/core/rates/testing";
 import { ANIL, formServer, fakeToday, mountForm, settle } from "./testing";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -24,6 +25,7 @@ const RAKESHS: DraftData = {
 };
 const rakeshs = { id: "5d1c2a8e-0b7f-4a8e-9c3a-1f2e3d4c5b6a", business: 3, started_by: { id: 2, name: "Rakesh Soni" }, data: RAKESHS, created_at: "2026-10-08T09:20:00+05:30", updated_at: "2026-10-08T09:25:00+05:30" };
 const draftRoutes: Route[] = [
+  ["GET", "rates/", () => wireRates({ in_force: null })],
   ["GET", "drafts/", () => ({ results: [rakeshs] })],
   ["PUT", /^drafts\/[0-9a-f-]+\/$/, ({ url, body }) => ({ id: url.split("/")[1], business: 3, started_by: { id: 1, name: "K" }, data: (body as { data: unknown }).data, created_at: "2026-10-08T10:00:00+05:30", updated_at: "2026-10-08T10:00:02+05:30" })],
   ["DELETE", /^drafts\/[0-9a-f-]+\/$/, () => ""],
@@ -38,7 +40,8 @@ test("opening a new bill", async () => {
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
-  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(8);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(9);
+  expect(calls.filter(c => c.url === "rates/").map(c => c.params.date)).toEqual(["2026-10-08"]);
 });
 
 test("opening an unfinished bill (?draft=)", async () => {
@@ -49,7 +52,8 @@ test("opening an unfinished bill (?draft=)", async () => {
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
-  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(10);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(11);
+  expect(calls.filter(c => c.url === "rates/").map(c => c.params.date)).toEqual(["2026-10-08"]);
 });
 
 test("opening a paper bill from the saved panel's Next paper bill", async () => {
@@ -60,7 +64,8 @@ test("opening a paper bill from the saved panel's Next paper bill", async () => 
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
-  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(10);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(11);
+  expect(calls.filter(c => c.url === "rates/").map(c => c.params.date)).toEqual(["2026-09-29"]);
 });
 
 test("opening an edit", async () => {
@@ -71,7 +76,8 @@ test("opening an edit", async () => {
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
-  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(8);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(9);
+  expect(calls.filter(c => c.url === "rates/").map(c => c.params.date)).toEqual(["2026-10-08"]);
 });
 
 test("a counter bill typed and saved, then what follows", async () => {
@@ -142,8 +148,9 @@ test("typing a paper bill's date with a four-digit year", async () => {
   await settle(); await settle();
   await act(async () => { vi.advanceTimersByTime(400); });
   await settle();
-  expect(calls.slice(at)).toHaveLength(2);
-  expect(calls.slice(at).every((c) => c.params.invoice_date === "2026-09-28")).toBe(true);
+  expect(calls.slice(at)).toHaveLength(3);
+  expect(calls.slice(at).filter(c => c.url === "rates/").map(c => c.params.date)).toEqual(["2026-09-28"]);
+  expect(calls.slice(at).filter(c => c.url !== "rates/").every((c) => c.params.invoice_date === "2026-09-28")).toBe(true);
 });
 
 test("a cleared paper date asks for neither the book nor a number", async () => {
@@ -157,4 +164,5 @@ test("a cleared paper date asks for neither the book nor a number", async () => 
   await user.clear(screen.getByRole("textbox", { name: /Date on the paper bill/ }));
   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
   expect(calls.slice(at).filter((c) => c.url.startsWith("sales/"))).toEqual([]);
+  expect(calls.slice(at).filter((c) => c.url === "rates/")).toEqual([]);
 });

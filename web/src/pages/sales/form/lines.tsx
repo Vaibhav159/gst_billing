@@ -6,12 +6,13 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, StickyNote, Trash2 } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
+import { RateReference } from "@/core/rates/RateReference";
 import { unitDecimals } from "@/core/format";
 import { Button, Combobox, IconButton, Input, Money, QtyInput, Select, type ComboItem, type ComboOption } from "@/core/ui";
 import { focusNow, focusSoon, RateInput } from "./fields";
 import { hasContent, lineFromProduct, SLAB_OPTIONS, slabOf, type FormLine } from "./model";
 import { matchProducts, productSubtitle, UNIT_OPTIONS, type SaleProduct } from "./products";
-import { isWeight, lineProblems, lineWarning, perWord, unitWord } from "./rules";
+import { isWeight, lineProblems, lineRateReference, lineWarning, perWord, unitWord } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 import { useRepairBoxes } from "./useRepairBoxes";
 
@@ -74,12 +75,15 @@ function QtyUnit({ F, l, n, describedBy, onEnter }: { F: BillFormApi; l: FormLin
 }
 
 /** The rate per unit as written on the paper bill, making included, before GST. */
-function RateField({ F, l, n, describedBy, onEnter }: { F: BillFormApi; l: FormLine; n: number; describedBy?: string; onEnter: () => void }) {
+function RateField({ F, l, n, products, describedBy, onEnter }: { F: BillFormApi; l: FormLine; n: number; products: SaleProduct[] | undefined; describedBy?: string; onEnter: () => void }) {
+  const reference = lineRateReference(l, products, F.rates, F.f.date);
+  const boardId = `bf-${l.key}-board`;
   return (
     <div className="min-w-0">
       <RateInput id={`bf-${l.key}-rate`} value={l.rate} onChange={(r) => F.setLine(l.key, { rate: r })} suffix={`/${l.unit}`}
-        aria-label={`Line ${n} rate per ${perWord(l.unit)}`} invalid={Boolean(F.showErr(`${l.key}-rate`))} aria-describedby={describedBy}
+        aria-label={`Line ${n} rate per ${perWord(l.unit)}`} invalid={Boolean(F.showErr(`${l.key}-rate`))} aria-describedby={[describedBy, reference ? boardId : ""].filter(Boolean).join(" ") || undefined}
         inputClassName={cn("text-right tnum !pl-7", l.unit.length > 2 ? "!pr-11" : "!pr-9")} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(); } }} />
+      <RateReference id={boardId} reference={reference} onFix={rate => { F.setLine(l.key, { rate }); focusNow(`bf-${l.key}-rate`); }} />
     </div>
   );
 }
@@ -162,7 +166,7 @@ export function LineRow(props: LineProps & { oneRow: boolean }) {
         <span className="text-sm text-muted tnum pt-3" aria-hidden="true">{n}</span>
         <ProductCell {...props} />
         <QtyUnit F={F} l={l} n={n} describedBy={desc("qty")} onEnter={toRate} />
-        <RateField F={F} l={l} n={n} describedBy={desc("rate")} onEnter={next} />
+        <RateField F={F} l={l} n={n} products={props.products} describedBy={desc("rate")} onEnter={next} />
         <div className="pt-2.5">{amount}</div>
         {removeBtn}
         <div className="col-start-2 col-span-4 min-w-0"><LineNotes F={F} l={l} /></div>
@@ -180,7 +184,7 @@ export function LineRow(props: LineProps & { oneRow: boolean }) {
       <div className="grid grid-cols-[20px_repeat(2,minmax(0,1fr))] gap-x-2.5 mt-2.5">
         <span aria-hidden="true" />
         <div className="min-w-0 flex flex-col gap-1"><span className="caps" aria-hidden="true">{isWeight(l.unit) ? "Weight" : "Qty"}</span><QtyUnit F={F} l={l} n={n} describedBy={desc("qty")} onEnter={toRate} /></div>
-        <div className="min-w-0 flex flex-col gap-1"><span className="caps" aria-hidden="true">Rate per {l.unit}</span><RateField F={F} l={l} n={n} describedBy={desc("rate")} onEnter={next} /></div>
+        <div className="min-w-0 flex flex-col gap-1"><span className="caps" aria-hidden="true">Rate per {l.unit}</span><RateField F={F} l={l} n={n} products={props.products} describedBy={desc("rate")} onEnter={next} /></div>
       </div>
       <div className="pl-[30px]"><LineNotes F={F} l={l} /></div>
     </div>

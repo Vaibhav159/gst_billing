@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { Check, PackagePlus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { RateReference } from "@/core/rates/RateReference";
 import { unitDecimals } from "@/core/format";
 import { lineFigures } from "@/core/sales/maths";
 import { Button, Chip, Dialog, DL, Field, Input, ListRow, Money, QtyInput, SearchInput, Select } from "@/core/ui";
@@ -12,7 +13,7 @@ import { focusNow, RateInput } from "./fields";
 import { blankLine, hasContent, lineFromProduct, SLAB_OPTIONS, slabOf, type FormLine } from "./model";
 import { NewItemForm } from "./NewItemForm";
 import { matchProducts, productSubtitle, quickProducts, UNIT_OPTIONS, type SaleProduct } from "./products";
-import { isWeight, lineProblems, perWord, unitWord, type LineField } from "./rules";
+import { isWeight, lineProblems, lineRateReference, perWord, unitWord, type LineField } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 import { useRepairBoxes } from "./useRepairBoxes";
 
@@ -66,6 +67,7 @@ export function ItemSheet({ F, open, lineKey, products, productsError, focusFiel
   const slab = slabOf(line.gst);
   const fig = lineFigures({ quantity: line.qty ?? 0, rate: line.rate || 0, gst_percent: slab || "0" }, F.tt.inter) ?? { taxable: 0, tax: 0, amount: 0 };
   const err = lineProblems(line);
+  const reference = lineRateReference(line, products, F.rates, F.f.date);
   // A refusal belongs to the value sent; local typing clears that field's words without losing the other refusals.
   const sourceError = (k: LineField | "product" | "note") => {
     const field = k === "product" ? "name" : k;
@@ -159,8 +161,9 @@ export function ItemSheet({ F, open, lineKey, products, productsError, focusFiel
             <p className="text-sm text-fg2 flex items-baseline justify-between gap-3" aria-live="polite"><span>Line total incl. GST</span><Money value={fig.amount} strong tone="sale" bump /></p>
           </div>
           <Field label={`Rate per ${perWord(line.unit)}`} htmlFor="is-rate" error={show("rate")} hint={show("rate") ? undefined : "As written on the paper bill, making included, before GST."}>
-            <RateInput id="is-rate" value={line.rate} onChange={(r) => setLine((l) => ({ ...l, rate: r }))} invalid={Boolean(show("rate"))} inputClassName="h-12 text-lg tnum" enterKeyHint="done" onKeyDown={enterTo(null)} />
+            <RateInput id="is-rate" aria-describedby={[show("rate") ? "is-rate-error" : "is-rate-hint", reference ? "is-rate-board" : ""].filter(Boolean).join(" ")} value={line.rate} onChange={(r) => setLine((l) => ({ ...l, rate: r }))} invalid={Boolean(show("rate"))} inputClassName="h-12 text-lg tnum" enterKeyHint="done" onKeyDown={enterTo(null)} />
           </Field>
+          <RateReference id="is-rate-board" reference={reference} onFix={rate => { setLine(l => ({ ...l, rate })); focusNow("is-rate"); }} />
           <Field label="Note on this item" htmlFor="is-note" error={noteError} hint="Optional: size, design or a hallmark number. Printed under the item.">
             <Input id="is-note" value={line.note} maxLength={60} invalid={Boolean(noteError)} onChange={(e) => setLine((l) => ({ ...l, note: e.target.value }))} />
           </Field>
