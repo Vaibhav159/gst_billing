@@ -20,7 +20,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, Trim, Upper
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, Lower, Trim, Upper
 from django.http import Http404
 from rest_framework.exceptions import ValidationError
 
@@ -61,16 +61,35 @@ def scoped_purchases(firm=None, fy=None):
     return bills
 
 
+def tax_total():
+    tax = uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")\
+        .annotate(tax=Sum(F("cgst") + F("sgst") + F("igst"))).values("tax")
+    return Coalesce(Subquery(tax), Value(ZERO), output_field=DECIMAL)
+
+
+def ordered_suppliers(rows, ordering, firm=None, fy=None):
+    if ordering == "-total":
+        totals = scoped_purchases(firm, fy).filter(customer_id=OuterRef("pk")).order_by().values("customer_id")\
+            .annotate(total=Sum("total_amount")).values("total")
+        rows = rows.alias(purchase_total=Coalesce(Subquery(totals), Value(ZERO), output_field=DECIMAL))
+    return rows.order_by(*(["-purchase_total"] if ordering == "-total" else []), Lower("name"), "pk")
+
+
+def supplier_summary(rows, firm=None, fy=None, *, count):
+    bills = scoped_purchases(firm, fy).filter(customer_id__in=rows.order_by().values("pk"))
+    figures = bills.annotate(_tax=tax_total()).aggregate(bills=Count("pk"), total=Sum("total_amount"), tax=Sum("_tax"))
+    return {"suppliers": count, "bills": figures["bills"],
+            **{key: money(figures[key] or ZERO) for key in ("total", "tax")}}
+
+
 def supplier_figures(ids, firm=None, fy=None):
     """One aggregate query; invoice totals are never multiplied by joining their lines."""
     if not ids:
         return {}
     bills = scoped_purchases(firm, fy).filter(customer_id__in=ids)
-    tax = uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")\
-        .annotate(tax=Sum(F("cgst") + F("sgst") + F("igst"))).values("tax")
     newest = scoped_purchases(firm, fy).filter(customer_id=OuterRef("customer_id")).order_by(*NEWEST)
     bills = bills.annotate(
-        _tax=Coalesce(Subquery(tax), Value(ZERO), output_field=DECIMAL),
+        _tax=tax_total(),
         _limit_year=ExtractYear("invoice_date") + Case(When(invoice_date__month__lt=4, then=Value(0)),
                                                      default=Value(1), output_field=IntegerField()),
         _credit_year=ExtractYear(Coalesce("itc_month", "invoice_date")),
@@ -176,6 +195,7 @@ def save_supplier(data, user, instance=None, enrich=True):
                 raise Refusal(f"This GSTIN belongs to {found.name}, already in your suppliers.", "gstin_taken",
                               supplier=supplier_ref(found))
         created = instance is None
+        before = {field: getattr(instance, field) for field in FIELDS if field != "id"} if instance else {}
         customer = instance or Customer()
         for field, value in data.items():
             setattr(customer, field, value)
@@ -185,9 +205,13 @@ def save_supplier(data, user, instance=None, enrich=True):
                 customer.save()
         except IntegrityError:
             name_problem(data["name"], instance)
-            raise
+            raise ValidationError({"name": ["This supplier couldn't be saved. Check the supplier details and try again."]}) from None
+        changes = {field: {"old": str(value) if value is not None else None,
+                           "new": str(getattr(customer, field)) if getattr(customer, field) is not None else None}
+                   for field, value in before.items() if value != getattr(customer, field)}
         AuditLog.objects.create(action="created" if created else "updated", entity="customer", entity_id=customer.pk,
-                                entity_name=customer.name, user=user, details="New supplier" if created else "Supplier details updated")
+                                entity_name=customer.name, user=user, changes=changes,
+                                details="New supplier" if created else "Supplier details updated")
         if created and enrich:
             # Import dry runs roll back this callback with their rows.
             from billing.gstin import enrich_customer

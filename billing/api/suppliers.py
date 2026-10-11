@@ -1,7 +1,5 @@
 """The v3 supplier register, independent of v2's customer write contract."""
 
-from decimal import Decimal
-
 from django.db.models import Q
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
@@ -16,7 +14,6 @@ from billing.gstin import validate
 from billing.params import PICK_A_FIRM, fy_param, id_param, text_param
 from billing.services import suppliers as service
 from billing.tax_rules import clean_gstin, gstin_problem, state_name_from_gstin
-from billing.text import money
 
 NAME_WORDS = "Type the supplier's name as it's printed on their bill."
 
@@ -80,16 +77,11 @@ class SupplierViewSet(viewsets.GenericViewSet):
         ordering = request.query_params.get("ordering", "-total")
         if ordering not in ("-total", "name"):
             raise serializers.ValidationError({"ordering": ["Choose name or -total for the supplier list."]})
-        # Only ids and sort names cross the wire for the full matching register.
-        names = list(rows.values_list("id", "name"))
-        figures = service.supplier_figures([pk for pk, _name in names], firm, fy)
-        names.sort(key=lambda row: ((-Decimal(figures[row[0]]["total"]), row[1].casefold(), row[0]) if ordering == "-total"
-                                    else (row[1].casefold(), row[0])))
-        page = self.paginate_queryset([pk for pk, _name in names])
-        found = {customer.pk: customer for customer in rows.filter(pk__in=page).only("id", "name", "gst_number", "state_name", "city")}
-        response = self.get_paginated_response([{**supplier_ref(found[pk]), "figures": figures[pk]} for pk in page])
-        response.data["summary"] = {"suppliers": len(names), "bills": sum(row["bills"] for row in figures.values()),
-                                    **{key: money(sum((Decimal(row[key]) for row in figures.values()), Decimal("0"))) for key in ("total", "tax")}}
+        rows = service.ordered_suppliers(rows, ordering, firm, fy)
+        page = self.paginate_queryset(rows.only("id", "name", "gst_number", "state_name", "city"))
+        figures = service.supplier_figures([customer.pk for customer in page], firm, fy)
+        response = self.get_paginated_response([{**supplier_ref(customer), "figures": figures[customer.pk]} for customer in page])
+        response.data["summary"] = service.supplier_summary(rows, firm, fy, count=response.data["count"])
         return response
 
     def retrieve(self, request, pk=None):
