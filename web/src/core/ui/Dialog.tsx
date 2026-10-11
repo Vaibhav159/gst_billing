@@ -16,11 +16,11 @@ function useHeld<T>(open: boolean, value: T): T {
 
 /**
  * Whether the body is a region the keyboard reaches (WCAG 2.1.1, Ruling 1D-18): while it overflows with nothing focusable
- * inside (the bill's review once payment is picked), so Tab reaches it and the arrows scroll it. Asked again as the body
- * resizes or its content changes, and forgotten as the dialog closes, so it reopens as no region until measured; the
- * focus trap never puts the first focus there.
+ * inside (the bill's review once payment is picked; in the bills list, the preview of a walk-in's bill), so Tab reaches
+ * it and the arrows scroll it. Asked again as the body resizes or its content changes, and forgotten as the dialog
+ * closes, so it reopens as no region until measured; the focus trap never puts the first focus there.
  */
-function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): boolean {
+export function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): boolean {
   const [region, setRegion] = useState(false);
   useEffect(() => {
     const el = body.current;

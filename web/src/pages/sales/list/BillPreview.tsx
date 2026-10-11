@@ -1,6 +1,6 @@
 // The bill beside the table (PROTO sales/SalesList.jsx:837-907): its figures and status at a glance, its items and who
 // made it once its own answer comes. The list's row draws it at once; the bill's answer fills in the rest.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ban, ChevronDown, ChevronUp, Lock, MoreHorizontal, Printer, Send, X } from "lucide-react";
 import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,13 +10,28 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { dateLong, qty } from "@/core/format";
 import type { BillDetail, BillRow } from "@/core/sales/types";
 import { LOCKED_REASON, PAY, ewayNumberText, rateText, realReason, sentLine, taxLines, timeOf } from "@/core/sales/words";
-import { Banner, Button, ButtonLink, DL, IconButton, Menu, Money, Skeleton, type DLRow } from "@/core/ui";
+import { Banner, Button, ButtonLink, DL, IconButton, Menu, Money, Skeleton, useScrollRegion, type DLRow } from "@/core/ui";
 import type { OpenDialog } from "../actions/BillDialogs";
 import { SendStatusBadge, StatusCell, TaxTypeBadge } from "../actions/StatusCell";
 import { madeByRow } from "../actions/recordRows";
 import { useBillMenu } from "../actions/useBillMenu";
 import { useSendReady } from "../actions/useSendBill";
 import { customerLine } from "@/pages/customers/forBills";
+
+/**
+ * The preview's scrolling part, drawn afresh for each bill (its rise), so each bill's is measured afresh. While it
+ * overflows with nothing inside for Tab (a walk-in's name is no link; a cancelled bill's banner makes it taller), it's a
+ * region the keyboard reaches, so the arrows scroll it (WCAG 2.1.1), as a dialog's body is (Ruling 1D-18). Its focus
+ * ring is drawn inside it: the card's edge is right there.
+ */
+function PreviewBody({ number, children }: { number: string; children: ReactNode }) {
+  const body = useRef<HTMLDivElement>(null);
+  const region = useScrollRegion(body, true);
+  return (
+    <div ref={body} {...(region ? { tabIndex: 0, role: "region", "aria-label": `Details of bill ${number}` } : {})}
+      className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-5 anim-rise focus-visible:[outline-offset:-2px]">{children}</div>
+  );
+}
 
 export function BillPreview({ id, row, index, total, onClose, onMove, openDialog, send }: {
   id: number; row: BillRow | null; index: number; total: number; onClose: () => void; onMove: (d: -1 | 1) => void; openDialog: OpenDialog; send: (b: BillRow | BillDetail) => void;
@@ -73,7 +88,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
         <IconButton size="sm" label="Next bill" icon={ChevronDown} disabled={index < 0 || index >= total - 1} onClick={() => onMove(1)} />
         {close}
       </div>
-      <div key={b.id} className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-5 anim-rise">
+      <PreviewBody key={b.id} number={b.invoice_number}>
         <div className="flex flex-wrap gap-1.5">
           <TaxTypeBadge bill={b} />
           <StatusCell bill={b} max={3} />
@@ -113,7 +128,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
           ]} />
         ) : null}
         {b.locked ? <p className="text-sm text-file flex items-start gap-1.5"><Lock size={15} className="shrink-0 mt-0.5" aria-hidden="true" />{LOCKED_REASON}</p> : null}
-      </div>
+      </PreviewBody>
       <div className="px-5 py-3 border-t border-rule flex flex-wrap items-center gap-2">
         <ButtonLink to={`/sales/${b.id}`} variant="primary" size="sm">Open full bill</ButtonLink>
         <ButtonLink to={`/sales/${b.id}/print`} size="sm" icon={Printer}>Print or PDF</ButtonLink>

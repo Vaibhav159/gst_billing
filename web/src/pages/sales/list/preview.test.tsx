@@ -14,12 +14,13 @@ async function pass(ms = 0) {
   for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }
 const props = { index: 0, total: 10, onClose: vi.fn(), onMove: vi.fn(), openDialog: vi.fn(), send: vi.fn() };
-function setup() {
+/** over: what a bill's row and answer say besides the contract's example (its status, its customer), by its id. */
+function setup(over: (id: number) => Record<string, unknown> = () => ({})) {
   const qc = testQueryClient();
-  const { calls } = salesServer([["GET", /^sales\/\d+\/$/, (c) => wireDetail({ id: Number(c.url.split("/")[1]), invoice_number: c.url.split("/")[1] })]]);
+  const { calls } = salesServer([["GET", /^sales\/\d+\/$/, (c) => { const id = Number(c.url.split("/")[1]); return wireDetail({ id, invoice_number: String(id), ...over(id) }); }]]);
   function Preview({ id }: { id: number }) {
     return <QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><MemoryRouter><ToastProvider>
-      <BillPreview {...props} id={id} row={toBillRow(wireRow({ id, invoice_number: String(id) }))} />
+      <BillPreview {...props} id={id} row={toBillRow(wireRow({ id, invoice_number: String(id), ...over(id) }))} />
     </ToastProvider></MemoryRouter></AuthContext.Provider></QueryClientProvider>;
   }
   return { qc, calls, Preview };
@@ -80,4 +81,37 @@ test("returning quickly to a stale bill waits for a fresh 200 ms pause", async (
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url)).toEqual(["sales/412/"]);
   await pass(1);
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url)).toEqual(["sales/412/", "sales/412/"]);
+});
+
+test("a body that scrolls with nothing to focus inside (a walk-in's cancelled bill) takes the keyboard as a region, as a dialog's does (Ruling 1D-18)", async () => {
+  // jsdom lays nothing out: what Tab reaches is drawn, and the preview's scrolling body is taller than its box
+  const was = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetParent")!;
+  const sized = HTMLElement.prototype as unknown as Record<string, unknown>;
+  Object.defineProperty(HTMLElement.prototype, "offsetParent", { configurable: true, get() { return (this as HTMLElement).parentElement; } });
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return (this as HTMLElement).classList.contains("overflow-y-auto") ? 900 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return (this as HTMLElement).classList.contains("overflow-y-auto") ? 500 : 0; } });
+  // 412 is a walk-in's cancelled bill, 413 Anil Gupta's
+  const cancelled = { status: "cancelled", cancel_reason: "Test bill" };
+  const walkIn = { ...cancelled, customer: { ...(wireDetail().customer as object), id: 9, name: "Walk-in Customer", type: "walkin", mobile_number: "" } };
+  const { Preview } = setup((id) => (id === 412 ? walkIn : cancelled));
+  try {
+    // a walk-in's name is no link: nothing in the body for Tab (Send is in the foot), so the body takes it
+    const { rerender } = render(<Preview id={412} />);
+    await pass(200);
+    const body = screen.getByRole("region", { name: "Details of bill 412" });
+    expect(body).toHaveAttribute("tabindex", "0");
+    expect(body).toHaveTextContent("Total when issued");
+    // the next bill's body is measured afresh: a customer's name is a link Tab reaches, which scrolls the body, so it's no region
+    rerender(<Preview id={413} />);
+    await pass(200);
+    expect(screen.getByRole("link", { name: "Anil Gupta" })).toBeInTheDocument();
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+    rerender(<Preview id={412} />);
+    await pass(200);
+    expect(screen.getByRole("region", { name: "Details of bill 412" })).toHaveAttribute("tabindex", "0");
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, "offsetParent", was);
+    delete sized.scrollHeight;
+    delete sized.clientHeight;
+  }
 });
