@@ -3,12 +3,15 @@
 import json
 import math
 import uuid
+from datetime import timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef
 from django.http import Http404
+from django.utils import timezone
 from rest_framework import serializers, viewsets
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 
 from billing.models import Business, SaleDraft, SavedDraft
 from billing.params import PICK_A_FIRM, id_param
@@ -23,6 +26,8 @@ NEEDS_DATA = "An unfinished bill needs its data."
 TOO_BIG = "This unfinished bill is too big to keep (over 64 KB). Save it as a bill, or start a new one."
 # The most the list sends (contract 4), newest change first.
 LISTED = 500
+# Ruling 1A-44: a keep clears drafts nobody has changed for longer than this.
+ABANDONED_DAYS = 90
 # How deep a draft's data may nest, the data itself the first level: a bill form's state is a few levels deep. Deeper
 # is no bill's, and nesting without end would outrun the encoders' own recursion.
 DEEPEST = 32
@@ -110,6 +115,11 @@ class DraftViewSet(viewsets.GenericViewSet):
     lookup_value_regex = "[^/]+"
     v3_actions = {"list": "bill.create", "update": "bill.create", "destroy": "bill.create"}
 
+    def get_throttles(self):
+        if self.action == "list":
+            return [throttle() for throttle in api_settings.DEFAULT_THROTTLE_CLASSES]
+        return super().get_throttles()
+
     def list(self, request):
         """GET drafts/: the shop's drafts, newest change first, at most LISTED; business_id narrows them to one firm
         (Ruling 1A-33: an id not on file matches none). A draft whose bill was saved while a keep of it raced the save
@@ -130,6 +140,9 @@ class DraftViewSet(viewsets.GenericViewSet):
         saved draft is refused before its body is read: the client lets it go either way.
         """
         key = draft_key(pk)
+        # Its own transaction, before the keep locks its row: even an old draft being kept keeps its starter.
+        with transaction.atomic():
+            SaleDraft.objects.filter(updated_at__lt=timezone.now() - timedelta(days=ABANDONED_DAYS)).exclude(pk=key).delete()
         with transaction.atomic():
             locked = SaleDraft.objects.select_for_update(of=("self",)).select_related("started_by").only(*KEPT_FIELDS)
             draft = locked.filter(pk=key).first()
