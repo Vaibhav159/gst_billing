@@ -153,9 +153,13 @@ test("a deleted bill's page says when, who and why; the owner restores it, and t
 });
 
 test("a bill that was never there says so, with the way to Sales", async () => {
-  salesServer([["GET", "sales/999/", () => refuse(404, { detail: "No Invoice matches the given query." })]]);
+  const { calls } = salesServer([
+    ["GET", "sales/999/", () => refuse(404, { detail: "No Invoice matches the given query." })],
+    ["GET", "purchases/999/", () => refuse(404, { detail: "No purchase matches the given query." })],
+  ]);
   mount("/sales/999");
   expect(await screen.findByText("This bill isn't here")).toBeInTheDocument();
+  expect(calls.some(c => c.method === "GET" && c.url === "purchases/999/")).toBe(true);
   expect(screen.getByText("No sales bill has the id “999”. It may have been deleted; deleted bills can be restored from the Audit log.")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Go to Sales" })).toHaveAttribute("href", "/sales");
 });
