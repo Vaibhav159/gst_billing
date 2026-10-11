@@ -14,14 +14,15 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Case, Exists, IntegerField, OuterRef, Q, Value, When
+from django.db.models import Case, Exists, IntegerField, OuterRef, Q, QuerySet, Value, When
 from django.db.models.functions import Coalesce, ExtractYear, Length, Trim
 from django.utils import timezone
 
-from billing.api.media import sign_media_path
+from billing.cache import uncached
 from billing.constants import B2CL_THRESHOLD, BILL_ACTIVE, BILL_CANCELLED, GST_CODE
 from billing.fy import fy_label, fy_of, fy_range
 from billing.gstin import validate
+from billing.media import sign_media_path
 from billing.models import AuditLog, Business, Invoice, LineItem
 from billing.numbering import bill_ref, counter_of
 from billing.params import PICK_A_CUSTOMER, PICK_A_FIRM, date_param, fy_param, id_param, month_param, text_param
@@ -32,7 +33,7 @@ from billing.tax_rules import (
     HEADS,
     PAISA,
     THOUSANDTH,
-    _chosen,
+    chosen_place,
     classify_b2c,
     clean_gstin,
     has_gstin,
@@ -49,6 +50,16 @@ ZERO = Decimal("0")
 ITAX_LIMIT = Decimal("200000")  # Sec 269ST (cash, at or over) and Rule 114B (PAN, over)
 EWAY_LIMIT = Decimal("50000")
 RATE_PLACES = Decimal("0.0001")  # LineItem.gst_tax_rate keeps 4 places
+
+# What the FY-wide reads fetch (Ruling 1A-36: Neon's free plan has 5 GB of transfer a month): only the columns the
+# checks (bill_checks, supply_interstate, classify_b2c), the facets' views and duplicated_ids read of a bill, and
+# what bill_checks and sums() read of a line. A column left out here would be read again a bill at a time:
+# test_the_narrowed_reads_never_load_a_column_later fails on that.
+CHECK_FIELDS = ("invoice_date", "status", "paper", "sent_at", "payment_mode", "total_amount", "place_of_supply",
+                "customer__gst_number", "customer__state_name", "business__gst_number", "business__state_name")
+ITAX_FIELDS = ("status", "payment_mode", "total_amount", "customer__name", "customer__customer_type",
+               "customer__pan_number", "customer__gst_number", "customer__address")
+LINE_FIELDS = ("quantity", "rate", "gst_tax_rate", "cgst", "sgst", "igst", "hsn_code")
 
 
 # ── one bill ──────────────────────────────────────────────────────────────
@@ -184,10 +195,16 @@ def bill_row(invoice, lines, closed, duplicated):
     }
 
 
-def lines_of(invoices):
-    """{invoice id: [its lines]} in one query, in the order they were made."""
+def lines_of(invoices, fields=None):
+    """{invoice id: [its lines]} in one query, in the order they were made, read around cacheops (Ruling 1A-34).
+
+    `invoices`: bills, or a queryset of them, read as a subquery and never fetched. `fields`: only these columns
+    (Ruling 1A-36); every line's by default.
+    """
+    ids = invoices.values("pk") if isinstance(invoices, QuerySet) else [inv.pk for inv in invoices]
+    lines = uncached(LineItem).filter(invoice_id__in=ids).order_by("id")
     out = defaultdict(list)
-    for li in LineItem.objects.filter(invoice_id__in=[inv.pk for inv in invoices]).order_by("id"):
+    for li in lines.only("invoice", *fields) if fields else lines:
         out[li.invoice_id].append(li)
     return out
 
@@ -195,7 +212,7 @@ def lines_of(invoices):
 def bill_rows(invoices):
     """BillRows for a page of sales (customer and firm joined): three queries however long the page."""
     invoices = list(invoices)
-    lines = lines_of(invoices)
+    lines = lines_of(invoices, LINE_FIELDS)  # a row shows figures, not items
     closed = closed_months({inv.business_id for inv in invoices})
     twice = duplicated_ids(invoices)
     return [bill_row(inv, lines[inv.pk], closed, inv.pk in twice) for inv in invoices]
@@ -226,12 +243,12 @@ def _same_number(invoice):
     """The other sales with this bill's number in its firm and FY, as the list's duplicate check finds them."""
     key = _number_key(invoice.business_id, invoice.invoice_date, invoice.invoice_number)
     ids = [pk for pk in _by_number([invoice]).get(key, []) if pk != invoice.pk]
-    return list(Invoice.objects.filter(pk__in=ids).select_related("customer").order_by("invoice_date", "pk")) if ids else []
+    return list(Invoice.objects.sales().filter(pk__in=ids).select_related("customer").order_by("invoice_date", "pk")) if ids else []
 
 
 def bill_detail(invoice):
     """GET sales/{id}/: the bill page and the print data (BillDetail)."""
-    lines = list(invoice.lineitem_set.order_by("id"))
+    lines = lines_of([invoice])[invoice.pk]
     twins = _same_number(invoice)
     customer, total = invoice.customer, invoice.total_amount or ZERO
     pos, gstin = place_of_supply(invoice), clean_gstin(customer.gst_number)
@@ -247,7 +264,7 @@ def bill_detail(invoice):
     return {
         **bill_row(invoice, lines, closed_months({invoice.business_id}), bool(twins)),
         "place_of_supply": pos, "place_of_supply_name": GST_CODE.get(pos, ""),
-        "place_of_supply_chosen": _chosen(invoice) or None,  # one reading of the place everywhere (Task 5)
+        "place_of_supply_chosen": chosen_place(invoice) or None,  # one reading of the place everywhere (Task 5)
         "segment": classify_b2c(invoice.business, invoice)[0],
         "notes": invoice.notes,
         "replaces": bill_ref(replaces) if replaces else None,
@@ -305,8 +322,9 @@ def search(bills, q):
 
 
 def _stored_rates(text):
-    """The stored rates gst_rate matches: its slab read either way ("3" and "0.03" are 3%), as the column holds it
-    (0.03) and as older rows may (3). None for what isn't a rate the column could hold ("abc", "NaN", "1e-9")."""
+    """The stored rates gst_rate matches (Ruling 1A-37): its slab read either way ("3" and "0.03" are 3%), as the
+    column holds it (0.03) and as older rows may (3); an off-slab rate as a percent the same two ways, so it still
+    finds v2's odd lines. [] (no bill) for what isn't a rate the column could hold ("abc", "NaN", "1e-9")."""
     try:
         fraction = normalize_rate(Decimal(text))
         return [r for r in {fraction, fraction * 100} if abs(r) < 10 ** 9 and r == r.quantize(RATE_PLACES)]
@@ -359,11 +377,14 @@ def filter_bills(bills, params, dates=True):
         rates = _stored_rates(p["gst_rate"])
         lines = LineItem.objects.filter(invoice=OuterRef("pk"), gst_tax_rate__in=rates)
         bills = bills.filter(Exists(lines)) if rates else bills.none()
+    # v2's drill-downs (Ruling 1A-35): a cancelled bill needs no items or HSN fixed, so these list active bills, and
+    # a blank HSN is one with nothing but spaces too, as the no_hsn check reads it. dups=1, below, keeps cancelled
+    # bills: their numbers stay used.
     if p.get("empty") == "1":
-        bills = bills.filter(~Exists(LineItem.objects.filter(invoice=OuterRef("pk"))))
+        bills = bills.counted().filter(~Exists(LineItem.objects.filter(invoice=OuterRef("pk"))))
     if p.get("no_hsn") == "1":
-        no_hsn = LineItem.objects.filter(Q(hsn_code__isnull=True) | Q(hsn_code=""), invoice=OuterRef("pk"))
-        bills = bills.filter(Exists(no_hsn))
+        no_hsn = LineItem.objects.filter(Q(hsn_code__isnull=True) | Q(hsn_code__regex=r"^\s*$"), invoice=OuterRef("pk"))
+        bills = bills.counted().filter(Exists(no_hsn))
     if p.get("segment") in ("b2b", "b2cl", "b2cs"):
         registered = Q(segment_gstin__regex=GSTIN_SHAPE)
         bills = bills.annotate(segment_gstin=Coalesce(Trim("customer__gst_number"), Value("")))
@@ -371,7 +392,7 @@ def filter_bills(bills, params, dates=True):
             bills = bills.filter(registered)
         else:
             unregistered = bills.exclude(registered)
-            large = [inv.pk for inv in unregistered.filter(total_amount__gt=B2CL_THRESHOLD)
+            large = [inv.pk for inv in unregistered.filter(total_amount__gt=B2CL_THRESHOLD).only(*CHECK_FIELDS)
                      if classify_b2c(inv.business, inv)[0] == "b2cl"]
             bills = unregistered.filter(pk__in=large) if p["segment"] == "b2cl" else unregistered.exclude(pk__in=large)
     q = text_param(p, "q")
@@ -382,18 +403,19 @@ def filter_bills(bills, params, dates=True):
         bills = bills.filter(pk__in=duplicated_ids(bills.select_related(None).only("business_id", "invoice_date")))
     if p.get("itax") == "1":
         # A flag needs a total at the limits or a GSTIN (15 characters, once trimmed): the database narrows to those.
-        maybe = bills.alias(gstin_length=Length("customer__gst_number")).filter(
-            Q(total_amount__gte=ITAX_LIMIT) | Q(gstin_length__gte=15))
+        maybe = (bills.select_related(None).select_related("customer").alias(gstin_length=Length("customer__gst_number"))
+                 .filter(Q(total_amount__gte=ITAX_LIMIT) | Q(gstin_length__gte=15)).only(*ITAX_FIELDS))
         bills = bills.filter(pk__in=[inv.pk for inv in maybe if itax_flags(inv)])
     if p.get("check") == "1":
-        bills = bills.filter(pk__in=checked_ids(bills.counted()))
+        bills = bills.filter(pk__in=checked_ids(bills.counted().only(*CHECK_FIELDS)))
     return bills
 
 
 def checked_ids(invoices):
-    """Ids of these bills (customer and firm joined) that have a check code: two queries (their lines, the twins)."""
+    """Ids of these bills that have a check code: two queries (their lines, the twins). Each bill needs CHECK_FIELDS,
+    customer and firm joined."""
     invoices = list(invoices)
-    lines, twice = lines_of(invoices), duplicated_ids(invoices)
+    lines, twice = lines_of(invoices, LINE_FIELDS), duplicated_ids(invoices)
     return {inv.pk for inv in invoices if bill_checks(inv, lines[inv.pk], inv.pk in twice)}
 
 
@@ -424,7 +446,8 @@ def summary(bills, of):
     with status=cancelled the cancelled ones' totals when issued. Three queries."""
     chosen = bills.filter(status=BILL_CANCELLED) if of == BILL_CANCELLED else bills.counted()
     totals = list(chosen.values_list("total_amount", flat=True))
-    lines = LineItem.objects.filter(invoice__in=chosen.values("pk")).only("quantity", "rate", *HEADS)
+    # Every line of the set, as a subquery, in only the columns sums() reads (Rulings 1A-34, 1A-36).
+    lines = uncached(LineItem).filter(invoice__in=chosen.values("pk")).only("quantity", "rate", *HEADS)
     total = sum((t or ZERO for t in totals), ZERO)
     return {
         "of": of, "bills": len(totals), **figures(sums(lines)), "total_amount": money(total),
@@ -435,7 +458,8 @@ def summary(bills, of):
 
 def facets(sales, params):
     """Month chips, view counts and other years' hits, for the firm and FY whatever else is filtered (part 1 API
-    contract, 2.1). The FY's active bills are read once, with their lines: a fixed number of queries."""
+    contract, 2.1). The FY's active bills are read once, with their lines, in only the columns the views and checks
+    use: a fixed number of queries."""
     firm = id_param(params, "business_id", PICK_A_FIRM)
     fy = fy_param(params)
     start, end = fy_range(fy_of(None) if fy is None else fy)
@@ -443,9 +467,9 @@ def facets(sales, params):
     scope = sales.filter(invoice_date__range=(start, end))
     if firm is not None:
         scope = scope.filter(business_id=firm)
-    active = list(scope.counted())
+    active = list(scope.counted().only(*CHECK_FIELDS))
     per_month = Counter((b.invoice_date.year, b.invoice_date.month) for b in active)
-    firms = [firm] if firm is not None else list(Business.objects.values_list("pk", flat=True))
+    firms = [firm] if firm is not None else list(uncached(Business).values_list("pk", flat=True))
     closed = closed_months(firms)
     months, cursor = [], start
     while cursor <= min(end, today):  # up to the current month

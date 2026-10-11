@@ -41,7 +41,7 @@ Settings modules: `gst_billing/settings.py` (dev, `DEBUG = True`),
   unregistered/B2C parties. `is_interstate` alone is for parties with no bill yet, such as a
   new purchase.
   DON'T: compare GSTIN prefixes or state names by hand, or read a bill's
-  `place_of_supply` column raw: `tax_rules._chosen(invoice)` reads the chosen place
+  `place_of_supply` column raw: `tax_rules.chosen_place(invoice)` reads the chosen place
   (trimmed, so a blank one keeps today's rule). `Invoice.is_igst_applicable` is v2's
   name for the same answer (it delegates to `supply_interstate`); new code calls
   `supply_interstate` itself.
@@ -73,8 +73,13 @@ shared setup. Config is in `pyproject.toml` under `[tool.pytest.ini_options]`
 - Line-item construction exists in several places (invoice write path, bulk
   import, CSV import, AI import, inward bills) with different money contracts.
   Fixing one is rarely enough — grep for the others.
-- `django-cacheops` caches `billing.Invoice` / `billing.LineItem`. Raw deletes
-  bypass invalidation; prefer the ORM's `delete()`.
+- `django-cacheops` caches Business, Customer, Product, Invoice and LineItem
+  queries in production (it is off in tests). It can't see a subquery, an
+  `Exists` or a `select_related` table change, so v3's server code reads around
+  it: `Invoice.objects.sales()`, or `billing.cache.uncached(Model)` (Ruling 1A-34;
+  `tests/test_v3_cacheops.py` fails on a v3 read that goes through it). Writes
+  must still invalidate for v2's cached reads: `save()` and `delete()` do; call
+  `billing.cache.invalidate()` after a queryset `update()` or a raw delete.
 - `gst_billing/local.py` contains the prod DSN. `GST_DB=prod` alone is refused;
   it also needs `GST_ALLOW_PROD=1`. Leave both unset.
 

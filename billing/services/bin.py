@@ -11,7 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from billing.api.mixins import mark_undone, snapshot_of
-from billing.cache import invalidate
+from billing.cache import invalidate, uncached
 from billing.constants import V2_LINE_SNAPSHOT_FIELDS
 from billing.fy import fy_label, fy_of
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem
@@ -25,12 +25,18 @@ from billing.text import money, person, stamp
 RESTORED_FROM = {"bin": "the bin", "audit_log": "the Audit log"}
 
 
-def v2_snapshot(invoice):
-    """What v2's audit log keeps for a bill: every field, and its lines with v2's ten keys."""
+def lines_now(invoice):
+    """The bill's lines as they are now, in the order they were made: read around cacheops (Ruling 1A-34), since a
+    snapshot or a bin row must never keep a stale line."""
+    return list(uncached(LineItem).filter(invoice_id=invoice.pk).order_by("id"))
+
+
+def v2_snapshot(invoice, lines=None):
+    """What v2's audit log keeps for a bill: every field, and its lines (`lines`, else read now) with v2's ten keys."""
     data = snapshot_of(invoice)
     data["line_items"] = [
         {f: (str(getattr(li, f)) if getattr(li, f) is not None else None) for f in V2_LINE_SNAPSHOT_FIELDS}
-        for li in invoice.lineitem_set.all()
+        for li in (lines_now(invoice) if lines is None else lines)
     ]
     return data
 
@@ -65,10 +71,11 @@ def bin_bill(invoice, user, reason="", details=None, kind=BinnedInvoice.KIND_DEL
             assert_sales_open(invoice.business_id, invoice.invoice_date, "delete")
         name = entity_name(invoice)
         who = user if user and user.is_authenticated else None
+        lines = lines_now(invoice)
         entry = AuditLog.objects.create(
             action="deleted", entity="invoice", entity_id=invoice.pk, entity_name=name, user=who,
             details=details or (f"Deleted invoice: {name}" + (f" · {reason}" if reason else "")),
-            snapshot=v2_snapshot(invoice),
+            snapshot=v2_snapshot(invoice, lines),
         )
         binned = BinnedInvoice.objects.create(
             original_id=invoice.pk, business_id=invoice.business_id, customer_id=invoice.customer_id,
@@ -77,7 +84,7 @@ def bin_bill(invoice, user, reason="", details=None, kind=BinnedInvoice.KIND_DEL
             kind=kind, reason=reason, audit_log_id=entry.pk, deleted_by=who,
             data={
                 "invoice": _row(invoice, skip={"id"}),
-                "lines": [_row(li, skip={"id", "invoice_id", "customer_id"}) for li in invoice.lineitem_set.all()],
+                "lines": [_row(li, skip={"id", "invoice_id", "customer_id"}) for li in lines],
                 "customer_name": invoice.customer.name, "business_name": invoice.business.name,
             },
         )
@@ -90,7 +97,7 @@ def _brought_back(binned, undone):
     id), else the original id. None when it has gone again."""
     log_id = (undone or {}).get("log")
     named = AuditLog.objects.filter(pk=log_id).values_list("entity_id", flat=True).first() if log_id else None
-    return Invoice.objects.select_related("customer").filter(pk=named or binned.original_id).first()
+    return Invoice.objects.sales().select_related("customer").filter(pk=named or binned.original_id).first()
 
 
 def restore_from_bin(binned, user, check_month=True, via="bin"):
@@ -113,11 +120,11 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
                           "already_restored", bill=bill_ref(back) if back else None)
         if check_month:
             assert_sales_open(binned.business_id, binned.invoice_date, "restore")
-        firm = Business.objects.filter(pk=binned.business_id).first()  # v2 may have deleted it (Ruling 1A-6)
+        firm = uncached(Business).filter(pk=binned.business_id).first()  # v2 may have deleted it (Ruling 1A-6)
         if firm is None:
             raise Refusal("The firm on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again in the right firm.", "firm_gone")
-        if not Customer.objects.filter(pk=binned.customer_id).exists():
+        if not uncached(Customer).filter(pk=binned.customer_id).exists():
             raise Refusal("The customer on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again with the right customer.", "customer_gone")
         # Bills in Sales only: another deleted bill with this number never blocks it (Ruling 1A-18).
@@ -127,7 +134,7 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
         fields.update(business_id=binned.business_id, customer_id=binned.customer_id)
         made = fields.pop("created_at", None)
         invoice = Invoice(**fields)
-        if not Invoice.objects.filter(pk=binned.original_id).exists():
+        if not uncached(Invoice).filter(pk=binned.original_id).exists():
             invoice.pk = binned.original_id
         invoice.save(force_insert=True)
         LineItem.objects.bulk_create([
@@ -144,7 +151,7 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
         restored = log(invoice, user, "restored", "Back in Sales and in the month's GST figures")
         if entry is not None:
             mark_undone(entry, user, restored, via=via)
-    return Invoice.objects.select_related("customer", "business").get(pk=invoice.pk)
+    return uncached(Invoice).select_related("customer", "business").get(pk=invoice.pk)
 
 
 def live_bin():

@@ -20,7 +20,7 @@ from billing.constants import BILL_CANCELLED
 from billing.models import BinnedInvoice, Invoice
 from billing.refusals import Refusal
 from billing.services.bin import bin_bill, restore_from_bin
-from billing.tax_rules import _chosen, default_place_of_supply
+from billing.tax_rules import chosen_place, default_place_of_supply
 
 
 class Command(BaseCommand):
@@ -39,8 +39,9 @@ class Command(BaseCommand):
             self.stdout.write("Dry run: nothing changed. Run again with --apply.")
 
     def _forward(self, apply):
-        # Past cacheops: a report shows the database (_repair.scope's rule), and --apply moves what it read.
-        bills = list(Invoice.objects.nocache().sales().filter(status=BILL_CANCELLED).select_related("business", "customer"))
+        # Past cacheops (sales() reads around it): a report shows the database (_repair.scope's rule), and --apply
+        # moves what it read.
+        bills = list(Invoice.objects.sales().filter(status=BILL_CANCELLED).select_related("business", "customer"))
         for inv in bills:
             self.stdout.write(f"  {inv.business.name} {inv.invoice_number} of {inv.invoice_date}: cancelled "
                               f"({inv.cancel_reason or 'no reason given'})")
@@ -52,10 +53,10 @@ class Command(BaseCommand):
 
     def _chosen_places(self):
         """Bills whose place of supply was chosen by hand: v2 files them under the customer's state. The place is
-        read as every reader reads it (_chosen): trimmed, so "  " is no place."""
-        chosen = (Invoice.objects.nocache().sales().counted().exclude(place_of_supply__isnull=True)
+        read as every reader reads it (chosen_place): trimmed, so "  " is no place."""
+        chosen = (Invoice.objects.sales().counted().exclude(place_of_supply__isnull=True)
                   .exclude(place_of_supply="").select_related("business", "customer"))
-        moved = [(inv, _chosen(inv), default_place_of_supply(inv.business, inv.customer)) for inv in chosen]
+        moved = [(inv, chosen_place(inv), default_place_of_supply(inv.business, inv.customer)) for inv in chosen]
         moved = [(inv, place, usual) for inv, place, usual in moved if place and usual != place]
         for inv, place, usual in moved:
             self.stdout.write(f"  {inv.business.name} {inv.invoice_number} of {inv.invoice_date}: place of supply "

@@ -35,7 +35,9 @@ def locked_period_or_none(business_id, invoice_date):
             raise ValidationError({"invoice_date": f"{invoice_date!r} is not a date (expected YYYY-MM-DD)."})
         invoice_date = parsed
     year, month = invoice_date.year, invoice_date.month
-    return FiledPeriod.objects.filter(
+    # The firm comes in the same query: a refusal names it, and a firm read on its own would go through cacheops
+    # (Ruling 1A-34).
+    return FiledPeriod.objects.select_related("business").filter(
         business_id=business_id, year=year, month=month
     ).first()
 

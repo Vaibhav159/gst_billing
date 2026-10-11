@@ -6,6 +6,7 @@ from datetime import date
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from billing.cache import uncached
 from billing.fy import parse_fy
 from billing.models import Business
 
@@ -74,7 +75,7 @@ def id_param(params, key, words):
 def firm_param(params):
     """`business_id` as a firm (required). Plain digits only: "²" passes isdigit() but not int() (Ruling 1A-5)."""
     raw = params.get("business_id") or ""
-    found = Business.objects.filter(pk=raw).first() if raw.isascii() and raw.isdigit() else None
+    found = uncached(Business).filter(pk=raw).first() if raw.isascii() and raw.isdigit() else None
     if found is None:
         raise ValidationError({"business_id": ["Pick the firm."]})
     return found

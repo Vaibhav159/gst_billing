@@ -9,6 +9,7 @@ from django.db.models import Case, IntegerField, Q, Value, When
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.cache import uncached
 from billing.models import Customer, Invoice, Product
 from billing.params import text_param
 
@@ -20,17 +21,19 @@ class QuickSearchView(APIView):
 
     def get(self, request):
         q = text_param(request.query_params, "q")  # psycopg refuses a null character in a query
+        # v3's search (Ctrl K) reads this too, so it reads around cacheops (Ruling 1A-34): a bill cancelled or
+        # renumbered a moment ago shows as it is.
         if len(q) < 2:
             return Response({"customers": [], "invoices": [], "products": []})
 
         customers = list(
-            Customer.objects.filter(
+            uncached(Customer).filter(
                 Q(name__icontains=q) | Q(gst_number__icontains=q) | Q(mobile_number__icontains=q)
             ).order_by("name")[:5]
         )
         cust_payload = []
         for c in customers:
-            recent = Invoice.objects.filter(customer=c).order_by(
+            recent = uncached(Invoice).filter(customer=c).order_by(
                 "-invoice_date", "-id"
             )[:3]
             cust_payload.append({
@@ -67,7 +70,7 @@ class QuickSearchView(APIView):
                 "status": i.status,
                 "paper": i.paper,
             }
-            for i in Invoice.objects.filter(invoice_number__icontains=q)
+            for i in uncached(Invoice).filter(invoice_number__icontains=q)
             .select_related("customer")
             .annotate(exact=exact)
             .order_by("exact", "-invoice_date", "-id")[:8]
@@ -76,7 +79,7 @@ class QuickSearchView(APIView):
         products = [
             # gst_tax_rate as stored, a fraction (0.03 is 3%), the way the invoices' totals go: a string
             {"id": p.id, "name": p.name, "hsn_code": p.hsn_code or "", "gst_tax_rate": str(p.gst_tax_rate)}
-            for p in Product.objects.filter(
+            for p in uncached(Product).filter(
                 Q(name__icontains=q) | Q(hsn_code__icontains=q)
             ).order_by("name")[:4]
         ]

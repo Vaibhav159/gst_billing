@@ -102,7 +102,7 @@ class DirectionTest(TestCase):
         self.assertEqual(heads(blank), (0, 0, 300))
 
     def test_a_blank_place_is_no_place(self):
-        # One reading of the place everywhere (_chosen): trimmed, "  " keeps today's rule.
+        # One reading of the place everywhere (chosen_place): trimmed, "  " keeps today's rule.
         local = Invoice(business=self.biz, customer=buyer(), place_of_supply="  ")
         self.assertEqual((supply_interstate(local), place_of_supply(local), classify_b2c(self.biz, local)),
                          (False, "08", ("b2cs", False, "08", False)))
@@ -227,7 +227,7 @@ class FirmAndNotesTest(TestCase):
         self.assertIn("1 bill(s) with a place of supply chosen by hand.", out.getvalue())
 
     def test_the_rollback_script_reads_the_place_as_every_reader_does(self):
-        # Task 5's carry (1A Task 7): one reading of the place (_chosen), trimmed. "  " is no place, so v2 files that
+        # Task 5's carry (1A Task 7): one reading of the place (chosen_place), trimmed. "  " is no place, so v2 files that
         # bill as v3 does, and it isn't listed.
         sale(self.biz, buyer(), "9", "2026-09-10", place_of_supply="  ")
         out = StringIO()

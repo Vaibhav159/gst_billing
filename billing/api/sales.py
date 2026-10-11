@@ -15,6 +15,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from billing import numbering
+from billing.cache import uncached
 from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, SENT_VIA_CHOICES
 from billing.fy import fy_label, fy_of, fy_range
 from billing.models import BinnedInvoice, Business, Invoice
@@ -119,13 +120,18 @@ class RenumberSerializer(serializers.Serializer):
 PICK_THE_FIRM = "Pick the firm to move it to."
 
 
+class FirmField(serializers.PrimaryKeyRelatedField):
+    """A firm by its id, read when the request comes, around cacheops (Ruling 1A-34): the move freezes this firm
+    on the bill, so it must be the firm as it is now."""
+
+    def get_queryset(self):
+        return uncached(Business)
+
+
 class MoveSerializer(RenumberSerializer):
     # Missing, null, blank, not an id or no such firm: the one sentence (Ruling 1A-5).
-    business = serializers.PrimaryKeyRelatedField(
-        queryset=Business.objects.all(),
-        error_messages={"required": PICK_THE_FIRM, "null": PICK_THE_FIRM, "does_not_exist": PICK_THE_FIRM,
-                        "incorrect_type": PICK_THE_FIRM},
-    )
+    business = FirmField(error_messages={"required": PICK_THE_FIRM, "null": PICK_THE_FIRM,
+                                         "does_not_exist": PICK_THE_FIRM, "incorrect_type": PICK_THE_FIRM})
 
 
 class Pages(PageNumberPagination):
@@ -141,11 +147,14 @@ class BinPages(Pages):
 
 class SalesViewSet(viewsets.GenericViewSet):
     permission_classes = [V3Permission]
-    queryset = Invoice.objects.sales().select_related("customer", "business")
     pagination_class = Pages
     lookup_value_regex = r"\d+"
     v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete", "sent": "bill.send",
                   "renumber": "bill.edit", "move": "bill.edit"}
+
+    def get_queryset(self):
+        # Built for each request, as sales() reads around cacheops (Ruling 1A-34).
+        return Invoice.objects.sales().select_related("customer", "business")
 
     def list(self, request):
         """The bills list: a page of BillRows, the whole filtered set's summary, and the facets when asked (2.1)."""

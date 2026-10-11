@@ -3,8 +3,10 @@ flags, the checks, and search/quick's exact number first."""
 
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.db import connection
+from django.db.models import Model
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -202,15 +204,17 @@ class SalesListTest(TestCase):
 
     # Beyond the plan's tests: the rulings.
 
-    def test_a_firm_or_customer_that_isnt_an_id_is_a_400_with_words(self):
-        # Ruling 1A-5: never a 500 (an id past the column's range was one on SQLite) and never DRF's own words.
+    def test_an_id_that_isnt_a_number_is_a_400_and_one_not_on_file_matches_nothing(self):
+        # Contract 2.1 as Ruling 1A-33 words it: an id that isn't a number is the 400 in the contract's words (Ruling
+        # 1A-5: never a 500, as an id past the column's range was on SQLite, and never DRF's own words); an id that
+        # isn't on file is a filter that matches nothing, a 200 with an empty page.
         url = reverse("sale-list")
         for key, words in (("business_id", "Pick a firm from the list."), ("customer_id", "Pick a customer from the list.")):
             for raw in ("abc", "²", "٣", "1.5", "-1", " 1", "9" * 19):
                 with self.subTest(key=key, raw=raw):
                     r = self.client.get(url, {key: raw, "facets": "1"})
                     self.assertEqual((r.status_code, r.data), (400, {key: [words]}))
-            self.assertEqual(self.get(**{key: "424242"})["count"], 0)  # a number nobody has: no bills
+            self.assertEqual(self.get(**{key: "424242"})["results"], [])  # not on file: 200, an empty page (1A-33)
         self.assertEqual(self.numbers(customer_id=self.rathore.pk), ["KGH/2026-27/131"])
 
     def test_a_null_character_in_a_search_is_read_past(self):
@@ -259,6 +263,94 @@ class SalesListTest(TestCase):
         self.assertEqual(self.numbers(no_hsn="1"), ["18"])
         self.assertEqual(self.numbers(segment="b2cl"), [large.invoice_number])
         self.assertEqual(self.numbers(segment="b2cs", fy="2026-27", business_id=self.mo.pk), ["18", "17"])
+
+    def test_v2s_drill_downs_list_active_bills_and_dups_keeps_cancelled_numbers(self):
+        # Ruling 1A-35: a cancelled bill needs no items or HSN fixed (v2's data-quality counts leave it out), so
+        # empty=1 and no_hsn=1 list active bills only; no_hsn reads a blank HSN as the check does, spaces and all;
+        # dups=1 keeps a cancelled bill's number, which it still holds (contract 2.1, 7).
+        Invoice.objects.create(business=self.kgh, customer=self.anil, invoice_number="KGH/2026-27/40",
+                               invoice_date="2026-10-09")
+        Invoice.objects.create(business=self.kgh, customer=self.anil, invoice_number="KGH/2026-27/41",
+                               invoice_date="2026-10-09", status=BILL_CANCELLED, cancel_reason="Made in error")
+        self.assertEqual(self.numbers(empty="1"), ["KGH/2026-27/40"])
+        LineItem.objects.filter(invoice=self.big).update(hsn_code="   ")
+        LineItem.objects.filter(invoice=self.paper).update(hsn_code="\t")
+        LineItem.objects.filter(invoice=self.cancelled).update(hsn_code="")
+        self.assertEqual(self.numbers(no_hsn="1"), ["18", "17"])
+        self.assertEqual([row["checks"] for row in self.get(no_hsn="1")["results"]], [["no_hsn"], ["no_hsn"]])
+        again = sale(self.kgh, self.anil, "kgh/2026-27/19", "2026-10-09")  # the cancelled 19's number again
+        self.assertEqual(self.numbers(dups="1"), [again.invoice_number, "KGH/2026-27/19"])
+
+    def test_the_views_count_by_value(self):
+        # Each facet view on its boundary day (or amount), with a cancelled bill beside it that must not count.
+        desai = firm("DESAI JEWELLERS", gstin="08AAAAA1111A1Z5")
+        cust = buyer("Hemant Dave")
+        sale(desai, cust, "1", "2026-10-09")  # today, active, made in the app, never sent: unsent_today
+        sale(desai, cust, "2", "2026-10-08")  # yesterday
+        sale(desai, cust, "3", "2026-10-09", status=BILL_CANCELLED)
+        sale(desai, cust, "4", "2026-10-09", paper=True)
+        sent = sale(desai, cust, "5", "2026-10-09")
+        Invoice.objects.filter(pk=sent.pk).update(sent_at=timezone.now(), sent_count=1, sent_via="whatsapp")
+        sale(desai, cust, "6", "2026-10-01", payment_mode="credit")  # this month's first day: credit_month
+        sale(desai, cust, "7", "2026-09-30", payment_mode="credit")  # last month
+        sale(desai, cust, "8", "2026-10-02", payment_mode="credit", status=BILL_CANCELLED)
+        sale(desai, cust, "9", "2026-04-01", line(hsn=""))  # the FY's first day, no HSN: check
+        sale(desai, cust, "10", "2026-03-31", line(hsn=""))  # the FY before
+        sale(desai, cust, "11", "2026-04-02", line(hsn=""), status=BILL_CANCELLED)
+        sale(desai, cust, "12", "2026-09-15", line(rate="194174.76"), payment_mode="cash")  # ₹2,00,000.00: cash
+        sale(desai, cust, "13", "2026-09-16", line(rate="194174.75"), payment_mode="cash")  # ₹1,99,999.99
+        sale(desai, cust, "14", "2026-09-17", line(rate="194174.76"), payment_mode="cash", status=BILL_CANCELLED)
+        with patch("billing.services.bill_reads.timezone.localdate", return_value=date(2026, 10, 9)):
+            facets = self.get(fy="2026-27", business_id=desai.pk, facets="1")["facets"]
+        self.assertEqual(facets["views"], {"unsent_today": 1, "credit_month": 1, "check": 1, "cash": 1})
+        self.assertEqual([(m["month"], m["bills"]) for m in facets["months"] if m["bills"]],
+                         [("2026-04", 1), ("2026-09", 3), ("2026-10", 5)])
+        self.assertEqual(facets["months"][-1]["month"], "2026-10")  # up to the current month
+
+    def test_the_fy_wide_reads_fetch_only_the_columns_they_use(self):
+        # Ruling 1A-36 (Neon's free plan has 5 GB of transfer a month): the facets, check=1, itax=1, the b2cl split
+        # and the summary read the whole FY, so they fetch only what their checks, views and sums use. Only the page
+        # itself (a LIMIT) reads whole rows, for the BillRows. One request each, so no filter's empty answer skips
+        # another's read.
+        wide = ('"notes"', '"firm_snapshot"', '"cancel_reason"', '"product_name"', '"bank_account_number"',
+                '"transporter_name"', '"source_file"')
+        whole = []
+        for params in ({"facets": "1", "page_size": "1"}, {"check": "1"}, {"itax": "1"}, {"segment": "b2cl"},
+                       {"q": "31", "facets": "1"}):
+            with CaptureQueriesContext(connection) as seen:
+                self.get(fy="2026-27", **params)
+            whole += [(params, q["sql"][:120]) for q in seen.captured_queries
+                      if "LIMIT" not in q["sql"] and any(c in q["sql"] for c in wide)]
+        self.assertEqual(whole, [])
+
+    def test_the_narrowed_reads_never_load_a_column_later(self):
+        # The narrowed reads list every column the checks and views read: one left out would be read again a bill at
+        # a time. The data reaches every branch: bills today (sent, paper, neither), udhaar this month, cash at ₹2
+        # lakh, a chosen place, a firm with no GSTIN, an unregistered buyer over ₹1 lakh in another state, a walk-in
+        # and a buyer with no PAN over ₹2 lakh, a business with no address.
+        stateless = firm("SONI JEWELLERS", gstin="", state="RAJASTHAN")
+        gujarati = buyer("Desai Gems Walk-in", state="GUJARAT")
+        walkin = buyer("Walk-in Customer", customer_type="walkin")
+        noaddr = Customer.objects.create(name="Desai Gems", gst_number=GOOD_GSTIN)
+        for n, (cust, day, kw) in enumerate((
+                (self.anil, "2026-10-09", {}), (self.anil, "2026-10-09", {"paper": True}),
+                (self.anil, "2026-10-09", {"sent_at": timezone.now()}), (self.anil, "2026-10-02", {"payment_mode": "credit"}),
+                (walkin, "2026-09-20", {"payment_mode": "cash"}), (gujarati, "2026-09-21", {"place_of_supply": "24"}),
+                (noaddr, "2026-09-22", {}), (buyer("Lalit"), "2026-09-23", {})), start=1):
+            sale(stateless, cust, str(n), day, line(rate="200000", hsn="" if n % 2 else "711319"), **kw)
+        loads = []
+        refresh = Model.refresh_from_db
+
+        def recorded(instance, *args, **kwargs):
+            loads.append((type(instance).__name__, kwargs.get("fields")))
+            return refresh(instance, *args, **kwargs)
+
+        with patch.object(Model, "refresh_from_db", recorded), \
+                patch("billing.services.bill_reads.timezone.localdate", return_value=date(2026, 10, 9)):
+            for params in ({"facets": "1", "page_size": "1"}, {"check": "1"}, {"itax": "1"}, {"segment": "b2cl"},
+                           {"segment": "b2cs"}):
+                self.get(fy="2026-27", **params)
+        self.assertEqual(loads, [])
 
     def test_itax_finds_a_business_without_an_address(self):
         noaddr = Customer.objects.create(name="Desai Gems", gst_number=f" {GOOD_GSTIN} ")
@@ -419,7 +511,7 @@ class SalesDetailTest(TestCase):
         self.assertEqual((self.get().data["customer"]["pan"], self.get().data["customer"]["gstin_valid"]), ("", False))
 
     def test_a_chosen_place_of_supply(self):
-        # Task 5's carry: the chosen place reads as every reader reads it (_chosen): trimmed, "  " is none.
+        # Task 5's carry: the chosen place reads as every reader reads it (chosen_place): trimmed, "  " is none.
         gujarat = sale(self.kgh, self.anil, "KGH/2026-27/41", "2026-10-08", place_of_supply="24")
         data = self.get(gujarat.pk).data
         self.assertEqual((data["place_of_supply"], data["place_of_supply_name"], data["place_of_supply_chosen"],
@@ -494,8 +586,9 @@ class ListQueriesTest(TestCase):
         owner = person("kailash", *ROLE_GROUPS["owner"])
         firms = (firm(), firm("MEERA ORNAMENTS", gstin="08AAAAA0000A1Z5"))
         for n in range(1, 56):
-            bill = sale(firms[n % 2], buyer(f"Buyer {n}", mobile_number=f"98290{n:05d}"), str(n), "2026-09-10",
-                        line(), line(rate="500", hsn=""), payment_mode="cash" if n % 3 else "credit")
+            gstin = f"08AAKFS{n:04d}M1ZZ" if n % 11 == 0 else None  # a business with no address: itax's b2b_address
+            bill = sale(firms[n % 2], buyer(f"Buyer {n}", mobile_number=f"98290{n:05d}", gst_number=gstin), str(n),
+                        "2026-09-10", line(), line(rate="500", hsn=""), payment_mode="cash" if n % 3 else "credit")
             if n % 5 == 0:
                 Invoice.objects.filter(pk=bill.pk).update(status=BILL_CANCELLED, cancelled_by=owner)
             if n % 7 == 0:
@@ -514,11 +607,13 @@ class ListQueriesTest(TestCase):
         self.assertEqual((rows5, rows50), (5, 50))
         self.assertEqual(fifty, five)
         self.assertLessEqual(fifty, 10)
-        # The facets read the whole FY in a fixed number of queries too.
-        facets_before = asked(page_size=50, facets="1")[0]
+        # The facets, check=1 and itax=1 read the whole FY in a fixed number of queries too: what they read of
+        # each bill comes in one query (Ruling 1A-36's narrowed reads never fetch a column a bill at a time).
+        before = [asked(page_size=50, **{flag: "1"})[0] for flag in ("facets", "check", "itax")]
         for n in range(56, 66):
-            sale(firms[0], buyer(f"Buyer {n}"), str(n), "2026-09-11")
-        self.assertEqual(asked(page_size=50, facets="1")[0], facets_before)
+            sale(firms[0], buyer(f"Buyer {n}", gst_number=f"08AAKFS{n:04d}M1ZZ"), str(n), "2026-09-11",
+                 line(rate="200000", hsn=""), payment_mode="cash")
+        self.assertEqual([asked(page_size=50, **{flag: "1"})[0] for flag in ("facets", "check", "itax")], before)
 
 
 class WordsTest(TestCase):

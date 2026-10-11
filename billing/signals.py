@@ -5,6 +5,7 @@ from django.db.models import Sum
 from django.db.models.signals import m2m_changed, post_delete, post_save
 from django.dispatch import receiver
 
+from billing.cache import invalidate
 from billing.models import Invoice, LineItem
 
 # Safety net for one-off saves (admin edits, shell fixes). Every bulk path —
@@ -22,6 +23,7 @@ def _resync_invoice_total(invoice):
         or 0
     )
     Invoice.objects.filter(id=invoice.id).update(total_amount=total)
+    invalidate(Invoice)  # update() sends no signal: v2's cached bills would keep the old total (Ruling 1A-34)
     invoice.total_amount = total
 
 

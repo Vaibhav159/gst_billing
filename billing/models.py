@@ -35,7 +35,7 @@ from billing.constants import (
     UNIT_GMS,
 )
 from billing.tax_rules import (
-    _chosen,
+    chosen_place,
     direction_known,
     normalize_state_name,
     normalize_tax_heads,
@@ -287,8 +287,9 @@ class InvoiceQuerySet(models.QuerySet):
     """Invoice.objects: the shared ways of narrowing bills (design decision 5)."""
 
     def sales(self):
-        """Outward bills only: what the shop sold."""
-        return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD)
+        """Outward bills only: what the shop sold. v3's way in, so it reads around cacheops (Ruling 1A-34,
+        billing.cache): a v3 page shows a cancel or an edit at once."""
+        return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD).nocache()
 
     def counted(self):
         """The bills every figure counts: all but the cancelled ones.
@@ -518,7 +519,7 @@ class Invoice(AbstractBaseModel):
         against a firm whose state is known. save(), not update(), so cacheops
         drops the cached lines.
         """
-        known = direction_known(self.business, self.customer) or bool(_chosen(self) and state_code(self.business))
+        known = direction_known(self.business, self.customer) or bool(chosen_place(self) and state_code(self.business))
         interstate = supply_interstate(self)
         for li in self.lineitem_set.all():
             changed = []
