@@ -30,7 +30,7 @@ vi.mock("@/pages/people/ChoosePassword", async () => {
 
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((route) => [route, ...all(route.children ?? [])]);
 
-test("the real routes warm every other lazy screen (GST returns and reports included) and Search records once, leaving the four import/supplier pages on demand, with no PDF renderer or API fetch", async () => {
+test("the real routes warm every other lazy screen (GST returns, reports, audit and backup included) and Search records once, leaving the four import/supplier pages on demand, with no PDF renderer or API fetch", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   let idle!: IdleRequestCallback;
@@ -47,8 +47,8 @@ test("the real routes warm every other lazy screen (GST returns and reports incl
     expect(owned).toHaveLength(4);
     for (const route of part2dRoutes) expect(all(appRoutes).find(r => r.path === route.path)?.element).toBe(route.element);
     expect(pages).toEqual(expect.arrayContaining(capturePages));
-    // parts 3C and 3D's GST returns and report pages are warmed with the rest
-    for (const path of ["/gst", "/reports", "/reports/:kind"]) {
+    // parts 3C and 3D's GST returns and report pages, and 4E's audit and backup, are warmed with the rest
+    for (const path of ["/gst", "/reports", "/reports/:kind", "/audit", "/backup"]) {
       const element = all(appRoutes).find(r => r.path === path)?.element;
       expect(isValidElement(element) && pages.includes(element.type as unknown as Code)).toBe(true);
     }

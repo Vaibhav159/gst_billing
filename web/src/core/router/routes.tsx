@@ -40,8 +40,10 @@ const PurchaseList = lazyPage(() => import('@/pages/purchases/PurchaseList'));
 const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
+const Audit = lazyPage(() => import("@/pages/records/Audit"));
+const Backup = lazyPage(() => import("@/pages/records/Backup"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -64,7 +66,7 @@ const PAGES: Record<string, string[]> = {
   gst: ["/gst", "/reports", "/reports/:kind"],
   records: [
     "/products", "/products/new", "/products/:id", "/products/:id/edit", "/firms", "/firms/new", "/firms/:id", "/firms/:id/edit",
-    "/backup", "/audit", "/settings", "/setup",
+    "/settings", "/setup",
   ],
   easy: [
     "/e", "/e/bills", "/e/new", "/e/new/items", "/e/saved/:id", "/e/bill/:id", "/e/capture", "/e/customers", "/e/customers/new", "/e/customers/:id/edit",
@@ -136,6 +138,8 @@ export const appRoutes: RouteObject[] = [{
         { path: "/setup", element: <SetupPage /> },
         { path: "/users", element: <UsersPage /> },
         { path: "/profile", element: <ProfilePage /> },
+        { path: "/audit", element: <Audit /> },
+        { path: "/backup", element: <Backup /> },
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         { path: "/sales/paper", element: <PaperBookPage /> },
