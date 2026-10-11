@@ -189,7 +189,8 @@ export function useBillForm(start: Start, formKey?: string) {
   const dateWaiting = dateAllowed && f.date !== settledDate;
   const queryDate = allowedDate(settledDate) ? settledDate : "";
   const dateReady = Boolean(queryDate) && queryDate === f.date;
-  const ratesQuery = useRates(queryDate || undefined, reading && dateReady);
+  const ratesDateReady = dateReady || (edit && bill?.invoice_date === f.date && f.date === settledDate);
+  const ratesQuery = useRates(f.date || undefined, reading && ratesDateReady);
   const nextFor = [keep ? null : f.firmId, keep ? "" : queryDate] as const;
   const next = useNextNumber(...nextFor, reading && dateReady);
   const bookFor = [f.paper && !edit ? f.firmId : null, f.paper && !edit && queryDate ? monthOf(queryDate) : null] as const;
@@ -448,7 +449,7 @@ export function useBillForm(start: Start, formKey?: string) {
   };
 
   return {
-    rates: dateReady ? ratesQuery.data : undefined,
+    rates: ratesDateReady ? ratesQuery.data : undefined,
     mode: start.mode, edit, bill, start, f, set, setLine, addLine, removeLine, setCustomer, setFirm, setPaper, setPayment, setNumber, takeSuggestion,
     firm, firmName, firmState, firms, firmHint: hint, cust, auto, pos, tt, filled, figs, lineFig, newKeys,
     paper: f.paper && !edit, book, lastPaperDay, keep, moved, next, suggestion, numberText, stored, numberError, numberNote, numberState, waitingForNext,

@@ -11,6 +11,8 @@ import { lineRateReference } from './rules';
 import { useBillForm } from './useBillForm';
 import { formServer, RING } from './testing';
 import { toBoard as boardOf } from '@/core/dashboard/wire';
+import { wireDetail } from '@/core/sales/fixtures';
+import { toBillDetail } from '@/core/sales/wire';
 
 const product = { ...toSaleProduct(RING), kind: null, kind_effective: 'gold' as const, purity: '22K' };
 const products = [product];
@@ -18,8 +20,8 @@ const start = () => {
   const s = startNew({ firmId: 3, firmSource: 'scope', today: '2026-10-12' });
   s.form.lines = [{ ...lineFromProduct(product, s.form.lines[0]), qty: 1, rate: '65125' }]; return s;
 };
-function Harness({ phone = false }: { phone?: boolean }) {
-  const F = useBillForm(start()); const l = F.f.lines[0]; const [open, setOpen] = useState(true);
+function Harness({ phone = false, initial = start() }: { phone?: boolean; initial?: ReturnType<typeof start> }) {
+  const F = useBillForm(initial); const l = F.f.lines[0]; const [open, setOpen] = useState(true);
   return <><output data-testid="rate">{l.rate}</output><button onClick={() => F.set({ date: '2026-09-30' })}>Earlier date</button>
     <button onClick={() => F.addLine(false, { ...l, key: 'second' })}>Second line</button>
     {phone ? <ItemSheet F={F} open={open} lineKey={l.key} products={products} again={0} onClose={() => setOpen(false)} onAgain={() => {}} onRemove={() => {}} />
@@ -52,6 +54,15 @@ test('phone fix changes only the item sheet draft until Save item', async () => 
 test('no in-force board means no latest fallback and no change to typing', async () => {
   formServer([['GET', 'rates/', () => wireRates({ in_force: null })]]); renderApp(<Harness />); await pass();
   expect(screen.queryByText(/Today's board:/)).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: /^Use ₹/ })).not.toBeInTheDocument(); expect(screen.getByTestId('rate')).toHaveTextContent('65125');
+});
+test('editing an older original bill date still gets its historical board', async () => {
+  const initial = start(); initial.mode = 'edit'; initial.form.date = '2024-09-30';
+  initial.bill = toBillDetail(wireDetail({ invoice_date: '2024-09-30', fy: '2024-25' }));
+  const { calls } = formServer([['GET', 'rates/', () => wireRates({ in_force: wireBoard({ on: '2024-09-30' }) })]]);
+  renderApp(<Harness initial={initial} />); await pass(400);
+  expect(calls.filter(c => c.url === 'rates/').map(c => c.params.date)).toEqual(['2024-09-30']);
+  expect(screen.getByText('Board on 30 Sep: ₹6,512.50 a gram')).toBeInTheDocument();
+  expect(screen.getByTestId('rate')).toHaveTextContent('65125');
 });
 test('saved names resolve only a unique exact product and one-off or non-gram lines stay quiet', () => {
   const s = start(), line = { ...s.form.lines[0], productId: null }; const rates = { ...wireRates(), latest: null, previous: null, in_force: boardOf(wireBoard()) };
