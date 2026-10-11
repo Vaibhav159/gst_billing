@@ -207,6 +207,11 @@ def month_status(business_id, year, month):
         stage = "gstr1"
     else:
         stage = "future" if key > today else "open" if key == today else "ready"
+        if stage == "ready":
+            from billing.services.gst_checks import gstr1_blockers
+            blockers = gstr1_blockers([business_id], [f"{year}-{month:02}"])
+            if blockers.get((business_id, f"{year}-{month:02}"), {}).get("count", 0):
+                stage = "blocked"
     return MonthStatus(stage, stage in ("filed", "gstr1"), bool(lock_id), rows.get("gstr1"), rows.get("gstr1a"),
                        rows.get("gstr3b"), legacy, unlocked, lock_id)
 
