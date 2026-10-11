@@ -70,3 +70,15 @@ class DashboardView(APIView):
             raise ValidationError({"fy": ["Give the year like 2026-27."]})
         firms, _business = scope(request)
         return Response(dashboard(request.user, firms, year, today))
+
+
+class DueNextView(APIView):
+    permission_classes = [V3Permission]
+
+    def get(self, request):
+        from billing.services.due import due_next
+        chosen = request.query_params.get("returns", "0")
+        if chosen not in ("0", "1"):
+            raise ValidationError({"returns": ["Choose 0 or 1 for returns."]})
+        firms, business_id = scope(request)
+        return Response(due_next(request.user, firms, business_id, timezone.localdate(), chosen == "1"))
