@@ -9,6 +9,7 @@ import { AuthContext } from "@/core/auth/AuthProvider";
 import { ToastProvider } from "@/core/ui";
 import { appRoutes } from "@/core/router/routes";
 import { stubAuth } from "@/test/render";
+import { pass } from "@/test/clock";
 // for the tests after the brief's four
 import type { ReactNode } from "react";
 import { readFileSync } from "node:fs";
@@ -398,20 +399,31 @@ test("a first sign-in on a phone, its setting slow to come, greets only the home
     try {
       await signIn();
       await waitFor(() => expect(s.pending()).toBe(1));
-      await wait(150); // past the 90 ms the page frame waits before it greets a page
+      // The preference notification, 90 ms focus and announcement's frame move only when this test says.
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+      await pass(150);
       expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
       expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
+      expect(heard.focused).toEqual([]);
+      expect(heard.said).toEqual([]);
       await s.release();
+      await pass(); // deliver React Query's notification before starting the page's clock
       const name = mode === "easy" ? "Easy" : "Dashboard";
-      const h1 = await screen.findByRole("heading", { level: 1, name });
-      await waitFor(() => expect(h1, mode).toHaveFocus());
-      await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent(name));
-      await wait(150);
+      const h1 = screen.getByRole("heading", { level: 1, name });
+      await pass(89);
+      expect(h1, mode).not.toHaveFocus();
+      expect(heard.said).toEqual([]);
+      await pass(1);
+      expect(h1, mode).toHaveFocus();
+      await pass(16); // announce() writes on the next animation frame
+      expect(document.getElementById("route-announcer")).toHaveTextContent(name);
+      await pass(150);
       expect(heard.focused).toEqual([name]);
       expect(heard.said).toEqual([name]);
     } finally {
       heard.stop();
       cleanup();
+      vi.useRealTimers();
     }
   }
   queryClient.clear();
