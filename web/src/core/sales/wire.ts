@@ -2,9 +2,10 @@
 // field the server leaves out read as empty, never a crash (contract: v3/2026-10-10-part-1-api-contract.md §0.2).
 // Every sales hook reads through these. Nothing is rounded to the rupee: a bill's total stays exact (Ruling 1B-12).
 import { amountInWords, toPaise } from "@/core/format";
+import { readItaxFlags } from "./itax";
 import type {
   Activity, AuditAction, BillDetail, BillRef, BillRow, BillStatus, BinPage, BinRow, CancelResult, CheckCode, CustomerOnBill, CustomerRef,
-  CustomerType, Eway, FirmOnBill, HsnRow, ItaxFlag, ItaxKind, Line, MoveResult, NextNumber, NumberCheck, PaperBook, PaymentMode, Person,
+  CustomerType, Eway, FirmOnBill, HsnRow, Line, MoveResult, NextNumber, NumberCheck, PaperBook, PaymentMode, Person,
   RenumberResult, SalesFacets, SalesPage, SalesSummary, Segment, Sent, ShopSettings, Slab,
 } from "./types";
 
@@ -20,7 +21,6 @@ const payment = (v: W): PaymentMode => (v === "cash" || v === "bank" || v === "c
 const customerType = (v: W): CustomerType => (v === "walkin" || v === "business" ? v : "person");
 const segment = (v: W): Segment => (v === "b2b" || v === "b2cl" ? v : "b2cs");
 const CHECKS: CheckCode[] = ["no_lines", "no_hsn", "duplicate", "heads_mismatch", "tax_mismatch"];
-const ITAX: ItaxKind[] = ["cash_limit", "pan", "walkin_limit", "b2b_address"];
 const ACTIONS: AuditAction[] = ["created", "imported", "updated", "cancelled", "renumbered", "moved", "deleted", "restored", "sent", "printed", "exported", "merged"];
 
 export function toPerson(w: W): Person {
@@ -36,8 +36,6 @@ const billRefOrNull = (w: W): BillRef | null => (w ? toBillRef(w) : null);
 export function toSent(w: W): Sent | null {
   return w ? { at: text(w.at), last_at: text(w.last_at ?? w.at), count: whole(w.count) || 1, via: w.via === "share" ? "share" : "whatsapp", to: text(w.to) } : null;
 }
-/** A bill's income-tax flags; a kind this app doesn't know yet is left out, as plan 1C's reader does (Ruling 1B-11), never shown as another. */
-const toItax = (v: W): ItaxFlag[] => list(v).filter((f: W) => ITAX.includes(f?.kind)).map((f: W) => ({ kind: f.kind, short: text(f.short), text: text(f.text) }));
 
 export function toBillRow(w: W): BillRow {
   return {
@@ -47,7 +45,7 @@ export function toBillRow(w: W): BillRow {
     taxable: money(w?.taxable), cgst: money(w?.cgst), sgst: money(w?.sgst), igst: money(w?.igst), tax: money(w?.tax), total_amount: money(w?.total_amount),
     interstate: Boolean(w?.interstate), gst_percents: list(w?.gst_percents).map(text), line_count: whole(w?.line_count),
     status: status(w?.status), cancel_reason: text(w?.cancel_reason), sent: toSent(w?.sent),
-    checks: list(w?.checks).filter((c: W) => CHECKS.includes(c)), itax: toItax(w?.itax), locked: Boolean(w?.locked),
+    checks: list(w?.checks).filter((c: W) => CHECKS.includes(c)), itax: readItaxFlags(w?.itax), locked: Boolean(w?.locked),
   };
 }
 export function toLine(w: W): Line {

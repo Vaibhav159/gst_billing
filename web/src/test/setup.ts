@@ -13,7 +13,14 @@ const g = globalThis as unknown as Record<string, unknown>;
 g.CSS ??= { escape: (s: string) => s.replace(/["\\\]\[]/g, "\\$&"), supports: () => false };
 class NoopObserver { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } }
 g.ResizeObserver ??= NoopObserver;
-g.IntersectionObserver ??= NoopObserver;
+// Cards are in view by default. A visibility test installs its own observer to keep them below the viewport.
+g.IntersectionObserver ??= class {
+  constructor(private callback: IntersectionObserverCallback) {}
+  observe(target: Element) { this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+  unobserve() {}
+  disconnect() {}
+  takeRecords() { return []; }
+};
 
 // Node 25 has its own localStorage (no methods without --localstorage-file) and sessionStorage, and
 // vitest 3 keeps a global that already exists, so jsdom's never arrive. Tests get jsdom's, as on Node 20.

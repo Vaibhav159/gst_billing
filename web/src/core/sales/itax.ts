@@ -4,7 +4,7 @@
 // flagged: the cash part isn't recorded.
 import { inr } from "@/core/format";
 import { hasGstin } from "@/core/ids";
-import type { BillStatus, CustomerType, ItaxFlag, PaymentMode } from "./types";
+import type { BillStatus, CustomerType, ItaxFlag, ItaxKind, PaymentMode } from "./types";
 
 /** ₹2,00,000 in paise: the cash limit for one bill (Sec 269ST, at or over) and the PAN threshold (Rule 114B, over). */
 export const ITAX_LIMIT = 20000000;
@@ -32,4 +32,12 @@ export function itaxFlags(b: ItaxInput): ItaxFlag[] {
     out.push({ kind: "b2b_address", short: "No address", text: "A bill to a business needs the buyer's address (CGST Rule 46). Add it on the customer." });
   }
   return out;
+}
+
+/** Read the server's flags on bills and statements; leave out kinds this app doesn't know yet. */
+export function readItaxFlags(raw: unknown): ItaxFlag[] {
+  const kinds: ItaxKind[] = ["cash_limit", "pan", "walkin_limit", "b2b_address"];
+  const text = (v: unknown): string => v == null ? "" : String(v);
+  return (Array.isArray(raw) ? raw : []).filter((f) => f && kinds.includes(f.kind))
+    .map((f) => ({ kind: f.kind, short: text(f.short), text: text(f.text) }));
 }

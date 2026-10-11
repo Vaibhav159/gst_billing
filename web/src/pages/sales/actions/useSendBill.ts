@@ -92,7 +92,7 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
           const f = notMarkedSent(problemOf(e), b.invoice_number);
           // one press records it once: a quick second press posts nothing (a failure again brings a new toast)
           let pressed = false;
-          show({ tone: f.tone, title: f.title, body: f.body, duration: Infinity, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
+          show({ tone: f.tone, title: f.title, body: f.body, duration: f.again ? Infinity : undefined, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
           return false;
         }
         done();

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { useAuth } from "@/core/auth/AuthProvider";
 import type { Action } from "@/core/auth/permissions";
 import { useToast } from "@/core/ui";
-import { MOD } from "./nav";
+import { MOD } from "@/core/keyboard";
 
 /**
  * Desktop shortcuts. They never fire inside a field or while a menu or dialog is open, except Ctrl K. They follow the

@@ -215,6 +215,13 @@ const ITAX_TITLE: Record<string, string> = {
 export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
   const { show } = useToast();
   const fixHeads = useFixHeads();
+  const fixedHeads = useRef(false);
+  useEffect(() => {
+    if (!fixedHeads.current || b.checks.includes("heads_mismatch")) return;
+    fixedHeads.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || !document.contains(active)) document.querySelector<HTMLElement>("#app-main [data-page-title]")?.focus({ preventScroll: true });
+  }, [b.checks, fixHeads.isSuccess]);
   const [fail, setFail] = useState<FailText | null>(null);
   const out: ReactNode[] = [];
   const month = monthLabel(b.invoice_date.slice(0, 7), { long: true, year: false });
@@ -243,7 +250,10 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
   }
   if (!d.cancelled && b.checks.includes("heads_mismatch")) {
     const fix = () => fixHeads.mutate(b.id, {
-      onSuccess: () => { requestAnimationFrame(() => document.querySelector<HTMLElement>("#app-main [data-page-title]")?.focus({ preventScroll: true })); setFail(null); show({ title: `Tax heads fixed on ${b.invoice_number}`, body: `Now ${b.interstate ? "IGST" : "CGST + SGST"}, worked out again from the place of supply.` }); },
+      onSuccess: () => {
+        fixedHeads.current = true;
+        setFail(null); show({ title: `Tax heads fixed on ${b.invoice_number}`, body: `Now ${b.interstate ? "IGST" : "CGST + SGST"}, worked out again from the place of supply.` });
+      },
       onError: (e) => setFail(failText(problemOf(e), "fixed")),
     });
     out.push(<Banner key="h" tone="neg" icon={AlertTriangle} title={`Tax is under ${b.igst > 0 ? "IGST" : "CGST + SGST"}, but this is ${b.interstate ? "an inter-state" : "a local"} sale`}

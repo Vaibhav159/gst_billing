@@ -68,8 +68,3 @@ export function tabOf(pathname: string): string {
   if (first === "purchases" && (second === "capture" || second === "inbox")) return "capture";
   return SECTION_TAB[sectionOf(pathname)] ?? "more";
 }
-
-/** Modifier key names as this keyboard shows them. */
-const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-export const MOD = MAC ? "⌘" : "Ctrl";
-export const ALT = MAC ? "⌥" : "Alt";

@@ -58,7 +58,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
   if (!b) {
     // not in the rows loaded, and its own answer not here yet, or the bill is gone
     return (
-      <aside aria-label="Preview of a bill" className="card sticky top-6 flex flex-col min-w-0 anim-rise">
+      <aside data-bill-preview="" aria-label="Preview of a bill" className="card sticky top-6 flex flex-col min-w-0 anim-rise">
         <div className="flex items-start gap-1 pl-5 pr-3 pt-4 pb-3 border-b border-rule"><div className="flex-1" />{close}</div>
         <div className="px-5 py-4 flex flex-col gap-3">
           {detail.isPending ? <><Skeleton w={160} h={22} /><Skeleton h={16} /><Skeleton w="60%" h={16} /></>
@@ -75,7 +75,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
   else lines.push(["GST", <Money key="gst" value={b.tax} />]);
   lines.push(["Paid by", b.payment_mode ? PAY[b.payment_mode] : <span key="p" className="text-muted">Not recorded</span>]);
   return (
-    <aside aria-label={`Preview of bill ${b.invoice_number}`} className="card sticky top-6 flex flex-col max-h-[calc(100vh-150px)] min-w-0 anim-rise">
+    <aside data-bill-preview="" aria-label={`Preview of bill ${b.invoice_number}`} className="card sticky top-6 flex flex-col max-h-[calc(100vh-150px)] min-w-0 anim-rise">
       <div className="flex items-start gap-1 pl-5 pr-3 pt-4 pb-3 border-b border-rule">
         <div className="flex-1 min-w-0">
           <p className="caps truncate">{b.business_name}</p>

@@ -1,3 +1,4 @@
+import { tick } from "@/test/clock";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,9 +9,8 @@ import { renderApp } from "@/test/render";
 import BillPage from "../BillPage";
 import { OtherBills, Parties } from "./parts";
 
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30")); vi.stubGlobal("IntersectionObserver", undefined); });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-async function tick(ms = 0) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30")); });
+afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.useRealTimers(); vi.unstubAllGlobals(); });
 const mount = (id: number) => renderApp(<main id="app-main"><Routes><Route path="/sales/:id" element={<BillPage />} /></Routes></main>, { path: `/sales/${id}` });
 
 test("Restore leaves focus on the restored bill's title", async () => {
@@ -54,10 +54,50 @@ test("Other bills asks once when its card enters the viewport, never while it st
 });
 
 test("Other bills asks at once without IntersectionObserver, and possessive names ending in s read naturally", async () => {
+  vi.stubGlobal("IntersectionObserver", undefined);
   salesServer([["GET", "sales/", () => wirePage([wireRow(), wireRow({ id: 300 })])]]);
   const b = toBillDetail(wireDetail()); b.customer.name = "Mehta & Sons";
   renderApp(<OtherBills b={b} />); await tick(10);
   expect(screen.getByRole("link", { name: "All of Mehta & Sons' bills" })).toBeInTheDocument();
+});
+
+test("fixing the tax heads keeps focus where the user moved while the fix was pending", async () => {
+  let resolveFix!: (bill: unknown) => void;
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail({ checks: ["heads_mismatch"] })],
+    ["POST", "sales/412/fix-heads/", () => new Promise((resolve) => { resolveFix = resolve; })],
+  ]);
+  mount(412); await tick(400);
+  const fix = screen.getByRole("button", { name: "Fix the tax heads" });
+  fix.focus(); fireEvent.click(fix); await tick();
+  const print = screen.getByRole("link", { name: "Print and share" });
+  print.focus();
+  await act(async () => resolveFix(wireDetail())); await tick(100);
+  expect(screen.queryByRole("button", { name: "Fix the tax heads" })).not.toBeInTheDocument();
+  expect(print).toHaveFocus();
+});
+
+test("the default observer loads Other bills in a bill page test", async () => {
+  const { calls } = salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/", () => wirePage([wireRow(), wireRow({ id: 300, invoice_number: "Other bill" })])],
+  ]);
+  mount(412); await tick(400); await tick(1);
+  expect(calls.some((call) => call.url === "sales/" && call.params.customer_id === 7)).toBe(true);
+  expect(screen.getByRole("link", { name: /^Other bill/ })).toBeInTheDocument();
+});
+
+test.each([
+  [{}, "Not sent yet", "text-brand"],
+  [{ paper: true }, "On paper", "text-muted"],
+  [{ sent: { at: "2026-10-08T10:00:00+05:30", count: 1, via: "whatsapp", to: "" } }, /^Sent /, "text-sale"],
+])("the phone draws its sending status as coloured text (%j)", async (over, label, tone) => {
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  salesServer([["GET", "sales/412/", () => wireDetail(over)]]);
+  mount(412); await tick(400);
+  const status = screen.getByText(label);
+  expect(status).toHaveClass("text-sm", "font-semibold", tone);
+  expect(status).not.toHaveClass("rounded-full");
 });
 
 test("cached Other bills still observes its card and refreshes stale data only after it enters view", async () => {

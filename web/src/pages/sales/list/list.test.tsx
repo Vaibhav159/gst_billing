@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
@@ -45,22 +46,6 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 
-/**
- * From here the clock moves only when the test says (Ruling 1B-10), however busy the machine: a search's pause (300 ms)
- * passes when the test says. Testing Library's async helpers wait on timers this clock never runs, so the steps after it
- * are fireEvent and pass().
- */
-function handClock() {
-  const now = Date.now();
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
-}
-/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 
 test("the list asks for the firm and year in view, and shows what they add up to, day by day", async () => {
   const { calls } = server();
@@ -108,12 +93,12 @@ test("a search looks through the whole year, not just the month picked, with its
   handClock();
   const box = screen.getByRole("searchbox", { name: /Search sales bills/ });
   for (const typed of ["a", "an", "ani", "anil"]) fireEvent.change(box, { target: { value: typed } });
-  await pass(300); // typing has paused: the search asks
+  await pass(300, 2); // typing has paused: the search asks
   expect(screen.getByText(/Searching all of FY 2026-27, not just September 2026\./)).toBeInTheDocument();
   expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", q: "anil", status: "cancelled" });
   expect(lists(calls).at(-1)?.params).not.toHaveProperty("facets");
   fireEvent.click(screen.getByRole("button", { name: "Only September" }));
-  await pass(0);
+  await pass(0, 2);
   expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", q: "anil" });
 });
 
@@ -137,26 +122,29 @@ test("on a row, ↓ moves with the preview, Esc closes it, and Enter opens the b
 });
 
 test("ticking bills says what's selected; the owner deletes them together, and Undo brings them back", async () => {
+  handClock();
   let bin = 50;
   const { calls } = server(ROWS, {}, [
     ["DELETE", /^sales\/\d+\/$/, (c) => wireBin({ id: (bin += 1), original_id: Number(c.url.split("/")[1]) })],
     ["POST", /^bin\/\d+\/restore\/$/, () => wireDetail()],
   ]);
-  mount();
-  await userEvent.click(await screen.findByRole("checkbox", { name: "Select KGH/2026-27/32" }));
-  await userEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
+  mount(); await pass(400, 2);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/32" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
   const bar = screen.getByRole("region", { name: "Selected bills" });
   expect(bar).toHaveTextContent("2 bills selected · ₹1,18,639.25");
-  await userEvent.click(within(bar).getByRole("button", { name: "Delete 2 bills…" }));
-  const dialog = await screen.findByRole("dialog", { name: "Delete 2 sales bills?" });
-  act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against the click that opened it
-  await userEvent.click(within(dialog).getByRole("button", { name: "Entered twice" }));
-  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
-  await waitFor(() => expect(calls.filter((c) => c.method === "DELETE").map((c) => [c.url, c.body])).toEqual([["sales/413/", { reason: "Entered twice" }], ["sales/412/", { reason: "Entered twice" }]]));
-  expect(await screen.findByText("Deleted 2 bills")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
-  await waitFor(() => expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/"]));
-  expect(await screen.findByText("Restored 2 bills")).toBeInTheDocument();
+  fireEvent.click(within(bar).getByRole("button", { name: "Delete 2 bills…" }));
+  const dialog = screen.getByRole("dialog", { name: "Delete 2 sales bills?" });
+  await pass(400, 2); // past the dialog's guard against the click that opened it
+  fireEvent.click(within(dialog).getByRole("button", { name: "Entered twice" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  await pass(0, 2);
+  expect(calls.filter((c) => c.method === "DELETE").map((c) => [c.url, c.body])).toEqual([["sales/413/", { reason: "Entered twice" }], ["sales/412/", { reason: "Entered twice" }]]);
+  expect(screen.getByText("Deleted 2 bills")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  await pass(0, 2);
+  expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/"]);
+  expect(screen.getByText("Restored 2 bills")).toBeInTheDocument();
 });
 
 test("a search that finds nothing here says where else it found bills, and offers every year", async () => {
@@ -264,16 +252,18 @@ test("a link's bill that isn't in the list and doesn't load says it couldn't, no
 
 /** Ticks the two bills of today and opens Delete for them, past the dialog's guard against the click that opened it. */
 async function deleteBoth() {
-  await userEvent.click(await screen.findByRole("checkbox", { name: "Select KGH/2026-27/32" }));
-  await userEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
-  await userEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills…" }));
-  const dialog = await screen.findByRole("dialog", { name: "Delete 2 sales bills?" });
-  act(() => { vi.advanceTimersByTime(400); });
+  await pass(400, 2);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/32" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
+  fireEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills…" }));
+  const dialog = screen.getByRole("dialog", { name: "Delete 2 sales bills?" });
+  await pass(400, 2);
   return dialog;
 }
 const deletes = (calls: Call[]) => calls.filter((c) => c.method === "DELETE").map((c) => c.url);
 
 test("a delete that stops part-way says how far it got and is then about what's left; Try again deletes only those", async () => {
+  handClock();
   let bin = 50;
   let failOnce = true;
   const { calls } = server(ROWS, {}, [["DELETE", /^sales\/\d+\/$/, (c) => {
@@ -283,58 +273,65 @@ test("a delete that stops part-way says how far it got and is then about what's 
   }]]);
   mount();
   const dialog = await deleteBoth();
-  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  await pass(0, 2);
   // 413 went and 412 didn't: never "Not deleted" while one went
-  expect(await within(dialog).findByText("Stopped after 1 of 2")).toBeInTheDocument();
+  expect(within(dialog).getByText("Stopped after 1 of 2")).toBeInTheDocument();
   expect(within(dialog).getByText("The other bill is still in Sales. Try again in a minute.")).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Delete 1 sales bill?" })).toBe(dialog);
   expect(within(within(dialog).getByRole("list", { name: "Bills to delete" })).getAllByRole("listitem").map((li) => li.textContent)).toEqual([expect.stringContaining("KGH/2026-27/31")]);
   expect(screen.getByText("Deleted 1 bill")).toBeInTheDocument();
-  await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/412/"]));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+  await pass(0, 2); await pass(170, 2);
+  expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/412/"]);
   // one toast for the whole delete, whose Undo brings back both
-  expect(await screen.findByText("Deleted 2 bills")).toBeInTheDocument();
-  await waitFor(() => expect(screen.queryByText("Deleted 1 bill")).not.toBeInTheDocument());
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByText("Deleted 2 bills")).toBeInTheDocument();
+  expect(screen.queryByText("Deleted 1 bill")).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
 test("a bill someone deleted already counts as gone: the delete carries on to the rest and says so", async () => {
+  handClock();
   const { calls } = server(ROWS, {}, [
     ["DELETE", "sales/413/", () => refuse(404, { detail: "Not found." })],
     ["DELETE", "sales/412/", () => wireBin({ id: 51, original_id: 412 })],
   ]);
   mount();
   const dialog = await deleteBoth();
-  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
-  await waitFor(() => expect(deletes(calls)).toEqual(["sales/413/", "sales/412/"]));
-  expect(await screen.findByText("Deleted 1 bill")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  await pass(0, 2); await pass(170, 2);
+  expect(deletes(calls)).toEqual(["sales/413/", "sales/412/"]);
+  expect(screen.getByText("Deleted 1 bill")).toBeInTheDocument();
   expect(screen.getByText("It's in the Audit log, where it can be restored. 1 bill was deleted already.")).toBeInTheDocument();
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
 test("bills deleted together ask for the list and the period chips once afterwards; their Undo too, carrying on past a bin row that has gone", async () => {
+  handClock();
   let bin = 50;
   const { calls } = server(ROWS, {}, [
     ["DELETE", /^sales\/\d+\/$/, (c) => wireBin({ id: (bin += 1), original_id: Number(c.url.split("/")[1]) })],
     ["POST", /^bin\/\d+\/restore\/$/, (c) => (c.url === "bin/52/restore/" ? refuse(404, { detail: "That deleted bill isn't in the bin any more." }) : wireDetail())],
   ]);
-  mount();
-  await userEvent.click(await screen.findByRole("checkbox", { name: "Select all 2 bills and 1 cancelled bill shown" }));
-  await userEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills and 1 cancelled bill…" }));
-  const dialog = await screen.findByRole("dialog", { name: "Delete 2 sales bills and 1 cancelled bill?" });
-  act(() => { vi.advanceTimersByTime(400); });
-  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills and 1 cancelled bill" }));
-  expect(await screen.findByText("Deleted 2 bills and 1 cancelled bill")).toBeInTheDocument();
+  mount(); await pass(400, 2);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select all 2 bills and 1 cancelled bill shown" }));
+  fireEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills and 1 cancelled bill…" }));
+  const dialog = screen.getByRole("dialog", { name: "Delete 2 sales bills and 1 cancelled bill?" });
+  await pass(400, 2);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills and 1 cancelled bill" }));
+  await pass(0, 2);
+  expect(screen.getByText("Deleted 2 bills and 1 cancelled bill")).toBeInTheDocument();
   const from = calls.findIndex((c) => c.method === "DELETE");
   expect(deletes(calls)).toHaveLength(3);
-  await waitFor(() => expect(lists(calls.slice(from))).toHaveLength(1));
+  expect(lists(calls.slice(from))).toHaveLength(1);
   expect(calls.slice(from).filter(isFacets)).toHaveLength(1);
-  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
-  expect(await screen.findByText("Restored 2 bills")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  await pass(0, 2);
+  expect(screen.getByText("Restored 2 bills")).toBeInTheDocument();
   expect(screen.getByText("Back in Sales and in the GST figures. 1 bill wasn't in the bin any more.")).toBeInTheDocument();
   expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/", "bin/53/restore/"]);
   const back = calls.findIndex((c) => c.url.startsWith("bin/"));
-  await waitFor(() => expect(lists(calls.slice(back))).toHaveLength(1));
+  expect(lists(calls.slice(back))).toHaveLength(1);
   expect(calls.slice(back).filter(isFacets)).toHaveLength(1);
 });
 
@@ -412,31 +409,31 @@ test("an Undo pressed while a stopped delete still shows puts those bills back i
     ["POST", /^bin\/\d+\/restore\/$/, () => wireDetail()],
   ]);
   mount();
-  await pass(400); // the page is ready, past its guard against the click that opened it
+  await pass(400, 2); // the page is ready, past its guard against the click that opened it
   fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/32" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
   fireEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills…" }));
   const dialog = screen.getByRole("dialog", { name: "Delete 2 sales bills?" });
-  await pass(400); // past the dialog's 350 ms guard
+  await pass(400, 2); // past the dialog's 350 ms guard
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
-  await pass(0);
+  await pass(0, 2);
   expect(within(dialog).getByText("Stopped after 1 of 2")).toBeInTheDocument();
   // the first try's toast sits above the dialog: its Undo brings 413 back while the dialog still shows
   fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByText("Restored 1 bill")).toBeInTheDocument();
   // nothing of this delete is deleted now: the dialog is about both bills again, and says so
   expect(within(dialog).getByText("Nothing was deleted. Try again in a minute.")).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Delete 2 sales bills?" })).toBe(dialog);
   fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
-  await pass(0);
+  await pass(0, 2);
   expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/413/", "sales/412/"]);
   expect(screen.getByText("Deleted 2 bills")).toBeInTheDocument();
-  await pass(170); // the dialog and the old Undo finish closing on the hand clock
+  await pass(170, 2); // the dialog and the old Undo finish closing on the hand clock
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   // its Undo is for the two bills in the bin now, and both come back
   fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
-  await pass(0);
+  await pass(0, 2);
   const restored = screen.getByText("Restored 2 bills").parentElement!;
   expect(restored).toHaveTextContent("Back in Sales and in the GST figures.");
   expect(restored).not.toHaveTextContent("in the bin");
@@ -478,23 +475,23 @@ test("the customer box says it's searching until the answer for what's typed has
   fireEvent.change(box, { target: { value: "meenaz" } });
   // typing hasn't paused: nothing is asked yet, and nothing is said of a search not made
   expect(status()).toHaveTextContent("Searching…");
-  await pass(250);
+  await pass(250, 2);
   expect(calls.filter((c) => c.url === "customers/").map((c) => c.params.search)).toEqual(["meenaz"]);
   // asked, not answered yet
   expect(status()).toHaveTextContent("Searching…");
   expect(status()).not.toHaveTextContent(/No customer matches/);
   await act(async () => { answer([]); });
-  await pass(0);
+  await pass(0, 2);
   expect(status()).toHaveTextContent("No customer matches “meenaz”");
   // a letter less: that answer was for "meenaz", so nothing is said of "meena" until it has been searched for
   fireEvent.change(box, { target: { value: "meena" } });
   expect(status()).toHaveTextContent("Searching…");
   expect(status()).not.toHaveTextContent(/No customer matches/);
-  await pass(250);
+  await pass(250, 2);
   await act(async () => { answer([{ ...MEENA, city: "Jaipur", state_name: "RAJASTHAN", figures: { bills: 6 } }]); });
-  await pass(0);
+  await pass(0, 2);
   fireEvent.click(within(customerList()).getByRole("option", { name: /^Meena Jain.*6 bills$/ }));
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("customer=8");
   expect(lists(calls).at(-1)?.params).toMatchObject({ customer_id: 8 });
 });
@@ -513,12 +510,12 @@ test("the customer box says when its search failed, and when it waits for the in
     return live;
   };
   fireEvent.change(box, { target: { value: "kamal" } });
-  await pass(250);
+  await pass(250, 2);
   expect(status()).toHaveTextContent("Couldn't search: the app couldn't get through");
   expect(status()).not.toHaveTextContent(/No customer matches/);
   act(() => { onlineManager.setOnline(false); __setNetState("offline"); });
   fireEvent.change(box, { target: { value: "rekha" } });
-  await pass(250);
+  await pass(250, 2);
   expect(status()).toHaveTextContent("You're offline: the search runs when you're back online");
   expect(status()).not.toHaveTextContent(/No customer matches/);
 });

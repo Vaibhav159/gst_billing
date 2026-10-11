@@ -16,7 +16,7 @@ export function groupIN(n: number): string {
   return rest + "," + last3;
 }
 
-/** "₹87,083.21"; whole: true gives "₹2,32,00,075" (rounded to the rupee). */
+/** inr(8708321) gives "₹87,083.21"; inr(23200075, { whole: true }) gives "₹2,32,001" (rounded to the rupee). */
 export function inr(paise: number | null | undefined, { whole = false, sign = false }: { whole?: boolean; sign?: boolean } = {}): string {
   if (paise == null || Number.isNaN(paise)) return "—";
   const neg = paise < 0;

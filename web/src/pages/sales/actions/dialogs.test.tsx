@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { refuse, salesServer, wireBin, wireDetail, wireRow } from "@/core/sales/fixtures";
@@ -153,20 +154,6 @@ test("the e-way bill checks the number, a vehicle by road and the distance, then
 
 /* ── Beyond the brief: Ruling 1B-9's one number check and storedNumber, and what's stored on an e-way bill ── */
 
-/**
- * For a test that waits on the number field's own pause (300 ms) before the server checks what's typed: a clock that
- * moves only when the test says, however long each step takes on a busy machine. Testing Library's async helpers
- * (userEvent, findBy, waitFor) wait on a 0 ms timer that this clock never runs, so these tests use fireEvent and pass().
- */
-function handClock() {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-}
-/** The clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 /** What a field holds after the person typed `value` into it. */
 const typeIn = (field: HTMLElement, value: string) => fireEvent.change(field, { target: { value } });
 const NEXT = { counter: 35, invoice_number: "KGH/2026-27/35" };
@@ -191,7 +178,7 @@ test("a typed number reads as the server stores it (034 is 34), a number the che
   ]);
   renderApp(<Harness bill={row()} kind="renumber" />);
   fireEvent.click(screen.getByText("open it"));
-  await pass(400); // the next free number comes, and the dialog's guard against a double tap's second tap passes
+  await pass(400, 2); // the next free number comes, and the dialog's guard against a double tap's second tap passes
   const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
   const field = within(dialog).getByLabelText("New number");
   expect(field).toHaveValue("KGH/2026-27/35");
@@ -199,16 +186,16 @@ test("a typed number reads as the server stores it (034 is 34), a number the che
   // the server drops the leading zero as it formats the number (int(text)), and the field says so before the check answers
   expect(within(dialog).getByText(/^Saved as KGH\/2026-27\/34\. /)).toBeInTheDocument();
   typeIn(field, "29");
-  await pass(300);
+  await pass(300, 2);
   expect(calls.filter((c) => c.url === "sales/check-number/").map((c) => c.params)).toContainEqual({ business_id: 3, invoice_date: "2026-10-08", invoice_number: "29", exclude_id: 412 });
   fireEvent.click(within(dialog).getByRole("button", { name: "Renumber bill" }));
   expect(within(dialog).getByText("KGH/2026-27/29 is already used in FY 2026-27 by Meena Jain's bill of 08 Oct 2026. The next free number is KGH/2026-27/35.")).toBeInTheDocument();
   expect(calls.some((c) => c.url === "sales/412/renumber/")).toBe(false);
   typeIn(field, "38");
-  await pass(300);
+  await pass(300, 2);
   expect(within(dialog).getByText("Saved as KGH/2026-27/38. Numbers 35 to 37 would be skipped. GSTR-1 lists skipped numbers, so only do this on purpose.")).toBeInTheDocument();
   fireEvent.keyDown(field, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(calls.filter((c) => c.url === "sales/412/renumber/").map((c) => c.body)).toEqual([{ invoice_number: "38" }]);
   expect(screen.getByText("KGH/2026-27/31 is now KGH/2026-27/38")).toBeInTheDocument();
 });
@@ -226,20 +213,20 @@ test("moving checks the number in the new firm's series with the same check, and
   ]);
   renderApp(<Harness bill={row()} kind="move" />);
   fireEvent.click(screen.getByText("open it"));
-  await pass(400); // the firms and that firm's next free number come, and the dialog's guard passes
+  await pass(400, 2); // the firms and that firm's next free number come, and the dialog's guard passes
   const dialog = screen.getByRole("dialog", { name: "Move KGH/2026-27/31 to another firm" });
   const field = within(dialog).getByLabelText("Number in that firm's series");
   expect(field).toHaveValue("MO/2026-27/31");
   typeIn(field, "29");
-  await pass(300);
+  await pass(300, 2);
   expect(within(dialog).getByText("Moves the bill to MEERA ORNAMENTS as MO/2026-27/29. KGH/2026-27/31 is left unused.")).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("button", { name: "Move bill" }));
   expect(within(dialog).getByText(/^MO\/2026-27\/29 belonged to a bill that was deleted/)).toBeInTheDocument();
   expect(tries).toBe(0);
   typeIn(field, "30");
-  await pass(300);
+  await pass(300, 2);
   fireEvent.click(within(dialog).getByRole("button", { name: "Move bill" }));
-  await pass(0);
+  await pass(0, 2);
   expect(within(dialog).getByText("Not moved")).toBeInTheDocument();
   expect(within(dialog).getByText(/so its bills can't move to another firm/)).toBeInTheDocument();
   expect(calls.filter((c) => c.url === "sales/412/move/").map((c) => c.body)).toEqual([{ business: 2, invoice_number: "30" }]);
@@ -256,17 +243,17 @@ test("a check that checked nothing (unchecked) is no answer: it never reads as f
   ]);
   renderApp(<Harness bill={row()} kind="renumber" />);
   fireEvent.click(screen.getByText("open it"));
-  await pass(400);
+  await pass(400, 2);
   const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
   const field = within(dialog).getByLabelText("New number");
   expect(field).toHaveValue("KGH/2026-27/35");
   typeIn(field, "34");
-  await pass(300);
+  await pass(300, 2);
   expect(calls.filter((c) => c.url === "sales/check-number/").map((c) => c.params)).toContainEqual({ business_id: 3, invoice_date: "2026-10-08", invoice_number: "34", exclude_id: 412 });
   // the answer's own "34" isn't how it's stored: the firm's format still says so
   expect(within(dialog).getByText(/^Saved as KGH\/2026-27\/34\. /)).toBeInTheDocument();
   fireEvent.keyDown(field, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(within(dialog).queryByText("Pick the firm.")).not.toBeInTheDocument();
   expect(calls.filter((c) => c.url === "sales/412/renumber/").map((c) => c.body)).toEqual([{ invoice_number: "34" }]);
   expect(screen.getByText("KGH/2026-27/31 is now KGH/2026-27/34")).toBeInTheDocument();
@@ -316,20 +303,20 @@ test("Enter pressed again while a renumber is on its way sends nothing more, and
   ]);
   renderApp(<Harness bill={row()} kind="renumber" />);
   fireEvent.click(screen.getByText("open it"));
-  await pass(400);
+  await pass(400, 2);
   const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
   const field = within(dialog).getByLabelText("New number");
   expect(field).toHaveValue("KGH/2026-27/35");
   fireEvent.keyDown(field, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(within(dialog).getByRole("button", { name: "Renumbering…" })).toBeInTheDocument();
   fireEvent.keyDown(field, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(calls.filter((c) => c.url === "sales/412/renumber/")).toHaveLength(1);
   await act(async () => { answer({ id: 412, invoice_number: "KGH/2026-27/35", previous: "KGH/2026-27/31" }); });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByText("KGH/2026-27/31 is now KGH/2026-27/35")).toBeInTheDocument();
-  await pass(400); // the dialog animates out
+  await pass(400, 2); // the dialog animates out
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
@@ -343,18 +330,18 @@ test("Enter pressed again while a move is on its way sends nothing more, and the
   ]);
   renderApp(<Harness bill={row()} kind="move" />);
   fireEvent.click(screen.getByText("open it"));
-  await pass(400);
+  await pass(400, 2);
   const dialog = screen.getByRole("dialog", { name: "Move KGH/2026-27/31 to another firm" });
   const field = within(dialog).getByLabelText("Number in that firm's series");
   expect(field).toHaveValue("MO/2026-27/31");
   fireEvent.keyDown(field, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(within(dialog).getByRole("button", { name: "Moving…" })).toBeInTheDocument();
   fireEvent.keyDown(field, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(calls.filter((c) => c.url === "sales/412/move/")).toHaveLength(1);
   await act(async () => { answer({ id: 412, business: 2, invoice_number: "MO/2026-27/31", previous: { business: 3, invoice_number: "KGH/2026-27/31" } }); });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByText("KGH/2026-27/31 is now MO/2026-27/31")).toBeInTheDocument();
 });
 
@@ -367,12 +354,12 @@ test("Renumber pressed before the next free number has come asks for a number wi
   ]);
   renderApp(<Harness bill={row()} kind="renumber" />);
   fireEvent.click(screen.getByText("open it"));
-  await pass(400);
+  await pass(400, 2);
   const dialog = screen.getByRole("dialog", { name: "Give KGH/2026-27/31 a new number" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Renumber bill" }));
   expect(within(dialog).getByText("Type the bill number.")).toBeInTheDocument();
   await act(async () => { next({ business: 3, fy: "2026-27", invoice_date: "2026-10-08", ...NEXT, full_number: true }); });
-  await pass(0);
+  await pass(0, 2);
   expect(within(dialog).getByLabelText("New number")).toHaveValue("KGH/2026-27/35");
   expect(within(dialog).queryByText("Type the bill number.")).not.toBeInTheDocument();
   expect(dialog).toHaveTextContent("KGH/2026-27/35 is the next free number in KIRAN GOLD HOUSE for FY 2026-27.");

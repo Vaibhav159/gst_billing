@@ -1,7 +1,20 @@
 import { Building2, ChevronDown } from "lucide-react";
 import { cn } from "@/core/cn";
-import { useFirms, useScope, type Firm, type Scope } from "@/core/scope";
+import { useFirms, useScope, type Firm, type FirmId, type Scope } from "@/core/scope";
 import { Menu, useToast, type MenuItem, type ToastApi } from "@/core/ui";
+
+/** The firm the lists follow, as chips on phones (the desktop has it in the top bar). */
+export function FirmChips({ firms, value, onChange }: { firms: Firm[]; value: FirmId | null; onChange: (id: FirmId) => void }) {
+  const opts: { id: FirmId; label: string }[] = [{ id: "all", label: "All firms" }, ...firms.map((f) => ({ id: f.id, label: f.short }))];
+  return (
+    <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar" role="radiogroup" aria-label="Firm">
+      {opts.map((o) => (
+        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} onClick={() => onChange(o.id)}
+          className={cn("min-h-11 px-4 rounded-full border whitespace-nowrap transition-colors shrink-0", value === o.id ? "bg-brand-sel border-brand text-brand font-semibold" : "bg-card border-line text-fg2")}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
 
 /** "Kiran, Meera and Aarav together": what All firms adds up. */
 function together(firms: Firm[]): string | undefined {

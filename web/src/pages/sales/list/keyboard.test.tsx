@@ -1,3 +1,4 @@
+import { pass } from "@/test/clock";
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router";
 import { salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow } from "@/core/sales/fixtures";
@@ -21,10 +22,6 @@ function mount(path = "/sales") {
     <Route path="/sales/:id" element={<Where />} />
     <Route path="/sales/:id/print" element={<Where />} />
   </Routes></ScopeProvider>, { path });
-}
-async function pass(ms = 0) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  for (let i = 0; i < 4; i++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }
 function row(id: number) { return document.querySelector<HTMLElement>(`tr[data-row="${id}"]`)!; }
 function server(initial = ROWS) {
@@ -121,4 +118,26 @@ test("held down-arrow still moves between bills", async () => {
   fireEvent.keyDown(row(413), { key: "ArrowDown", repeat: true });
   await pass(20);
   expect(row(412)).toHaveFocus();
+});
+
+test.each([413, 411])("the preview Send in Not sent today returns focus to the removed bill's clamped row (%s)", async (id) => {
+  const { calls } = server();
+  mount(`/sales?month=today&status=unsent&bill=${id}`);
+  await pass(400);
+  const send = within(screen.getByRole("complementary")).getByRole("button", { name: "Send" });
+  act(() => send.focus()); fireEvent.click(send); await pass(0);
+  expect(calls.filter((c) => c.url === `sales/${id}/sent/`)).toHaveLength(1);
+  expect(row(id)).toBeNull();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  expect(row(412)).toHaveFocus();
+  expect(row(412)).toHaveAttribute("tabindex", "0");
+});
+
+test("the preview Send on the last Not sent today bill returns focus to the page title", async () => {
+  server([ROWS[0]]);
+  mount("/sales?month=today&status=unsent&bill=413"); await pass(400);
+  const send = within(screen.getByRole("complementary")).getByRole("button", { name: "Send" });
+  act(() => send.focus()); fireEvent.click(send); await pass(0);
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Sales", level: 1 })).toHaveFocus();
 });

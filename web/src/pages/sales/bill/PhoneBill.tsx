@@ -62,7 +62,7 @@ export function PhoneBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex flex-wrap gap-1.5"><TaxTypeBadge bill={b} /><StatusCell bill={b} max={3} /></span>
             {/* a paper bill the customer already has is On paper, never "Not sent yet" */}
-            <SendStatusBadge bill={b} />
+            <SendStatusBadge bill={b} variant="text" />
           </div>
           <TotalBlock b={b} d={d} />
           <DL rows={[

@@ -6,8 +6,7 @@ import { plural } from "@/core/format";
 import { PAY_FILTER, STATUS, type PayFilter, type StatusFilter } from "@/core/sales/words";
 import { Avatar, Button, Chip, Dialog, Field, IconButton, ListRow, SearchInput, Select } from "@/core/ui";
 import { customerLine, useTypedSearch } from "@/pages/customers/forBills";
-// the firms as chips (PROTO core/common.jsx:130-140): 1C's, one home for them (Ruling 1C-3)
-import { FirmChips } from "@/pages/customers/listParts";
+import { FirmChips } from "@/core/shell/ScopePickers";
 import type { ListModel } from "./model";
 import { SavedViews } from "./parts";
 

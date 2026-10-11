@@ -137,10 +137,13 @@ export function DesktopList({ m }: { m: ListModel }) {
     const ids = new Set(rows.map((r) => r.id));
     setSelected((s) => { const n = new Set([...s].filter((id) => ids.has(id))); return n.size === s.size ? s : n; });
     // the previewed bill left the rows it was in (deleted, or filtered out): close it. A link's bill past the first page stays
-    if (previewId != null && seen.current.has(previewId) && !ids.has(previewId)) setPreview(null);
+    const closingPreview = previewId != null && seen.current.has(previewId) && !ids.has(previewId);
+    if (closingPreview) setPreview(null);
     const active = document.activeElement;
-    if (focusId != null && seen.current.has(focusId) && !ids.has(focusId) && (!active || active === document.body || !document.contains(active))) {
-      const next = rows[Math.min([...seen.current].indexOf(focusId), rows.length - 1)];
+    const previewFocused = closingPreview && active?.closest("[data-bill-preview]");
+    const removedFocusId = previewFocused ? previewId : focusId;
+    if (removedFocusId != null && seen.current.has(removedFocusId) && !ids.has(removedFocusId) && (previewFocused || !active || active === document.body || !document.contains(active))) {
+      const next = rows[Math.min([...seen.current].indexOf(removedFocusId), rows.length - 1)];
       setFocusId(next?.id ?? null);
       (next ? rowEl(next.id) : document.querySelector<HTMLElement>("#app-main [data-page-title]"))?.focus({ preventScroll: true });
     }

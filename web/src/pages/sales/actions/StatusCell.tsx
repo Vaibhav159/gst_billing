@@ -24,8 +24,11 @@ export function TaxTypeBadge({ bill }: { bill: Pick<BillRow, "interstate"> }) {
 }
 
 /** The same sending status on the preview and both bill layouts. */
-export function SendStatusBadge({ bill }: { bill: Pick<BillRow, "status" | "sent" | "paper"> }) {
+export function SendStatusBadge({ bill, variant = "badge" }: { bill: Pick<BillRow, "status" | "sent" | "paper">; variant?: "badge" | "text" }) {
   if (bill.status === "cancelled") return null;
+  if (variant === "text") return bill.sent ? <span className="text-sm text-sale font-semibold">Sent {sentWhen(bill.sent)}</span>
+    : bill.paper ? <span className="text-sm text-muted font-semibold">On paper</span>
+      : <span className="text-sm text-brand font-semibold">Not sent yet</span>;
   return bill.sent ? <Badge tone="sale" icon={Send}>Sent {sentWhen(bill.sent)}</Badge>
     : bill.paper ? <Badge tone="muted" icon={FileText} title="Entered from the paper bill book: the customer has the paper bill">On paper</Badge>
       : <Badge tone="brand">Not sent yet</Badge>;
