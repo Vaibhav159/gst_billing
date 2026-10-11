@@ -1,4 +1,4 @@
-import { settle } from "@/test/clock";
+import { pastGuard } from "@/test/clock";
 import type { ReactNode } from "react";
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
@@ -36,7 +36,7 @@ test("a counter bill by keyboard: the customer box has the first keys, Enter pic
   expect(screen.getByRole("heading", { level: 1, name: "New sales bill" })).toBeInTheDocument();
   await waitFor(() => expect(customer).toHaveFocus());
   await user.keyboard("Anil");
-  await settle();
+  await pastGuard();
   await screen.findByRole("option", { name: /^Anil Gupta/ });
   await user.keyboard("{Enter}");
   const product = screen.getByRole("combobox", { name: "Line 1 product" });
@@ -90,11 +90,11 @@ test("a typed number is checked as you type: its shape at once, whether it's fre
   expect(screen.getByText("Use only letters, digits, \"-\" and \"/\" (GST rule 46). Spaces and other marks aren't allowed.")).toBeInTheDocument();
   await user.clear(number);
   await user.type(number, "31");
-  await settle();
+  await pastGuard();
   expect(await screen.findByText("KGH/2026-27/31 is already used in FY 2026-27 by Anil Gupta's bill of 08 Oct 2026. The next free number is KGH/2026-27/34.")).toBeInTheDocument();
   await user.clear(number);
   await user.type(number, "40");
-  await settle();
+  await pastGuard();
   expect(await screen.findByText("Saved as KGH/2026-27/40. Numbers 34 to 39 would be skipped. GSTR-1 lists skipped numbers, so only do this on purpose.")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Use the next free one" }));
   expect(number).toHaveValue("34");
@@ -107,7 +107,7 @@ test("offline before the next number has come, the number box asks for the paper
   mountForm("/sales/new");
   const number = await screen.findByLabelText("Bill number");
   expect(screen.getByText("Looking up the next number…")).toBeInTheDocument();
-  await settle();
+  await pastGuard();
   act(() => __setNetState("offline"));
   expect(screen.getByText("Type the number written on the paper bill. The app can't look up the next free number offline.")).toBeInTheDocument();
   expect(number).not.toHaveAttribute("aria-invalid");
@@ -138,7 +138,7 @@ test("a counter sale is taxed where it's handed over; Delivered to another state
   const customer = await screen.findByRole("combobox", { name: /Customer/ });
   await waitFor(() => expect(customer).toHaveFocus());
   await user.keyboard("Ramesh");
-  await settle();
+  await pastGuard();
   await screen.findByRole("option", { name: /^Ramesh Patel/ });
   await user.keyboard("{Enter}");
   expect(screen.getByText("Local sale · CGST + SGST")).toBeInTheDocument();
@@ -161,13 +161,13 @@ test("a line removed says so with Undo, which puts it back; Ctrl Enter adds a li
   expect(screen.getByRole("combobox", { name: "Line 2 product" })).toHaveFocus();
   await user.click(screen.getByRole("button", { name: "Remove line 1, Gold Necklace 22K" }));
   // past the remove's own step that puts the cursor on the next line
-  await settle();
+  await pastGuard();
   expect(screen.getByText("Removed Gold Necklace 22K")).toBeInTheDocument();
   expect(screen.queryByRole("combobox", { name: "Line 2 product" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /^Undo/ }));
   expect(screen.getByRole("combobox", { name: "Line 1 product" })).toHaveValue("Gold Necklace 22K");
   // the toast that offered Undo has gone: the form has settled
-  await settle();
+  await pastGuard();
 });
 
 test("a new customer is added without leaving the bill: typed in the customer box, saved in the sheet, picked, and the items are next", async () => {
@@ -177,11 +177,11 @@ test("a new customer is added without leaving the bill: typed in the customer bo
   const customer = await screen.findByRole("combobox", { name: /Customer/ });
   await waitFor(() => expect(customer).toHaveFocus());
   await user.keyboard("Kamal Jain");
-  await settle();
+  await pastGuard();
   await screen.findByRole("option", { name: /New customer “Kamal Jain”/ });
   await user.keyboard("{Enter}");
   const sheet = await screen.findByRole("dialog", { name: "New customer" });
-  await settle();
+  await pastGuard();
   expect(within(sheet).getByLabelText(/Name on the bill/)).toHaveValue("Kamal Jain");
   // the cursor goes straight to the items: never back through the customer box, whose list would open on the way
   const passed = vi.fn();
@@ -191,7 +191,7 @@ test("a new customer is added without leaving the bill: typed in the customer bo
   expect(calls.find((c) => c.method === "POST" && c.url === "customers/")?.body).toMatchObject({ name: "Kamal Jain", state_name: "RAJASTHAN" });
   expect(screen.getByRole("combobox", { name: /Customer/ })).toHaveValue("Kamal Jain");
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Line 1 product" })).toHaveFocus());
-  await settle();
+  await pastGuard();
   expect(passed).not.toHaveBeenCalled();
   expect(screen.queryByRole("listbox", { name: "Customers" })).not.toBeInTheDocument();
 });
@@ -203,15 +203,15 @@ test("Ctrl S inside one of the form's own sheets stays there: the bill behind it
   const customer = await screen.findByRole("combobox", { name: /Customer/ });
   await waitFor(() => expect(customer).toHaveFocus());
   await user.keyboard("Kamal Jain");
-  await settle();
+  await pastGuard();
   await screen.findByRole("option", { name: /New customer “Kamal Jain”/ });
   await user.keyboard("{Enter}");
   const sheet = await screen.findByRole("dialog", { name: "New customer" });
-  await settle();
+  await pastGuard();
   const name = within(sheet).getByLabelText(/Name on the bill/);
   expect(name).toHaveFocus();
   await user.keyboard("{Control>}s{/Control}");
-  await settle();
+  await pastGuard();
   expect(name).toHaveFocus();
   expect(screen.queryByText(/to fix before saving/)).not.toBeInTheDocument();
   expect(screen.queryByText("Choose who this bill is for. Pick Walk-in customer for a counter sale.")).not.toBeInTheDocument();
@@ -270,7 +270,7 @@ test("an item that isn't in Products fills its line, with its HSN and GST rate t
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Line 1 quantity in pieces" })).toHaveFocus());
   expect(product).toHaveValue("silver idol");
   expect(screen.getByRole("textbox", { name: "Line 1 HSN code" })).toHaveValue("7114");
-  await settle();
+  await pastGuard();
   expect(passed).not.toHaveBeenCalled();
   expect(screen.queryByRole("listbox", { name: "Products" })).not.toBeInTheDocument();
 });
@@ -295,7 +295,7 @@ test("an item kept in Products: the sheet stays while the save is on its way (Es
   expect(within(sheet).getByRole("button", { name: "Saving…" })).toBeInTheDocument();
   await user.keyboard("{Escape}");
   await user.click(within(sheet).getByRole("button", { name: "Close" }));
-  await settle();
+  await pastGuard();
   expect(screen.getByRole("dialog", { name: "An item that isn't in Products" })).toBeInTheDocument();
   expect(within(sheet).getByRole("button", { name: "Back" })).toBeDisabled();
   await act(async () => { answer(); });
@@ -424,11 +424,11 @@ test("a paper bill from its link: its number and date; a number used already say
   const number = await screen.findByLabelText("Number on the paper bill");
   expect(number).toHaveValue("31");
   expect(screen.getByLabelText("Date on the paper bill")).toHaveValue("30 Sep 2026");
-  await settle();
+  await pastGuard();
   expect(await screen.findByText("KGH/2026-27/31 is already used in FY 2026-27 by Anil Gupta's bill of 08 Oct 2026. The next free number is KGH/2026-27/34.")).toBeInTheDocument();
   await user.clear(number);
   await user.type(number, "35");
-  await settle();
+  await pastGuard();
   expect(await screen.findByText("Saved as KGH/2026-27/35.")).toBeInTheDocument();
 });
 
@@ -728,7 +728,7 @@ test("a number checked before a bill was saved isn't called free on the next bil
     const box = screen.getByLabelText("Bill number");
     await user.clear(box);
     await user.type(box, "36");
-    await settle();
+    await pastGuard();
   };
   await typed();
   await waitFor(() => expect(checksOnBill()).toHaveTextContent("Bill number KGH/2026-27/36 is free"));
@@ -777,7 +777,7 @@ test.each([
   await user.click(within(sheet).getByRole("textbox"));
   await user.keyboard("ABCPG1234K{Enter}");
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument());
-  await settle();
+  await pastGuard();
   const save = within(dialog).getByRole("button", { name: "Save bill" });
   expect(save).toBeDisabled();
   expect(save).toHaveAttribute("title", "Getting the next number");
@@ -787,7 +787,7 @@ test.each([
   expect(within(dialog).getByRole("list", { name: "Checked before saving" })).toHaveTextContent("Getting the next number");
   // pressed anyway, it does nothing: the review stays, and nothing is sent
   await user.keyboard("{Control>}s{/Control}");
-  await settle();
+  await pastGuard();
   expect(screen.getByRole("dialog", { name: "Check the bill before saving" })).toBeInTheDocument();
   expect(calls.some((c) => c.method === "POST")).toBe(false);
   // the answer comes: Save is on, and saves the number it shows

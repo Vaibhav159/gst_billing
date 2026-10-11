@@ -71,7 +71,7 @@ test("a GSTIN placeholder on file prints no GSTIN label, never GSTIN URP", async
 }, 30_000);
 
 
-test.each(["", "ABCDE1234F"])("a B2C statement head omits No GSTIN with PAN %s", async (pan) => {
+test.each([{ pan: "", label: "without a PAN" }, { pan: "ABCDE1234F", label: "with a PAN" }])("a B2C statement head omits No GSTIN $label", async ({ pan }) => {
   const text = await drawn(await makeStatementPdf(data(pan, "FY 2026-27")));
   expect(head(text)).not.toContain("No GSTIN");
   if (pan) expect(head(text)).toContain(`PAN ${pan}`);

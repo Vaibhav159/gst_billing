@@ -141,3 +141,22 @@ test("the preview Send on the last Not sent today bill returns focus to the page
   expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Sales", level: 1 })).toHaveFocus();
 });
+
+test("filtering out the previewed bill closes its preview without taking focus from search", async () => {
+  const { calls } = salesServer([
+    ["GET", "sales/", (c) => c.params.facets ? { ...wirePage([]), facets: wireFacets() }
+      : wirePage(c.params.q === "32" ? [ROWS[0]] : ROWS)],
+    ["GET", "sales/412/", () => wireDetail()],
+  ]);
+  mount("/sales?bill=412"); await pass(400);
+  expect(screen.getByRole("complementary", { name: "Preview of bill KGH/2026-27/31" })).toBeInTheDocument();
+  act(() => row(412).focus());
+  const search = screen.getByRole("searchbox", { name: /Search sales bills/ });
+  act(() => search.focus());
+  fireEvent.change(search, { target: { value: "32" } });
+  await pass(300);
+  expect(calls.some((c) => c.url === "sales/" && c.params.q === "32")).toBe(true);
+  expect(row(412)).toBeNull();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  expect(search).toHaveFocus();
+});

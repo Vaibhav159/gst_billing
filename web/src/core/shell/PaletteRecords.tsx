@@ -15,7 +15,7 @@ import { cancelledMark, dayOf, timeOf } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
 import { Button, Kbd, optionClass } from "@/core/ui";
 import { useView } from "@/core/view";
-import { ALT } from "@/core/keyboard";
+import { ALT } from "@/core/modifierKeys";
 import { DESKTOP_NAV, MORE_NAV, NAV_ICON } from "./nav";
 import { recentVisits } from "./recent";
 import { billNumberRank, newBillFor, rankBills, suggestions } from "./suggest";

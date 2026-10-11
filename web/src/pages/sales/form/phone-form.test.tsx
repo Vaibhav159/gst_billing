@@ -1,4 +1,4 @@
-import { settle } from "@/test/clock";
+import { pastGuard } from "@/test/clock";
 import { screen, waitFor, within } from "@testing-library/react";
 import { wireDetail } from "@/core/sales/fixtures";
 import { formServer, fakeToday, mountForm, RING } from "./testing";
@@ -17,7 +17,7 @@ test("common product chips keep their full names when purity distinguishes produ
   formServer([["GET", "products/", () => ({ results: [RING, { ...RING, id: 99, name: "Gold Ring" }] })]]);
   mountForm("/sales/new");
   await screen.findByRole("heading", { level: 1, name: "New bill" });
-  await settle();
+  await pastGuard();
   await user.click(screen.getByRole("button", { name: "Add item" }));
   const chips = within(screen.getByRole("dialog", { name: "Add item 1" })).getByRole("group", { name: "Common products" });
   expect(within(chips).getByRole("button", { name: "Gold Ring 22K" })).toBeInTheDocument();
@@ -32,7 +32,7 @@ test("on a phone a bill is made with sheets: the customer list first, an item fr
   expect(screen.getByText("Kept as a draft once you start")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /Choose customer/ }));
   const sheet = await screen.findByRole("dialog", { name: "Customer" });
-  await settle();
+  await pastGuard();
   // the list first (walk-in, then recent), not the keyboard
   await user.click(await within(sheet).findByRole("button", { name: /^Anil Gupta/ }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Customer" })).not.toBeInTheDocument());
@@ -40,7 +40,7 @@ test("on a phone a bill is made with sheets: the customer list first, an item fr
 
   await user.click(screen.getByRole("button", { name: "Add item" }));
   const item = await screen.findByRole("dialog", { name: "Add item 1" });
-  await settle();
+  await pastGuard();
   const chips = within(item).getByRole("group", { name: "Common products" });
   expect(within(chips).getAllByRole("button").map((b) => b.textContent)).toEqual(["Gold Ring 22K", "Gold Necklace 22K", "Cut Diamond"]);
   await user.click(within(chips).getByRole("button", { name: "Gold Ring 22K" }));
@@ -59,7 +59,7 @@ test("on a phone a bill is made with sheets: the customer list first, an item fr
 
   await user.click(screen.getByRole("button", { name: "Check and save" }));
   const review = await screen.findByRole("dialog", { name: "Check the bill" });
-  await settle();
+  await pastGuard();
   await user.click(within(review).getByRole("radio", { name: "UPI / bank" }));
   await user.click(within(review).getByRole("button", { name: "Save bill" }));
   await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
@@ -74,12 +74,12 @@ test("Check and save takes you to what's missing: the customer's sheet, then an 
   await user.click(screen.getByRole("button", { name: "Check and save" }));
   expect(await screen.findByRole("dialog", { name: "Customer" })).toBeInTheDocument();
   expect(screen.getByText("Choose who this bill is for. Pick Walk-in customer for a counter sale.")).toBeInTheDocument();
-  await settle();
+  await pastGuard();
   await user.click(await within(screen.getByRole("dialog", { name: "Customer" })).findByRole("button", { name: /^Walk-in Customer/ }));
   // an item without its rate: Add to bill says what's missing, in the sheet, and goes there
   await user.click(screen.getByRole("button", { name: "Add item" }));
   const item = await screen.findByRole("dialog", { name: "Add item 1" });
-  await settle();
+  await pastGuard();
   await user.click(within(item).getByRole("button", { name: "Gold Necklace 22K" }));
   await user.keyboard("18.2");
   await user.click(within(item).getByRole("button", { name: "Add to bill" }));
@@ -96,7 +96,7 @@ test("changing a bill on a phone: the firm, number and date are one sheet, the n
   expect(screen.getByRole("button", { name: /KIRAN GOLD HOUSE/ })).toHaveTextContent("No. KGH/2026-27/31 · 08 Oct 2026");
   await user.click(screen.getByRole("button", { name: /KIRAN GOLD HOUSE/ }));
   const info = await screen.findByRole("dialog", { name: "Firm, number and date" });
-  await settle();
+  await pastGuard();
   expect(within(info).getByRole("radiogroup", { name: "Firm" })).toBeInTheDocument();
   expect(within(info).getByText("A bill keeps its number. Renumbering is for the owner, while the month is open.")).toBeInTheDocument();
   await user.click(within(info).getByRole("button", { name: "Done" }));

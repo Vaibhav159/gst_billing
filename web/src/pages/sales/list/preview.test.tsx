@@ -94,17 +94,17 @@ test("a body that scrolls with nothing to focus inside (a walk-in's cancelled bi
   try {
     // a walk-in's name is no link: nothing in the body for Tab (Send is in the foot), so the body takes it
     const { rerender } = render(<Preview id={412} />);
-    await pass(200);
+    await pass(200, 3);
     const body = screen.getByRole("region", { name: "Details of bill 412" });
     expect(body).toHaveAttribute("tabindex", "0");
     expect(body).toHaveTextContent("Total when issued");
     // the next bill's body is measured afresh: a customer's name is a link Tab reaches, which scrolls the body, so it's no region
     rerender(<Preview id={413} />);
-    await pass(200);
+    await pass(200, 3);
     expect(screen.getByRole("link", { name: "Anil Gupta" })).toBeInTheDocument();
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
     rerender(<Preview id={412} />);
-    await pass(200);
+    await pass(200, 3);
     expect(screen.getByRole("region", { name: "Details of bill 412" })).toHaveAttribute("tabindex", "0");
   } finally {
     Object.defineProperty(HTMLElement.prototype, "offsetParent", was);

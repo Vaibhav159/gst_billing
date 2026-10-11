@@ -1,6 +1,6 @@
 import { cn } from "@/core/cn";
 import { Dialog, Kbd } from "@/core/ui";
-import { ALT, MOD } from "@/core/keyboard";
+import { ALT, MOD } from "@/core/modifierKeys";
 
 export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const rows: [string[], string][] = [

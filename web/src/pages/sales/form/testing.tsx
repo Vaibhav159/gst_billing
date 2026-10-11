@@ -1,7 +1,7 @@
-import { tick } from "@/test/clock";
 // Tests only (not *.test.tsx, so vitest doesn't run it, and nothing in the app imports it): the bill form in a data
 // router with the app's providers and the firm scope, and a fake server answering everything the form asks, the
 // contract's way. Today is 08 Oct 2026, as in the prototype's sample data.
+import { tick } from "@/test/clock";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";

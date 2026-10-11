@@ -1,8 +1,8 @@
-import { readStored, writeStored } from "@/core/storage";
 // Unfinished bills kept on this device (localStorage), beside the shop-wide copies on the server (core/api/drafts.ts).
 // A bill typed offline, or while a session ran out, is never lost: it stays here until the server has it. Signing out
 // keeps them ("Unfinished bills stay on this phone"): drafts are the shop's, not one person's, so whoever signs in next
 // on this device can finish them. A browser that refuses storage keeps them for the visit.
+import { readStored, writeStored } from "@/core/storage";
 import { useSyncExternalStore } from "react";
 import { toDraftData, type DraftData } from "@/core/draftData";
 import type { Person } from "@/core/sales/types";

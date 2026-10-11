@@ -7,6 +7,7 @@ import { AlertTriangle, BookOpenText, FilePlus2, Plus, SquarePen } from "lucide-
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, plural } from "@/core/format";
+import { MOD } from "@/core/modifierKeys";
 import { Button, ButtonLink, Card, Field, Kbd, Page, Select, Sheet, Textarea } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { CustomerFixSheet, CustomerPicker, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
@@ -94,7 +95,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
           </Card>
 
           <Card title={`Items · ${F.filled.length}`} subtitle="Type each rate as written on the paper bill: per gram, carat or piece, making included, before GST."
-            actions={<span className="text-sm text-muted inline-flex items-center gap-1"><Kbd>Ctrl</Kbd><Kbd>Enter</Kbd> adds a line</span>}>
+            actions={<span className="text-sm text-muted inline-flex items-center gap-1"><Kbd>{MOD}</Kbd><Kbd>Enter</Kbd> adds a line</span>}>
             <div ref={lines} role="group" aria-label="Items on the bill">
               {oneRow ? (
                 <div aria-hidden="true" className={cn("grid gap-x-2.5 pb-2 border-b border-rule caps", LINE_COLS)}>
@@ -133,7 +134,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
           <CheckList checks={checks} label="Checks on this bill" />
           {errCount ? <p className="text-sm text-neg anim-rise flex items-start gap-1.5" role="alert"><AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />{plural(errCount, "thing")} to fix before saving. Each is marked under its field.</p> : null}
           <Button variant="primary" size="lg" full onClick={onTryReview}>{edit ? "Check and save changes" : "Check and save"}</Button>
-          <p className="text-xs text-muted text-center -mt-2 inline-flex items-center justify-center gap-1"><Kbd>Ctrl</Kbd><Kbd>S</Kbd> check and save</p>
+          <p className="text-xs text-muted text-center -mt-2 inline-flex items-center justify-center gap-1"><Kbd>{MOD}</Kbd><Kbd>S</Kbd> check and save</p>
           <p className="text-sm text-muted border-t border-rule pt-3"><DraftStatus F={F} drafts={drafts} /></p>
         </aside>
       </div>

@@ -20,7 +20,7 @@ import { useView } from "@/core/view";
 import { downloadFile, firmShort, fyPeriod, notCounted, scopeWords, SETTLED, useRouteCustomer } from "./lib";
 import { MissingRecord } from "./parts";
 import { useContact } from "./listParts";
-import { printPdf, sharePdf, statementFileName, useStatementPdf } from "./statementFiles";
+import { printPdf, sharePdf, STATEMENT_PDF_AHEAD, statementFileName, useStatementPdf } from "./statementFiles";
 
 type Which = "fy" | "month" | "last" | "custom";
 type Span = { from: string; to: string; label: string; short: string; range: string };
@@ -87,7 +87,8 @@ function Statement({ c }: { c: Customer }) {
   } : null), [st.data, badRange, named, c.name, c.mobile_number, c.gst_number, c.pan, c.address, c.city, c.state_name, span.label, span.range, scope, today]);
   const pdf = useStatementPdf(data);
   const making = pdf.making;
-  const off = !data || pdf.failed;
+  const makeOnPress = bills.length > STATEMENT_PDF_AHEAD;
+  const off = !data || pdf.failed || (making && !makeOnPress);
   const printButton = useRef<HTMLButtonElement>(null);
   const [printReady, setPrintReady] = useState<typeof data>(null);
   const readyToPrint = Boolean(data && printReady === data && pdf.blob);
@@ -213,8 +214,8 @@ function Statement({ c }: { c: Customer }) {
     <Page icon={FileText} breadcrumbs={[{ label: "Customers", to: "/customers" }, { label: c.name, to: `/customers/${c.id}` }]} title="Statement" back={`/customers/${c.id}`}
       context={[c.name, mobileText(c.mobile_number), "bills register", scope].filter(Boolean).join(" · ")}
       actions={<>
-        <Button ref={printButton} icon={Printer} onClick={onPrint} disabled={off} loading={making} title={why}>Print</Button>
-        <Button icon={Download} onClick={onDownload} disabled={off} loading={making} title={why}>Download PDF</Button>
+        <Button ref={printButton} icon={Printer} onClick={onPrint} disabled={off} loading={making && makeOnPress} title={why}>Print</Button>
+        <Button icon={Download} onClick={onDownload} disabled={off} loading={making && makeOnPress} title={why}>Download PDF</Button>
         <Button variant="primary" icon={Share2} onClick={() => void onShare()} disabled={off} loading={making} title={why}>Share PDF</Button>
       </>}>
       <Card>

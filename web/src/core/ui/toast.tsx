@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { useInRouterContext, useLocation } from "react-router";
 import { CheckCircle2, Info, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/core/cn";
-import { MOD } from "@/core/keyboard";
+import { MOD } from "@/core/modifierKeys";
 import { useIsPhone } from "@/core/device";
 import { useView } from "@/core/view";
 import { Kbd } from "./Badge";
@@ -194,7 +194,7 @@ function ToastItem({ t, dismiss, acted, isPhone, isEasy }: { t: Toast; dismiss: 
       </div>
       {action ? (
         // a toast on its way out (pressed, dismissed or timed out) ignores its action, so a quick second press can't run it twice
-        <Button size="sm" variant="link" onClick={() => { if (t.leaving) return; action.onClick(); acted(t.id); dismiss(t.id); }} aria-keyshortcuts={undo ? "Control+Z Meta+Z" : undefined}>
+        <Button size="sm" variant="link" onClick={() => { if (t.leaving) return; action.onClick(); acted(t.id); dismiss(t.id); }} aria-keyshortcuts={undo && !isPhone ? "Control+Z Meta+Z" : undefined}>
           {action.label}{undo && !isPhone ? <Kbd className="ml-1">{MOD} Z</Kbd> : null}
         </Button>
       ) : null}

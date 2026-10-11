@@ -492,3 +492,70 @@ test("a large statement's desktop Share opens WhatsApp within the press before t
   expect(clicked).toEqual(["Anil-Gupta_statement_FY-2026-27.pdf"]);
   expect(open).toHaveBeenCalledTimes(1);
 });
+
+test.each([150, 151])("at %i bills, Print and Download spin only when the PDF is made on press", async (count) => {
+  handClock();
+  const ready = heldPdf();
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(count) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400, 1);
+  const print = screen.getByRole("button", { name: "Print" });
+  const download = screen.getByRole("button", { name: "Download PDF" });
+  const share = screen.getByRole("button", { name: "Share PDF" });
+  if (count === 151) {
+    expect(makeStatementPdf).not.toHaveBeenCalled();
+    act(() => download.focus());
+    fireEvent.click(download);
+  }
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  for (const button of [print, download]) {
+    expect(button).toHaveAttribute("title", "Making the PDF…");
+    if (count === 150) {
+      expect(button).toBeDisabled();
+      expect(button).not.toHaveAttribute("aria-busy");
+      expect(button.querySelector(".anim-spin")).toBeNull();
+    } else {
+      expect(button).not.toBeDisabled();
+      expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button.querySelector(".anim-spin")).not.toBeNull();
+    }
+  }
+  expect(share).toHaveAttribute("aria-busy", "true");
+  if (count === 150) expect(share).toBeDisabled();
+  else {
+    expect(share).not.toBeDisabled();
+    expect(download).toHaveFocus();
+  }
+  await act(async () => ready());
+  for (const button of [print, download, share]) {
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("aria-busy");
+  }
+  if (count === 151) expect(download).toHaveFocus();
+});
+
+test.each([150, 151])("at %i bills, phone Share keeps its spinner and small statements remain natively disabled", async (count) => {
+  handClock();
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  const ready = heldPdf();
+  Object.assign(navigator, { share: vi.fn(async () => {}), canShare: () => true });
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(count) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400, 1);
+  const share = screen.getByRole("button", { name: "Share PDF" });
+  if (count === 151) {
+    expect(makeStatementPdf).not.toHaveBeenCalled();
+    act(() => share.focus());
+    fireEvent.click(share);
+  }
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  expect(share).toHaveAttribute("aria-busy", "true");
+  if (count === 150) expect(share).toBeDisabled();
+  else {
+    expect(share).not.toBeDisabled();
+    expect(share).toHaveFocus();
+  }
+  await act(async () => ready());
+  expect(share).toBeEnabled();
+  expect(share).not.toHaveAttribute("aria-busy");
+});

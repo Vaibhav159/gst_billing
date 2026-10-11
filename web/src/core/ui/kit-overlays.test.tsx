@@ -1,4 +1,4 @@
-import { settle } from "@/test/clock";
+import { pastGuard } from "@/test/clock";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -208,7 +208,7 @@ test("a dialog holding typing asks before it closes: Keep editing stays, Discard
     // @ts-expect-error confirmClose takes a string
     void (<Dialog open onClose={onClose} title="New customer" confirmClose><input aria-label="Name" /></Dialog>);
     wrap(<Dialog open onClose={onClose} title="New customer" confirmClose="Discard this customer?"><input aria-label="Name" /></Dialog>);
-    await settle();
+    await pastGuard();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Discard this customer?");
     expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus();
@@ -232,7 +232,7 @@ test("on phones a dialog is a bottom sheet: a long drag or a flick closes it, a 
     const drag = (type: string, y: number) => fireEvent(screen.getByRole("heading", { name: "Firm" }), new MouseEvent(type, { bubbles: true, button: 0, clientY: y }));
     // 60 px, slowly: it follows the finger, then springs back and stays open
     drag("pointerdown", 100);
-    await settle();
+    await pastGuard();
     drag("pointermove", 160);
     expect(screen.getByRole("dialog").style.transform).toBe("translateY(60px)");
     drag("pointerup", 160);
@@ -240,10 +240,10 @@ test("on phones a dialog is a bottom sheet: a long drag or a flick closes it, a 
     expect(screen.getByRole("dialog")).not.toHaveAttribute("data-closing");
     // 150 px, slowly: past 110 px, so it closes
     drag("pointerdown", 100);
-    await settle();
+    await pastGuard();
     drag("pointermove", 250);
     drag("pointerup", 250);
-    await settle();
+    await pastGuard();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(screen.getByRole("dialog", { name: "Firm" }).style.transform).toBe("");
@@ -409,7 +409,7 @@ test("a confirmation can wait for a tick, and while it saves nothing closes it",
     const record: DLRow[] = [["Firm", "Meera Ornaments"], ["GSTIN", "08BBBBB0000B1Z5"]];
     const props = { open: true, onClose, onConfirm: () => {}, title: "Remove Meera Ornaments?", confirmLabel: "Remove", ack: "I understand Meera Ornaments goes off every list.", record };
     const { rerender } = wrap(<ConfirmDialog {...props} />);
-    await settle();
+    await pastGuard();
     expect(screen.getByText("08BBBBB0000B1Z5")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: "I understand Meera Ornaments goes off every list." }));
@@ -433,7 +433,7 @@ test("on phones a sheet that asks first springs back while it asks", async () =>
     wrap(<Dialog open onClose={onClose} title="New customer" confirmClose="Discard this customer?"><input aria-label="Name" /></Dialog>);
     const drag = (type: string, y: number) => fireEvent(screen.getByRole("heading", { name: "New customer" }), new MouseEvent(type, { bubbles: true, button: 0, clientY: y }));
     drag("pointerdown", 100);
-    await settle();
+    await pastGuard();
     drag("pointermove", 250);
     drag("pointerup", 250);
     expect(screen.getByRole("alert")).toHaveTextContent("Discard this customer?");
@@ -466,7 +466,7 @@ test("on phones a drag cut short by the app closing the sheet leaves no offset w
     expect(screen.getByRole("dialog").style.transform).toBe("translateY(80px)");
     // the app closes it mid-drag (a save came back, say): no release ever comes
     fireEvent.click(screen.getByRole("button", { name: "Shut" }));
-    await settle();
+    await pastGuard();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(screen.getByRole("dialog", { name: "Firm" }).style.transform).toBe("");

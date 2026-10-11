@@ -7,7 +7,7 @@ import { cn } from "@/core/cn";
 import { useFirms } from "@/core/scope";
 import { AppMark, Kbd } from "@/core/ui";
 import { AccountMenu } from "./AccountMenu";
-import { MOD } from "@/core/keyboard";
+import { MOD } from "@/core/modifierKeys";
 import { MORE_NAV, sectionOf } from "./nav";
 import { NavBar } from "./NavBar";
 import { FirmPicker, FyPicker } from "./ScopePickers";

@@ -17,6 +17,7 @@ const routes = [
   { path: "/sales/new", element: <p>the bill form</p> },
 ];
 const NONE = { count: 0, next: null, results: [] };
+vi.hoisted(() => { Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" }); });
 beforeEach(() => { localStorage.clear(); });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -36,6 +37,8 @@ test("a new customer: a valid GSTIN fills the state, type and PAN, and the save 
   const calls = serve({ "GET customers/": NONE, "POST customers/": (c: Call) => ({ status: 201, data: { ...ANIL, ...(c.data as object), id: 30 } }) });
   const { router } = mount(routes, ["/customers", "/customers/new?from=list"]);
   const name = await screen.findByLabelText(/^Name/);
+  expect(screen.getAllByRole("button", { name: "Save customer" })[0]).toHaveAttribute("title", "Ctrl S");
+  expect(screen.getByText("Ctrl S saves")).toBeInTheDocument();
   await waitFor(() => expect(name).toHaveFocus());
   await userEvent.type(name, "Kulkarni Jewellers");
   await userEvent.type(screen.getByLabelText("GSTIN"), "27xtzps7585p1zb");

@@ -14,6 +14,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, plural, possessive } from "@/core/format";
 import { checkGstin, cleanGstin, cleanPan, emailProblem, formatMobile, gstinPan, gstinPlaceholder, hasGstin, mobileDigits, mobileProblem, panProblem, stateLabel, stateOptions, stateTitle } from "@/core/ids";
+import { MOD } from "@/core/modifierKeys";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope, type Firm } from "@/core/scope";
 import { Banner, Button, ButtonLink, Card, ConfirmDialog, Field, Input, ListSkeleton, LoadError, Page, QueryView, Segmented, Select, scrollIntoViewSafe } from "@/core/ui";
@@ -314,7 +315,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
       breadcrumbs={[{ label: "Customers", to: "/customers" }, ...(existing ? [{ label: existing.name, to: `/customers/${existing.id}` }] : [])]}
       context={existing ? "Changes show on new bills from now on" : "A name and phone are enough to start. Add the GSTIN for businesses."}
       phoneSubtitle={existing ? "Changes show on new bills" : "Name and phone are enough to start"}
-      actions={<><Button variant="ghost" onClick={back} disabled={busy}>Cancel</Button><Button variant="primary" icon={Check} onClick={() => save()} loading={busy} title="Ctrl S" {...keepFocus}>{saveLabel}</Button></>}
+      actions={<><Button variant="ghost" onClick={back} disabled={busy}>Cancel</Button><Button variant="primary" icon={Check} onClick={() => save()} loading={busy} title={`${MOD} S`} {...keepFocus}>{saveLabel}</Button></>}
       actionBar={<Button variant="primary" size="lg" icon={Check} onClick={() => save()} loading={busy} {...keepFocus}>{saveLabel}</Button>}>
       {guard}
       <form id="customer-form" onSubmit={save} noValidate className="flex flex-col gap-5">
@@ -423,7 +424,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
 
         {!isPhone ? (
           <div className="flex items-center justify-end gap-2">
-            <span className={cn("text-sm mr-auto", dirty ? "text-fg2" : "text-muted")}>{!existing ? "Ctrl S saves" : dirty ? "Unsaved changes · Ctrl S saves" : "No changes yet"}</span>
+            <span className={cn("text-sm mr-auto", dirty ? "text-fg2" : "text-muted")}>{!existing ? `${MOD} S saves` : dirty ? `Unsaved changes · ${MOD} S saves` : "No changes yet"}</span>
             <Button variant="ghost" onClick={back} disabled={busy}>Cancel</Button>
             <Button type="submit" variant="primary" icon={Check} loading={busy} {...keepFocus}>{saveLabel}</Button>
           </div>

@@ -7,6 +7,7 @@ import { refuse, salesServer, wireBin, wireDetail, wirePage, wireRow } from "@/c
 import { toBillDetail } from "@/core/sales/wire";
 import { renderApp } from "@/test/render";
 import BillPage from "../BillPage";
+import { BillPreview } from "../list/BillPreview";
 import { OtherBills, Parties } from "./parts";
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30")); });
@@ -87,17 +88,32 @@ test("the default observer loads Other bills in a bill page test", async () => {
   expect(screen.getByRole("link", { name: /^Other bill/ })).toBeInTheDocument();
 });
 
-test.each([
+const SEND_STATUSES: [Record<string, unknown>, string | RegExp, string][] = [
   [{}, "Not sent yet", "text-brand"],
   [{ paper: true }, "On paper", "text-muted"],
   [{ sent: { at: "2026-10-08T10:00:00+05:30", count: 1, via: "whatsapp", to: "" } }, /^Sent /, "text-sale"],
-])("the phone draws its sending status as coloured text (%j)", async (over, label, tone) => {
+];
+test.each(SEND_STATUSES)("the phone draws its sending status as coloured text (%j)", async (over, label, tone) => {
   (window as unknown as { __phone?: boolean }).__phone = true;
   salesServer([["GET", "sales/412/", () => wireDetail(over)]]);
   mount(412); await tick(400);
   const status = screen.getByText(label);
   expect(status).toHaveClass("text-sm", "font-semibold", tone);
   expect(status).not.toHaveClass("rounded-full");
+});
+
+test.each(SEND_STATUSES)("the desktop bill page keeps its sending status pill (%j)", async (over, label) => {
+  salesServer([["GET", "sales/412/", () => wireDetail(over)]]);
+  mount(412); await tick(400);
+  expect(screen.getByText(label)).toHaveClass("rounded-full");
+});
+
+test.each(SEND_STATUSES)("the desktop preview keeps its sending status pill (%j)", async (over, label) => {
+  salesServer([["GET", "sales/412/", () => wireDetail(over)]]);
+  const bill = toBillDetail(wireDetail(over));
+  renderApp(<BillPreview id={bill.id} row={bill} index={0} total={1} onClose={() => {}} onMove={() => {}} openDialog={() => {}} send={() => {}} />);
+  await tick(400);
+  expect(within(screen.getByRole("complementary")).getByText(label)).toHaveClass("rounded-full");
 });
 
 test("cached Other bills still observes its card and refreshes stale data only after it enters view", async () => {

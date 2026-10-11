@@ -6,7 +6,7 @@ import { Combobox, Dialog, type ComboItem, type ComboOption } from "./index";
 
 const PEOPLE = ["Anil Gupta", "Meena Jain", "Mahesh Soni"];
 
-test.each([1, 2])("the announced count excludes action rows and uses the right grammar for %s matches", (count) => {
+test.each([1, 2])("the announced count excludes action rows and uses the right grammar for a count of %s", (count) => {
   const options = [
     ...PEOPLE.slice(0, count).map((title, value) => ({ key: title, title, value })),
     { key: "new", title: "+ New customer…", value: -1, action: true },
