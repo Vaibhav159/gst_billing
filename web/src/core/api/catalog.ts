@@ -87,7 +87,7 @@ export function useProduct(id: number | null, scope: ProductScope, all = false) 
 }
 export function useCatalogSearch(typed: string, enabled = true) {
   const q = typed.trim().slice(0, 100);
-  return useQuery({ queryKey: ["catalog", "search", q], queryFn: !enabled || !q ? skipToken : async ({ signal }) => toCatalogPage((await api.get("catalog/", { params: { q, page_size: 5 }, signal })).data).results });
+  return useQuery({ queryKey: ["catalog", "search", q], retry: false, networkMode: "always", staleTime: 30_000, queryFn: !enabled || !q ? skipToken : async ({ signal }) => toCatalogPage((await api.get("catalog/", { params: { q, page_size: 5 }, signal })).data).results });
 }
 export function invalidateCatalog(qc: QueryClient) {
   for (const key of ["catalog", "products", "setup", "search", "audit"]) void qc.invalidateQueries({ queryKey: [key] });

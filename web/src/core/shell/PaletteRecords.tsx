@@ -6,11 +6,12 @@ import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Camera, CornerDownLeft, FileText, FileX, Package, Plus, ShoppingBag, Truck, UserRound, type LucideIcon } from "lucide-react";
 import { api } from "@/core/api/client";
+import { useCatalogSearch } from "@/core/api/catalog";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useBin, useTodaysBills } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { date, dateShort, inr, mobileText, pct, toPaise, todayIST } from "@/core/format";
+import { date, dateShort, inr, mobileText, toPaise, todayIST } from "@/core/format";
 import type { BinRow } from "@/core/sales/types";
 import { cancelledMark, dayOf, timeOf } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
@@ -63,7 +64,6 @@ function recordRows(d: Quick, term: string, deleted: BinRow[]): Result[] {
   const exact = ranked.some((b) => billNumberRank(b.invoice_number, term) < 2);
   const rows = exact ? (exactGone.length ? [...sales, ...gone, ...customers] : [...sales, ...customers, ...gone])
     : exactGone.length ? [...gone, ...customers, ...sales] : [...customers, ...sales, ...gone];
-  for (const p of d.products.slice(0, 3)) rows.push({ group: "Products", label: p.name, icon: Package, hint: `HSN ${p.hsn_code}${p.gst_tax_rate == null ? "" : ` · GST ${pct(Number(p.gst_tax_rate))}`}`, to: `/products/${p.id}` });
   return rows;
 }
 
@@ -71,7 +71,7 @@ const NO_BINS: BinRow[] = [];
 
 /** The firms matching t, by name or GSTIN: the app's own list (useFirms), so nothing is asked for them. */
 function firmRows(firms: Firm[], t: string): Result[] {
-  return firms.filter((f) => f.name.toLowerCase().includes(t) || f.gstin.toLowerCase().includes(t)).slice(0, 3)
+  return firms.filter((f) => f.name.toLowerCase().includes(t) || f.short.toLowerCase().includes(t) || f.gstin.toLowerCase().includes(t)).slice(0, 3)
     .map((f) => ({ group: "Firms", label: f.name, icon: Building2, hint: f.gstin || undefined, to: `/firms/${f.id}` }));
 }
 
@@ -120,6 +120,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
   });
   // deleted bills, for whoever may restore them (design §6: bill.delete): search/quick/ doesn't hold the bin, so it's a
   // second request per term, once typing has paused, through the app's one bin reader (Ruling 1B-9), kept 30 s
+  const catalog = useCatalogSearch(term, open && term.length >= 2);
   const canBin = can("bill.delete");
   const bin = useBin({ q: term, page_size: 3 }, open && canBin && term.length >= 2);
   // today's newest bills, for the empty box: asked once as search opens and kept 30 s, never on a timer (Neon's free
@@ -129,6 +130,8 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
   // reason shows again only once Try again has had its answer
   const current = open && asked.length >= 2 && term === asked;
   const records = current && search.data && !search.isError ? search.data : null;
+  const products = current && !catalog.isError ? catalog.data : undefined;
+  const catalogProblem = current && catalog.isError && !catalog.isFetching ? problemOf(catalog.error) : null;
   const problem = current && search.isError && search.fetchStatus !== "fetching" ? problemOf(search.error) : null;
   // the deleted bills come with the records, never after them (a failure there leaves them out; asked for again, a
   // failure with nothing loaded is pending once more, so the records wait for that answer too)
@@ -169,13 +172,17 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
     // words that go straight to a list come first ("udhaar sep", "kiran gstr1", "new anil")
     const out: Result[] = [...suggestions(q, { firms, today: todayIST(), canCreate: can("bill.create"), customers: records?.customers ?? [] }), ...actions.filter((a) => match(a.label)), ...pages.filter((p) => match(p.label))];
     // the records come in together, once the server has answered for this text (or couldn't: the firms are this app's own)
-    if (settled) out.push(...(records ? recordRows(records, asked, deleted) : []), ...firmRows(firms, t));
+    if (settled) {
+      out.push(...(records ? recordRows(records, asked, deleted) : []));
+      for (const product of (products ?? []).slice(0, 5)) out.push({ group: "Products", label: product.name, icon: Package, hint: "HSN " + product.hsn_code + (product.gst_percent == null ? "" : " · GST " + product.gst_percent + "%"), to: "/products/" + product.id });
+      out.push(...firmRows(firms, t));
+    }
     if (current) {
       for (const b of rankBills(purchases.data ?? [], asked)) out.push({ group: 'Purchase bills', label: b.invoice_number, icon: ShoppingBag, hint: `${b.supplier.name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}`, to: `/purchases/${b.id}` });
       for (const s of suppliers.data ?? []) out.push({ group: 'Suppliers', label: s.name, icon: Truck, hint: [s.gst_number, s.city].filter(Boolean).join(' · ') || 'Supplier', to: `/suppliers/${s.id}` });
     }
     return out.slice(0, 24);
-  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted, current, purchases.data, suppliers.data]);
+  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted, products, current, purchases.data, suppliers.data]);
   const go = (r: Result) => { onClose(); navigate(r.to); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((x) => Math.max(0, Math.min(results.length - 1, x + 1))); }
@@ -195,15 +202,16 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
   useEffect(() => { document.getElementById(`pal-${i}`)?.scrollIntoView({ block: "nearest" }); }, [i]);
   if (!open) return null;
   // what the box says above the rows: why records weren't searched, else (with no rows) what to do next
-  const trouble = problem ? troubleText(problem) : null;
+  const trouble = problem ? troubleText(problem) : catalogProblem ? (catalogProblem.kind === "offline" ? "You're offline, so products can't be searched." : "Products couldn't be searched just now.") : null;
   const status = trouble ?? (results.length ? null
     : text.length < 2 ? "Keep typing to search customers and bills."
-      : !settled ? "Searching…"
+      : !settled || (current && catalog.isPending) ? "Searching…"
         : `Nothing matches “${q}”. Try a phone number, or a bill number like 31 or KGH/2026-27/31.`);
   // Try again asks through the client (Ruling 1B-11): this term's search, and its deleted bills when asking for them failed too
   const retry = () => {
     input.current?.focus();
-    void qc.refetchQueries({ queryKey: ["search", term] });
+    if (search.isError) void qc.refetchQueries({ queryKey: ["search", term] });
+    if (catalog.isError) void catalog.refetch();
     if (bin.isError) void qc.refetchQueries({ queryKey: ["bin"], type: "active", predicate: (x) => x.state.status === "error" });
   };
   let lastGroup: string | null = null;
