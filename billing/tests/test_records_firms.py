@@ -253,3 +253,65 @@ class FirmWriteTests(TestCase):
         self.assertFalse(Business.objects.filter(pk=old.pk).exists())
         self.assertIsNone(ShopSetting.objects.get(pk=1).default_business_id)
         self.assertEqual(AuditLog.objects.get(pk=response.data["audit_id"]).snapshot["name"], old.name)
+
+
+
+class FirmSignatureTests(TestCase):
+    def setUp(self):
+        import tempfile
+
+        from django.test import override_settings
+        self.media = tempfile.TemporaryDirectory(dir=".")
+        self.addCleanup(self.media.cleanup)
+        setting = override_settings(MEDIA_ROOT=self.media.name)
+        setting.enable()
+        self.addCleanup(setting.disable)
+        self.client = client_for(person("signature-owner", "admin"))
+        self.firm = firm()
+        self.url = f"/api/firms/{self.firm.pk}/signature/"
+
+    def picture(self, name="signature.png", kind="PNG"):
+        from io import BytesIO
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        data = BytesIO()
+        Image.new("RGB", (10, 10), "white").save(data, format=kind)
+        return SimpleUploadedFile(name, data.getvalue(), content_type="image/png")
+
+    def test_signature_mints_signed_url_enables_printing_and_keeps_removed_file(self):
+        from billing.models import AuditLog
+        response = self.client.put(self.url, {"image": self.picture()}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["signature_on_bills"])
+        self.assertTrue(response.data["signature_url"].startswith("/api/media/signatures/"))
+        self.assertIn("?s=", response.data["signature_url"])
+        self.firm.refresh_from_db()
+        saved = self.firm.signature_image.name
+        storage = self.firm.signature_image.storage
+        response = self.client.delete(self.url)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(response.data["signature_on_bills"])
+        self.assertIsNone(response.data["signature_url"])
+        self.assertTrue(storage.exists(saved))
+        self.assertEqual(AuditLog.objects.filter(entity="business").count(), 2)
+        self.assertEqual(AuditLog.objects.latest("id").details, "Signature picture: A picture → Removed")
+
+    def test_invalid_missing_large_and_wrong_format_images(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        response = self.client.put(self.url, {}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {"image": ["Choose the picture of the signature."]})
+        for image in (SimpleUploadedFile("fake.png", b"not an image", content_type="image/png"), self.picture("animated.gif", "GIF")):
+            response = self.client.put(self.url, {"image": image}, format="multipart")
+            self.assertEqual(response.status_code, 400, response.data)
+            self.assertIn("isn't a picture. Pick a PNG or JPG of the signature.", response.data["image"][0])
+        response = self.client.put(self.url, {"image": SimpleUploadedFile("large.png", b"x" * (1024 * 1024 + 1))}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["image"], ["That picture is 1.0 MB. Pick one under 1 MB; a phone photo cropped to the signature is fine."])
+
+    def test_webp_is_allowed_and_viewers_cannot_change_it(self):
+        response = self.client.put(self.url, {"image": self.picture("signature.webp", "WEBP")}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.client = client_for(person("signature-viewer", "viewer"))
+        self.assertEqual(self.client.delete(self.url).status_code, 403)

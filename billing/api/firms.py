@@ -67,3 +67,13 @@ class FirmDetailView(APIView):
 class FirmSignatureView(APIView):
     permission_classes = [V3Permission]
     v3_actions = {"PUT": "firm.edit", "DELETE": "firm.edit"}
+
+    def put(self, request, pk):
+        from billing.services.firms import save_signature
+        business = save_signature(found_firm(pk), request.FILES.get("image"), request.user)
+        return Response(firm_detail(business))
+
+    def delete(self, request, pk):
+        from billing.services.firms import save_signature
+        business = save_signature(found_firm(pk), None, request.user, remove=True)
+        return Response(firm_detail(business))

@@ -422,3 +422,41 @@ def delete_firm(business, user):
         drop_settled_party_rows(business)
         business.delete()
         return entry
+
+
+def save_signature(business, image, user, remove=False):
+    from decimal import Decimal
+
+    from django.db import transaction
+    from PIL import Image, UnidentifiedImageError
+    from rest_framework.exceptions import ValidationError
+
+    from billing.api.mixins import snapshot_of
+    from billing.models import AuditLog
+    if not remove:
+        if image is None or not hasattr(image, "size"):
+            raise ValidationError({"image": ["Choose the picture of the signature."]})
+        if image.size > 1024 * 1024:
+            size = (Decimal(image.size) / (1024 * 1024)).quantize(Decimal("0.1"))
+            raise ValidationError({"image": [f"That picture is {size} MB. Pick one under 1 MB; a phone photo cropped to the signature is fine."]})
+        try:
+            with Image.open(image) as picture:
+                if picture.format not in {"PNG", "JPEG", "WEBP"}:
+                    raise ValueError
+                picture.verify()
+            image.seek(0)
+        except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError):
+            raise ValidationError({"image": [f"{image.name} isn't a picture. Pick a PNG or JPG of the signature."]}) from None
+    with transaction.atomic():
+        business = uncached(Business).select_for_update().get(pk=business.pk)
+        before = snapshot_of(business)
+        # Old files stay for Audit log restore/revert; only the model's path changes.
+        business.signature_image = "" if remove else image
+        business.signature_on_bills = not remove
+        business.save(update_fields=["signature_image", "signature_on_bills", "updated_at"])
+        after = snapshot_of(business)
+        changes = {key: {"old": before[key], "new": after[key]} for key in ("signature_image", "signature_on_bills") if before[key] != after[key]}
+        AuditLog.objects.create(action="updated", entity="business", entity_id=business.pk, entity_name=business.name,
+                                user=user, changes=changes, snapshot=before,
+                                details="Signature picture: A picture → " + ("Removed" if remove else "A new picture"))
+        return business
