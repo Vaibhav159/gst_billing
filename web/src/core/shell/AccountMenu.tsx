@@ -1,24 +1,18 @@
 import { useState } from "react";
 import { Keyboard, LogOut, Palette as PaletteIcon, Settings as SettingsIcon, Type, UserRound } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { useSignOutAction } from "@/core/auth/useSignOutAction";
 import { THEMES, TEXT_SIZES, useTextSize, useTheme } from "@/core/device";
 import { Avatar, ConfirmDialog, Menu, type MenuItem } from "@/core/ui";
 
 /** Who is signed in, their pages, this device's theme and text size, and Sign out (asked first). */
 export function AccountMenu({ onShortcuts }: { onShortcuts: () => void }) {
-  const { me, signOut } = useAuth();
+  const { me } = useAuth();
   const [theme, setTheme] = useTheme();
   const [textSize, setTextSize] = useTextSize();
   const [leaving, setLeaving] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const leave = async () => {
-    if (busy) return;
-    setBusy(true); setError("");
-    try { await signOut(); setLeaving(false); }
-    catch { setError("Sign out didn't finish. Try again when the app can connect."); }
-    finally { setBusy(false); }
-  };
+  const { leave: signOut, busy, error } = useSignOutAction();
+  const leave = async () => { if (await signOut()) setLeaving(false); };
   const items: MenuItem[] = [
     { heading: `${me?.fullName} · ${me?.roleLabel}` },
     { label: "Profile and password", icon: UserRound, to: "/profile" },

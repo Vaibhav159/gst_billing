@@ -7,6 +7,7 @@ import { problemOf, saveFailure, type ApiProblem } from "@/core/api/errors";
 import { useSetup } from "@/core/api/setup";
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { useSignOutAction } from "@/core/auth/useSignOutAction";
 import { TEXT_SIZES, useTextSize } from "@/core/device";
 import { addMonths, date, monthLabel, monthOf, todayIST } from "@/core/format";
 import { usePrefs } from "@/core/prefs";
@@ -34,7 +35,7 @@ function notSwitched(p: ApiProblem): { title: string; body: string } {
 }
 
 export default function More() {
-  const { me, can, signOut } = useAuth();
+  const { me, can } = useAuth();
   const setup = useSetup();
   const { isEasy } = useView();
   const { setPrefs } = usePrefs();
@@ -43,15 +44,8 @@ export default function More() {
   const { show } = useToast();
   const net = useNetwork();
   const [leaving, setLeaving] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState("");
-  const leave = async () => {
-    if (signingOut) return;
-    setSigningOut(true); setSignOutError("");
-    try { await signOut(); setLeaving(false); }
-    catch { setSignOutError("Sign out didn't finish. Try again when the app can connect."); }
-    finally { setSigningOut(false); }
-  };
+  const { leave: signOut, busy: signingOut, error: signOutError } = useSignOutAction();
+  const leave = async () => { if (await signOut()) setLeaving(false); };
   const [help, setHelp] = useState(false);
   const [switching, setSwitching] = useState(false);
   // a switch answered after the person left the page doesn't pull them back to a home

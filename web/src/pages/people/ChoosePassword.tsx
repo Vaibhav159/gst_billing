@@ -1,8 +1,7 @@
-import { useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { useSignOutAction } from "@/core/auth/useSignOutAction";
 import { useProfile } from "@/core/api/account";
-import { problemOf } from "@/core/api/errors";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
 import { AppMark, Button, QueryView, useDocTitle } from "@/core/ui";
@@ -10,20 +9,15 @@ import { ChangePasswordForm } from "./PasswordFields";
 import { safeNext } from "@/pages/core/Login";
 
 export default function ChoosePassword() {
-  const { me, signOut } = useAuth();
+  const { me } = useAuth();
   const profile = useProfile();
   const navigate = useNavigate();
   const [query] = useSearchParams();
   const next = safeNext(query.get("next")) || "/";
   const { isPhone } = useView();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { leave, busy, error } = useSignOutAction();
   useDocTitle("Choose your own password");
   if (me && !me.mustChangePassword) return <Navigate to={next} replace />;
-  const leave = async () => {
-    setBusy(true); setError("");
-    try { await signOut(); } catch (failure) { setError(problemOf(failure).message); } finally { setBusy(false); }
-  };
   return <main className={cn("min-h-full flex justify-center bg-ground px-4", isPhone ? "items-start pt-10 pb-10" : "items-start pt-[12vh] pb-10")}>
     <section className={isPhone ? "w-full flex flex-col gap-6" : "card w-full max-w-[580px] p-8 flex flex-col gap-6 shadow-pop"}>
       <div className="flex items-center gap-3"><AppMark size={52} /><h1 className="text-2xl font-semibold leading-tight">Choose your own password</h1></div>
