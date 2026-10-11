@@ -1,6 +1,6 @@
-// The QR code on a printed bill (PROTO sales/lib.js:476-511): what it carries, read back by the QR check, and drawn as
-// one path that the paper on screen (SVG) and the PDF (react-pdf's Svg) both use. Easy (part 6) prints the same code.
-import QRCode from "qrcode";
+// The QR code on a printed bill (PROTO sales/lib.js:476-511): what it carries, and that text read back by the QR check.
+// Easy (part 6) prints the same code. The drawing is qrPath.ts: the encoder it needs comes only with the paper and the
+// PDF, so the QR check (and the bills list it sits in) never brings it into the app's first download (Ruling 1B-4).
 import { paiseToDecimal, toPaise } from "@/core/format";
 
 /** What a bill's QR code carries: number | the firm's GSTIN | date | the total printed, exact to the paisa (Ruling 1B-12). */
@@ -38,29 +38,4 @@ export function parseQr(text: string): QrText | null {
   const total = toPaise(parts[3]);
   if (total == null) return null;
   return { number: parts[0], gstin: parts[1].toUpperCase(), firm: "", date: parts[2], total };
-}
-
-/**
- * The code as one SVG path in a (size)-unit square that includes a two-module quiet zone: each row's dark modules as
- * rectangles, so a 29 × 29 code is about 150 short subpaths, not 440 squares. null when the text can't be encoded.
- */
-export function qrPath(text: string): { size: number; d: string } | null {
-  let m: { size: number; get(r: number, c: number): number };
-  try {
-    m = QRCode.create(text, { errorCorrectionLevel: "M" }).modules;
-  } catch {
-    return null;
-  }
-  const n = m.size;
-  let d = "";
-  for (let r = 0; r < n; r += 1) {
-    let c = 0;
-    while (c < n) {
-      if (!m.get(r, c)) { c += 1; continue; }
-      const start = c;
-      while (c < n && m.get(r, c)) c += 1;
-      d += `M${start + 2} ${r + 2}H${c + 2}V${r + 3}H${start + 2}Z`;
-    }
-  }
-  return { size: n + 4, d };
 }

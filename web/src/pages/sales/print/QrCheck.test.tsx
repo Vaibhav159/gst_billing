@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, Route, RouterProvider, Routes, type RouteObject } from "react-router";
@@ -123,6 +123,36 @@ function noCamera() {
   Object.assign(globalThis, { BarcodeDetector: undefined });
   Object.assign(navigator, { mediaDevices: undefined });
 }
+/** The whole app at `path`, signed in as the owner, as App renders it. */
+function mountApp(path: string) {
+  const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
+  render(<QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+  return router;
+}
+/**
+ * From here the clock moves only when the test says, however busy the machine (as 1B's list tests do it): Testing
+ * Library's async helpers wait on timers this clock never runs, so the steps after it are fireEvent and pass().
+ */
+function handClock() {
+  const now = Date.now();
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
+}
+/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
+async function pass(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  for (let i = 0; i < 4; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
+/**
+ * The hand clock moves `step` ms at a time (none by default) until `seen()` holds: a check (and its requests) answers
+ * over many turns of the promise queue. A check started inside a timer needs steps of 1 ms: the fake clock puts a 0 ms
+ * timer set during its tick (TanStack's news) 1 ms on.
+ */
+async function until(seen: () => boolean, step = 0) {
+  for (let i = 0; i < 20 && !seen(); i += 1) await pass(step);
+}
+/** Whatever is due settles on the hand clock, which doesn't move: so an answer that isn't there wasn't coming yet. */
+const settle = () => until(() => false);
 
 test("/scan holds the same check on a page of its own, and v2's QR scanner link lands on it (Ruling 1E-7)", async () => {
   const { calls } = serve();
@@ -131,10 +161,12 @@ test("/scan holds the same check on a page of its own, and v2's QR scanner link 
   expect(await loadedPage(scans[0].element)).toBe(ScanPage);
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   try {
-    const router = createMemoryRouter(appRoutes, { initialEntries: ["/billing/qr-scanner"] });
-    render(<QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+    const router = mountApp("/billing/qr-scanner");
     expect(await screen.findByRole("heading", { level: 1, name: "Check a bill's QR code" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/scan");
+    // the page puts focus on its title, as every page does, so on a computer its card says how a USB scanner reads in
+    // (PROTO's words): a scan made before the field is clicked would be lost
+    expect(screen.getByRole("region", { name: "Scan" })).toHaveTextContent("A USB scanner works like a keyboard: click the field and scan.");
     act(() => { vi.advanceTimersByTime(400); });
     await userEvent.type(screen.getByLabelText("Or type or paste what it says"), `${CODE}{Enter}`);
     expect(await screen.findByText("Matches KGH/2026-27/31")).toBeInTheDocument();
@@ -338,4 +370,144 @@ test("offline with the firms not in, Check says so at once: it doesn't wait for 
     onLine.mockRestore();
     vi.useRealTimers();
   }
+});
+
+/* ── Review fix 1 ── */
+
+test("/scan on a phone: Back, PROTO's subtitle, and no USB scanner's cue (that's a computer's)", async () => {
+  serve();
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  try {
+    renderApp(<ScanPage />, { path: "/scan" });
+    expect(await screen.findByRole("heading", { level: 1, name: "Check a bill's QR code" })).toBeInTheDocument();
+    expect(screen.getByText("Bills printed by this app")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+    expect(screen.queryByText("A USB scanner works like a keyboard: click the field and scan.")).not.toBeInTheDocument();
+  } finally {
+    (window as unknown as { __phone?: boolean }).__phone = false;
+  }
+});
+
+test("a code left under a scanner that reads it again once a second asks the server once, however long it stays: each read renews the few seconds (Neon's free plan)", async () => {
+  const { calls } = salesServer([["GET", "sales/", () => wirePage([wireRow()])]]);
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  try {
+    const field = await openDialog();
+    await userEvent.type(field, `${CODE}{Enter}`);
+    expect(await screen.findByText("Matches KGH/2026-27/31")).toBeInTheDocument();
+    for (let s = 1; s <= 15; s += 1) {
+      act(() => { vi.advanceTimersByTime(1000); });
+      fireEvent.keyDown(field, { key: "Enter" }); // the scanner's next read: the same code over the selected one, then Enter
+      expect(await screen.findByText("Matches KGH/2026-27/31")).toBeInTheDocument();
+    }
+    expect(calls.filter((c) => c.url === "sales/")).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("text that isn't a code waits 300 ms for its answer, so the rest of a scan split by a line break comes first: typing cancels it, and so does closing the check; it never selects the box", async () => {
+  numbersServer([wireRow({ invoice_number: "KGH/2026-27/\n31" })]);
+  const NOT_A_CODE = "This isn't a bill's QR code";
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const field = await openDialog();
+  handClock();
+  try {
+    // half a scan: its Enter waits; the rest arrives meanwhile and cancels it; the whole code checks at once
+    fireEvent.change(field, { target: { value: "KGH/2026-27/" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await pass(250);
+    await settle();
+    expect(screen.queryByText(NOT_A_CODE)).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await until(() => Boolean(screen.queryByText("Matches KGH/2026-27/ 31")));
+    expect(screen.getByText("Matches KGH/2026-27/ 31")).toBeInTheDocument();
+    await pass(1000);
+    await settle();
+    expect(screen.queryByText(NOT_A_CODE)).not.toBeInTheDocument();
+    // a scanner that sends no Enter after the rest: what it types cancels the wait all the same
+    fireEvent.change(field, { target: { value: "KGH/2026-27/" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await pass(100);
+    fireEvent.change(field, { target: { value: "KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21" } });
+    await pass(1000);
+    await settle();
+    expect(screen.queryByText(NOT_A_CODE)).not.toBeInTheDocument();
+    // text that stays half: its answer comes 300 ms on, and the box keeps it unselected, for the rest to join it
+    fireEvent.change(field, { target: { value: "hello" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await pass(299);
+    await settle();
+    expect(screen.queryByText(NOT_A_CODE)).not.toBeInTheDocument();
+    await pass(1);
+    await until(() => Boolean(screen.queryByText(NOT_A_CODE)), 1);
+    expect(screen.getByText(NOT_A_CODE)).toBeInTheDocument();
+    expect([field.selectionStart, field.selectionEnd]).toEqual([5, 5]);
+    // the check closed while one waits: it never shows, even while the dialog is on its way out
+    fireEvent.change(field, { target: { value: "KGH/2026-27/" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await pass(200);
+    fireEvent.keyDown(field, { key: "Escape" });
+    await pass(120);
+    await settle();
+    expect(screen.queryByText(NOT_A_CODE)).not.toBeInTheDocument();
+    await pass(500);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the camera stops when the dialog closes with it on", async () => {
+  serve();
+  const stop = aCamera(async () => []);
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  try {
+    await openDialog();
+    await userEvent.click(await screen.findByRole("button", { name: "Scan with the camera" }));
+    expect(screen.getByLabelText("The camera: hold the bill's QR code in the square")).toBeInTheDocument();
+    await act(async () => {}); // the camera's stream comes
+    expect(stop).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(stop).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+    noCamera();
+  }
+});
+
+test("the camera stops when the person leaves /scan with it on", async () => {
+  serve();
+  const stop = aCamera(async () => []);
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  try {
+    const router = mountApp("/scan");
+    expect(await screen.findByRole("heading", { level: 1, name: "Check a bill's QR code" })).toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(400); });
+    await userEvent.click(await screen.findByRole("button", { name: "Scan with the camera" }));
+    expect(screen.getByLabelText("The camera: hold the bill's QR code in the square")).toBeInTheDocument();
+    await act(async () => {}); // the camera's stream comes
+    expect(stop).not.toHaveBeenCalled();
+    await act(async () => { await router.navigate("/purchases"); });
+    await waitFor(() => expect(screen.queryByLabelText("The camera: hold the bill's QR code in the square")).not.toBeInTheDocument());
+    expect(stop).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+    noCamera();
+  }
+});
+
+test("how often each answer asks the server: a match once; an unknown code three times, as a deleted one does (the number, its look-alikes, the bin)", async () => {
+  const { calls } = serve();
+  expect(await checkQr(CODE, FIRMS)).toMatchObject({ kind: "match" });
+  expect(calls).toHaveLength(1);
+  calls.length = 0;
+  expect(await checkQr("KGH/2026-27/40|08ABCPK1234F1Z5|2026-10-08|100.00", FIRMS)).toMatchObject({ kind: "unknown" });
+  expect(calls).toHaveLength(3);
+  expect(calls.map((c) => c.url)).toEqual(["sales/", "sales/", "sales/check-number/"]);
+  calls.length = 0;
+  expect(await checkQr("KGH/2026-27/27|08ABCPK1234F1Z5|2026-09-24|45000.00", FIRMS)).toMatchObject({ kind: "deleted" });
+  expect(calls).toHaveLength(3);
 });

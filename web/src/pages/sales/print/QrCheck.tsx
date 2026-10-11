@@ -140,8 +140,10 @@ function CameraView({ onText, onFail }: { onText: (t: string) => void; onFail: (
   return <video ref={video} muted playsInline aria-label="The camera: hold the bill's QR code in the square" className="w-full max-w-[320px] self-center aspect-square object-cover rounded-ctl bg-black" />;
 }
 
-/** The same code read again within this long is answered from the last check, without asking the server again. */
+/** The same code read again within this long of its last read is answered from the last check, without asking the server again. */
 const AGAIN_MS = 5000;
+/** How long text that isn't a code waits for the rest of a scan before it's called that (a line break in a code is a USB scanner's Enter). */
+const HALF_READ_MS = 300;
 
 /**
  * The check itself, in the list's dialog and on /scan: the camera (where the browser reads codes), the box a USB scanner
@@ -166,25 +168,35 @@ export function QrCheck({ input, go }: { input: RefObject<HTMLInputElement>; go:
     if (!fresh.length) throw qc.getQueryState(["firms"])?.error ?? failed ?? new Error("The firms didn't load");
     return checkQr(t, fresh);
   };
-  // Neon's free plan: only a code read asks the server, and the same code again within seconds (a scanner's second read,
-  // a second Enter, the camera held up to it again) gets the answer it had. A check that failed is asked again at once.
+  // Neon's free plan: only a code read asks the server, and the same code again within seconds of its last read (a
+  // scanner's second read, a second Enter, the camera held up to it again) gets the answer it had. Each such read renews
+  // the seconds, so a bill left under a stand scanner that reads it again and again asks once, not every few seconds. A
+  // check that failed is asked again at once.
   const last = useRef<{ text: string; at: number; answer: Promise<QrResult> } | null>(null);
   const check = useMutation({
     mutationFn: (t: string): Promise<QrResult> => {
       const key = t.trim();
       const prev = last.current;
-      if (prev && prev.text === key && Date.now() - prev.at < AGAIN_MS) return prev.answer;
+      if (prev && prev.text === key && Date.now() - prev.at < AGAIN_MS) { prev.at = Date.now(); return prev.answer; }
       const answer = withFirms(key);
       last.current = { text: key, at: Date.now(), answer };
       answer.catch(() => { if (last.current?.answer === answer) last.current = null; });
       return answer;
     },
   });
+  // Text that isn't a code may be half a read: a code with a line break reaches the scanner's Enter halfway, and the rest
+  // follows at once. Its answer waits a moment, and what's typed meanwhile, or the check closing, cancels it.
+  const halfRead = useRef(0);
+  useEffect(() => () => window.clearTimeout(halfRead.current), []);
   // An answer leaves the code selected in the box, so a USB scanner's next read replaces it rather than adding to it.
-  // Not "this isn't a bill's code": that may be half a read (a code with a line break reaches the scanner's Enter halfway,
-  // and the rest follows at once) or a code half typed, so the rest joins it.
+  // Not "this isn't a bill's code": the rest of a half read, or of a code half typed, joins it.
   const run = (t = text) => {
-    if (t.trim()) check.mutate(t, { onSettled: (a) => { if (a?.kind !== "unreadable" && document.activeElement === input.current) input.current?.select(); } });
+    if (!t.trim()) return;
+    window.clearTimeout(halfRead.current);
+    const ask = () => check.mutate(t, { onSettled: (a) => { if (a?.kind !== "unreadable" && document.activeElement === input.current) input.current?.select(); } });
+    if (parseQr(t)) { ask(); return; }
+    // (a dialog on its way out keeps its last look: data-closing, as the kit's shortcuts read it)
+    halfRead.current = window.setTimeout(() => { if (!input.current?.closest("[data-closing]")) ask(); }, HALF_READ_MS);
   };
   const r = check.data;
   let result: ReactNode = null;
@@ -226,14 +238,14 @@ export function QrCheck({ input, go }: { input: RefObject<HTMLInputElement>; go:
     <div className="flex flex-col gap-4">
       {camera || cameraReads ? (
         <Button icon={camera ? CameraOff : Camera} full={isPhone} className={isPhone ? "" : "self-start"}
-          onClick={() => { if (camera) { setCamera(false); return; } setCameraFail(""); check.reset(); setCamera(true); }}>{camera ? "Stop the camera" : "Scan with the camera"}</Button>
+          onClick={() => { if (camera) { setCamera(false); return; } window.clearTimeout(halfRead.current); setCameraFail(""); check.reset(); setCamera(true); }}>{camera ? "Stop the camera" : "Scan with the camera"}</Button>
       ) : null}
       {camera ? <CameraView onText={(t) => { setCamera(false); setText(t); run(t); }} onFail={(why) => { setCamera(false); setCameraFail(why); }} /> : null}
       {cameraFail ? <p role="alert" className="text-sm text-neg">{cameraFail}</p> : null}
       <Field label="Or type or paste what it says" htmlFor="qr-text" hint="A USB scanner types it here and presses Enter. It reads like bill number|GSTIN|date|total.">
         <div className="flex gap-2">
           <Input ref={input} id="qr-text" value={text} className="flex-1" inputClassName="tnum" autoComplete="off" spellCheck={false}
-            onChange={(e) => { setText(e.target.value); check.reset(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); run(); } }} />
+            onChange={(e) => { window.clearTimeout(halfRead.current); setText(e.target.value); check.reset(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); run(); } }} />
           <Button variant="primary" icon={ScanLine} loading={check.isPending} onClick={() => run()}>{check.isPending ? "Checking…" : "Check"}</Button>
         </div>
       </Field>

@@ -7,7 +7,7 @@ import type { ReactElement } from "react";
 import { Document, Image, Page, Path, StyleSheet, Svg, Text, View, type Styles } from "@react-pdf/renderer";
 import { PAGE_FIT, type CopyMark, type PrintBill, type PrintPage, type Run } from "./model";
 import { RupeeText } from "./pdfRupee";
-import { qrPath } from "./qr";
+import { qrPath } from "./qrPath";
 
 type Style = Styles[string];
 

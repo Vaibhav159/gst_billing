@@ -1,6 +1,7 @@
 import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
-import { parseQr, qrPath, qrPayload } from "./qr";
+import { parseQr, qrPayload } from "./qr";
+import { qrPath } from "./qrPath";
 
 test("a bill's QR carries its number, the firm's GSTIN, its date and the total printed, to the paisa", () => {
   expect(qrPayload(toBillDetail(wireDetail()))).toBe("KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21");
@@ -21,6 +22,18 @@ test("a bill from a firm without a GSTIN reads back too: its GSTIN is empty, not
   const b = toBillDetail(wireDetail({ firm: { ...(wireDetail().firm as object), gst_number: "" } }));
   expect(qrPayload(b)).toBe("KGH/2026-27/31||2026-10-08|87083.21");
   expect(parseQr(qrPayload(b))).toEqual({ number: "KGH/2026-27/31", gstin: "", firm: "", date: "2026-10-08", total: 8708321 });
+});
+
+test("reading a code back doesn't load the QR encoder: the QR check comes with the first download, and the encoder only with the paper and the PDF (Ruling 1B-4)", async () => {
+  vi.resetModules();
+  vi.doMock("qrcode", () => { throw new Error("the QR encoder was loaded"); });
+  try {
+    const qr = await import("./qr");
+    expect(qr.parseQr("KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21")).toMatchObject({ number: "KGH/2026-27/31", total: 8708321 });
+  } finally {
+    vi.doUnmock("qrcode");
+    vi.resetModules();
+  }
 });
 
 test("the code is a real QR: a 2-module quiet zone, then the 7-module finder square in the top left", () => {

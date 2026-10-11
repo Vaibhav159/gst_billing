@@ -8,7 +8,7 @@ import { Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/core/cn";
 import { Button } from "@/core/ui";
 import { PAGE_FIT, type CopyMark, type FreeText, type PrintBill, type PrintPage, type Run } from "./model";
-import { qrPath } from "./qr";
+import { qrPath } from "./qrPath";
 
 export const A4_W = 794; // 210 mm at 96 px per inch
 export const A4_H = 1123;
