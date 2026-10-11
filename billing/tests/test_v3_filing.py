@@ -8,6 +8,7 @@ from rest_framework.exceptions import ValidationError
 
 from billing.models import AuditLog, Business, FiledPeriod, FilingMonth, FilingRecord
 from billing.refusals import Refusal
+from billing.services.filing import _snapshot as real_snapshot
 from billing.services.filing import edit_filing, filed_before, mark_filed, relock_month, remove_filing, unlock_month
 
 pytestmark = pytest.mark.django_db
@@ -189,3 +190,32 @@ def test_second_legacy_unlock_keeps_the_first_books_snapshot(shop):
     assert state.unlock_reason == "Correct the GSTIN too"
     assert not FilingRecord.objects.exists()
     assert not FiledPeriod.objects.exists()
+
+
+def test_gstr3b_record_keeps_late_fee_and_interest_worked_out_to_its_filing_day(shop):
+    # R3A-4: the record holds the figures the month shows; typed ones win.
+    firm, user = shop
+    late = {"gstr1": {"fee": "0.00"}, "gstr3b": {"fee": "150.00"}, "interest": "4.93"}
+    snapshot = ({"cash": HEADS, "carry_on": HEADS, "tables": {"late": late}}, {}, {})
+    mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})
+    with patch("billing.services.filing._snapshot", return_value=snapshot):
+        record = mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-11"})[0]
+    assert (record.late_fee, record.interest) == (Decimal("150.00"), Decimal("4.93"))
+    FilingRecord.objects.filter(kind="gstr3b").delete()
+    with patch("billing.services.filing._snapshot", return_value=snapshot):
+        record = mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-11", "late_fee": "0"})[0]
+    assert (record.late_fee, record.interest) == (Decimal("0"), Decimal("4.93"))
+    seen = {}
+
+    def position(*args, **kwargs):
+        seen["position"] = kwargs["today"]
+        return {}
+
+    def tables(*args, **kwargs):
+        seen["tables"] = kwargs["today"]
+        return {}
+
+    with patch("billing.services.ledger.month_position", side_effect=position), patch(
+            "billing.services.ledger.gstr3b_tables", side_effect=tables):
+        real_snapshot(firm, DAY, "gstr3b", filing_date=date(2026, 10, 11))
+    assert seen == {"position": date(2026, 10, 11), "tables": date(2026, 10, 11)}

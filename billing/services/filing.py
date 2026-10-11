@@ -188,11 +188,23 @@ def _paid(record, data):
             setattr(record, f"credit_left_{head}", value)
 
 
+def _worked_late(record, data):
+    """R3A-4: untyped late fee and interest default to the frozen working, like cash."""
+    late = (record.figures.get("tables") or {}).get("late") or {}
+    worked = {"late_fee": sum((Decimal(str((late.get(kind) or {}).get("fee", 0))) for kind in ("gstr1", "gstr3b")), Decimal(0)),
+              "interest": Decimal(str(late.get("interest", 0)))}
+    for key, value in worked.items():
+        if key not in data:
+            setattr(record, key, value)
+
+
 def _snapshot(business, month, kind, *, filing_date=None):
     if kind == "gstr3b":
         from billing.services.ledger import gstr3b_tables, month_position
-        figures = month_position(business, month.year, month.month, filing_date=filing_date)
-        figures["tables"] = gstr3b_tables(business, month.year, month.month, position=figures, filing_date=filing_date)
+        # Late fee and interest are worked out to the filing day when there is one.
+        figures = month_position(business, month.year, month.month, filing_date=filing_date, today=filing_date)
+        figures["tables"] = gstr3b_tables(business, month.year, month.month, position=figures, filing_date=filing_date,
+                                          today=filing_date)
         return json_money(figures), {}, {}
     from billing.services.gstr1_file import attach_amendments, build_amendments, build_gstr1
 
@@ -226,6 +238,8 @@ def _create(business, month, user, kind, data, legacy=False):
                          filed_on=data["filed_on"], arn=_arn(data.get("arn")), figures={**figures, "legacy": legacy},
                          bills=bills, file=file, marked_by=user)
     _paid(record, data)
+    if kind == "gstr3b":
+        _worked_late(record, data)
     record.save()
     details = f"{business.name} · {month:%B %Y} · {NAMES[kind]} filed {day_text(record.filed_on)}"
     if record.arn:

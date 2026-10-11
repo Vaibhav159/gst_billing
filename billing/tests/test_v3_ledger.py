@@ -49,7 +49,7 @@ def test_filed_carry_is_portal_balance_and_snapshot_stays_frozen():
     assert rows["2025-05"]["carry_source"]["as_filed"] is True
 
 
-def test_amendment_applies_once_after_last_frozen_return_and_can_reduce_output_below_zero():
+def test_amendment_applies_once_after_last_frozen_return_and_unused_reduction_waits_for_tax():
     books = {"2025-04": book(amount(cgst=100)), "2025-05": book(amount(cgst=20))}
     original = calculate_ledger(books, {}, amount(), "2025-06")
     frozen = {key: freeze(original[key]) for key in ("2025-04", "2025-05")}
@@ -57,11 +57,15 @@ def test_amendment_applies_once_after_last_frozen_return_and_can_reduce_output_b
     june = calculate_ledger(books, frozen, amount(), "2025-06")["2025-06"]
     assert june["amendments_in"] == ["2025-04"]
     assert june["output"] == amount()
-    assert june["carry_on"] == amount(cgst=60)
+    assert june["carry_on"] == amount()
+    assert june["reduction_on"] == amount(cgst=60)
     frozen["2025-06"] = freeze(june)
-    july = calculate_ledger(books, frozen, amount(), "2025-07")["2025-07"]
-    assert july["amendments_in"] == []
-    assert july["carry_on"] == amount(cgst=60)
+    books["2025-08"] = book(amount(cgst=75))
+    rows = calculate_ledger(books, frozen, amount(), "2025-08")
+    assert rows["2025-07"]["amendments_in"] == []
+    assert rows["2025-07"]["carry_on"] == amount()
+    assert rows["2025-07"]["reduction_on"] == amount(cgst=60)
+    assert rows["2025-08"]["output"] == rows["2025-08"]["cash"] == amount(cgst=15)
 
 
 def test_negative_credit_amendment_becomes_cash_shortfall():
@@ -139,7 +143,7 @@ def test_filed_database_rows_use_small_figures_and_typed_carry(monkeypatch, djan
     FilingRecord.objects.create(business=business, year=2025, month=4, kind="gstr3b", filed_on="2025-05-20",
                                 figures=json_money(april), bills={"big": "x" * 10000}, file={"big": "y" * 10000},
                                 credit_left_igst=0, credit_left_cgst=10, credit_left_sgst=0, cash_total=13)
-    monkeypatch.setattr("billing.services.ledger._book_groups", lambda *args: books)
+    monkeypatch.setattr("billing.services.ledger._book_groups", lambda *args, **kwargs: books)
     with django_assert_num_queries(4) as captured:
         rows = ledger(business, date(2025, 5, 1), today=date(2025, 6, 20))
     assert rows["2025-05"]["cash"] == amount(cgst=15)
@@ -197,7 +201,8 @@ def test_credit_risk_before_first_supported_fy_has_no_query(monkeypatch):
 
     monkeypatch.setattr("billing.services.ledger.uncached", unexpected_query)
     assert credit_at_risk_summary([17], today=date(2025, 11, 1)) == {
-        "count": 0, "tax": Decimal("0.00"), "earliest_deadline": None, "first_business_id": None}
+        "count": 0, "tax": Decimal("0.00"), "earliest_deadline": None, "first_business_id": None,
+        "lapsed": {"count": 0, "tax": Decimal("0.00")}}
 
 
 PART2 = {"itc_month", "itc_eligible", "needs_review"} <= {f.name for f in Invoice._meta.fields}
@@ -262,3 +267,106 @@ def test_opening_effect_stops_before_first_filed_carry():
     assert effect["reaches"] == "2025-04"
     assert effect["cash"] == {"month": "2025-04", "from": Decimal(30), "to": Decimal(0)}
     assert effect["filed_differ"]["count"] == 1
+
+
+def test_correction_below_this_months_tax_is_taken_off_next_months_tax_never_credit():
+    # R3A-2: April filed with CGST 100; corrected to 40 (-60). May's own CGST 20
+    # leaves -40: 3.1(a) shows 0 and 40 is taken off June's 3.1(a), not credit.
+    books = {"2025-04": book(amount(cgst=100)), "2025-05": book(amount(cgst=20), amount(sgst=5)),
+             "2025-06": book(amount(cgst=100))}
+    frozen = {"2025-04": freeze(calculate_ledger(books, {}, amount(), "2025-04")["2025-04"])}
+    books["2025-04"] = book(amount(cgst=40))
+    rows = calculate_ledger(books, frozen, amount(), "2025-06")
+    may, june = rows["2025-05"], rows["2025-06"]
+    assert may["amendments_in"] == ["2025-04"]
+    assert may["output"] == amount()
+    assert may["available"] == amount(sgst=5)
+    assert may["carry_on"] == amount(sgst=5)
+    assert may["reduction_on"] == amount(cgst=40)
+    assert may["reduction_note"] == "₹40.00 of an earlier correction is taken off next month's tax."
+    assert june["output"] == amount(cgst=60)
+    assert june["cash"] == amount(cgst=60)
+    assert june["reduction_on"] == amount()
+    assert june["reduction_note"] is None
+    frozen["2025-05"] = freeze(may)
+    june = calculate_ledger(books, frozen, amount(), "2025-06")["2025-06"]
+    assert june["amendments_in"] == []
+    assert june["output"] == amount(cgst=60)
+
+
+def test_nil_gstr3b_ignores_carried_credit_but_not_nil_rated_sales():
+    # R3A-1, Notification 19/2021: 60 days late, turnover under 1.5 Cr.
+    from billing.services.gst_amounts import late_cost
+    from billing.services.ledger import nil_returns
+
+    position = calculate_ledger({}, {}, amount(igst=10000), "2025-05")["2025-05"]
+    empty = {"bills": 0, "taxable": Decimal(0), **amount()}
+    purchases = {"heads": amount()}
+    nil = nil_returns(empty, {"taxable": Decimal(0)}, position, purchases, purchases)
+    assert nil == {"gstr1": True, "gstr3b": True}
+    late = late_cost(2025, 5, cash=amount(), turnover=0, nil=nil, filed={"gstr1": True}, today=date(2025, 8, 19))
+    assert (late["gstr3b"]["days"], late["gstr3b"]["fee"]) == (60, Decimal(500))
+    nil = nil_returns(empty, {"taxable": Decimal(100000)}, position, purchases, purchases)
+    assert nil == {"gstr1": False, "gstr3b": False}
+    late = late_cost(2025, 5, cash=amount(), turnover=0, nil=nil, filed={"gstr1": True}, today=date(2025, 8, 19))
+    assert late["gstr3b"]["fee"] == Decimal(2000)
+    credit = calculate_ledger({"2025-05": book(credit=amount(cgst=9, sgst=9))}, {}, amount(), "2025-05")["2025-05"]
+    assert nil_returns(empty, {"taxable": Decimal(0)}, credit, purchases, purchases)["gstr3b"] is False
+
+
+@pytest.mark.django_db
+def test_october_credit_lapses_once_30_november_passes_unfiled():
+    # R3A-5: a 2025-26 bill claimed in October 2026, no GSTR-3B on record.
+    from django.db.models import DateField, Value
+
+    from billing.models import FiledPeriod, FilingRecord, LineItem
+    from billing.services.ledger import _credit_lapse
+
+    business, customer = firm(), buyer(gst_number="08ABCDE1234A1Z5")
+    sale(business, customer, "P1", "2025-06-01", line(rate="1000"), kind="inward")
+
+    def lapsed(today):
+        lines = LineItem.objects.filter(invoice__business=business).annotate(
+            credit_month=Value(date(2026, 10, 1), output_field=DateField()), credit_eligible=Value(True))
+        return _credit_lapse(lines, today=today).get().lapsed
+
+    assert lapsed(date(2026, 11, 30)) is False
+    assert lapsed(date(2026, 12, 1)) is True
+    FiledPeriod.objects.create(business=business, year=2026, month=10)
+    assert lapsed(date(2026, 12, 1)) is False
+    FiledPeriod.objects.all().delete()
+    FilingRecord.objects.create(business=business, year=2026, month=10, kind="gstr3b", filed_on=date(2026, 11, 20))
+    assert lapsed(date(2026, 12, 1)) is False
+
+
+def test_credit_risk_after_30_november_reports_october_credit_as_lapsed(monkeypatch):
+    from billing.services import ledger
+
+    monkeypatch.setattr(ledger, "_risk_rows", lambda business_ids, source_fy, **more: {
+        "count": 2, "tax": Decimal("54.00"), "first_business_id": 17})
+    at_risk = ledger.credit_at_risk_summary([17], today=date(2026, 11, 30))
+    assert (at_risk["count"], at_risk["lapsed"]) == (2, {"count": 0, "tax": Decimal("0.00")})
+    after = ledger.credit_at_risk_summary([17], today=date(2026, 12, 1))
+    assert (after["count"], after["earliest_deadline"]) == (0, None)
+    assert after["lapsed"] == {"count": 2, "tax": Decimal("54.00")}
+
+
+@pytest.mark.django_db
+def test_recorded_gstr3b_shows_the_recorded_late_fee_and_interest(monkeypatch):
+    # R3A-4: the frozen worked-out figure gives way to what the owner recorded.
+    from billing.models import FilingRecord
+
+    business = firm()
+    worked = {"gstr1": {"days": 0, "per_day": Decimal(50), "fee": Decimal(0), "cap": Decimal(2000), "capped": False},
+              "gstr3b": {"days": 10, "per_day": Decimal(50), "fee": Decimal(500), "cap": Decimal(2000), "capped": False},
+              "interest": Decimal("4.93"), "interest_on": Decimal(1000), "interest_from": "2026-10-21",
+              "turnover_band": "upto_1.5cr", "nil": {"gstr1": False, "gstr3b": False}, "total": Decimal("504.93")}
+    position = {"filed": True, "recorded": True, "tables": {"late": worked}, "as_filed_at": None, "cash_paid": None, "carry_on": amount()}
+    FilingRecord.objects.create(business=business, year=2026, month=9, kind="gstr3b", filed_on=date(2026, 10, 31),
+                                late_fee=Decimal(400), interest=Decimal("5.00"), cash_total=Decimal(1000))
+    late = gstr3b_tables(business, 2026, 9, today=date(2026, 12, 1), position=position)["late"]
+    assert late["recorded"] is True
+    assert (late["gstr3b"]["fee"], late["gstr3b"]["days"], late["interest"], late["total"]) == (
+        Decimal(400), 0, Decimal("5.00"), Decimal("405.00"))
+    FilingRecord.objects.update(late_fee=Decimal(0), interest=Decimal(0))
+    assert gstr3b_tables(business, 2026, 9, today=date(2026, 12, 1), position=position)["late"] is None

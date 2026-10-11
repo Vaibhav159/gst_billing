@@ -39,6 +39,7 @@ from billing.services.gst_amounts import (
     taxable_expression,
 )
 from billing.tax_rules import HEADS, clean_gstin, is_interstate, place_of_supply, set_off, supply_interstate, to_paise
+from billing.text import inr
 
 START = date(2025, 4, 1)
 
@@ -87,7 +88,7 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
             for kind in ("output", "credit"):
                 old[kind] = add_heads(old[kind], amendment[kind])
             old["taxable"] = old.get("taxable", Decimal(0)) + Decimal(str(amendment.get("taxable", 0)))
-    carry, result, pending = heads(opening), {}, []
+    carry, result, pending, reduction = heads(opening), {}, [], heads()
     previous, earlier_filed = None, False
     for key in months_until(upto_date):
         own = books.get(key, {})
@@ -103,14 +104,17 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
                 output = add_heads(output, amendment["output"])
                 credit = add_heads(credit, amendment["credit"])
                 taxable += Decimal(str(amendment.get("taxable", 0)))
+            output, reduction = add_heads(output, {head: -reduction[head] for head in HEADS}), heads()
         available = add_heads(carry, credit)
-        tax_output = heads({head: max(Decimal(0), output[head]) for head in HEADS})
-        # A reduction larger than this month's tax becomes credit. A reversed
-        # credit larger than the available balance becomes tax to pay in cash.
+        # R3A-2: Table 3.1(a) is never negative per head. A reduction larger
+        # than this month's tax comes off next month's 3.1(a), never credit.
+        # A reversed credit larger than the available balance becomes tax to pay in cash.
         for head in HEADS:
             if output[head] < 0:
-                available[head] -= output[head]
+                reduction[head] -= output[head]
                 output[head] = Decimal(0)
+        tax_output = heads(output)
+        for head in HEADS:
             if available[head] < 0:
                 output[head] -= available[head]
                 available[head] = Decimal(0)
@@ -123,10 +127,11 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
                "filed": False, "recorded": bool(record and record.get("recorded", True)),
                "as_filed_at": None, "cash_paid": None,
                "amendments": amendments, "amendments_in": [entry["month"] for entry in amendments],
+               "reduction_on": heads(reduction), "reduction_note": _reduction_note(reduction),
                "opening_missing": not opening_typed and not any(r["recorded"] for r in result.values())}
         if locked:
             figures = deepcopy(record["figures"])
-            for kind in ("output", "credit", "base_output", "base_credit", "used", "cash", "carry_on", "available"):
+            for kind in ("output", "credit", "base_output", "base_credit", "used", "cash", "carry_on", "available", "reduction_on"):
                 if kind in figures:
                     figures[kind] = heads(figures[kind])
             if "carry_in" in figures:
@@ -136,6 +141,9 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
             if "steps" in figures:
                 figures["steps"] = [{**step, "amount": to_paise(step["amount"])} for step in figures["steps"]]
             row.update(figures)
+            # Like the carry, a filed month passes on the reduction it filed with.
+            row["reduction_on"] = reduction = heads(figures.get("reduction_on"))
+            row["reduction_note"] = _reduction_note(reduction)
             row.update(filed=True, recorded=record.get("recorded", True), as_filed_at=record.get("marked_at"),
                        cash_paid=record.get("cash_paid"))
             if row["recorded"]:
@@ -162,7 +170,12 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
     return result
 
 
-def _credit_lapse(lines, *, filing_month=None, filing_date=None):
+def _reduction_note(reduction):
+    total = heads(reduction)["total"]
+    return f"{inr(total)} of an earlier correction is taken off next month's tax." if total else None
+
+
+def _credit_lapse(lines, *, filing_month=None, filing_date=None, today=None):
     """Annotate Sec 16(4) from the recorded filing day, else the month rule.
 
     The caller supplies credit_month and credit_eligible. A filing in progress
@@ -180,13 +193,23 @@ def _credit_lapse(lines, *, filing_month=None, filing_date=None):
     lines = lines.annotate(claimed_on=claimed_on).annotate(
         claim_year=ExtractYear("claimed_on"), claim_month_number=ExtractMonth("claimed_on"))
     after_month = Q(credit_year__gt=F("bill_fy") + 1) | Q(credit_year=F("bill_fy") + 1, credit_month_number__gt=10)
+    # R3A-5: October's GSTR-3B still unfiled after 30 November can no longer
+    # claim it. Legacy months (locked or frozen before the app) count as filed.
+    today = today or timezone.localdate()
+    closed_fy = today.year - (1 if today > date(today.year, 11, 30) else 2)
+    legacy = (uncached(FiledPeriod).filter(business_id=OuterRef("invoice__business_id"), year=OuterRef("credit_year"),
+                                           month=OuterRef("credit_month_number")))
+    frozen = (uncached(FilingMonth).filter(business_id=OuterRef("invoice__business_id"), year=OuterRef("credit_year"),
+                                           month=OuterRef("credit_month_number"), legacy_frozen_at__isnull=False))
+    after_month |= (Q(credit_year=F("bill_fy") + 1, credit_month_number=10, bill_fy__lte=closed_fy)
+                    & ~Exists(legacy) & ~Exists(frozen))
     after_date = Q(claim_year__gt=F("bill_fy") + 1) | Q(claim_year=F("bill_fy") + 1, claim_month_number__gt=11)
     return lines.annotate(lapsed=Case(When(Q(credit_eligible=True) & (
         Q(claimed_on__isnull=True) & after_month | Q(claimed_on__isnull=False) & after_date), then=True),
         default=False, output_field=BooleanField()))
 
 
-def _purchase_lines(business, *, filing_month=None, filing_date=None):
+def _purchase_lines(business, *, filing_month=None, filing_date=None, today=None):
     required = {"itc_month", "itc_eligible", "needs_review"}
     if not required <= {field.name for field in Invoice._meta.fields}:
         raise ImproperlyConfigured("3A ledger requires part 2A's itc_month, itc_eligible and needs_review fields.")
@@ -194,7 +217,7 @@ def _purchase_lines(business, *, filing_month=None, filing_date=None):
                                       invoice__invoice_date__gte=START)
             .annotate(credit_month=Coalesce("invoice__itc_month", TruncMonth("invoice__invoice_date"), output_field=DateField()),
                       credit_eligible=F("invoice__itc_eligible")))
-    return _credit_lapse(lines, filing_month=filing_month, filing_date=filing_date)
+    return _credit_lapse(lines, filing_month=filing_month, filing_date=filing_date, today=today)
 
 
 def _sums():
@@ -205,7 +228,7 @@ def _sales_lines(business):
     return uncached(LineItem).counted().filter(invoice__business_id=business.pk, invoice__type_of_invoice="outward")
 
 
-def _book_groups(business, upto, *, filing_date=None):
+def _book_groups(business, upto, *, filing_date=None, today=None):
     end, books = next_month(upto), {}
     sales = (_sales_lines(business).filter(invoice__invoice_date__gte=START, invoice__invoice_date__lt=end)
              .annotate(month=TruncMonth("invoice__invoice_date")).values("month")
@@ -213,7 +236,7 @@ def _book_groups(business, upto, *, filing_date=None):
     for row in sales:
         books.setdefault(month_key(row["month"]), {})["output"] = heads(row)
         books[month_key(row["month"])]["taxable"] = to_paise(row["taxable"] or 0)
-    purchases = (_purchase_lines(business, filing_month=upto, filing_date=filing_date).filter(credit_month__gte=START, credit_month__lt=end,
+    purchases = (_purchase_lines(business, filing_month=upto, filing_date=filing_date, today=today).filter(credit_month__gte=START, credit_month__lt=end,
                                                   invoice__itc_eligible=True, lapsed=False)
                  .values("credit_month").annotate(**_sums()).order_by())
     for row in purchases:
@@ -256,7 +279,7 @@ def ledger(business, upto, *, today=None, opening=None, freeze=True, filing_date
     if upto < START or upto > today.replace(day=1):
         return {}
     saved = uncached(OpeningCredit).filter(business_id=business.pk).values(*HEADS).first()
-    books = _book_groups(business, upto, filing_date=filing_date) if filing_date is not None else _book_groups(business, upto)
+    books = _book_groups(business, upto, filing_date=filing_date, today=today)
     frozen = _records(business, upto)
     effective_opening = heads(opening if opening is not None else saved)
     # Legacy locks without figures are recomputed from the opening being read
@@ -320,6 +343,11 @@ def gstr3b_tables(business, year, month, *, today=None, position=None, filing_da
         tables = deepcopy(position["tables"])
         tables.update(filed=True, as_filed_at=position["as_filed_at"], cash_paid=position["cash_paid"],
                       carry_on=position["carry_on"], interest_note=INTEREST_NOTE)
+        record = position.get("recorded") and (
+            uncached(FilingRecord).filter(business_id=business.pk, year=year, month=month, kind="gstr3b")
+            .values("late_fee", "interest").first())
+        if record:
+            tables["late"] = recorded_late(tables.get("late"), record)
         return tables
     sales = (_sales_lines(business).filter(invoice__invoice_date__gte=day, invoice__invoice_date__lt=next_month(day))
              .annotate(nil=Case(When(gst_tax_rate=0, then=True), default=False, output_field=BooleanField()))
@@ -331,7 +359,7 @@ def gstr3b_tables(business, year, month, *, today=None, position=None, filing_da
             t31c["taxable"] = to_paise(row["taxable"])
         else:
             t31a = {"bills": row["bills"], "taxable": to_paise(row["taxable"]), **heads(row)}
-    t31a.update(add_heads(position["base_output"], *(entry["output"] for entry in position["amendments"])))
+    t31a.update(heads(position["output"]))
     t31a["taxable"] = to_paise(position.get("taxable", t31a["taxable"]))
     t32 = {}
     for row in (_sales_lines(business).filter(invoice__invoice_date__gte=day, invoice__invoice_date__lt=next_month(day),
@@ -347,7 +375,7 @@ def gstr3b_tables(business, year, month, *, today=None, position=None, filing_da
                                      "bills": 0, "taxable": Decimal(0), "igst": Decimal(0)})
         for field in ("bills", "taxable", "igst"):
             group[field] += row[field]
-    purchase = (_purchase_lines(business, filing_month=day, filing_date=filing_date).filter(credit_month=day)
+    purchase = (_purchase_lines(business, filing_month=day, filing_date=filing_date, today=today).filter(credit_month=day)
                 .values("invoice_id", "invoice__invoice_number", "invoice__invoice_date", "invoice__created_at",
                         "invoice__customer__name", "invoice__customer__gst_number", "invoice__customer__state_name",
                         "invoice__itc_eligible", "invoice__needs_review", "lapsed")
@@ -377,23 +405,53 @@ def gstr3b_tables(business, year, month, *, today=None, position=None, filing_da
             if target is t4a5 and row["invoice__needs_review"]:
                 confirm.append(item)
         party = _party(row)
+        # R3A-3: Table 5 includes purchases from unregistered suppliers with no
+        # GST charged (every such line), as built; the owner's CA can say otherwise.
         nil_value = row["taxable"] if not clean_gstin(party.gst_number) else row["nil_taxable"]
         t5["inter" if is_interstate(business, party) else "intra"] += to_paise(nil_value or 0)
     t4c = subtract_heads(t4a5["heads"], t4b1["heads"])
     recorded = set(uncached(FilingRecord).filter(business_id=business.pk, year=year, month=month).values_list("kind", flat=True))
     late = late_cost(year, month, cash=position["cash"], turnover=_turnover(business, day), today=today,
                      filed={"gstr1": "gstr1" in recorded or position["filed"], "gstr3b": "gstr3b" in recorded or position["filed"]},
-                     nil={"gstr1": not (t31a["taxable"] or t31c["taxable"]),
-                          "gstr3b": not (position["output"]["total"] or position["available"]["total"] or t4a5["heads"]["total"]
-                                          or t4d2["heads"]["total"])})
+                     nil=nil_returns(t31a, t31c, position, t4a5, t4d2))
     amendment = ({"months": position["amendments_in"],
                   **{kind: add_heads(*(entry[kind] for entry in position["amendments"])) for kind in ("output", "credit")}}
                  if position["amendments_in"] else None)
     return {"month": key, "filed": position["filed"], "as_filed_at": position["as_filed_at"],
             "t31a": t31a, "t31c": t31c, "t32": list(t32.values()), "amendments": amendment,
             "carry_in": position["carry_source"], "t4a5": t4a5, "t4b1": t4b1, "t4c": t4c, "t4d2": t4d2, "t5": t5,
+            "t5_note": T5_NOTE, "reduction_on": position["reduction_on"], "reduction_note": position["reduction_note"],
             **{field: position[field] for field in ("available", "steps", "used", "cash", "cash_paid", "carry_on", "opening_missing")},
             "to_confirm": confirm, "cross_head": position.get("cross_head"), "late": late, "interest_note": INTEREST_NOTE}
+
+
+T5_NOTE = "Includes purchases from unregistered suppliers with no GST charged."
+
+
+def nil_returns(t31a, t31c, position, t4a5, t4d2):
+    """Nil returns for late fees (Notification 19/2021, R3A-1).
+
+    GSTR-3B is nil only with no outward supply of any kind (3.1(a)-(e); the app
+    files no zero-rated, reverse-charge or non-GST supply), and no credit
+    claimed in the period: this month's credit and its corrections. Credit
+    carried in from earlier months doesn't count.
+    """
+    sales = bool(t31a["taxable"] or t31c["taxable"])
+    claimed = [position["base_credit"], *(entry["credit"] for entry in position["amendments"]),
+               t4a5["heads"], t4d2["heads"]]
+    tax = any(heads(values)[head] for values in (t31a, *claimed) for head in HEADS)
+    return {"gstr1": not sales, "gstr3b": not (sales or tax)}
+
+
+def recorded_late(worked, record):
+    """R3A-4: a recorded GSTR-3B shows the late fee and interest on its record."""
+    fee, interest = to_paise(record["late_fee"] or 0), to_paise(record["interest"] or 0)
+    if not fee and not interest:
+        return None
+    worked = worked or {}
+    result = {kind: {**worked.get(kind, {}), "days": 0, "capped": False, "fee": Decimal(0)} for kind in ("gstr1", "gstr3b")}
+    result["gstr3b"]["fee"] = fee
+    return {**worked, **result, "interest": interest, "total": fee + interest, "recorded": True}
 
 
 def interest_heads(cash, late):
@@ -451,13 +509,24 @@ def build_gstr3b_json(business, year, month, *, today=None):
 def credit_at_risk_summary(business_ids, today=None):
     """One aggregate with correlated EXISTS, never one read per bill or firm."""
     today = today or timezone.localdate()
-    zero = {"count": 0, "tax": Decimal("0.00"), "earliest_deadline": None, "first_business_id": None}
+    zero = {"count": 0, "tax": Decimal("0.00"), "earliest_deadline": None, "first_business_id": None,
+            "lapsed": {"count": 0, "tax": Decimal("0.00")}}
     if not business_ids:
         return zero
     source_fy = fy_of(today) - 1
     deadline = date(source_fy + 1, 11, 30)
-    if today > deadline or source_fy < fy_of(START):
+    if source_fy < fy_of(START):
         return zero
+    if today > deadline:
+        # R3A-5: October's credit with its GSTR-3B still unfiled has lapsed.
+        rows = _risk_rows(business_ids, source_fy, october=True)
+        return {**zero, "lapsed": {"count": rows["count"], "tax": to_paise(rows["tax"] or 0)}}
+    rows = _risk_rows(business_ids, source_fy)
+    return {**rows, "tax": to_paise(rows["tax"] or 0), "earliest_deadline": deadline if rows["count"] else None,
+            "lapsed": zero["lapsed"]}
+
+
+def _risk_rows(business_ids, source_fy, *, october=False):
     if not {"itc_month", "itc_eligible"} <= {field.name for field in Invoice._meta.fields}:
         raise ImproperlyConfigured("3A credit summary requires part 2A's purchase credit fields.")
     start, end = fy_range(source_fy)
@@ -465,15 +534,18 @@ def credit_at_risk_summary(business_ids, today=None):
                                             month=OuterRef("credit_number"), kind="gstr3b")
     legacy = uncached(FiledPeriod).filter(business_id=OuterRef("business_id"), year=OuterRef("credit_year"),
                                           month=OuterRef("credit_number"))
-    rows = (uncached(Invoice).filter(business_id__in=business_ids, type_of_invoice="inward", itc_eligible=True,
+    frozen = uncached(FilingMonth).filter(
+        business_id=OuterRef("business_id"), year=OuterRef("credit_year"), month=OuterRef("credit_number"),
+        legacy_frozen_at__isnull=False)
+    return (uncached(Invoice).filter(business_id__in=business_ids, type_of_invoice="inward", itc_eligible=True,
                                      invoice_date__range=(start, end))
             .annotate(credit_date=Coalesce("itc_month", TruncMonth("invoice_date"), output_field=DateField()))
-            .filter(credit_date__lte=date(source_fy + 1, 10, 1))
+            .filter(credit_date__lte=date(source_fy + 1, 10, 1), **({"credit_date": date(source_fy + 1, 10, 1)} if october else {}))
             .annotate(credit_year=ExtractYear("credit_date"), credit_number=ExtractMonth("credit_date"))
-            .annotate(recorded=Exists(records), legacy=Exists(legacy)).filter(recorded=False, legacy=False)
+            .annotate(recorded=Exists(records), legacy=Exists(legacy), frozen=Exists(frozen))
+            .filter(recorded=False, legacy=False, frozen=False)
             .filter(Q(lineitem__igst__gt=0) | Q(lineitem__cgst__gt=0) | Q(lineitem__sgst__gt=0))
             .aggregate(count=Count("pk", distinct=True), tax=Sum(paise_expression("lineitem__igst")
                                                                + paise_expression("lineitem__cgst")
                                                                + paise_expression("lineitem__sgst")),
                        first_business_id=Min("business_id")))
-    return {**rows, "tax": to_paise(rows["tax"] or 0), "earliest_deadline": deadline if rows["count"] else None}
