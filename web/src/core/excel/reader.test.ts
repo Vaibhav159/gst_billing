@@ -42,3 +42,12 @@ test("an unfinished CSV quote and a non-workbook buffer are refused rather than 
   expect(() => parseCsv('Bill,Party\n1,"A')).toThrow("A quoted field isn't closed. Check the CSV file.");
   await expect(readExcel(new ArrayBuffer(2))).rejects.toThrow("This isn't an Excel workbook (.xlsx).");
 });
+
+test("Excel error cells read as empty values, never as their numeric error codes", async () => {
+  const book = XLSX.utils.book_new();
+  // SheetJS stores #N/A as code 42 and #DIV/0! as code 7 in v.
+  XLSX.utils.book_append_sheet(book, { "!ref": "A1:C1", A1: { t: "e", v: 42, w: "#N/A" }, B1: { t: "e", v: 7, w: "#DIV/0!" }, C1: { t: "n", v: 5 } }, "Import");
+  const [sheet] = await readExcel(XLSX.write(book, { type: "array", bookType: "xlsx" }) as ArrayBuffer);
+  expect(sheet.rows).toEqual([[null, null, 5]]);
+  expect(sheet.shown).toEqual([["#N/A", "#DIV/0!", "5"]]);
+});
