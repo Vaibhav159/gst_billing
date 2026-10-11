@@ -3,7 +3,7 @@ import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-li
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { toCustomer } from "@/core/api/customers";
-import { useKeepDraft, useUnfinishedBills } from "@/core/api/drafts";
+import { __resetDrafts, useKeepDraft, useUnfinishedBills } from "@/core/api/drafts";
 import { __setNetState } from "@/core/api/network";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { __resetDeviceDrafts, keepOnDevice, keptDraft } from "@/core/deviceDrafts";
@@ -19,7 +19,7 @@ import { ACCOUNTANT, ANIL, formServer, fakeToday, mountForm, RING, STAFF, TODAY 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
 
-beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); });
+beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
 afterEach(() => { vi.useRealTimers(); act(() => __setNetState("online")); });
 /** Past a debounce (the number's check, the customer search) at once. */
 const settle = () => act(async () => { vi.advanceTimersByTime(400); });

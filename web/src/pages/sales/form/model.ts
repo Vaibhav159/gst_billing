@@ -38,11 +38,15 @@ export type FormState = {
   lines: FormLine[];
 };
 
-/** Where a bill came from, for the banner above the form. */
+/**
+ * Where a bill came from, for the banner above the form. missing-draft: the shop's list answered without the unfinished
+ * bill the address names; unread-draft: neither this device nor the shop's list (which didn't load) could give it.
+ */
 export type Origin =
   | { kind: "paper" }
   | { kind: "draft"; startedBy: Person; startedAt: string }
   | { kind: "missing-draft" }
+  | { kind: "unread-draft" }
   | { kind: "copy"; number: string; customer: string; date: string }
   | { kind: "remake"; number: string; reason: string }
   | { kind: "amountOnly" }

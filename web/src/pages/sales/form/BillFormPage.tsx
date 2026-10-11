@@ -1,14 +1,17 @@
 // The bill form's pages (PROTO pages/sales/BillForm.jsx:20-94): /sales/new, where a link decides how a bill starts
-// (?paper=1&firm=&date=&number=, ?from=, ?remake=, ?customer=, ?paid=), and who may make bills. Every bill is copied from
-// the paper book first, so a new bill's number is the paper bill's: typed, or the next one confirmed.
+// (?paper=1&firm=&date=&number=, ?from=, ?remake=, ?customer=, ?paid=, or ?draft= for an unfinished bill), and who may
+// make bills. Every bill is copied from the paper book first, so a new bill's number is the paper bill's: typed, or the
+// next one confirmed. A new bill keeps itself as an unfinished bill as it's typed, named in its address.
 import { useEffect, useRef, type ReactNode } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams, type Location } from "react-router";
 import { FilePlus2, Lock } from "lucide-react";
 import { useCustomer } from "@/core/api/customers";
+import { useUnfinishedBills } from "@/core/api/drafts";
 import { useBillDetail } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { ROLES } from "@/core/auth/permissions";
 import { cn } from "@/core/cn";
+import { keptDraft } from "@/core/deviceDrafts";
 import { addMonths, monthOf, todayIST } from "@/core/format";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope } from "@/core/scope";
@@ -16,10 +19,11 @@ import { ButtonLink, Card, EmptyState, Page, Skeleton } from "@/core/ui";
 import { useView } from "@/core/view";
 import { DesktopForm } from "./DesktopForm";
 import { PAY_KEYS } from "./fields";
-import { idParam, startCopy, startNew, startPaper, startRemake, type Start } from "./model";
+import { idParam, startCopy, startDraft, startNew, startPaper, startRemake, type Start } from "./model";
 import { lastPaperDate } from "./paperDates";
 import { parseDateText } from "./rules";
 import { useBillForm } from "./useBillForm";
+import { useDraftKeeping } from "./useDraftKeeping";
 
 /** Placeholders while the form's data loads, never an empty form that fills in under the cursor (PROTO BillForm.jsx:63-83). */
 export function FormLoading({ title }: { title: string }) {
@@ -73,23 +77,38 @@ function useFormExit(unsaved: boolean, message: string, goTo: string | null): Re
 }
 
 const EDIT_UNSAVED = "Your changes to this bill aren't saved. Leave and lose them?";
-const NEW_UNSAVED = "This bill isn't saved. Leave and lose it?";
+/** A new bill asks only while its last change isn't in the draft yet (plan Call 7; the prototype's words). */
+const NOT_KEPT_YET = "Your last change isn't in the draft yet. Leave and lose it?";
 
-/** The form itself, from where it starts. A new bill asks before it's left with something typed; plan Task 6 keeps it as a draft instead. */
-export function BillForm({ start }: { start: Start }) {
+/**
+ * The form itself, from where it starts. formKey: this form's place in the address, which a new bill keeps as it names
+ * its unfinished bill there. A new bill keeps itself as a draft; a change to a saved bill asks before it's left.
+ */
+export function BillForm({ start, formKey }: { start: Start; formKey: string }) {
   const F = useBillForm(start);
-  const exit = useFormExit(F.dirty, F.edit ? EDIT_UNSAVED : NEW_UNSAVED, F.savedTo);
-  return <DesktopForm F={F}>{exit}</DesktopForm>;
+  const drafts = useDraftKeeping(F, formKey);
+  const exit = useFormExit(F.edit ? F.dirty : drafts.pending, F.edit ? EDIT_UNSAVED : NOT_KEPT_YET, F.savedTo ?? drafts.leaveTo);
+  return <DesktopForm F={F} drafts={drafts}>{exit}</DesktopForm>;
 }
 
 /**
- * How a new bill starts, from its link, once what it needs has loaded. Decided once: the form then stays, whatever the
- * queries underneath do next.
+ * How a new bill starts, from its link, once what it needs has loaded. Decided once: the form then stays, whatever its
+ * address or the queries underneath do next (naming its draft in the address must not restart it).
  */
-function NewBillStart({ params }: { params: URLSearchParams }) {
+function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: string }) {
   const opened = useRef<Start | null>(null);
   const deciding = opened.current === null;
   const { firms, loading, error } = useFirms();
+  // an unfinished bill named in the address: this device's copy when the server doesn't have its last change yet (kept
+  // offline, or as a session ran out), and gone when it was discarded here. Otherwise the shop's list, asked again as the
+  // form opens, since a list cached before the draft was made doesn't have it; while that list can't be read, this
+  // device's copies stand in for it (Ruling 1D-4)
+  const draftId = params.get("draft");
+  const local = deciding && draftId ? keptDraft(draftId) : null;
+  const fresher = local && !local.synced && !local.gone ? local : null;
+  const lookUp = deciding && Boolean(draftId) && !fresher && !local?.gone;
+  const unfinished = useUnfinishedBills(lookUp, { fresh: true });
+  const listed = lookUp ? unfinished.bills.find((d) => d.id === draftId) : undefined;
   const { firmId: scopeFirm, ready } = useScope();
   const today = todayIST();
   const fromId = idParam(params.get("from"));
@@ -99,8 +118,8 @@ function NewBillStart({ params }: { params: URLSearchParams }) {
   const customer = useCustomer(deciding ? customerId : null);
   const paper = params.get("paper") === "1";
   const title = paper ? "Bill from the paper book" : "New sales bill";
-  if (opened.current) return <BillForm start={opened.current} />;
-  if (loading || !ready || ((remakeId ?? fromId) !== null && source.isPending) || (customerId !== null && customer.isPending)) return <FormLoading title={title} />;
+  if (opened.current) return <BillForm start={opened.current} formKey={formKey} />;
+  if (loading || !ready || ((remakeId ?? fromId) !== null && source.isPending) || (customerId !== null && customer.isPending) || (lookUp && !listed && unfinished.loading)) return <FormLoading title={title} />;
   if (!firms.length) {
     return (
       <Page icon={FilePlus2} title={title} breadcrumbs={[{ label: "Sales", to: "/sales" }]} back="/sales">
@@ -114,7 +133,11 @@ function NewBillStart({ params }: { params: URLSearchParams }) {
   const fallback = typeof scopeFirm === "number" && known(scopeFirm) ? { firmId: scopeFirm, firmSource: "scope" as const } : { firmId: firms[0].id, firmSource: "first" as const };
   const bill = source.data ?? null;
   let start: Start;
-  if (remakeId !== null && bill && bill.status === "cancelled") start = startRemake(bill, today);
+  const draft = fresher ? { ...fresher, onDevice: true } : listed;
+  if (draftId && draft) start = startDraft(draft);
+  // only the shop's own answer, or a discard on this device, says it's gone; a list that didn't load can't (Ruling 1D-4)
+  else if (draftId) start = { ...startNew({ ...fallback, today }), origin: local?.gone || unfinished.answered ? { kind: "missing-draft" } : { kind: "unread-draft" } };
+  else if (remakeId !== null && bill && bill.status === "cancelled") start = startRemake(bill, today);
   else if (fromId !== null && bill) start = startCopy(bill, today);
   else if (paper) {
     const asked = idParam(params.get("firm"));
@@ -128,17 +151,21 @@ function NewBillStart({ params }: { params: URLSearchParams }) {
     start = startNew({ ...fallback, today, customer: customer.data ?? null, payment: PAY_KEYS.find((k) => k === params.get("paid")) ?? null });
   }
   opened.current = start;
-  return <BillForm start={start} />;
+  return <BillForm start={start} formKey={formKey} />;
 }
 
+/** A link opened again (or another one) is another bill; the form naming its own draft in the address stays the same one. */
+export const formKeyOf = (location: Location) => (location.state as { formKey?: string } | null)?.formKey ?? location.key;
+
 /**
- * /sales/new: a new bill, a paper bill, a copy, a cancelled bill made again (bill.create). A link opened again is another
- * bill. The app's routes load it on demand (plan 1E's lazyPage), so it's this module's default.
+ * /sales/new: a new bill, a paper bill, a copy, a cancelled bill made again, an unfinished bill picked up (bill.create).
+ * The app's routes load it on demand (plan 1E's lazyPage), so it's this module's default.
  */
 export default function NewBillPage() {
   const { can } = useAuth();
   const [params] = useSearchParams();
   const location = useLocation();
   if (!can("bill.create")) return <CantMakeBills params={params} />;
-  return <NewBillStart key={location.key} params={params} />;
+  const formKey = formKeyOf(location);
+  return <NewBillStart key={formKey} formKey={formKey} params={params} />;
 }

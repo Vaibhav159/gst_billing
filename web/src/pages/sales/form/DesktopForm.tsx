@@ -10,6 +10,7 @@ import { date, monthOf, plural } from "@/core/format";
 import { Button, ButtonLink, Card, Field, Kbd, Page, Select, Sheet, Textarea } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { CustomerFixSheet, CustomerPicker, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
+import { DraftBanners, DraftStatus } from "./drafts";
 import { CheckList, focusNow, LabelSpacer, PayPicker, type CheckRow } from "./fields";
 import { LineRow, ONE_ROW, LINE_COLS } from "./lines";
 import { hasContent } from "./model";
@@ -18,6 +19,7 @@ import { DateBlock, NumberField, Origins, PaperSwitch, paperBookTo, PaymentNote,
 import { useSaleProducts } from "./products";
 import { paymentNote } from "./rules";
 import type { BillFormApi } from "./useBillForm";
+import type { DraftKeeping } from "./useDraftKeeping";
 
 /** The element a problem's key points at on the desktop form (a line's field falls back to its product box). */
 export function desktopFieldId(F: BillFormApi, k: string): string {
@@ -37,7 +39,7 @@ export function checksWithFixes(F: BillFormApi, open: (f: FixField) => void): Ch
   return F.checks.map((c) => (c.fix && F.cust && F.cust.type !== "walkin" ? { ...c, action: { label: c.fix === "pan" ? "Add PAN" : "Add the address", onClick: () => open(c.fix as FixField) } } : c));
 }
 
-export function DesktopForm({ F, children }: { F: BillFormApi; children?: ReactNode }) {
+export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: DraftKeeping; children?: ReactNode }) {
   const { can } = useAuth();
   const navigate = useNavigate();
   const products = useSaleProducts();
@@ -85,6 +87,7 @@ export function DesktopForm({ F, children }: { F: BillFormApi; children?: ReactN
       context={<>{F.firmName || "No firm yet"} · No. <span className="tnum">{F.stored || "not typed yet"}</span> · {F.f.date ? date(F.f.date) : "no date yet"}</>}
       actions={edit && F.bill ? <ButtonLink to={`/sales/${F.bill.id}`}>Cancel</ButtonLink> : <Button onClick={close} title={F.draftId ? "Keeps the draft; finish it later" : undefined}>Close</Button>}>
       <Origins F={F} />
+      <DraftBanners F={F} drafts={drafts} onTryReview={onTryReview} />
       <div ref={page} className="grid gap-5 items-start" style={{ gridTemplateColumns: `minmax(0,1fr) ${side}px` }}>
         <div className="flex flex-col gap-5 min-w-0">
           <Card title="Bill">
@@ -145,7 +148,7 @@ export function DesktopForm({ F, children }: { F: BillFormApi; children?: ReactN
           {errCount ? <p className="text-sm text-neg anim-rise flex items-start gap-1.5" role="alert"><AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />{plural(errCount, "thing")} to fix before saving. Each is marked under its field.</p> : null}
           <Button variant="primary" size="lg" full onClick={onTryReview}>{edit ? "Check and save changes" : "Check and save"}</Button>
           <p className="text-xs text-muted text-center -mt-2 inline-flex items-center justify-center gap-1"><Kbd>Ctrl</Kbd><Kbd>S</Kbd> check and save</p>
-          {edit ? <p className="text-sm text-muted border-t border-rule pt-3" aria-live="polite">{F.dirty ? "Changes not saved yet" : "No changes yet"}</p> : null}
+          <p className="text-sm text-muted border-t border-rule pt-3"><DraftStatus F={F} drafts={drafts} /></p>
         </aside>
       </div>
       <NewCustomerSheet open={Boolean(nc)} initialName={nc?.name ?? ""} homeState={homeState(F.firms, F.f.firmId)} onClose={() => setNc(null)}

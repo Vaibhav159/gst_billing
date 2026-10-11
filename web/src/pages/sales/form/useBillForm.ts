@@ -13,6 +13,7 @@ import { lineErrors, linesErrors, problemOf, type ApiProblem } from "@/core/api/
 import { useNetwork } from "@/core/api/network";
 import { useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesFacets, useSalesPage, useUpdateBill } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { keepsOnDevice } from "@/core/deviceDrafts";
 import { addMonths, fyOf, monthLabel, monthOf, todayIST } from "@/core/format";
 import { GST_STATES } from "@/core/ids";
 import { markFresh } from "@/core/sales/fresh";
@@ -30,6 +31,7 @@ import { focusNow } from "./fields";
 import { blankLine, hasContent, posCustomer, slabOf, stateOf, storedFor, toBillInput, type FormLine, type FormState, type Start } from "./model";
 import { lastPaperDate, rememberPaperDate } from "./paperDates";
 import { changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, numberProblem, prevFy, type Locked, type NumberState } from "./rules";
+import { VISIT_ONLY } from "./useDraftKeeping";
 
 /**
  * Why a save didn't happen, said once at the top of the review. next: a number to save as instead (a clash). link: where
@@ -286,8 +288,10 @@ export function useBillForm(start: Start) {
     if (f.payment == null) { setSaveError({ kind: "payment", title: "How was it paid?", body: "Pick one above: it goes on the bill and in your cash and bank split." }); return none; }
     if (cashBlock) { setSaveError({ kind: "cash", title: "Cash of ₹2,00,000 or more", body: "Switch to Part cash, part UPI, or tick that you're saving it as all cash anyway." }); return none; }
     if (net === "offline") {
+      // a browser that refuses storage keeps the unfinished bill until the page closes, never "on this device" (Task 1's review)
+      const kept = keepsOnDevice() ? "The bill is kept on this device as an unfinished bill." : VISIT_ONLY;
       setSaveError(edit ? { kind: "offline", ...failText({ kind: "offline", message: "" }) }
-        : { kind: "offline", title: "Not saved: you're offline", body: "The bill is kept on this device as an unfinished bill. Save it when the internet is back; nothing saves by itself." });
+        : { kind: "offline", title: "Not saved: you're offline", body: `${kept} Save it when the internet is back; nothing saves by itself.` });
       return none;
     }
     const number = numberOverride ?? numberText;
