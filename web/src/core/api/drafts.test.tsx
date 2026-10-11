@@ -10,7 +10,7 @@ import { stubAuth } from "@/test/render";
 import { serve, serveWith } from "@/test/server";
 import { api, setTokens } from "./client";
 import {
-  draftKeys, draftSettled, forgetDraft, newDraftId, toDraftData, useDiscardDraft, useDraftSync, useKeepDraft, useUnfinishedBills, type DraftData, type DraftList,
+  __resetDrafts, draftKeys, draftSettled, forgetDraft, newDraftId, toDraftData, useDiscardDraft, useDraftSync, useKeepDraft, useUnfinishedBills, type DraftData, type DraftList,
 } from "./drafts";
 
 const RAKESH = { id: 2, name: "Rakesh Soni" };
@@ -42,6 +42,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   __resetDeviceDrafts();
+  __resetDrafts();
   act(() => __setNetState("online"));
 });
 afterEach(() => {
@@ -105,7 +106,7 @@ test("a copy of a bill finished on another device is let go; one sent since the 
   const list = renderHook(() => useUnfinishedBills(), { wrapper });
   renderHook(() => useDraftSync(), { wrapper });
   // while the shop's list is coming, a copy it may have finished isn't offered
-  expect(list.result.current).toEqual({ bills: [], loading: true });
+  expect(list.result.current).toEqual({ bills: [], loading: true, answered: false });
   await waitFor(() => expect(answer).toBeDefined());
   await act(async () => { answer?.({ results: [] }); });
   await waitFor(() => expect(keptDraft("a")).toBeNull());
@@ -258,13 +259,85 @@ test("one saved as a bill already (409 draft_saved): forgotten here and off the 
   await waitFor(() => expect(methods(calls, "GET").length).toBeGreaterThan(0));
   await drain();
   expect(list.result.current.bills.map((b) => b.id)).toEqual([Y]);
-  // a form still open on X keeps it again: the server's words say where it went, and nothing stays here
+  // a form still open on X keeps it again: the server's words say where it went, nothing stays here, and nothing is sent
   const keep = renderHook(() => useKeepDraft(), { wrapper });
   let where: unknown;
   await act(async () => { where = await keep.result.current(X, 3, DATA); });
   expect(where).toEqual({ kept: null, refusal: "This unfinished bill was saved as KGH/2026-27/31 already." });
   expect(keptDraft(X)).toBeNull();
   expect(list.result.current.bills.map((b) => b.id)).toEqual([Y]);
+  expect(methods(calls, "PUT").filter((c) => c.url === `drafts/${X}/`)).toHaveLength(1);
+});
+
+/** A PUT of X held until `land()`, then answered 409 draft_saved (a counter saved it as a bill meanwhile). */
+function savedWhileOut(X: string) {
+  let land: (() => void) | undefined;
+  const { calls } = salesServer([
+    ["PUT", `drafts/${X}/`, () => new Promise<void>((r) => { land = r; }).then(() => refuse(409, SAVED_AS))],
+    ["GET", "drafts/", () => ({ results: [] })],
+  ]);
+  return { calls, land: () => land?.(), out: () => land !== undefined };
+}
+
+test("a keep waiting behind another keep that's answered 409 draft_saved answers with the server's words too, and sends nothing (N1)", async () => {
+  const X = "99999999-1111-4111-8111-999999999999";
+  const server = savedWhileOut(X);
+  const keep = renderHook(() => useKeepDraft(), { wrapper: setup().wrapper });
+  let first!: Promise<unknown>;
+  let second!: Promise<unknown>;
+  act(() => { first = keep.result.current(X, 3, DATA); });
+  await waitFor(() => expect(server.out()).toBe(true));
+  // the next change is kept while the first is still on its way
+  act(() => { second = keep.result.current(X, 3, { ...DATA, notes: "Two rings" }); });
+  let answers: unknown[] = [];
+  await act(async () => { server.land(); answers = await Promise.all([first, second]); });
+  expect(answers).toEqual([{ kept: null, refusal: SAVED_AS.detail }, { kept: null, refusal: SAVED_AS.detail }]);
+  expect(methods(server.calls, "PUT")).toHaveLength(1);
+  expect(keptDraft(X)).toBeNull();
+});
+
+test("a keep waiting behind the sync's PUT that's answered 409 draft_saved answers with the server's words, not \"server\" (N1)", async () => {
+  const X = "99999999-2222-4222-8222-999999999999";
+  keepOnDevice(copy({ id: X, updated_at: "2026-10-08T10:00:00+05:30" }));
+  const server = savedWhileOut(X);
+  const { wrapper } = setup();
+  renderHook(() => useDraftSync(), { wrapper });
+  await waitFor(() => expect(server.out()).toBe(true));
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  let queued!: Promise<unknown>;
+  act(() => { queued = keep.result.current(X, 3, { ...DATA, notes: "Two rings" }); });
+  let answer: unknown;
+  await act(async () => { server.land(); answer = await queued; });
+  expect(answer).toEqual({ kept: null, refusal: SAVED_AS.detail });
+  expect(methods(server.calls, "PUT")).toHaveLength(1);
+  expect(keptDraft(X)).toBeNull();
+  await waitFor(() => expect(methods(server.calls, "GET")).toHaveLength(1));
+});
+
+test("a draft saved as a bill here is never kept again: a keep after the save keeps nothing and sends nothing (Ruling 1D-4/F6)", async () => {
+  const SAVED = "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d";
+  const { calls } = salesServer([["PUT", `drafts/${SAVED}/`, (c) => row({ id: SAVED, data: sent(c) })]]);
+  const { qc, wrapper } = setup();
+  act(() => forgetDraft(qc, SAVED));
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  let where: unknown;
+  await act(async () => { where = await keep.result.current(SAVED, 3, DATA); });
+  expect(where).toEqual({ kept: null });
+  expect(keptDraft(SAVED)).toBeNull();
+  expect(calls).toEqual([]);
+});
+
+test("the tests' reset forgets what this page learnt about drafts: saved ones, the server's words and the writes' order (N2)", async () => {
+  const X = "99999999-3333-4333-8333-999999999999";
+  const { calls } = salesServer([["PUT", `drafts/${X}/`, (c) => row({ id: X, data: sent(c) })]]);
+  const { qc, wrapper } = setup();
+  act(() => forgetDraft(qc, X));
+  __resetDrafts();
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  let where: unknown;
+  await act(async () => { where = await keep.result.current(X, 3, DATA); });
+  expect(where).toEqual({ kept: "server" });
+  expect(methods(calls, "PUT")).toHaveLength(1);
 });
 
 const X2 = "77777777-1111-4111-8111-777777777777";
@@ -333,6 +406,53 @@ test("offline, the shop's list can't be read: every unfinished bill on this devi
     const view = renderHook(() => useUnfinishedBills(), { wrapper: setup().wrapper });
     expect(view.result.current.loading).toBe(false);
     expect(view.result.current.bills.map((b) => [b.id, b.onDevice])).toEqual([["c", true], [ID, false]]);
+    expect(calls).toHaveLength(0);
+    view.unmount();
+  } finally {
+    onlineManager.setOnline(true);
+  }
+});
+
+test("asked for fresh, the list waits for its own answer: one cached before a draft was made can't say it isn't there (Ruling 1D-4)", async () => {
+  let answer: ((list: unknown) => void) | undefined;
+  const { calls } = salesServer([["GET", "drafts/", () => new Promise((r) => { answer = r; })]]);
+  const { qc, wrapper } = setup();
+  // this page read the shop's list a moment ago, before Rakesh's draft was made on another counter
+  qc.setQueryData<DraftList>(draftKeys.list(), { drafts: [], askedAt: Date.now() - 2000, complete: true });
+  const cached = renderHook(() => useUnfinishedBills(), { wrapper });
+  expect(cached.result.current).toEqual({ bills: [], loading: false, answered: true });
+  const fresh = renderHook(() => useUnfinishedBills(true, { fresh: true }), { wrapper });
+  expect(fresh.result.current).toEqual({ bills: [], loading: true, answered: false });
+  await waitFor(() => expect(answer).toBeDefined());
+  await act(async () => { answer?.({ results: [row()] }); });
+  await waitFor(() => expect(fresh.result.current).toMatchObject({ loading: false, answered: true }));
+  expect(fresh.result.current.bills.map((b) => b.id)).toEqual([ID]);
+  expect(methods(calls, "GET")).toHaveLength(1);
+});
+
+test("a list that can't be read now lets every copy on this device stand in for it, even one an older answer left out (Ruling 1D-4)", async () => {
+  // sent before the list this page read last, and not on it; and one discarded here
+  keepOnDevice(copy({ id: "a", updated_at: "2026-10-08T15:00:00+05:30", synced: true, syncedAt: 1 }));
+  keepOnDevice(copy({ id: "g", updated_at: "2026-10-08T15:01:00+05:30", gone: true }));
+  salesServer([["GET", "drafts/", () => refuse(0, null)]]);
+  const { qc, wrapper } = setup();
+  qc.setQueryData<DraftList>(draftKeys.list(), { drafts: [], askedAt: Date.now() - 60_000, complete: true });
+  const view = renderHook(() => useUnfinishedBills(true, { fresh: true }), { wrapper });
+  await waitFor(() => expect(view.result.current.loading).toBe(false));
+  expect(view.result.current.answered).toBe(false);
+  expect(view.result.current.bills.map((b) => [b.id, b.onDevice])).toEqual([["a", false]]);
+});
+
+test("offline, an older list in the cache hides no copy on this device: every copy stands in while the list waits for the network (Ruling 1D-4)", () => {
+  keepOnDevice(copy({ id: "a", synced: true, syncedAt: 1 }));
+  const { calls } = salesServer([["GET", "drafts/", () => ({ results: [] })]]);
+  const { qc, wrapper } = setup();
+  qc.setQueryData<DraftList>(draftKeys.list(), { drafts: [], askedAt: Date.now() - 60_000, complete: true });
+  onlineManager.setOnline(false);
+  try {
+    const view = renderHook(() => useUnfinishedBills(true, { fresh: true }), { wrapper });
+    expect(view.result.current).toMatchObject({ loading: false, answered: false });
+    expect(view.result.current.bills.map((b) => b.id)).toEqual(["a"]);
     expect(calls).toHaveLength(0);
     view.unmount();
   } finally {

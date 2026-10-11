@@ -87,8 +87,13 @@ export function toDraft(raw: unknown): Draft {
 
 export const draftKeys = { all: ["drafts"] as const, list: () => ["drafts", "list"] as const };
 
-/** Drafts saved as bills in this visit (forgetDraft): a list the server answered before the save still names them. */
+/**
+ * Drafts saved as bills in this visit, here (forgetDraft) or on another counter (a PUT answered 409 draft_saved): a list
+ * the server answered before the save still names them, and none is kept again.
+ */
 const finished = new Set<string>();
+/** The server's words for a draft it said a bill was made from already (409 draft_saved), for a keep that comes later. */
+const savedAs = new Map<string, string>();
 
 /** The most the server lists (contract §4): a list that long may leave some out. */
 const DRAFTS_CAP = 500;
@@ -111,9 +116,12 @@ export async function deleteDraft(id: string): Promise<void> {
   await api.delete(`drafts/${id}/`);
 }
 
-/** Every unfinished bill the shop has (newest change first). Asked for once as a bill form opens, never on a timer. */
-export function useDrafts(enabled = true) {
-  return useQuery({ ...listQuery, enabled, staleTime: 10_000 });
+/**
+ * Every unfinished bill the shop has (newest change first). Asked for once as a bill form opens, never on a timer.
+ * fresh: asked for again as it mounts, whatever the cache holds.
+ */
+export function useDrafts(enabled = true, fresh = false) {
+  return useQuery({ ...listQuery, enabled, staleTime: 10_000, ...(fresh ? { refetchOnMount: "always" as const } : {}) });
 }
 
 function upsert(qc: QueryClient, row: Draft) {
@@ -145,6 +153,16 @@ export function draftSettled(id: string): Promise<void> {
   return (writes.get(id) ?? Promise.resolve()).then(() => { settledAt.set(id, ++tick); });
 }
 
+/** Tests only: forget what this page learnt about drafts (saved ones, the writes on their way and their order), beside __resetDeviceDrafts. */
+export function __resetDrafts(): void {
+  finished.clear();
+  savedAs.clear();
+  writes.clear();
+  tick = 0;
+  settledAt.clear();
+  putAt.clear();
+}
+
 /** The server's answer to a PUT of a draft a bill took already (contract §4): it won't make the draft again. */
 const savedAlready = (e: unknown) => problemOf(e).code === "draft_saved";
 /**
@@ -156,22 +174,28 @@ function aboutThisDraft(e: unknown): boolean {
   return status !== undefined && status < 500 && status !== 401 && status !== 403 && status !== 429;
 }
 
-/** Sends this device's copy of a draft as it is when its turn comes (a later change goes with it), unless it's sent or gone already. */
-function send(qc: QueryClient, id: string): Promise<void> {
+/**
+ * Sends this device's copy of a draft as it is when its turn comes (a later change goes with it), unless it's sent or
+ * gone already. Resolves with the server's words when a write before it heard that a bill was made from the draft
+ * (409 draft_saved), which let this device's copy go: nothing is sent, and a keep says so in those words (N1).
+ */
+function send(qc: QueryClient, id: string): Promise<string | null> {
   return inTurn(id, async () => {
     const d = keptDraft(id);
-    if (!d || d.gone || d.synced) return;
+    if (!d) return savedAs.get(id) ?? null;
+    if (d.gone || d.synced) return null;
     putAt.set(id, ++tick);
     let row: Draft;
     try {
       row = await putDraft(id, d.business, d.data);
     } catch (e) {
       // saved as a bill already, here or on another device: this device lets it go too
-      if (savedAlready(e)) { finished.add(id); forgetOnDevice(id); drop(qc, id); }
+      if (savedAlready(e)) { finished.add(id); savedAs.set(id, problemOf(e).message); forgetOnDevice(id); drop(qc, id); }
       throw e;
     }
     markSynced(id, d.updated_at, row);
     upsert(qc, row); // discarded meanwhile: hidden as gone, and dropped once its delete lands
+    return null;
   });
 }
 /** Deletes a discarded draft on the server when its turn comes, unless it was kept again meanwhile (Undo); then lets it go here. */
@@ -206,14 +230,20 @@ export function useKeepDraft(): (id: string, business: number | null, data: Draf
   const who = useRef<Person>(null);
   who.current = me ? { id: me.id, name: me.fullName || me.username } : null;
   return useCallback(async (id, business, data) => {
+    // a bill was made from it already (here, or the server said so): it's never kept again, here or there (Ruling 1D-4/F6)
+    if (finished.has(id)) {
+      const words = savedAs.get(id);
+      return words ? { kept: null, refusal: words } : { kept: null };
+    }
     const now = new Date().toISOString();
     // a draft picked up from the shop's list keeps who started it, and when
     const prev = keptDraft(id) ?? shopCopy(qc, id);
     keepOnDevice({ id, business, data, started_by: prev ? prev.started_by : who.current, created_at: prev?.created_at || now, updated_at: now, synced: false });
     const here = keepsOnDevice() ? "device" : "visit";
     try {
-      await send(qc, id);
-      return { kept: "server" };
+      // a write before this one heard that a bill was made from it: this change went nowhere (N1)
+      const words = await send(qc, id);
+      return words ? { kept: null, refusal: words } : { kept: "server" };
     } catch (e) {
       const p = problemOf(e);
       // saved as a bill already: forgotten here. Refused (too big, its firm gone): it stays here. Both in the server's words.
@@ -248,21 +278,28 @@ export function forgetDraft(qc: QueryClient, id: string): void {
 /**
  * The shop's unfinished bills and this device's own, newest change first. This device's version of one it changed wins
  * until the server has it. A copy the server already had shows until a list asked for after it was sent leaves it out
- * (finished elsewhere); while the shop's list can't be read (offline, or it failed), every copy here stands in for it.
+ * (finished elsewhere); while the shop's list can't be read (offline, or it failed), every copy here stands in for it
+ * (Ruling 1D-4).
+ *
+ * fresh: the list is asked for again as this mounts, and loading lasts until that answer, since a list cached before a
+ * draft was made doesn't have it. answered: the shop's list answered (since this mounted, when fresh); false while it's
+ * coming, when it failed, and while it waits for the network: only an answer can say a draft isn't there any more.
  */
-export function useUnfinishedBills(enabled = true): { bills: UnfinishedBill[]; loading: boolean } {
-  const server = useDrafts(enabled);
+export function useUnfinishedBills(enabled = true, { fresh = false }: { fresh?: boolean } = {}): { bills: UnfinishedBill[]; loading: boolean; answered: boolean } {
+  const server = useDrafts(enabled, fresh);
   const kept = useKeptDrafts();
   const list = server.data;
   const firstAsk = !list && server.fetchStatus === "fetching";
+  // its last ask failed, or waits for the network: what the cache holds may be older than a copy here
+  const unread = server.isError || server.fetchStatus === "paused";
   const bills = useMemo(() => {
     const live = kept.filter((d) => !d.gone);
     const gone = new Set(kept.filter((d) => d.gone).map((d) => d.id));
     const fromServer = (list?.drafts ?? []).filter((d) => !gone.has(d.id));
     const listed = new Set(fromServer.map((d) => d.id));
     // a copy the server had, missing from the list: shown if the list was asked for before it was sent, or came back
-    // full; with no list, shown once there won't be one (offline, or it failed), not while the first one is coming
-    const sentShown = (d: KeptDraft) => (list ? !list.complete || (d.syncedAt ?? 0) >= list.askedAt : !firstAsk);
+    // full; with no list it can read, shown once there won't be one (offline, or it failed), not while the first one is coming
+    const sentShown = (d: KeptDraft) => (list && !unread ? !list.complete || (d.syncedAt ?? 0) >= list.askedAt : !firstAsk);
     const here = live.filter((d) => !listed.has(d.id) && (!d.synced || sentShown(d)))
       .map((d): UnfinishedBill => ({ id: d.id, business: d.business, started_by: d.started_by, data: d.data, created_at: d.created_at, updated_at: d.updated_at, onDevice: !d.synced }));
     const changed = new Map(live.filter((d) => !d.synced).map((d) => [d.id, d]));
@@ -271,8 +308,10 @@ export function useUnfinishedBills(enabled = true): { bills: UnfinishedBill[]; l
       return mine ? { ...d, business: mine.business, data: mine.data, updated_at: mine.updated_at, onDevice: true } : { ...d, onDevice: false };
     });
     return [...here, ...merged].sort(newestFirst);
-  }, [list, kept, firstAsk]);
-  return { bills, loading: enabled && firstAsk };
+  }, [list, kept, firstAsk, unread]);
+  const asking = fresh ? server.fetchStatus === "fetching" && !server.isFetchedAfterMount : firstAsk;
+  const answered = server.isSuccess && server.fetchStatus !== "paused" && (!fresh || server.isFetchedAfterMount);
+  return { bills, loading: enabled && asking, answered: enabled && answered };
 }
 
 /**
@@ -281,7 +320,7 @@ export function useUnfinishedBills(enabled = true): { bills: UnfinishedBill[]; l
  */
 async function syncDrafts(qc: QueryClient): Promise<void> {
   // an answer about one draft (refused, saved already) leaves it as it is and goes on; anything else stops until next time
-  const each = async (ids: string[], write: (id: string) => Promise<void>) => {
+  const each = async (ids: string[], write: (id: string) => Promise<unknown>) => {
     for (const id of ids) {
       try { await write(id); } catch (e) { if (!aboutThisDraft(e)) throw e; }
     }
