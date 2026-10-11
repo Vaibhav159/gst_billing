@@ -57,7 +57,7 @@ def test_purchase_credit_follows_return_month_and_explains_gap():
     ({}, {(3, "2026-09")}, "claimed"), ({}, set(), "to_claim"),
     ({"itc_eligible": False}, set(), "not_allowed"),
     ({"needs_review": True}, set(), "to_confirm"),
-    ({"credit_lapsed": True}, {(3, "2026-09")}, "claimed"),
+    ({"credit_lapsed": True}, {(3, "2026-09")}, "lapsed"),
     ({"date": date(2025, 5, 1), "credit_month": "2026-11", "credit_lapsed": True}, set(), "lapsed"),
 ])
 def test_purchase_credit_states(changes, closed, want):

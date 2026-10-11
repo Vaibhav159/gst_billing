@@ -182,10 +182,10 @@ def credit_state(bill, closed_credit):
     tax = amounts([bill])["tax"]
     if not bill["itc_eligible"] or not tax or not has_gstin(bill["customer"]["gst_number"]):
         return "not_allowed"
-    if (bill["business"]["id"], bill["credit_month"]) in closed_credit:
-        return "claimed"
     if bill["credit_lapsed"]:
         return "lapsed"
+    if (bill["business"]["id"], bill["credit_month"]) in closed_credit:
+        return "claimed"
     return "to_confirm" if bill["needs_review"] else "to_claim"
 
 

@@ -157,7 +157,7 @@ def test_opening_is_the_real_3a_reader_body_without_a_second_balance_model(shop)
 
 def test_deadline_and_claim_month_due_are_separate_and_inclusive(shop):
     business, supplier, _ = shop
-    purchase(business, supplier, "november", month=date(2026, 11, 1))
+    purchase(business, supplier, "october", month=date(2026, 10, 1))
     out = read(business, today=date(2026, 11, 30))["at_risk"]
     assert out["days_left"] == 0 and out["count"] == 1
     assert out["bills"][0]["claim_months"][-1] == {

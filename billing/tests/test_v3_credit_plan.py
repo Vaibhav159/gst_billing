@@ -17,7 +17,7 @@ def row(pk=77, day=date(2026, 2, 18), tax="902.40", **changes):
         "entered_on": date(2026, 10, 5), "supplier": {
             "id": 21, "name": "Jaipur Gem Exports", "gst_number": "08ABCDE1234A1Z5"},
         "tax": Decimal(tax), "credit_month": date(2026, 10, 1),
-        "credit_month_due": date(2026, 11, 20), "eligible": True,
+        "credit_month_due": date(2026, 11, 20), "eligible": True, "lapsed": False,
         "deadline": date(2026 if day.month < 4 else 2027, 11, 30),
         "claim_months": [
             {"month": "2026-09", "state": "not_filed", "gstr3b_due": "2026-10-20", "too_late": False},
@@ -100,12 +100,13 @@ def test_sum_is_decimal_exact_and_uses_only_unfiled_rows():
     assert out["at_risk"]["count"] == 2
 
 
-def test_unclaimable_scheduled_month_is_still_at_risk_before_actual_deadline():
-    purchase = row(credit_month=date(2026, 11, 1), credit_month_due=date(2026, 12, 20), claim_months=[
-        {"month": "2026-11", "state": "running", "gstr3b_due": "2026-12-20", "too_late": True}])
-    out = data([purchase], today=date(2026, 11, 1))
-    assert out["at_risk"]["bills"][0]["claim_months"][0]["too_late"] is True
-    assert out["at_risk"]["count"] == 1
+@pytest.mark.parametrize("filed", [set(), {(3, 2026, 12)}])
+def test_unclaimable_scheduled_month_is_lapsed_even_when_recorded(filed):
+    purchase = row(credit_month=date(2026, 12, 1), credit_month_due=date(2027, 1, 20), lapsed=True)
+    assert data([purchase], filed)["at_risk"]["count"] == 0
+    buckets = data([purchase], filed, fy=2025)["buckets"]
+    assert buckets["lapsed"] == {"bills": 1, "tax": "902.40"}
+    assert buckets["claimed"] == buckets["open"] == {"bills": 0, "tax": "0.00"}
 
 
 def test_risk_order_is_stable_and_other_firms_are_aggregate_rows():

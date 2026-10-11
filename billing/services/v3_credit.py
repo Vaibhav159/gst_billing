@@ -10,8 +10,8 @@ from billing.text import money
 def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, others_at_risk=()):
     """Project narrowed purchase rows. ``filed`` includes unlocked recorded returns and legacy locks.
 
-    Deadlines and claim months come from part 2's helpers. Unlike the ledger's scheduled-month
-    eligibility, this screen's lapsed bucket is the actual deadline passing without a filing.
+    Deadlines, claim months and scheduled lapse come from part 2's helpers. Lapsed
+    credit stays lapsed when recorded; otherwise an unfiled bill expires after its deadline.
     """
     buckets = {"fy": fy_label(fy), "deadline": deadline.isoformat(), "days_left": (deadline - today).days,
                **{key: {"bills": 0, "tax": Decimal("0")} for key in ("claimed", "open", "lapsed")}, "none": []}
@@ -20,6 +20,7 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
         bill_fy = fy_of(row["bill_date"])
         month = row["credit_month"]
         claimed = month is not None and (business_id, month.year, month.month) in filed
+        lapsed = row["lapsed"] or month is None or (not claimed and today > row["deadline"])
         reason = ("not_allowed" if not row["eligible"] else
                   "no_gstin" if not has_gstin(row["supplier"]["gst_number"]) else
                   "no_gst" if row["tax"] <= 0 else None)
@@ -28,10 +29,10 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
                 buckets["none"].append({"id": row["id"], "bill_no": row["bill_no"],
                                         "supplier_name": row["supplier"]["name"], "why": reason})
             else:
-                key = "claimed" if claimed else "lapsed" if month is None or today > row["deadline"] else "open"
+                key = "lapsed" if lapsed else "claimed" if claimed else "open"
                 buckets[key]["bills"] += 1
                 buckets[key]["tax"] += row["tax"]
-        if bill_fy != fy - 1 or reason or claimed or month is None or today > row["deadline"]:
+        if bill_fy != fy - 1 or reason or lapsed or claimed:
             continue
         risk.append({"id": row["id"], "bill_no": row["bill_no"], "bill_date": row["bill_date"].isoformat(),
                      "entered_on": row["entered_on"].isoformat(), "supplier": dict(row["supplier"]),
@@ -74,7 +75,7 @@ def credit_data(business, fy, *, opening, today=None):
     from django.utils import timezone
 
     from billing.cache import uncached
-    from billing.credit import credit_deadline, credit_month_of, open_credit_months
+    from billing.credit import credit_deadline, credit_lapsed, credit_month_of, open_credit_months
     from billing.fy import due_dates, fy_range
     from billing.models import Invoice
     from billing.services.gst_amounts import paise_expression
@@ -91,17 +92,20 @@ def credit_data(business, fy, *, opening, today=None):
     ).annotate(**{f"tax_{head}": Sum(paise_expression(f"lineitem__{head}")) for head in HEADS}))
     rows = []
     for bill in raw:
-        month = credit_month_of(SimpleNamespace(itc_month=bill["itc_month"], invoice_date=bill["invoice_date"]))
+        tax = sum((bill[f"tax_{head}"] or Decimal("0") for head in HEADS), Decimal("0"))
+        invoice = SimpleNamespace(pk=bill["id"], business_id=business.pk, itc_month=bill["itc_month"],
+                                  invoice_date=bill["invoice_date"], itc_eligible=bill["itc_eligible"], _purchase_tax=tax)
+        month = credit_month_of(invoice)
         rows.append({
             "id": bill["id"], "bill_no": bill["invoice_number"], "bill_date": bill["invoice_date"],
             "entered_on": timezone.localtime(bill["created_at"]).date(), "supplier": {
                 "id": bill["customer_id"], "name": bill["customer__name"],
                 "gst_number": clean_gstin(bill["customer__gst_number"])},
-            "tax": sum((bill[f"tax_{head}"] or Decimal("0") for head in HEADS), Decimal("0")),
+            "tax": tax, "lapsed": credit_lapsed(invoice, today),
             "credit_month": month, "credit_month_due": due_dates(month.year, month.month)["gstr3b"] if month else None,
             "eligible": bill["itc_eligible"], "deadline": credit_deadline(bill["invoice_date"]), "claim_months": [],
         })
-    candidates = [row for row in rows if row["credit_month"] is not None
+    candidates = [row for row in rows if row["credit_month"] is not None and not row["lapsed"]
                   and fy_of(row["bill_date"]) == fy - 1 and row["eligible"]
                   and row["tax"] > 0 and has_gstin(row["supplier"]["gst_number"]) and today <= row["deadline"]
                   and (business.pk, row["credit_month"].year, row["credit_month"].month) not in filed]
@@ -128,7 +132,7 @@ def _other_risk(business_id, fy, today):
     from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, TruncMonth
 
     from billing.cache import uncached
-    from billing.credit import LEDGER_START, credit_deadline
+    from billing.credit import LEDGER_START, credit_deadline, last_credit_month
     from billing.fy import fy_range
     from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, LineItem
     from billing.services.gst_amounts import paise_expression
@@ -150,6 +154,7 @@ def _other_risk(business_id, fy, today):
                                      invoice_date__gte=LEDGER_START)
             .exclude(business_id=business_id).filter(registered("customer__gst_number"), Exists(taxed))
             .alias(credit_date=Coalesce("itc_month", TruncMonth("invoice_date"), output_field=DateField()))
+            .filter(credit_date__lte=last_credit_month(start))
             .alias(credit_year=ExtractYear("credit_date"), credit_number=ExtractMonth("credit_date"))
             .filter(~Exists(recorded), ~Exists(legacy), ~Exists(frozen_legacy)).values("business_id", "business__name")
             .annotate(count=Count("pk")).order_by("business__name", "business_id"))
