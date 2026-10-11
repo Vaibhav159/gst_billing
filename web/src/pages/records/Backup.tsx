@@ -11,6 +11,8 @@ import { useFirms, useScope } from "@/core/scope";
 import { useView } from "@/core/view";
 import { Avatar, Banner, Button, ButtonLink, Card, Field, Input, Page, QueryView, Select, SuccessMark, cn } from "@/core/ui";
 
+import Restore from "./Restore";
+
 const KINDS = [["firms", "Firms"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["products", "Products"], ["sales", "Sales bills"], ["purchases", "Purchase bills"]] as const;
 const when = (at: string | null) => at ? `${date(dayOf(at))}, ${timeOf(at)}` : "None yet";
 export default function Backup() {
@@ -20,8 +22,11 @@ export default function Backup() {
     <QueryView query={query} what="the backup counts">{(summary) => <>
       <FullBackup summary={summary} />
       <RecentBackups summary={summary} />
-      <div className={cn("grid gap-5 items-start", isPhone ? "grid-cols-1 gap-4" : "grid-cols-2")}><Exports summary={summary} /></div>
     </>}</QueryView>
+    <div className={cn("grid gap-5 items-start", isPhone ? "grid-cols-1 gap-4" : "grid-cols-2")}>
+      <QueryView query={query} what="the export counts">{(summary) => <Exports summary={summary} />}</QueryView>
+      <Restore />
+    </div>
     <Card><p className="text-sm text-fg2">Keep your own copy somewhere else too: download the full backup every week and save it to a pen drive or Google Drive.</p></Card>
   </Page>;
 }

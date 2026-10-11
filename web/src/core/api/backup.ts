@@ -32,3 +32,21 @@ export async function downloadBackupFile(url: string, params: Record<string, str
     throw error;
   }
 }
+
+export type RestoreKind = "firms" | "customers" | "products" | "bills" | "purchases";
+export type RestoreRow = { name: string; detail?: string; why?: string };
+export type RestoreGroup = { add: RestoreRow[]; skip: RestoreRow[]; fail: RestoreRow[]; add_count: number; skip_count: number; fail_count: number };
+export type RestorePlan = Record<RestoreKind, RestoreGroup> & { adds: number; skips: number; fails: number; words: string };
+export type RestorePreview = {
+  file: { name: string; kind: "this_app" | "old_v4" | "old_v3"; kind_words: string; size: string; made: string | null; by: string };
+  plan: RestorePlan; fingerprint: string;
+};
+export type RestoreResult = { plan: RestorePlan; added: Record<RestoreKind, number[]> };
+export async function previewRestore(file: File): Promise<RestorePreview> {
+  const body = new FormData(); body.append("file", file);
+  return (await api.post<RestorePreview>("backup/restore/preview/", body, { timeout: 600_000 })).data;
+}
+export async function applyRestore(file: File, fingerprint: string): Promise<RestoreResult> {
+  const body = new FormData(); body.append("file", file); body.append("fingerprint", fingerprint);
+  return (await api.post<RestoreResult>("backup/restore/", body, { timeout: 600_000 })).data;
+}
