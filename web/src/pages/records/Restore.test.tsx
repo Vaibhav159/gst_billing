@@ -39,6 +39,7 @@ it("previews and applies the same multipart File with its fingerprint after a ch
   expect(screen.getByRole("link", { name: "Open the new customer" })).toHaveAttribute("href", "/customers/7");
   const upload = calls.find((c) => c.url === "backup/restore/preview/")?.data as FormData;
   const restore = calls.find((c) => c.url === "backup/restore/")?.data as FormData;
+  expect(upload.get("fy")).toBeNull(); expect(restore.get("fy")).toBeNull();
   expect(upload.get("file")).toBe(file); expect(restore.get("file")).toBe(file); expect(restore.get("fingerprint")).toBe("first-fingerprint");
 });
 
@@ -188,4 +189,193 @@ it("distinguishes sales and credit months and leaves pre-ledger purchase plannin
   expect(await screen.findByText("Added 1 purchase bill")).toBeVisible();
   expect(read).not.toHaveBeenCalled();
   expect(calls.filter((c) => c.url.startsWith("backup/restore/")).every((c) => (c.data as FormData).get("file") === file)).toBe(true);
+});
+
+
+const years = [
+  { fy: "2025-26", bills: 1204, words: "Adding 2025-26: 1,204 bills…" },
+  { fy: "2026-27", bills: 1800, words: "Adding 2026-27: 1,800 bills…" },
+];
+function yearPlan(fy: string) {
+  const count = years.find((year) => year.fy === fy)!.bills;
+  return { ...plan(`${count.toLocaleString("en-IN")} sales bills`), customers: { ...empty(), skip: [{ name: "Synthetic Customer" }], skip_count: 1 }, bills: { ...empty(), add: [{ name: `BILL/${fy}/1` }], add_count: count }, adds: count, skips: 1 };
+}
+function yearPreview(fy: string | null) {
+  return { ...preview(), years, fy, plan: fy ? yearPlan(fy) : { ...plan("3,004 sales bills"), adds: 3004 }, fingerprint: fy ? `fingerprint-${fy}` : "overview-never-apply" };
+}
+function yearResult(fy: string) {
+  return { plan: yearPlan(fy), added: { firms: [], customers: [], products: [], bills: [fy === years[0].fy ? 101 : 201], purchases: [] } };
+}
+const requestedYear = (call: Call) => (call.data as FormData).get("fy") as string | null;
+const applies = (calls: Call[]) => calls.filter((call) => call.url === "backup/restore/");
+const previews = (calls: Call[]) => calls.filter((call) => call.url === "backup/restore/preview/");
+
+it("walks large backups by year with separate confirmations, opaque uploads and server progress/counts", async () => {
+  let finishFirst!: (reply: { status: number; data: unknown }) => void;
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => ({ status: 200, data: yearPreview(requestedYear(call)) }),
+    "POST backup/restore/": (call: Call) => requestedYear(call) === years[0].fy
+      ? new Promise((resolve) => { finishFirst = resolve; }) : { status: 200, data: yearResult(years[1].fy) },
+  });
+  renderApp(<Restore />);
+  const file = new File(["opaque backup"], "large.json"); const read = vi.fn(); Object.defineProperty(file, "text", { value: read }); choose(file);
+  expect(await screen.findByRole("button", { name: "Add 1,204 sales bills" })).toBeEnabled();
+  expect(previews(calls).map(requestedYear)).toEqual([null, "2025-26"]);
+  expect(applies(calls)).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Add 1,204 sales bills" }));
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText("2025-26")).toBeVisible();
+  act(() => { vi.setSystemTime(Date.now() + 1000); });
+  fireEvent.click(within(dialog).getByRole("checkbox")); fireEvent.click(within(dialog).getByRole("button", { name: "Add 1,204 sales bills" }));
+  expect(await screen.findByText("Adding 2025-26: 1,204 bills…")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Choose another file" })).toBeDisabled();
+  expect(previews(calls)).toHaveLength(2);
+  await act(async () => finishFirst({ status: 200, data: yearResult(years[0].fy) }));
+  expect(await screen.findByRole("button", { name: "Add 1,800 sales bills" })).toBeEnabled();
+  expect(screen.getByText("2025-26 · Added 1,204 sales bills")).toBeVisible();
+  expect(screen.queryByText("Finished checking 2 financial years")).not.toBeInTheDocument();
+  expect(applies(calls)).toHaveLength(1);
+  await confirm("1,800 sales bills");
+  expect(await screen.findByText("Finished checking 2 financial years")).toBeVisible();
+  expect(screen.getByText("2026-27 · Added 1,800 sales bills")).toBeVisible();
+  expect(screen.getByText("Added 3,004 bills across these years.")).toBeVisible();
+  expect(previews(calls).map(requestedYear)).toEqual([null, "2025-26", "2026-27"]);
+  expect(applies(calls).map((call) => [requestedYear(call), (call.data as FormData).get("fingerprint")])).toEqual([["2025-26", "fingerprint-2025-26"], ["2026-27", "fingerprint-2026-27"]]);
+  expect(calls.every((call) => (call.data as FormData).get("file") === file)).toBe(true);
+  expect(read).not.toHaveBeenCalled();
+});
+
+it("refreshes only the changed year and needs a fresh confirmation without losing earlier results", async () => {
+  let secondChecks = 0; let secondApplies = 0;
+  const changed = { ...yearPlan(years[1].fy), words: "1,799 sales bills", adds: 1799 };
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => {
+      const fy = requestedYear(call); const data = yearPreview(fy);
+      return { status: 200, data: fy === years[1].fy && ++secondChecks > 1 ? { ...data, plan: changed, fingerprint: "fresh-second-year" } : data };
+    },
+    "POST backup/restore/": (call: Call) => requestedYear(call) === years[1].fy && ++secondApplies === 1
+      ? { status: 409, data: { code: "plan_changed", detail: "The books changed since the preview. Check the new plan, then restore.", plan: changed } }
+      : { status: 200, data: yearResult(requestedYear(call)!) },
+  });
+  renderApp(<Restore />); choose(); await confirm("1,204 sales bills"); await confirm("1,800 sales bills");
+  expect(await screen.findByRole("button", { name: "Add 1,799 sales bills" })).toBeEnabled();
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByText("2025-26 · Added 1,204 sales bills")).toBeVisible();
+  expect(applies(calls)).toHaveLength(2);
+  await confirm("1,799 sales bills");
+  expect(await screen.findByText("Finished checking 2 financial years")).toBeVisible();
+  expect(previews(calls).map(requestedYear)).toEqual([null, "2025-26", "2026-27", "2026-27"]);
+  expect((applies(calls)[2].data as FormData).get("fingerprint")).toBe("fresh-second-year");
+});
+
+it.each([0, 500, 403])("stops after a second-year failure (%s) and retains the first year's confirmed result", async (status) => {
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => ({ status: 200, data: yearPreview(requestedYear(call)) }),
+    "POST backup/restore/": (call: Call) => requestedYear(call) === years[0].fy ? { status: 200, data: yearResult(years[0].fy) } : { status, data: { detail: "Only the owner can restore a backup." } },
+  });
+  renderApp(<Restore />); choose(); await confirm("1,204 sales bills"); await confirm("1,800 sales bills");
+  expect(await screen.findByText(status === 403 ? "Only the owner can restore a backup." : "The restore answer didn't arrive")).toBeVisible();
+  expect(screen.getByText("2025-26 · Added 1,204 sales bills")).toBeVisible();
+  expect(screen.queryByText("Finished checking 2 financial years")).not.toBeInTheDocument();
+  expect(applies(calls)).toHaveLength(2); expect(previews(calls)).toHaveLength(3);
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  if (status !== 403) {
+    expect(screen.getByRole("button", { name: "Add 1,800 sales bills" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Check the plan again" }));
+    await waitFor(() => expect(previews(calls)).toHaveLength(4));
+    expect(requestedYear(previews(calls)[3])).toBe("2026-27");
+    expect(applies(calls)).toHaveLength(2);
+  }
+});
+
+it("keeps the next year recoverable if its preview fails, without reapplying completed years", async () => {
+  let secondChecks = 0;
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => requestedYear(call) === years[1].fy && ++secondChecks === 1 ? { status: 0 } : { status: 200, data: yearPreview(requestedYear(call)) },
+    "POST backup/restore/": (call: Call) => ({ status: 200, data: yearResult(requestedYear(call)!) }),
+  });
+  renderApp(<Restore />); choose(); await confirm("1,204 sales bills");
+  fireEvent.click(await screen.findByRole("button", { name: "Check the plan again" }));
+  expect(await screen.findByRole("button", { name: "Add 1,800 sales bills" })).toBeEnabled();
+  expect(screen.getByText("2025-26 · Added 1,204 sales bills")).toBeVisible();
+  expect(applies(calls)).toHaveLength(1);
+  expect(previews(calls).map(requestedYear)).toEqual([null, "2025-26", "2026-27", "2026-27"]);
+});
+
+it("can finish checking an already-present year after an uncertain answer without inventing an added result", async () => {
+  let secondChecks = 0;
+  const nothing = { ...yearPlan(years[1].fy), bills: { ...empty(), skip_count: 1800 }, adds: 0, skips: 1801, words: "" };
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => {
+      const fy = requestedYear(call);
+      return { status: 200, data: fy === years[1].fy && ++secondChecks > 1 ? { ...yearPreview(fy), plan: nothing } : yearPreview(fy) };
+    },
+    "POST backup/restore/": (call: Call) => requestedYear(call) === years[0].fy ? { status: 200, data: yearResult(years[0].fy) } : { status: 0 },
+  });
+  renderApp(<Restore />); choose(); await confirm("1,204 sales bills"); await confirm("1,800 sales bills");
+  fireEvent.click(await screen.findByRole("button", { name: "Check the plan again" }));
+  const finish = await screen.findByRole("button", { name: "Finish checking this backup" });
+  act(() => {
+    finish.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    finish.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  expect(await screen.findByText("Finished checking 2 financial years")).toBeVisible();
+  expect(screen.getByText("2026-27 · Nothing to add")).toBeVisible();
+  expect(screen.queryByText("2026-27 · Added 1,800 sales bills")).not.toBeInTheDocument();
+  expect(applies(calls)).toHaveLength(2);
+});
+
+it("uses the server's required-year manifest if apply discovers the large-file rule", async () => {
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => ({ status: 200, data: requestedYear(call) ? yearPreview(requestedYear(call)) : preview() }),
+    "POST backup/restore/": () => ({ status: 409, data: { code: "restore_year_required", detail: "Restore this backup one financial year at a time.", years } }),
+  });
+  renderApp(<Restore />); const file = choose(); await confirm();
+  expect(await screen.findByRole("button", { name: "Add 1,204 sales bills" })).toBeEnabled();
+  expect(screen.getByText("Restore this backup one financial year at a time.")).toBeVisible();
+  expect(previews(calls).map(requestedYear)).toEqual([null, "2025-26"]);
+  expect(applies(calls)).toHaveLength(1);
+  expect(calls.every((call) => (call.data as FormData).get("file") === file)).toBe(true);
+});
+
+it("blocks a large backup with no valid financial year instead of offering an inert restore", async () => {
+  const calls = serve({ "POST backup/restore/preview/": { ...preview(), years: [], fy: null } });
+  renderApp(<Restore />); choose();
+  expect(await screen.findByText("This backup has no valid financial year.")).toBeVisible();
+  expect(screen.getByText("Check the bill dates in the original app and download another backup.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add 1 customer" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Choose another file" })).toBeEnabled();
+  expect(applies(calls)).toHaveLength(0);
+});
+
+it("sends only one apply when confirmation receives two clicks before the busy render", async () => {
+  const calls = serve({ "POST backup/restore/preview/": (call: Call) => ({ status: 200, data: yearPreview(requestedYear(call)) }), "POST backup/restore/": () => new Promise(() => {}) });
+  renderApp(<Restore />); choose();
+  fireEvent.click(await screen.findByRole("button", { name: "Add 1,204 sales bills" }));
+  const dialog = screen.getByRole("dialog");
+  act(() => { vi.setSystemTime(Date.now() + 1000); });
+  fireEvent.click(within(dialog).getByRole("checkbox"));
+  const button = within(dialog).getByRole("button", { name: "Add 1,204 sales bills" });
+  act(() => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await screen.findByText("Adding 2025-26: 1,204 bills…");
+  expect(applies(calls)).toHaveLength(1);
+});
+
+it("sends only one explicit re-preview when retry receives two clicks before the busy render", async () => {
+  let checks = 0;
+  const calls = serve({
+    "POST backup/restore/preview/": (call: Call) => ++checks > 2 ? new Promise(() => {}) : { status: 200, data: yearPreview(requestedYear(call)) },
+    "POST backup/restore/": () => ({ status: 0 }),
+  });
+  renderApp(<Restore />); choose(); await confirm("1,204 sales bills");
+  const button = await screen.findByRole("button", { name: "Check the plan again" });
+  act(() => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await waitFor(() => expect(previews(calls).length).toBeGreaterThan(2));
+  expect(previews(calls)).toHaveLength(3);
 });

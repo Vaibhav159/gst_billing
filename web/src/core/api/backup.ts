@@ -37,16 +37,19 @@ export type RestoreKind = "firms" | "customers" | "products" | "bills" | "purcha
 export type RestoreRow = { name: string; detail?: string; why?: string };
 export type RestoreGroup = { add: RestoreRow[]; skip: RestoreRow[]; fail: RestoreRow[]; add_count: number; skip_count: number; fail_count: number };
 export type RestorePlan = Record<RestoreKind, RestoreGroup> & { adds: number; skips: number; fails: number; words: string };
+export type RestoreYear = { fy: string; bills: number; words: string };
 export type RestorePreview = {
   file: { name: string; kind: "this_app" | "old_v4" | "old_v3"; kind_words: string; size: string; made: string | null; by: string };
-  plan: RestorePlan; fingerprint: string;
+  plan: RestorePlan; fingerprint: string; years?: RestoreYear[]; fy?: string | null;
 };
 export type RestoreResult = { plan: RestorePlan; added: Record<RestoreKind, number[]> };
-export async function previewRestore(file: File): Promise<RestorePreview> {
+export async function previewRestore(file: File, fy?: string): Promise<RestorePreview> {
   const body = new FormData(); body.append("file", file);
+  if (fy) body.append("fy", fy);
   return (await api.post<RestorePreview>("backup/restore/preview/", body, { timeout: 600_000 })).data;
 }
-export async function applyRestore(file: File, fingerprint: string): Promise<RestoreResult> {
+export async function applyRestore(file: File, fingerprint: string, fy?: string): Promise<RestoreResult> {
   const body = new FormData(); body.append("file", file); body.append("fingerprint", fingerprint);
+  if (fy) body.append("fy", fy);
   return (await api.post<RestoreResult>("backup/restore/", body, { timeout: 600_000 })).data;
 }
