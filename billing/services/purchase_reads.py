@@ -50,6 +50,7 @@ from billing.tax_rules import HEADS, THOUSANDTH, clean_gstin, is_interstate, sta
 from billing.text import money, percent, person, stamp
 
 ZERO = Decimal("0")
+PAISA = Decimal("0.01")
 PICK_SUPPLIER = "Pick a supplier from the list."
 LINE_FIELDS = ("product_name", "hsn_code", "quantity", "unit", "rate", "gst_tax_rate", "cgst", "sgst", "igst", "amount", "note")
 ROW_FIELDS = ("business_id", "customer_id", "invoice_number", "invoice_date", "created_at", "payment_mode",
@@ -110,8 +111,30 @@ class NumberKey(Func):
         return compiler.compile(Replace(expression, Value("#"), Value("-")))
 
 
+def _sqlite_paise(value):
+    if value is None:
+        return None
+    return float(Decimal(str(value)).quantize(PAISA, ROUND_HALF_UP))
+
+
+class Paise(Func):
+    """Round to paise half away from zero, the way to_paise and PostgreSQL numeric ROUND do."""
+    function = "v3_round_paise"
+    output_field = MONEY_SQL
+    arity = 1
+
+    def as_sqlite(self, compiler, connection, **extra_context):
+        # SQLite's ROUND works on binary floats, so 1.005 would round down.
+        connection.ensure_connection()
+        connection.connection.create_function(self.function, 1, _sqlite_paise, deterministic=True)
+        return Func.as_sql(self, compiler, connection, **extra_context)
+
+    def as_sql(self, compiler, connection, **extra_context):
+        return compiler.compile(Round(self.source_expressions[0], 2))
+
+
 def _rounded_tax():
-    return Round(F("cgst"), 2) + Round(F("sgst"), 2) + Round(F("igst"), 2)
+    return Paise(F("cgst")) + Paise(F("sgst")) + Paise(F("igst"))
 
 
 def _credit_totals(qs):
@@ -393,8 +416,8 @@ def purchase_summary(qs, lines=None):
         bills=Count("pk"), total_amount=Sum("total_amount"), credit=Sum("_claimed"))
     line_rows = uncached(LineItem).filter(invoice_id__in=qs.order_by().values("pk"))
     total = line_rows.aggregate(
-        taxable=Sum(Round(F("quantity") * F("rate"), 2), output_field=MONEY_SQL),
-        **{head: Sum(Round(F(head), 2), output_field=MONEY_SQL) for head in HEADS})
+        taxable=Sum(Paise(F("quantity") * F("rate")), output_field=MONEY_SQL),
+        **{head: Sum(Paise(F(head)), output_field=MONEY_SQL) for head in HEADS})
     total = {key: value or ZERO for key, value in total.items()}
     total["tax"] = sum((total[head] for head in HEADS), ZERO)
     return {"bills": bills["bills"], **figures(total), "total_amount": money(bills["total_amount"] or ZERO),
