@@ -1,21 +1,27 @@
 // Sign in. No marketing badges: the page says what it is and how to get help,
 // shows progress, explains each failure in plain words next to the field that
 // caused it, and after a session runs out takes the person back to their page.
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Eye, EyeOff, LogIn, WifiOff, CloudOff, KeyRound, Clock, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import type { ApiProblem } from "@/core/api/errors";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
-import { AppMark, Button, Field, Input, Banner, Dialog, useDocTitle } from "@/core/ui";
+import { AppMark, Button, Field, Input, Banner, Checkbox, useDocTitle } from "@/core/ui";
 import { version as APP_VERSION } from "../../../package.json";
+
+const ForgotPassword = lazy(() => import("@/pages/people/ForgotPassword"));
 
 /** What's wrong: a missing field says so under it; a sign-in that didn't go through has a title and an icon, above the fields. */
 type Problem = { field?: "user" | "pw"; icon?: LucideIcon; title?: string; text: string };
 
 /** The prototype's words for each way a sign-in fails. */
 function failureOf(p: ApiProblem): Problem {
+  if (p.code === "stopped") {
+    const detail = (p.body as { detail?: unknown } | undefined)?.detail;
+    return { icon: KeyRound, title: "Sign-in stopped", text: typeof detail === "string" ? detail : p.message };
+  }
   if (p.kind === "auth") return { field: "pw", icon: KeyRound, title: "That username and password don't match", text: "Check both, including capital letters." };
   if (p.kind === "offline") return { icon: WifiOff, title: "You're offline", text: "This phone or computer isn't connected. Check the internet, then sign in again." };
   if (p.kind === "throttled") return { icon: Clock, title: "Too many tries", text: "Wait a minute, then try again." };
@@ -25,14 +31,14 @@ function failureOf(p: ApiProblem): Problem {
 /**
  * Where `next` may send the person after signing in: a page of this app, never another site. Browsers read
  * "/\host" and "/<tab>/host" as "//host", so the path must also resolve to this origin (React Router throws otherwise).
- * Never this page again either, however it's spelt (the router reads "/login//" and "/%6Cogin" as this page): the page
- * leaves once, so a signed-in person would be left on it. A path whose %-escapes don't read goes home.
+ * Never either authentication page again, however it's spelt (the router reads "/login//" and "/%6Cogin" as this page):
+ * the page leaves once, so a signed-in person would be left on it. A path whose %-escapes don't read goes home.
  */
-function safeNext(next: string | null): string | null {
+export function safeNext(next: string | null): string | null {
   if (!next || !next.startsWith("/") || next.startsWith("//")) return null;
   try {
     const url = new URL(next, window.location.origin);
-    return url.origin === window.location.origin && !/^\/login\/*$/i.test(decodeURIComponent(url.pathname)) ? next : null;
+    return url.origin === window.location.origin && !/^\/(login|password)\/*$/i.test(decodeURIComponent(url.pathname)) ? next : null;
   } catch { return null; }
 }
 
@@ -44,6 +50,7 @@ export default function Login() {
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
   const [show, setShow] = useState(false);
+  const [keep, setKeep] = useState(true);
   const [err, setErr] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(query.get("forgot") === "1");
@@ -78,7 +85,7 @@ export default function Login() {
     }
     setErr(null);
     setBusy(true);
-    const r = await signIn(user.trim(), pw);
+    const r = await signIn(user.trim(), pw, keep);
     setBusy(false);
     if (!r.ok) { setErr(failureOf(r.problem)); return; }
     goOn();
@@ -100,6 +107,7 @@ export default function Login() {
             Sign in again. Nothing you saved is affected.
           </Banner>
         ) : null}
+        {query.get("reason") === "signed_out" ? <Banner tone="brand" icon={Clock}>You were signed out on this device. Sign in again.</Banner> : null}
         {err?.title && ErrIcon ? (
           <div role="alert" className="flex items-start gap-3 rounded-card border border-neg-line bg-neg-tint px-4 py-3 anim-rise">
             <ErrIcon size={20} className="text-neg shrink-0 mt-0.5" aria-hidden="true" />
@@ -120,25 +128,14 @@ export default function Login() {
             </button>
           </div>
         </Field>
+        <Checkbox label="Keep me signed in on this device" checked={keep} onChange={setKeep} disabled={busy} />
         <Button type="submit" variant="primary" size="lg" icon={LogIn} full loading={busy} className={big ? "!min-h-14 !text-lg" : undefined}>{busy ? "Signing in…" : "Sign in"}</Button>
         <div className={cn("flex items-center justify-between gap-3 text-muted", big ? "text-md" : "text-sm")}>
           <Button variant="link" onClick={() => setForgot(true)}>Forgot your password?</Button>
           <span className="tnum shrink-0">Version {APP_VERSION}</span>
         </div>
       </form>
-      <ForgotDialog open={forgot} onClose={() => setForgot(false)} />
+      {forgot ? <Suspense fallback={<p role="status">Loading password help…</p>}><ForgotPassword open onClose={() => setForgot(false)} /></Suspense> : null}
     </div>
-  );
-}
-
-/**
- * Forgot password. Until the owner's SMS code comes (part 4), everyone is told today's way:
- * the owner sets a new password in Users and roles, and the owner asks whoever looks after the app.
- */
-function ForgotDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Dialog open={open} onClose={onClose} title="Forgot your password?" size="sm" footer={<Button onClick={onClose}>Close</Button>}>
-      <p className="text-fg2">The owner sets a new password for you in Users and roles. Ask them; it takes a minute. If you're the owner, ask the person who looks after the app to reset it.</p>
-    </Dialog>
   );
 }

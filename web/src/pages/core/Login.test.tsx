@@ -7,6 +7,7 @@ import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@/core/ui";
 import Login from "./Login";
+import { serve } from "@/test/server";
 // Beyond the brief: the real AuthProvider and a router the tests can watch, for sign-ins here and on another tab
 import { act, waitFor } from "@testing-library/react";
 import type { AxiosAdapter } from "axios";
@@ -56,10 +57,11 @@ test("after a long break it says why, and signing in returns to the same page", 
 });
 
 test("forgot password explains today's way", async () => {
+  serve({ "GET auth/options/": { sms_reset: false } });
   renderApp(<Login />, { path: "/login", me: null });
   await userEvent.click(screen.getByRole("button", { name: "Forgot your password?" }));
   expect(await screen.findByRole("dialog", { name: "Forgot your password?" })).toBeInTheDocument();
-  expect(screen.getByText(/the owner/i)).toBeInTheDocument();
+  expect(await screen.findByText("Password codes by SMS aren't switched on yet. Ask the owner to set a new password for you. If you are the owner, ask the person who looks after the app.")).toBeInTheDocument();
 });
 
 /* ── Beyond the brief ── */
@@ -136,11 +138,11 @@ test("a sign-in here that finishes after another tab's doesn't pull the person b
 });
 
 // Ruling 34: nothing on the page promises what the app can't do
-test("the page promises nothing it can't keep: a plain line, and no keep-me-signed-in box", () => {
+test("the page names sign-in plainly and offers the server-backed remember choice", () => {
   mountWith({ ok: true });
   expect(screen.getByText("Sign in with your username and password.")).toBeInTheDocument();
   expect(screen.queryByText(/Kiran|Meera|Aarav/)).not.toBeInTheDocument();
-  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "Keep me signed in on this device" })).toBeChecked();
 });
 
 test("a next with a query string is kept whole", async () => {
@@ -203,4 +205,26 @@ test.each([
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent(title);
   expect(alert).toHaveTextContent(text);
+});
+
+
+test("keep me signed in forwards the chosen value", async () => {
+  const auth = mountWith({ ok: true });
+  await userEvent.click(screen.getByRole("checkbox", { name: "Keep me signed in on this device" }));
+  await signInAs("rakesh", "pw");
+  expect(auth.signIn).toHaveBeenCalledWith("rakesh", "pw", false);
+});
+
+test("stopped credentials show the server's exact reason", async () => {
+  const detail = "The owner has stopped @rakesh signing in. Ask the owner.";
+  mountWith({ ok: false, problem: { kind: "auth", code: "stopped", message: detail, body: { detail, code: "stopped" } } });
+  await signInAs("rakesh", "pw");
+  expect(await screen.findByText(detail)).toBeInTheDocument();
+  expect(screen.queryByText("That username and password don't match")).not.toBeInTheDocument();
+});
+
+test("a remotely ended session explains why sign-in is needed", () => {
+  mountWith({ ok: true }, "/login?reason=signed_out");
+  expect(screen.getByText("You were signed out on this device. Sign in again.")).toBeInTheDocument();
+  expect(screen.queryByText("You were signed out after a long break")).not.toBeInTheDocument();
 });
