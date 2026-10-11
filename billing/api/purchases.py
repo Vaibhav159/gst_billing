@@ -26,8 +26,9 @@ from billing.services.purchase_reads import (
     usual_rate,
 )
 
+from .body import valid
 from .permissions import V3Permission
-from .sales import Pages
+from .sales import DeleteSerializer, Pages
 
 
 class PurchasesViewSet(viewsets.GenericViewSet):
@@ -37,7 +38,7 @@ class PurchasesViewSet(viewsets.GenericViewSet):
 
     lookup_value_regex = r"\d+"
 
-    v3_actions = {}
+    v3_actions = {"destroy": "purchase.delete"}
 
     def get_queryset(self):
         return purchase_queryset()
@@ -112,4 +113,26 @@ class PurchasesViewSet(viewsets.GenericViewSet):
     def usual_rate(self, request):
         return Response(usual_rate(request.query_params))
 
+
+    def destroy(self, request, pk=None):
+        from billing.services.purchase_bin import bin_purchase, purchase_bin_row
+
+        data = valid(DeleteSerializer, request.data)
+        return Response(purchase_bin_row(bin_purchase(self.get_object(), request.user, data["reason"])))
+
+
+
+class PurchaseBinViewSet(viewsets.GenericViewSet):
+    permission_classes = [V3Permission]
+    lookup_value_regex = r"\d+"
+    v3_actions = {"restore": "purchase.delete"}
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        from billing.services.purchase_bin import restore_purchase
+
+        binned = BinnedInvoice.objects.filter(pk=pk, type_of_invoice="inward").first()
+        if binned is None:
+            raise Http404("That deleted purchase isn't in the bin any more.")
+        return Response(purchase_detail(restore_purchase(binned, request.user)))
 

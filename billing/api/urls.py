@@ -15,7 +15,7 @@ from .inward_bills import (
 from .me import MeView
 from .media import SignedMediaView
 from .preferences import PreferencesView
-from .purchases import PurchasesViewSet
+from .purchases import PurchaseBinViewSet, PurchasesViewSet
 from .reconciliation import ReconciliationView
 from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
@@ -39,6 +39,7 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register(r"purchases/bin", PurchaseBinViewSet, basename="purchase-bin")
 router.register(r"purchases", PurchasesViewSet, basename="purchase")
 router.register(r"businesses", BusinessViewSet)
 router.register(r"customers", CustomerViewSet)
