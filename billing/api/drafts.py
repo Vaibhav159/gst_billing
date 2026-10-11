@@ -15,6 +15,7 @@ from billing.params import PICK_A_FIRM, id_param
 from billing.services.drafts import saved_already
 from billing.text import person, stamp
 
+from .auth import DynamicScopedRateThrottle
 from .body import UNSTORABLE, Picked, valid
 from .permissions import V3Permission
 
@@ -101,6 +102,10 @@ class DraftViewSet(viewsets.GenericViewSet):
     a draft as it's kept, and asks for the list as a bill form opens and as the network comes back."""
 
     permission_classes = [V3Permission]
+    # A keep is a request at every pause while a bill is typed, so drafts have their own rate (Ruling 1A-42): a day of
+    # the paper book never spends the user's daily requests, which its saves need, and the rate still caps a runaway.
+    throttle_classes = [DynamicScopedRateThrottle]
+    throttle_scope = "drafts"
     # Any id reaches the view, so one that isn't a draft's is the 404 in words, never Django's page.
     lookup_value_regex = "[^/]+"
     v3_actions = {"list": "bill.create", "update": "bill.create", "destroy": "bill.create"}
@@ -119,9 +124,10 @@ class DraftViewSet(viewsets.GenericViewSet):
     def update(self, request, pk=None):
         """PUT drafts/{uuid}/: make it (201) or replace it (200); who started it stays.
 
-        The draft's row is locked first: a bill being saved from it deletes it under that lock, so a keep that comes
-        meanwhile waits for the save, then finds it saved (409 draft_saved), and never makes it again. A saved draft
-        is refused before its body is read: the client lets it go either way.
+        The draft's row is locked first. A bill being saved from the draft deletes it as the save begins, right after
+        claiming it (billing.services.drafts.claim), and holds that lock until the save ends: a keep that comes while
+        the bill is made waits for the save, then finds the draft saved (409 draft_saved), and never makes it again. A
+        saved draft is refused before its body is read: the client lets it go either way.
         """
         key = draft_key(pk)
         with transaction.atomic():

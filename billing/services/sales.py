@@ -291,7 +291,9 @@ def save_bill(data, user, invoice=None):
     with transaction.atomic():
         old = locked_bill(invoice) if invoice else None
         if draft is not None:
-            claim(draft)  # first: a draft made a bill already makes no other (409 draft_saved), whatever else is wrong
+            # First: a draft made a bill already makes no other (409 draft_saved), whatever else is wrong; and the draft
+            # is taken now, so a keep of it while the bill is made waits for this save and is then refused.
+            claim(draft)
         if old is not None:
             refuse_cancelled(old)
             assert_sales_open(old.business_id, old.invoice_date, "edit")
@@ -353,7 +355,7 @@ def save_bill(data, user, invoice=None):
             paper = f" · From the paper bill book, dated {day_text(day)}" if bill.paper else ""
             log(bill, user, "created", f"{customer.name} · {inr(total)}{paper}", snapshot=v2_snapshot(bill))
             if draft is not None:
-                became(draft, bill)  # the draft goes with the save, in its transaction
+                became(draft, bill)  # its note keeps the bill it became
         else:
             log(bill, user, "updated", _changed_words(changed), changes=_changes(before, after, EDIT_FIELDS) or None)
     return Invoice.objects.sales().select_related("customer", "business").get(pk=bill.pk)

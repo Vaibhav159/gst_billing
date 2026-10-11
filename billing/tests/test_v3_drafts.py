@@ -5,19 +5,23 @@ import json
 import threading
 import uuid
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.db import connection, transaction
-from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
+from django.test import TestCase, TransactionTestCase, override_settings, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework.throttling import SimpleRateThrottle
 
 from billing.api.body import valid
 from billing.api.sales import SaleSerializer
 from billing.constants import BILL_CANCELLED
 from billing.models import AuditLog, Business, FiledPeriod, Invoice, SaleDraft, SavedDraft
+from billing.numbering import checked_number
 from billing.services.sales import save_bill
+from billing.tests.test_base import load_production_settings, production_throttling
 from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, person, sale
 
 LINE = {"product_name": "Gold Ring 22K", "hsn_code": "711319", "gst_percent": "3", "quantity": "1",
@@ -92,6 +96,25 @@ class DraftTest(TestCase):
         self.assertEqual(r.data, {"error": "Cannot delete: 1 unfinished bill(s) still name this firm. Finish or "
                                            "discard them first.", "protected": 1})
         self.assertTrue(Business.objects.filter(pk=self.biz.pk).exists())
+
+    def test_a_draft_left_behind_its_save_doesnt_hold_its_firm(self):
+        # Task 10's review, minor 1: a draft that outlived its save (a keep that raced it) is listed nowhere, so nobody
+        # could discard it. It goes with its firm; a draft still on the list keeps holding it.
+        self.put()
+        SavedDraft.objects.create(id=self.key, bill_id=424242, invoice_number="31")
+        r = client_for(self.owner).delete(reverse("business-detail", args=[self.biz.pk]))
+        self.assertEqual(r.status_code, 204, getattr(r, "data", None))
+        self.assertFalse(Business.objects.filter(pk=self.biz.pk).exists())
+        self.assertFalse(SaleDraft.objects.exists())
+        other = firm("MEERA ORNAMENTS", gstin="08AAAAA0000A1Z5")
+        listed, behind = str(uuid.uuid4()), str(uuid.uuid4())
+        for key in (listed, behind):
+            self.put(key=key, business=other.pk)
+        SavedDraft.objects.create(id=behind, bill_id=424242, invoice_number="32")
+        r = client_for(self.owner).delete(reverse("business-detail", args=[other.pk]))
+        self.assertEqual((r.status_code, r.data), (409, {"error": "Cannot delete: 1 unfinished bill(s) still name this "
+                                                         "firm. Finish or discard them first.", "protected": 1}))
+        self.assertEqual(SaleDraft.objects.count(), 2)  # a delete refused changes nothing
 
 
 class SavedOnceTest(TestCase):
@@ -201,6 +224,23 @@ class SavedOnceTest(TestCase):
         made = self.save().data
         saved = SavedDraft.objects.get()
         self.assertEqual((str(saved.pk), saved.bill_id, saved.invoice_number), (self.key, made["id"], "31"))
+
+    def test_the_save_takes_the_draft_before_it_makes_the_bill(self):
+        # Task 10's review, minor 2: the draft goes as soon as the save has claimed it, under its row lock, so a keep
+        # while the bill is being made waits for the save and is then refused, never told "kept" and then dropped.
+        # The bill goes on the note at the end. Here the save is looked at as it checks the number, before the bill.
+        self.keep()
+        seen = []
+
+        def looking(*args, **kwargs):
+            seen.append((SaleDraft.objects.filter(pk=self.key).exists(), SavedDraft.objects.get(pk=self.key).bill_id))
+            return checked_number(*args, **kwargs)
+
+        with patch("billing.services.sales.checked_number", looking):
+            made = self.save()
+        self.assertEqual(made.status_code, 201, made.data)
+        self.assertEqual(seen, [(False, None)])  # the draft gone, the note claimed, no bill on it yet
+        self.assertEqual(SavedDraft.objects.get().bill_id, made.data["id"])
 
     def test_a_discarded_draft_can_come_back(self):
         # Only a save leaves a note: a discard's Undo keeps the draft again.
@@ -466,6 +506,52 @@ class DraftWordsTest(TestCase):
         self.assertEqual(self.put({"data": {}}).status_code, 200)
 
 
+class DraftThrottleTest(TestCase):
+    """Ruling 1A-42: keeps have their own rate, drafts' 120 a minute, so a day of the paper book, a keep at every pause,
+    never spends the user's daily requests, which the saves need. Production's throttles, with the rates below."""
+
+    def setUp(self):
+        self.staff = client_for(person("rakesh", *ROLE_GROUPS["staff"]))
+        self.kgh, self.anil = firm(), buyer()
+        self.key = str(uuid.uuid4())
+
+    def keep(self, n):
+        return self.staff.put(reverse("draft-detail", args=[self.key]), {"business": self.kgh.pk, "data": {"n": n}},
+                              format="json")
+
+    @staticmethod
+    def rated(prod, **rates):
+        """Production's REST settings with these rates changed, for the scoped throttles (read live) and for the user's
+        (read from its class)."""
+        changed = {**prod.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], **rates}
+        return (override_settings(REST_FRAMEWORK={**prod.REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": changed}),
+                patch.object(SimpleRateThrottle, "THROTTLE_RATES", changed))
+
+    def test_keeps_dont_spend_the_users_daily_requests(self):
+        with production_throttling() as prod:
+            rest, user_rates = self.rated(prod, user="2/day")  # the day's budget, shrunk to two requests
+            with rest, user_rates:
+                for n in range(20):  # a bill typed with many pauses, and the list asked for as forms open
+                    self.assertEqual(self.keep(n).status_code, 201 if n == 0 else 200)
+                    if n % 5 == 0:
+                        self.assertEqual(self.staff.get(reverse("draft-list")).status_code, 200)
+                body = {"business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "1",
+                        "invoice_date": str(timezone.localdate()), "lines": [LINE], "draft_id": self.key}
+                r = self.staff.post(reverse("sale-list"), body, format="json")
+                self.assertEqual(r.status_code, 201, r.data)  # the save still goes through: the day's first request
+                self.assertEqual(self.staff.get(reverse("sale-list")).status_code, 200)
+                self.assertEqual(self.staff.get(reverse("sale-list")).status_code, 429)  # the tiny budget is real
+                self.assertEqual(self.staff.get(reverse("draft-list")).status_code, 200)  # keeps never needed it
+
+    def test_keeps_have_their_own_rate(self):
+        self.assertEqual(load_production_settings().REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["drafts"], "120/min")
+        with production_throttling() as prod:
+            rest, user_rates = self.rated(prod, drafts="3/min")
+            with rest, user_rates:
+                self.assertEqual([self.keep(n).status_code for n in range(4)], [201, 200, 200, 429])
+                self.assertEqual(self.staff.get(reverse("sale-list")).status_code, 200)  # the rest of the app goes on
+
+
 class ResetTest(TestCase):
     def test_the_sandbox_reset_empties_the_drafts_and_their_notes(self):
         from billing.management.commands.seed_sandbox import Command
@@ -563,6 +649,34 @@ class AtOnceTest(TransactionTestCase):
         r = answer["r"]
         self.assertEqual((r.status_code, r.data["data"], r.data["started_by"]["id"]), (200, {"n": 2}, self.rakesh.pk))
         self.assertEqual(SaleDraft.objects.get(pk=key).data, {"n": 2})
+
+    def test_a_keep_while_the_bill_is_being_made_waits_and_is_refused(self):
+        # Task 10's review, minor 2: the save is held before its bill is made, its draft claimed and taken. A keep then
+        # waits for it and is refused; it used to be told "kept", and then the save deleted the draft.
+        locked, release, made = threading.Event(), threading.Event(), {}
+
+        def holding(*args, **kwargs):
+            locked.set()
+            release.wait(10)
+            return checked_number(*args, **kwargs)
+
+        def first():
+            try:
+                made["bill"] = save_bill(valid(SaleSerializer, self.body("1")), self.rakesh)
+            finally:
+                connection.close()
+
+        with patch("billing.services.sales.checked_number", holding):
+            thread = threading.Thread(target=first, daemon=True)
+            thread.start()
+            self.assertTrue(locked.wait(10))
+            second, answer = self.meanwhile(lambda: self.owner.put(reverse("draft-detail", args=[self.key]),
+                                                                   {"business": self.kgh.pk, "data": {"n": 2}},
+                                                                   format="json"))
+            self.settle(thread, second, release=release)
+        r = answer["r"]
+        self.assertEqual((r.status_code, r.data["code"], r.data["bill"]["id"]), (409, "draft_saved", made["bill"].pk))
+        self.assertFalse(SaleDraft.objects.exists())
 
     def test_a_keep_meanwhile_never_makes_the_draft_again(self):
         first, release, made = self.held_save()

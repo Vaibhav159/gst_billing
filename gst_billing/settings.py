@@ -234,6 +234,9 @@ REST_FRAMEWORK = {
         # touching a human; refresh is authenticated-adjacent and more frequent.
         "login": "10/min",
         "token_refresh": "60/min",
+        # v3's unfinished bills (billing.api.drafts, Ruling 1A-42): a keep at every pause while a bill is typed, so
+        # they don't spend the user's daily requests; one open form keeps at most about 50 times a minute.
+        "drafts": "120/min",
     },
     "DEFAULT_RENDERER_CLASSES": (
         [

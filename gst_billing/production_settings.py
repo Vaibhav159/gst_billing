@@ -205,6 +205,8 @@ REST_FRAMEWORK = {
         "user": "5000/day",
         "login": "10/min",
         "token_refresh": "60/min",
+        # v3's unfinished bills: their own rate, so keeps never spend the user's day (Ruling 1A-42).
+        "drafts": "120/min",
     },
     # Throttles key on the client IP. Requests reach gunicorn through two
     # proxies, Cosmos (TLS edge) then nginx, and each appends the address it

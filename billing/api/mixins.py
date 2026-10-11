@@ -1,12 +1,12 @@
 import logging
 
 from django.db import transaction
-from django.db.models import JSONField, ProtectedError
+from django.db.models import Exists, JSONField, OuterRef, ProtectedError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 
-from billing.models import AuditLog, BinnedInvoice, Business, Customer, SaleDraft
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, SaleDraft, SavedDraft
 
 logger = logging.getLogger(__name__)
 
@@ -179,4 +179,9 @@ class ProtectedDeleteMixin:
         with transaction.atomic():
             if key:
                 BinnedInvoice.objects.settled().filter(**{key: instance}).delete()
+            if key == "business":
+                # So does a firm's draft that outlived its save (a keep that raced it): it is listed nowhere, so nobody
+                # could discard it, and a save of it is refused anyway (Task 10's review, minor 1).
+                SaleDraft.objects.filter(business=instance).filter(
+                    Exists(SavedDraft.objects.filter(pk=OuterRef("pk")))).delete()
             super().perform_destroy(instance)
