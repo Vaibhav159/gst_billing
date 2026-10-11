@@ -369,7 +369,8 @@ export function useBillForm(start: Start) {
         // the paper bill's own number never changes by itself: only a suggested number is offered the next free one
         const offer = !f.numberTyped && !(f.paper && !edit) && !keep ? n : "";
         setSaveError({ kind: "clash", title: p.code === "number_taken" ? `${shown} was just used` : `${shown} belonged to a deleted bill`, body: `${p.message} Check the number on the paper bill.`, next: offer || undefined });
-        void next.refetch();
+        void qc.invalidateQueries({ queryKey: salesKeys.checkNumber(checkFor) });
+        void qc.invalidateQueries({ queryKey: salesKeys.nextNumber(...nextFor) });
       } else if (p.code === "month_closed") {
         // the month the server names: a change is refused for the bill's old month or its new one, whichever is filed
         // (contract §2.3), so the date's month alone could name the wrong one
@@ -378,6 +379,7 @@ export function useBillForm(start: Start) {
         const m = Number(at?.month);
         const filed = y > 0 && m >= 1 && m <= 12 ? monthLabel(`${y}-${String(m).padStart(2, "0")}`, { long: true }) : month;
         setSaveError({ kind: "filed", title: `${filed} was just filed`, body: p.message });
+        void qc.invalidateQueries({ queryKey: ["sales", "months", f.firmId] });
       } else if (p.code === "cancelled" && bill) {
         // cancelled while it was being changed (a PUT): the bill itself is the way on, where it can be made again
         setSaveError({ kind: "cancelled", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });

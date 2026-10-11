@@ -3,7 +3,7 @@ import { AxiosError } from "axios";
 import { __resetDrafts } from "@/core/api/drafts";
 import { __setNetState } from "@/core/api/network";
 import { __resetDeviceDrafts } from "@/core/deviceDrafts";
-import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
+import { refuse, wireDetail, wireFacets, wirePage, type Route } from "@/core/sales/fixtures";
 import { takeFresh } from "@/core/sales/fresh";
 import { ANIL, BIG, formServer, fakeToday, mountForm, settle, wireNext } from "./testing";
 
@@ -287,9 +287,16 @@ test("a number that belonged to a deleted bill: the server's words first, and th
   expect(posts(calls)).toEqual(["34", "KGH/2026-27/35"]);
 });
 
-test("a paper bill's own number taken: nothing is offered in its place, and Change the number takes you back to it", async () => {
+test.each(["number_taken", "number_deleted"])("a paper bill's own number refused (%s): Change the number shows the fresh server check", async (code) => {
   const user = fakeToday();
-  formServer([["POST", "sales/", () => refuse(409, { detail: "KGH/2026-27/36 is already used in FY 2026-27 by Hemant Dave's bill of 29 Sep 2026. The next free number is KGH/2026-27/37.", code: "number_taken", next: { counter: 37, invoice_number: "KGH/2026-27/37" } })]]);
+  let taken = false;
+  const words = code === "number_taken"
+    ? "KGH/2026-27/36 is already used in FY 2026-27 by Hemant Dave's bill of 29 Sep 2026. The next free number is KGH/2026-27/37."
+    : "KGH/2026-27/36 belonged to a bill that was deleted, so it can't be used again. The next free number is KGH/2026-27/37.";
+  const { calls } = formServer([
+    ["GET", "sales/check-number/", () => ({ invoice_number: "KGH/2026-27/36", counter: 36, code: taken ? code : "", problem: taken ? words : "", next: { counter: 37, invoice_number: "KGH/2026-27/37" } })],
+    ["POST", "sales/", () => { taken = true; return refuse(409, { detail: words, code, next: { counter: 37, invoice_number: "KGH/2026-27/37" } }); }],
+  ]);
   mountForm("/sales/new?paper=1&firm=3&date=2026-09-30&number=36");
   const customer = await screen.findByRole("combobox", { name: /Customer/ });
   await waitFor(() => expect(customer).toHaveFocus());
@@ -303,11 +310,17 @@ test("a paper bill's own number taken: nothing is offered in its place, and Chan
   await user.keyboard(" ");
   await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save bill" })).toHaveFocus());
   await user.keyboard("{Enter}");
-  expect(await within(dialog).findByRole("alert")).toHaveTextContent("KGH/2026-27/36 was just used");
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(code === "number_taken" ? "KGH/2026-27/36 was just used" : "KGH/2026-27/36 belonged to a deleted bill");
   expect(within(dialog).queryByRole("button", { name: /^Save as/ })).not.toBeInTheDocument();
   expect(cell(dialog, "Bill no.")).toHaveTextContent("KGH/2026-27/36");
   await user.click(within(dialog).getByRole("button", { name: "Change the number" }));
   await waitFor(() => expect(screen.getByLabelText("Number on the paper bill")).toHaveFocus());
+  await waitFor(() => expect(screen.getByLabelText("Number on the paper bill")).toHaveAttribute("aria-invalid", "true"));
+  expect(screen.getByLabelText("Number on the paper bill")).toHaveAccessibleDescription(words);
+  const checks = within(screen.getByRole("complementary", { name: "Bill summary" })).getByRole("list", { name: "Checks on this bill" });
+  expect(checks).not.toHaveTextContent("is free");
+  expect(calls.filter((c) => c.url === "sales/check-number/")).toHaveLength(2);
+  expect(calls.filter((c) => c.url === "sales/next-number/")).toHaveLength(2);
 });
 
 test("a closed month, then a lost connection: each said first in the review, with everything kept; Try again saves", async () => {
@@ -441,4 +454,23 @@ test("a save that answers after the form was left keeps the bill and says so, wi
   expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Open" }));
   await waitFor(() => expect(where(router)).toBe("/sales/504"));
+});
+
+
+test("a month closed during save refreshes the date and removes the unfiled assurance", async () => {
+  const user = fakeToday();
+  let closed = false;
+  const words = "October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.";
+  const { calls, dialog } = await review(user, [
+    ["GET", "sales/", ({ params }) => ({ ...wirePage([]), ...(params.facets ? { facets: { ...wireFacets(), months: [{ month: "2026-10", bills: 1, locked: closed }] } } : {}) })],
+    ["POST", "sales/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", locked_period: { id: 7, business: 3, year: 2026, month: 10 } }); }],
+  ]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(words);
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await waitFor(() => expect(screen.getByLabelText("Date")).toHaveAttribute("aria-invalid", "true"));
+  expect(screen.getByLabelText("Date")).toHaveAccessibleDescription(/is filed and locked/);
+  expect(screen.getByRole("complementary", { name: "Bill summary" })).not.toHaveTextContent("isn't filed yet");
+  expect(calls.filter((c) => c.url === "sales/" && c.params.facets)).toHaveLength(2);
 });
