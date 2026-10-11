@@ -225,3 +225,15 @@ def test_real_purchase_restore_budget_after_part2(part2_credit):
     elapsed = monotonic() - started
     assert result["plan"]["purchases"]["add_count"] == 2000
     assert elapsed < 30, f"2000 real purchases took {elapsed:.2f}s ({len(queries)} queries)"
+
+
+def test_real_purchase_restore_refuses_a_source_outside_the_model_choices(part2_credit):
+    client = client_for(person("source-restore-owner", "admin"))
+    firm(gstin="08VRHFA2322D1ZI")
+    buyer("Supplier", gst_number="08WWUFP9975S1ZN")
+    data = registered_payload()
+    data["invoices"][0]["source"] = "forged"
+    answer = client.post("/api/backup/restore/preview/", {"file": upload(data)}, format="multipart")
+    assert answer.status_code == 200, answer.data
+    assert answer.data["plan"]["purchases"]["add_count"] == 0
+    assert answer.data["plan"]["purchases"]["fail"][0]["why"] == "That bill's source isn't one this app records."

@@ -2,11 +2,13 @@
 
 import json
 from datetime import date, datetime
+from contextlib import contextmanager
 from importlib import import_module
 from itertools import islice
 
 from django.contrib.auth.models import User
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connection, transaction
 from django.db.models import Count, Q
 
 from billing.api.serializers import (
@@ -29,7 +31,7 @@ from billing.models import (
     ShopSetting,
 )
 from billing.roles import can, role_of
-from billing.services.bill_reads import _FY_EXPR
+from billing.services.bill_reads import FY_EXPR
 from billing.text import person, stamp
 
 BATCH = 500
@@ -142,7 +144,7 @@ def full_backups():
 
 def summary(user):
     total = counts()
-    years = uncached(Invoice).annotate(fy=_FY_EXPR).values("fy").annotate(
+    years = uncached(Invoice).annotate(fy=FY_EXPR).values("fy").annotate(
         sales=Count("id", filter=Q(type_of_invoice="outward", status="active")),
         cancelled=Count("id", filter=Q(type_of_invoice="outward", status="cancelled")),
         purchases=Count("id", filter=Q(type_of_invoice="inward"))).order_by("fy")
@@ -181,40 +183,54 @@ def _array(rows):
     yield "]"
 
 
+@contextmanager
+def snapshot():
+    # One view of the books for the whole download: a bill saved meanwhile never arrives without its customer.
+    outermost = not connection.in_atomic_block
+    with transaction.atomic():
+        if outermost and connection.vendor == "postgresql":
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        yield
+
+
 def full_stream(user, made, filename):
-    total = counts()
+    size = 0
+    with snapshot():
+        total = counts()
+        for chunk in _full_content(made, user, total):
+            data = chunk.encode("utf-8")
+            size += len(data)
+            yield data
+    AuditLog.objects.create(action="exported", entity="backup", entity_id=0, entity_name="Full backup", user=user,
+        details=f"All years · {total['firms']} firms · {total['sales']} sales bills (and {total['cancelled']} cancelled) "
+                f"and {total['purchases']} purchase bills · {filename} · {size_words(size)}")
+
+
+def _full_content(made, user, total):
     header = dict(app="gst-billing", version="5.0", made=stamp(made), by=person(user)["name"],
                   exportedAt=stamp(made), counts=total)
     setting = uncached(ShopSetting).filter(pk=1).values(*fields_of(ShopSetting)).first()
     if setting is None:
         default = ShopSetting(pk=1)
         setting = {key: getattr(default, key) for key in fields_of(ShopSetting)}
-    def content():
-        yield json.dumps(header, ensure_ascii=False, separators=(",", ":"))[:-1]
-        for key, rows in (
-            ("businesses", record_rows(Business, BusinessSerializer)),
-            ("customers", record_rows(Customer, CustomerSerializer)),
-            ("products", record_rows(Product, ProductSerializer)), ("invoices", invoice_rows())):
-            yield f',"{key}":'
-            yield from _array(rows)
-        yield ',"v3":{"bin":'
-        yield from _array(uncached(BinnedInvoice).live().order_by("pk").values(
-            "original_id", "kind", "reason", "deleted_at", "deleted_by", "data").iterator(chunk_size=BATCH))
-        yield ',"shop_settings":' + json.dumps(setting, default=json_value, ensure_ascii=False, separators=(",", ":"))
-        yield ',"people":'
-        yield from _array(people_rows())
-        yield ',"filed_periods":'
-        yield from _array(uncached(FiledPeriod).order_by("pk").values("business", "year", "month").iterator(chunk_size=BATCH))
-        yield ',"filing":'
-        yield json.dumps(filing_rows(), default=json_value, ensure_ascii=False, separators=(",", ":"))
-        yield ',"audit_log":'
-        yield from _array(audit_rows())
-        yield "}}"
-    size = 0
-    for chunk in content():
-        data = chunk.encode("utf-8")
-        size += len(data)
-        yield data
-    AuditLog.objects.create(action="exported", entity="backup", entity_id=0, entity_name="Full backup", user=user,
-        details=f"All years · {total['firms']} firms · {total['sales']} sales bills (and {total['cancelled']} cancelled) "
-                f"and {total['purchases']} purchase bills · {filename} · {size_words(size)}")
+    yield json.dumps(header, ensure_ascii=False, separators=(",", ":"))[:-1]
+    for key, rows in (
+        ("businesses", record_rows(Business, BusinessSerializer)),
+        ("customers", record_rows(Customer, CustomerSerializer)),
+        ("products", record_rows(Product, ProductSerializer)), ("invoices", invoice_rows())):
+        yield f',"{key}":'
+        yield from _array(rows)
+    yield ',"v3":{"bin":'
+    yield from _array(uncached(BinnedInvoice).live().order_by("pk").values(
+        "original_id", "kind", "reason", "deleted_at", "deleted_by", "data").iterator(chunk_size=BATCH))
+    yield ',"shop_settings":' + json.dumps(setting, default=json_value, ensure_ascii=False, separators=(",", ":"))
+    yield ',"people":'
+    yield from _array(people_rows())
+    yield ',"filed_periods":'
+    yield from _array(uncached(FiledPeriod).order_by("pk").values("business", "year", "month").iterator(chunk_size=BATCH))
+    yield ',"filing":'
+    yield json.dumps(filing_rows(), default=json_value, ensure_ascii=False, separators=(",", ":"))
+    yield ',"audit_log":'
+    yield from _array(audit_rows())
+    yield "}}"

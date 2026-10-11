@@ -499,7 +499,7 @@ def checked_ids(invoices, reads=None):
     return {inv.pk for inv in invoices if bill_checks(inv, lines[inv.pk], inv.pk in twice)}
 
 
-_FY_EXPR = ExtractYear("invoice_date") - Case(When(invoice_date__month__lt=4, then=Value(1)), default=Value(0),
+FY_EXPR = ExtractYear("invoice_date") - Case(When(invoice_date__month__lt=4, then=Value(1)), default=Value(0),
                                               output_field=IntegerField())
 ORDERINGS = {
     "-date": ("-invoice_date", "-created_at", "-id"), "date": ("invoice_date", "created_at", "id"),
@@ -512,7 +512,7 @@ def ordered(bills, params):
     """Exact numbers first, then equal numeric parts, each in the chosen order."""
     keys = ORDERINGS.get(params.get("ordering") or "-date", ORDERINGS["-date"])
     if "number" in (params.get("ordering") or ""):
-        bills = bills.annotate(fy=_FY_EXPR, number_length=Length("invoice_number"))
+        bills = bills.annotate(fy=FY_EXPR, number_length=Length("invoice_number"))
     q = search_text(params)
     if q:
         first = [When(invoice_number__iexact=q, then=Value(0))]

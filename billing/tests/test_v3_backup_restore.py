@@ -535,3 +535,48 @@ def test_filing_object_is_archival_and_never_adds_closed_periods():
     result = apply(data, owner)
     assert result["plan"]["bills"]["add_count"] == 1
     assert not FiledPeriod.objects.exists()
+
+
+@pytest.mark.parametrize("made", [{"nested": ["x"] * 50}, 12345, "x" * 5000, False], ids=["object", "number", "long", "false"])
+def test_made_is_echoed_only_as_short_text(made):
+    data = payload()
+    data["made"] = made
+    answer = preview(upload(data))["file"]["made"]
+    assert answer is None or (isinstance(answer, str) and len(answer) <= 40)
+    if isinstance(made, str):
+        assert answer == "x" * 40
+
+
+@pytest.mark.django_db(transaction=True)
+def test_backup_stream_reads_one_snapshot():
+    from django.db import connection, transaction
+    from django.utils import timezone
+
+    from billing.services.backups import full_stream
+
+    owner = person("snapshot-owner", "admin")
+    business, customer = firm(), buyer()
+    sale(business, customer, "1", timezone.localdate())
+    stream = full_stream(owner, timezone.localtime(), "snapshot.json")
+    chunks = [next(stream)]
+    assert connection.in_atomic_block, "the whole download reads inside one transaction"
+    if connection.vendor == "postgresql":
+        from threading import Thread
+
+        def elsewhere():
+            try:
+                with transaction.atomic():
+                    late = buyer("Late Buyer")
+                    sale(business, late, "2", timezone.localdate())
+            finally:
+                connection.close()
+
+        writer = Thread(target=elsewhere)
+        writer.start()
+        writer.join()
+    chunks.extend(stream)
+    assert not connection.in_atomic_block
+    data = json.loads(b"".join(chunks))
+    assert [row["invoice_number"] for row in data["invoices"]] == ["1"]
+    assert "Late Buyer" not in {row["name"] for row in data["customers"]}
+    assert AuditLog.objects.filter(action="exported", entity="backup").count() == 1

@@ -20,7 +20,7 @@ from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice,
 from billing.numbering import REF_FIELDS, bill_ref, lock_firms, refuse_taken
 from billing.period_lock import assert_sales_open, locked_period_or_none
 from billing.refusals import Refusal
-from billing.services.bill_reads import _FY_EXPR, lines_of
+from billing.services.bill_reads import FY_EXPR, lines_of
 from billing.services.sales import entity_name, locked_bill, log
 from billing.text import money, person, stamp
 
@@ -211,9 +211,9 @@ def restore_many_from_bin(binned_ids, user, check_month=True, via="bin"):
         # Compare in SQL, preserving the database's case-insensitive matching.
         match = {"business_id": OuterRef("business_id"), "_restore_fy": OuterRef("_restore_fy"),
                  "invoice_number__iexact": Trim(OuterRef("invoice_number"))}
-        holders = Invoice.objects.sales().alias(_restore_fy=_FY_EXPR).filter(**match).order_by("pk")
-        previous = wanted.alias(_restore_fy=_FY_EXPR).filter(**match, pk__lt=OuterRef("pk")).order_by("pk")
-        matches = {pk: (holder, prior) for pk, holder, prior in wanted.alias(_restore_fy=_FY_EXPR).annotate(
+        holders = Invoice.objects.sales().alias(_restore_fy=FY_EXPR).filter(**match).order_by("pk")
+        previous = wanted.alias(_restore_fy=FY_EXPR).filter(**match, pk__lt=OuterRef("pk")).order_by("pk")
+        matches = {pk: (holder, prior) for pk, holder, prior in wanted.alias(_restore_fy=FY_EXPR).annotate(
             _holder=Subquery(holders.values("pk")[:1]), _prior=Subquery(previous.values("pk")[:1])
         ).values_list("pk", "_holder", "_prior")}
         live = Invoice.objects.sales().select_related("customer").only(*REF_FIELDS).in_bulk(
