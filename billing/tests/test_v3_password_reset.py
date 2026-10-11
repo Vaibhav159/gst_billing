@@ -199,7 +199,7 @@ def test_every_reset_start_does_one_code_hash_before_username_branch(kind):
             user.is_active = False
             user.save(update_fields=["is_active"])
         security = security_for(user)
-        security.phone = {"no-phone": "", "invalid-phone": "not-a-phone"}.get(kind, "9000000000")
+        security.phone = {"no-phone": "", "invalid-phone": "bad-phone"}.get(kind, "9000000000")
         security.save()
         if kind == "limited":
             for _ in range(3):
