@@ -25,6 +25,20 @@ test("the paper on screen says what prints: the copy's mark, the rows, the total
   expect(within(paper).getByRole("table", { name: "Tax by HSN/SAC" })).toHaveTextContent("SGST/UTGST Amount");
 });
 
+test("the paper sets its lines and rows as the PDF does, so the screen and the browser's print break where the PDF does (Ruling 1E-14): Times's line, 1.12 em; a goods row at least 18 pt, the Total row 20, a box 22, at 96 px an inch", () => {
+  const p = bill();
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const paper = screen.getByRole("document");
+  expect(paper).toHaveStyle({ lineHeight: "1.12" });
+  const pt = (el: HTMLElement) => Math.round(parseFloat(el.style.minHeight) * 750) / 1000; // px at 96 an inch, in points
+  const rows = within(within(paper).getByRole("table", { name: "Goods" })).getAllByRole("row");
+  expect(rows.map(pt)).toEqual([18, 18, 18, 18, 18, 20]); // the heading, two lines, CGST and SGST, then the Total row
+  const box = within(paper).getByText("Invoice No.");
+  expect(pt(box.parentElement!)).toBe(22);
+  // a label stands on its own line, as tall as its own text, as the PDF's 7 pt label does (inline, it would take the paper's 12 px line)
+  expect(box).toHaveClass("block");
+});
+
 test("a page after the first has the short header, no QR, and the next page's number at its foot", () => {
   const lines = Array.from({ length: 60 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}` }));
   const p = bill({ lines, status: "cancelled" });

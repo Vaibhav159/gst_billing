@@ -15,6 +15,13 @@ export const A4_H = 1123;
 const SERIF = '"Times New Roman", Times, "Liberation Serif", "Nimbus Roman", serif';
 const GREY = "#4b4b4b";
 const COLS = "30px minmax(0,1fr) 62px 96px 84px 38px 112px";
+/**
+ * The paper sets its lines and rows as the PDF does, so it breaks where the PDF does (Ruling 1E-14): Times's own line, 1.12
+ * em (react-pdf's, as model.ts's PAGE_FIT measures it), not PROTO's 1.35, and the PDF's rows in points, at the paper's 96
+ * px an inch.
+ */
+const LINE = 1.12;
+const PT = 4 / 3;
 const NBSP = "\u00a0"; // PROTO's " ": an empty box or line keeps its height
 
 /**
@@ -45,12 +52,15 @@ export function QrSvg({ text, size = 78, label }: { text: string; size?: number;
   );
 }
 
-/** A row of the goods table. head: its column headings; filler: the empty row that stretches the table down the sheet. */
+/**
+ * A row of the goods table, at least as tall as the PDF's (18 pt; a Total row passes its 20) and its cells padded 3 pt, as
+ * the PDF's are. head: its column headings; filler: the empty row that stretches the table down the sheet.
+ */
 function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode[]; className?: string; style?: CSSProperties; bold?: boolean; head?: boolean; filler?: boolean }) {
   return (
-    <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...style }}>
+    <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...(filler ? {} : { minHeight: 18 * PT }), ...style }}>
       {cells.map((c, i) => (
-        <div key={i} role={head ? "columnheader" : "cell"} className={cn("px-1.5 py-[3px] min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold")}>{c}</div>
+        <div key={i} role={head ? "columnheader" : "cell"} className={cn("px-1.5 py-1 min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold")}>{c}</div>
       ))}
     </div>
   );
@@ -59,15 +69,16 @@ function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode
 /** One sheet: a page of one copy of one bill. Lines are keyed by their place: an address can repeat a line. */
 export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
   const multi = page.count > 1;
-  const label = (t: string) => <span style={{ fontSize: 10, color: GREY }}>{t}</span>;
+  // a label stands on its own line, as tall as its own 10 px text (inline, it would take the paper's 12 px line)
+  const label = (t: string) => <span className="block" style={{ fontSize: 10, color: GREY }}>{t}</span>;
   const cell = (i: number, k: string, v: FreeText, extra: string) => (
-    <div key={i} className={cn("px-2 py-1 min-h-[34px] border-black", extra)}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
+    <div key={i} className={cn("px-2 py-1 border-black", extra)} style={{ minHeight: 22 * PT }}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
   );
   // a firm without a GSTIN leaves it out of the code's name, as the code leaves its field empty
   const qrName = `QR code: ${[b.number, b.firm.gstin, b.dated, `₹${b.total.amount}`].filter(Boolean).join(", ")}`;
   return (
     <div role="document" data-paper="" aria-label={`Bill ${b.number} on paper, ${copy.label.toLowerCase()} copy${multi ? `, page ${page.index + 1} of ${page.count}` : ""}`}
-      className="relative bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: "18px 28px 24px", fontFamily: SERIF, fontSize: 12, lineHeight: 1.35 }}>
+      className="relative bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: "18px 28px 24px", fontFamily: SERIF, fontSize: 12, lineHeight: LINE }}>
       <div className="flex justify-between items-end mb-1" style={{ fontSize: 9.5 }}>
         <span style={{ color: GREY }}>{multi ? `Page ${page.index + 1} of ${page.count}` : NBSP}</span>
         <span style={{ fontStyle: "italic" }}>({copy.tag})</span>
@@ -128,14 +139,14 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
           {page.last ? (
             <>
               {b.taxes.map((t) => <Row key={t.key} cells={["", <span key="l" className="block text-right font-bold" style={{ fontStyle: "italic" }}>{t.head}</span>, "", "", t.rate, "", <span key="a" className="font-bold">{t.amount}</span>]} />)}
-              {b.note ? <Row cells={["", <span key="n" style={{ fontStyle: "italic", fontSize: 11 }}>Note: <RupeeText>{b.note}</RupeeText></span>, "", "", "", "", ""]} /> : null}
+              {b.note ? <Row cells={["", <span key="n" className="block" style={{ fontStyle: "italic", fontSize: 11 }}>Note: <RupeeText>{b.note}</RupeeText></span>, "", "", "", "", ""]} /> : null}
             </>
           ) : null}
           <Row filler cells={["", "", "", "", "", "", ""]} />
           {page.last ? (
-            <Row bold className="border-t border-black" cells={["", <span key="t" className="block text-right">Total</span>, "", b.total.qty, "", "", <span key="g" style={{ fontSize: 13 }}><RupeeText>{`₹ ${b.total.amount}`}</RupeeText></span>]} />
+            <Row bold className="border-t border-black" style={{ minHeight: 20 * PT }} cells={["", <span key="t" className="block text-right">Total</span>, "", b.total.qty, "", "", <span key="g" style={{ fontSize: 13 }}><RupeeText>{`₹ ${b.total.amount}`}</RupeeText></span>]} />
           ) : (
-            <Row className="border-t border-black" cells={["", <span key="t" className="block text-right" style={{ fontStyle: "italic" }}>continued on page {page.index + 2}</span>, "", "", "", "", ""]} />
+            <Row className="border-t border-black" style={{ minHeight: 20 * PT }} cells={["", <span key="t" className="block text-right" style={{ fontStyle: "italic" }}>continued on page {page.index + 2}</span>, "", "", "", "", ""]} />
           )}
         </div>
 
