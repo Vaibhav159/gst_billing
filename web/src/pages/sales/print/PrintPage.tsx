@@ -94,9 +94,17 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   const prints = useMemo(() => JSON.stringify({ ...paper, firm: { ...paper.firm, signature: paper.firm.signature?.split("?")[0] ?? null } }), [paper]);
   const copyList = copyPages(copies);
   const sheets = paper.pages.length * copyList.length;
-  // made once the shop's defaults are in, so the first file is the one wanted; offline, with the choices on screen
-  const made = useMade(settings.isPending && !settings.isPaused ? null : `${copies}|${prints}`, () => billFile(b, { copies, showBank }));
-  const file = made.value;
+  // made once the shop's defaults are in, so the first file is the one wanted; offline, with the choices on screen.
+  // Each file keeps the signature's link it was made with
+  const sign = paper.firm.signature;
+  const made = useMade(settings.isPending && !settings.isPaused ? null : `${copies}|${prints}`, async () => ({ pdf: await billFile(b, { copies, showBank }), sign }));
+  const file = made.value?.pdf ?? null;
+  // a PDF that went without the signature, which may come next time (it got no answer: offline, or the server failing),
+  // is made again once the bill comes back with the link signed afresh (a refresh, as the paper on screen loads it);
+  // made again without it, it waits for the next. Meanwhile the one made is handed out
+  const { remake } = made;
+  const unsignedWith = made.value?.pdf.again ? made.value.sign : null;
+  useEffect(() => { if (unsignedWith !== null && unsignedWith !== sign) remake(); }, [unsignedWith, sign, remake]);
   const cancelled = b.status === "cancelled";
   const canSend = can("bill.send");
   const c = b.customer;
@@ -107,17 +115,20 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   const differs = Boolean(s) && (copies !== s?.copies || showBank !== s?.show_bank);
   const making = !file && !made.failed;
   const waitWhy = made.failed ? "The PDF couldn't be made. Try again." : making ? "Making the PDF…" : undefined;
-  const pdfFail = made.failed ? { title: "The PDF wasn't made", body: net === "offline" ? "You're offline, so the PDF wasn't made. It needs the internet; try again when you're back." : "Something stopped it part way. Try again." } : null;
+  // a Try again keeps the note on screen, busy, until the PDF is made or fails again
+  const pdfFail = made.failed || made.retrying ? { title: "The PDF wasn't made", body: net === "offline" ? "You're offline, so the PDF wasn't made. It needs the internet; try again when you're back." : "Something stopped it part way. Try again." } : null;
   // every Send waits for the shop's message, so it never goes with the standard one instead
   const sendWait = ready ? undefined : "Getting the shop's WhatsApp message";
   // the bill's exact total, as the PDF prints it (Ruling 1B-12), and the firm's name as useSendBill sends it
   const message = billMessage(s?.share_message, { invoice_number: b.invoice_number, invoice_date: b.invoice_date, total: b.total_amount, firm: b.business_name, customer: c });
   const entityName = `#${b.invoice_number} - ${c.name}`;
 
+  // a PDF downloaded goes into the audit log, from PDF or from Share's download
+  const exported = () => log({ action: "exported", entity_id: b.id, entity_name: entityName, details: `PDF downloaded: ${copiesWords(copies).toLowerCase()}` });
   const download = () => {
     if (!file) return;
     saveFile(file.blob, file.name);
-    log({ action: "exported", entity_id: b.id, entity_name: entityName, details: `PDF downloaded: ${copiesWords(copies).toLowerCase()}` });
+    exported();
     show({ title: `Downloaded ${file.name}`, body: `${plural(sheets, "A4 page")}${copyList.length > 1 ? " (Original, Duplicate and Triplicate)" : `, ${copyList[0].label} copy`}.` });
   };
   const print = () => {
@@ -130,6 +141,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
     void sharePdf(file, { title: b.invoice_number }).then((r) => {
       if (r !== "unsupported") return;
       saveFile(file.blob, file.name);
+      exported();
       show({ tone: "brand", title: `${file.name} downloaded`, body: "Attach it to an email, or put it on Drive, from your Downloads folder." });
     });
   };
@@ -143,7 +155,8 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
     setFail(null);
     saveDefaults.mutate({ copies, show_bank: showBank }, {
       onSuccess: () => show({ title: "Saved as the default", body: "Every bill opens with these copies and bank setting." }),
-      onError: (e) => setFail(failText(problemOf(e), "saved")),
+      // nothing was typed on this page, so the words don't say it's still here ("saved" does)
+      onError: (e) => setFail(failText(problemOf(e), "saved as the default")),
     });
   };
   const defaults = !differs ? null : can("settings.edit")
@@ -175,18 +188,19 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
       <Page title="Print and share" phoneSubtitle={`${b.invoice_number} · ${c.name}`} back={`/sales/${b.id}`}
         actionBar={<>
           <Button size="lg" icon={SlidersHorizontal} onClick={() => setOptionsOpen(true)}>Options</Button>
-          <Button size="lg" icon={Share2} variant={sendable && !b.paper ? "secondary" : "primary"} disabled={!file} title={waitWhy} onClick={share}>Share</Button>
-          {sendable ? <Button size="lg" variant={b.paper ? "secondary" : "primary"} icon={hasNumber ? Send : MessageCircle} disabled={!ready} title={sendWait} onClick={sendPress} {...(hasNumber ? {} : { "aria-label": "Send to a WhatsApp number" })}>{b.sent ? "Resend" : "Send"}</Button> : null}
+          {/* a touch screen never shows a title: the PDF on its way shows on the button itself */}
+          <Button size="lg" icon={Share2} variant={sendable && !b.paper ? "secondary" : "primary"} disabled={!file} loading={making} title={waitWhy} onClick={share}>Share</Button>
+          {sendable ? <Button size="lg" variant={b.paper ? "secondary" : "primary"} icon={hasNumber ? Send : MessageCircle} disabled={!ready} title={sendWait} onClick={sendPress} {...(hasNumber ? {} : { "aria-label": `${b.sent ? "Resend" : "Send"} to a WhatsApp number` })}>{b.sent ? "Resend" : "Send"}</Button> : null}
         </>}>
         {note}
         <p className="text-sm text-muted">{copyList.length > 1 ? "All three copies" : `${copyList[0].label} copy`} · {plural(sheets, "page")} · {hasBank(b.firm) ? `bank details ${showBank ? "shown" : "hidden"}` : "no bank account saved"} · {paper.file}</p>
         {!canSend && !cancelled ? <p className="text-sm text-muted flex items-start gap-1.5 -mt-2"><Lock size={15} className="shrink-0 mt-0.5" aria-hidden="true" />Sending on WhatsApp marks the bill sent. {whyNot("bill.send")}</p> : null}
-        <FailNote error={pdfFail} onRetry={made.retry} />
+        <FailNote error={pdfFail} onRetry={made.retry} busy={made.retrying} />
         {paperStack}
         <Dialog open={optionsOpen} onClose={() => setOptionsOpen(false)} title="Print options"
           footer={<>
-            <Button icon={Download} disabled={!file} title={waitWhy} onClick={() => { setOptionsOpen(false); download(); }}>Download PDF</Button>
-            <Button icon={Printer} disabled={!file} title={waitWhy} onClick={() => { setOptionsOpen(false); print(); }}>Print</Button>
+            <Button icon={Download} disabled={!file} loading={making} title={waitWhy} onClick={() => { setOptionsOpen(false); download(); }}>Download PDF</Button>
+            <Button icon={Printer} disabled={!file} loading={making} title={waitWhy} onClick={() => { setOptionsOpen(false); print(); }}>Print</Button>
             <Button variant="primary" onClick={() => setOptionsOpen(false)}>Done</Button>
           </>}>
           <div className="flex flex-col gap-4">
@@ -224,7 +238,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
             <p className="font-medium tnum mt-0.5 break-all">{paper.file}</p>
             <p className="text-sm text-muted">{plural(sheets, "A4 page")}{paper.pages.length > 1 ? ` (${paper.pages.length} per copy)` : ""} · named by its number, so no two files clash</p>
           </div>
-          <FailNote error={pdfFail} onRetry={made.retry} />
+          <FailNote error={pdfFail} onRetry={made.retry} busy={made.retrying} />
           {cancelled ? <p className="text-sm text-neg">This bill is cancelled, so it isn&apos;t sent. The printout carries a CANCELLED stamp.</p>
             : canSend ? (hasNumber
               ? <Button variant={b.paper ? "secondary" : "primary"} size="lg" full icon={Send} disabled={!ready} title={sendWait} onClick={sendPress}>{sendLabel}</Button>

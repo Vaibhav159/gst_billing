@@ -11,21 +11,27 @@ import { andList, billsAnd } from "@/core/sales/words";
 import { Switch } from "@/core/ui";
 
 /**
- * What `make` makes for `key` (null: nothing to make yet), made again when the key changes or on retry. Only the file of
- * the key now showing is handed out, so a choice just changed never prints the one before it.
+ * What `make` makes for `key` (null: nothing to make yet), made again when the key changes, on retry or on remake. Only
+ * the file of the key now showing is handed out, so a choice just changed never prints the one before it. retry: the
+ * person's Try again, which clears the failure at once (retrying until that attempt ends); remake: made again quietly,
+ * the one made still handed out meanwhile (a PDF that went without its signature).
  */
-export function useMade<T>(key: string | null, make: () => Promise<T>): { value: T | null; failed: boolean; retry: () => void } {
+export function useMade<T>(key: string | null, make: () => Promise<T>): { value: T | null; failed: boolean; retrying: boolean; retry: () => void; remake: () => void } {
   const [tries, setTries] = useState(0);
   const [made, setMade] = useState<{ key: string; value: T | null; failed: boolean } | null>(null);
+  // the key a Try again is making again
+  const [retrying, setRetrying] = useState<string | null>(null);
   useEffect(() => {
     if (key === null) return undefined;
     let live = true;
-    make().then((value) => { if (live) setMade({ key, value, failed: false }); }, () => { if (live) setMade({ key, value: null, failed: true }); });
+    const end = (m: { key: string; value: T | null; failed: boolean }) => { if (!live) return; setMade(m); setRetrying(null); };
+    make().then((value) => end({ key, value, failed: false }), () => end({ key, value: null, failed: true }));
     return () => { live = false; };
   }, [key, tries]); // eslint-disable-line react-hooks/exhaustive-deps -- `make` changes with `key`
-  const retry = useCallback(() => setTries((n) => n + 1), []);
+  const retry = useCallback(() => { setMade(null); setRetrying(key); setTries((n) => n + 1); }, [key]);
+  const remake = useCallback(() => setTries((n) => n + 1), []);
   const now = made && made.key === key ? made : null;
-  return { value: now?.value ?? null, failed: now?.failed ?? false, retry };
+  return { value: now?.value ?? null, failed: now?.failed ?? false, retrying: retrying !== null && retrying === key, retry, remake };
 }
 
 export type PrintLog = { action: "printed" | "exported"; entity_id: number; entity_name: string; details: string };

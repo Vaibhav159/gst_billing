@@ -8,8 +8,11 @@ import type { BillDetail, Copies } from "@/core/sales/types";
 import { copyPages, printBill, type PrintBill } from "./model";
 
 export type PdfOptions = { copies: Copies; showBank: boolean };
-/** A made PDF: the file, its name, and how many A4 sheets it has. */
-export type PdfFile = { blob: Blob; name: string; sheets: number };
+/**
+ * A made PDF: the file, its name, and how many A4 sheets it has. again: it went without a firm's signature that may
+ * come next time (Signature's `again`), so a page holding it asks again once it can (a link signed afresh).
+ */
+export type PdfFile = { blob: Blob; name: string; sheets: number; again?: boolean };
 
 /**
  * A firm's signature for the PDF. src: a data URL that react-pdf draws without fetching, a PNG or JPEG as it is and another
@@ -74,9 +77,9 @@ const made = new WeakMap<BillDetail, Map<string, Promise<PdfFile>>>();
  * One bill's PDF, named by its number (billPdfName). Made once per answer from the server and choice. A failure isn't
  * kept, and nor is a file made without a signature that may come next time (Signature's `again`): one that got no reply
  * from the app (none at all, or only the proxy's 502, 503 or 504) or the app's own error (500). That file goes out
- * without it, and the next ask tries again, as the paper on screen shows the signature. A refusal (a 403, or a file
- * that's gone, 404) or an image that won't decode won't come next time, so that file is kept, and Download, Print and
- * Share hand it out at once.
+ * without it, saying so (its `again`), and the next ask tries again, as the paper on screen shows the signature. A
+ * refusal (a 403, or a file that's gone, 404) or an image that won't decode won't come next time, so that file is kept,
+ * and Download, Print and Share hand it out at once.
  */
 export function billFile(d: BillDetail, opts: PdfOptions): Promise<PdfFile> {
   const key = `${opts.copies}|${opts.showBank}`;
@@ -88,7 +91,7 @@ export function billFile(d: BillDetail, opts: PdfOptions): Promise<PdfFile> {
   const choices = byChoice;
   const p = draw([b], opts.copies, { title: `Tax Invoice ${d.invoice_number}`, subject: b.qr }).then(({ blob, again }) => {
     if (again) forget();
-    return { blob, name: b.file, sheets: b.pages.length * copyPages(opts.copies).length };
+    return { blob, name: b.file, sheets: b.pages.length * copyPages(opts.copies).length, again };
   });
   const forget = () => { if (choices.get(key) === p) choices.delete(key); };
   p.catch(forget);

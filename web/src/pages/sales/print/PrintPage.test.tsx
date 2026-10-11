@@ -6,7 +6,7 @@ import { __setNetState } from "@/core/api/network";
 import { billQuery, type BillOutcome } from "@/core/api/sales";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
-import { billFile } from "@/core/print/make";
+import { billFile, type PdfFile } from "@/core/print/make";
 import { printBill } from "@/core/print/model";
 import { firmWith } from "@/core/print/testing";
 import { refuse, salesServer, wireBin, wireDetail, type Route as ServerRoute } from "@/core/sales/fixtures";
@@ -285,4 +285,147 @@ test("offline with the bill here but not the shop's defaults: the PDF is made wi
     onlineManager.setOnline(true);
     act(() => __setNetState("online"));
   }
+});
+
+/* ── Task 5's review leftovers (Task 6, commit A) ── */
+
+test("a PDF made while the firm's signature got no answer is made again once the bill comes back with its link signed afresh, and kept once signed", async () => {
+  let detail = wireDetail({ firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=abc" }) });
+  salesServer([["GET", "sales/412/", () => detail], ["GET", "shop-settings/", () => SETTINGS], ["POST", "audit-logs/log/", () => ({ ok: true })]]);
+  // the first file went without the signature, which may come next time (billFile's `again`)
+  const unsigned = new Blob(["%PDF-1.3 unsigned"], { type: "application/pdf" });
+  vi.mocked(billFile).mockImplementationOnce(async (d, o) => ({ blob: unsigned, name: printBill(d, o).file, sheets: 1, again: true }));
+  const qc = testQueryClient();
+  openWith(qc);
+  /** A refresh of the bill, once the paper on screen loads the signature by the link it brought. */
+  const refreshed = async (s: string) => {
+    await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
+    await waitFor(() => expect(document.querySelector("img[alt^='Signature for']")).toHaveAttribute("src", `/api/media/signatures/3.png?s=${s}`));
+    await act(async () => {});
+  };
+  const pdf = await screen.findByRole("button", { name: "PDF" });
+  await waitFor(() => expect(pdf).toBeEnabled());
+  // asked again with the same link: nothing new to try with, so the file made stays
+  await refreshed("abc");
+  expect(billFile).toHaveBeenCalledTimes(1);
+  await userEvent.click(pdf);
+  expect(URL.createObjectURL).toHaveBeenLastCalledWith(unsigned);
+  // a refresh brings the link signed afresh (on reconnect, after a send), as the paper on screen loads it: made again
+  detail = { ...detail, firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=def" }) };
+  await refreshed("def");
+  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(2));
+  let signed: Blob | undefined;
+  await act(async () => { signed = (await vi.mocked(billFile).mock.results[1].value).blob; });
+  await userEvent.click(pdf);
+  expect(URL.createObjectURL).toHaveBeenLastCalledWith(signed);
+  // signed, it's kept however its link is signed next (Ruling 1E-8)
+  detail = { ...detail, firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=ghi" }) };
+  await refreshed("ghi");
+  expect(billFile).toHaveBeenCalledTimes(2);
+});
+
+test("a default that couldn't be saved says so in place with Try again, and the choices made stay", async () => {
+  serve([["PUT", "shop-settings/", () => refuse(500, {})]]);
+  open();
+  await userEvent.click(await screen.findByRole("radio", { name: "All three" }));
+  await userEvent.click(screen.getByRole("switch", { name: "Bank details on the bill" }));
+  await userEvent.click(screen.getByRole("button", { name: "Make these the default for every bill" }));
+  const note = (await screen.findByText("Not saved as the default: the app couldn't get through")).closest<HTMLElement>("[role=alert]")!;
+  // nothing was typed on this page, so nothing says what was typed is still here
+  expect(note).toHaveTextContent(/^Not saved as the default: the app couldn't get throughNothing was changed\. Try again in a minute\.Try again$/);
+  expect(screen.getByRole("radio", { name: "All three" })).toBeChecked();
+  expect(screen.getByRole("switch", { name: "Bank details on the bill" })).not.toBeChecked();
+  expect(papers()).toHaveLength(3);
+  expect(within(note).getByRole("button", { name: "Try again" })).toBeEnabled();
+});
+
+test("a failed refresh keeps the bill on a phone too, and keeps a deleted bill's page, each saying so", async () => {
+  let answer = () => wireDetail();
+  let binned = () => refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin() });
+  salesServer([["GET", "sales/412/", () => answer()], ["GET", "sales/205/", () => binned()], ["GET", "shop-settings/", () => SETTINGS]]);
+  phone(true);
+  const qc = testQueryClient();
+  const view = openWith(qc);
+  expect(await screen.findByRole("document", { name: "Bill KGH/2026-27/31 on paper, original copy" })).toBeInTheDocument();
+  answer = () => refuse(500, {});
+  await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
+  expect(await screen.findByText("Couldn't refresh this bill")).toBeInTheDocument();
+  expect(screen.getByText("The app couldn't reach the shop's records just now, so this is what was last loaded.")).toBeInTheDocument();
+  expect(papers()).toHaveLength(1);
+  view.unmount();
+  phone(false);
+  openWith(qc, "/sales/205/print");
+  expect(await screen.findByText("This bill was deleted")).toBeInTheDocument();
+  binned = () => refuse(500, {});
+  await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(205).queryKey }); });
+  expect(await screen.findByText("Couldn't refresh this bill")).toBeInTheDocument();
+  expect(screen.getByText("This bill was deleted")).toBeInTheDocument();
+});
+
+test("Print and Share act within the press itself: the tab and the share sheet open before anything waits", async () => {
+  serve();
+  const share = vi.fn(async () => {});
+  Object.assign(navigator, { share, canShare: () => true });
+  try {
+    open();
+    const print = await screen.findByRole("button", { name: "Print" });
+    await waitFor(() => expect(print).toBeEnabled());
+    vi.mocked(window.open).mockReturnValue({ addEventListener: () => {} } as unknown as Window);
+    fireEvent.click(print);
+    expect(window.open).toHaveBeenCalledWith("blob:pdf", "_blank");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(share).toHaveBeenCalledWith({ files: [expect.objectContaining({ name: "KGH_2026-27_31.pdf" })], title: "KGH/2026-27/31" });
+  } finally {
+    Object.assign(navigator, { share: undefined, canShare: undefined });
+  }
+});
+
+test("Share where the share sheet takes no files downloads the PDF instead, and logs it as PDF does", async () => {
+  const { calls } = serve();
+  open();
+  const share = await screen.findByRole("button", { name: "Share" });
+  await waitFor(() => expect(share).toBeEnabled());
+  await userEvent.click(share);
+  expect(await screen.findByText("KGH_2026-27_31.pdf downloaded")).toBeInTheDocument();
+  expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(calls.filter((c) => c.url === "audit-logs/log/").map((c) => c.body)).toEqual([
+    { action: "exported", entity: "invoice", entity_id: 412, entity_name: "#KGH/2026-27/31 - Anil Gupta", details: "PDF downloaded: original copy" },
+  ]));
+});
+
+test("Try again on a PDF that wasn't made is at work at once, until the PDF is made; on a phone, Share shows the PDF on its way", async () => {
+  serve();
+  const later = () => { let made: (f: PdfFile) => void = () => {}; return { promise: new Promise<PdfFile>((r) => { made = r; }), made: (f: PdfFile) => made(f) }; };
+  const FILE = { blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "KGH_2026-27_31.pdf", sheets: 1 };
+  const second = later();
+  vi.mocked(billFile).mockRejectedValueOnce(new Error("the font didn't load")).mockReturnValueOnce(second.promise);
+  const view = open();
+  expect(await screen.findByText("The PDF wasn't made")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  // the note stays, busy, while the PDF is made again; the buttons wait for it
+  expect(screen.getByRole("button", { name: "Trying…" })).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByRole("button", { name: "Print" })).toHaveAttribute("title", "Making the PDF…");
+  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(2));
+  await act(async () => { second.made(FILE); });
+  expect(screen.queryByText("The PDF wasn't made")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Print" })).toBeEnabled();
+  view.unmount();
+  phone(true);
+  const third = later();
+  vi.mocked(billFile).mockReturnValueOnce(third.promise);
+  open();
+  const shareButton = await screen.findByRole("button", { name: "Share" });
+  expect(shareButton).toHaveAttribute("aria-busy", "true");
+  // (made once the shop's defaults are in: the PDF asked for, then made)
+  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(3));
+  await act(async () => { third.made(FILE); });
+  expect(shareButton).not.toHaveAttribute("aria-busy");
+  expect(shareButton).toBeEnabled();
+});
+
+test("on a phone, a bill sent before whose customer now has no mobile reads Resend, and its name says so (WCAG 2.5.3)", async () => {
+  phone(true);
+  serve([], { sent: SENT, customer: { ...(wireDetail().customer as object), mobile_number: "" } });
+  open();
+  expect(await screen.findByRole("button", { name: "Resend to a WhatsApp number" })).toHaveTextContent(/^Resend$/);
 });

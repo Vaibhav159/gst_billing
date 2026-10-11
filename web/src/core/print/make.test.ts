@@ -92,9 +92,12 @@ test.each([["no answer (offline, unreachable)", 0], ["the proxy's 502 for an app
   const d = bill({ firm: { ...(wireDetail().firm as object), signature_url: `/api/${path}?sig=a1` } });
   const without = await billFile(d, { copies: "original", showBank: true });
   expect(made()[0].bills[0].firm.signature).toBeNull();
+  // the file says so, so a page holding it can ask again (Task 5's review, Minor 1)
+  expect(without.again).toBe(true);
   up = true;
   const signed = await billFile(d, { copies: "original", showBank: true });
   expect(signed).not.toBe(without);
+  expect(signed.again).toBe(false);
   expect(made()[1].bills[0].firm.signature).toMatch(/^data:image\/png;base64,/);
   // once it carries the signature, it's kept
   expect(await billFile(d, { copies: "original", showBank: true })).toBe(signed);
@@ -103,6 +106,7 @@ test.each([["no answer (offline, unreachable)", 0], ["the proxy's 502 for an app
   const plain = bill();
   const kept = await billFile(plain, { copies: "original", showBank: true });
   expect(await billFile(plain, { copies: "original", showBank: true })).toBe(kept);
+  expect(kept.again).toBe(false);
 });
 
 test("while the print page shows a bill, a send from it carries the page's bank choice; elsewhere there's none", () => {
