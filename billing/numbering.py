@@ -197,6 +197,13 @@ def check_number(business, day, typed, exclude_invoice=None):
     if twin is not None:
         return {**out, "same_counter": bill_ref(twin),
                 "note": f"{twin.invoice_number} has the same number part ({counter}). Customers and your CA may mix them up."}
+    # A deleted bill with that number part ("KGH-18" in the bin) doesn't hold the number, but restored it would read
+    # alike: a note only, since a deleted bill has no BillRef (Ruling 1A-30).
+    binned_alike = series_bin(business.pk, fy).filter(invoice_number__endswith=str(counter)).order_by("invoice_date", "pk")
+    binned_twin = next((b for b in binned_alike if counter_of(b.invoice_number) == counter), None)
+    if binned_twin is not None:
+        return {**out, "note": f"{binned_twin.invoice_number} in the bin has the same number part ({counter}). "
+                               "If it's restored, customers and your CA may mix them up."}
     if counter > following["counter"]:
         first = following["counter"]
         span = f"Number {first} would" if counter - 1 == first else f"Numbers {first} to {counter - 1} would"

@@ -248,6 +248,20 @@ class CheckNumberTest(TestCase):
         BinnedInvoice.objects.filter(pk=binned.pk).update(customer_id=424242, deleted_by_id=424242)
         self.assertEqual(self.check("27")["binned"]["id"], binned.pk)
 
+    def test_a_deleted_bill_with_the_same_number_part_is_a_note(self):
+        # Ruling 1A-30: a deleted "KGH-18" doesn't hold 18, so 18 is free; but restored, the two would read alike. The
+        # note says so, and same_counter stays null (a deleted bill has no BillRef). A row v2's undo already brought
+        # back is no deleted bill (Ruling 1A-6).
+        _binned, entry = bin_bill(sale(self.kgh, self.cust, "KGH-18", "2026-09-24"), None, "Entered twice")
+        data = self.check("18")
+        self.assertEqual((data["invoice_number"], data["code"], data["bill"], data["binned"], data["same_counter"]),
+                         ("KGH/2026-27/18", "", None, None, None))
+        self.assertEqual(data["note"], "KGH-18 in the bin has the same number part (18). If it's restored, customers "
+                                       "and your CA may mix them up.")
+        entry.snapshot = {**entry.snapshot, "_undo": {"at": "2026-10-01T10:00:00+05:30", "by": None, "log": entry.pk}}
+        entry.save(update_fields=["snapshot"])
+        self.assertEqual(self.check("18")["note"], "")
+
 
 class PaperBookTest(TestCase):
     def setUp(self):
@@ -431,6 +445,13 @@ class PaperBookEveryBillTest(TestCase):
         self.assertEqual((self.explained(), self.book()["missing"]), ([(18, "cancelled", "KGH-18")], []))
         bin_bill(Invoice.objects.get(pk=self.b18.pk), None, "Entered twice by mistake")
         self.assertEqual((self.explained(), self.book()["missing"]), ([(18, "deleted", "KGH-18")], []))
+
+    def test_an_odd_number_in_a_later_month_is_skipped_and_its_month_named(self):
+        # Review minor: after and after_months read every bill's number part, not the series shapes only (Ruling
+        # 1A-29). October's "KGH-20" uses 20, so September's next is 21, and October is the month that used it.
+        sale(self.kgh, self.cust, "KGH-20", "2026-10-02")
+        data = self.book()
+        self.assertEqual((data["next"]["counter"], data["after"], data["after_months"]), (21, [20], ["2026-10"]))
 
     def test_a_number_of_any_shape_is_listed(self):
         Invoice.objects.filter(pk=self.b18.pk).update(invoice_number="KGH/26-27/18")  # as v2 may have stored it
