@@ -50,6 +50,7 @@ from billing.models import (
     ITCReclaimLedger,
     LineItem,
     Product,
+    RateBoard,
     SaleDraft,
     SavedDraft,
     UserPreference,
@@ -207,6 +208,7 @@ class Command(BaseCommand):
                 from billing.services.gst_seed import seed_gst
                 seed_gst(firms, User.objects.get(username="sandbox_owner"), self.today)
             self._records()
+            self._rates()
         self.stderr.write(
             f"Seeded {len(firms)} firms, {len(parties['all'])} parties, {Product.objects.count()} products, "
             f"{n_out} outward + {n_in} inward invoices, {n_locked} filed months, {n_caps} captures."
@@ -234,6 +236,7 @@ class Command(BaseCommand):
         from billing.models import FilingMonth, FilingRecord, OpeningCredit, ReturnDownload
         for model in (ReturnDownload, FilingRecord, FilingMonth, OpeningCredit):
             model.objects.all().delete()
+        RateBoard.objects.all().delete()
         BinnedInvoice.objects.all().delete()  # these two protect the customers and firms below
         SaleDraft.objects.all().delete()
         SavedDraft.objects.all().delete()  # the notes of drafts saved as the bills below
@@ -676,3 +679,19 @@ class Command(BaseCommand):
         buf = BytesIO()
         img.save(buf, "PNG")
         return buf.getvalue()
+
+
+    def _rates(self):
+        owner = User.objects.get(username="sandbox_owner")
+        base = {"gold-24K": D("71040"), "gold-22K": D("65125"), "gold-18K": D("53280"),
+                "silver-999": D("78500"), "silver-925": D("72610")}
+        for ago in range(30, 0, -1):
+            if ago in {4, 11, 18, 25}:
+                continue
+            quotes = {key: f"{amount - ago * D('10'):.2f}" for key, amount in base.items()}
+            board = RateBoard.objects.create(on=self.today - timedelta(days=ago), quoted=quotes, set_by=owner)
+            when = timezone.make_aware(datetime.combine(board.on, time(10, 5)))
+            RateBoard.objects.filter(pk=board.pk).update(set_at=when)
+            if ago == 1:
+                corrected = RateBoard.objects.create(on=board.on, quoted={key: f"{amount:.2f}" for key, amount in base.items()}, set_by=owner)
+                RateBoard.objects.filter(pk=corrected.pk).update(set_at=when + timedelta(hours=1))
