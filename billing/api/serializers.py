@@ -117,6 +117,16 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    kind_effective = serializers.ReadOnlyField()
+
+    def validate_kind(self, value):
+        return value or None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["kind"] = data["kind"] or None
+        return data
+
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )

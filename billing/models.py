@@ -67,6 +67,12 @@ def get_state_code_from_state_name(state_name):
 
 
 class Business(AbstractBaseModel):
+    short_name = models.CharField(max_length=20, blank=True, default="", db_default="")
+    city = models.CharField(max_length=100, blank=True, default="", db_default="")
+    pin_code = models.CharField(max_length=6, blank=True, default="", db_default="")
+    jurisdiction = models.CharField(max_length=100, blank=True, default="", db_default="")
+    declaration = models.CharField(max_length=500, blank=True, default="", db_default="")
+    signature_on_bills = models.BooleanField(default=True, db_default=True)
     name = models.CharField(
         max_length=255,
         unique=True,
@@ -889,6 +895,12 @@ class LineItem(AbstractBaseModel):
 
 
 class Product(AbstractBaseModel):
+    kind = models.CharField(max_length=10, null=True, blank=True, default=None, db_default=None, choices=[
+        (value, value.title()) for value in ("gold", "silver", "diamond", "bullion", "service", "packing", "other")
+    ])
+    purity = models.CharField(max_length=20, blank=True, default="", db_default="")
+    usual_rate = models.DecimalField(max_digits=15, decimal_places=3, null=True, blank=True)
+    purchase_only = models.BooleanField(default=False, db_default=False)
     name = models.CharField(
         max_length=255,
         verbose_name="Product Name",
@@ -929,6 +941,23 @@ class Product(AbstractBaseModel):
         verbose_name="Default Unit",
         help_text="Unit a new invoice line starts with when this product is picked.",
     )
+
+
+    @property
+    def kind_effective(self):
+        """One inferred kind for v2 products, catalog and the client pickers."""
+        if self.kind:
+            return self.kind
+        hsn = self.hsn_code
+        if hsn.startswith("7102"):
+            return "diamond"
+        if hsn.startswith(("7106", "7108")):
+            return "bullion"
+        if hsn.startswith(("7113", "7114", "7117")):
+            return "silver" if any(word in self.name.lower() for word in ("silver", "chandi")) else "gold"
+        if hsn.startswith(("9983", "9988")):
+            return "service"
+        return "packing" if hsn.startswith(("4819", "4823")) else "other"
 
 
 class UserPreference(models.Model):
@@ -1113,6 +1142,9 @@ class ShopSetting(models.Model):
     COPIES = [("original", "Original"), ("duplicate", "Duplicate"), ("triplicate", "Triplicate"), ("all", "All three")]
 
     copies = models.CharField(max_length=10, choices=COPIES, default="original", db_default="original")
+    default_business = models.ForeignKey(
+        Business, null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
     show_bank = models.BooleanField(default=True, db_default=True)
     share_message = models.CharField(max_length=500, default=DEFAULT_SHARE_MESSAGE, db_default=DEFAULT_SHARE_MESSAGE)
     updated_at = models.DateTimeField(null=True, blank=True)

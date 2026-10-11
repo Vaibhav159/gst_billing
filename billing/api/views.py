@@ -134,7 +134,8 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     audit_entity = "business"
     queryset = Business.objects.all().order_by("name")
     serializer_class = BusinessSerializer
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "firm.edit", "update": "firm.edit", "partial_update": "firm.edit", "destroy": "firm.edit"}
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_entity_name(self, instance):
@@ -635,7 +636,8 @@ class ProductViewSet(AuditLogMixin, viewsets.ModelViewSet):
     audit_entity = "product"
     queryset = Product.objects.all().order_by("name")
     serializer_class = ProductSerializer
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "product.edit", "update": "product.edit", "partial_update": "product.edit", "destroy": "product.edit"}
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     def get_entity_name(self, instance):
@@ -2867,7 +2869,8 @@ def _restore_logs(entity, entity_id):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only viewset for audit log entries with undo support."""
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"list": "audit.view", "retrieve": "audit.view", "undo": "audit.undo", "log": "view"}
 
     queryset = AuditLog.objects.all().select_related("user")
     serializer_class = AuditLogSerializer
@@ -2898,7 +2901,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
         return queryset
 
-    @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=["post"], permission_classes=[permissions.IsAuthenticated, V3PermissionIfPlaced])
     def log(self, request):
         # A viewer printing or exporting is a legitimate event to record; the
         # only write here is the log row itself.
@@ -2926,7 +2929,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-    @action(detail=True, methods=["post"], permission_classes=[AdminOnlyPermission])
+    @action(detail=True, methods=["post"], permission_classes=[AdminOnlyPermission, V3PermissionIfPlaced])
     def undo(self, request, pk=None):
         # Undo is a full write primitive — undoing a "created" entry deletes the
         # object — so it is delete-class: admin only. It used to fall through to
@@ -2934,35 +2937,10 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         """Undo an audit log entry by restoring the previous state."""
         entry = self.get_object()
 
-        MODEL_MAP = {
-            "invoice": Invoice,
-            "customer": Customer,
-            "product": Product,
-            "business": Business,
-        }
-
+        from billing.services.audit import MODEL_MAP, _resolve_fk
         model = MODEL_MAP.get(entry.entity)
         if not model:
             return Response({"error": f"Unknown entity: {entry.entity}"}, status=400)
-
-        def _resolve_fk(field, raw_value):
-            """Resolve an FK snapshot value to an integer PK, even if older
-            audit entries stored the related object's __str__ (a name) rather
-            than the ID."""
-            if raw_value is None or raw_value == "None" or raw_value == "":
-                return None
-            try:
-                return int(raw_value)
-            except (TypeError, ValueError):
-                pass
-            # Older snapshots may have stored the __str__ — try a name lookup
-            related = field.related_model
-            for cand in ("name", "invoice_number", "username"):
-                if hasattr(related, cand):
-                    obj = related.objects.filter(**{cand: raw_value}).first()
-                    if obj:
-                        return obj.pk
-            return None
 
         def _undone(response, log):
             # Recorded on the entry, in the same transaction, so the undo can't be used twice (H7).
