@@ -15,7 +15,7 @@ from billing.cache import invalidate, uncached
 from billing.constants import INVOICE_TYPE_OUTWARD, V2_LINE_SNAPSHOT_FIELDS
 from billing.fy import fy_label, fy_of
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem
-from billing.numbering import bill_ref, refuse_taken
+from billing.numbering import bill_ref, lock_firms, refuse_taken
 from billing.period_lock import assert_sales_open, locked_period_or_none
 from billing.refusals import Refusal
 from billing.services.bill_reads import lines_of
@@ -63,6 +63,7 @@ def bin_bill(invoice, user, reason="", details=None, kind=BinnedInvoice.KIND_DEL
     """
     with transaction.atomic():
         invoice = locked_bill(invoice)
+        lock_firms(invoice.business_id)
         if check_month:
             assert_sales_open(invoice.business_id, invoice.invoice_date, "delete")
         name = entity_name(invoice)
@@ -114,12 +115,12 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
             source = (undone or {}).get("via") or ("bin" if binned.restored_at else "audit_log")
             raise Refusal(f"{binned.invoice_number} is back already: it was restored from {RESTORED_FROM[source]}.",
                           "already_restored", bill=bill_ref(back) if back else None)
-        if check_month:
-            assert_sales_open(binned.business_id, binned.invoice_date, "restore")
         firm = uncached(Business).select_for_update(no_key=True).filter(pk=binned.business_id).first()
         if firm is None:
             raise Refusal("The firm on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again in the right firm.", "firm_gone")
+        if check_month:
+            assert_sales_open(firm, binned.invoice_date, "restore")
         if not uncached(Customer).filter(pk=binned.customer_id).exists():
             raise Refusal("The customer on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again with the right customer.", "customer_gone")

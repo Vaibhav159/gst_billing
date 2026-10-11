@@ -15,9 +15,13 @@ cancelled bill in a filed month moves too.
 """
 
 from django.core.management.base import BaseCommand
+from django.db import transaction
+from django.db.models import Exists, OuterRef
 
+from billing.cache import uncached
 from billing.constants import BILL_CANCELLED
-from billing.models import BinnedInvoice, Invoice
+from billing.models import BinnedInvoice, FiledPeriod, FilingMonth, FilingRecord, Invoice
+from billing.numbering import lock_firms
 from billing.refusals import Refusal
 from billing.services.bin import bin_bill, restore_from_bin
 from billing.tax_rules import chosen_place, default_place_of_supply
@@ -50,6 +54,7 @@ class Command(BaseCommand):
                          details=f"Cancelled in v3, set aside for v2: {inv.cancel_reason or 'no reason given'}")
         self.stdout.write(f"{len(bills)} cancelled bill(s) {'moved' if apply else 'to move'} to the bin for v2.")
         self._chosen_places()
+        self._gstr1_locks(apply)
 
     def _chosen_places(self):
         """Bills whose place of supply was chosen by hand: v2 files them under the customer's state. The place is
@@ -64,7 +69,23 @@ class Command(BaseCommand):
         self.stdout.write(f"{len(moved)} bill(s) with a place of supply chosen by hand. v2 files them under the "
                           "customer's state; don't run fix_tax_heads on v2 before the CA has seen this list.")
 
+    def _gstr1_locks(self, apply):
+        unlocked = uncached(FilingMonth).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
+                                               month=OuterRef("month"), unlocked_at__isnull=False)
+        filed3 = uncached(FilingRecord).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
+                                               month=OuterRef("month"), kind="gstr3b")
+        rows = uncached(FilingRecord).filter(kind="gstr1").exclude(Exists(unlocked)).exclude(Exists(filed3))
+        for row in rows.only("business_id", "year", "month"):
+            self.stdout.write(f"  Firm {row.business_id} {row.year}-{row.month:02}: GSTR-1 only")
+            if apply:
+                with transaction.atomic():
+                    lock_firms(row.business_id)
+                    FiledPeriod.objects.get_or_create(business_id=row.business_id, year=row.year, month=row.month,
+                        defaults={"note": "GSTR-1 only: protected for v2 rollback"})
+
     def _reverse(self, apply):
+        if apply:
+            FiledPeriod.objects.filter(note="GSTR-1 only: protected for v2 rollback").delete()
         # No join on the firm: a row whose firm v2 deleted is reported, not skipped (Ruling 1A-6).
         rows = BinnedInvoice.objects.filter(kind=BinnedInvoice.KIND_CANCELLED, restored_at__isnull=True)
         live = set(rows.live().values_list("pk", flat=True))

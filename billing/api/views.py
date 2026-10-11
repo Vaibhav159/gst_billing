@@ -3367,7 +3367,8 @@ class FiledPeriodViewSet(viewsets.ModelViewSet):
         "business__name", "-year", "-month"
     )
     serializer_class = FiledPeriodSerializer
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
+    v3_actions = {"create": "gst.lock", "destroy": "gst.unlock"}
     http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
@@ -3380,8 +3381,17 @@ class FiledPeriodViewSet(viewsets.ModelViewSet):
             qs = qs.filter(year=year)
         return qs
 
+    @transaction.atomic
     def perform_create(self, serializer):
+        from billing.models import FilingMonth
         period = serializer.save(workspace_id=1)
+        state = FilingMonth.objects.filter(business_id=period.business_id, year=period.year, month=period.month).first()
+        if state and state.unlocked_at:
+            state.unlocked_at = None
+            state.unlocked_by = None
+            state.relocked_at = timezone.now()
+            state.relocked_by = self.request.user
+            state.save(update_fields=["unlocked_at", "unlocked_by", "relocked_at", "relocked_by"])
         AuditLog.objects.create(
             action="locked", entity="period", entity_id=period.id,
             entity_name=f"{period.business.name} {period.month:02d}/{period.year}",
@@ -3389,7 +3399,16 @@ class FiledPeriodViewSet(viewsets.ModelViewSet):
             details=f"Month marked as filed & locked. {('Note: ' + period.note) if period.note else ''}".strip(),
         )
 
+    @transaction.atomic
     def perform_destroy(self, instance):
+        from billing.cache import uncached
+        from billing.models import FilingMonth, FilingRecord
+        from billing.numbering import lock_firms
+        lock_firms(instance.business_id)
+        if uncached(FilingRecord).filter(business_id=instance.business_id, year=instance.year, month=instance.month).exists():
+            FilingMonth.objects.update_or_create(business_id=instance.business_id, year=instance.year, month=instance.month,
+                defaults={"unlocked_at": timezone.now(), "unlocked_by": self.request.user,
+                          "unlock_reason": "Unlocked in the old screen", "relocked_at": None, "relocked_by": None})
         label = f"{instance.business.name} {instance.month:02d}/{instance.year}"
         pid = instance.id
         instance.delete()

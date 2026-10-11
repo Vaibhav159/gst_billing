@@ -78,45 +78,137 @@ CLOSED_WORDS = {
 
 
 def assert_sales_open(business, day, action="edit"):
-    """Refuse a sales write into a closed month: 409 {"code": "month_closed", "locked_period"}.
-
-    The one door every v3 sales write goes through (design §4.6). Today a month is closed when
-    v2's FiledPeriod locks it whole; part 3 adds the "GSTR-1 filed" stage here. v2's own paths
-    keep assert_period_unlocked and its 400, which their tests and v2's screens expect.
-    """
+    """Read-only guard; write callers acquire bill then firm locks before checking."""
+    from billing.cache import uncached
+    from billing.models import Business
     from billing.refusals import Refusal
 
-    period = locked_period_or_none(getattr(business, "pk", business), day)
-    if period is None:
+    business_id = getattr(business, "pk", business)
+    if isinstance(day, str):
+        day = parse_date(day)
+    if not sales_month_closed(business_id, day):
         return
-    month = date(period.year, period.month, 1).strftime("%B %Y")
-    raise Refusal(
-        f"{month} is filed and locked for {period.business.name}, so {CLOSED_WORDS[action]}. "
-        f"Have the owner unlock {month} in GST returns first.",
-        "month_closed",
-        locked_period={"id": period.id, "business": period.business_id, "year": period.year, "month": period.month},
-    )
+    status = month_status(business_id, day.year, day.month)
+    name = business.name if hasattr(business, "name") else uncached(Business).values_list("name", flat=True).get(pk=business_id)
+    label = day.strftime("%B %Y")
+    if status.stage == "gstr1":
+        words = (f"{label}'s GSTR-1 is filed for {name}, so {CLOSED_WORDS[action]}. "
+                 f"Have the owner unlock {label}'s sales bills in GST returns first.")
+    else:
+        words = (f"{label} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
+                 f"Have the owner unlock {label} in GST returns first.")
+    raise Refusal(words, "month_closed", **({"stage": status.stage} if not status.legacy else {}),
+                  locked_period={"id": status.locked_period_id, "business": business_id, "year": day.year, "month": day.month})
 
 
-def closed_months(business_ids):
-    """{(business_id, year, month)} of every closed month of these firms: one query for a page of bills."""
-    from billing.models import FiledPeriod
-
-    return set(FiledPeriod.objects.filter(business_id__in=business_ids).values_list("business_id", "year", "month"))
-
-
-def credit_month_closed(business_id, month):
-    """Part 3 replaces this source with the GSTR-3B filing stage."""
-    from billing.cache import uncached
-    from billing.models import FiledPeriod
-    return uncached(FiledPeriod).filter(business_id=business_id, year=month.year, month=month.month).exists()
+def _month(value):
+    return (value.year, value.month) if isinstance(value, date) else tuple(value)
 
 
 def closed_credit_months(business_ids):
-    """Batch twin of credit_month_closed; keep both on the same source."""
     from billing.cache import uncached
     from billing.models import FiledPeriod
     return set(uncached(FiledPeriod).filter(business_id__in=business_ids).values_list("business_id", "year", "month"))
+
+
+def credit_month_closed(business_id, month):
+    from billing.cache import uncached
+    from billing.models import FiledPeriod
+    year, number = _month(month)
+    return uncached(FiledPeriod).filter(business_id=business_id, year=year, month=number).exists()
+
+
+def closed_months(business_ids):
+    """One SQL UNION: legacy/3B locks plus GSTR-1 without an open unlock."""
+    business_ids = list(business_ids)
+    if not business_ids:
+        return set()
+    from django.db.models import Exists, OuterRef
+
+    from billing.cache import uncached
+    from billing.models import FiledPeriod, FilingMonth, FilingRecord
+    unlocked = uncached(FilingMonth).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
+                                            month=OuterRef("month"), unlocked_at__isnull=False)
+    records = uncached(FilingRecord).filter(business_id__in=business_ids, kind="gstr1").exclude(Exists(unlocked))
+    locks = uncached(FiledPeriod).filter(business_id__in=business_ids)
+    combined = locks.values_list("business_id", "year", "month").union(records.values_list("business_id", "year", "month"))
+    # PostgreSQL parenthesizes UNION arms. Keep a plain outer SELECT for read-only
+    # query instrumentation; the derived table contains only these three columns.
+    from django.db import connection
+
+    sql, params = combined.query.sql_with_params()
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT * FROM ({sql}) AS sales_closed_months", params)
+        return set(cursor.fetchall())
+
+
+def sales_month_closed(business_id, day):
+    return (business_id, *_month(day)) in closed_months([business_id])
+
+
+def next_open_credit_month(business_id, from_month, today=None):
+    from django.utils import timezone
+
+    from billing.cache import uncached
+    from billing.models import FiledPeriod
+    start = max(date(2025, 4, 1), date(*_month(from_month), 1))
+    today = today or timezone.localdate()
+    closed = set(uncached(FiledPeriod).filter(business_id=business_id, year__gte=start.year,
+                                               year__lte=today.year).values_list("year", "month"))
+    current = start
+    while current <= today and (current.year, current.month) in closed:
+        current = date(current.year + (current.month == 12), current.month % 12 + 1, 1)
+    return current
+
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class MonthStatus:
+    stage: str
+    sales_closed: bool
+    credit_closed: bool
+    gstr1: object = None
+    gstr1a: object = None
+    gstr3b: object = None
+    legacy: bool = False
+    unlocked: object = None
+    locked_period_id: int | None = None
+
+
+def month_status(business_id, year, month):
+    """Two narrow state reads, plus one aggregate for an unfiled past month."""
+    from django.db.models import OuterRef, Subquery
+    from django.utils import timezone
+
+    from billing.cache import uncached
+    from billing.models import Business, FiledPeriod, FilingMonth, FilingRecord
+    rows = {row.kind: row for row in uncached(FilingRecord).filter(business_id=business_id, year=year, month=month)
+            .only("id", "business_id", "year", "month", "kind", "filed_on", "marked_by_id", "marked_at")}
+    periods = uncached(FiledPeriod).filter(business_id=OuterRef("pk"), year=year, month=month)
+    months = uncached(FilingMonth).filter(business_id=OuterRef("pk"), year=year, month=month)
+    fields = ("id", "unlocked_at", "unlocked_by_id", "unlock_reason", "relocked_at", "relocked_by_id", "legacy_frozen_at")
+    annotations = {f"state_{field}": Subquery(months.values(field)[:1]) for field in fields}
+    info = uncached(Business).filter(pk=business_id).annotate(
+        lock_id=Subquery(periods.values("pk")[:1]), **annotations).values("lock_id", *annotations).first() or {}
+    lock_id = info.get("lock_id")
+    unlock = FilingMonth(business_id=business_id, year=year, month=month,
+                         **{field: info[f"state_{field}"] for field in fields}) if info.get("state_id") else None
+    unlocked = unlock if unlock and unlock.unlocked_at else None
+    today = timezone.localdate().replace(day=1)
+    key = date(year, month, 1)
+    legacy = bool(not rows and (lock_id or (unlock and unlock.legacy_frozen_at)))
+    if unlocked:
+        stage = "unlocked"
+    elif lock_id:
+        stage = "filed"
+    elif "gstr1" in rows:
+        stage = "gstr1"
+    else:
+        stage = "future" if key > today else "open" if key == today else "ready"
+    return MonthStatus(stage, stage in ("filed", "gstr1"), bool(lock_id), rows.get("gstr1"), rows.get("gstr1a"),
+                       rows.get("gstr3b"), legacy, unlocked, lock_id)
 
 
 CREDIT_CLOSED_WORDS = {

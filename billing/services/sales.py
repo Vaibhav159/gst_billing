@@ -97,6 +97,7 @@ def cancel_bill(invoice, user, reason):
     with transaction.atomic():
         invoice = locked_bill(invoice)
         refuse_cancelled(invoice, f"{invoice.invoice_number} is already cancelled.")
+        lock_firms(invoice.business_id)
         assert_sales_open(invoice.business_id, invoice.invoice_date, "cancel")
         invoice.status = BILL_CANCELLED
         invoice.cancel_reason = reason
@@ -166,6 +167,7 @@ def renumber_bill(invoice, user, typed):
     with transaction.atomic():
         invoice = locked_bill(invoice)
         refuse_cancelled(invoice)
+        lock_firms(invoice.business_id)
         assert_sales_open(invoice.business_id, invoice.invoice_date, "renumber")
         old = invoice.invoice_number
         number = checked_number(invoice.business, invoice.invoice_date, typed, exclude_invoice=invoice.pk)
@@ -298,19 +300,20 @@ def save_bill(data, user, invoice=None):
             claim(draft)
         if old is not None:
             refuse_cancelled(old)
-            assert_sales_open(old.business_id, old.invoice_date, "edit")
             before = _audit_values(old)
         problem = _date_problem(day) if old is None or day != old.invoice_date else ""
         if problem:
             raise ValidationError({"invoice_date": [problem]})
-        assert_sales_open(business, day, "edit" if old else "create")
         replaces = data["replaces"] if old is None else old.replaces
         if old is None and replaces is not None:
             # Bill before firm, as renumber and move lock them: the reverse order can deadlock (Ruling 1A-49).
             replaces = _remade(replaces).pk
         moved = old is not None and business.pk != old.business_id
-        if moved:
-            lock_firms(old.business_id, business.pk)
+        # Lock every existing/replaced bill first, then the firms together in id order.
+        lock_firms(*(old.business_id, business.pk) if old else (business.pk,))
+        if old is not None:
+            assert_sales_open(old.business_id, old.invoice_date, "edit")
+        assert_sales_open(business, day, "edit" if old else "create")
         number = format_number(business, day, typed)
         # Unchanged when the stored number is what's typed or its formatted form: the form sends it back as it is, so
         # a v2 "31" stays "31" (contract 2.3). Kept as stored, and never checked again.
@@ -376,6 +379,7 @@ def save_eway(invoice, user, data):
     with transaction.atomic():
         invoice = locked_bill(invoice)
         refuse_cancelled(invoice)
+        lock_firms(invoice.business_id)
         assert_sales_open(invoice.business_id, invoice.invoice_date, "edit")
         stored = {f: getattr(invoice, f) for f in EWAY_FIELDS}
         merged = {**stored, **data}
@@ -401,6 +405,7 @@ def refile_heads(invoice, user):
     with transaction.atomic():
         invoice = locked_bill(invoice)
         refuse_cancelled(invoice)
+        lock_firms(invoice.business_id)
         assert_sales_open(invoice.business_id, invoice.invoice_date, "edit")
         inter, now, moved = supply_interstate(invoice), timezone.now(), []
         for li in lines_of([invoice])[invoice.pk]:

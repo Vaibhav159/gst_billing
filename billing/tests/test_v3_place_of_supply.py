@@ -15,7 +15,7 @@ from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 
 from billing.constants import BILL_CANCELLED
-from billing.models import AuditLog, BinnedInvoice, Customer, Invoice, LineItem
+from billing.models import AuditLog, BinnedInvoice, Customer, FilingMonth, FilingRecord, Invoice, LineItem
 from billing.period_lock import assert_period_unlocked
 from billing.services.line_items import build_line_items
 from billing.services.sales import firm_snapshot
@@ -243,7 +243,8 @@ class FirmAndNotesTest(TestCase):
         out = StringIO()
         with patch.object(QuerySet, "nocache", autospec=True, side_effect=lambda qs: qs) as nocache:
             call_command("prepare_v2_rollback", stdout=out)
-        self.assertEqual([c.args[0].model for c in nocache.call_args_list], [Invoice, Invoice])
+        self.assertEqual([c.args[0].model for c in nocache.call_args_list],
+                         [Invoice, Invoice, FilingMonth, FilingRecord, FilingRecord])
         self.assertIn("place of supply 24, v2 reads 08", out.getvalue())
 
     def test_the_admin_shows_a_line_note_but_cant_change_it(self):
