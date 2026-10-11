@@ -186,7 +186,7 @@ EXPLORER_PERMISSION_CHANGE = lambda r: r.user.is_superuser  # noqa: E731
 # REST Framework settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "billing.api.auth.SessionJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",

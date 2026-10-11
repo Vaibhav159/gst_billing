@@ -250,7 +250,7 @@ REST_FRAMEWORK = {
     ),
     # JWT Authentication only
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "billing.api.auth.SessionJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",

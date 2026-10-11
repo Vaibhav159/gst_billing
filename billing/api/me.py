@@ -21,6 +21,8 @@ class MeView(APIView):
         user = request.user
         role = role_of(user)
         return Response({
+            "must_change_password": bool(getattr(getattr(user, "security", None), "must_change_password", False)),
+            "session_id": getattr(user, "_session_id", None),
             "id": user.id,
             "username": user.username,
             "full_name": user.get_full_name() or user.username,

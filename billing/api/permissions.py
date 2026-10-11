@@ -104,6 +104,9 @@ class V3Permission(BasePermission):
         user = request.user
         if not (user and user.is_authenticated):
             return False
+        if not isinstance(self, V3PermissionIfPlaced):
+            from .account_access import password_gate
+            password_gate(user)
         return self._allows(user, needed(request, view))
 
     def has_object_permission(self, request, view, obj):

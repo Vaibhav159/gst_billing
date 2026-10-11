@@ -3,7 +3,6 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenVerifyView
 
 from .audit import AuditActionView, AuditExportView, AuditView
-from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .catalog import CatalogDetail, CatalogList
@@ -46,6 +45,7 @@ from .search import QuickSearchView
 from .setup import SetupView
 from .shop import ShopSettingsView
 from .suppliers import SupplierViewSet
+from .token_views import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
