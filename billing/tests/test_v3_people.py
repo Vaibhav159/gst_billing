@@ -46,6 +46,25 @@ def test_self_password_reset_is_refused_before_any_account_mutation(surface, pas
     assert not AuditLog.objects.exists()
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize(("data", "words"), [
+    ({"role": "viewer"}, "You can't change your own role. Another owner can."),
+    ({"role": "editor", "is_active": True}, "You can't change your own role. Another owner can."),
+    ({"is_active": False}, "You can't stop yourself signing in. Another owner can."),
+    ({"role": "admin", "is_active": False}, "You can't stop yourself signing in. Another owner can."),
+])
+def test_v2_users_refuses_own_role_or_stop_before_any_change(data, words):
+    owner = person("kailash", "admin")
+    client = client_for(owner)
+    response = client.patch("/api/users/", {"user_id": str(owner.pk), **data}, format="json")
+    assert response.status_code == 409
+    assert response.data == {"detail": words, "code": "own_account"}
+    owner.refresh_from_db()
+    assert owner.is_active and role_of(owner) == "owner"
+    unchanged = client.patch("/api/users/", {"user_id": str(owner.pk), "role": "admin", "is_active": True}, format="json")
+    assert unchanged.status_code == 200, unchanged.data
+
+
 class PeopleTest(TestCase):
     def setUp(self):
         self.owner = person("kailash", *ROLE_GROUPS["owner"], first_name="Kailash", last_name="Mehta")

@@ -3352,6 +3352,12 @@ class UserManagementView(APIView):
 
         if user.pk == request.user.pk and request.data.get("password"):
             return Response({"detail": "Change your own password on your profile.", "code": "own_account"}, status=409)
+        # R4B-3: as in v3, another owner changes your role or stops you; resending your own is fine.
+        if user.pk == request.user.pk and request.data.get("role") in ("admin", "editor", "viewer") \
+                and request.data["role"] != get_user_role(user):
+            return Response({"detail": "You can't change your own role. Another owner can.", "code": "own_account"}, status=409)
+        if user.pk == request.user.pk and "is_active" in request.data and request.data["is_active"] is not True:
+            return Response({"detail": "You can't stop yourself signing in. Another owner can.", "code": "own_account"}, status=409)
 
         # Before any change, so a refused password leaves the role and status as they were.
         problem = request.data.get("password") and _password_problem(request.data["password"], user)
@@ -3384,6 +3390,7 @@ class UserManagementView(APIView):
             "is_active": user.is_active,
             "message": "User updated",
         })
+
 
 class FiledPeriodViewSet(viewsets.ModelViewSet):
     """Lock/unlock filed months. Every transition is audit-logged —
