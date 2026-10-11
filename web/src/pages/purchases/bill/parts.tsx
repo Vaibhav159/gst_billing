@@ -39,15 +39,16 @@ export function DeletePurchases({ bills, onClose, onDone }: { bills: PurchaseRow
   const confirm = async () => {
     setError("");
     const bins: { billId: number; binId: number }[] = [];
-    const removed: number[] = [];
+    const removed: number[] = [], missing: number[] = [];
     try {
-      await remove.mutateAsync({ ids: writable.map((p) => p.id), reason: reason.trim(), onEach: (id, bin) => { removed.push(id); if (bin) bins.push({ billId: id, binId: bin.id }); } });
+      await remove.mutateAsync({ ids: writable.map((p) => p.id), reason: reason.trim(), onEach: (id, bin) => { removed.push(id); bins.push({ billId: id, binId: bin.id }); }, onMissing: (id) => missing.push(id) });
+      if (missing.length) show({ title: `Skipped ${plural(missing.length, "purchase bill")}`, body: "Already deleted elsewhere, so not counted here." });
       onDone();
       onClose();
     } catch (e) {
-      setError(`${removed.length ? `Stopped after ${removed.length} of ${writable.length}. ` : "Nothing was deleted. "}${problemOf(e).message}`);
+      setError(`${removed.length ? `Stopped after ${removed.length} of ${writable.length}. ` : "Nothing was deleted. "}${missing.length ? `${missing.length} ${missing.length === 1 ? "was" : "were"} already deleted elsewhere. ` : ""}${problemOf(e).message}`);
     } finally {
-      setGone((before) => new Set([...before, ...removed]));
+      setGone((before) => new Set([...before, ...removed, ...missing]));
       if (bins.length) show({ title: `Deleted ${plural(bins.length, "purchase bill")}`, body: "They're in the Audit log, where they can be restored.", action: { label: "Undo", onClick: () => { void (async () => {
         let returned = 0;
         try { for (const bin of bins) { try { await restore.mutateAsync(bin.binId); } catch (e) { if (problemOf(e).code !== "already_restored") throw e; } returned++; setGone((before) => new Set([...before].filter((id) => id !== bin.billId))); } show({ title: `Restored ${plural(returned, "purchase bill")}`, body: "Back in Purchases and in the credit figures." }); }

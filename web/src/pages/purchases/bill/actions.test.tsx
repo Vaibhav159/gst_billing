@@ -73,3 +73,21 @@ test("Undo counts a bill someone else already restored and goes on to the next",
   expect(screen.queryByText("Not all purchases were restored")).not.toBeInTheDocument();
   expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["purchases/bin/4/restore/", "purchases/bin/5/restore/"]);
 });
+test("a bill deleted elsewhere is skipped, not counted, and never sent again", async () => {
+  let thirdFails = true;
+  const { calls } = salesServer([
+    ["DELETE", "purchases/905/", () => refuse(404, { detail: "Not found." })],
+    ["DELETE", "purchases/906/", () => purchaseBinWire({ id: 5, original_id: 906 })],
+    ["DELETE", "purchases/907/", () => { if (thirdFails) refuse(0, null); return purchaseBinWire({ id: 6, original_id: 907 }); }],
+  ]);
+  const done = vi.fn();
+  renderApp(<DeletePurchases bills={[905, 906, 907].map((id) => toPurchaseRow(purchaseRowWire({ id, invoice_number: `UBS/26-27/${id}` })))} onClose={() => {}} onDone={done} />);
+  await pause();
+  await userEvent.click(screen.getByRole("button", { name: "Delete 3 purchase bills" }));
+  expect(await screen.findByText(/Stopped after 1 of 3\. 1 was already deleted elsewhere\./)).toBeInTheDocument();
+  expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Delete 1 purchase bill?" })).toBeInTheDocument();
+  thirdFails = false;
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(done).toHaveBeenCalledOnce());
+  expect(calls.filter((c) => c.method === "DELETE").map((c) => c.url)).toEqual(["purchases/905/", "purchases/906/", "purchases/907/", "purchases/907/"]);
+});

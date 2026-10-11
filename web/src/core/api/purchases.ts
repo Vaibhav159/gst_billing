@@ -98,15 +98,15 @@ export function useRestorePurchase() {
 /** One request per selected bill. A partial failure leaves the caller's completed IDs for an honest retry. */
 export function useDeletePurchases() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ ids, reason, onEach }: { ids: number[]; reason: string; onEach: (id: number, binned: PurchaseBinRow | null) => void }) => {
+  return useMutation({ mutationFn: async ({ ids, reason, onEach, onMissing }: { ids: number[]; reason: string; onEach: (id: number, binned: PurchaseBinRow) => void; onMissing: (id: number) => void }) => {
     for (const id of ids) {
-      let binned: PurchaseBinRow | null = null;
+      let binned: PurchaseBinRow;
       try { binned = toPurchaseBin((await api.delete(`purchases/${id}/`, { data: { reason } })).data); }
       catch (error) {
-        // already in the bin (another tab, an earlier try) is done; a bill never found is a refusal, not a deletion
-        const p = problemOf(error), already = p.kind === 'notfound' && p.code === 'deleted' ? (p.body as { binned?: unknown }).binned : undefined;
-        if (!already) throw error;
-        binned = toPurchaseBin(already);
+        // the server's DELETE answers a plain 404 for a bill already deleted elsewhere: skip it, uncounted, and go on
+        if (problemOf(error).kind !== 'notfound') throw error;
+        onMissing(id);
+        continue;
       }
       onEach(id, binned);
     }
