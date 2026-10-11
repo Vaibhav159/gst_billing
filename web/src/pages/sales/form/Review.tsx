@@ -16,9 +16,19 @@ import { useView } from "@/core/view";
 import { customerLine } from "@/pages/customers/forBills";
 import { ItemsTable, type ItemLine } from "@/pages/sales/bill/ItemsTable";
 import { CheckList, focusSoon, PayPicker, type CheckRow } from "./fields";
-import { qtyText } from "./model";
+import { toBillInput } from "./model";
 import type { BillFormApi } from "./useBillForm";
 import { SAVE_WAITS, VISIT_ONLY } from "./useDraftKeeping";
+
+/** The review's own box, by id: what focusReview finds it by. */
+const BODY_ID = "rv-body";
+/**
+ * Puts the cursor on the review's title, for a sheet opened from its checks that closes with its opener gone (a PAN
+ * added: the check and its Add PAN go). Called before the sheet lets go, the cursor never lands on the page behind.
+ */
+export function focusReview(): void {
+  document.getElementById(BODY_ID)?.closest('[role="dialog"]')?.querySelector<HTMLElement>("[data-dialog-title]")?.focus({ preventScroll: true });
+}
 
 /**
  * onSave: the form's save (it takes the person to a field the server refused); numberId: the number box, for "Change the
@@ -28,6 +38,8 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const { isPhone } = useView();
   const offline = useNetwork() === "offline";
   const saveRef = useRef<HTMLButtonElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  const wayRef = useRef<HTMLAnchorElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // after the change has drawn: Save may only now be enabled (cash under the limit), and a box that held focus may be gone
   const focusSave = () => setTimeout(() => saveRef.current?.focus(), 0);
@@ -35,6 +47,10 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const err = F.saveError;
   const failed = Boolean(err && err.kind !== "payment" && err.kind !== "cash");
   const clash = err?.kind === "clash";
+  // a refusal saving again can't change (Ruling 1D-12): the bill a draft became, a bill cancelled meanwhile, or a remake
+  // refused. No Try again: the way on is that bill (its link), else only back to the form
+  const final = err?.kind === "draft_saved" || err?.kind === "cancelled" || err?.kind === "replaces";
+  const way = final ? err?.link : undefined;
   const offlineNew = offline && !edit;
   const askPay = F.f.payment == null;
   const noChange = edit && F.changes.length === 0;
@@ -45,6 +61,8 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const sending = offer || F.stored;
   // a failure is said first, at the top, and the sheet scrolls to it; so is a save that waits
   useEffect(() => { if ((failed || held) && body.current) body.current.closest("[role=dialog]")?.querySelector(".overflow-y-auto")?.scrollTo({ top: 0 }); }, [failed, err, held]);
+  // Save goes with such a refusal, and the cursor with it: it goes to the way on, else to Go back and edit
+  useEffect(() => { if (final) (wayRef.current ?? backRef.current)?.focus(); }, [final]);
   // Ctrl S presses Save (as a click would: not while it's off, nor in the dialog's first moments), from the review itself
   // only: the one dialog open, or the one the cursor is in. A sheet opened over it (a PAN added from its checks) and a
   // menu keep their keys, and a key held down doesn't save the review it opened. The browser's Save page never opens
@@ -84,18 +102,17 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const footer = (
     <>
       {isPhone ? null : total}
-      <Button onClick={F.closeReview} disabled={F.saving}>Go back and edit</Button>
-      <Button ref={saveRef} variant="primary" icon={offer ? Check : undefined} onClick={primary} disabled={blocked} loading={F.saving} title={offlineNew ? "Saving needs the internet" : undefined}>{primaryLabel}</Button>
+      <Button ref={backRef} onClick={F.closeReview} disabled={F.saving}>Go back and edit</Button>
+      {final ? (way ? <ButtonLink ref={wayRef} to={way.to} variant="primary">{way.label}</ButtonLink> : null)
+        : <Button ref={saveRef} variant="primary" icon={offer ? Check : undefined} onClick={primary} disabled={blocked} loading={F.saving} title={offlineNew ? "Saving needs the internet" : undefined}>{primaryLabel}</Button>}
       {isPhone ? total : null}
     </>
   );
   const posName = F.pos ? `${stateNameOf(F.pos)} (${F.pos})` : "Not chosen";
   const taxWord = F.tt.inter ? "Inter-state · IGST" : "Local · CGST + SGST";
-  // the lines as they're sent (toBillInput): the name and note trimmed, the weight to the milligram
-  const items: ItemLine[] = F.filled.map((l, i) => ({
-    id: l.key, product_name: l.name.trim(), hsn_code: l.hsn, quantity: qtyText(l.qty), unit: l.unit, rate: l.rate, gst_percent: l.gst ?? "",
-    taxable: F.figs.lines[i]?.taxable ?? 0, tax: F.figs.lines[i]?.tax ?? 0, note: l.note.trim(),
-  }));
+  // the lines exactly as they're sent, from the save's own body (toBillInput), each beside its figures to the paisa
+  const sent = toBillInput(F.f, { mode: F.mode, pos: F.pos, number: sending, draftId: null, replaces: F.start.replaces }).lines;
+  const items: ItemLine[] = sent.map((l, i) => ({ ...l, id: F.filled[i].key, taxable: F.figs.lines[i]?.taxable ?? 0, tax: F.figs.lines[i]?.tax ?? 0 }));
   const warn = checks.filter((x) => x.ok === "warn" && x.key !== "cash");
   const paidBy = F.f.payment == null ? <span className="text-brand">Not picked yet</span> : PAY[F.f.payment];
   // a browser that refuses storage keeps it only while the page is open, never "on this device" (Task 1's review)
@@ -104,14 +121,12 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
     <Dialog open={F.reviewOpen} onClose={F.closeReview} size="lg" initialFocus={askPay || failed ? undefined : saveRef} footer={footer}
       title={edit && F.bill ? `Check the changes to ${F.bill.invoice_number}` : F.paper ? (isPhone ? "Check the paper bill" : "Check the paper bill before saving") : isPhone ? "Check the bill" : "Check the bill before saving"}
       description="This is exactly what will be saved, to the paisa. Nothing on it is rounded.">
-      <div ref={body} className="flex flex-col gap-4">
+      <div ref={body} id={BODY_ID} className="flex flex-col gap-4">
         {held ? <p role="status" className="rounded-ctl border border-line px-4 py-3 text-sm text-fg2 flex items-center gap-2 anim-rise"><Spinner size={14} />{SAVE_WAITS}</p> : null}
         {failed && err ? (
           <div id="rv-fail" className="flex flex-col gap-2">
             <FailNote error={err} />
             {offer ? <p className="text-sm text-fg2">Save as {offer} takes the next free number in one step.</p> : null}
-            {/* a bill was made from this unfinished bill already: that bill is the way on (Ruling 1D-8) */}
-            {err.link ? <ButtonLink to={err.link.to} size="sm" variant="outline" className="self-start">{err.link.label}</ButtonLink> : null}
           </div>
         ) : null}
         {offlineNew ? <FailNote error={{ title: "You're offline: this bill can't be saved yet", body: `${keptOffline} Save it when the internet is back.` }} /> : null}

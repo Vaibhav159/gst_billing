@@ -8,7 +8,7 @@ import { takeFresh } from "@/core/sales/fresh";
 import { toBillDetail } from "@/core/sales/wire";
 import { BillForm } from "./BillFormPage";
 import { startEdit } from "./model";
-import { ANIL, formServer, fakeToday, mountForm, wireNext } from "./testing";
+import { ANIL, formServer, fakeToday, mountForm, settle, wireNext } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -22,10 +22,6 @@ const where = (router: { state: { location: { pathname: string; search: string }
 const posts = (calls: { method: string; body: unknown }[]) => calls.filter((c) => c.method === "POST").map((c) => (c.body as { invoice_number: string }).invoice_number);
 /** What a row of the review says: its label and value ("Bill no.KGH/2026-27/34"). */
 const cell = (dialog: HTMLElement, label: string) => within(dialog).getByText(label).parentElement;
-/** Lets what's on its way land (answers, the cache telling the page): a little faked time, inside act, twice. */
-async function settle() {
-  for (let i = 0; i < 2; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-}
 
 /** A copy of KGH/2026-27/31 (Anil Gupta: a ring and a pendant), a whole bill ready to check: the review open, past its guard. */
 async function review(user: ReturnType<typeof fakeToday>, routes: Route[] = [], bill = wireDetail()) {
@@ -141,6 +137,31 @@ test("Ctrl S saves from the review only while it's on top and Save is on: not wh
   await user.keyboard("{Control>}s{/Control}");
   await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ payment_mode: "mixed", invoice_number: "34" });
+});
+
+test("a PAN added from the review's own checks: the check and its Add PAN go, and the cursor is back in the review, never on the page behind it (T5 review)", async () => {
+  const user = fakeToday();
+  formServer([
+    ["GET", "sales/412/", () => wireDetail({ lines: BIG })],
+    ["PATCH", "customers/7/", () => ({ ...ANIL, pan_number: "ABCPG1234K", pan: "ABCPG1234K" })],
+  ]);
+  mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  const checked = within(dialog).getByRole("list", { name: "Checked before saving" });
+  await user.click(within(checked).getByRole("button", { name: "Add PAN" }));
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await user.click(within(sheet).getByRole("textbox"));
+  await user.keyboard("ABCPG1234K{Enter}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument());
+  await settle();
+  expect(within(dialog).queryByRole("button", { name: "Add PAN" })).not.toBeInTheDocument();
+  expect(dialog).toContainElement(document.activeElement as HTMLElement);
 });
 
 test("a change to a saved bill with nothing changed yet: Save changes is off, and Ctrl S doesn't send it either", async () => {
@@ -328,6 +349,12 @@ test("a bill cancelled while it was being changed: the review says so in the ser
   const fail = await within(dialog).findByRole("alert");
   expect(fail).toHaveTextContent(`Not saved${words}`);
   expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+  // saving again can't change a cancelled bill: no Try again, and the way on is the bill itself (Ruling 1D-12)
+  expect(within(dialog).queryByRole("button", { name: /^(Try again|Save)/ })).not.toBeInTheDocument();
+  const open = within(dialog).getByRole("link", { name: "Open KGH/2026-27/31" });
+  expect(open).toHaveAttribute("href", "/sales/412");
+  expect(open).toHaveAttribute("data-variant", "primary");
+  expect(open).toHaveFocus();
   // what was typed is still there behind it
   await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the changes to KGH/2026-27/31" })).not.toBeInTheDocument());
@@ -351,6 +378,10 @@ test("a cancelled bill made again whose remake the server refuses (made again al
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(`Not saved${words}`);
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ replaces: 412 });
   expect(screen.getByRole("dialog", { name: "Check the bill before saving" })).toBeInTheDocument();
+  // saving again can't change that: no Try again, only back to the form (Ruling 1D-12)
+  expect(within(dialog).queryByRole("button", { name: /^(Try again|Save)/ })).not.toBeInTheDocument();
+  expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Go back and edit" })).toHaveFocus();
 });
 
 test("offline, the review says the bill can't be saved yet, and Save waits for the internet", async () => {
@@ -381,6 +412,17 @@ test("what the server refuses on a line comes back under that line: the review c
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the bill before saving" })).not.toBeInTheDocument());
   expect(screen.getByText("Type the rate per piece.")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Line 2 rate per piece" })).toHaveFocus());
+});
+
+test("a date the server refuses comes back under the date in its words (a date before 2000: Ruling 1A-32): the review closes and the date box takes the cursor", async () => {
+  const user = fakeToday();
+  const { dialog } = await review(user, [["POST", "sales/", () => refuse(400, { invoice_date: ["Pick a date from 2000 to 2099."] })]]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the bill before saving" })).not.toBeInTheDocument());
+  const day = screen.getByLabelText("Date");
+  await waitFor(() => expect(day).toHaveFocus());
+  expect(day).toHaveAccessibleDescription("Pick a date from 2000 to 2099.");
 });
 
 test("a save that answers after the form was left keeps the bill and says so, without moving the page (part 0 carry)", async () => {

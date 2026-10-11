@@ -13,7 +13,6 @@ import { lineErrors, linesErrors, problemOf, type ApiProblem } from "@/core/api/
 import { useNetwork } from "@/core/api/network";
 import { useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesFacets, useSalesPage, useUpdateBill } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
-import { keepsOnDevice } from "@/core/deviceDrafts";
 import { addMonths, fyOf, monthLabel, monthOf, todayIST } from "@/core/format";
 import { GST_STATES } from "@/core/ids";
 import { markFresh } from "@/core/sales/fresh";
@@ -31,14 +30,15 @@ import { focusNow } from "./fields";
 import { blankLine, hasContent, posCustomer, slabOf, stateOf, storedFor, toBillInput, type FormLine, type FormState, type Start } from "./model";
 import { lastPaperDate, rememberPaperDate } from "./paperDates";
 import { changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, numberProblem, prevFy, type Locked, type NumberState } from "./rules";
-import { VISIT_ONLY } from "./useDraftKeeping";
 
 /**
- * Why a save didn't happen, said once at the top of the review. next: a number to save as instead (a clash). link: where
- * the bill that this unfinished bill became already is (draft_saved: the server made none this time).
+ * Why a save didn't happen, said once at the top of the review. next: a number to save as instead (a clash). link: the
+ * way on, a bill: the one this unfinished bill became already (draft_saved: the server made none this time), or the
+ * bill being changed, cancelled meanwhile (cancelled). draft_saved, cancelled and replaces (the server refused the
+ * cancelled bill this one makes again) can't change by saving again: the review offers no Try again (Ruling 1D-12).
  */
 export type SaveError = FailText & {
-  kind: "payment" | "cash" | "clash" | "filed" | "offline" | "failed" | "draft_saved";
+  kind: "payment" | "cash" | "clash" | "filed" | "offline" | "failed" | "draft_saved" | "cancelled" | "replaces";
   next?: string;
   link?: { label: string; to: string };
 };
@@ -300,13 +300,8 @@ export function useBillForm(start: Start) {
     if (firstError) { setReviewOpen(false); return { refused: firstError }; }
     if (f.payment == null) { setSaveError({ kind: "payment", title: "How was it paid?", body: "Pick one above: it goes on the bill and in your cash and bank split." }); return none; }
     if (cashBlock) { setSaveError({ kind: "cash", title: "Cash of ₹2,00,000 or more", body: "Switch to Part cash, part UPI, or tick that you're saving it as all cash anyway." }); return none; }
-    if (net === "offline") {
-      // a browser that refuses storage keeps the unfinished bill until the page closes, never "on this device" (Task 1's review)
-      const kept = keepsOnDevice() ? "The bill is kept on this device as an unfinished bill." : VISIT_ONLY;
-      setSaveError(edit ? { kind: "offline", ...failText({ kind: "offline", message: "" }) }
-        : { kind: "offline", title: "Not saved: you're offline", body: `${kept} Save it when the internet is back; nothing saves by itself.` });
-      return none;
-    }
+    // only an edit gets here offline: a new bill's review turns Save off and says where the bill is kept (offlineNew)
+    if (net === "offline") { setSaveError({ kind: "offline", ...failText({ kind: "offline", message: "" }) }); return none; }
     const number = numberOverride ?? numberText;
     // only a new bill takes an unfinished bill with it (toBillInput sends draft_id on a POST only)
     const draft = edit ? null : draftId;
@@ -353,6 +348,9 @@ export function useBillForm(start: Start) {
         void next.refetch();
       } else if (p.code === "month_closed") {
         setSaveError({ kind: "filed", title: `${month} was just filed`, body: p.message });
+      } else if (p.code === "cancelled" && bill) {
+        // cancelled while it was being changed (a PUT): the bill itself is the way on, where it can be made again
+        setSaveError({ kind: "cancelled", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
       } else {
         // what the server refused under a field the form has goes there, and the review closes for it; a refusal of
         // something the form has no field for (replaces, draft_id, payment_mode) stays in the review, in its words
@@ -364,7 +362,7 @@ export function useBillForm(start: Start) {
           setReviewOpen(false);
           return { refused: first };
         }
-        setSaveError({ kind: "failed", ...failText(p) });
+        setSaveError({ kind: p.fields?.replaces ? "replaces" : "failed", ...failText(p) });
       }
       return none;
     } finally {

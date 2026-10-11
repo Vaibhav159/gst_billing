@@ -30,6 +30,8 @@ test("which days can take a bill: not ahead, this year or last, and never a file
   expect(at("")).toBe("Type the date like 08/10/2026 or 8 Oct.");
   expect(at("2026-10-09")).toBe("This date is after today (08 Oct 2026). A bill can't be dated ahead.");
   expect(at("2025-03-31", nothingFiled)).toBe("This date is in FY 2024-25. New bills can be dated this year or last year (FY 2025-26) only.");
+  // the server's floor, 2000-01-01 (Ruling 1A-32), is far below this one: a date before it never leaves the form
+  expect(at(parseDateText("31/12/1999", TODAY) ?? "", nothingFiled)).toBe("This date is in FY 1999-00. New bills can be dated this year or last year (FY 2025-26) only.");
   expect(at("2026-09-30")).toBe("September 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Pick a date in October, or have the owner unlock September 2026 in GST returns first.");
   expect(at("2026-09-30", septemberFiled, true)).toBe("September 2026 is filed and locked for KIRAN GOLD HOUSE, so this paper bill can't be added. The paper bill's date can't change: have the owner unlock September in GST returns first.");
   expect(at("2026-10-01")).toBe("");

@@ -17,7 +17,7 @@ import { hasContent } from "./model";
 import { NewItemForm, type NewItem } from "./NewItemForm";
 import { DateBlock, NumberField, Origins, PaperSwitch, paperBookTo, PaymentNote, PlaceOfSupply, SummaryFigures } from "./parts";
 import { useSaleProducts } from "./products";
-import { Review } from "./Review";
+import { focusReview, Review } from "./Review";
 import { paymentNote } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 import type { DraftKeeping } from "./useDraftKeeping";
@@ -165,7 +165,9 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
         description={can("product.edit") ? "Use it on this bill, and keep it in Products if you like." : "Used on this bill only. The owner adds products to the list."}>
         {np ? <NewItemForm key={`${np.key}${np.name}`} initialName={np.name} idBase="np" onCancel={() => setNp(null)} onDone={onNewItem(np.key)} onBusy={setNpBusy} /> : null}
       </Sheet>
-      <CustomerFixSheet customer={F.cust} field={fix} open={Boolean(fix)} onClose={() => setFix(null)} onSaved={(c) => F.set({ customer: c })} />
+      {/* opened from the review's checks, its Add PAN goes with the check: the cursor goes back into the review before the
+          sheet lets go of it (the kit's fallback would put it on the page behind the review) */}
+      <CustomerFixSheet customer={F.cust} field={fix} open={Boolean(fix)} onClose={() => setFix(null)} onSaved={(c) => { F.set({ customer: c }); if (F.reviewOpen) focusReview(); }} />
       <Review F={F} checks={checks} numberId="bf-number" onSave={saveNow} waiting={drafts.waiting} />
       {children}
     </Page>

@@ -138,6 +138,7 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   // named in the address too, as the page may come back from the browser's back-forward cache (Ruling 1D-10).
   useEffect(() => {
     const away = () => {
+      // its own guards stay: the drafts layer refuses only a draft made a bill already, not a bill saved before it had one, nor a discarded draft
       if (!isNew || done.current || save.current.saving || save.current.savedTo || !unkept()) return;
       setPending(false);
       keepNow(true);

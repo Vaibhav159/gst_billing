@@ -1,7 +1,7 @@
 // Tests only (not *.test.tsx, so vitest doesn't run it, and nothing in the app imports it): the bill form in a data
 // router with the app's providers and the firm scope, and a fake server answering everything the form asks, the
 // contract's way. Today is 08 Oct 2026, as in the prototype's sample data.
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, type RouteObject } from "react-router";
@@ -19,6 +19,19 @@ export function fakeToday() {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+}
+/**
+ * Lets what's on its way land (answers, the cache telling the page, a dialog's focus): a little faked time, inside act,
+ * twice, since what one answer draws can ask for more.
+ */
+export async function settle() {
+  for (let i = 0; i < 2; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+}
+/** Whether closing the tab now would ask (the browser's own prompt). */
+export function asksOnClose(): boolean {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
 }
 
 const figures = (last: Record<string, unknown> | null) => ({ bills: last ? 1 : 0, total: last ? "87083.21" : "0.00", cancelled: 0, udhaar_bills: 0, udhaar_total: "0.00", last_bill: last });

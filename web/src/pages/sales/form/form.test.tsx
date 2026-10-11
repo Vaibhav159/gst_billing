@@ -7,14 +7,15 @@ import { toCustomer } from "@/core/api/customers";
 import { __resetDrafts, useKeepDraft, useUnfinishedBills } from "@/core/api/drafts";
 import { __setNetState } from "@/core/api/network";
 import { AuthContext } from "@/core/auth/AuthProvider";
-import { __resetDeviceDrafts, keepOnDevice, keptDraft } from "@/core/deviceDrafts";
+import { __resetDeviceDrafts, keepOnDevice, keptDraft, keptDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { LINE_COLS } from "./lines";
-import { startCopy, startEdit, startNew, startRemake, toDraftData, type Start } from "./model";
+import { startCopy, startDraft, startEdit, startNew, startRemake, toDraftData, type Start } from "./model";
 import { useBillForm } from "./useBillForm";
+import { useDraftKeeping } from "./useDraftKeeping";
 import { ACCOUNTANT, ANIL, formServer, fakeToday, mountForm, RING, STAFF, TODAY } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
@@ -236,6 +237,8 @@ test("a menu open (the top bar's) has Ctrl S and Ctrl Enter, as the app's shortc
     await user.keyboard("{Control>}{Enter}{/Control}");
     expect(screen.queryByText(/to fix before saving/)).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Line 2 product" })).not.toBeInTheDocument();
+    // a blank last line is reused rather than doubled, and focused: the cursor staying put is what shows no line was added
+    expect(customer).toHaveFocus();
     // one on its way out doesn't
     menu.setAttribute("data-closing", "");
     await user.keyboard("{Control>}s{/Control}");
@@ -632,7 +635,8 @@ test("a refusal the form can't put under a field (the cancelled bill was made ag
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ replaces: 412 });
   expect(r).toEqual({ refused: null });
   expect(result.current.form.reviewOpen).toBe(true);
-  expect(result.current.form.saveError).toEqual({ kind: "failed", title: "Not saved", body: words });
+  // a refusal saving again can't change: the review offers no Try again for it (Ruling 1D-12)
+  expect(result.current.form.saveError).toEqual({ kind: "replaces", title: "Not saved", body: words });
   // nothing was put under a field
   expect(result.current.form.errors).toEqual({});
 });
@@ -648,4 +652,58 @@ test("a refusal the form can put under a field closes the review and names the f
   expect(result.current.form.reviewOpen).toBe(false);
   expect(result.current.form.saveError).toBeNull();
   expect(result.current.form.showErr(`${pendant}-rate`)).toBe("Type the rate per piece.");
+});
+
+/* ── away()'s own guards: what the drafts layer doesn't refuse (T5 review, PROBE-A6 and PROBE-A6-DISCARD) ── */
+
+/** The page hidden (a phone switching to another app), then closed (the tab): neither runs React's cleanup. */
+function hideAndClose() {
+  act(() => {
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    delete (document as { visibilityState?: unknown }).visibilityState;
+    window.dispatchEvent(new Event("pagehide"));
+  });
+}
+
+test("a new bill saved before it was ever kept, then hidden and closed before the page moves on: no unfinished bill of the saved bill is kept", async () => {
+  fakeToday();
+  const { calls } = formServer();
+  const start = COPY();
+  const { result } = renderHook(() => { const form = useBillForm(start); return { form, drafts: useDraftKeeping(form, "a6") }; }, { wrapper: inRouter });
+  await waitFor(() => expect(result.current.form.suggestion).toBe("34"));
+  act(() => { result.current.form.setPayment("cash"); });
+  act(() => { expect(result.current.form.openReview()).toEqual({ ok: true }); });
+  await act(async () => { await result.current.form.save(); });
+  // saved, with no draft of its own: the drafts layer has no id to refuse, so only away()'s guards stop a keep
+  expect(result.current.form).toMatchObject({ savedTo: "/sales/501?saved=new", draftId: null });
+  hideAndClose();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+  expect(keptDrafts()).toEqual([]);
+  expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
+});
+
+test("a change, then Discard draft, then the page closed before the form moves on: the discarded bill stays gone", async () => {
+  fakeToday();
+  const D = "5d1c2a8e-0b7f-4a8e-9c3a-1f2e3d4c5b6a";
+  const row = { id: D, business: 3, started_by: RAKESH, data: { ...toDraftData(COPY().form, null), notes: "Waiting" }, created_at: "2026-10-08T09:20:00+05:30", updated_at: "2026-10-08T09:25:00+05:30" };
+  const { calls } = formServer([
+    ["GET", "drafts/", () => ({ results: [row] })],
+    ["DELETE", `drafts/${D}/`, () => null],
+    ["PUT", `drafts/${D}/`, ({ body }) => ({ ...row, data: (body as { data: unknown }).data })],
+  ]);
+  keepOnDevice({ ...row, synced: true });
+  const start = startDraft({ ...row, onDevice: false });
+  const { result } = renderHook(() => { const form = useBillForm(start); return { form, drafts: useDraftKeeping(form, "a6-discard") }; }, { wrapper: inRouter });
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  act(() => { result.current.form.set({ notes: "Waiting for the ring" }); });
+  act(() => { result.current.drafts.discard(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(result.current.drafts.leaveTo).toBe("/sales");
+  expect(calls.filter((c) => c.method === "DELETE").map((c) => c.url)).toEqual([`drafts/${D}/`]);
+  // the drafts layer doesn't refuse a discarded draft: only away()'s guards keep it from coming back
+  hideAndClose();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+  expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
+  expect(keptDraft(D)).toBeNull();
 });

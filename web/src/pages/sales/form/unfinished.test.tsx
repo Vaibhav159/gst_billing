@@ -8,7 +8,7 @@ import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { BillForm } from "./BillFormPage";
 import { startDraft, startEdit, type Start } from "./model";
-import { ANIL, formServer, fakeToday, mountForm } from "./testing";
+import { ANIL, asksOnClose, formServer, fakeToday, mountForm, settle } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -93,13 +93,6 @@ async function pickAnil(user: ReturnType<typeof fakeToday>) {
   await user.keyboard("{Enter}");
 }
 const puts = (calls: { method: string }[]) => calls.filter((c) => c.method === "PUT");
-/**
- * Lets what's on its way land (answers, the cache telling the page, a dialog's focus): a little faked time, inside act,
- * twice, since what one answer draws can ask for more.
- */
-async function settle() {
-  for (let i = 0; i < 2; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-}
 /**
  * Opens an unfinished bill (a click, or a link): the form waits for the shop's fresh answer before it's drawn, so that
  * answer is held, then let land inside act, and the form isn't drawn between a test's steps.
@@ -279,8 +272,17 @@ test.each([
   server.savedAsBill(rakeshs.id);
   const dialog = await save(user);
   expect(within(dialog).getByRole("alert")).toHaveTextContent(`Not saved${SAVED_AS.detail}`);
-  if (linked) expect(within(dialog).getByRole("link", { name: "Open KGH/2026-27/31" })).toHaveAttribute("href", "/sales/412");
-  else expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
+  // saving again can't make it, so there's no Try again: that bill is the way on, else only back to the form (Ruling 1D-12)
+  expect(within(dialog).queryByRole("button", { name: /^(Try again|Save)/ })).not.toBeInTheDocument();
+  if (linked) {
+    const open = within(dialog).getByRole("link", { name: "Open KGH/2026-27/31" });
+    expect(open).toHaveAttribute("href", "/sales/412");
+    expect(open).toHaveAttribute("data-variant", "primary");
+    expect(open).toHaveFocus();
+  } else {
+    expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Go back and edit" })).toHaveFocus();
+  }
   await waitFor(() => expect(status().getByText(SAVED_AS.detail)).toBeInTheDocument());
   expect(screen.getByText(`Started at 09:20 by Rakesh Soni. ${SAVED_AS.detail}`)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Discard draft" })).not.toBeInTheDocument();
@@ -707,8 +709,6 @@ test("where the browser refuses storage, closing the tab with a change not kept 
   const { calls } = formServer(server.routes);
   const { router } = mountForm("/sales/new");
   await settle();
-  /** Whether closing the tab now would ask (the browser's prompt). */
-  const asksOnClose = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
   expect(asksOnClose()).toBe(false);
   await pickAnil(user);
   expect(asksOnClose()).toBe(true);
@@ -741,7 +741,6 @@ test("where the browser keeps unfinished bills, closing the tab never asks: the 
   const { calls } = formServer(server.routes);
   mountForm("/sales/new");
   await settle();
-  const asksOnClose = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
   await pickAnil(user);
   expect(asksOnClose()).toBe(false);
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
