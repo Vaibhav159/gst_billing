@@ -116,7 +116,7 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
                           "already_restored", bill=bill_ref(back) if back else None)
         if check_month:
             assert_sales_open(binned.business_id, binned.invoice_date, "restore")
-        firm = uncached(Business).select_for_update().filter(pk=binned.business_id).first()
+        firm = uncached(Business).select_for_update(no_key=True).filter(pk=binned.business_id).first()
         if firm is None:
             raise Refusal("The firm on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again in the right firm.", "firm_gone")

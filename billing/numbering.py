@@ -174,7 +174,8 @@ def shape_problem(typed, final, following):
 
 def lock_firms(*business_ids):
     """Hold number writes until the transaction ends; moves take both firms in id order (Ruling 1A-46)."""
-    list(uncached(Business).select_for_update().filter(pk__in=sorted(set(business_ids)))
+    # Let v2's deferred foreign-key checks take KEY SHARE when they commit (Ruling 1A-49).
+    list(uncached(Business).select_for_update(no_key=True).filter(pk__in=sorted(set(business_ids)))
          .order_by("pk").values_list("pk", flat=True))
 
 

@@ -304,6 +304,10 @@ def save_bill(data, user, invoice=None):
         if problem:
             raise ValidationError({"invoice_date": [problem]})
         assert_sales_open(business, day, "edit" if old else "create")
+        replaces = data["replaces"] if old is None else old.replaces
+        if old is None and replaces is not None:
+            # Bill before firm, as renumber and move lock them: the reverse order can deadlock (Ruling 1A-49).
+            replaces = _remade(replaces).pk
         moved = old is not None and business.pk != old.business_id
         if moved:
             lock_firms(old.business_id, business.pk)
@@ -315,9 +319,6 @@ def save_bill(data, user, invoice=None):
             number = old.invoice_number
         else:
             number = checked_number(business, day, typed, exclude_invoice=old.pk if old else None)
-        replaces = data["replaces"] if old is None else old.replaces
-        if old is None and replaces is not None:
-            replaces = _remade(replaces).pk
         chosen = data["place_of_supply"]
         if chosen == default_place_of_supply(business, customer):
             chosen = None  # NULL means the rule: stored only when it differs (rollback-safe)
