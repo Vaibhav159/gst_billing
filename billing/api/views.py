@@ -3358,8 +3358,10 @@ class UserManagementView(APIView):
         # Update role
         new_role = request.data.get("role")
         if new_role and new_role in ("admin", "editor", "viewer"):
-            user.groups.clear()
-            user.groups.add(Group.objects.get(name=new_role))
+            from billing.roles import V3_GROUPS
+
+            kept = list(user.groups.filter(name__in=V3_GROUPS)) if new_role == "editor" else []
+            user.groups.set([Group.objects.get(name=new_role), *kept])
 
         # Update active status
         if "is_active" in request.data:
@@ -3368,8 +3370,9 @@ class UserManagementView(APIView):
 
         # Update password
         if request.data.get("password"):
-            user.set_password(request.data["password"])
-            user.save()
+            from billing.services.accounts import set_password
+
+            set_password(user, request.data["password"])
 
         return Response({
             "id": user.id,
@@ -3378,7 +3381,6 @@ class UserManagementView(APIView):
             "is_active": user.is_active,
             "message": "User updated",
         })
-
 
 class FiledPeriodViewSet(viewsets.ModelViewSet):
     """Lock/unlock filed months. Every transition is audit-logged —

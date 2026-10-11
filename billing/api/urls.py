@@ -32,6 +32,7 @@ from .inward_bills import (
 )
 from .me import MeView
 from .media import SignedMediaView
+from .people import AccountView, PeopleActionView, PeopleView
 from .preferences import PreferencesView
 from .purchase_files import PurchaseFilesView
 from .purchase_reader import AiReadsView, PurchaseReadView
@@ -142,6 +143,9 @@ urlpatterns = [
     path("account/sessions/sign-out-others/", SessionEndView.as_view()),
     path("account/sessions/<str:pk>/sign-out/", SessionEndView.as_view()),
     path("auth/sign-out/", SignOutView.as_view()),
+    path("people/", PeopleView.as_view(), name="people"),
+    path("people/<int:pk>/<str:action>/", PeopleActionView.as_view(), name="people-action"),
+    path("account/", AccountView.as_view(), name="account"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",
