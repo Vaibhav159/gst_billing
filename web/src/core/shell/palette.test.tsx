@@ -408,6 +408,7 @@ test("noteVisit keeps a person's last eight, newest first and each once; storage
 /** The server for the whole app: this person's preferences (Expert on a phone), one firm, and a search that finds Meena. */
 function serve() {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("preferences/") ? { data: { phoneMode: "expert" } }
+    : config.url === "setup/" ? { firms: { count: 1, names: ["KIRAN GOLD HOUSE (SANDBOX)"] }, customers: { count: 0, names: [] }, products: { count: 0, names: [] }, bills: { count: 0, cancelled: 0 }, people: 1, last_backup_at: null }
     : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("search/quick/") ? MEENA : {})) as AxiosAdapter;
 }

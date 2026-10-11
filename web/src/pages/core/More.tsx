@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { BarChart3, Building2, DatabaseBackup, History, Inbox, Landmark, LifeBuoy, LogOut, Maximize2, Package, QrCode, Settings, ShieldCheck, ShoppingBag, Sparkles, Truck, Type, UserRound, type LucideIcon } from "lucide-react";
 import { problemOf, saveFailure, type ApiProblem } from "@/core/api/errors";
+import { useSetup } from "@/core/api/setup";
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { TEXT_SIZES, useTextSize } from "@/core/device";
@@ -34,6 +35,7 @@ function notSwitched(p: ApiProblem): { title: string; body: string } {
 
 export default function More() {
   const { me, can, signOut } = useAuth();
+  const setup = useSetup();
   const { isEasy } = useView();
   const { setPrefs } = usePrefs();
   const [textSize, setTextSize] = useTextSize();
@@ -41,6 +43,15 @@ export default function More() {
   const { show } = useToast();
   const net = useNetwork();
   const [leaving, setLeaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+  const leave = async () => {
+    if (signingOut) return;
+    setSigningOut(true); setSignOutError("");
+    try { await signOut(); setLeaving(false); }
+    catch { setSignOutError("Sign out didn't finish. Try again when the app can connect."); }
+    finally { setSigningOut(false); }
+  };
   const [help, setHelp] = useState(false);
   const [switching, setSwitching] = useState(false);
   // a switch answered after the person left the page doesn't pull them back to a home
@@ -76,6 +87,7 @@ export default function More() {
 
   return (
     <Page title="More" phoneSubtitle={`${me?.fullName} · ${me?.roleLabel}`}>
+      {setup.isError ? <div role="status" className="text-muted"><Button variant="link" onClick={() => { void setup.refetch(); }}>Counts couldn't load. Try again.</Button></div> : null}
       <Card pad={false}>
         <ListRow onClick={() => void switchMode()} aria-busy={switching || undefined}
           leading={<span className="w-9 h-9 rounded-ctl bg-brand-tint border border-brand-line grid place-items-center text-brand shrink-0">{isEasy ? <Maximize2 size={18} aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}</span>}
@@ -91,13 +103,13 @@ export default function More() {
         <ListRow to="/scan" leading={icon(QrCode)} title="Check a bill's QR code" subtitle="Scan a printed bill to open it" />
       </>)}
       {group("Records", <>
-        {may("/products") ? <ListRow to="/products" leading={icon(Package)} title="Products" /> : null}
+        {may("/products") ? <ListRow to="/products" leading={icon(Package)} title="Products" subtitle={setup.data ? `${setup.data.products.count} ${setup.data.products.count === 1 ? "product" : "products"} with HSN and GST rate` : undefined} /> : null}
         <ListRow to="/suppliers" leading={icon(Truck)} title="Suppliers" />
         {may("/firms") ? <ListRow to="/firms" leading={icon(Building2)} title="Firms" subtitle="GSTIN, bank details, bill numbers" /> : null}
       </>)}
       {group("Admin", <>
-        {may("/users") ? <ListRow to="/users" leading={icon(ShieldCheck)} title="Users and roles" /> : null}
-        {may("/backup") ? <ListRow to="/backup" leading={icon(DatabaseBackup)} title="Backup and restore" /> : null}
+        {may("/users") ? <ListRow to="/users" leading={icon(ShieldCheck)} title="Users and roles" subtitle={setup.data?.people != null ? `${setup.data.people} ${setup.data.people === 1 ? "person" : "people"} can sign in` : undefined} /> : null}
+        {may("/backup") ? <ListRow to="/backup" leading={icon(DatabaseBackup)} title="Backup and restore" subtitle={setup.data ? setup.data.last_backup_at ? `Last full backup ${date(setup.data.last_backup_at.slice(0, 10))}` : "No full backup yet" : undefined} /> : null}
         {may("/audit") ? <ListRow to="/audit" leading={icon(History)} title="Audit log" subtitle="Who changed what, and restore deleted bills" /> : null}
         {may("/settings") ? <ListRow to="/settings" leading={icon(Settings)} title="Settings" subtitle="Bill defaults, numbering, messages" /> : null}
         <ListRow to="/profile" leading={icon(UserRound)} title="Profile and password" />
@@ -118,8 +130,9 @@ export default function More() {
       <Button variant="danger-outline" icon={LogOut} full onClick={() => setLeaving(true)}>Sign out</Button>
       {/* signed out, the app's sign-in check takes this tab to a plain sign-in page */}
       <ConfirmDialog open={leaving} onClose={() => setLeaving(false)} title="Sign out of this phone?" cancelLabel="Stay signed in" confirmLabel="Sign out"
-        onConfirm={() => { setLeaving(false); signOut(); }}>
+        onConfirm={() => { void leave(); }} busy={signingOut} busyLabel="Signing out…">
         <p>You'll need your password to sign in again. Unfinished bills stay on this phone.</p>
+        {signOutError ? <p role="alert" className="text-neg">{signOutError}</p> : null}
       </ConfirmDialog>
     </Page>
   );

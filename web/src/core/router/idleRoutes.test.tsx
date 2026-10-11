@@ -13,12 +13,20 @@ import { appRoutes } from "./routes";
 import { part2dRoutes } from "@/pages/imports/routes";
 
 type Code = { load: () => Promise<unknown> };
-const { queues, rendererLoaded } = vi.hoisted(() => ({ queues: [] as Code[][], rendererLoaded: vi.fn() }));
+const { queues, rendererLoaded, passwordCode } = vi.hoisted(() => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  return { queues: [] as Code[][], rendererLoaded: vi.fn(), passwordCode: { pending, release } };
+});
 vi.mock("./lazyPage", async (real) => {
   const actual = await real<typeof import("./lazyPage")>();
   return { ...actual, idlePages: (pages: Code[]) => { queues.push(pages); return actual.idlePages(pages); } };
 });
 vi.mock("@react-pdf/renderer", () => { rendererLoaded(); return {}; });
+vi.mock("@/pages/people/ChoosePassword", async () => {
+  await passwordCode.pending;
+  return { default: () => <h1>Choose your own password</h1> };
+});
 
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((route) => [route, ...all(route.children ?? [])]);
 
@@ -77,5 +85,37 @@ test("the real routes warm every other lazy screen (GST returns and reports incl
   } finally {
     view?.unmount(); router.dispose(); client.clear();
     vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers();
+  }
+});
+
+test("More shares one lazy chunk between its two phone addresses and warming its code fetches no data", async () => {
+  const more = all(appRoutes).find(({ path }) => path === "/more")?.element;
+  const easy = all(appRoutes).find(({ path }) => path === "/e/more")?.element;
+  if (!isValidElement(more) || !isValidElement(easy)) throw new Error("Both More routes must have a page.");
+  expect(more.type).toHaveProperty("load", expect.any(Function));
+  expect(easy.type).toBe(more.type);
+  expect(queues[0]).toContain(more.type);
+  const { calls } = salesServer();
+  await (more.type as unknown as Code).load();
+  expect(calls).toHaveLength(0);
+  expect(rendererLoaded).not.toHaveBeenCalled();
+});
+
+test("the password chunk shows its loading state outside the shell until its code arrives", async () => {
+  const { calls } = salesServer();
+  const client = testQueryClient();
+  const router = createMemoryRouter(appRoutes, { initialEntries: ["/password"] });
+  const view = render(<QueryClientProvider client={client}><AuthContext.Provider value={stubAuth({ mustChangePassword: true })}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+  try {
+    expect(screen.getByRole("status")).toHaveTextContent("Loading your password page…");
+    expect(document.querySelector("#app-main")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Choose your own password" })).not.toBeInTheDocument();
+    await act(async () => { passwordCode.release(); });
+    expect(await screen.findByRole("heading", { name: "Choose your own password" })).toBeInTheDocument();
+    expect(document.querySelector("#app-main")).toBeNull();
+    expect(calls).toHaveLength(0);
+  } finally {
+    await act(async () => { passwordCode.release(); });
+    view.unmount(); router.dispose(); client.clear();
   }
 });

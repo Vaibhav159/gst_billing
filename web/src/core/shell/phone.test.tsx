@@ -29,10 +29,11 @@ import { useKeyboardInset } from "./keyboard";
 import { tabOf } from "./nav";
 
 const auth = stubAuth();
+const SETUP = { firms:{count:0,names:[]}, customers:{count:0,names:[]}, products:{count:0,names:[]}, bills:{count:0,cancelled:0}, people:1, last_backup_at:null };
 
 function mount(path: string, prefs: Record<string, unknown> = {}) {
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {} })) as AxiosAdapter;
+    data: config.url === "setup/" ? SETUP : config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {} })) as AxiosAdapter;
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={auth}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
@@ -62,6 +63,8 @@ test("an Easy person on an Expert page gets a way back to Easy", async () => {
 
 test("More lists the other pages, switches mode and signs out", async () => {
   mount("/more", { phoneMode: "expert" });
+  // Wait for the real route module requested by mount; the loading boundary is tested separately.
+  await act(async () => { await import("@/pages/core/More"); });
   expect(await screen.findByRole("link", { name: /products/i })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /switch to easy/i })).toBeInTheDocument();
   await act(() => new Promise<void>((r) => { setTimeout(r, 300); })); // past the page's guard against a double tap's second tap (PageFrame, 300 ms)
@@ -93,6 +96,7 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
     calls.push({ method: config.method, url: config.url, body });
     const answer = (data: unknown) => ({ status: 200, statusText: "", headers: {}, config, data });
     const down = () => Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config));
+    if (config.url === "setup/") return Promise.resolve(answer(SETUP));
     if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {}));
     if (config.method === "patch") {
       if (patchFail) return down();

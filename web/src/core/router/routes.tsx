@@ -1,8 +1,10 @@
+import { Suspense } from "react";
 import { Navigate, useLocation, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { paletteCode } from "@/core/shell/Palette";
 import { AppFailed } from "@/core/shell/ScreenBoundary";
+import { ListSkeleton } from "@/core/ui";
 import Login from "@/pages/core/Login";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
@@ -18,7 +20,11 @@ import { idlePages, lazyPage } from "./lazyPage";
 const GstReturns = lazyPage(() => import("@/pages/gst/GstReturns"));
 const SetupPage = lazyPage(() => import("@/pages/records/Setup"));
 const SettingsPage = lazyPage(() => import("@/pages/records/Settings"));
+const UsersPage = lazyPage(() => import("@/pages/people/Users"));
+const ProfilePage = lazyPage(() => import("@/pages/people/Profile"));
+const ChoosePassword = lazyPage(() => import("@/pages/people/ChoosePassword"));
 const More = lazyPage(() => import("@/pages/core/More"));
+
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -34,7 +40,7 @@ const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, More, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, More, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -57,7 +63,7 @@ const PAGES: Record<string, string[]> = {
   gst: ["/gst", "/reports", "/reports/:kind"],
   records: [
     "/products", "/products/new", "/products/:id", "/products/:id/edit", "/firms", "/firms/new", "/firms/:id", "/firms/:id/edit",
-    "/users", "/backup", "/audit", "/settings", "/profile", "/setup",
+    "/backup", "/audit", "/settings", "/setup",
   ],
   easy: [
     "/e", "/e/bills", "/e/new", "/e/new/items", "/e/saved/:id", "/e/bill/:id", "/e/capture", "/e/customers", "/e/customers/new", "/e/customers/:id/edit",
@@ -106,6 +112,7 @@ export const appRoutes: RouteObject[] = [{
   errorElement: <AppFailed />,
   children: [
     { path: "/login", element: <Login /> },
+    { path: "/password", element: <RequireAuth><Suspense fallback={<div className="p-6"><ListSkeleton what="your password page" /></div>}><ChoosePassword /></Suspense></RequireAuth> },
     // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
     ...V2_REDIRECTS.map(([path, to]): RouteObject => ({ path, element: <V2Redirect to={to} /> })),
     {
@@ -125,6 +132,8 @@ export const appRoutes: RouteObject[] = [{
         ...firmRoutes,
         { path: "/settings", element: <SettingsPage /> },
         { path: "/setup", element: <SetupPage /> },
+        { path: "/users", element: <UsersPage /> },
+        { path: "/profile", element: <ProfilePage /> },
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         { path: "/sales/paper", element: <PaperBookPage /> },

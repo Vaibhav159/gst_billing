@@ -10,6 +10,15 @@ export function AccountMenu({ onShortcuts }: { onShortcuts: () => void }) {
   const [theme, setTheme] = useTheme();
   const [textSize, setTextSize] = useTextSize();
   const [leaving, setLeaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const leave = async () => {
+    if (busy) return;
+    setBusy(true); setError("");
+    try { await signOut(); setLeaving(false); }
+    catch { setError("Sign out didn't finish. Try again when the app can connect."); }
+    finally { setBusy(false); }
+  };
   const items: MenuItem[] = [
     { heading: `${me?.fullName} · ${me?.roleLabel}` },
     { label: "Profile and password", icon: UserRound, to: "/profile" },
@@ -27,9 +36,10 @@ export function AccountMenu({ onShortcuts }: { onShortcuts: () => void }) {
       <Menu width={260} title="Account" items={items}
         trigger={(p) => <button {...p} type="button" aria-label={`Account: ${me?.fullName}`} className="rounded-full"><Avatar name={me?.fullName ?? ""} size={36} /></button>} />
       {/* signed out, the app's sign-in check takes this tab to the sign-in page */}
-      <ConfirmDialog open={leaving} onClose={() => setLeaving(false)} onConfirm={() => { setLeaving(false); signOut(); }}
+      <ConfirmDialog open={leaving} onClose={() => setLeaving(false)} onConfirm={() => { void leave(); }} busy={busy} busyLabel="Signing out…"
         title="Sign out?" confirmLabel="Sign out" cancelLabel="Stay signed in">
         <p>You'll need your password to sign in again.</p>
+        {error ? <p role="alert" className="text-neg">{error}</p> : null}
       </ConfirmDialog>
     </>
   );
