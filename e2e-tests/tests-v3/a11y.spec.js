@@ -1,11 +1,17 @@
 const { test, expect } = require("@playwright/test");
 const { measure, problems } = require("./axe");
-const { cleanDrafts, draftWrites, leaveForm, monthBefore, possessive } = require("./bill-form-data");
+const { aProduct, monthBefore, notesSavedBills, possessive, startsDrafts } = require("./bill-form-data");
 const { SIGNED_OUT, opened } = require("./session");
-const { afterDialog, client, esc, makesBills, newBill, today, walkIn } = require("./sales-data");
+const { TEST_ITEM, afterDialog, client, esc, makesBills, newBill, today, walkIn } = require("./sales-data");
 
-// every bill a check makes goes to the bin after it (sales-data.js)
+// After each check: the bill form left with its writes to the shop's list stopped, a bill it saved noted, and the
+// unfinished bills started during the check deleted (startsDrafts); then every bill the check made goes to the bin
+// (makesBills). In that order: afterEach hooks run in the order they're declared
+startsDrafts(test);
 makesBills(test);
+
+/** Where a check runs, as its title says: "desktop", "phone" or "desktop and phone". */
+const where = (on) => on.join(" and ");
 
 /** Opens `path` in `theme` and waits for the page it lands on (`landing`): the page itself, not the app still loading. */
 async function openIn(page, theme, path, landing = path) {
@@ -72,6 +78,10 @@ const STATES = [
     },
   },
 ];
+/** A saved bill's edit form itself, not its placeholders: its Check and save changes (the summary's, the action bar's). */
+const editDrawn = (page) => expect(page.getByRole("button", { name: "Check and save changes" })).toBeVisible();
+/** A bill's preview in the list (desktop), once it has the bill's own answer: its item, never the skeletons before it. */
+const previewed = (page, b) => expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true }).getByText(TEST_ITEM)).toBeVisible();
 // What needs a bill: one is made through the API for each test and measured in each state it's put in on the way (sent,
 // cancelled or deleted through the API between pages), so few bills go to the bin; each goes there after its test.
 const BILL_STATES = [
@@ -82,7 +92,7 @@ const BILL_STATES = [
     steps: [
       {
         name: "the bills list with a bill previewed", on: ["desktop"], path: (b) => `/sales?firm=${b.business}&month=today&bill=${b.id}`, landing: "/sales",
-        async show(page, b) { await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toBeVisible(); },
+        async show(page, b) { await previewed(page, b); },
       },
       {
         name: "a bill's page", path: (b) => `/sales/${b.id}`,
@@ -154,7 +164,38 @@ const BILL_STATES = [
       },
       {
         name: "a cancelled bill in the list's preview", on: ["desktop"], path: (b) => `/sales?firm=${b.business}&month=today&bill=${b.id}`, landing: "/sales",
-        async show(page, b) { await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toContainText("Total when issued"); },
+        async show(page, b) {
+          await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toContainText("Total when issued");
+          await previewed(page, b);
+        },
+      },
+    ],
+  },
+  {
+    // a bill's edit page (1D): the form; its review once one thing has changed, with what changes; then, cancelled, what's
+    // on it and why it can't change (ReadOnlyBill; a filed month's is in FORM_STATES); then, deleted, what its edit
+    // address shows. A change to a saved bill keeps no draft, and the page left with it unsaved asks the browser first
+    // (beforeunload), which Playwright accepts
+    name: "a bill's edit page, then cancelled, then deleted", on: ["desktop", "phone"],
+    steps: [
+      { name: "a bill's edit form", path: (b) => `/sales/${b.id}/edit`, async show(page) { await editDrawn(page); } },
+      {
+        name: "the edit's review, with what changes", path: (b) => `/sales/${b.id}/edit`,
+        async show(page, b, project) {
+          await editDrawn(page);
+          await opened(page);
+          await page.getByRole("textbox", { name: "Note on the bill", exact: true }).fill("Changed in a test");
+          const { dialog } = await openReview(page, project, `Check the changes to ${b.number}`);
+          await expect(dialog.getByRole("list", { name: "What changes" })).toContainText("Note");
+        },
+      },
+      {
+        name: "a cancelled bill's edit page", cancelled: true, path: (b) => `/sales/${b.id}/edit`,
+        async show(page) { await expect(page.getByText(/^Cancelled bills can't be changed\./)).toBeVisible(); },
+      },
+      {
+        name: "a deleted bill's edit page", deleted: true, path: (b) => `/sales/${b.id}/edit`,
+        async show(page, b) { await expect(page.getByText(`${b.number} was deleted`, { exact: true })).toBeVisible(); },
       },
     ],
   },
@@ -162,7 +203,7 @@ const BILL_STATES = [
 
 for (const theme of ["obsidian", "pearl"]) {
   for (const { path, ...lands } of PAGES) {
-    test(`no WCAG 2.2 AA problems: ${path} in ${theme}`, async ({ page }, info) => {
+    test(`no WCAG 2.2 AA problems: ${path} in ${theme} (${where(["desktop", "phone"].filter((p) => lands[p]))})`, async ({ page }, info) => {
       const landing = lands[info.project.name];
       test.skip(!landing, `${path} isn't measured on the ${info.project.name}`);
       await openIn(page, theme, path, landing);
@@ -171,7 +212,7 @@ for (const theme of ["obsidian", "pearl"]) {
     });
   }
   for (const { name, on, path, show } of STATES) {
-    test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page }, info) => {
+    test(`no WCAG 2.2 AA problems: ${name} in ${theme} (${where(on)})`, async ({ page }, info) => {
       test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
       await openIn(page, theme, path);
       await show(page);
@@ -180,7 +221,7 @@ for (const theme of ["obsidian", "pearl"]) {
     });
   }
   for (const { name, on, paper, walkin, steps } of BILL_STATES) {
-    test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
+    test(`no WCAG 2.2 AA problems: ${name} in ${theme} (${where(on)})`, async ({ page, request }, info) => {
       test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
       test.slow(); // several pages, each measured
       const api = client(request);
@@ -202,30 +243,24 @@ for (const theme of ["obsidian", "pearl"]) {
 
 // The bill form (part 1D), in both themes: a new bill; the paper book (last month's, the first firm's with numbers not
 // entered yet and a cancelled bill, as the sandbox's KIRAN has, else the fullest there is: bookToMeasure, and the test
-// notes which); Check and save on a copy of a bill made for it; the date's calendar (F14); the customer box while it
-// searches and with no match (Ruling 1C-20a: web has no axe of its own); and the review once how it was paid is picked,
-// with nothing left in its body to focus, so the body itself takes the keyboard (Ruling 1D-18), measured where it
-// scrolls: a 1280×720 desktop and a phone. A copy keeps no unfinished bill until something on it changes; picking how it
-// was paid does, so that one is deleted after the test.
-let draftsSince = null;
-let drafted = null;
-test.afterEach(async ({ page, request }) => {
-  const since = draftsSince;
-  draftsSince = null;
-  if (!since) return;
-  await leaveForm(page, drafted);
-  await cleanDrafts(client(request), since);
-});
+// notes which) and the form its Enter bill opens; Check and save on a copy of a bill made for it; the date's calendar
+// (F14); the customer box while it searches and with no match (Ruling 1C-20a: web has no axe of its own); the review once
+// how it was paid is picked, with nothing left in its body to focus, so the body itself takes the keyboard (Ruling
+// 1D-18), measured where it scrolls: a 1280×720 desktop and a phone; the desktop's sheet for an item that isn't in
+// Products; the phone's item sheet, step by step; a filed month's bill on its edit page; and the review refusing a save
+// (1D-20): a number just taken, and a filed month. An unfinished bill a check leaves is deleted after it (startsDrafts).
 /** The form itself, not its placeholders: the desktop's customer box has the cursor; a phone's offers to choose one. */
 async function formDrawn(page, project) {
   if (project === "phone") await expect(page.getByRole("button", { name: /^Choose customer/ })).toBeVisible();
   else await expect(page.getByRole("combobox", { name: /^Customer/ })).toBeFocused();
 }
-/** Check and save (Ctrl S on a desktop, the action bar's button on a phone): the review, past its guard. */
-async function openReview(page, project) {
-  const title = project === "phone" ? "Check the bill" : "Check the bill before saving";
+/**
+ * Check and save (Ctrl S on a desktop, the action bar's button on a phone): the review, past its guard. Its title: a new
+ * bill's, unless `title` (a change to a saved bill's).
+ */
+async function openReview(page, project, title = project === "phone" ? "Check the bill" : "Check the bill before saving") {
   await opened(page);
-  if (project === "phone") await page.getByRole("button", { name: "Check and save" }).click();
+  if (project === "phone") await page.getByRole("button", { name: /^Check and save/ }).click();
   else await page.keyboard.press("Control+s");
   const dialog = page.getByRole("dialog", { name: title });
   await expect(dialog).toBeVisible();
@@ -251,6 +286,73 @@ async function bookToMeasure(api) {
   const why = full ? `${f.name}, ${month}: ${holds}` : `fallback: no firm's ${month} has numbers not entered yet and a cancelled bill; measured ${possessive(f.name)} (${holds})`;
   return (book = { firm: f.id, month, why });
 }
+/** "2026-27": the financial year (April to March) of the ISO date `iso`, or the one `back` years before it. */
+function fyOf(iso, back = 0) {
+  const [y, m] = iso.split("-").map(Number);
+  const from = (m >= 4 ? y : y - 1) - back;
+  return `${from}-${String((from + 1) % 100).padStart(2, "0")}`;
+}
+let filed;
+/**
+ * A month a firm has filed, as the sandbox's AARAV and MEERA have (CI has none): the first firm's, as the app lists them,
+ * whose month now is open (a bill for today can still be made in it), and its latest filed month this year or last (the
+ * bill form takes no older date) with a bill in it that isn't cancelled: { firm, month, monthName, day (its first), bill },
+ * else null.
+ */
+async function filedMonth(api) {
+  if (filed !== undefined) return filed;
+  const now = today();
+  const { results: firms } = await api.get("businesses/", { page_size: 100 });
+  for (const firm of firms) {
+    const months = [];
+    for (const fy of [fyOf(now, 1), fyOf(now)]) months.push(...(await api.get("sales/", { business_id: firm.id, fy, facets: "months", summary: 0, page_size: 1 })).facets.months);
+    if (months.some((m) => m.month === now.slice(0, 7) && m.locked)) continue;
+    for (const { month } of months.filter((m) => m.locked && m.bills).reverse()) {
+      const { results: [bill] } = await api.get("sales/", { business_id: firm.id, month, status: "active", summary: 0, page_size: 1 });
+      if (!bill) continue;
+      const [y, m] = month.split("-").map(Number);
+      const monthName = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(Date.UTC(y, m - 1, 1));
+      return (filed = { firm, month, monthName, day: `${month}-01`, bill });
+    }
+  }
+  return (filed = null);
+}
+/** A filed month (filedMonth), or the check skipped: CI has none. */
+async function aFiledMonth(api) {
+  const f = await filedMonth(api);
+  test.skip(!f, "no firm has a filed month this year or last (CI has none)");
+  return f;
+}
+/** The page's asks for which of a firm's months are filed (the sales list's facets=months). */
+const asksMonths = (url) => url.pathname === "/api/sales/" && url.searchParams.get("facets") === "months";
+/**
+ * Holds back the page's asks for which months are filed until the returned release() is called, as if a month were filed
+ * after the form asked: a bill dated in one then goes to the server, which refuses it in its own words. Called before the
+ * page opens.
+ */
+async function holdMonths(page) {
+  let release;
+  const held = new Promise((done) => { release = done; });
+  // an ask the form gave up meanwhile (it asked again) has nothing left to go on
+  await page.route(asksMonths, async (route) => { await held; await route.continue().catch(() => {}); });
+  return release;
+}
+// the GST rates the bill form takes (web/src/pages/sales/form/model.ts SLABS), as a product stores them: fractions
+const SLAB_RATES = [0.03, 0.0025, 0, 0.001, 0.01, 0.015, 0.05, 0.12, 0.18, 0.28, 0.4];
+/**
+ * What the phone's item sheet is measured with: a product to search for (aProduct), and one missing its HSN code or GST
+ * rate where the shop has one, for the boxes the sheet then shows. Neither the sandbox nor CI has one: their boxes are an
+ * item typed in by hand's.
+ */
+async function itemsToMeasure(api) {
+  const { results } = await api.get("products/", { page_size: 200, ordering: "name" });
+  const broken = results.find((p) => !/^\d{4,8}$/.test(String(p.hsn_code ?? "").replace(/\D/g, ""))
+    || !SLAB_RATES.some((s) => p.gst_tax_rate != null && p.gst_tax_rate !== "" && Math.abs(s - Number(p.gst_tax_rate)) < 1e-9)) ?? null;
+  const why = broken ? `the HSN and GST boxes for ${broken.name}` : "the HSN and GST boxes for an item typed in by hand: no product misses its HSN code or GST rate";
+  return { search: await aProduct(api), broken, why };
+}
+/** An item no product is called, typed in by hand: it goes on no bill and into no list of products. */
+const BY_HAND = "Kundan Anklet (e2e)";
 const FORM_STATES = [
   {
     name: "a new bill's form", on: ["desktop", "phone"], path: () => "/sales/new",
@@ -259,6 +361,21 @@ const FORM_STATES = [
   {
     name: "the paper book", on: ["desktop", "phone"], prepare: bookToMeasure, note: (c) => c.why, path: (c) => `/sales/paper?firm=${c.firm}&month=${c.month}`, landing: "/sales/paper",
     async show(page) { await expect(page.getByRole("button", { name: /^Enter bill \d+$/ })).toBeVisible(); },
+  },
+  {
+    // the paper-mode form (1D Task 7) as the paper book's Enter bill opens it, with the paper bill's own number and date,
+    // from the book the paper book's state measures; measured once its number is checked
+    name: "the paper-mode form, from the paper book's Enter bill", on: ["desktop", "phone"], prepare: bookToMeasure, note: (c) => c.why,
+    path: (c) => `/sales/paper?firm=${c.firm}&month=${c.month}`, landing: "/sales/paper",
+    async show(page, c, project) {
+      const enter = page.getByRole("button", { name: /^Enter bill \d+$/ });
+      await expect(enter).toBeEnabled();
+      await opened(page);
+      await enter.click();
+      await page.waitForURL(/\/sales\/new\?paper=1/);
+      await formDrawn(page, project);
+      await expect(page.getByText(/ from the paper bill is free in FY /)).toBeVisible();
+    },
   },
   {
     name: "the bill form's review", on: ["desktop"], prepare: (api) => newBill(api), path: (b) => `/sales/new?from=${b.id}`, landing: "/sales/new",
@@ -304,7 +421,7 @@ const FORM_STATES = [
     },
   },
   {
-    name: "the review once paid", on: ["desktop", "phone"], desktopSize: { width: 1280, height: 720 }, prepare: (api) => newBill(api), keepsDraft: true,
+    name: "the review once paid", on: ["desktop", "phone"], desktopSize: { width: 1280, height: 720 }, prepare: (api) => newBill(api),
     path: (b) => `/sales/new?from=${b.id}`, landing: "/sales/new",
     async show(page, b, project) {
       await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
@@ -317,20 +434,145 @@ const FORM_STATES = [
       await expect(page.getByText(/^Kept as a draft at \d\d:\d\d$/)).toBeVisible({ timeout: 15_000 });
     },
   },
+  {
+    // the desktop's sheet for an item that isn't in Products (1D Task 6), from a line's product box: what was typed is
+    // its name. Nothing is saved
+    name: "the sheet for an item that isn't in Products", on: ["desktop"], path: () => "/sales/new",
+    async show(page) {
+      await formDrawn(page, "desktop");
+      await opened(page);
+      await page.getByRole("combobox", { name: "Line 1 product" }).click();
+      await page.keyboard.type(BY_HAND);
+      await page.getByRole("option", { name: new RegExp(`^\\+ An item that isn't in Products: “${esc(BY_HAND)}”`) }).click();
+      const name = page.getByRole("dialog", { name: "An item that isn't in Products" }).getByRole("textbox", { name: /^Name/ });
+      await expect(name).toBeFocused();
+      await expect(name).toHaveValue(BY_HAND);
+    },
+  },
+  {
+    // the phone's item sheet (1D Task 9), measured at each step: as it opens, on the shop's common products; a search; the
+    // boxes for the item's HSN code and GST rate (a product missing either where there is one, else an item typed in by
+    // hand and used on this bill only, so nothing goes into Products); then, after Add and next item, the sheet open
+    // again for the next item. The item on the form keeps itself as an unfinished bill (deleted after the test): measured
+    // once that has landed
+    name: "the phone's item sheet: its chips, a search, the HSN and GST boxes, then after Add and next item", on: ["phone"],
+    prepare: itemsToMeasure, note: (c) => c.why, path: () => "/sales/new",
+    async show(page, c) {
+      await formDrawn(page, "phone");
+      await opened(page);
+      await page.getByRole("button", { name: "Add item", exact: true }).click();
+      // one sheet, whose title follows what it shows
+      const sheet = page.getByRole("dialog");
+      await expect(sheet).toHaveAccessibleName("Add item 1");
+      const chips = sheet.getByRole("group", { name: "Common products" }).getByRole("button");
+      await expect(chips.first()).toBeVisible();
+      expect(await measure(page), "the chips").toEqual([]);
+      await afterDialog(page);
+      const search = sheet.getByRole("searchbox", { name: "Search products" });
+      await search.fill(c.search.name);
+      await expect(sheet.getByRole("button", { name: new RegExp(`^${esc(c.search.name)}`) }).first()).toBeVisible();
+      expect(await measure(page), "a search").toEqual([]);
+      if (c.broken) {
+        await search.fill(c.broken.name);
+        await sheet.getByRole("button", { name: new RegExp(`^${esc(c.broken.name)}`) }).first().click();
+      } else {
+        await search.fill(BY_HAND);
+        await sheet.getByRole("button", { name: `“${BY_HAND}” isn't in Products`, exact: true }).click();
+        await expect(sheet).toHaveAccessibleName("An item that isn't in Products");
+        await sheet.getByRole("textbox", { name: /^HSN code/ }).fill("711319");
+        await sheet.getByRole("combobox", { name: /^GST rate/ }).selectOption("3");
+        // used on this bill only: the owner's Also save to Products, ticked as it opens, is unticked first
+        const keep = sheet.getByRole("checkbox", { name: /^Also save to Products/ });
+        if (await keep.count()) await keep.uncheck();
+        await sheet.getByRole("button", { name: "Use on this bill", exact: true }).click();
+        await expect(sheet.getByText("Used on this bill only", { exact: true })).toBeVisible();
+      }
+      const hsn = sheet.getByRole("textbox", { name: "HSN code", exact: true });
+      const gst = sheet.getByRole("combobox", { name: "GST rate", exact: true });
+      await expect(hsn).toBeVisible();
+      await expect(gst).toBeVisible();
+      expect(await measure(page), "the HSN and GST boxes").toEqual([]);
+      if (c.broken) { await hsn.fill("711319"); await gst.selectOption("3"); }
+      await sheet.getByRole("textbox", { name: /^(Weight in|How many) / }).fill("2");
+      await sheet.getByRole("textbox", { name: /^Rate per / }).fill("6500");
+      await sheet.getByRole("button", { name: "Add and next item" }).click();
+      await expect(sheet).toHaveAccessibleName("Add item 2");
+      await expect(chips.first()).toBeVisible();
+      await expect(page.getByText(/^Kept as a draft at \d\d:\d\d$/)).toBeVisible({ timeout: 15_000 });
+    },
+  },
+  {
+    // a bill in a filed month on its edit page: what's on it, and why it can't change (ReadOnlyBill); the sandbox's
+    name: "a filed month's bill on its edit page", on: ["desktop", "phone"], prepare: aFiledMonth,
+    note: (c) => `${c.firm.name}, ${c.monthName} (filed): bill ${c.bill.invoice_number}`, path: (c) => `/sales/${c.bill.id}/edit`,
+    async show(page) { await expect(page.getByText(/^This bill's month is filed and locked\./)).toBeVisible(); },
+  },
+  {
+    // a save refused (1D-20): the number a copy shows is taken meanwhile, by a bill another counter saves (made through
+    // the API in the same firm, at its next free number), and the server refuses the copy's (409 number_taken), in the
+    // review, which offers the next free number. A bill the form saved anyway would go to the bin (notesSavedBills)
+    name: "the review refusing a number just taken", on: ["desktop", "phone"], prepare: (api) => newBill(api),
+    path: (b) => `/sales/new?from=${b.id}`, landing: "/sales/new",
+    async show(page, b, project, api) {
+      notesSavedBills(page);
+      await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
+      const { dialog } = await openReview(page, project);
+      await dialog.getByRole("radio", { name: "Cash", exact: true }).click();
+      // kept as an unfinished bill (deleted after the test) first, so its status doesn't change under axe
+      await expect(page.getByText(/^Kept as a draft at \d\d:\d\d$/)).toBeVisible({ timeout: 15_000 });
+      const taken = await newBill(api, { firm: { id: b.business, name: b.firmName } });
+      await dialog.getByRole("button", { name: "Save bill" }).click();
+      await expect(dialog.getByText(`${taken.number} was just used`, { exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: /^Save as / })).toBeEnabled();
+    },
+  },
+  {
+    // a save refused (1D-20) as its month is filed: a copy dated in a month its firm has filed (the sandbox's), while the
+    // form's ask for which months are filed is held back, as if the month was filed after it asked. Its save goes to the
+    // server, which refuses it (409 month_closed), in the review; then the form hears which months are filed. A bill the
+    // form saved anyway would go to the bin (notesSavedBills)
+    name: "the review refusing a filed month", on: ["desktop", "phone"], note: (c) => `${c.firm.name}, ${c.monthName} (filed): a copy of ${c.b.number} dated ${c.day}`,
+    prepare: async (api) => { const f = await aFiledMonth(api); return { ...f, b: await newBill(api, { firm: f.firm }) }; },
+    async before(page, c) { c.release = await holdMonths(page); },
+    path: (c) => `/sales/new?from=${c.b.id}`, landing: "/sales/new",
+    async show(page, c, project) {
+      notesSavedBills(page);
+      await expect(page.getByText(`Copied from ${c.b.number}`)).toBeVisible();
+      await opened(page);
+      // on a phone the date is in the sheet with the firm and number
+      if (project === "phone") {
+        await page.locator("#bfp-info").click();
+        await expect(page.getByRole("dialog", { name: "Firm, number and date" })).toBeVisible();
+        await afterDialog(page);
+      }
+      await page.getByRole("textbox", { name: "Date", exact: true }).fill(c.day);
+      if (project === "phone") await page.getByRole("button", { name: "Done", exact: true }).click();
+      const { dialog } = await openReview(page, project);
+      await dialog.getByRole("radio", { name: "Cash", exact: true }).click();
+      await dialog.getByRole("button", { name: "Save bill" }).click();
+      await expect(dialog.getByText(`${c.monthName} was just filed`, { exact: true })).toBeVisible();
+      const heard = page.waitForResponse((r) => asksMonths(new URL(r.url())));
+      c.release();
+      await heard;
+      // what was typed keeps itself as an unfinished bill (deleted after the test) once the save let it: measured after
+      await expect(page.getByText(/^Kept as a draft at \d\d:\d\d$/)).toBeVisible({ timeout: 15_000 });
+    },
+  },
 ];
 for (const theme of ["obsidian", "pearl"]) {
-  for (const { name, on, prepare, note, path, landing, desktopSize, keepsDraft, show } of FORM_STATES) {
-    test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
+  for (const { name, on, prepare, before, note, path, landing, desktopSize, show } of FORM_STATES) {
+    test(`no WCAG 2.2 AA problems: ${name} in ${theme} (${where(on)})`, async ({ page, request }, info) => {
       test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
       test.slow(); // the form's data, then axe, once or more
-      const c = prepare ? await prepare(client(request)) : null;
+      const api = client(request);
+      const c = prepare ? await prepare(api) : null;
       // what was measured, in the report: the paper book's choice, or that it fell back
       if (note) info.annotations.push({ type: "measured", description: note(c) });
       if (desktopSize && info.project.name === "desktop") await page.setViewportSize(desktopSize);
-      if (keepsDraft) { draftsSince = new Date(); drafted = draftWrites(page); }
+      if (before) await before(page, c);
       const at = path(c);
       await openIn(page, theme, at, landing ?? at);
-      await show(page, c, info.project.name);
+      await show(page, c, info.project.name, api);
       expect(await measure(page)).toEqual([]);
     });
   }
@@ -339,7 +581,7 @@ for (const theme of ["obsidian", "pearl"]) {
 test.describe("signed out", () => {
   test.use({ storageState: SIGNED_OUT });
 
-  test("the sign-in page has no WCAG 2.2 AA problems", async ({ page }) => {
+  test("the sign-in page has no WCAG 2.2 AA problems (desktop and phone)", async ({ page }) => {
     await page.goto("/login");
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     expect(await problems(page)).toEqual([]);

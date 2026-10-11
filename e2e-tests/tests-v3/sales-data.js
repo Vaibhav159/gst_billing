@@ -54,6 +54,9 @@ async function walkIn(api) {
 /** The bills made in the test running now, for makesBills to send to the bin after it. */
 const made = [];
 
+/** The item on newBill's one line: a page draws it only from the bill's own answer, never from a list's row. */
+const TEST_ITEM = "Gold Ring 22K (e2e)";
+
 /**
  * A bill for today in the firm's series at its next free number, one 3% line unless `lines` (the contract's line inputs)
  * says otherwise, from the paper book when `paper`: { id, number, counter, business, firmName, customerName }. Each is
@@ -66,7 +69,7 @@ async function newBill(api, { firm, customer, rate = "6500.000", lines, paper = 
   const next = await api.get("sales/next-number/", { business_id: f.id, invoice_date: day });
   const bill = await api.post("sales/", {
     business: f.id, customer: c.id, invoice_number: next.invoice_number, invoice_date: day, payment_mode: "cash", place_of_supply: null, notes: "", paper,
-    lines: lines ?? [{ product_name: "Gold Ring 22K (e2e)", hsn_code: "711319", gst_percent: "3", quantity: "1.000", unit: "gms", rate, note: "" }],
+    lines: lines ?? [{ product_name: TEST_ITEM, hsn_code: "711319", gst_percent: "3", quantity: "1.000", unit: "gms", rate, note: "" }],
   });
   const b = { id: bill.id, number: bill.invoice_number, counter: bill.counter, business: f.id, firmName: f.name, customerName: c.name };
   made.push(b);
@@ -122,4 +125,4 @@ async function afterDialog(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { today, esc, client, firstFirm, someCustomer, walkIn, newBill, noteBill, removeBill, makesBills, afterDialog };
+module.exports = { today, esc, client, firstFirm, someCustomer, walkIn, TEST_ITEM, newBill, noteBill, removeBill, makesBills, afterDialog };

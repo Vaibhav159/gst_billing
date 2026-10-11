@@ -151,15 +151,16 @@ Pitfalls:
   sets the copies and bank details it needs on the page, which saves nothing:
   the shop's print defaults can be anything, and stay as they were.
 - What the specs leave behind, on the sandbox as on CI: the bills they make stay
-  in the bin, which nothing empties. A full run uses about 39 of the first
-  firm's numbers, 3 of them on last month's paper bills (on a fresh database the
-  earlier specs use up its one-digit numbers before search needs a number of two
-  digits), and 4 of the firm `print.spec.js` prints from (the sandbox's KIRAN,
-  CI's `TEST PRINT FIRM (e2e)`). They show in those firms' bins, and in the
-  first firm's paper book, as deleted test bills. `walkIn` makes "Walk-in
-  Customer (e2e)" where there's no walk-in record (the sandbox had none) and
-  keeps it for every later run: don't delete it. Its bills in the bin protect it
-  anyway, and each run would make a new one.
+  in the bin, which nothing empties. A full run uses about 51 of the first
+  firm's numbers (55 on the sandbox, whose first firm, AARAV, also has the filed
+  month `a11y.spec.js` measures), 3 of them on last month's paper bills (on a
+  fresh database the earlier specs use up its one-digit numbers before search
+  needs a number of two digits), and 4 of the firm `print.spec.js` prints from
+  (the sandbox's KIRAN, CI's `TEST PRINT FIRM (e2e)`). They show in those firms'
+  bins, and in the first firm's paper book, as deleted test bills. `walkIn` makes
+  "Walk-in Customer (e2e)" where there's no walk-in record (the sandbox had none)
+  and keeps it for every later run: don't delete it. Its bills in the bin protect
+  it anyway, and each run would make a new one.
 - Your own Vite in a worktree: start it with `--force` when its dependency
   cache (`web/node_modules/.vite`) may be older than an import such as the PDF's
   `qrcode`. Otherwise Vite optimizes that dependency the first time a page
