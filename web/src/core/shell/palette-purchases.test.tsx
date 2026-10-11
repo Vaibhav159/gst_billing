@@ -29,6 +29,6 @@ test('a purchase or supplier search failure is visible and can be retried withou
     'GET purchases/': () => ({ status: down ? 500 : 200, data: { results: [] } }), 'GET suppliers/': { results: [{ id: 21, name: 'Udaipur Bullion', gst_number: '', city: '' }] } });
   renderApp(<Palette open onClose={() => {}} />); await pass(0, 2); fireEvent.change(screen.getByRole('combobox'), { target: { value: 'bullion' } }); await pass(250, 2);
   expect(screen.getByText('Some purchases or suppliers could not be searched. Try again.')).toBeInTheDocument(); expect(screen.getByRole('option', { name: 'Udaipur Bullion Supplier' })).toBeInTheDocument();
-  down = false; await pass(400, 2); fireEvent.click(screen.getByRole('button', { name: 'Search purchases and suppliers again' })); await pass(0, 2);
+  down = false; await pass(400, 2); fireEvent.click(screen.getByRole('button', { name: 'Try again' })); await pass(0, 2);
   expect(screen.queryByText('Some purchases or suppliers could not be searched. Try again.')).not.toBeInTheDocument();
 });

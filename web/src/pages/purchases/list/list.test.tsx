@@ -67,3 +67,19 @@ test("phone lists keep supplier navigation and credit filters in the sheet", asy
   expect(within(screen.getByRole("dialog")).getByRole("combobox", { name: "Credit claimed in" })).toBeInTheDocument();
   Object.assign(window, { __phone: false });
 });
+
+test("Credit not allowed asks the server for eligible 0 and the row carries the badge", async () => {
+  const { calls } = salesServer([["GET", "purchases/", () => purchasePageWire([purchaseRowWire({ credit: { month: "2026-10", chosen: null, late: false, eligible: false, lapsed: false, claimed: "0.00", state: "open", filed_on: null, deadline: "2027-11-30" } })])]]);
+  mount();
+  expect(await screen.findAllByText("Credit not allowed", { selector: "span *, span" })).not.toHaveLength(0);
+  await userEvent.click(screen.getByRole("button", { name: /^Credit not allowed/ }));
+  await waitFor(() => expect(calls.filter((c) => c.url === "purchases/").at(-1)?.params).toMatchObject({ eligible: 0 }));
+});
+
+test("the phone Add keeps the firm in view, as the desktop button does", async () => {
+  Object.assign(window, { __phone: true });
+  salesServer([["GET", "purchases/", () => purchasePageWire([purchaseRowWire()])]]);
+  mount("/purchases?firm=3");
+  expect(await screen.findByRole("link", { name: "Add" })).toHaveAttribute("href", "/purchases/new?firm=3");
+  Object.assign(window, { __phone: false });
+});

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { salesServer, refuse } from "@/core/sales/fixtures";
@@ -80,4 +80,27 @@ test.each([false, true])("a deleted linked sale is labelled and linked only for 
   const link = screen.queryByRole("link", { name: "MO/2026-27/31" });
   if (staff) expect(link).not.toBeInTheDocument();
   else expect(link).toHaveAttribute("href", "/sales/31");
+});
+
+const months = { bill_month: "2026-10", bill_month_closed: false, default: "2026-10", options: [{ month: "2026-10", due: "2026-11-20", running: true, in_time: true }, { month: "2026-11", due: "2026-12-20", running: false, in_time: true }], deadline: "2027-11-30", lapsed: false };
+test("moving the credit sends the chosen month and closes", async () => {
+  const { calls } = salesServer([["GET", "purchases/905/", () => purchaseDetailWire()], ["GET", "purchases/credit-months/", () => months], ["PUT", "purchases/905/credit-month/", () => ({ id: 905, previous: "2026-10", credit: { month: "2026-11", claimed: "14348.88", eligible: true, state: "open" } })]]);
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Move credit to another month" }));
+  await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Claim the credit in" }), "2026-11");
+  await act(async () => { vi.setSystemTime(Date.now() + 400); });
+  await userEvent.click(screen.getByRole("button", { name: "Move credit" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ itc_month: "2026-11" });
+});
+test("a filed month refusal keeps the credit dialog open with the server's words", async () => {
+  const detail = "October 2026's GSTR-3B is filed for KIRAN GOLD HOUSE, with this bill's credit in it, so it can't be changed. Have the owner unlock October 2026 in GST returns first.";
+  salesServer([["GET", "purchases/905/", () => purchaseDetailWire()], ["GET", "purchases/credit-months/", () => months], ["PUT", "purchases/905/credit-month/", () => refuse(409, { code: "month_closed", detail })]]);
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Move credit to another month" }));
+  await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Claim the credit in" }), "2026-11");
+  await act(async () => { vi.setSystemTime(Date.now() + 400); });
+  await userEvent.click(screen.getByRole("button", { name: "Move credit" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
 });

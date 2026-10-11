@@ -207,7 +207,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
   let lastGroup: string | null = null;
   return (
     <>
-        {current && (purchases.isError || suppliers.isError) ? <div className="px-3 py-2"><p role="status" className="text-muted">Some purchases or suppliers could not be searched. Try again.</p><Button size="sm" aria-label="Search purchases and suppliers again" onClick={() => { void qc.refetchQueries({ queryKey: ['purchases', 'search', term] }); void qc.refetchQueries({ queryKey: ['suppliers', 'search', term] }); }}>Try again</Button></div> : null}
+        {current && (purchases.isError || suppliers.isError) ? <div className="px-3 py-2"><p role="status" className="text-muted">Some purchases or suppliers could not be searched. Try again.</p><Button size="sm" onClick={() => { void qc.refetchQueries({ queryKey: ['purchases', 'search', term] }); void qc.refetchQueries({ queryKey: ['suppliers', 'search', term] }); }}>Try again</Button></div> : null}
         {status ? <p role="status" className={cn("px-3 text-center text-muted", trouble ? "pt-6 pb-1" : "py-6")}>{status}</p> : null}
         {trouble ? <div className="flex justify-center pb-3"><Button size="sm" onClick={retry}>Try again</Button></div> : null}
         <ul id="palette-list" role="listbox" aria-label="Results" className={cn("flex flex-col max-h-[52vh] overflow-y-auto -mx-2", !results.length && "hidden")}>
