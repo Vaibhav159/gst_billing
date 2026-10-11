@@ -5,10 +5,13 @@ import { renderApp } from "@/test/render";
 import { Combobox, Dialog, type ComboItem, type ComboOption } from "./index";
 
 const PEOPLE = ["Anil Gupta", "Meena Jain", "Mahesh Soni"];
-/** A customer box as a page holds one: what's typed, the matches under a heading, and the pick shown in the box. */
-function Picker({ onPick, autoFocus }: { onPick: (o: ComboOption<number>) => void; autoFocus?: boolean }) {
+/**
+ * A customer box as a page holds one: what's typed, the matches under a heading, and the pick shown in the box. min: the
+ * characters typed before it lists anything (a search box's minimum).
+ */
+function Picker({ onPick, autoFocus, min = 0 }: { onPick: (o: ComboOption<number>) => void; autoFocus?: boolean; min?: number }) {
   const [q, setQ] = useState("");
-  const found = PEOPLE.filter((n) => n.toLowerCase().includes(q.trim().toLowerCase()));
+  const found = q.trim().length >= min ? PEOPLE.filter((n) => n.toLowerCase().includes(q.trim().toLowerCase())) : [];
   const options: ComboItem<number>[] = found.length ? [{ heading: "Customers" }, ...found.map((n) => ({ key: n, title: n, sub: "Udaipur", value: PEOPLE.indexOf(n) }))] : [];
   return <Combobox id="cb" ariaLabel="Customer" listLabel="Customers" query={q} onQuery={setQ} options={options} autoFocus={autoFocus} onPick={(o) => { setQ(o.title); onPick(o); }} />;
 }
@@ -79,6 +82,26 @@ test("in a real dialog, Esc with the list open closes only the list, and the nex
   expect(box).toHaveFocus();
   await userEvent.keyboard("{Escape}");
   expect(closed).toHaveBeenCalledTimes(1);
+});
+
+test("in a real dialog, a box with nothing listed keeps no Esc: one Esc closes the dialog, with nothing typed yet or nothing matching", async () => {
+  for (const typed of ["", "zzz"]) {
+    const closed = vi.fn();
+    function InDialog() {
+      const [open, setOpen] = useState(true);
+      return <Dialog open={open} onClose={() => { closed(); setOpen(false); }} title="Pick the customer"><Picker onPick={() => {}} min={2} /></Dialog>;
+    }
+    const { unmount } = renderApp(<InDialog />);
+    const box = within(screen.getByRole("dialog", { name: "Pick the customer" })).getByRole("combobox", { name: "Customer" });
+    await userEvent.click(box);
+    if (typed) await userEvent.type(box, typed);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    // expanded only with a list on screen
+    expect(box, typed).toHaveAttribute("aria-expanded", "false");
+    await userEvent.keyboard("{Escape}");
+    expect(closed, typed).toHaveBeenCalledTimes(1);
+    unmount();
+  }
 });
 
 test("a box focused as its page opens waits for the person: its list opens on an arrow key", async () => {

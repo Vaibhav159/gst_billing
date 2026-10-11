@@ -5,7 +5,7 @@
 // come in part 4.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { flushSync } from "react-dom";
-import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { AlertTriangle, Check, CheckCircle2, Info, UserPlus, UserRound } from "lucide-react";
 import { customerSaveErrors, useCustomerSearch, useSaveCustomer, useStatement, type Customer, type CustomerBody, type CustomerField } from "@/core/api/customers";
 import type { ApiProblem } from "@/core/api/errors";
@@ -18,7 +18,7 @@ import { useFirms, useScope, type Firm } from "@/core/scope";
 import { Banner, Button, ButtonLink, Card, ConfirmDialog, Field, Input, ListSkeleton, LoadError, Page, QueryView, Segmented, Select, scrollIntoViewSafe } from "@/core/ui";
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
-import { firstName, homeState, keepFocus, markSaved, safeReturn, tableState, useBack, useCtrlS, useOnFile, useRouteCustomer } from "./lib";
+import { firstName, historyIndex, homeState, keepFocus, markSaved, safeReturn, tableState, useBack, useCtrlS, useOnFile, useRouteCustomer } from "./lib";
 import { ErrorSummary, FirmToggles, MissingRecord, NoAccess, SaveError, useEcho } from "./parts";
 
 type Values = { name: string; phone: string; email: string; type: "person" | "business"; gstin: string; pan: string; address: string; city: string; state: string; firms: number[] };
@@ -79,17 +79,22 @@ export default function CustomerForm() {
   // upgrade: a "would this lose the changes" option on useUnsavedGuard, which this then gives way to
   const location = useLocation();
   const navigate = useNavigate();
-  const navType = useNavigationType();
   const startKey = editId ?? `new?${query.get("name") ?? ""}&${query.get("phone") ?? ""}&${query.get("gstin") ?? ""}`;
-  const here = { key: startKey, query, path: location.pathname, url: `${location.pathname}${location.search}` };
+  const here = { key: startKey, query, path: location.pathname, url: `${location.pathname}${location.search}`, idx: historyIndex() };
   const [shown, setShown] = useState(here);
   const [dirty, setDirty] = useState(false);
   const asking = shown.key !== startKey && dirty && shown.path === here.path;
-  if (shown.url !== here.url && !asking) { setShown(here); if (shown.key !== startKey) setDirty(false); }
+  if ((shown.url !== here.url || shown.idx !== here.idx) && !asking) { setShown(here); if (shown.key !== startKey) setDirty(false); }
+  // Stay: back to the form's own entry by the steps between (a link, Back or Forward), so no entry in the tab's history
+  // is lost; a history without numbers (in memory) has the form's address put back in place
+  const stay = () => {
+    const now = historyIndex();
+    if (shown.idx !== null && now !== null && now !== shown.idx) navigate(shown.idx - now);
+    else navigate(shown.url, { replace: true });
+  };
   const restart = asking ? (
-    // the words of the form's guard (useUnsavedGuard), with Stay putting the form's own address back
-    <ConfirmDialog open title="Leave without saving?" confirmLabel="Leave" cancelLabel="Stay" tone="danger"
-      onClose={() => { if (navType === "PUSH") navigate(-1); else navigate(shown.url, { replace: true }); }}
+    // the words of the form's guard (useUnsavedGuard)
+    <ConfirmDialog open title="Leave without saving?" confirmLabel="Leave" cancelLabel="Stay" tone="danger" onClose={stay}
       onConfirm={() => { setShown(here); setDirty(false); }}>Your changes aren't saved. Leave this page and lose them?</ConfirmDialog>
   ) : null;
   if (missing) return <MissingRecord icon={UserRound} title="This customer isn't on file" to="/customers" label="All customers" />;
@@ -152,7 +157,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
   useEffect(() => () => onDirty(false), [onDirty]);
   useEffect(() => {
     if (!done) return;
-    if (done.back && ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) navigate(-1);
+    if (done.back && (historyIndex() ?? 0) > 0) navigate(-1);
     else navigate(done.to, { replace: true });
   }, [done, navigate]);
   // a link like ?focus=pan (the customer page's "PAN needed · Add PAN") lands on that field

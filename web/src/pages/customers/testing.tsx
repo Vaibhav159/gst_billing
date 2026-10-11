@@ -3,7 +3,7 @@
 // a screen reader hears from a live region. Used by the *.test.tsx files beside it only.
 import { act, fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from "react-router";
+import { createBrowserRouter, createMemoryRouter, Outlet, RouterProvider, type RouteObject } from "react-router";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
 import { ScopeProvider } from "@/core/scope";
@@ -30,11 +30,17 @@ export function serve(answers: Record<string, Answer>): Call[] {
   return serveAll({ "GET businesses/": { results: FIRMS }, "GET preferences/": { data: { defaultBusinessId: "3" } }, ...answers });
 }
 
-/** The screens under test in a data router, with the app's providers and the firm scope; signed in as the owner unless `me` says. */
-export function mount(routes: RouteObject[], entries: string[], { me }: { me?: Partial<Me> } = {}) {
+/**
+ * The screens under test in a data router, with the app's providers and the firm scope; signed in as the owner unless
+ * `me` says. browser: the browser's own history (jsdom's), whose entries carry React Router's index as the app's do,
+ * starting at entries[0] alone; the test goes on with router.navigate and ends with router.dispose().
+ */
+export function mount(routes: RouteObject[], entries: string[], { me, browser = false }: { me?: Partial<Me>; browser?: boolean } = {}) {
   const auth = stubAuth(me);
   // toasts inside the router, so the provider shows them itself (as renderApp's do)
-  const router = createMemoryRouter([{ element: <ToastProvider><ScopeProvider><Outlet /></ScopeProvider></ToastProvider>, children: routes }], { initialEntries: entries, initialIndex: entries.length - 1 });
+  const tree: RouteObject[] = [{ element: <ToastProvider><ScopeProvider><Outlet /></ScopeProvider></ToastProvider>, children: routes }];
+  if (browser) window.history.replaceState(null, "", entries[0]);
+  const router = browser ? createBrowserRouter(tree) : createMemoryRouter(tree, { initialEntries: entries, initialIndex: entries.length - 1 });
   const view = render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AuthContext.Provider value={auth}><RoleContext.Provider value={auth.me?.role ?? null}>

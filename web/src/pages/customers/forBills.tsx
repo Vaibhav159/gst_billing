@@ -377,8 +377,9 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   const { echo, say } = useEcho();
   const cid = customer?.id;
   // filled from the record each time it opens (or for another customer or field): the same customer asked for again
-  // meanwhile, as after the connection comes back, keeps what's typed
-  useEffect(() => { if (open && customer) { setVal(field === "pan" ? customer.pan_number : customer.address); setErr(""); say(""); setFail(null); } }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
+  // meanwhile, as after the connection comes back, keeps what's typed. Opening or closing drops words the echo has still
+  // to say: a sheet on its way out says nothing
+  useEffect(() => { say(""); if (open && customer) { setVal(field === "pan" ? customer.pan_number : customer.address); setErr(""); setFail(null); } }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!customer || !field) return null;
   const busy = save$.isPending;
   const id = `fix-${field}`;

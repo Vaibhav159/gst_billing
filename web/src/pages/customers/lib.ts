@@ -165,11 +165,16 @@ export function useCtrlS(fn: () => void) {
 /** Spread on Save buttons: a press doesn't blur the field first, so an error appearing under it can't move the button mid-click. */
 export const keepFocus = { onMouseDown: (e: { preventDefault(): void }) => e.preventDefault() };
 
+/** This entry's place in the tab's history (React Router's idx in the browser's history state), or null without one. */
+export function historyIndex(): number | null {
+  const idx = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof idx === "number" ? idx : null;
+}
 /** Back to the page before this one in the tab, else to `path` (a link opened straight). */
 export function useBack(path: string): () => void {
   const navigate = useNavigate();
   return useCallback(() => {
-    if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) navigate(-1);
+    if ((historyIndex() ?? 0) > 0) navigate(-1);
     else navigate(path, { replace: true });
   }, [navigate, path]);
 }

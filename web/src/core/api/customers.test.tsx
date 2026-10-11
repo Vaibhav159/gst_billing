@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, skipToken } from "@tanstack/react-query";
 import { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { serve, type Call, type Reply } from "@/test/server";
 import {
@@ -80,8 +80,12 @@ test("a query that can't ask yet (no firm or customer known) has a key of its ow
     renderHook(() => useItaxBills(null), { wrapper: w }),
   ];
   expect(waiting.map((h) => h.result.current.data)).toEqual([undefined, undefined, undefined, undefined, undefined]);
-  // every query asked again through the client, as the app's Try again does (Ruling 1B-11): one with skipToken is passed
-  // over, where its own refetch() would end it in an error
+  // each waits with skipToken, not enabled: false: even a refetch() of its own can't make it ask (QueryView's Try again
+  // is the query's own refetch(), though it shows only after a failure, which a query that never asks can't have)
+  const waits = [customerKeys.list(null), customerKeys.recent(null), customerKeys.statement(7, null), customerKeys.one(0), customerKeys.itax(0)];
+  expect(waits.map((queryKey) => qc.getQueryCache().find({ queryKey, exact: true })?.options.queryFn === skipToken)).toEqual([true, true, true, true, true]);
+  // every query asked again through the client (as a reconnect or the sales list's Try again does, Ruling 1B-11): one
+  // with skipToken is passed over
   await act(async () => { await qc.refetchQueries(); });
   expect(calls).toEqual([]);
   expect(waiting.map((h) => `${h.result.current.status} ${h.result.current.fetchStatus}`)).toEqual(Array(5).fill("pending idle"));
@@ -264,6 +268,12 @@ test("refusals read as the form's fields; a taken name and a customer with bills
   expect(deleteRefusal(refuse(409, { error: LINES, protected: 2 }))).toBe("Lines on 2 bills of other customers still name it, so it can't be deleted. Merge it into the right customer instead.");
   expect(deleteRefusal(refuse(409, { error: `${LINES} 1 bill(s) in the bin reference it too.`, protected: 3 }))).toBe("Lines on 2 bills of other customers still name it, so it can't be deleted. Merge it into the right customer instead.");
   expect(deleteRefusal(refuse(409, { error: LINES.replace("2 invoice(s)", "1 invoice(s)"), protected: 1 }))).toBe("Lines on 1 bill of another customer still name it, so it can't be deleted. Merge it into the right customer instead.");
+  // no bills in Sales: only deleted bills in the bin still name them (a merge moves those too: contract §7)
+  const BIN = "Cannot delete: 2 bill(s) in the bin still reference this record. Restore and reassign them first.";
+  expect(deleteRefusal(refuse(409, { error: BIN, protected: 2 }))).toBe("2 deleted bills in the bin are still made out to it, so it can't be deleted. Merge it into the right customer instead.");
+  expect(deleteRefusal(refuse(409, { error: BIN.replace("2 bill(s)", "1 bill(s)"), protected: 1 }))).toBe("1 deleted bill in the bin is still made out to it, so it can't be deleted. Merge it into the right customer instead.");
+  // bills in Sales and in the bin: the bills counted are the ones in Sales (`protected` adds the bin's)
+  expect(deleteRefusal(refuse(409, { error: "Cannot delete: 2 invoice(s) still reference this record. Reassign or delete them first. 1 bill(s) in the bin reference it too.", protected: 3 }))).toBe("Has 2 bills. Merge it into the right customer instead.");
   const noReply = new AxiosError("Network Error", "ERR_NETWORK");
   expect(deleteRefusal(noReply)).toBe("Not deleted: the app couldn't get through. Nothing was changed; try again in a minute.");
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);

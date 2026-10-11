@@ -331,18 +331,20 @@ export function customerSaveErrors(error: unknown, typedName = ""): { problem: A
   return { problem, fields };
 }
 /**
- * Why a delete didn't happen: the prototype's words when the server counted the bills (v2's 409 has `protected`). When
- * only lines on other customers' bills still name the customer (old data, from before a line followed its bill), it
- * says so, with the count of those bills from the server's words (billing/api/mixins.py), not `protected`.
+ * Why a delete didn't happen: the prototype's words when the server counted the bills (v2's 409 has `protected`). The
+ * server's words (billing/api/mixins.py) say what holds the customer, and the counts come from them, as `protected` adds
+ * the bin's bills to the rest: only lines on other customers' bills (old data, from before a line followed its bill),
+ * only deleted bills in the bin, or bills in Sales (with some in the bin, perhaps). A merge moves all of them.
  */
 export function deleteRefusal(error: unknown): string {
   const res = (error as { response?: { status?: number; data?: unknown } } | null)?.response;
-  const lines = res?.status === 409 ? /lines on (\d+) invoice/i.exec(str(obj(res.data).error)) : null;
-  if (lines) {
-    const k = Number(lines[1]);
-    return `Lines on ${plural(k, "bill")} of ${k === 1 ? "another customer" : "other customers"} still name it, so it can't be deleted. Merge it into the right customer instead.`;
-  }
-  const n = res?.status === 409 ? Number(obj(res.data).protected) : NaN;
+  const said = res?.status === 409 ? str(obj(res.data).error) : "";
+  const count = (re: RegExp): number | null => { const m = re.exec(said); return m ? Number(m[1]) : null; };
+  const lines = count(/lines on (\d+) invoice/i);
+  if (lines !== null) return `Lines on ${plural(lines, "bill")} of ${lines === 1 ? "another customer" : "other customers"} still name it, so it can't be deleted. Merge it into the right customer instead.`;
+  const binned = count(/(\d+) bill\(s\) in the bin still reference/i);
+  if (binned !== null) return `${plural(binned, "deleted bill")} in the bin ${binned === 1 ? "is" : "are"} still made out to it, so it can't be deleted. Merge it into the right customer instead.`;
+  const n = count(/(\d+) invoice\(s\) still reference/i) ?? (res?.status === 409 ? Number(obj(res.data).protected) : NaN);
   if (Number.isFinite(n) && n > 0) return `Has ${plural(n, "bill")}. Merge it into the right customer instead.`;
   const p = problemOf(error);
   if (p.kind === "offline") return "Not deleted: you're offline. Nothing was changed; try again when the internet is back.";

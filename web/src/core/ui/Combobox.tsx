@@ -24,6 +24,8 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
   const quietFocus = useRef(Boolean(autoFocus));
   const listId = `${id}-list`;
   const items = options.filter((o): o is ComboOption<T> => !("heading" in o));
+  // the list is on screen: open, with something to show (a heading counts). Open with nothing to show draws nothing
+  const listed = open && options.length > 0;
   useEffect(() => { setActive(0); }, [query, open]);
   const pick = (o: ComboOption<T>) => { setOpen(false); onPick(o); };
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -33,16 +35,16 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
     else if (e.key === "Enter") { if (open && items[active]) { e.preventDefault(); pick(items[active]); } }
     else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey) { if (open && query.trim() && items[active]) { e.preventDefault(); pick(items[active]); } else setOpen(false); }
   };
-  // Esc with the list open closes only the list. It's taken on the key's way down (capture): a dialog around the box
+  // Esc with the list on screen closes only the list. It's taken on the key's way down (capture): a dialog around the box
   // (useFocusTrap) listens on its own element, which a key reaches before React's bubbling handlers, so it would close
-  // the dialog first. With the list shut, Esc goes on.
+  // the dialog first. With no list on screen (shut, or nothing to show), Esc goes on.
   const onKeyDownCapture = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+    if (e.key === "Escape" && listed) { e.preventDefault(); e.stopPropagation(); setOpen(false); }
   };
   let k = -1;
   return (
     <div className="relative min-w-0">
-      <Input id={id} role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-label={ariaLabel}
+      <Input id={id} role="combobox" aria-expanded={listed} aria-controls={listId} aria-autocomplete="list" aria-label={ariaLabel}
         aria-activedescendant={open && items[active] ? `${id}-o${active}` : undefined} aria-describedby={describedBy} invalid={invalid}
         value={query} placeholder={placeholder} autoComplete="off" spellCheck={false} autoFocus={autoFocus} inputClassName={inputClassName}
         onChange={(e) => { onQuery(e.target.value); setOpen(true); }}
@@ -50,7 +52,7 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
         onMouseDown={() => setOpen(true)}
         onBlur={() => { setOpen(false); onBlur?.(); }}
         onKeyDown={onKeyDown} onKeyDownCapture={onKeyDownCapture} />
-      {open && options.length ? (
+      {listed ? (
         <ul id={listId} role="listbox" aria-label={listLabel || ariaLabel} className="absolute z-pop left-0 top-full mt-1.5 w-full min-w-[min(340px,80vw)] card shadow-pop py-1.5 max-h-[340px] overflow-y-auto anim-pop">
           {options.map((o) => {
             if ("heading" in o) return <li key={`h-${o.heading}`} role="presentation" className="caps px-3.5 pt-2 pb-1">{o.heading}</li>;

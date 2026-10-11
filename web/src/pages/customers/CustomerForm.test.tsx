@@ -372,6 +372,36 @@ test("a link to this page that would start the form afresh (Ctrl K's Add a custo
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
+test("Stay after Back goes forward to the form's own address, and the address Back went to stays in the history", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  serve({ "GET customers/": NONE });
+  // the browser's history, which numbers its entries as the app's does (an in-memory one doesn't)
+  const { router } = mount(routes, ["/customers/new?name=Rekha%20Soni"], { browser: true });
+  try {
+    expect(await screen.findByLabelText(/^Name/)).toHaveValue("Rekha Soni");
+    // Ctrl K's Add a customer with nothing typed yet: the form starts afresh at once
+    await act(async () => { await router.navigate("/customers/new"); });
+    await waitFor(() => expect(screen.getByLabelText(/^Name/)).toHaveValue(""));
+    await userEvent.type(screen.getByLabelText("City"), "Udaipur");
+    // Back to Rekha's address would start the form afresh: it asks, and Stay goes forward to the form's own again
+    act(() => { void router.navigate(-1); });
+    let dialog = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(router.state.location.search).toBe("?name=Rekha%20Soni");
+    act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against a double tap's second tap
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stay" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("City")).toHaveValue("Udaipur");
+    // Rekha's address is still the entry before it: Back reaches it, and asks again
+    act(() => { void router.navigate(-1); });
+    await waitFor(() => expect(router.state.location.search).toBe("?name=Rekha%20Soni"));
+    dialog = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(screen.getByLabelText("City")).toHaveValue("Udaipur");
+  } finally {
+    router.dispose();
+  }
+});
+
 test("a viewer is told who may add customers, and gets no form", async () => {
   serve({});
   mount(routes, ["/customers/new"], { me: VIEWER });
