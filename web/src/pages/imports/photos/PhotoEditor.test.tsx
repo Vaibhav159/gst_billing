@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { mount, serve } from '@/pages/customers/testing';
 import type { PurchaseEditorProps } from '@/pages/purchases/form/PurchaseEditor';
 import type { PurchaseInput } from '@/core/purchases/types';
-import { PhotoEditor } from './PhotoEditor';
+import { PhotoEditor, readLines } from './PhotoEditor';
 import { bodyFor } from './model';
 import { firms, row } from './fixtures';
 import { quantityRateRequired } from '../model';
@@ -132,4 +132,13 @@ test('paired rows keep firm identity read-only and validate before accepting edi
   fireEvent.change(screen.getByLabelText('Bill number'), { target: { value: '00031' } });
   fireEvent.click(screen.getByRole('button', { name: 'Use these details' }));
   expect(apply.mock.calls[0][0]).toMatchObject({ firmId: 2, buyerFirmId: 3, kind: 'interfirm', read: { invoice_number: '00031', supplier: original.read!.supplier, buyer: original.read!.buyer } });
+});
+
+it('keeps each printed rate with its own line when lines are deleted or reordered', () => {
+  const read = row().read!, gold = read.lines[0], silver = { ...gold, product_name: 'Silver bar', printed_rate: '0.25%' };
+  const two = { ...read, lines: [gold, silver] };
+  const line = (l: typeof gold) => ({ product_name: l.product_name, hsn_code: l.hsn_code, gst_percent: l.gst_percent!, unit: l.unit, quantity: '1', rate: '1' });
+  expect(readLines([line(silver), line(gold)], two).map(l => l.printed_rate)).toEqual(['0.25%', '3%']);
+  expect(readLines([line(silver)], two).map(l => l.printed_rate)).toEqual(['0.25%']);
+  expect(readLines([{ ...line(gold), product_name: 'New item' }], two).map(l => l.printed_rate)).toEqual(['']);
 });

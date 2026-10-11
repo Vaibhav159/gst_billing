@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bodyFor, detect, fileProblem, localProblems, statusOf, totalOf } from "./model";
+import { bodyFor, detect, fileProblem, kindPatch, localProblems, overLimit, statusOf, totalOf } from "./model";
 import { read, row, firms } from "./fixtures";
 import { quantityRateRequired } from "../model";
 const may = { purchases: true, sales: true };
@@ -84,4 +84,20 @@ describe("bill-photo model", () => {
 it("explains a supplier's GST refusal and the actual off-slab printed rate", () => {
   expect(localProblems(row({ read: { ...read, supplier: { ...read.supplier, gst_number: "" } } }), may, firms)).toContain("Line 1: the supplier has no GSTIN, so this purchase carries no input tax credit. Add the supplier's GSTIN to claim GST, or set the line to 0%.");
   expect(localProblems(row({ read: { ...read, lines: [{ ...read.lines[0], gst_percent: null, printed_rate: "2.5%" }] } }), may, firms).join(" ")).toContain("The bill shows 2.5%, which isn't a GST rate.");
+});
+describe("review amendments", () => {
+  it("restores the matched supplier when a row goes back to Purchase", () => {
+    const sale = { ...row(), ...kindPatch(row(), "sale") };
+    expect(sale.partyId).toBeNull();
+    expect(kindPatch(sale, "purchase")).toMatchObject({ kind: "purchase", partyId: 21 });
+    expect(kindPatch(row({ read: null }), "purchase").partyId).toBeNull();
+  });
+  it("sends a sale in the same shape as the workbook importer", () => {
+    const sale = row({ kind: "sale", firmId: 2, partyId: 51 });
+    expect(bodyFor([sale], "sales", firms).bills[0]).toMatchObject({ customer: 51, paper: true, place_of_supply: null, notes: "" });
+  });
+  it("counts only rows not yet imported toward the 300-bill limit", () => {
+    const done = Array.from({ length: 300 }, (_, i) => row({ id: `p${i}`, phase: "imported" }));
+    expect(overLimit(done, 5)).toBe(false); expect(overLimit([...done, row()], 300)).toBe(true); expect(overLimit([row()], 299)).toBe(false);
+  });
 });

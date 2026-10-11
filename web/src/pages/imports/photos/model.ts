@@ -20,6 +20,12 @@ export function detect(read: Read): Pick<PhotoRow, "kind" | "firmId" | "buyerFir
 }
 export { fileProblem } from "@/core/captures/files";
 
+/** Changing a row's kind keeps the supplier the read matched for a purchase, and clears it otherwise. */
+export function kindPatch(row: PhotoRow, kind: PhotoKind): Partial<PhotoRow> {
+  return { kind, partyId: kind === "purchase" ? row.read?.supplier.id ?? null : null, partyResolved: false, buyerAck: false };
+}
+/** The 300-bill limit counts only rows still to import. */
+export const overLimit = (rows: PhotoRow[], adding: number): boolean => rows.filter((r) => r.phase !== "imported").length + adding > 300;
 export function partyOf(row: PhotoRow) {
   return row.kind === "sale" ? row.read?.buyer : row.read?.supplier;
 }
@@ -85,7 +91,7 @@ export function bodyFor(rows: PhotoRow[], kind: ImportKind, firms: Firm[]): Impo
     return {
       ref: row.id, business: (row.kind === "interfirm" ? row.buyerFirmId : row.firmId)!, invoice_number: r.invoice_number.trim(), invoice_date: r.invoice_date, payment_mode: r.payment_mode,
       lines: r.lines.map((l) => l.amount_only ? { product_name: l.product_name, hsn_code: l.hsn_code, gst_percent: l.gst_percent!, unit: l.unit, taxable: l.taxable, amount_only: true as const, note: "" } : { product_name: l.product_name, hsn_code: l.hsn_code, gst_percent: l.gst_percent!, quantity: l.quantity!, unit: l.unit, rate: l.rate!, note: "" }),
-      ...(kind === "purchases" ? { supplier: party, itc_eligible: row.itcEligible, itc_month: r.invoice_date < "2025-04-01" ? null : row.itcMonth, buyer_gstin: r.buyer.gst_number, buyer_ack: row.buyerAck, pair: row.kind === "interfirm" ? { seller: row.firmId!, invoice_number: r.invoice_number.trim() } : null } : { customer: party, paper: true as const }),
+      ...(kind === "purchases" ? { supplier: party, itc_eligible: row.itcEligible, itc_month: r.invoice_date < "2025-04-01" ? null : row.itcMonth, buyer_gstin: r.buyer.gst_number, buyer_ack: row.buyerAck, pair: row.kind === "interfirm" ? { seller: row.firmId!, invoice_number: r.invoice_number.trim() } : null } : { customer: party, paper: true as const, place_of_supply: null, notes: "" }),
     };
   });
   return { file_name: "", dry_run: true, [kind === "purchases" ? "suppliers" : "customers"]: parties, bills };

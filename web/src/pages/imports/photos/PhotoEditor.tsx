@@ -17,9 +17,12 @@ import type { PhotoEditorProps } from './PhotoImport';
 import { totalOf, type PhotoRow } from './model';
 
 type ReviewedLine = { product_name: string; hsn_code: string; gst_percent: string; unit: string; quantity?: string; rate?: string; amount_only?: boolean; taxable?: string };
-function readLines(lines: ReviewedLine[], read: Read): Read['lines'] {
-  return lines.map((line, i) => ({ product_name: line.product_name, hsn_code: line.hsn_code, gst_percent: line.gst_percent, unit: line.unit,
-    printed_rate: read.lines[i]?.printed_rate ?? '', amount_only: Boolean(line.amount_only), quantity: line.amount_only ? null : line.quantity ?? null, rate: line.amount_only ? null : line.rate ?? null,
+/** A printed rate follows its own read line by item name, never by position: deleted or moved lines keep theirs, new ones have none. */
+export function readLines(lines: ReviewedLine[], read: Read): Read['lines'] {
+  const used = new Set<number>(), nameOf = (name: string) => name.trim().toLowerCase();
+  const printedFor = (name: string) => { const i = read.lines.findIndex((l, n) => !used.has(n) && nameOf(l.product_name) === nameOf(name)); if (i < 0) return ''; used.add(i); return read.lines[i].printed_rate ?? ''; };
+  return lines.map((line) => ({ product_name: line.product_name, hsn_code: line.hsn_code, gst_percent: line.gst_percent, unit: line.unit,
+    printed_rate: printedFor(line.product_name), amount_only: Boolean(line.amount_only), quantity: line.amount_only ? null : line.quantity ?? null, rate: line.amount_only ? null : line.rate ?? null,
     taxable: line.amount_only ? line.taxable ?? '0.00' : paiseToDecimal(lineFigures({ quantity: line.quantity ?? '', rate: line.rate ?? '', gst_percent: line.gst_percent }, false)?.taxable ?? 0) }));
 }
 function changedRow(row: PhotoRow, read: Read, patch: Partial<PhotoRow> = {}): PhotoRow {
