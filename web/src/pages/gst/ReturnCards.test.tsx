@@ -110,13 +110,17 @@ it("uses Circular 170's corrected rows and hand-worked ledger totals", () => {
   expect(screen.getByText(/Output tax ₹300.00 − credit used ₹200.00/)).toHaveTextContent("₹100.00");
   expect(screen.getByText(/JGE\/1098, 18 Feb 2026/)).toBeVisible();
   expect(screen.getByText("3.1(c)")).toBeVisible();
-  expect(screen.getByText("5")).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Exempt, nil-rated and non-GST purchases/ })).toHaveTextContent(/5$/);
 });
 
 it("shows as-filed cash separately without replacing its working, and empty/null states", () => {
   const { unmount } = renderApp(<Gstr3bCard month={month()} data={ledger({ filed: true, as_filed_at: "2026-10-19T17:02:11+05:30", cash_paid: heads(0, 5500, 5500) })} />);
   expect(screen.getByRole("heading", { name: "GSTR-3B · as filed" })).toBeVisible();
-  expect(screen.getByText(/₹110.00 recorded as paid/)).toBeVisible();
+  const rows = screen.getAllByRole("row"); const row = (label: string) => rows.find((r) => r.textContent?.includes(label))!;
+  expect(row("Tax worked out in cash")).toHaveTextContent("₹100.00");
+  expect(row("Tax paid in cash (recorded)")).toHaveTextContent("₹110.00");
+  expect(screen.queryByText(/^Tax paid in cash$/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Output tax ₹300.00 − credit used ₹200.00 = tax worked out in cash/)).toHaveTextContent("₹100.00");
   unmount();
   renderApp(<Gstr1Card data={{ ...sections, b2b: [] }} month={month()} section="b2b" onSection={vi.fn()} />);
   expect(screen.getByText("No bills to registered buyers in September")).toBeVisible();
@@ -265,9 +269,22 @@ it.each([false, true])("shows April's combined portal HSN rows and exact two-dec
   else expect(screen.getByText("₹1,400.00")).toBeVisible();
 });
 
-it("labels the downloadable GSTR-3B interest for the CA to check on the portal", () => {
+it("labels the downloadable GSTR-3B interest for the CA to check on the portal, only when interest is due on an unfiled month", () => {
+  const late = { gstr1: { days: 0, per_day: 5000, fee: 0, cap: 200000, capped: false }, gstr3b: { days: 3, per_day: 5000, fee: 15000, cap: 200000, capped: false }, interest: 120, interest_on: 10000, interest_from: "2026-10-21", turnover_band: "upto_1.5cr" as const, nil: { gstr1: false, gstr3b: false }, total: 15120 };
+  const note = "Interest in the GSTR-3B JSON: worked out to today; check on the portal.";
+  const view = renderApp(<Gstr3bCard month={month()} data={ledger({ late })} />);
+  expect(screen.getByText(note)).toBeVisible();
+  view.unmount();
+  const again = renderApp(<Gstr3bCard month={month()} data={ledger()} />);
+  expect(screen.queryByText(note)).not.toBeInTheDocument();
+  again.unmount();
+  renderApp(<Gstr3bCard month={month()} data={ledger({ late, filed: true, as_filed_at: "2026-10-19T17:02:11+05:30" })} />);
+  expect(screen.queryByText(note)).not.toBeInTheDocument();
+});
+
+it("does not count the firms in the explanation", () => {
   renderApp(<Gstr3bCard month={month()} data={ledger()} />);
-  expect(screen.getByText("Interest in the GSTR-3B JSON: worked out to today; check on the portal.")).toBeVisible();
+  expect(screen.queryByText(/three firms/)).not.toBeInTheDocument();
 });
 
 it("checks: no 'All 0 pass', the restore hint without detail, and no dash for a missing bill total", () => {
