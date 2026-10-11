@@ -38,3 +38,7 @@ REST_FRAMEWORK = {**REST_FRAMEWORK, "NUM_PROXIES": 1}
 # helpers, so production's 5000 a day per user would lock the owner out of the sandbox for the rest of the day.
 # Production keeps 5000/day; the login, refresh and drafts rates stay as production's.
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {**REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], "user": "50000/day"}
+
+# Only this settings module can enable deterministic synthetic reads.
+AI_READER = os.environ.get("AI_READER", "fake")
+AI_READER_ALLOW_FAKE = True

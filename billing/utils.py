@@ -756,7 +756,11 @@ class AIInvoiceProcessor:
 
     # ── public API ──────────────────────────────────────────────────
 
-    def process_invoice_image(self, image_file, business_id: int | None = None) -> dict:
+    def process_invoice_pdf(self, pdf_file, business_id=None, *, pages=None):
+        from billing.services.ai_reader import extract_pages
+        return extract_pages(self, pages or [pdf_file])
+
+    def process_invoice_image(self, image_file, business_id: int | None = None, *, pages=None, v3=False) -> dict:
         """Extract structured data from an invoice image.
 
         Routing:
@@ -779,6 +783,9 @@ class AIInvoiceProcessor:
         """
         from billing.models import Customer
 
+        if v3:
+            from billing.services.ai_reader import extract_pages
+            return extract_pages(self, pages or [image_file])
         if not self.gemini_keys:
             raise AIInvoiceProcessingError(
                 "No Gemini API key configured. Add GEMINI_API_KEYS "

@@ -15,6 +15,7 @@ from .inward_bills import (
 from .me import MeView
 from .media import SignedMediaView
 from .preferences import PreferencesView
+from .purchase_reader import AiReadsView, PurchaseReadView
 from .purchases import PurchaseBinViewSet, PurchasesViewSet
 from .reconciliation import ReconciliationView
 from .sales import BinViewSet, SalesViewSet
@@ -55,6 +56,8 @@ router.register(r"drafts", DraftViewSet, basename="draft")
 router.register(r"suppliers", SupplierViewSet, basename="supplier")
 
 urlpatterns = [
+    path("purchases/read/", PurchaseReadView.as_view(), name="purchase-read"),
+    path("ai-reads/", AiReadsView.as_view(), name="ai-reads"),
     # Explicit paths BEFORE router to avoid router's <pk> catching them
     path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
