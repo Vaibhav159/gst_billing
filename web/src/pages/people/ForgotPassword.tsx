@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useState, type FormEvent } from "react";
 import { Smartphone, UserRound } from "lucide-react";
 import { useAuthOptions, startReset, finishReset, usePrivateMutation, SMS_OFF } from "@/core/api/auth";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
-import { cn } from "@/core/cn";
 import { Button, Dialog, Field, Input, QueryView } from "@/core/ui";
 import { PasswordFields, newPasswordValid } from "./PasswordFields";
 
@@ -11,7 +10,6 @@ export default function ForgotPassword({ open, onClose }: { open: boolean; onClo
   const send = usePrivateMutation(startReset);
   const reset = usePrivateMutation(finishReset);
   const [step, setStep] = useState<"pick" | "owner" | "code" | "done">("pick");
-  const [staff, setStaff] = useState(false);
   const [username, setUsername] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -53,18 +51,21 @@ export default function ForgotPassword({ open, onClose }: { open: boolean; onClo
     } catch (error) { setProblem(problemOf(error)); }
   };
   const close = () => { if (!busy) onClose(); };
-  const off = options.data?.sms_reset === false || problem?.code === "sms_off";
+  // hidden unless the server plainly says SMS is on
+  const off = options.data?.sms_reset !== true || problem?.code === "sms_off";
+  // the username field is only on the owner step; a refusal naming it elsewhere goes in the alert
+  const fieldHere = step === "owner" ? usernameError : "";
+  const alertWords = step !== "owner" && problem?.fields?.username ? problem.fields.username : words;
   return <Dialog open={open} onClose={close} title="Forgot your password?" size="sm" ghostGuardKey={step}
     footer={<Button onClick={close} disabled={busy}>{step === "done" ? "Back to sign in" : "Close"}</Button>}>
     <QueryView query={options} what="password help">{() => off ? <p className="text-fg2">{SMS_OFF}</p> : <div className="flex flex-col gap-4" aria-busy={busy || undefined}>
-      {problem && !codeError && !problem.fields?.password && !usernameError ? <p role="alert" className="text-neg">{words}</p> : null}
+      {problem && !codeError && !problem.fields?.password && !fieldHere ? <p role="alert" className="text-neg">{alertWords}</p> : null}
       {step === "pick" ? <div className="flex flex-col gap-3">
         <p className="text-fg2">Who are you?</p>
-        <button type="button" onClick={() => setStaff(true)} aria-pressed={staff}
-          className={cn("flex items-start gap-3 text-left rounded-card border px-4 py-3 transition-colors", staff ? "border-brand bg-brand-sel" : "border-line hover:border-muted/60")}>
+        <div className="flex items-start gap-3 rounded-card border border-line px-4 py-3">
           <UserRound size={20} className="text-brand mt-0.5 shrink-0" aria-hidden="true" />
           <span><span className="block font-semibold">Staff, accountant or family</span><span className="block text-sm text-fg2 mt-0.5">The owner sets a new password for you in Users and roles. Ask them; it takes a minute.</span></span>
-        </button>
+        </div>
         <button type="button" onClick={() => setStep("owner")} className="flex items-start gap-3 text-left rounded-card border border-line px-4 py-3 hover:border-muted/60 transition-colors">
           <Smartphone size={20} className="text-brand mt-0.5 shrink-0" aria-hidden="true" />
           <span><span className="block font-semibold">The owner</span><span className="block text-sm text-fg2 mt-0.5">Get a code by SMS on the number saved in your profile, and choose a new password.</span></span>
@@ -75,7 +76,7 @@ export default function ForgotPassword({ open, onClose }: { open: boolean; onClo
         <Button disabled={busy} onClick={() => { setStep("pick"); setTried(false); clearError(); }}>Back</Button>
       </form> : step === "code" ? <form onSubmit={(e) => void finish(e)} noValidate className="flex flex-col gap-4">
         <p role="status" className="text-fg2">{message}</p>
-        <Field label="Code from the SMS" htmlFor="fp-code" error={codeError}><Input id="fp-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} disabled={busy} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); clearError(); }} /></Field>
+        <Field label="Code from the SMS" htmlFor="fp-code" error={codeError}><Input id="fp-code" inputMode="numeric" autoComplete="one-time-code" value={code} disabled={busy} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "").slice(0, 6)); clearError(); }} /></Field>
         <PasswordFields id="fp" value={password} onChange={(v) => { setPassword(v); clearError(); }} again={again} onAgain={(v) => { setAgain(v); clearError(); }} identity={identity} tried={tried} own error={problem?.fields?.password} disabled={busy} />
         <Button type="submit" variant="primary" loading={reset.isPending} disabled={send.isPending}>Set the new password</Button>
         <Button disabled={busy} onClick={() => void sendCode()}>Send a new code</Button>

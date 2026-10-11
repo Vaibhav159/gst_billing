@@ -46,8 +46,10 @@ test("failed options show a retry and never pretend SMS is off", async () => {
 });
 test("staff ask the owner without sending a code", async () => {
   const { calls } = mount();
-  await screen.findByRole("button", { name: /Staff, accountant or family/ }); opened();
-  await user.click(screen.getByRole("button", { name: /Staff, accountant or family/ }));
+  await screen.findByRole("button", { name: /^The owner/ });
+  // plain words, not a toggle that changes nothing a screen reader would notice
+  expect(screen.queryByRole("button", { name: /Staff, accountant or family/ })).not.toBeInTheDocument();
+  expect(screen.getByText("Staff, accountant or family")).toBeInTheDocument();
   expect(screen.getByText("The owner sets a new password for you in Users and roles. Ask them; it takes a minute.")).toBeInTheDocument();
   expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
 });
@@ -113,4 +115,23 @@ test("a server common-password refusal belongs under the password", async () => 
   mount({ "POST auth/reset/finish/": () => ({ status: 400, data: { password: [words] } }) }); await start(); await finish();
   expect(await screen.findByText(words)).toBeInTheDocument();
   expect(screen.getByLabelText("New password")).toHaveAttribute("aria-invalid", "true");
+});
+
+test("a pasted code with a space keeps all six digits", async () => {
+  mount(); await start();
+  fireEvent.change(screen.getByLabelText("Code from the SMS"), { target: { value: "123 456" } });
+  expect(screen.getByLabelText("Code from the SMS")).toHaveValue("123456");
+  // a browser cuts a paste at maxlength before the digits are picked out
+  expect(screen.getByLabelText("Code from the SMS")).not.toHaveAttribute("maxlength");
+});
+test("a username refusal at the code step is shown, not swallowed", async () => {
+  mount({ "POST auth/reset/finish/": () => ({ status: 400, data: { username: ["Ask for a new code first."] } }) });
+  await start(); await finish();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Ask for a new code first.");
+});
+test("SMS counts as on only when the server says true", async () => {
+  const { calls } = mount({ "GET auth/options/": {} });
+  expect(await screen.findByText(OFF)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^The owner/ })).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
 });

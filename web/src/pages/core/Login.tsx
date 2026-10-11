@@ -129,7 +129,11 @@ export default function Login() {
             Sign in again. Nothing you saved is affected.
           </Banner>
         ) : null}
-        {query.get("reason") === "signed_out" ? <Banner tone="brand" icon={Clock}>You were signed out on this device. Sign in again.</Banner> : null}
+        {query.get("reason") === "signed_out" ? (
+          <Banner tone="brand" icon={LogIn} title="You were signed out on this device">
+            Sign in again. Nothing you saved is affected.
+          </Banner>
+        ) : null}
         {err?.title && ErrIcon ? (
           <div role="alert" className="flex items-start gap-3 rounded-card border border-neg-line bg-neg-tint px-4 py-3 anim-rise">
             <ErrIcon size={20} className="text-neg shrink-0 mt-0.5" aria-hidden="true" />

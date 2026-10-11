@@ -19,3 +19,4 @@ test("password help that can't load keeps the sign-in page and still says what t
   expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
 });
+

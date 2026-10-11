@@ -225,6 +225,8 @@ test("stopped credentials show the server's exact reason", async () => {
 
 test("a remotely ended session explains why sign-in is needed", () => {
   mountWith({ ok: true }, "/login?reason=signed_out");
-  expect(screen.getByText("You were signed out on this device. Sign in again.")).toBeInTheDocument();
+  // titled like the long-break banner (review amendment)
+  expect(screen.getByText("You were signed out on this device")).toBeInTheDocument();
+  expect(screen.getByText("Sign in again. Nothing you saved is affected.")).toBeInTheDocument();
   expect(screen.queryByText("You were signed out after a long break")).not.toBeInTheDocument();
 });
