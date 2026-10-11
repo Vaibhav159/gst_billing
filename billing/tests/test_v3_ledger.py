@@ -392,3 +392,41 @@ def test_recorded_gstr3b_shows_the_recorded_late_fee_and_interest(monkeypatch):
         Decimal(400), 0, Decimal("5.00"), Decimal("405.00"))
     FilingRecord.objects.update(late_fee=Decimal(0), interest=Decimal(0))
     assert gstr3b_tables(business, 2026, 9, today=date(2026, 12, 1), position=position)["late"] is None
+
+
+def _refresh(figures, lapsed_before, monkeypatch, old=date(2026, 12, 2), new=date(2026, 11, 20)):
+    # Re-review minors: a GSTR-3B filed 2 Dec with "lapsed_before" in 4(D)(2) is moved to 20 Nov.
+    from types import SimpleNamespace
+
+    from billing.services import ledger
+
+    lapsed = {date(2026, 11, 20): {"heads": heads(), "list": []},
+              date(2026, 12, 2): {"heads": heads({"igst": lapsed_before}), "list": [{"id": 1}]}}
+    monkeypatch.setattr(ledger, "_lapsed", lambda business, day, filed_on: lapsed[filed_on])
+    monkeypatch.setattr(ledger, "_turnover", lambda business, day: Decimal(0))
+    return ledger.refresh_filing_date(SimpleNamespace(pk=1), 2026, 10, figures, old, new)[0]
+
+
+def test_refreshing_a_date_keeps_late_costs_on_odd_snapshot_shapes(monkeypatch):
+    # tables saved as None, no t4a5 and no earlier late working: moved from 20 Nov (on time) to
+    # 2 Dec, the nil return's new late cost still lands: 12 days x 20 = 240.
+    figures = {"cash": {"igst": "0.00"}, "tables": None}
+    refreshed = _refresh(figures, "0", monkeypatch, old=date(2026, 11, 20), new=date(2026, 12, 2))
+    assert (refreshed["tables"]["late"]["gstr3b"]["days"], refreshed["tables"]["late"]["gstr3b"]["fee"]) == (12, "240.00")
+    assert refreshed["tables"]["late"]["nil"] == {"gstr1": True, "gstr3b": True}
+
+
+def test_moving_credit_back_out_of_4d2_releases_the_earlier_excess(monkeypatch):
+    # Filed 2 Dec: IGST 80 lapsed into 4(D)(2); with 30 of other credit that left -50, paid in
+    # cash on top of the 1000 tax (set-off output 1050). Moved to 20 Nov the 80 is claimable
+    # again: 30 + 80 - 80 + 80 -> available 30, set-off output back to 1000, cash 970.
+    igst = lambda value: {"igst": value, "cgst": "0.00", "sgst": "0.00", "total": value}  # noqa: E731
+    figures = {"output": igst("1000.00"), "setoff_output": igst("1050.00"), "available": igst("0.00"),
+               "credit": igst("-50.00"), "base_credit": igst("-50.00"), "cash": igst("1050.00"),
+               "tables": {"late": None, "t4a5": {"heads": igst("30.00"), "bills": 1},
+                          "t4d2": {"heads": igst("80.00"), "bills": 1, "list": [{"id": 1}]}}}
+    refreshed = _refresh(figures, "80", monkeypatch)
+    assert refreshed["setoff_output"]["igst"] == "1000.00"
+    assert refreshed["available"]["igst"] == "30.00"
+    assert refreshed["cash"]["igst"] == "970.00"
+    assert refreshed["credit"]["igst"] == "30.00"

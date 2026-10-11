@@ -438,7 +438,7 @@ def nil_returns(t31a, t31c, position, t4a5, t4d2):
     """
     sales = bool(to_paise(t31a.get("taxable") or 0) or to_paise(t31c.get("taxable") or 0))
     claimed = [position.get("base_credit"), *(entry["credit"] for entry in position.get("amendments", [])),
-               t4a5["heads"], t4d2["heads"]]
+               t4a5.get("heads"), t4d2.get("heads")]
     tax = any(heads(values)[head] for values in (t31a, *claimed) for head in HEADS)
     return {"gstr1": not sales, "gstr3b": not (sales or tax)}
 
@@ -459,14 +459,17 @@ def refresh_filing_date(business, year, month, figures, old, new):
     Returns the new figures and the credit that moved into (or out of) 4(D)(2).
     """
     day, figures = date(year, month, 1), deepcopy(figures)
-    tables = figures.setdefault("tables", {}) or {}
+    tables = figures["tables"] = figures.get("tables") or {}
     before, after = _lapsed(business, day, old), _lapsed(business, day, new)
     moved = subtract_heads(after["heads"], before["heads"])
     if any(moved[head] for head in HEADS):
         for kind in ("credit", "base_credit"):
             figures[kind] = subtract_heads(heads(figures.get(kind)), moved)
-        available = subtract_heads(heads(figures.get("available")), moved)
-        output = heads(figures.get("setoff_output", figures.get("output")))
+        # Re-run set-off from the tax before any cash already added for credit
+        # reversed beyond the balance, so moving credit back releases that cash.
+        output = heads(figures.get("output", figures.get("setoff_output")))
+        excess = subtract_heads(heads(figures.get("setoff_output", output)), output)
+        available = subtract_heads(subtract_heads(heads(figures.get("available")), excess), moved)
         for head in HEADS:
             if available[head] < 0:
                 output[head] -= available[head]
