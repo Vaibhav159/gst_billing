@@ -1,4 +1,8 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { toBoard as boardOf } from '@/core/dashboard/wire';
+import { act, fireEvent, screen, within } from '@testing-library/react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { ratesKeys } from '@/core/api/dashboard';
+
 import { renderApp } from '@/test/render';
 import { serve } from '@/test/server';
 import { pass } from '@/test/clock';
@@ -16,7 +20,7 @@ const type = (value: string) => fireEvent.change(field(), { target: { value } })
 const posts = (calls: ReturnType<typeof serve>) => calls.filter(c => c.method === 'POST');
 test.each(['card', 'easy', 'strip'] as const)('%s shows quiet unset copy and the right rows', async variant => {
   serve({ 'GET rates/': wireRates({ set_today: false, latest: wireBoard({ on: '2026-10-07', set_at: '2026-10-07T10:12:00+05:30' }) }) });
-  window.__phone = variant !== 'card'; renderApp(<RatesCard variant={variant} />, { path: variant === 'easy' ? '/e' : '/' }); await pass();
+  (window as unknown as { __phone: boolean }).__phone = variant !== 'card'; renderApp(<RatesCard variant={variant} />, { path: variant === 'easy' ? '/e' : '/' }); await pass();
   expect(screen.getByText('Not set today · last set 07 Oct at 10:12')).toBeInTheDocument();
   expect(screen.getByText('Gold 22K')).toBeInTheDocument(); expect(screen.getByText('Silver 999')).toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(screen.queryByText('Gold 24K') !== null).toBe(variant !== 'strip');
@@ -77,6 +81,27 @@ test('failed read uses QueryView without a zero board', async () => {
   serve({ 'GET rates/': () => ({ status: 500 }) }); renderApp(<RatesCard />); expect(screen.queryByText('₹0.00')).not.toBeInTheDocument(); await pass(); expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
 });
 test('Easy sheet uses Go back and labelled fields', async () => {
-  window.__phone = true; serve({ 'GET rates/': wireRates() }); renderApp(<RatesSheet open onClose={vi.fn()} />, { path: '/e' }); await pass(); await pass(400);
+  (window as unknown as { __phone: boolean }).__phone = true; serve({ 'GET rates/': wireRates() }); renderApp(<RatesSheet open onClose={vi.fn()} />, { path: '/e' }); await pass(); await pass(400);
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Go back' })).toBeInTheDocument(); expect(field()).toBeInTheDocument();
+});
+test('a cold failed sheet remains a closable dialog with its retry inside', async () => {
+  serve({ 'GET rates/': () => ({ status: 500 }) }); const close = vi.fn(); renderApp(<RatesSheet open onClose={close} />);
+  expect(screen.getByRole('dialog', { name: "Today's rates" })).toBeInTheDocument(); await pass(); await pass(400);
+  const dialog = screen.getByRole('dialog'); expect(within(dialog).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); expect(close).toHaveBeenCalledOnce();
+});
+
+test('a refreshed new IST day permits unchanged quotes without replacing typing', async () => {
+  let cache: QueryClient;
+  function CaptureCache() { cache = useQueryClient(); return null; }
+  serve({ 'GET rates/': wireRates() }); renderApp(<><CaptureCache /><RatesSheet open onClose={vi.fn()} /></>); await pass(); await pass(400);
+  expect(screen.getByRole('button', { name: "Save today's rates" })).toBeDisabled();
+  act(() => cache.setQueryData(ratesKeys.board(), { ...wireRates(), latest: boardOf(wireBoard()), previous: null, today: '2026-10-13', set_today: false })); await pass();
+  expect(screen.getByRole('button', { name: "Save today's rates" })).toBeEnabled(); expect(field()).toHaveValue('65,125.00');
+  type('65001.25');
+  act(() => cache.setQueryData(ratesKeys.board(), { ...wireRates(), latest: boardOf(wireBoard({ id: 42 })), previous: null })); await pass();
+  expect(field()).toHaveValue('65001.25');
+  type('');
+  act(() => cache.setQueryData(ratesKeys.board(), { ...wireRates(), latest: boardOf(wireBoard({ id: 43, on: '2026-10-13', quoted: { ...wireBoard().quoted, 'gold-22K': '68000.00' } })), previous: null })); await pass();
+  expect(screen.getByText('13 Oct: ₹68,000.00 per 10 g')).toBeInTheDocument();
 });

@@ -1,3 +1,4 @@
+import type { UseQueryResult } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { AlertTriangle, History } from 'lucide-react';
 import { useAuth } from '@/core/auth/AuthProvider';
@@ -6,17 +7,22 @@ import { dateShort, inr } from '@/core/format';
 import { rateText } from '@/core/sales/words';
 import { useView } from '@/core/view';
 import { Banner, Button, Dialog, Field, MoneyInput, QueryView, useToast } from '@/core/ui';
-import { useRates, useSetRates } from './api';
+import { useRates } from '@/core/api/dashboard';
+import { useSetRates } from './api';
 import { changed, moved, perGram, quotedErrors, RATE_ROWS, type QuoteInput, type Quoted, type RateKey, type Rates } from './model';
 
 export function RatesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { can } = useAuth();
   const query = useRates(undefined, open && can('rates.edit'));
+  const { isEasy } = useView();
   if (!open || !can('rates.edit')) return null;
-  return <QueryView query={query} what="today's rates">{data => <Editor initial={data} onClose={onClose} />}</QueryView>;
+  if (!query.data) return <Dialog open onClose={onClose} title="Today's rates" footer={<Button onClick={onClose}>{isEasy ? 'Go back' : 'Cancel'}</Button>}>
+    <QueryView query={query} what="today's rates">{() => null}</QueryView>
+  </Dialog>;
+  return <Editor initial={query.data} query={query} onClose={onClose} />;
 }
-function Editor({ initial, onClose }: { initial: Rates; onClose: () => void }) {
-  // Freeze the opening board: a background refresh must not replace typing or its comparison baseline.
+function Editor({ initial, query, onClose }: { initial: Rates; query: UseQueryResult<Rates>; onClose: () => void }) {
+  // Freeze the opening values for typing and discard checks; server freshness still decides save eligibility.
   const [base] = useState(initial);
   const [values, setValues] = useState<QuoteInput>(() => Object.fromEntries(RATE_ROWS.map(r => [r.key, base.latest?.quoted[r.key] ?? null])) as QuoteInput);
   const [invalidRaw, setInvalidRaw] = useState<Partial<Record<RateKey, boolean>>>({});
@@ -27,16 +33,18 @@ function Editor({ initial, onClose }: { initial: Rates; onClose: () => void }) {
   const saving = useRef(false);
   const { isEasy } = useView();
   const { show } = useToast();
-  const differences = moved(values, base.latest);
+  const [comparedTo, setComparedTo] = useState(initial.latest?.id);
+  if (comparedTo !== initial.latest?.id) { setComparedTo(initial.latest?.id); setAsked(false); setMessage(''); }
+  const differences = moved(values, initial.latest);
   const dirty = changed(values, base.latest);
-  const unchanged = base.set_today && !dirty;
+  const unchanged = initial.set_today && !changed(values, initial.latest);
   const close = () => { if (!saving.current) onClose(); };
   const save = async () => {
     if (saving.current || unchanged) return;
     const invalid = { ...quotedErrors(values), ...Object.fromEntries(RATE_ROWS.filter(r => invalidRaw[r.key]).map(r => [r.key, "That's not an amount."])) };
     if (Object.keys(invalid).length) { setErrors(invalid); setMessage(Object.values(invalid)[0]!); return; }
     if (differences.length && !asked) {
-      setAsked(true); setMessage(`${differences.length} rates moved more than a fifth since ${dateShort(base.latest!.on)}. Check them, then save again.`); return;
+      setAsked(true); setMessage(`${differences.length} rates moved more than a fifth since ${dateShort(initial.latest!.on)}. Check them, then save again.`); return;
     }
     saving.current = true;
     try {
@@ -53,22 +61,23 @@ function Editor({ initial, onClose }: { initial: Rates; onClose: () => void }) {
     confirmClose={!mutation.isPending && dirty ? 'Discard the changes to these rates?' : undefined}
     footer={<><Button onClick={close} disabled={mutation.isPending}>{isEasy ? 'Go back' : 'Cancel'}</Button><Button variant="primary" loading={mutation.isPending} disabled={unchanged} onClick={() => void save()}>{mutation.isPending ? 'Saving…' : asked && differences.length ? 'Yes, save these rates' : "Save today's rates"}</Button></>}>
     <div className="flex flex-col gap-4">
+      <QueryView query={query} what="today's rates">{() => null}</QueryView>
       {message ? <Banner tone="neg" icon={AlertTriangle} title={message} /> : null}
       {RATE_ROWS.map(row => {
-        const value = values[row.key], old = base.latest?.quoted[row.key];
+        const value = values[row.key], old = initial.latest?.quoted[row.key];
         const warning = differences.includes(row.key) && value != null && old
-          ? `That's ${value > old ? 'up' : 'down'} ${Math.round(Math.abs(value - old) * 100 / old)}% on ${dateShort(base.latest!.on)} (${inr(old)}). Check it's per ${row.per_label}.` : '';
+          ? `That's ${value > old ? 'up' : 'down'} ${Math.round(Math.abs(value - old) * 100 / old)}% on ${dateShort(initial.latest!.on)} (${inr(old)}). Check it's per ${row.per_label}.` : '';
         const valid = value != null && Number.isSafeInteger(value) && value > 0 && value <= 999999999;
         return <Field key={row.key} label={`${row.label} (${row.sub}) per ${row.per_label}`} htmlFor={`rate-${row.key}`} error={errors[row.key]}
-          hint={warning || (valid ? `${rateText(perGram(value, row.per))} a gram` : base.latest ? `${dateShort(base.latest.on)}: ${inr(old)} per ${row.per_label}` : 'Not set')}>
+          hint={warning || (valid ? `${rateText(perGram(value, row.per))} a gram` : initial.latest ? `${dateShort(initial.latest.on)}: ${inr(old)} per ${row.per_label}` : 'Not set')}>
           <MoneyInput id={`rate-${row.key}`} value={value} disabled={mutation.isPending} onChange={(p, raw) => {
             setValues(v => ({ ...v, [row.key]: p })); setInvalidRaw(v => ({ ...v, [row.key]: p == null && raw.trim() !== '' }));
             setErrors(e => { const next = { ...e }; delete next[row.key]; return next; }); setMessage(''); setAsked(false);
           }} />
         </Field>;
       })}
-      {base.previous ? <p className="text-sm text-muted flex items-center gap-1.5"><History size={14} aria-hidden="true" />
-        {dateShort(base.previous.on)}: Gold 22K {inr(base.previous.quoted['gold-22K'])} per 10 g · Silver 999 {inr(base.previous.quoted['silver-999'])} per kg
+      {initial.previous ? <p className="text-sm text-muted flex items-center gap-1.5"><History size={14} aria-hidden="true" />
+        {dateShort(initial.previous.on)}: Gold 22K {inr(initial.previous.quoted['gold-22K'])} per 10 g · Silver 999 {inr(initial.previous.quoted['silver-999'])} per kg
       </p> : null}
     </div>
   </Dialog>;

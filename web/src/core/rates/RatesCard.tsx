@@ -5,7 +5,7 @@ import { cn } from '@/core/cn';
 import { dateShort, inr } from '@/core/format';
 import { rateText, timeOf } from '@/core/sales/words';
 import { Button, Card, Money, QueryView } from '@/core/ui';
-import { useRates } from './api';
+import { useRates } from '@/core/api/dashboard';
 import { RATE_ROWS, type Rates } from './model';
 import { RatesSheet } from './RatesSheet';
 export type RatesVariant = 'card' | 'strip' | 'easy';
