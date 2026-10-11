@@ -190,3 +190,39 @@ test("when the upload worked but switching printing off failed, retry only switc
   await waitFor(() => expect(router.state.location.pathname).toBe("/firms/3"));
   expect(calls.filter((c) => c.method === "PUT").map((c) => c.url)).toEqual(["firms/3/", "firms/3/signature/", "firms/3/", "firms/3/"]);
 });
+test("pasted bank and PIN numbers are kept whole, so a digit too many is refused rather than cut off", async () => {
+  server();
+  mount(routes, ["/firms/new"]);
+  fireEvent.change(await screen.findByLabelText("Account number"), { target: { value: "1234 5678 9012 3456 789" } });
+  expect(screen.getByLabelText("Account number")).toHaveValue("1234567890123456789");
+  fireEvent.blur(screen.getByLabelText("Account number"));
+  expect(screen.getByText("Account numbers have 9 to 18 digits; this has 19.")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("IFSC"), { target: { value: "sbin0udr0145" } });
+  expect(screen.getByLabelText("IFSC")).toHaveValue("SBIN0UDR0145");
+  fireEvent.change(screen.getByLabelText("PIN code"), { target: { value: "3130011" } });
+  expect(screen.getByLabelText("PIN code")).toHaveValue("3130011");
+});
+test("opening the edit form never fills it from the registry, so nothing changes until the owner types", async () => {
+  const calls = server({ "GET firms/3/": { ...FIRM_DETAIL, city: "", pin_code: "" }, "GET registry/08VRHFA2322D1ZI/": { gstin: "08VRHFA2322D1ZI", status: "found", registry: { active: true, legal_name: "KIRAN GOLD HOUSE", address: "x", city: "Jaipur", pin_code: "302003" } } });
+  mount(routes, ["/firms/3/edit"]);
+  expect(await screen.findByLabelText("City")).toHaveValue("");
+  await new Promise((done) => setTimeout(done, 700));
+  expect(screen.getByLabelText("City")).toHaveValue("");
+  expect(screen.getByLabelText("PIN code")).toHaveValue("");
+  expect(calls.some((c) => c.url.startsWith("registry/"))).toBe(false);
+});
+test("a half-typed paper date keeps the saved date and says how to type it, on leaving the field", async () => {
+  server();
+  mount(routes, ["/firms/3/edit"]);
+  const date = await screen.findByLabelText("Paper bills carry the full number from");
+  Object.defineProperty(date, "validity", { configurable: true, value: { badInput: true } });
+  fireEvent.change(date, { target: { value: "" } });
+  fireEvent.blur(date);
+  expect(screen.getByText("Type the date like 2027-04-01.")).toBeInTheDocument();
+  expect(date).toHaveAttribute("aria-invalid", "true");
+  const decl = screen.getByLabelText("Declaration");
+  fireEvent.change(decl, { target: { value: "x".repeat(501) } });
+  fireEvent.blur(decl);
+  expect(screen.getByText("Keep the declaration to 500 characters.")).toBeInTheDocument();
+  expect(decl).toHaveAttribute("aria-invalid", "true");
+});
