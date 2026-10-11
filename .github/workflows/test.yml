@@ -327,7 +327,7 @@ jobs:
       - name: Run v3 E2E
         working-directory: e2e-tests
         # one worker on purpose (one login, the phone's mode kept on the server, one number series); a full run is
-        # ~11 min on a 2-CPU machine and each part adds specs, so the limit leaves room (Ruling 1E-22)
+        # ~15 min on a 2-CPU machine (after 1D's axe states) and each part adds specs, so the limit leaves room (Ruling 1E-22)
         timeout-minutes: 25
         env:
           BASE_URL_V3: http://127.0.0.1:8081
