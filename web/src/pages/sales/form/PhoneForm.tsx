@@ -3,7 +3,7 @@
 // reach in the action bar beside Check and save.
 import { useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { Check, ChevronRight, MoreHorizontal, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
 import { cn } from "@/core/cn";
 import { date, plural, qty as qtyLabel } from "@/core/format";
@@ -26,15 +26,16 @@ type SheetState = { kind: "info"; numberFocus?: boolean; dateFocus?: boolean } |
 
 export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: DraftKeeping; children?: ReactNode }) {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const products = useSaleProducts();
-  const [sheet, setSheet] = useState<SheetState>(null);
+  const [sheet, setSheet] = useState<SheetState>(() => F.edit && params.get("focus") === "customer" ? { kind: "customer" } : null);
   const again = useRef(0);
   const [fix, setFix] = useState<FixField | null>(null);
   const edit = F.edit;
   const cust = F.cust;
   const custErr = F.showErr("customer");
   const infoErr = F.showErr("firm") || F.showErr("number") || F.showErr("date");
-  const checks = checksWithFixes(F, setFix);
+  const checks = checksWithFixes(F, setFix, () => setSheet({ kind: "customer" }));
   /** Takes the person to a problem: the sheet that holds it, or the field itself. */
   const focusProblem = (k: string) => {
     if (k === "firm" || k === "number" || k === "date") setSheet({ kind: "info", numberFocus: k === "number", dateFocus: k === "date" });
@@ -131,7 +132,8 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
       </div>
 
       <InfoSheet F={F} open={sheet?.kind === "info"} numberFocus={sheet?.kind === "info" && sheet.numberFocus} dateFocus={sheet?.kind === "info" && sheet.dateFocus} onClose={() => setSheet(null)} />
-      <CustomerSheet open={sheet?.kind === "customer"} onClose={() => setSheet(null)} firmId={F.f.firmId} homeState={homeState(F.firms, F.f.firmId)} value={F.cust} onPick={F.setCustomer} enabled={!F.saving && !F.savedTo} />
+      <CustomerSheet open={sheet?.kind === "customer"} onClose={() => setSheet(null)} firmId={F.f.firmId} homeState={homeState(F.firms, F.f.firmId)} value={F.cust}
+        onPick={(c) => { F.setCustomer(c); if (F.reviewOpen) focusReview(); }} enabled={!F.saving && !F.savedTo} />
       <ItemSheet F={F} open={sheet?.kind === "item"} lineKey={sheet?.kind === "item" ? sheet.key : null} again={sheet?.kind === "item" ? sheet.n : 0} products={products.data} productsError={products.isError}
         focusField={sheet?.kind === "item" ? sheet.focusField : undefined}
         onClose={() => setSheet(null)} onAgain={() => setSheet({ kind: "item", key: null, n: ++again.current })} onRemove={removeItem} />

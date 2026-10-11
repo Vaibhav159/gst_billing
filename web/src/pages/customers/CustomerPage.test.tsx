@@ -207,6 +207,22 @@ test("income-tax checks that can't load say so, with Try again", async () => {
   expect(screen.queryByText("Couldn't check their bills for income tax")).not.toBeInTheDocument();
 });
 
+test.each([false, true])("Rule 46(f) counts missing name-and-address bills alongside the business-address checks (phone=%s)", async (phone) => {
+  handClock();
+  (window as unknown as { __phone?: boolean }).__phone = phone;
+  const text = "A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address (CGST Rule 46(f)). Add Anil Gupta's address.";
+  const rows = flags([[1, "KGH/2026-27/18", "b2c_address"], [2, "KGH/2026-27/22", "b2c_address"], [3, "KGH/2026-27/23", "b2b_address"]]);
+  for (const row of rows.results) if (row.itax[0].kind === "b2c_address") Object.assign(row.itax[0], { short: "Name and address needed", text });
+  serve({ "GET customers/7/": { ...ANIL, address: "" }, "GET customers/7/statement/": statement(), "GET sales/": rows });
+  mount(routes, ["/customers/7"]);
+  await pass(400);
+  const note = screen.getByText("Name and address needed: 2 bills").closest("[role=status]") as HTMLElement;
+  expect(note).toHaveTextContent("KGH/2026-27/18, KGH/2026-27/22");
+  expect(note).toHaveTextContent(text);
+  expect(within(note).getByRole("link", { name: "Add the address" })).toHaveAttribute("href", "/customers/7/edit?focus=address");
+  expect(screen.getByText("Address needed: 1 bill to a business")).toBeInTheDocument();
+});
+
 test("offline, a failed income-tax check says the device is offline and offers no Try again (it runs again by itself)", async () => {
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": () => ({ status: 503 }) });
   mount(routes, ["/customers/7"]);

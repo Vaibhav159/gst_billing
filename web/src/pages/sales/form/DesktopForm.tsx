@@ -2,7 +2,7 @@
 // switch, firm, number, date, customer, place of supply), the items, payment and a note, and beside them the Bill summary
 // with the checks and Check and save. Ctrl S checks and saves; Ctrl Enter adds a line.
 import { useState, type ReactNode } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { AlertTriangle, BookOpenText, FilePlus2, Plus, SquarePen } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -10,7 +10,7 @@ import { date, plural } from "@/core/format";
 import { MOD } from "@/core/modifierKeys";
 import { Button, ButtonLink, Card, Field, Kbd, Page, Select, Sheet, Textarea } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
-import { CustomerFixSheet, CustomerPicker, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
+import { CustomerFixSheet, CustomerPicker, CustomerSheet, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
 import { DraftBanners, DraftStatus } from "./drafts";
 import { CheckList, focusNow, LabelSpacer, PayPicker } from "./fields";
 import { LineRow, ONE_ROW, LINE_COLS } from "./lines";
@@ -40,12 +40,14 @@ export function focusProblem(F: BillFormApi, k: string) {
 export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: DraftKeeping; children?: ReactNode }) {
   const { can } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const products = useSaleProducts();
   const [nc, setNc] = useState<{ name: string } | null>(null);
   const [np, setNp] = useState<{ name: string; key: string } | null>(null);
   // a save to Products on its way: the sheet stays until it lands, or the product would be saved but left off the line
   const [npBusy, setNpBusy] = useState(false);
   const [fix, setFix] = useState<FixField | null>(null);
+  const [chooseCustomer, setChooseCustomer] = useState(() => F.edit && params.get("focus") === "customer");
   // until a box is measured (and in tests, where nothing lays out) it reads as 1400 px: the wide layout (Ruling 1E-3)
   const [page, pageW] = useBoxWidth();
   const [lines, linesW] = useBoxWidth();
@@ -54,7 +56,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
   const edit = F.edit;
   const firstOpenLine = () => (F.f.lines.find((l) => !hasContent(l)) ?? F.f.lines[0]).key;
   const errCount = F.tried ? Object.keys(F.errors).length : 0;
-  const checks = checksWithFixes(F, setFix);
+  const checks = checksWithFixes(F, setFix, () => setChooseCustomer(true));
   /** Check and save: the review, or the first problem, scrolled to and focused. */
   const onTryReview = () => { const r = F.openReview(); if (!r.ok) focusProblem(F, r.first); };
   /** Saves from the review; a field the server refused is focused once the review has closed. */
@@ -149,6 +151,8 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
       {/* opened from the review's checks, its Add PAN goes with the check: the cursor goes back into the review before the
           sheet lets go of it (the kit's fallback would put it on the page behind the review) */}
       <CustomerFixSheet customer={F.cust} field={fix} open={Boolean(fix)} onClose={() => setFix(null)} onSaved={(c) => { F.set({ customer: c }); if (F.reviewOpen) focusReview(); }} />
+      <CustomerSheet open={chooseCustomer} onClose={() => setChooseCustomer(false)} firmId={F.f.firmId} homeState={homeState(F.firms, F.f.firmId)} value={F.cust}
+        onPick={(c) => { F.setCustomer(c); if (F.reviewOpen) focusReview(); }} enabled={chooseCustomer && !F.saving && !F.savedTo} />
       <Review F={F} checks={checks} numberId="bf-number" onSave={saveNow} waiting={drafts.waiting} />
       {children}
     </Page>

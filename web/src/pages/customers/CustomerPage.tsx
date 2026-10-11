@@ -158,8 +158,9 @@ function ComplianceNotes({ c, bills }: { c: Customer; bills: ItaxBill[] }) {
   const { can } = useAuth();
   const by = (...kinds: ItaxKind[]) => bills.filter((b) => b.itax.some((f) => kinds.includes(f.kind)));
   // on the walk-in record a big bill's flag is walkin_limit: it needs the buyer's PAN all the same
-  const pan = by("pan", "walkin_limit"), addr = by("b2b_address"), cash = by("cash_limit");
-  if (!pan.length && !addr.length && !cash.length) return null;
+  const pan = by("pan", "walkin_limit"), addr = by("b2b_address"), b2cAddr = by("b2c_address"), cash = by("cash_limit");
+  const b2cFlag = b2cAddr[0]?.itax.find((f) => f.kind === "b2c_address");
+  if (!pan.length && !addr.length && !b2cAddr.length && !cash.length) return null;
   const walkin = c.type === "walkin";
   const edit = (field: string) => (can("customer.edit") && !walkin ? `/customers/${c.id}/edit?focus=${field}` : null);
   const panTo = edit("pan"), addrTo = edit("address");
@@ -174,6 +175,11 @@ function ComplianceNotes({ c, bills }: { c: Customer; bills: ItaxBill[] }) {
       {addr.length ? (
         <Banner tone="brand" icon={MapPin} title={`Address needed: ${plural(addr.length, "bill")} to a business`} actions={addrTo ? <ButtonLink size="sm" to={addrTo}>Add the address</ButtonLink> : null}>
           A bill to a GST-registered buyer carries their address. Add it once here; it prints on every bill from now on.
+        </Banner>
+      ) : null}
+      {b2cFlag ? (
+        <Banner tone="brand" icon={MapPin} title={`${b2cFlag.short}: ${plural(b2cAddr.length, "bill")}`} actions={addrTo ? <ButtonLink size="sm" to={addrTo}>Add the address</ButtonLink> : null}>
+          {numbers(b2cAddr)}. {b2cFlag.text}
         </Banner>
       ) : null}
       {cash.length ? (

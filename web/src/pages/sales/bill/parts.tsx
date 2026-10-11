@@ -7,6 +7,7 @@ import {
   AlertTriangle, ArrowRightLeft, Ban, ChevronRight, Download, FilePlus2, FileSpreadsheet, Hash, Info, Landmark, Lock, Pencil, Printer, RefreshCcw, RotateCcw,
   Scale, Send, Trash2, Truck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
+import { toCustomer } from "@/core/api/customers";
 import { problemOf } from "@/core/api/errors";
 import { salesKeys, useFixHeads, useSalesPage } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
@@ -19,6 +20,7 @@ import { gstinNote, SEGMENTS, stateNameOf } from "@/core/sales/pos";
 import type { Activity as ActivityRow, AuditAction, BillDetail } from "@/core/sales/types";
 import { LOCKED_REASON, PAY, cancelledMark, dayOf, ewayNumberText, failText, realReason, sentLine, taxLines, timeOf, type FailText } from "@/core/sales/words";
 import { Banner, Button, ButtonLink, Card, DL, FailNote, ListRow, Money, Skeleton, useToast } from "@/core/ui";
+import { CustomerFixSheet } from "@/pages/customers/forBills";
 import type { Detail } from "./useDetail";
 import { madeByRow } from "../actions/recordRows";
 
@@ -205,6 +207,7 @@ export function RoleNote() {
 
 const ITAX_TITLE: Record<string, string> = {
   cash_limit: "Cash at or over the ₹2,00,000 limit", pan: "The buyer's PAN is missing", walkin_limit: "A walk-in bill over ₹2,00,000", b2b_address: "The buyer's address is missing",
+  b2c_address: "Name and address needed",
 };
 
 /**
@@ -214,6 +217,7 @@ const ITAX_TITLE: Record<string, string> = {
  */
 export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
   const { show } = useToast();
+  const [fixAddress, setFixAddress] = useState(false);
   const fixHeads = useFixHeads();
   const fixedHeads = useRef(false);
   useEffect(() => {
@@ -285,6 +289,10 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
     const acts: ReactNode[] = [];
     if (canFix && b.itax.some((x) => x.kind === "pan")) acts.push(<ButtonLink key="pan" size="sm" to={`/customers/${c.id}/edit?focus=pan`}>Add PAN</ButtonLink>);
     if (canFix && b.itax.some((x) => x.kind === "b2b_address")) acts.push(<ButtonLink key="addr" size="sm" to={`/customers/${c.id}/edit?focus=address`}>Add the address</ButtonLink>);
+    if (b.itax.some((x) => x.kind === "b2c_address")) {
+      if (canFix) acts.push(<Button key="b2c-address" size="sm" onClick={() => setFixAddress(true)}>Add the address</Button>);
+      else if (c.type === "walkin" && d.can("bill.edit")) acts.push(<Button key="buyer" size="sm" disabled={Boolean(d.editBlock)} title={d.editBlock || undefined} onClick={() => d.navigate(`/sales/${b.id}/edit?focus=customer`)}>Choose the buyer</Button>);
+    }
     out.push(<Banner key="it" tone={b.itax.some((x) => x.kind === "cash_limit") ? "neg" : "brand"} icon={Scale}
       title={b.itax.length === 1 ? ITAX_TITLE[b.itax[0].kind] : `${b.itax.length} things to check on this bill`} actions={acts.length ? <>{acts}</> : null}>
       {b.itax.length === 1 ? b.itax[0].text : <ul className="list-disc pl-5 flex flex-col gap-1">{b.itax.map((x) => <li key={x.kind}>{x.text}</li>)}</ul>}
@@ -302,5 +310,5 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
       This bill can be printed and sent, not edited, cancelled or deleted. Unlock the month in GST returns first (owner only).
     </Banner>);
   }
-  return <>{out}</>;
+  return <>{out}<CustomerFixSheet customer={toCustomer(b.customer)} field="address" open={fixAddress} onClose={() => setFixAddress(false)} /></>;
 }

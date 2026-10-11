@@ -302,7 +302,7 @@ export function useBillForm(start: Start, formKey?: string) {
   };
 
   /* ── income tax, a bill maybe made twice, and the checks beside the total ── */
-  const itax = cust ? itaxFlags({ status: "active", payment_mode: f.payment ?? "", total: figs.total, customer: { name: cust.name, type: cust.type, pan: cust.pan, gst_number: cust.gst_number, address: cust.address } }) : [];
+  const itax = cust ? itaxFlags({ status: "active", payment_mode: f.payment ?? "", total: figs.total, taxable: figs.taxable, customer: { name: cust.name, type: cust.type, pan: cust.pan, gst_number: cust.gst_number, address: cust.address } }) : [];
   const cashOver = itax.some((x) => x.kind === "cash_limit");
   const cashBlock = cashOver && !cashAnyway;
   const twinAsked = !edit && Boolean(cust) && cust?.type !== "walkin" && figs.total > 0 && Boolean(f.date) && !dateError;

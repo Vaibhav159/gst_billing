@@ -169,7 +169,7 @@ export function lineWarning(l: FormLine): string {
 }
 
 /* ── The checks beside the total ── */
-export type Check = { key: string; ok: true | false | null | "warn"; text: string; fix?: "pan" | "address" };
+export type Check = { key: string; ok: true | false | null | "warn"; text: string; fix?: "pan" | "address" | "customer" };
 /** waiting: no number yet, the next one on its way (Ruling 1D-15). */
 export type NumberState = "free" | "checking" | "waiting" | "unknown";
 export type CheckInput = {
@@ -208,6 +208,8 @@ export function checksOf(c: CheckInput): Check[] {
   else out.push({ key: "cust", ok: true, text: `No GSTIN needed: ${cust.name} buys as a person (B2C)` });
   if (c.gstinNote) out.push({ key: "gstin", ok: "warn", text: c.gstinNote });
   if (cust && c.itax.some((x) => x.kind === "b2b_address")) out.push({ key: "addr", ok: "warn", text: `${cust.name} has no address on record. A B2B bill must show it (CGST Rule 46).`, fix: "address" });
+  const b2cAddress = c.itax.find((x) => x.kind === "b2c_address");
+  if (cust && b2cAddress) out.push({ key: "b2c_address", ok: "warn", text: b2cAddress.text, fix: cust.type === "walkin" ? "customer" : "address" });
   if (c.dateError) out.push({ key: "date", ok: false, text: c.f.date ? `${monthLabel(monthOf(c.f.date), { long: true })} can't take this bill` : "The date isn't readable yet" });
   else if (c.dateWarn) out.push({ key: "date", ok: "warn", text: c.nextNumber ? `Last year's bill: number ${c.nextNumber}` : "Last year's bill" });
   else out.push({ key: "date", ok: true, text: periodCheck(c.f.date, c.today, c.locked) });

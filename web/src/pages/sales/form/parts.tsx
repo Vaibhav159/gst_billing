@@ -15,9 +15,12 @@ import type { BillFormApi } from "./useBillForm";
 
 type P = { F: BillFormApi; id: string };
 
-/** The checks, with "Add PAN" or "Add the address" beside the ones a customer's record fixes. */
-export function checksWithFixes(F: BillFormApi, open: (f: FixField) => void): CheckRow[] {
-  return F.checks.map((c) => (c.fix && F.cust && F.cust.type !== "walkin" ? { ...c, action: { label: c.fix === "pan" ? "Add PAN" : "Add the address", onClick: () => open(c.fix as FixField) } } : c));
+/** The checks lead to the buyer's missing detail, or the customer picker for a walk-in. */
+export function checksWithFixes(F: BillFormApi, open: (f: FixField) => void, chooseCustomer: () => void): CheckRow[] {
+  return F.checks.map((c) => {
+    if (c.fix === "customer") return { ...c, action: { label: "Choose customer", onClick: chooseCustomer } };
+    return c.fix && F.cust && F.cust.type !== "walkin" ? { ...c, action: { label: c.fix === "pan" ? "Add PAN" : "Add the address", onClick: () => open(c.fix as FixField) } } : c;
+  });
 }
 
 /** A firm's month in the paper book (/sales/paper keeps its firm and month in the address). */

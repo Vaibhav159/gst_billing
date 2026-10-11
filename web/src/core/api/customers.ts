@@ -34,7 +34,7 @@ export type CustomerSummary = { customers: number; bills: number; total: number;
 export type CustomerPage = { count: number; next: string | null; rows: CustomerRow[]; summary: CustomerSummary | null };
 
 /** An income-tax check on a bill (contract §0.2 ItaxFlag); never on a cancelled bill. */
-export type ItaxKind = "cash_limit" | "pan" | "walkin_limit" | "b2b_address";
+export type ItaxKind = "cash_limit" | "pan" | "walkin_limit" | "b2b_address" | "b2c_address";
 export type ItaxFlag = { kind: ItaxKind; short: string; text: string };
 /** How a statement bill was settled: at billing (cash, UPI or both), on udhaar, not recorded (from Tally), or cancelled. */
 export type PaidAs = "billing" | "udhaar" | "not_recorded" | "cancelled";
