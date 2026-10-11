@@ -212,7 +212,8 @@ export function DesktopList({ m }: { m: ListModel }) {
   }, [hasPreview, setPreview]);
   const menuItems = useCallback((b: BillRow) => billMenu(b, dialogs.open, { shareIt: true, eway: true }), [billMenu, dialogs.open]);
 
-  const selBills = rows.filter((r) => selected.has(r.id));
+  const rowsById = new Map(rows.map((r) => [r.id, r]));
+  const selBills = [...selected].flatMap((id) => rowsById.get(id) ?? []);
   const selTotal = selBills.filter((b) => b.status !== "cancelled").reduce((a, b) => a + b.total_amount, 0);
   const allShownSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleAll = (on: boolean) => setSelected(on ? new Set(rows.map((r) => r.id)) : new Set());

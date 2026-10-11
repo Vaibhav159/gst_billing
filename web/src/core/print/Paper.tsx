@@ -9,6 +9,7 @@ import { cn } from "@/core/cn";
 import { Button } from "@/core/ui";
 import { PAGE_FIT, type CopyMark, type FreeText, type PrintBill, type PrintPage, type Run } from "./model";
 import { qrPath } from "./qrPath";
+import { LAYOUT } from "./layout";
 
 export const A4_W = 794; // 210 mm at 96 px per inch
 export const A4_H = 1123;
@@ -22,7 +23,7 @@ const GREY = "#4b4b4b";
 const LINE = 1.12;
 const pt = (n: number) => (n * 4) / 3;
 /** The goods' columns, the PDF's: Sl No., the description (the rest), HSN/SAC, Quantity, Rate, per, Amount. */
-const COLS = [26, 0, 50, 62, 58, 30, 80].map((w) => (w ? `${pt(w)}px` : "minmax(0,1fr)")).join(" ");
+const COLS = LAYOUT.cols.map((w) => (w ? `${pt(w)}px` : "minmax(0,1fr)")).join(" ");
 const NBSP = "\u00a0"; // PROTO's " ": an empty box or line keeps its height
 
 /**
@@ -72,7 +73,7 @@ function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode
   return (
     <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...(filler ? {} : { minHeight: pt(PAGE_FIT.row) }), ...style }}>
       {cells.map((c, i) => (
-        <div key={i} role={head ? "columnheader" : "cell"} style={{ padding: filler ? 0 : pt(3) }}
+        <div key={i} role={head ? "columnheader" : "cell"} style={{ padding: filler ? 0 : pt(LAYOUT.padding.cell) }}
           className={cn("min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold", i === 3 && oneLineQty(c) && "whitespace-nowrap")}>{c}</div>
       ))}
     </div>
@@ -92,27 +93,27 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
   // a label stands on its own line, as tall as its own 7 pt text (inline, it would take the paper's 9 pt line)
   const label = (t: string) => <span className="block" style={{ fontSize: pt(7), color: GREY }}>{t}</span>;
   const cell = (i: number, k: string, v: FreeText, extra: string) => (
-    <div key={i} className={cn("border-black", extra)} style={{ padding: pt(3), minHeight: pt(22) }}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
+    <div key={i} className={cn("border-black", extra)} style={{ padding: pt(LAYOUT.padding.cell), minHeight: pt(22) }}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
   );
   // a firm without a GSTIN leaves it out of the code's name, as the code leaves its field empty
   const qrName = `QR code: ${[b.number, b.firm.gstin, b.dated, `₹${b.total.amount}`].filter(Boolean).join(", ")}`;
   return (
     <div role="document" data-paper="" aria-label={`Bill ${b.number} on paper, ${sheetOf(copy, page)}`}
-      className="relative flex flex-col bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: `${pt(14)}px ${pt(20)}px`, fontFamily: SERIF, fontSize: pt(9), lineHeight: LINE }}>
+      className="relative flex flex-col bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: `${pt(LAYOUT.padding.pageVertical)}px ${pt(LAYOUT.padding.pageHorizontal)}px`, fontFamily: SERIF, fontSize: pt(9), lineHeight: LINE }}>
       <div className="flex justify-between items-end" style={{ fontSize: pt(7.5), marginBottom: pt(3) }}>
         <span style={{ color: GREY }}>{multi ? `Page ${page.index + 1} of ${page.count}` : NBSP}</span>
         <span style={{ fontStyle: "italic" }}>({copy.tag})</span>
       </div>
       {/* the box fills the sheet down to its foot, as the PDF's does */}
       <div className="border border-black flex flex-col flex-1">
-        <div className="grid border-b border-black" style={{ gridTemplateColumns: page.first ? `${pt(80)}px minmax(0,1fr) ${pt(80)}px` : "minmax(0,1fr)" }}>
+        <div className="grid border-b border-black" style={{ gridTemplateColumns: page.first ? `${pt(LAYOUT.titleSide)}px minmax(0,1fr) ${pt(LAYOUT.titleSide)}px` : "minmax(0,1fr)" }}>
           {page.first ? <span aria-hidden="true" /> : null}
-          <div role="heading" aria-level={2} className="text-center self-center" style={{ paddingTop: pt(5), paddingBottom: pt(5) }}>
+          <div role="heading" aria-level={2} className="text-center self-center" style={{ paddingTop: pt(LAYOUT.padding.block), paddingBottom: pt(LAYOUT.padding.block) }}>
             <span style={{ fontSize: pt(12), fontWeight: 700, letterSpacing: "0.03em" }}>Tax Invoice</span>
             {!page.first ? <span style={{ fontSize: pt(7.5), color: GREY }}> (continued, page {page.index + 1})</span> : null}
           </div>
           {page.first ? (
-            <div className="border-l border-black flex flex-col items-center justify-center" style={{ paddingTop: pt(3), paddingBottom: pt(3) }}>
+            <div className="border-l border-black flex flex-col items-center justify-center" style={{ paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>
               <QrSvg text={b.qr} label={qrName} size={pt(58)} />
               <span style={{ fontSize: pt(6.5), color: GREY }}>Scan to check</span>
             </div>
@@ -120,14 +121,14 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
         </div>
 
         {page.first ? (
-          <div className="grid border-b border-black" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(240)}px` }}>
+          <div className="grid border-b border-black" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(LAYOUT.infoWidth)}px` }}>
             <div className="border-r border-black flex flex-col">
-              <div className="border-b border-black" style={{ padding: pt(5) }}>
+              <div className="border-b border-black" style={{ padding: pt(LAYOUT.padding.block) }}>
                 <div style={{ fontSize: pt(11), fontWeight: 700, marginBottom: pt(1) }}><RupeeText>{b.firm.name}</RupeeText></div>
                 {b.firm.lines.map((l, i) => <div key={i}><RupeeText>{l}</RupeeText></div>)}
               </div>
               {b.parties.map((p, i) => (
-                <div key={i} className={cn(i === 0 && "border-b border-black")} style={{ padding: pt(5) }}>
+                <div key={i} className={cn(i === 0 && "border-b border-black")} style={{ padding: pt(LAYOUT.padding.block) }}>
                   {label(p.label)}
                   <div className="font-bold"><RupeeText>{p.name}</RupeeText></div>
                   {p.lines.map((l, j) => <div key={j}><RupeeText>{l}</RupeeText></div>)}
@@ -139,7 +140,7 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
             </div>
           </div>
         ) : (
-          <div className="grid border-b border-black gap-x-4" style={{ gridTemplateColumns: "minmax(0,1fr) auto", fontSize: pt(8.5), padding: pt(5) }}>
+          <div className="grid border-b border-black gap-x-4" style={{ gridTemplateColumns: "minmax(0,1fr) auto", fontSize: pt(8.5), padding: pt(LAYOUT.padding.block) }}>
             {b.short.map((runs, i) => <div key={i} className={i % 2 ? "text-right" : undefined}><Runs runs={runs} /></div>)}
           </div>
         )}
@@ -152,7 +153,7 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
               <Row key={i} cells={[l.sl, (
                 <span key="n">
                   <span className="font-bold"><RupeeText>{l.name}</RupeeText></span>
-                  {l.note ? <span className="block" style={{ fontStyle: "italic", fontSize: pt(7.5), paddingLeft: pt(8) }}><RupeeText>{l.note}</RupeeText></span> : null}
+                  {l.note ? <span className="block" style={{ fontStyle: "italic", fontSize: pt(7.5), paddingLeft: pt(LAYOUT.padding.noteLeft) }}><RupeeText>{l.note}</RupeeText></span> : null}
                 </span>
               ), l.hsn, l.qty, l.rate, l.per, <span key="a" className="font-bold">{l.amount}</span>]} />
             );
@@ -173,7 +174,7 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
 
         {page.last ? (
           <>
-            <div className="border-t border-b border-black" style={{ padding: `${pt(3)}px ${pt(5)}px` }}>
+            <div className="border-t border-b border-black" style={{ padding: `${pt(LAYOUT.padding.cell)}px ${pt(LAYOUT.padding.block)}px` }}>
               <div className="flex justify-between">{label("Amount Chargeable (in words)")}<span style={{ fontSize: pt(7.5), fontStyle: "italic" }}>E. & O.E</span></div>
               <div className="font-bold">{b.words}</div>
             </div>
@@ -197,9 +198,9 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
                 })}
               </tbody>
             </table>
-            <div className="border-b border-black" style={{ fontSize: pt(8), padding: pt(3) }}>Tax Amount (in words) : <span className="font-bold">{b.taxWords}</span></div>
-            <div className="grid" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(240)}px`, fontSize: pt(8) }}>
-              <div className="border-r border-black flex flex-col justify-between gap-3" style={{ padding: pt(5) }}>
+            <div className="border-b border-black" style={{ fontSize: pt(8), padding: pt(LAYOUT.padding.cell) }}>Tax Amount (in words) : <span className="font-bold">{b.taxWords}</span></div>
+            <div className="grid" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(LAYOUT.infoWidth)}px`, fontSize: pt(8) }}>
+              <div className="border-r border-black flex flex-col justify-between gap-3" style={{ padding: pt(LAYOUT.padding.block) }}>
                 <div>Company&apos;s PAN : <span className="font-bold">{b.firm.pan}</span></div>
                 <div>
                   <div role="heading" aria-level={3} className="font-bold underline">Declaration</div>
@@ -208,14 +209,14 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
               </div>
               <div className="flex flex-col">
                 {b.firm.bank ? (
-                  <div className="border-b border-black" style={{ padding: pt(5) }}>
+                  <div className="border-b border-black" style={{ padding: pt(LAYOUT.padding.block) }}>
                     <div>Company&apos;s Bank Details</div>
-                    <div className="grid" style={{ gridTemplateColumns: `${pt(82)}px minmax(0,1fr)` }}>
+                    <div className="grid" style={{ gridTemplateColumns: `${pt(LAYOUT.bankLabel)}px minmax(0,1fr)` }}>
                       {b.firm.bank.map(([k, v], i) => [<span key={`${i}k`}>{k}</span>, <span key={`${i}v`} className="font-bold">: <RupeeText>{v}</RupeeText></span>])}
                     </div>
                   </div>
                 ) : null}
-                <div className="flex-1 flex flex-col justify-between text-right" style={{ padding: pt(5), minHeight: pt(PAGE_FIT.sign) }}>
+                <div className="flex-1 flex flex-col justify-between text-right" style={{ padding: pt(LAYOUT.padding.block), minHeight: pt(PAGE_FIT.sign) }}>
                   <div className="font-bold">for <RupeeText>{b.firm.name}</RupeeText></div>
                   {/* the signature in the PDF's own box, 90 by 30 pt, whatever its size */}
                   {b.firm.signature ? <img src={b.firm.signature} alt={`Signature for ${b.firm.name}`} className="self-end object-contain" style={{ width: pt(90), height: pt(PAGE_FIT.signature) }} /> : null}
@@ -223,8 +224,8 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
                 </div>
               </div>
             </div>
-            <div className="border-t border-black text-center py-1" style={{ fontSize: pt(7.5) }}>SUBJECT TO {b.jurisdiction.toUpperCase()} JURISDICTION</div>
-            <div className="border-t border-black text-center py-1" style={{ fontSize: pt(7), color: GREY }}>This is a Computer Generated Invoice</div>
+            <div className="border-t border-black text-center" style={{ fontSize: pt(7.5), paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>SUBJECT TO {b.jurisdiction.toUpperCase()} JURISDICTION</div>
+            <div className="border-t border-black text-center" style={{ fontSize: pt(7), color: GREY, paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>This is a Computer Generated Invoice</div>
           </>
         ) : null}
       </div>

@@ -273,7 +273,7 @@ function shortHeight(b: Omit<PrintBill, "pages">): number {
 }
 
 // ponytail: the last page's part after its lines has to fit on one sheet, and past about 30 HSN groups with the bank block
-// (33 without), or about 21 beside a 500-character note, it doesn't: the totals then stand alone on a last page that is still
+// (33 without), or fewer beside a note typed on many lines, it doesn't: the totals then stand alone on a last page that is still
 // too tall, and react-pdf spills it onto one more sheet, with no copy mark and a wrong "Page n of N". Upgrade: carry the HSN
 // summary on to a next page.
 /**

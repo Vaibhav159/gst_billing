@@ -1,11 +1,12 @@
 import { useCallback } from "react";
 import { queryClient } from "@/core/api/query";
 import { billQuery, shopSettingsQuery } from "@/core/api/sales";
-import { canShareFiles, pdfCodeMissing, saveFile } from "@/core/print/files";
+import { canShareFiles, saveFile } from "@/core/print/files";
 import { billLog, useLogPrint } from "@/core/print/log";
 import type { PdfFile } from "@/core/print/make";
 import { sendBankChoice, sendFile } from "@/core/print/send";
 import { sharePdf, tell } from "@/core/print/ShareHost";
+import { ATTACH_PDF, Unmade, unmade } from "@/core/print/words";
 import { waLink } from "@/core/sales/share";
 import type { BillDetail, Copies } from "@/core/sales/types";
 import { useToast, type ToastInput } from "@/core/ui";
@@ -15,10 +16,6 @@ export type DeliverInput = { billId: number; invoiceNumber: string; mobile: stri
 /** How the bill went (the send's `via`) and the PDF's name when one was made; null when the person stopped (a share sheet closed). */
 export type Delivered = { via: "whatsapp" | "share"; file: string | null } | null;
 
-/** What a PDF can't be made without: the shop's settings (its copies and bank details), or a bill that's still there. */
-class Unmade extends Error {
-  constructor(readonly lack: "settings" | "bill") { super(lack === "settings" ? "The shop's settings didn't load." : "This bill was deleted."); }
-}
 type Made = { file: PdfFile; bill: BillDetail; copies: Copies };
 
 /**
@@ -39,15 +36,6 @@ async function pdfFor(billId: number, purpose: "send" | "share"): Promise<Made> 
   return { file: await billFile(o.bill, { copies, showBank: chosen ?? settings?.show_bank ?? true }), bill: o.bill, copies };
 }
 
-/** Why a PDF wasn't made, and what to do (nothing, for a deleted bill). */
-function noPdf(e: unknown): { why: string; todo: string } {
-  if (e instanceof Unmade && e.lack === "bill") return { why: "This bill was deleted.", todo: "" };
-  if (navigator.onLine === false) return { why: "You're offline, so the PDF wasn't made.", todo: "Try again when the internet is back." };
-  // react-pdf's code that didn't come (the app changed since the page opened) comes only with a reload
-  if (pdfCodeMissing(e)) return { why: "The part of the app that makes PDFs didn't load.", todo: "Reload the page, then try again." };
-  if (e instanceof Unmade) return { why: "The shop's settings didn't load, and the PDF needs them.", todo: "Try again in a minute." };
-  return { why: "Something stopped the PDF part way.", todo: "Try again in a minute." };
-}
 const words = (...parts: string[]) => parts.filter(Boolean).join(" ");
 /** WhatsApp's tab, which the browser stopped (window.open answered null): nothing was sent. */
 const TAB_STOPPED: ToastInput = { tone: "neg", title: "WhatsApp didn't open", body: "The browser stopped the new tab, so nothing was marked as sent. Allow pop-ups for this app, then send it again." };
@@ -100,7 +88,7 @@ export async function deliver(input: DeliverInput): Promise<Delivered> {
     try {
       made = (await pdfFor(input.billId, "send")).file;
     } catch (e) {
-      const { why, todo } = noPdf(e);
+      const { why, todo } = unmade(e, navigator.onLine === false, "PDF");
       tell({ tone: "neg", title: "The bill wasn't sent", body: words(why, "Nothing was marked as sent.", todo) });
       return null;
     } finally {
@@ -125,12 +113,12 @@ export function useShareBill(): (b: { id: number; invoice_number: string }) => v
     const download = ({ file, bill, copies }: Made) => {
       saveFile(file.blob, file.name);
       log(billLog("exported", bill, copies));
-      show({ tone: "brand", title: `${file.name} downloaded`, body: "Attach it to an email, or put it on Drive, from your Downloads folder." });
+      show({ tone: "brand", title: `${file.name} downloaded`, body: ATTACH_PDF });
     };
     const said = show(makingPdf(sheet ? SHEET_NEXT : "It downloads as soon as it's ready."));
     void pdfFor(b.id, "share")
       .then(async (m) => { dismiss(said); if (!sheet || (await sharePdf(m.file, { title: b.invoice_number })) === "unsupported") download(m); })
-      .catch((e: unknown) => { dismiss(said); const { why, todo } = noPdf(e); show({ tone: "neg", title: "The PDF wasn't made", body: words(why, todo) }); });
+      .catch((e: unknown) => { dismiss(said); show({ tone: "neg", title: "The PDF wasn't made", body: unmade(e, navigator.onLine === false, "PDF").body }); });
   }, [isPhone, show, dismiss, log]);
 }
 

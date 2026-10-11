@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { notifyManager, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { billQuery } from "@/core/api/sales";
 import { makeBillPdf } from "@/core/print/make";
 import { ScopeProvider } from "@/core/scope";
 import { FIRM, OTHER_FIRM, refuse, salesServer, wireDetail, wirePage, wireRow, type Call } from "@/core/sales/fixtures";
@@ -182,4 +183,27 @@ test("two firms sharing a canonical PDF name are never written into one zip", as
   expect(zipped.names).toEqual([]);
   expect(screen.getByText("These bills would share a file name")).toBeInTheDocument();
   expect(screen.getByText(/Pick one firm and make its zip/)).toBeInTheDocument();
+});
+
+
+test.each([401, 403].flatMap((status) => ["detail", "stale", "zip", "list", "settings", "firms"].map((stage) => [status, stage] as const)))("HTTP %i does not offer or instruct Try again for a refused %s read", async (status, stage) => {
+  handClock();
+  let stale = false;
+  const rows = rowsOf(stage === "zip" ? 31 : 1);
+  salesServer([
+    ["GET", "businesses/", () => stage === "firms" ? refuse(status, {}) : { results: [FIRM] }],
+    ["GET", "sales/", () => stage === "list" ? refuse(status, {}) : wirePage(rows)],
+    ["GET", /^sales\/\d+\/$/, ({ url }) => stage === "detail" || stale || stage === "zip" && url === "sales/31/" ? refuse(status, {}) : wireDetail(rows[Number(url.split("/")[1]) - 1])],
+    ["GET", "shop-settings/", () => stage === "settings" ? refuse(status, {}) : settings],
+  ]);
+  open();
+  for (let step = 0; step < 4; step += 1) await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  if (stage === "stale") {
+    stale = true;
+    await act(async () => { await qc.refetchQueries({ queryKey: billQuery(1).queryKey }); });
+  } else if (stage === "zip") fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  for (let step = 0; step < 4; step += 1) await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  expect(document.body).toHaveTextContent(status === 401 ? "You've been signed out" : "Your role can't do this");
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent("Try again");
 });

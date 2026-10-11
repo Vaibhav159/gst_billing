@@ -22,7 +22,7 @@ import { useFirms, useScope, type FirmId } from "@/core/scope";
 import { Badge, Banner, Button, Card, Checkbox, EmptyState, FailNote, Input, LoadError, ListSkeleton, Money, Page, SearchInput, Segmented, Select, StaleNote, Table, Td, Th, Tr, useToast } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { useDebounced } from "@/core/useDebounced";
-import { billsSpan, byFirm, MAX_BILLS, named, notLoadedWords, unmade, useMade, whatPrints } from "./parts";
+import { billsSpan, byFirm, canRetryPrintRead, MAX_BILLS, named, notLoadedWords, unmade, useMade, whatPrints } from "./parts";
 import { zipFiles } from "./zip";
 
 const ZIP_CAP = 300;
@@ -131,6 +131,7 @@ export default function BulkExport() {
   const firmText = firmIds.length === firms.length ? (firms.length > 1 ? "All firms" : firms[0]?.name ?? "") : firms.filter((f) => firmIds.includes(f.id)).map((f) => f.name).join(" and ") || "No firm";
   const zipName = `Sales_PDFs_${mode === "month" ? monthLabel(month).replace(" ", "") : `${from}_to_${to}`}_${firms.filter((f) => firmIds.includes(f.id)).map((f) => f.prefix || f.short).join("-")}.zip`;
   const showBank = settings.data?.show_bank ?? true;
+  const settingsProblem = settings.isError ? problemOf(settings.error) : settings.isPaused ? OFFLINE : null;
   const countFor = (id: number) => inPeriod.filter((b) => b.business === id).length;
   const toggleFirm = (id: number, on: boolean) => setPicked(firms.map((f) => f.id).filter((x) => (x === id ? on : firmIds.includes(x))));
   const tick = useCallback((id: number, on: boolean) => setTicked((t) => { const n = new Set(t ?? bills.map((b) => b.id)); if (on) n.add(id); else n.delete(id); return n; }), [bills]);
@@ -167,7 +168,7 @@ export default function BulkExport() {
   const [retrying, setRetrying] = useState<Unread[] | null>(null);
   const retryReads = async (rows = unread) => {
     setRetrying(rows);
-    try { for (const b of rows) if (b.problem.kind !== "notfound") await qc.refetchQueries({ queryKey: billQuery(b.row.id).queryKey }); }
+    try { for (const b of rows) if (b.problem.kind !== "notfound" && canRetryPrintRead(b.problem)) await qc.refetchQueries({ queryKey: billQuery(b.row.id).queryKey }); }
     finally { setRetrying(null); }
   };
   const selection = useMemo(() => JSON.stringify([chosen.map((b) => [b.id, b.invoice_number, b.invoice_date, b.fy, b.business]), [...names], month, mode, from, to, which, withCancelled, copies, showBank, zipName]), [chosen, names, month, mode, from, to, which, withCancelled, copies, showBank, zipName]);
@@ -405,17 +406,17 @@ export default function BulkExport() {
             <Button variant="primary" icon={Download} disabled={!chosen.length || busy || ((!here || !settingsReady) && net !== "offline")} onClick={() => void run()}>Download as zip</Button>
           </>}>
           <div ref={listBox} className="px-5 pt-3 pb-4 flex flex-col gap-3">
-            {(settings.isError || settings.isPaused) && !settings.data ? <FailNote error={{ title: "The print defaults didn't load", body: `This run uses ${copies === "all" ? "all three copies" : "Original copies"} and bank details. Try again to load the shop's defaults.` }} onRetry={settings.isPaused ? undefined : () => { void settings.refetch(); }} busy={settings.isFetching} /> : null}
+            {settingsProblem && !settings.data ? <FailNote error={{ title: "The print defaults didn't load", body: `This run uses ${copies === "all" ? "all three copies" : "Original copies"} and bank details. ${canRetryPrintRead(settingsProblem) ? "Try again to load the shop's defaults." : settingsProblem.message}` }} onRetry={canRetryPrintRead(settingsProblem) ? () => { void settings.refetch(); } : undefined} busy={settings.isFetching} /> : null}
             {capped ? <Banner tone="brand" title="More than 300 bills match">This list shows the first 301 bills. Narrow the dates or pick one firm to read the remaining bills.</Banner> : null}
             {chosen.length > MAX_BILLS ? <Banner tone="brand" title={`Print up to ${MAX_BILLS} bills`}>Print the first {MAX_BILLS}, through {printRows.at(-1)?.invoice_number}. {capped ? "Narrow the dates to print the remaining bills in another run." : capNext(chosen[MAX_BILLS], chosen.length - MAX_BILLS, "print", firmIds.length > 1)}</Banner> : null}
             {chosen.length > ZIP_CAP ? <Banner tone="brand" title={`Export up to ${ZIP_CAP} bills`}>Export the first {ZIP_CAP}, through {pickedBills.at(-1)?.invoice_number}. {capped ? "Narrow the dates to export the remaining bills in another run." : capNext(chosen[ZIP_CAP], chosen.length - ZIP_CAP, "export", firmIds.length > 1)}</Banner> : null}
             <ReadNote unread={job?.unread.length ? [] : retrying?.filter((r) => !reads.bills[printRows.findIndex((b) => b.id === r.row.id)]) ?? unread} offline={net === "offline"} busy={Boolean(retrying)} onRetry={() => void retryReads()} />
-            {stale.length ? <StaleNote problem={stale[0].problem} what={named(stale.map((r) => r.row.invoice_number))} retry={() => void retryReads(stale)} busy={Boolean(retrying)} /> : null}
+            {stale.length ? <StaleNote problem={stale[0].problem} what={named(stale.map((r) => r.row.invoice_number))} retry={canRetryPrintRead(stale[0].problem) ? () => void retryReads(stale) : undefined} busy={Boolean(retrying)} /> : null}
             {coming && !unread.length ? <p role="status" className="text-sm text-muted">Loading the picked bills…</p> : null}
             {printKey && !printed.value && !printed.failed ? <p role="status" className="text-sm text-muted">Getting the bills ready to print…</p> : null}
             <FailNote error={printed.failed || printed.retrying ? { title: "The batch wasn't made", body: printWhy.body } : null} onRetry={printWhy.again ? printed.retry : undefined} busy={printed.retrying} />
             {job ? <JobPanel job={job} offline={net === "offline"} onReadRetry={() => void run(job.list, job.unread.filter((r) => r.problem.kind !== "notfound"), job)} onRetry={(list) => void run(list, [], job)} onStop={() => { stop.current = true; cancelRead.current?.(); }} onSave={saveReady} onClose={() => setJob(null)} /> : null}
-            {firmsError ? <LoadError problem={firmsProblem!} what="the firms" retry={() => { void qc.refetchQueries({ queryKey: ["firms"] }); }} /> : q.isError ? <LoadError problem={problemOf(q.error)} what="the bills" retry={() => { void q.refetch(); }} />
+            {firmsError ? <LoadError problem={firmsProblem!} what="the firms" retry={canRetryPrintRead(firmsProblem!) ? () => { void qc.refetchQueries({ queryKey: ["firms"] }); } : undefined} /> : q.isError ? <LoadError problem={problemOf(q.error)} what="the bills" retry={canRetryPrintRead(problemOf(q.error)) ? () => { void q.refetch(); } : undefined} />
               : q.isPending && (query || firmsLoading || scope === null) ? <ListSkeleton what="the bills" rows={4} />
                 : bills.length ? (!job ? (
                   <div key={`${chosen.length}-${renamed.length}`} className="anim-rise flex flex-col gap-3">
@@ -508,6 +509,6 @@ function ReadNote({ unread, offline, busy, onRetry, zip = false }: { unread: Unr
   return <>
     <FailNote error={gone.length ? { title: `${numbers(gone)} ${gone.length === 1 ? "was" : "were"} deleted after being picked`, body: gone.length === 1 ? "Untick it." : "Untick them." } : null} />
     <FailNote error={why ? { title: `${numbers(failed)} didn't load`, body } : null}
-      onRetry={failed.length && why?.kind !== "offline" ? onRetry : undefined} busy={busy} />
+      onRetry={failed.length && why && canRetryPrintRead(why) ? onRetry : undefined} busy={busy} />
   </>;
 }

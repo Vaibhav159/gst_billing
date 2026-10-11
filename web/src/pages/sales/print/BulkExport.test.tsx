@@ -264,8 +264,7 @@ test("a ready zip is discarded when a cached bill changes, or a new selection re
   serve(); open(); await ready();
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await screen.findByRole("button", { name: "Save the zip" });
-  const updated: BillOutcome = { kind: "bill", bill: toBillDetail(wireDetail({ total_amount: "87084.21" })) };
-  act(() => qc.setQueryData(billQuery(412).queryKey, updated));
+  act(() => qc.setQueryData(billQuery(412).queryKey, (old) => old?.kind === "bill" ? { ...old, kind: "bill" as const, bill: { ...old.bill, total_amount: 8_708_421 } } : old));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument());
   await ready();
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
@@ -429,15 +428,14 @@ test("new list and detail reads keep the app's one retry on a server error", asy
 });
 
 
-test("a ZIP press refreshes stale Print details without cancelling its own job", async () => {
-  let total = "87083.21";
-  serve(ROWS, ({ url }) => wireDetail({ ...ROWS.find((r) => url === `sales/${r.id}/`), total_amount: total }));
+test("a ZIP press reuses stale Print details without cancelling its own job", async () => {
+  const { calls } = serve();
   open(); await ready();
-  total = "87084.21";
   act(() => vi.setSystemTime(new Date("2026-10-08T10:01:00+05:30")));
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await screen.findByText("3 PDFs made");
   expect(zipped.files).toHaveLength(3);
+  expect(billAsks(calls)).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Save the zip" })).toBeEnabled();
 });
 
@@ -531,16 +529,22 @@ const removeExtraDetails = () => { for (let id = 31; id <= 40; id += 1) qc.remov
 
 test("a completed zip survives details leaving the cache during PDF generation", async () => {
   serve(forty()); open(); await ready(30);
+  const now = Date.now();
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"], now });
   let finish!: (blob: Blob) => void;
   vi.mocked(makeBillPdf).mockImplementationOnce(() => new Promise((done) => { finish = done; }));
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
-  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  for (let step = 0; step < 100 && typeof finish !== "function"; step += 1) await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  expect(finish).toBeTypeOf("function");
   expect(qc.getQueryData(billQuery(40).queryKey)).toBeDefined();
   act(removeExtraDetails);
   expect(qc.getQueryData(billQuery(40).queryKey)).toBeUndefined();
   await act(async () => finish(new Blob(["pdf"])));
-  await waitFor(() => expect(zipped.files).toHaveLength(40), { timeout: 5000 });
-  expect(await screen.findByText("40 PDFs made")).toBeInTheDocument();
+  for (let step = 0; step < 100 && zipped.files.length < 40; step += 1) await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(zipped.files).toHaveLength(40);
+  expect(screen.getByText("40 PDFs made")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save the zip" })).toBeEnabled();
 }, 20000);
 

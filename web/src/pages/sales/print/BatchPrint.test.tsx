@@ -105,6 +105,82 @@ const billAsks = (calls: { url: string }[]) => calls.filter((c) => /^sales\/\d+\
 /** KGH/2026-27/31, already on this device (opened a moment ago). */
 const HERE: BillOutcome = { kind: "bill", bill: toBillDetail(wireDetail()) };
 
+/** Final-review regressions run only on a hand clock; no wall-clock waits or debounces. */
+function handClock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: new Date("2026-10-08T12:30:00+05:30") });
+}
+async function pass() {
+  for (let i = 0; i < 3; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
+
+test.each([
+  [31, "Print them, then tick the other bill in the sales list."],
+  [61, "Print them, then tick the other 31 bills in the sales list, 30 at a time."],
+])("final review: %i picked bills give the remaining batches clear words", async (count, words) => {
+  handClock();
+  salesServer([["GET", /^sales\/\d+\/$/, () => new Promise(() => {})], ["GET", "shop-settings/", () => SETTINGS]]);
+  open(Array.from({ length: count }, (_, i) => i + 1).join(","));
+  expect(screen.getByText(new RegExp(`You picked ${count} bills`))).toHaveTextContent(words);
+});
+
+test.each([false, true])("final review: successful not-loaded Try again focuses the page title (another bill already loaded: %s)", async (partlyLoaded) => {
+  handClock();
+  let fails = true;
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/413/", () => fails ? refuse(500, {}) : wireDetail({ id: 413, invoice_number: "KGH/2026-27/32" })],
+    ["GET", "shop-settings/", () => SETTINGS],
+  ]);
+  open(partlyLoaded ? "412,413" : "413");
+  await pass();
+  const retry = screen.getByRole("button", { name: "Try again" });
+  retry.focus();
+  fails = false;
+  fireEvent.click(retry);
+  await pass();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1 })).toHaveFocus();
+});
+
+test("final review: leaving only unloaded bills never shows a zero-page summary", async () => {
+  handClock();
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/413/", () => refuse(500, {})],
+    ["GET", "shop-settings/", () => SETTINGS],
+  ]);
+  open("412,413");
+  await pass();
+  fireEvent.click(options().getByRole("button", { name: "Leave KGH/2026-27/31 out" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("1 bill didn't load");
+  expect(screen.queryByText(/No bills · 0 A4 pages · ₹0.00/)).not.toBeInTheDocument();
+});
+
+test.each([401, 403])("final review: HTTP %i has no Try again for missing bills or a refused refresh", async (status) => {
+  handClock();
+  localStorage.clear();
+  let fails = false;
+  salesServer([
+    ["GET", "sales/412/", () => fails ? refuse(status, {}) : wireDetail()],
+    ["GET", "sales/413/", () => refuse(status, {})],
+    ["GET", "shop-settings/", () => SETTINGS],
+  ]);
+  const qc = testQueryClient();
+  const view = openWith(qc, "412,413");
+  await pass();
+  expect(screen.getByRole("alert")).toHaveTextContent(status === 401 ? "You've been signed out" : "Your role can't do this");
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  fails = true;
+  await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
+  await pass();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  view.unmount();
+  open("413");
+  await pass();
+  expect(screen.getByRole("alert")).toHaveTextContent(status === 401 ? "You've been signed out" : "Your role can't do this");
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+});
+
 test("for the browser's own print every paper stacks at full size, and each full-size view is named after its paper: bill, copy and page (Ruling 1); nothing is rounded, and a buyer's PAN shows only where there is one", async () => {
   salesServer([
     ["GET", "sales/412/", () => wireDetail()],

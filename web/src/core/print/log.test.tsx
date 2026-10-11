@@ -9,6 +9,11 @@ import { batchLog, billLog, exportLog, useLogPrint } from "./log";
 
 const BILL = toBillDetail(wireDetail());
 
+test("a long bill number and customer name still fit the audit log's 255-character limit", () => {
+  const b = { ...BILL, invoice_number: "K".repeat(200), customer: { ...BILL.customer, name: "A".repeat(255) } };
+  expect(billLog("printed", b, "original").entity_name).toBe(`#${b.invoice_number} - ${b.customer.name}`.slice(0, 255));
+});
+
 test("a bill's lines, as v2's bulk PDFs wrote them: printed from its print page, or its PDF downloaded", () => {
   expect(billLog("printed", BILL, "original")).toEqual({ action: "printed", entity_id: 412, entity_name: "#KGH/2026-27/31 - Anil Gupta", details: "Printed: original copy" });
   expect(billLog("exported", BILL, "all")).toEqual({ action: "exported", entity_id: 412, entity_name: "#KGH/2026-27/31 - Anil Gupta", details: "PDF downloaded: all three copies" });

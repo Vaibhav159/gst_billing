@@ -18,7 +18,7 @@ export function useLogPrint(): (entry: PrintLog) => void {
 /** One bill's line: printed from its print page, or its PDF downloaded (the print page's PDF, or a share's download). */
 export function billLog(action: PrintLog["action"], b: { id: number; invoice_number: string; customer: { name: string } }, copies: Copies): PrintLog {
   return {
-    action, entity_id: b.id, entity_name: `#${b.invoice_number} - ${b.customer.name}`,
+    action, entity_id: b.id, entity_name: `#${b.invoice_number} - ${b.customer.name}`.slice(0, 255),
     details: `${action === "printed" ? "Printed" : "PDF downloaded"}: ${copiesWords(copies).toLowerCase()}`,
   };
 }

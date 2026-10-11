@@ -121,6 +121,17 @@ test("on a row, ↓ moves with the preview, Esc closes it, and Enter opens the b
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/412");
 });
 
+test("final review: batch Print preserves tick order, including an unticked bill picked again", async () => {
+  server();
+  mount();
+  await screen.findByRole("checkbox", { name: "Select KGH/2026-27/31" });
+  handClock();
+  for (const number of [31, 30, 32, 31, 31]) fireEvent.click(screen.getByRole("checkbox", { name: `Select KGH/2026-27/${number}` }));
+  fireEvent.click(screen.getByRole("button", { name: "Print 3…" }));
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/batch?ids=405,413,412");
+}, 15_000);
+
 test("ticking bills says what's selected; the owner deletes them together, and Undo brings them back", async () => {
   handClock();
   let bin = 50;

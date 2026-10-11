@@ -16,6 +16,7 @@ import { billFile, useSendBankChoice, useSendFile } from "@/core/print/make";
 import { COPY_OPTIONS, copyPages, hasBank, printBill } from "@/core/print/model";
 import { Paper, PrintCopy, ScaledPaper } from "@/core/print/Paper";
 import { sharePdf } from "@/core/print/ShareHost";
+import { ATTACH_PDF } from "@/core/print/words";
 import { billMessage, mobileOf } from "@/core/sales/share";
 import type { BillDetail, Copies } from "@/core/sales/types";
 import { failText, type FailText } from "@/core/sales/words";
@@ -25,13 +26,13 @@ import { DeletedBill } from "../bill/DeletedBill";
 import { MissingBill } from "../bill/MissingBill";
 import { useSendBill, useSendReady } from "../actions/useSendBill";
 import { WhatsAppDialog } from "../actions/WhatsAppDialog";
-import { BankSwitch, unmade, useMade, whatPrints } from "./parts";
+import { BankSwitch, canRetryPrintRead, unmade, useMade, whatPrints } from "./parts";
 
 /** Until the bill comes: the paper's outline, or why it can't come, with Try again when asking again can help. */
 function Preparing({ phone, problem, retry }: { phone: boolean; problem: ApiProblem | null; retry?: () => void }) {
   return (
     <Page icon={Printer} title="Print and share" back breadcrumbs={[{ label: "Sales", to: "/sales" }]}>
-      {problem ? <LoadError problem={problem} retry={retry} what="this bill" /> : (
+      {problem ? <LoadError problem={problem} retry={canRetryPrintRead(problem) ? retry : undefined} what="this bill" /> : (
         <div className="flex justify-center" role="status" aria-label="Making the bill's preview">
           <div className="card p-8 flex flex-col gap-4" style={{ width: phone ? "100%" : 600, height: phone ? 480 : 820 }}>
             <Skeleton w="40%" h={18} className="self-center" /><Skeleton h={90} /><Skeleton h={220} /><Skeleton h={120} /><Skeleton w="60%" h={14} />
@@ -63,7 +64,8 @@ export default function PrintPage() {
     return p.kind === "notfound" ? <MissingBill id={raw} /> : <Preparing phone={isPhone} problem={p} retry={retry} />;
   }
   // a refresh that failed, a 404 too, keeps the bill on screen and says so, as the bill's own page does
-  const note = q.isError ? <StaleNote problem={problemOf(q.error)} what="this bill" retry={retry} busy={q.isFetching} /> : null;
+  const refreshProblem = q.isError ? problemOf(q.error) : null;
+  const note = refreshProblem ? <StaleNote problem={refreshProblem} what="this bill" retry={canRetryPrintRead(refreshProblem) ? retry : undefined} busy={q.isFetching} /> : null;
   if (q.data.kind === "deleted") return <DeletedBill b={q.data.binned} note={note} />;
   return <PrintScreen b={q.data.bill} phone={isPhone} note={note} />;
 }
@@ -133,6 +135,9 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   const hasNumber = Boolean(own || before);
   const differs = Boolean(s) && (copies !== s?.copies || showBank !== s?.show_bank);
   const making = !file && !made.failed;
+  // The live region mounts empty, then announces its first update as well as later copy changes.
+  const [announcedMaking, setAnnouncedMaking] = useState(false);
+  useEffect(() => { setAnnouncedMaking(making); }, [making]);
   // a Try again keeps the note on screen, busy, until the PDF is made or fails again (none for react-pdf's code that
   // didn't come: only a reload brings it)
   const why = unmade(made.error, net === "offline", "PDF");
@@ -163,7 +168,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
       if (r !== "unsupported") return;
       saveFile(file.blob, file.name);
       exported();
-      show({ tone: "brand", title: `${file.name} downloaded`, body: "Attach it to an email, or put it on Drive, from your Downloads folder." });
+      show({ tone: "brand", title: `${file.name} downloaded`, body: ATTACH_PDF });
     });
   };
   // useSendBill holds the bill while its send is on its way, whichever button pressed it. The second click of a double
@@ -264,7 +269,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
               ? <Button variant={b.paper ? "secondary" : "primary"} size="lg" full icon={Send} disabled={!ready} title={sendWait} onClick={sendPress}>{sendLabel}</Button>
               : (
                 <div className="flex flex-col gap-1.5">
-                  <Button variant="primary" size="lg" full icon={Printer} disabled={!file} title={waitWhy} onClick={print}>Print</Button>
+                  <Button variant="primary" size="lg" full icon={Printer} disabled={!file} title={waitWhy} aria-describedby={making ? "pr-pdf-progress" : undefined} onClick={print}>Print</Button>
                   <Button full icon={MessageCircle} disabled={!ready} title={sendWait} onClick={sendPress}>Send to a WhatsApp number</Button>
                   <p className="text-sm text-muted">{c.type === "walkin" ? "A walk-in has" : `${c.name} has`} no number on record, so printing comes first.</p>
                 </div>
@@ -276,10 +281,11 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
                 </div>
               )}
           <div className="grid grid-cols-3 gap-2">
-            <Button icon={Download} disabled={!file} title={waitWhy} onClick={download}>PDF</Button>
-            <Button icon={Printer} disabled={!file} title={waitWhy} onClick={print}>Print</Button>
-            <Button ref={shareRef} icon={Share2} disabled={!file} title={waitWhy} onClick={share}>Share</Button>
+            <Button icon={Download} disabled={!file} title={waitWhy} aria-describedby={making ? "pr-pdf-progress" : undefined} onClick={download}>PDF</Button>
+            <Button icon={Printer} disabled={!file} title={waitWhy} aria-describedby={making ? "pr-pdf-progress" : undefined} onClick={print}>Print</Button>
+            <Button ref={shareRef} icon={Share2} disabled={!file} title={waitWhy} aria-describedby={making ? "pr-pdf-progress" : undefined} onClick={share}>Share</Button>
           </div>
+          <p id="pr-pdf-progress" role="status" aria-label="PDF progress" className={making ? "text-sm text-muted" : "sr-only"}>{announcedMaking && making ? "Making the PDF…" : ""}</p>
           {messageBox}
           <p className="text-sm text-muted border-t border-rule pt-4">One bill style for every firm, with a QR code anyone can check against your records.</p>
         </aside>

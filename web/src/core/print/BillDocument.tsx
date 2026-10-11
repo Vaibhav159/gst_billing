@@ -8,6 +8,7 @@ import { Document, Image, Page, Path, StyleSheet, Svg, Text, View, type Styles }
 import { PAGE_FIT, type CopyMark, type PrintBill, type PrintPage, type Run } from "./model";
 import { RupeeText } from "./pdfRupee";
 import { qrPath } from "./qrPath";
+import { LAYOUT } from "./layout";
 
 type Style = Styles[string];
 
@@ -16,7 +17,7 @@ const B_THIN = "0.5pt solid #999";
 const GREY = "#555";
 const NBSP = "\u00a0"; // PROTO's " ": an empty box or line keeps its height
 const s = StyleSheet.create({
-  page: { fontFamily: "Times-Roman", fontSize: 9, paddingTop: 14, paddingBottom: 14, paddingHorizontal: 20, color: "#000" },
+  page: { fontFamily: "Times-Roman", fontSize: 9, paddingTop: LAYOUT.padding.pageVertical, paddingBottom: LAYOUT.padding.pageVertical, paddingHorizontal: LAYOUT.padding.pageHorizontal, color: "#000" },
   top: { flexDirection: "row", justifyContent: "space-between", fontSize: 7.5, marginBottom: 3 },
   outer: { border: B, flexGrow: 1 },
   bold: { fontFamily: "Times-Bold" },
@@ -25,48 +26,48 @@ const s = StyleSheet.create({
   small: { fontSize: 7.5 },
   label: { fontSize: 7, color: GREY },
   titleRow: { flexDirection: "row", borderBottom: B, minHeight: 22 },
-  title: { flexGrow: 1, flexBasis: 0, justifyContent: "center", alignItems: "center", paddingVertical: 5 },
+  title: { flexGrow: 1, flexBasis: 0, justifyContent: "center", alignItems: "center", paddingVertical: LAYOUT.padding.block },
   titleText: { fontFamily: "Times-Bold", fontSize: 12 },
-  titleSide: { width: 80 },
-  qrBox: { width: 80, borderLeft: B, alignItems: "center", justifyContent: "center", paddingVertical: 3 },
+  titleSide: { width: LAYOUT.titleSide },
+  qrBox: { width: LAYOUT.titleSide, borderLeft: B, alignItems: "center", justifyContent: "center", paddingVertical: LAYOUT.padding.cell },
   info: { flexDirection: "row", borderBottom: B },
   infoLeft: { flexGrow: 1, flexBasis: 0, borderRight: B },
-  infoRight: { width: 240 },
-  block: { padding: 5 },
-  blockRule: { padding: 5, borderBottom: B },
+  infoRight: { width: LAYOUT.infoWidth },
+  block: { padding: LAYOUT.padding.block },
+  blockRule: { padding: LAYOUT.padding.block, borderBottom: B },
   metaRow: { flexDirection: "row", borderBottom: B, minHeight: 22 },
   metaRowLast: { flexDirection: "row", minHeight: 22 },
-  metaLeft: { flexGrow: 1, flexBasis: 0, borderRight: B, padding: 3 },
-  metaRight: { flexGrow: 1, flexBasis: 0, padding: 3 },
+  metaLeft: { flexGrow: 1, flexBasis: 0, borderRight: B, padding: LAYOUT.padding.cell },
+  metaRight: { flexGrow: 1, flexBasis: 0, padding: LAYOUT.padding.cell },
   metaValue: { fontFamily: "Times-Bold", fontSize: 9 },
-  shortHead: { flexDirection: "row", borderBottom: B, padding: 5, fontSize: 8.5 },
+  shortHead: { flexDirection: "row", borderBottom: B, padding: LAYOUT.padding.block, fontSize: 8.5 },
   items: { flexGrow: 1 },
   row: { flexDirection: "row", minHeight: 18 },
-  colSl: { width: 26, padding: 3, borderRight: B, textAlign: "center" },
-  colDesc: { flexGrow: 1, flexBasis: 0, padding: 3, borderRight: B },
-  colHsn: { width: 50, padding: 3, borderRight: B, textAlign: "center" },
-  colQty: { width: 62, padding: 3, borderRight: B, textAlign: "right" },
-  colRate: { width: 58, padding: 3, borderRight: B, textAlign: "right" },
-  colPer: { width: 30, padding: 3, borderRight: B, textAlign: "center" },
-  colAmt: { width: 80, padding: 3, textAlign: "right" },
+  colSl: { width: LAYOUT.cols[0], padding: LAYOUT.padding.cell, borderRight: B, textAlign: "center" },
+  colDesc: { flexGrow: 1, flexBasis: 0, padding: LAYOUT.padding.cell, borderRight: B },
+  colHsn: { width: LAYOUT.cols[2], padding: LAYOUT.padding.cell, borderRight: B, textAlign: "center" },
+  colQty: { width: LAYOUT.cols[3], padding: LAYOUT.padding.cell, borderRight: B, textAlign: "right" },
+  colRate: { width: LAYOUT.cols[4], padding: LAYOUT.padding.cell, borderRight: B, textAlign: "right" },
+  colPer: { width: LAYOUT.cols[5], padding: LAYOUT.padding.cell, borderRight: B, textAlign: "center" },
+  colAmt: { width: LAYOUT.cols[6], padding: LAYOUT.padding.cell, textAlign: "right" },
   fill: { flexGrow: 1, flexDirection: "row" },
   totalRow: { flexDirection: "row", borderTop: B, minHeight: 20 },
-  words: { borderTop: B, borderBottom: B, paddingHorizontal: 5, paddingVertical: 3 },
+  words: { borderTop: B, borderBottom: B, paddingHorizontal: LAYOUT.padding.block, paddingVertical: LAYOUT.padding.cell },
   wordsHead: { flexDirection: "row", justifyContent: "space-between" },
   hsnHead: { flexDirection: "row", borderBottom: B, backgroundColor: "#f2f2f2" },
   hsnRow: { flexDirection: "row", borderBottom: B_THIN },
   hsnTotal: { flexDirection: "row", borderBottom: B },
   cell: { padding: 2.5, borderRight: B, textAlign: "right", fontSize: 8 },
   cellLast: { padding: 2.5, textAlign: "right", fontSize: 8 },
-  taxWords: { flexDirection: "row", borderBottom: B, padding: 3, fontSize: 8 },
+  taxWords: { flexDirection: "row", borderBottom: B, padding: LAYOUT.padding.cell, fontSize: 8 },
   foot: { flexDirection: "row", borderBottom: B },
-  footLeft: { flexGrow: 1, flexBasis: 0, borderRight: B, padding: 5, justifyContent: "space-between", fontSize: 8 },
-  footRight: { width: 240 },
-  bank: { padding: 5, borderBottom: B, fontSize: 8 },
+  footLeft: { flexGrow: 1, flexBasis: 0, borderRight: B, padding: LAYOUT.padding.block, justifyContent: "space-between", fontSize: 8 },
+  footRight: { width: LAYOUT.infoWidth },
+  bank: { padding: LAYOUT.padding.block, borderBottom: B, fontSize: 8 },
   bankRow: { flexDirection: "row" },
   bankValue: { flexGrow: 1, flexBasis: 0 }, // a value too long for its column wraps in it, as on the paper on screen
-  sign: { padding: 5, minHeight: PAGE_FIT.sign, justifyContent: "space-between", alignItems: "flex-end", fontSize: 8 }, // the plan counts its height
-  center: { textAlign: "center", paddingVertical: 3, fontSize: 7.5 },
+  sign: { padding: LAYOUT.padding.block, minHeight: PAGE_FIT.sign, justifyContent: "space-between", alignItems: "flex-end", fontSize: 8 }, // the plan counts its height
+  center: { textAlign: "center", paddingVertical: LAYOUT.padding.cell, fontSize: 7.5 },
   stamp: { position: "absolute", top: 380, left: 0, right: 0, alignItems: "center" },
   stampText: { transform: "rotate(-16deg)", border: "4pt solid #c62828", color: "#c62828", fontFamily: "Times-Bold", fontSize: 54, letterSpacing: 6, paddingHorizontal: 20, paddingVertical: 2, opacity: 0.8 },
 });
@@ -186,7 +187,7 @@ function Footer({ b }: { b: PrintBill }) {
           {b.firm.bank ? (
             <View style={s.bank}>
               <Text>Company&apos;s Bank Details</Text>
-              {b.firm.bank.map(([k, v]) => <View key={k} style={s.bankRow}><Text style={{ width: 82 }}>{k}</Text><Text style={[s.bold, s.bankValue]}>: <RupeeText>{v}</RupeeText></Text></View>)}
+              {b.firm.bank.map(([k, v]) => <View key={k} style={s.bankRow}><Text style={{ width: LAYOUT.bankLabel }}>{k}</Text><Text style={[s.bold, s.bankValue]}>: <RupeeText>{v}</RupeeText></Text></View>)}
             </View>
           ) : null}
           <View style={s.sign}>
@@ -220,7 +221,7 @@ export function BillPage({ b, copy, page }: { b: PrintBill; copy: CopyMark; page
               <Row key={i} cells={[l.sl, (
                 <View key="d">
                   <RupeeText style={s.bold}>{l.name}</RupeeText>
-                  {l.note ? <RupeeText style={[s.small, s.italic, { paddingLeft: 8 }]}>{l.note}</RupeeText> : null}
+                  {l.note ? <RupeeText style={[s.small, s.italic, { paddingLeft: LAYOUT.padding.noteLeft }]}>{l.note}</RupeeText> : null}
                 </View>
               ), l.hsn, l.qty, l.rate, l.per, <Text key="a" style={s.bold}>{l.amount}</Text>]} />
             );

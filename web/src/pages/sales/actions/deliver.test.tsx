@@ -142,7 +142,7 @@ test("a PDF that couldn't be made: a computer's chat still opens and says so; a 
   await pastTheRetry();
   expect(await onPhone).toBeNull();
   expect(await screen.findByText("The bill wasn't sent")).toBeInTheDocument();
-  expect(screen.getByText("Something stopped the PDF part way. Nothing was marked as sent. Try again in a minute.")).toBeInTheDocument();
+  expect(screen.getByText("Something stopped it part way. Nothing was marked as sent. Try again.")).toBeInTheDocument();
   expect(window.open).toHaveBeenCalledTimes(1);
 });
 
@@ -279,6 +279,16 @@ function later() {
 /** react-pdf's code didn't come: the app changed since the page opened (Chrome's words). */
 const codeMissing = () => new TypeError("Failed to fetch dynamically imported module: https://bills.example/assets/react-pdf.browser-Bx1c2.js");
 
+test("Send shares the print page's offline missing-code guidance: reload once the internet is back", async () => {
+  serve();
+  phoneSheet();
+  renderApp(<ShareHost />);
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  vi.mocked(billFile).mockRejectedValueOnce(codeMissing());
+  await act(async () => { await deliver({ ...INPUT, isPhone: true }); });
+  expect(screen.getByText("You're offline, and the part of the app that makes PDFs didn't load. Nothing was marked as sent. Reload the page once the internet is back.")).toBeInTheDocument();
+});
+
 test("a phone's Send away from the print page says Making the PDF… while the PDF is made; the dialog asking for one more press takes its place", async () => {
   serve();
   phoneSheet(false);
@@ -331,7 +341,7 @@ test("Share the PDF that couldn't be made says why and what to do in place of Ma
   vi.mocked(billFile).mockRejectedValueOnce(new Error("the font didn't load"));
   await userEvent.click(screen.getByText("share it"));
   expect(await screen.findByText("The PDF wasn't made")).toBeInTheDocument();
-  expect(screen.getByText("Something stopped the PDF part way. Try again in a minute.")).toBeInTheDocument();
+  expect(screen.getByText("Something stopped it part way. Try again.")).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByText("Making the PDF…")).not.toBeInTheDocument());
   // a bill deleted since it was listed: nothing more to do
   await userEvent.click(screen.getByText("share the deleted one"));

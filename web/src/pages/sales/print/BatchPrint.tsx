@@ -18,7 +18,7 @@ import { Paper, PrintCopy, ScaledPaper } from "@/core/print/Paper";
 import type { BillDetail, Copies, ShopSettings } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
 import { Banner, Button, ButtonLink, Card, EmptyState, FailNote, LoadError, Money, Page, Segmented, Skeleton, StaleNote, Switch, useToast } from "@/core/ui";
-import { billsSpan, MAX_BILLS, named, notLoadedWords, unmade, useMade, whatPrints } from "./parts";
+import { billsSpan, canRetryPrintRead, MAX_BILLS, named, notLoadedWords, unmade, useMade, whatPrints } from "./parts";
 
 const COPIES: { value: Copies; label: string }[] = [{ value: "original", label: "Original only" }, { value: "all", label: "All three" }];
 const CRUMBS = [{ label: "Sales", to: "/sales" }];
@@ -49,7 +49,7 @@ function ordinal(n: number): string {
   return `${n}${teen ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
-/** Why bills didn't load: offline only when every one waits for the internet, else the first other reason (Try again can help). */
+/** Why bills didn't load: offline only when every one waits for the internet, else the first other reason. */
 function whyUnloaded(unloaded: Unloaded[]): ApiProblem | null {
   return unloaded.find((r) => r.failed.kind !== "offline")?.failed ?? unloaded[0]?.failed ?? null;
 }
@@ -86,10 +86,18 @@ export default function BatchPrint() {
   const [upFor, setUpFor] = useState<string | null>(null);
   const showing = qs.some((q) => q.data?.kind === "bill") && (!coming || upFor === ids);
   useEffect(() => { if (showing) setUpFor(ids); }, [showing, ids]);
+  const focusAfterRetry = useRef<number[]>([]);
+  useEffect(() => {
+    if (!focusAfterRetry.current.length) return;
+    const retried = focusAfterRetry.current.map((id) => qs[asked.indexOf(id)]);
+    if (retried.some((q) => q?.isFetching)) return;
+    focusAfterRetry.current = [];
+    if (retried.every((q) => q?.isSuccess)) document.querySelector<HTMLElement>("[data-page-title]")?.focus();
+  });
   const over = picked.length - asked.length;
   const capNote = over ? (
     <Banner tone="brand" icon={Info} title={`Pick up to ${MAX_BILLS} bills`}>
-      {`You picked ${plural(picked.length, "bill")}, so the first ${MAX_BILLS} are here, in the order you picked them. Print them, then tick the other ${plural(over, "bill")} in the sales list.`}
+      {`You picked ${plural(picked.length, "bill")}, so the first ${MAX_BILLS} are here, in the order you picked them. Print them, then tick the other ${over === 1 ? "bill" : plural(over, "bill")} in the sales list${over > MAX_BILLS ? `, ${MAX_BILLS} at a time` : ""}.`}
     </Banner>
   ) : null;
   const frame = (body: ReactNode) => <Page icon={Printer} title="Batch print" breadcrumbs={CRUMBS}>{capNote}{body}</Page>;
@@ -109,19 +117,22 @@ export default function BatchPrint() {
   }
   const rows = asked.map((id, i) => rowOf(id, i + 1, qs[i], qc));
   // Try again asks again for those bills alone, through the client (Ruling 1B-11)
-  const again = (which: number[]) => { for (const id of which) void qc.refetchQueries({ queryKey: billQuery(id).queryKey }); };
+  const again = (which: number[], focusTitle = false) => {
+    if (focusTitle) focusAfterRetry.current = which;
+    for (const id of which) void qc.refetchQueries({ queryKey: billQuery(id).queryKey });
+  };
   const asking = new Set(asked.filter((_, i) => qs[i].isFetching));
   if (!rows.some((r) => "bill" in r)) {
     const unloaded = rows.filter((r): r is Unloaded => "failed" in r);
     if (!unloaded.length) return empty("These bills aren't here any more");
     // none came: why, with Try again (offline, they come by themselves once the internet is back)
     const p = whyUnloaded(unloaded) as ApiProblem;
-    return frame(<LoadError problem={p} what="the bills" retry={p.kind === "offline" ? undefined : () => again(unloaded.map((r) => r.id))} />);
+    return frame(<LoadError problem={p} what="the bills" retry={canRetryPrintRead(p) ? () => again(unloaded.filter((r) => canRetryPrintRead(r.failed)).map((r) => r.id), true) : undefined} />);
   }
   return <BatchScreen key={ids} rows={rows} capNote={capNote} settings={settings.data} again={again} asking={asking} />;
 }
 
-function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; capNote: ReactNode; settings: ShopSettings | undefined; again: (ids: number[]) => void; asking: Set<number> }) {
+function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; capNote: ReactNode; settings: ShopSettings | undefined; again: (ids: number[], focusTitle?: boolean) => void; asking: Set<number> }) {
   const { show } = useToast();
   const log = useLogPrint();
   const net = useNetwork();
@@ -195,8 +206,8 @@ function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; 
       context={bills.length ? `${billsSpan(bills)} · ${plural(pageCount, "A4 page")} · ${inr(total)}${anyCancelled ? " (cancelled bills not in the total)" : ""}` : undefined}>
       {capNote}
       {gone ? <Banner tone="brand" icon={Info} title={`${plural(gone, "bill")} left out`}>{gone === 1 ? "It was" : "They were"} deleted after being picked.</Banner> : null}
-      {stale.length ? <StaleNote problem={stale[0].stale as ApiProblem} what={named(stale.map((r) => r.bill.invoice_number))} retry={() => again(stale.map((r) => r.id))} busy={stale.some((r) => asking.has(r.id))} /> : null}
-      <FailNote error={notLoaded} onRetry={p && p.kind !== "offline" ? () => again(unloaded.map((r) => r.id)) : undefined} />
+      {stale.length ? <StaleNote problem={stale[0].stale as ApiProblem} what={named(stale.map((r) => r.bill.invoice_number))} retry={canRetryPrintRead(stale[0].stale as ApiProblem) ? () => again(stale.filter((r) => canRetryPrintRead(r.stale as ApiProblem)).map((r) => r.id)) : undefined} busy={stale.some((r) => asking.has(r.id))} /> : null}
+      <FailNote error={notLoaded} onRetry={p && canRetryPrintRead(p) ? () => again(unloaded.filter((r) => canRetryPrintRead(r.failed)).map((r) => r.id), true) : undefined} />
       <div className="grid gap-6 items-start lg:grid-cols-[minmax(0,1fr)_340px]">
         <div key={`${copies}-${showBank}-${bills.length}`} className="min-w-0 flex flex-col items-center gap-6 anim-rise">
           {papers.flatMap((pp, bi) => copyList.flatMap((cp) => pp.pages.map((pg) => {
@@ -239,7 +250,7 @@ function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; 
           </div>
           <Switch label="Bank details on the bills" checked={showBank} onChange={(v) => setChosen((c) => ({ ...c, showBank: v }))}
             description={noBank.length ? `Each firm's own bank. ${andList(noBank)} ${noBank.length === 1 ? "has" : "have"} no account saved, so ${noBank.length === 1 ? "its bills print" : "their bills print"} without one.` : "Each firm's own bank"} />
-          <p className="text-sm text-fg2 rounded-ctl border border-line bg-field px-4 py-3">{what} · {plural(pageCount, "A4 page")} · {inr(total)}{anyCancelled ? " (cancelled bills not in the total)" : ""}</p>
+          {bills.length ? <p className="text-sm text-fg2 rounded-ctl border border-line bg-field px-4 py-3">{what} · {plural(pageCount, "A4 page")} · {inr(total)}{anyCancelled ? " (cancelled bills not in the total)" : ""}</p> : null}
           <FailNote error={pdfFail} onRetry={why.again ? made.retry : undefined} busy={made.retrying} />
           <Button variant="primary" size="lg" full icon={Printer} disabled={!made.value} title={waitWhy} loading={making} onClick={print}>
             {making ? "Making the batch…" : printWords(pageCount)}

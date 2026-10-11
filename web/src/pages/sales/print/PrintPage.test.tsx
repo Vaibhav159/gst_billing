@@ -51,6 +51,44 @@ function openWith(qc: QueryClient, path = "/sales/412/print") {
 const papers = () => screen.getAllByRole("document", { name: /^Bill KGH\/2026-27\/31 on paper/ });
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 
+test.each([[401, false], [403, false], [401, true], [403, true]] as const)("a refused read (%s, cached %s) never offers a futile Try again", async (status, cached) => {
+  let refused = !cached;
+  serve([["GET", "sales/412/", () => refused ? refuse(status, { detail: "You can't read this bill." }) : wireDetail()]]);
+  const qc = testQueryClient();
+  openWith(qc);
+  if (cached) {
+    await screen.findByRole("document", { name: "Bill KGH/2026-27/31 on paper, original copy" });
+    refused = true;
+    await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
+  }
+  await screen.findByText(cached ? "Couldn't refresh this bill" : "Couldn't load this bill");
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+});
+
+test("the desktop explains and announces why PDF, Print and Share wait for the first PDF", async () => {
+  serve();
+  let resolve!: (file: PdfFile) => void;
+  vi.mocked(billFile).mockReturnValueOnce(new Promise<PdfFile>((done) => { resolve = done; }));
+  const updates: MutationRecord[] = [];
+  const observer = new MutationObserver((records) => updates.push(...records));
+  observer.observe(document.body, { subtree: true, childList: true });
+  open();
+  const pdf = await screen.findByRole("button", { name: "PDF" });
+  const status = screen.getByRole("status", { name: "PDF progress" });
+  try {
+    await waitFor(() => expect(updates.some((record) => record.target === status && [...record.addedNodes].some((node) => node.textContent === "Making the PDF…"))).toBe(true));
+  } finally { observer.disconnect(); }
+  expect(status).toHaveTextContent("Making the PDF…");
+  for (const name of ["PDF", "Print", "Share"]) {
+    expect(screen.getByRole("button", { name })).toBeDisabled();
+    expect(screen.getByRole("button", { name })).toHaveAccessibleDescription("Making the PDF…");
+  }
+  await waitFor(() => expect(billFile).toHaveBeenCalled());
+  await act(async () => resolve({ blob: new Blob(["%PDF-1.3"]), name: "bill.pdf", sheets: 1 }));
+  expect(pdf).toBeEnabled();
+  expect(status).toBeEmptyDOMElement();
+});
+
 // jsdom has no object URLs and no downloads: a file handed out is a link clicked with its name. window.open answers with
 // the tab it opened (Print's PDF, WhatsApp's chat), or null for one the browser stopped
 beforeEach(() => {

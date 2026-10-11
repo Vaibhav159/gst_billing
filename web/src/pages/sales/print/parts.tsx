@@ -5,11 +5,12 @@ import { Link } from "react-router";
 import type { ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { plural } from "@/core/format";
-import { pdfCodeMissing } from "@/core/print/make";
 import { hasBank, type PrintBill } from "@/core/print/model";
 import type { FirmOnBill } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
 import { Switch } from "@/core/ui";
+
+export { unmade } from "@/core/print/words";
 
 /**
  * A batch takes up to this many bills (Ruling 1E-16): about 90 pages with all three copies. Its PDF is made here, on the
@@ -17,6 +18,9 @@ import { Switch } from "@/core/ui";
  * papers are drawn twice (on screen and for the browser's own print). Each bill is also a request (Neon's free plan).
  */
 export const MAX_BILLS = 30;
+
+/** Repeating a read cannot restore sign-in, permissions or an offline connection. */
+export const canRetryPrintRead = (p: ApiProblem) => !["offline", "auth", "forbidden"].includes(p.kind);
 
 /** Bills by number where it's known, the rest counted: "KGH/2026-27/32 and MO/2026-27/7", "KGH/2026-27/32 and 1 more bill", "4 bills". */
 export function named(numbers: (string | null)[]): string {
@@ -65,18 +69,6 @@ export function useMade<T>(key: string | null, make: () => Promise<T>): { value:
   const remake = useCallback(() => { quiet.current = key; setTries((n) => n + 1); }, [key]);
   const now = made && made.key === key ? made : null;
   return { value: now?.value ?? null, failed: now?.failed ?? false, error: now?.error ?? null, retrying: retrying !== null && retrying === key, retry, remake };
-}
-
-/**
- * Why a PDF wasn't made, in words, and whether Try again can help. react-pdf's code that didn't come (the app changed
- * since the page opened) comes only with a reload, so there's no Try again then, and offline the reload waits for the
- * internet. what: "PDF" or "batch".
- */
-export function unmade(error: unknown, offline: boolean, what: string): { body: string; again: boolean } {
-  if (pdfCodeMissing(error)) {
-    return { again: false, body: offline ? "You're offline, and the part of the app that makes PDFs didn't load. Reload the page once the internet is back." : "The part of the app that makes PDFs didn't load. Reload the page, then try again." };
-  }
-  return { again: true, body: offline ? `You're offline, so the ${what} wasn't made. It needs the internet; try again when you're back.` : "Something stopped it part way. Try again." };
 }
 
 /**

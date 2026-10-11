@@ -12,8 +12,8 @@ function firstDownload(limitKb = 500): Plugin {
     name: "first-download",
     generateBundle(_options, bundle) {
       for (const c of Object.values(bundle)) {
-        if (c.type === "chunk" && c.isEntry && c.code.length > limitKb * 1000) {
-          this.warn(`${c.fileName} is ${Math.round(c.code.length / 1000)} kB, over the ${limitKb} kB first download (Ruling 1B-4): load the page that grew it on demand in core/router/routes.tsx.`);
+        if (c.type === "chunk" && c.isEntry && Buffer.byteLength(c.code) > limitKb * 1000) {
+          this.error(`${c.fileName} is ${Math.round(Buffer.byteLength(c.code) / 1000)} kB, over the ${limitKb} kB first download (Ruling 1B-4): load the page that grew it on demand in core/router/routes.tsx.`);
         }
       }
     },

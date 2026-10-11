@@ -220,7 +220,7 @@ test("a bill number saved with a line break (v2's import): new codes carry it on
   expect(await checkQr("KGH/2026-27/44|08ABCPK1234F1Z5|2026-10-08|87083.21", FIRMS)).toMatchObject({ kind: "match", bill: { id: 444 } });
   expect(await checkQr("KGH/2026-27/13|08ABCPK1234F1Z5|2026-10-08|87083.21", FIRMS)).toMatchObject({ kind: "unknown" });
   // the look-alike search is only for a number the exact one missed, by its digits, in the firm's year
-  expect(calls.filter((c) => c.params.q).map((c) => c.params)).toContainEqual({ business_id: 3, q: "31", fy: "2026-27", ordering: "number", page: 1, page_size: 40 });
+  expect(calls.filter((c) => c.params.q).map((c) => c.params)).toContainEqual({ business_id: 3, q: "31", fy: "2026-27", ordering: "number", summary: 0, page: 1, page_size: 40 });
 });
 
 test("such a code printed before now reaches a USB scanner's Enter halfway: the box keeps the first half, the rest joins it, and the whole code checks", async () => {
