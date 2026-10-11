@@ -149,7 +149,9 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     ? `By ${e.transport_mode.toLowerCase()}${e.distance_km ? `, ${e.distance_km} km` : ""}` : "";
   const bill: Omit<PrintBill, "pages"> = {
     id: d.id, number: d.invoice_number, dated: date(d.invoice_date), file: billPdfName(d), cancelled: d.status === "cancelled",
-    qr: qrPayload({ ...d, firm: { gst_number: firmGstin } }),
+    // the number on one line, as the Invoice No. box prints it: a break in the code would be a USB scanner's Enter
+    // halfway through it. The QR check finds a stored number that differs only in its spaces and breaks (1E Task 9)
+    qr: qrPayload({ ...d, invoice_number: oneLine(d.invoice_number), firm: { gst_number: firmGstin } }),
     firm: {
       name: firmName, gstin: firmGstin,
       lines: [...linesOf(f.address), firmGstin ? `GSTIN/UIN: ${firmGstin}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),

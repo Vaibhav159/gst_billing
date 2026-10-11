@@ -214,8 +214,10 @@ test("the 14 boxes and a continued page's header hold one line each: a line brea
     customer: { ...(wireDetail().customer as object), name: "Anil\nGupta", gst_number: "08AAKFS4821M1ZQ\r\n" },
   }), { showBank: true });
   expect(p.meta[5]).toEqual(["Other References", "Hallmarked BIS 916 Size 14"]);
-  // the Invoice No. box and a later page's header read the number alike
+  // the Invoice No. box, a later page's header and the QR code read the number alike: a break in the code would be a
+  // USB scanner's Enter halfway through it (1E Task 9)
   expect(p.meta[0]).toEqual(["Invoice No.", "KGH/2026-27/ 31"]);
+  expect(p.qr).toBe("KGH/2026-27/ 31|08ABCPK1234F1Z5|2026-10-08|87083.21");
   expect(p.short.slice(0, 3)).toEqual([
     [{ text: "KIRAN GOLD HOUSE", bold: true }, { text: " · GSTIN 08ABCPK1234F1Z5" }],
     [{ text: "Invoice No. " }, { text: "KGH/2026-27/ 31", bold: true }, { text: " · Dated " }, { text: "08 Oct 2026", bold: true }],
