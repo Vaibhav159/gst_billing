@@ -20,7 +20,7 @@ function mount(initial = valid(), props: Partial<React.ComponentProps<typeof Pur
 }
 function server(over: Parameters<typeof serve>[0] = {}) {
   return serve({
-    'GET businesses/': [{ id: 3, name: 'KIRAN GOLD HOUSE', gst_number: '08AAGPL3375F1ZO', state_name: 'RAJASTHAN' }],
+    'GET firms/': [{ id: 3, name: 'KIRAN GOLD HOUSE', gst_number: '08AAGPL3375F1ZO', state_name: 'RAJASTHAN' }],
     'GET products/': [], 'GET suppliers/21/': { supplier: { ...SUPPLIER, address: '', pan: '', mobile_number: '', email: '', prefix: '', gstin_valid: true }, figures: {}, rates: [], bills: [] }, 'GET suppliers/': { count: 0, next: null, results: [] },
     'GET suppliers/21/memory/': { bills: 1, last: null, line: null, next_number: 'UBS/13' },
     'GET purchases/check-duplicate/': { duplicate: null, same_spelling: true },

@@ -26,7 +26,7 @@ test("when another tab signs in as someone else, the app says who is signed in n
   };
   // /api/me/ answers for whoever the request's token names; the shell's preferences and firm list come back empty
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("preferences/") ? { data: {} } : config.url?.startsWith("businesses/") ? { results: [] }
+    data: config.url?.startsWith("preferences/") ? { data: {} } : config.url?.startsWith("firms/") ? { results: [] }
       : people[String(config.headers.Authorization).replace(/^Bearer /, "")] })) as AxiosAdapter;
   setTokens(jwt(1), "r1");
   render(<AppRoutes router={createMemoryRouter(appRoutes, { initialEntries: ["/users"] })} />);

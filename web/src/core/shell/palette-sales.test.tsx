@@ -36,7 +36,7 @@ function serve({ today = TODAY, search = quickSearch, bin = theBin }: { today?: 
   api.defaults.adapter = ((config) => {
     const url = String(config.url);
     asked.push(`${url}?${new URLSearchParams(config.params as Record<string, string>).toString()}`);
-    if (url.startsWith("businesses/")) return answer(config, { results: [{ id: 3, name: "KIRAN GOLD HOUSE", gst_number: "08ABCPK1234F1Z5", state_name: "RAJASTHAN" }] });
+    if (url.startsWith("firms/")) return answer(config, { results: [{ id: 3, name: "KIRAN GOLD HOUSE", gst_number: "08ABCPK1234F1Z5", state_name: "RAJASTHAN" }] });
     if (url === "sales/") return answer(config, wirePage(today));
     if (url === "bin/") return bin(config);
     if (url.startsWith("search/quick/")) return search(config);

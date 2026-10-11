@@ -81,7 +81,7 @@ test("offline, a reply to a request sent before the connection dropped doesn't h
     render(<MemoryRouter><OfflineBanner /></MemoryRouter>);
     act(() => { window.dispatchEvent(new Event("offline")); });
     expect(screen.getByText(/You're offline/)).toBeInTheDocument();
-    await act(async () => { await api.get("businesses/"); });
+    await act(async () => { await api.get("firms/"); });
     expect(screen.getByText(/You're offline/)).toBeInTheDocument();
   } finally {
     onLine.mockRestore();
@@ -150,7 +150,7 @@ test("a load TanStack holds between tries while the tab is hidden isn't offline:
 /** AppLayout around `pages`, signed in, with a server that answers the shell's questions: one firm, no preferences. */
 function inApp(pages: RouteObject[], path: string) {
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] } : { data: {} } })) as AxiosAdapter;
+    data: config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] } : { data: {} } })) as AxiosAdapter;
   const router = createMemoryRouter([{ element: <AppLayout />, children: pages }], { initialEntries: [path] });
   render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;

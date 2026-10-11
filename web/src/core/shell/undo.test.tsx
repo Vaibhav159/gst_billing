@@ -10,7 +10,7 @@ import { DesktopShell } from "./DesktopShell";
 beforeEach(() => {
   localStorage.clear();
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("businesses/") ? { results: [] } : { data: {} } })) as AxiosAdapter;
+    data: config.url?.startsWith("firms/") ? { results: [] } : { data: {} } })) as AxiosAdapter;
 });
 afterEach(() => { vi.useRealTimers(); });
 

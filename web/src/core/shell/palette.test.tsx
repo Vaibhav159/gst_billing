@@ -204,7 +204,7 @@ test("each record says what it is: a mobile in two groups, else as typed, else t
       { id: 5, name: "Anklet", hsn_code: "7113", gst_tax_rate: "0.0300" }, { id: 6, name: "Anklet, kids", hsn_code: "7113", gst_tax_rate: "0.0300" },
       { id: 7, name: "Anklet, silver", hsn_code: "7113", gst_tax_rate: "0.0300" }, { id: 8, name: "Anklet, toe", hsn_code: "7113", gst_tax_rate: "0.0300" },
     ],
-  } : config.url?.startsWith("businesses/") ? { results: [
+  } : config.url?.startsWith("firms/") ? { results: [
     { id: 3, name: "ANIL JEWELLERS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" },
     { id: 4, name: "KIRAN GOLD HOUSE", gst_number: "08DDDDD0000D1Z5", state_name: "RAJASTHAN" },
     { id: 5, name: "ANIL GOLD", gst_number: "", state_name: "RAJASTHAN" }, { id: 6, name: "ANIL SILVER", gst_number: "", state_name: "RAJASTHAN" },
@@ -287,7 +287,7 @@ test("when the server can't be searched it says what wasn't, firms still show, n
   let down = true;
   const asked: string[] = [];
   api.defaults.adapter = ((config) => {
-    if (config.url?.startsWith("businesses/")) return answer(config, { results: [{ id: 4, name: "MEENA ORNAMENTS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] });
+    if (config.url?.startsWith("firms/")) return answer(config, { results: [{ id: 4, name: "MEENA ORNAMENTS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] });
     if (!config.url?.startsWith("search/quick/")) return answer(config, { results: [] });
     asked.push((config.params as { q: string }).q);
     return down ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config, MEENA);
@@ -406,7 +406,7 @@ test("noteVisit keeps a person's last eight, newest first and each once; storage
 /** The server for the whole app: this person's preferences (Expert on a phone), one firm, and a search that finds Meena. */
 function serve() {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("preferences/") ? { data: { phoneMode: "expert" } }
-    : config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
+    : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("search/quick/") ? MEENA : {})) as AxiosAdapter;
 }
 function inApp(router: DataRouter) {

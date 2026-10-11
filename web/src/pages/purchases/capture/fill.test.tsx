@@ -18,7 +18,7 @@ const read = () => readFixture({ buyer: { name: '', gst_number: '', business: 3 
 const readyCapture = () => captureFixture({ read: read() });
 function server(capture = readyCapture(), extra: Parameters<typeof serve>[0] = {}) {
   return serve({
-    'GET captures/12/': capture, 'GET businesses/': [PURCHASE_FIRM], 'GET products/': [],
+    'GET captures/12/': capture, 'GET firms/': [PURCHASE_FIRM], 'GET products/': [],
     'GET suppliers/': { count: 1, results: [SUPPLIER] },
     'GET suppliers/21/': { supplier: { ...SUPPLIER, address: '', gstin_valid: true }, figures: {}, rates: [], bills: [] },
     'GET suppliers/21/memory/': { bills: 0, last: null, line: null, next_number: null },

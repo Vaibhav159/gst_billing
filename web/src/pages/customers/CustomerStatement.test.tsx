@@ -259,7 +259,7 @@ test("the statement waits for the firm's name, so neither the page nor the PDF s
   let firmsCome = () => {};
   const held = new Promise<void>((resolve) => { firmsCome = resolve; });
   const calls = serve({
-    "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; },
+    "GET firms/": async () => { await held; return { status: 200, data: { results: FIRMS } }; },
     "GET customers/7/": ANIL, "GET customers/7/statement/": answer,
   });
   mount(routes, ["/customers/7/statement"]);
@@ -277,7 +277,7 @@ test("the statement waits for the firm's name, so neither the page nor the PDF s
 
 test("when the list of firms can't load, the bills still show, and the PDF isn't made without the firm's name", async () => {
   localStorage.setItem("gst3.scope.1", "3");
-  serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
+  serve({ "GET firms/": () => ({ status: 503 }), "GET customers/7/": ANIL, "GET customers/7/statement/": answer });
   mount(routes, ["/customers/7/statement"]);
   expect(await screen.findByText("Billed · FY 2026-27")).toBeInTheDocument();
   expect(screen.getAllByRole("row")).toHaveLength(6);

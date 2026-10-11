@@ -303,7 +303,7 @@ test.each([
   ["can't load its firms", () => refuse(500, {}), "The firms couldn't load", "Each firm has its own bill book, so the page waits for the list of firms. Try again when the internet is back."],
 ] as const)("a shop that %s is told so, and nothing is asked of the paper book", async (_, firms, title, words) => {
   fakeToday();
-  const { calls } = formServer([["GET", "businesses/", firms]]);
+  const { calls } = formServer([["GET", "firms/", firms]]);
   mountBook("/sales/paper");
   expect(await screen.findByText(title)).toBeInTheDocument();
   expect(screen.getByText(words)).toBeInTheDocument();

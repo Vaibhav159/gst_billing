@@ -26,7 +26,7 @@ test("detail uses server figures, rates, stored heads and credit; links preserve
 });
 test("all firms with different states describes each firm rather than claiming the same tax everywhere", async () => {
   localStorage.setItem("gst3.scope.1", "all");
-  serve({ "GET businesses/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE", gst_number: "08AAKFS4821M1ZQ", state_name: "RAJASTHAN" }, { id: 4, name: "MUMBAI GOLD", gst_number: "27AAKFS4821M1ZQ", state_name: "MAHARASHTRA" }] }, "GET suppliers/21/": detail });
+  serve({ "GET firms/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE", gst_number: "08AAKFS4821M1ZQ", state_name: "RAJASTHAN" }, { id: 4, name: "MUMBAI GOLD", gst_number: "27AAKFS4821M1ZQ", state_name: "MAHARASHTRA" }] }, "GET suppliers/21/": detail });
   mount(routes, ["/suppliers/21"]);
   expect(await screen.findByText("CGST + SGST for firms in their state; IGST for the others")).toBeInTheDocument();
   expect(screen.getByRole("columnheader", { name: "Firm" })).toBeInTheDocument();

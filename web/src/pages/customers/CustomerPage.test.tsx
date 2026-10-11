@@ -290,7 +290,7 @@ test("the figures wait for the firm's name, so they never show under another one
   let firmsCome = () => {};
   const held = new Promise<void>((resolve) => { firmsCome = resolve; });
   const calls = serve({
-    "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; },
+    "GET firms/": async () => { await held; return { status: 200, data: { results: FIRMS } }; },
     "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": flags([]),
   });
   mount(routes, ["/customers/7"]);
@@ -306,7 +306,7 @@ test("the figures wait for the firm's name, so they never show under another one
 
 test("when the list of firms can't load, the words stay neutral: one firm's bills, never “the firm picked's”", async () => {
   localStorage.setItem("gst3.scope.1", "3");
-  serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/7/": ANIL, "GET customers/7/statement/": statement([]), "GET sales/": flags([]) });
+  serve({ "GET firms/": () => ({ status: 503 }), "GET customers/7/": ANIL, "GET customers/7/statement/": statement([]), "GET sales/": flags([]) });
   mount(routes, ["/customers/7"]);
   expect(await screen.findByText("Only one firm's bills are counted. Pick All firms in the firm picker to see the rest.")).toBeInTheDocument();
   expect(screen.getByText("Showing one firm's bills only")).toBeInTheDocument();

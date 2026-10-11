@@ -14,7 +14,7 @@ import FillCapturePage from './FillCapturePage';
 
 const read = () => readFixture({ buyer: { name: '', gst_number: '', business: 3 }, notes: [], confidence: { supplier: 'high', gstin: 'high', bill_no: 'high', date: 'medium', amounts: 'medium' } });
 function server(extra: Parameters<typeof serve>[0] = {}) {
-  return serve({ 'GET captures/12/': captureFixture({ read: read() }), 'GET businesses/': [PURCHASE_FIRM],
+  return serve({ 'GET captures/12/': captureFixture({ read: read() }), 'GET firms/': [PURCHASE_FIRM],
     'GET products/': [], 'GET suppliers/': { count: 1, results: [SUPPLIER] },
     'GET suppliers/21/': { supplier: { ...SUPPLIER, address: '', gstin_valid: true }, figures: {}, rates: [], bills: [] },
     'GET suppliers/21/memory/': { bills: 0, last: null, line: null, next_number: null },

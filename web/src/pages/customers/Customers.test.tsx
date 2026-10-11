@@ -264,7 +264,7 @@ test("a customer who comes again on the next page shows once, and Show more goes
 
 test("when the list of firms can't load, the figures never say “All firms” for one firm's money, and Export waits", async () => {
   localStorage.setItem("gst3.scope.1", "3");
-  serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/": list() });
+  serve({ "GET firms/": () => ({ status: 503 }), "GET customers/": list() });
   mount(routes, ["/customers"]);
   expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), the firm picked")).toBeInTheDocument();
   expect(screen.getByText(/Their sales · FY 2026-27 · the firm picked:/)).toBeInTheDocument();
@@ -276,7 +276,7 @@ test("when the list of firms can't load, the figures never say “All firms” f
 
 test("with all firms picked, Export still waits when the list of firms can't load: the file would leave out each customer's usual firms", async () => {
   localStorage.setItem("gst3.scope.1", "all");
-  serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/": list() });
+  serve({ "GET firms/": () => ({ status: 503 }), "GET customers/": list() });
   mount(routes, ["/customers"]);
   expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), All firms")).toBeInTheDocument();
   const exp = screen.getByRole("button", { name: "Export 3 customers" });
@@ -288,7 +288,7 @@ test("with all firms picked, Export also waits while the list of firms loads, an
   localStorage.setItem("gst3.scope.1", "all");
   let firmsCome = () => {};
   const held = new Promise<void>((resolve) => { firmsCome = resolve; });
-  serve({ "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
+  serve({ "GET firms/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
   mount(routes, ["/customers"]);
   // the rows come first: all firms needs no firm's name
   const exp = await screen.findByRole("button", { name: "Export 3 customers" });
@@ -302,7 +302,7 @@ test("with all firms picked, Export also waits while the list of firms loads, an
 test("on a phone, Export in the ⋯ menu waits for the list of firms too, and says so", async () => {
   (window as unknown as { __phone?: boolean }).__phone = true;
   localStorage.setItem("gst3.scope.1", "all");
-  serve({ "GET businesses/": () => new Promise(() => {}), "GET customers/": list() });
+  serve({ "GET firms/": () => new Promise(() => {}), "GET customers/": list() });
   mount(routes, ["/customers"]);
   await screen.findByText("3 customers");
   await userEvent.click(screen.getByRole("button", { name: "Import or export customers" }));
@@ -346,10 +346,10 @@ test("the figures wait for the firm's name, so they never show under another one
   localStorage.setItem("gst3.scope.1", "3");
   let firmsCome = () => {};
   const held = new Promise<void>((resolve) => { firmsCome = resolve; });
-  const calls = serve({ "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
+  const calls = serve({ "GET firms/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
   mount(routes, ["/customers"]);
   // No customer reads are needed before the firm is known, including an unfiltered count.
-  await waitFor(() => expect(calls.some((c) => c.url === "businesses/")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.url === "firms/")).toBe(true));
   expect(calls.some((c) => c.params.page_size === 1)).toBe(false);
   expect(calls.some((c) => c.params.figures === 1)).toBe(false);
   expect(screen.queryByText(/All firms/)).not.toBeInTheDocument();

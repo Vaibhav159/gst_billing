@@ -22,7 +22,7 @@ test("list follows scope and the server summary, and opens 2B's supplier sheet",
   expect(screen.getByLabelText("Supplier name")).toHaveValue("");
 });
 test("IGST follows the selected firm's state rather than Rajasthan", async () => {
-  serve({ "GET businesses/": { results: [{ id: 3, name: "MUMBAI GOLD", gst_number: "27AAKFS4821M1ZQ", state_name: "MAHARASHTRA" }] }, "GET suppliers/": { count: 1, results: [supplier], summary } });
+  serve({ "GET firms/": { results: [{ id: 3, name: "MUMBAI GOLD", gst_number: "27AAKFS4821M1ZQ", state_name: "MAHARASHTRA" }] }, "GET suppliers/": { count: 1, results: [supplier], summary } });
   mount(routes, ["/suppliers"]);
   expect(await screen.findByText("IGST on their bills")).toBeInTheDocument();
 });

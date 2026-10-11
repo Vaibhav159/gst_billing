@@ -32,7 +32,7 @@ const auth = stubAuth();
 
 function mount(path: string, prefs: Record<string, unknown> = {}) {
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("businesses/") ? { results: [] } : {} })) as AxiosAdapter;
+    data: config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("firms/") ? { results: [] } : {} })) as AxiosAdapter;
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={auth}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
@@ -93,7 +93,7 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
     calls.push({ method: config.method, url: config.url, body });
     const answer = (data: unknown) => ({ status: 200, statusText: "", headers: {}, config, data });
     const down = () => Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config));
-    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("businesses/") ? { results: [] } : {}));
+    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [] } : {}));
     if (config.method === "patch") {
       if (patchFail) return down();
       const save = () => { stored = { ...stored, ...body }; return answer({ data: stored }); };

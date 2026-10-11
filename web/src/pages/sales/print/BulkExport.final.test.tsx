@@ -28,7 +28,7 @@ const rowsOf = (count: number) => Array.from({ length: count }, (_, i) => wireRo
 const settings = { copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null };
 function serve(rows = rowsOf(3), overrides: { detail?: (c: Call) => unknown; settings?: () => unknown; list?: (c: Call) => unknown; firms?: unknown[] } = {}) {
   return salesServer([
-    ["GET", "businesses/", () => ({ results: overrides.firms ?? [{ ...FIRM, invoice_prefix: "LIVE" }] })],
+    ["GET", "firms/", () => ({ results: overrides.firms ?? [{ ...FIRM, invoice_prefix: "LIVE" }] })],
     ["GET", "sales/", overrides.list ?? (() => wirePage(rows))],
     ["GET", /^sales\/\d+\/$/, overrides.detail ?? (({ url }) => wireDetail(rows.find((r) => url === `sales/${r.id}/`)))],
     ["GET", "shop-settings/", overrides.settings ?? (() => settings)],
@@ -193,7 +193,7 @@ test.each([401, 403].flatMap((status) => ["detail", "stale", "zip", "list", "set
   let stale = false;
   const rows = rowsOf(stage === "zip" ? 31 : 1);
   salesServer([
-    ["GET", "businesses/", () => stage === "firms" ? refuse(status, {}) : { results: [FIRM] }],
+    ["GET", "firms/", () => stage === "firms" ? refuse(status, {}) : { results: [FIRM] }],
     ["GET", "sales/", () => stage === "list" ? refuse(status, {}) : wirePage(rows)],
     ["GET", /^sales\/\d+\/$/, ({ url }) => stage === "detail" || stale || stage === "zip" && url === "sales/31/" ? refuse(status, {}) : wireDetail(rows[Number(url.split("/")[1]) - 1])],
     ["GET", "shop-settings/", () => stage === "settings" ? refuse(status, {}) : settings],

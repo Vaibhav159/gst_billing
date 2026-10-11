@@ -21,7 +21,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }, { id: 4, name: "MEERA ORNAMENTS (SANDBOX)", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] }
+    data: config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }, { id: 4, name: "MEERA ORNAMENTS (SANDBOX)", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("preferences/") ? { data: { defaultBusinessId: "3" } } : {} })) as AxiosAdapter;
 });
 
@@ -328,7 +328,7 @@ test("through the real sign-in state, Sign out ends the session and the app goes
 
 test("a shop with no firm yet shows only how to start; a firm list that fails to load keeps the whole header", async () => {
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("businesses/") ? { results: [] } : { data: {} } })) as AxiosAdapter;
+    data: config.url?.startsWith("firms/") ? { results: [] } : { data: {} } })) as AxiosAdapter;
   const view = shell();
   expect(await screen.findByText("Setting up the shop")).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
@@ -338,7 +338,7 @@ test("a shop with no firm yet shows only how to start; a firm list that fails to
 
   let failed = false;
   api.defaults.adapter = ((config) => {
-    if (!config.url?.startsWith("businesses/")) return Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: { data: {} } });
+    if (!config.url?.startsWith("firms/")) return Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: { data: {} } });
     failed = true;
     return Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config));
   }) as AxiosAdapter;
@@ -366,12 +366,12 @@ test("the firm list is asked for once, with room for every firm, however often t
   await userEvent.click(screen.getByRole("button", { name: "Show another picker" }));
   expect(await screen.findAllByRole("button", { name: "Firm: Meera" })).toHaveLength(2);
   await act(() => new Promise((r) => setTimeout(r, 30)));
-  expect(asked.filter((u) => u.includes("businesses/"))).toEqual(["/api/businesses/?page_size=100"]);
+  expect(asked.filter((u) => u.includes("firms/"))).toEqual(["/api/firms/"]);
 });
 
 test("a firm list the server doesn't page is read the same way", async () => {
   const paged = api.defaults.adapter as AxiosAdapter;
-  api.defaults.adapter = ((config) => paged(config).then((r) => (config.url?.startsWith("businesses/") ? { ...r, data: r.data.results } : r))) as AxiosAdapter;
+  api.defaults.adapter = ((config) => paged(config).then((r) => (config.url?.startsWith("firms/") ? { ...r, data: r.data.results } : r))) as AxiosAdapter;
   shell();
   expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
 });
@@ -482,7 +482,7 @@ test.each([
   ["null", { invoice_prefix: null }, ""],
   ["present", { invoice_prefix: "KGH" }, "KGH"],
 ])("a firm's %s bill-number prefix is available for PDF names", async (_, prefix, expected) => {
-  salesServer([["GET", "businesses/", () => ({ results: [{ id: 3, name: "KIRAN GOLD HOUSE", ...prefix }] })]]);
+  salesServer([["GET", "firms/", () => ({ results: [{ id: 3, name: "KIRAN GOLD HOUSE", ...prefix }] })]]);
   function FirmRead() {
     const { firms } = useFirms();
     return <output aria-label="Firms">{JSON.stringify(firms)}</output>;
@@ -505,7 +505,7 @@ test.each([
 ])("the firm query exposes the real problem for a $name and keeps its error flag", async ({ status, online, body, expected }) => {
   const connection = vi.spyOn(navigator, "onLine", "get").mockReturnValue(online);
   try {
-    salesServer([["GET", "businesses/", () => refuse(status, body)]]);
+    salesServer([["GET", "firms/", () => refuse(status, body)]]);
     renderApp(<FirmProblem />);
     await waitFor(() => expect(JSON.parse(screen.getByLabelText("Firm query").textContent!)).toEqual({
       firms: [], loading: false, error: true, problem: expected,
@@ -514,7 +514,7 @@ test.each([
 });
 
 test("the firm query has no problem when its read succeeds", async () => {
-  salesServer([["GET", "businesses/", () => ({ results: [] })]]);
+  salesServer([["GET", "firms/", () => ({ results: [] })]]);
   renderApp(<FirmProblem />);
   await waitFor(() => expect(JSON.parse(screen.getByLabelText("Firm query").textContent!)).toEqual({
     firms: [], loading: false, error: false, problem: null,
@@ -598,7 +598,7 @@ test("a list that waits for the firm asks once, for the usual firm, never for al
 
 test("when the firm list can't load, the firm button says so instead of loading for ever", async () => {
   const answer = api.defaults.adapter as AxiosAdapter;
-  api.defaults.adapter = ((config) => (config.url?.startsWith("businesses/") ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config))) as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url?.startsWith("firms/") ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config))) as AxiosAdapter;
   localStorage.setItem("gst3.scope.1", "4");
   const view = shell();
   const button = await screen.findByRole("button", { name: "Firm: couldn't load" });
@@ -614,7 +614,7 @@ test("until the firm list is in, the firm button's name says it's loading", asyn
   localStorage.setItem("gst3.scope.1", "4");
   let release: (() => void) | undefined;
   const answer = api.defaults.adapter as AxiosAdapter;
-  api.defaults.adapter = ((config) => (config.url?.startsWith("businesses/")
+  api.defaults.adapter = ((config) => (config.url?.startsWith("firms/")
     ? new Promise((resolve, reject) => { release = () => { answer(config).then(resolve, reject); }; })
     : answer(config))) as AxiosAdapter;
   shell();

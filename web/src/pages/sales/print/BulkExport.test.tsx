@@ -33,7 +33,7 @@ const ROWS = [
 ];
 function serve(rows = ROWS, detail?: (c: Call) => unknown, list?: (c: Call) => unknown, settings?: () => unknown) {
   return salesServer([
-    ["GET", "businesses/", () => ({ results: [{ ...FIRM, invoice_prefix: "KGH" }, { ...OTHER_FIRM, invoice_prefix: "MO" }] })],
+    ["GET", "firms/", () => ({ results: [{ ...FIRM, invoice_prefix: "KGH" }, { ...OTHER_FIRM, invoice_prefix: "MO" }] })],
     ["GET", "sales/", list ?? (() => wirePage(rows))],
     ["GET", /^sales\/\d+\/$/, detail ?? (({ url }) => {
       const r = rows.find((x) => x.id === Number(url.split("/")[1]))!;

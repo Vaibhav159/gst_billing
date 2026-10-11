@@ -20,7 +20,7 @@ const read = (): PurchaseRead => toPurchaseRead({
 });
 function server(extra: Parameters<typeof serve>[0] = {}) {
   return serve({
-    'GET businesses/': [PURCHASE_FIRM, { ...PURCHASE_FIRM, id: 4, name: 'OTHER FIRM' }],
+    'GET firms/': [PURCHASE_FIRM, { ...PURCHASE_FIRM, id: 4, name: 'OTHER FIRM' }],
     'GET products/': [], 'GET suppliers/': { count: 1, results: [SUPPLIER] },
     'GET suppliers/21/': { supplier: { ...SUPPLIER, address: '', pan: '', mobile_number: '', email: '', prefix: '', gstin_valid: true }, figures: {}, rates: [], bills: [] },
     'GET suppliers/21/memory/': { bills: 0, last: null, line: null, next_number: null },

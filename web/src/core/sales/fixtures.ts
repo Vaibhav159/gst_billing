@@ -130,7 +130,7 @@ export function salesServer(routes: Route[] = []): { calls: Call[] } {
       }
     }
     if (call.url.startsWith("preferences/")) return { status: 200, data: { data: {} } };
-    if (call.url.startsWith("businesses/")) return { status: 200, data: { results: [FIRM, OTHER_FIRM] } };
+    if (call.url.startsWith("firms/")) return { status: 200, data: { results: [FIRM, OTHER_FIRM] } };
     return { status: 200, data: { count: 0, next: null, previous: null, results: [] } };
   });
   return { calls };

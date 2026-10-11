@@ -10,6 +10,7 @@ import Placeholder from "@/pages/core/Placeholder";
 import { capturePages, captureRoutes } from "@/pages/purchases/capture/routes";
 import { customerPages, customerRoutes } from "@/pages/customers/routes";
 import { part2dRoutes } from "@/pages/imports/routes";
+import { firmPages, firmRoutes } from "@/pages/firms/routes";
 import { productPages, productRoutes } from "@/pages/products/routes";
 import { idlePages, lazyPage } from "./lazyPage";
 
@@ -31,7 +32,7 @@ const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -119,6 +120,7 @@ export const appRoutes: RouteObject[] = [{
         { path: '/purchases/:id/edit', element: <PurchaseFormPage />, handle: { hideNav: true } },
         { path: '/purchases/:id', element: <PurchasePage /> },
         ...productRoutes,
+        ...firmRoutes,
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         { path: "/sales/paper", element: <PaperBookPage /> },

@@ -8,13 +8,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Camera, CameraOff, ScanLine } from "lucide-react";
 import { api } from "@/core/api/client";
 import { problemOf } from "@/core/api/errors";
+import { firmListQuery } from "@/core/api/firms";
 import { salesParams, type SalesQuery } from "@/core/api/sales";
 import { date, fyOf, inr } from "@/core/format";
 import { parseQr, type QrText } from "@/core/print/qr";
 import { sameNumber } from "@/core/sales/numbers";
 import type { BillRow, NumberCheck } from "@/core/sales/types";
 import { toNumberCheck, toSalesPage } from "@/core/sales/wire";
-import { useFirms, type Firm } from "@/core/scope";
+import { toScopeFirm, useFirms, type Firm } from "@/core/scope";
 import { Banner, Button, Dialog, Field, Input, type MenuItem } from "@/core/ui";
 import { useView } from "@/core/view";
 
@@ -162,11 +163,12 @@ export function QrCheck({ input, go }: { input: RefObject<HTMLInputElement>; go:
   // fails at once in the words of the firms' own failure (a new ask clears it, so it's read first).
   const withFirms = async (t: string): Promise<QrResult> => {
     if (firms.length || !parseQr(t)) return checkQr(t, firms);
-    const failed = qc.getQueryState(["firms"])?.error;
-    await qc.refetchQueries({ queryKey: ["firms"] }, { cancelRefetch: false });
-    const fresh = qc.getQueryData<Firm[]>(["firms"]) ?? [];
-    if (!fresh.length) throw qc.getQueryState(["firms"])?.error ?? failed ?? new Error("The firms didn't load");
-    return checkQr(t, fresh);
+    const { queryKey } = firmListQuery();
+    const failed = qc.getQueryState(queryKey)?.error;
+    await qc.refetchQueries({ queryKey, exact: true }, { cancelRefetch: false });
+    const fresh = qc.getQueryData(queryKey) ?? [];
+    if (!fresh.length) throw qc.getQueryState(queryKey)?.error ?? failed ?? new Error("The firms didn't load");
+    return checkQr(t, fresh.map(toScopeFirm));
   };
   // Neon's free plan: only a code read asks the server, and the same code again within seconds of its last read (a
   // scanner's second read, a second Enter, the camera held up to it again) gets the answer it had. Each such read renews

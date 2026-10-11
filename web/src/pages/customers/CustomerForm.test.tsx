@@ -540,7 +540,7 @@ test("opening an edit asks only for its record; name, mobile and GSTIN searches 
   const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS });
   mount(routes, ["/customers/7/edit"]);
   await pass(1000, 1);
-  expect(calls.map((c) => c.url).sort()).toEqual(["businesses/", "customers/7/", "preferences/"]);
+  expect(calls.map((c) => c.url).sort()).toEqual(["customers/7/", "firms/", "preferences/"]);
   expect(screen.queryByText(/^Has billed /)).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Anil Kumar" } });
   await pass(249, 1);

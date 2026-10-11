@@ -325,7 +325,7 @@ test("a browser that can't read codes from the camera (an iPhone's, most compute
 test("while the firms haven't come (the app opened offline), a code isn't called another firm's: it isn't checked, and Check asks for them again", async () => {
   let up = false;
   const { calls } = salesServer([
-    ["GET", "businesses/", () => (up ? { results: [FIRM, OTHER_FIRM] } : refuse(503, {}))],
+    ["GET", "firms/", () => (up ? { results: [FIRM, OTHER_FIRM] } : refuse(503, {}))],
     ["GET", "sales/", () => wirePage([wireRow()])],
   ]);
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
@@ -344,7 +344,7 @@ test("while the firms haven't come (the app opened offline), a code isn't called
 });
 
 test("offline with the firms not in, Check says so at once: it doesn't wait for the internet to ask for them", async () => {
-  salesServer([["GET", "businesses/", () => refuse(0, null)]]);
+  salesServer([["GET", "firms/", () => refuse(0, null)]]);
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
   try {

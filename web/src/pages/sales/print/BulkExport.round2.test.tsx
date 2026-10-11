@@ -23,7 +23,7 @@ vi.mock("./zip", async (real) => ({
 const rowsOf = (count: number) => Array.from({ length: count }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
 function serve(rows = rowsOf(3), detail?: (c: Call) => unknown) {
   return salesServer([
-    ["GET", "businesses/", () => ({ results: [{ ...FIRM, invoice_prefix: "KGH" }, { ...OTHER_FIRM, invoice_prefix: "MO" }] })],
+    ["GET", "firms/", () => ({ results: [{ ...FIRM, invoice_prefix: "KGH" }, { ...OTHER_FIRM, invoice_prefix: "MO" }] })],
     ["GET", "sales/", () => wirePage(rows)],
     ["GET", /^sales\/\d+\/$/, detail ?? (({ url }) => wireDetail(rows.find((r) => url === `sales/${r.id}/`)))],
     ["GET", "shop-settings/", () => ({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null })],

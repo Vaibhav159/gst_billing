@@ -30,14 +30,14 @@ describe('concrete supplier and import routes', () => {
     expect(await screen.findByRole('heading', { name: 'Import from Excel or Tally' })).toBeInTheDocument();
   });
   it('waits for firms before offering photo import', async () => {
-    serve({ 'GET businesses/': () => new Promise(() => {}) });
+    serve({ 'GET firms/': () => new Promise(() => {}) });
     await loadedPage(part2dRoutes[3].element);
     open('/purchases/ai-import');
     expect(await screen.findByText('Loading firms…')).toBeInTheDocument();
     expect(screen.queryByLabelText('Choose files', { exact: true })).not.toBeInTheDocument();
   });
   it('shows the firms load failure instead of offering import with no firms', async () => {
-    serve({ 'GET businesses/': () => ({ status: 503, data: { detail: 'Try again shortly.' } }) });
+    serve({ 'GET firms/': () => ({ status: 503, data: { detail: 'Try again shortly.' } }) });
     await loadedPage(part2dRoutes[3].element);
     open('/purchases/ai-import');
     expect(await screen.findByText("Couldn't load firms")).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('concrete supplier and import routes', () => {
     open('/purchases/ai-import');
     expect(await screen.findByRole('heading', { name: 'Import bill photos' })).toBeInTheDocument();
     expect(screen.getByLabelText('Choose files', { exact: true })).toBeInTheDocument();
-    expect(calls.filter(c => c.url === 'businesses/')).toHaveLength(1);
+    expect(calls.filter(c => c.url === 'firms/')).toHaveLength(1);
     expect(calls.filter(c => c.method === 'POST')).toHaveLength(0);
   });
 });

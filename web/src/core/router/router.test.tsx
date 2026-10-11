@@ -18,7 +18,7 @@ import { useUnsavedGuard } from "./useUnsavedGuard";
 beforeEach(() => {
   localStorage.clear();
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("businesses/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
+    data: config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("preferences/") ? { data: {} } : {} })) as AxiosAdapter;
 });
 

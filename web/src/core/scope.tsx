@@ -1,7 +1,7 @@
 import { readStored as read, writeStored as write } from "@/core/storage";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/core/api/client";
+import { firmListQuery, type FirmRow } from "@/core/api/firms";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";
@@ -14,22 +14,14 @@ import { usePrefs } from "@/core/prefs";
 export type Firm = { id: number; name: string; short: string; gstin: string; state: string; prefix?: string };
 export type FirmId = number | "all";
 
-// ponytail: the first word stands in for a short name, so two firms that share one ("SHREE …") look alike on the
-// header button (the menu's GSTIN tells them apart). Upgrade: a short name stored on the firm.
+// Fallback for older answers; the slim firms endpoint supplies the stored effective short name.
 export function shortName(name: string): string {
   const w = name.trim().split(/\s+/)[0] ?? "";
   return w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : name;
 }
 
-type ApiBusiness = { id: number; name?: string | null; gst_number?: string | null; state_name?: string | null; invoice_prefix?: string | null };
-function toFirms(data: unknown): Firm[] {
-  const d = data as { results?: unknown } | null;
-  // the API pages its lists; an older or unpaged answer is the array itself
-  const rows = (Array.isArray(d) ? d : Array.isArray(d?.results) ? d.results : []) as ApiBusiness[];
-  return rows.map((b) => {
-    const name = (b.name ?? "").trim();
-    return { id: b.id, name, short: shortName(name), gstin: b.gst_number ?? "", state: b.state_name ?? "", prefix: b.invoice_prefix ?? "" };
-  });
+export function toScopeFirm(b: FirmRow): Firm {
+  return { id: b.id, name: b.name, short: b.short || shortName(b.name), gstin: b.gst_number ?? "", state: b.state_name ?? "", prefix: b.invoice_prefix ?? "" };
 }
 
 const NO_FIRMS: Firm[] = [];
@@ -39,12 +31,9 @@ const NO_FIRMS: Firm[] = [];
  */
 export function useFirms(): { firms: Firm[]; loading: boolean; error: boolean; problem: ApiProblem | null } {
   const { status } = useAuth();
-  const q = useQuery({
-    queryKey: ["firms"], enabled: status === "signed-in", staleTime: Infinity,
-    // ponytail: one page of 100 is every firm a shop has; a bigger list would need the next pages
-    queryFn: async ({ signal }) => toFirms((await api.get("businesses/", { params: { page_size: 100 }, signal })).data),
-  });
-  return { firms: q.data ?? NO_FIRMS, loading: q.isPending, error: q.isError, problem: q.isError ? problemOf(q.error) : null };
+  const q = useQuery({ ...firmListQuery(), enabled: status === "signed-in" });
+  const firms = useMemo(() => q.data?.map(toScopeFirm) ?? NO_FIRMS, [q.data]);
+  return { firms, loading: q.isPending, error: q.isError, problem: q.isError ? problemOf(q.error) : null };
 }
 
 /**

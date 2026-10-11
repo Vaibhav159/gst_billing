@@ -10,7 +10,7 @@ beforeEach(() => { localStorage.clear(); handClock(new Date('2026-10-08T12:30:00
 afterEach(() => vi.useRealTimers());
 test('Ctrl K searches purchases by number or supplier and suppliers by name or GSTIN; inward recent bills are shown once', async () => {
   const calls = serve({
-    'GET businesses/': { results: [] }, 'GET sales/': { results: [] }, 'GET bin/': { results: [] },
+    'GET firms/': { results: [] }, 'GET sales/': { results: [] }, 'GET bin/': { results: [] },
     'GET search/quick/': { customers: [], invoices: [], products: [] },
     'GET purchases/': { results: [{ id: 905, invoice_number: 'UBS/0850', invoice_date: '2026-10-04', total_amount: '103.06', supplier: { name: 'Udaipur Bullion' } }] },
     'GET suppliers/': { results: [{ id: 21, name: 'Udaipur Bullion', gst_number: '08AACFU5521R1ZN', city: 'Udaipur' }] },
@@ -25,7 +25,8 @@ test('Ctrl K searches purchases by number or supplier and suppliers by name or G
 });
 test('a purchase or supplier search failure is visible and can be retried without discarding the other records', async () => {
   let down = true;
-  serve({ 'GET businesses/': { results: [] }, 'GET sales/': { results: [] }, 'GET bin/': { results: [] }, 'GET search/quick/': { customers: [], invoices: [], products: [] },
+  serve({ 'GET firms/': { results: [] }, 'GET sales/': { results: [] }, 'GET bin/': { results: [] }, 'GET search/quick/': { customers: [], invoices: [], products: [] },
+    'GET catalog/': { count: 0, next: null, previous: null, results: [], total_products: 0, twins: [] },
     'GET purchases/': () => ({ status: down ? 500 : 200, data: { results: [] } }), 'GET suppliers/': { results: [{ id: 21, name: 'Udaipur Bullion', gst_number: '', city: '' }] } });
   renderApp(<Palette open onClose={() => {}} />); await pass(0, 2); fireEvent.change(screen.getByRole('combobox'), { target: { value: 'bullion' } }); await pass(250, 2);
   expect(screen.getByText('Some purchases or suppliers could not be searched. Try again.')).toBeInTheDocument(); expect(screen.getByRole('option', { name: 'Udaipur Bullion Supplier' })).toBeInTheDocument();
