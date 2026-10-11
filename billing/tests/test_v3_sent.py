@@ -279,7 +279,7 @@ class SendLockTest(TransactionTestCase):
             # The delete starts as the send re-reads the bill. Under the send's lock it can't finish, so the re-read
             # goes ahead after 2 s; without the lock it would finish first and the re-read would find no bill.
             if not deleter:
-                deleter.append(threading.Thread(target=delete))
+                deleter.append(threading.Thread(target=delete, daemon=True))
                 deleter[0].start()
                 deleted.wait(2)
             return reread(invoice, *args, **kwargs)

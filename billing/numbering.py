@@ -212,9 +212,16 @@ def unchecked(typed, problem):
             "bill": None, "binned": None, "note": "", "same_counter": None, "next": None}
 
 
+def _numbered(row):
+    """Whether a bill's number has a number part above 0, whatever its shape: it fills that place in the paper
+    book ("KGH-18" is 18: Ruling 1A-29)."""
+    return (counter_of(row.invoice_number) or 0) > 0
+
+
 def _in_series(row):
-    """Whether the paper book counts a bill's number: a shape next-number reads, with a counter (Ruling 1A-1)."""
-    return bool(_SERIES_SHAPE.match(row.invoice_number or "")) and counter_of(row.invoice_number) > 0
+    """Whether a bill's number is a shape next-number reads, with a number part: only these set the span the paper
+    book looks across (Ruling 1A-1)."""
+    return _numbered(row) and bool(_SERIES_SHAPE.match(row.invoice_number or ""))
 
 
 def paper_book(business, year, month):
@@ -222,30 +229,32 @@ def paper_book(business, year, month):
 
     Which numbers are in the app, what explains the missing ones (deleted, cancelled), which
     aren't entered yet, and the number and date to enter next. A number another month used
-    isn't missing from this one. Every bill of the month is listed and counted, whatever its
-    number's shape ("KGH-18" too: review fix 1). The gaps, runs, twins and the next number read
-    only the numbers next-number reads, and the missing ones are counted, not listed past the
-    first LISTED: one stray "P20000" or "1778291284" would otherwise make thousands of rows, or
-    a billion (Rulings 1A-1, 1D-3).
+    isn't missing from this one. Every bill of the month is listed and counted, and every bill's
+    and deleted bill's number part fills its place, whatever the number's shape: a "KGH-18" is 18,
+    so it is never "not entered yet", and a second 18 shows as twice (Ruling 1A-29). Only the
+    series shapes next-number reads set the span the book looks across, and the missing numbers
+    are counted, not listed past the first LISTED: one stray "P20000" or "1778291284" would
+    otherwise make thousands of rows, or a billion. A stray fills a hole; it never widens the
+    span (Rulings 1A-1, 1D-3).
     """
     first, last = date(year, month, 1), date(year, month, monthrange(year, month)[1])
     fy = fy_of(first)
     every = list(series_bills(business.pk, fy).select_related("customer"))
+    every_bin = list(series_bin(business.pk, fy))
     listed = sorted((b for b in every if first <= b.invoice_date <= last),
                     key=lambda b: (counter_of(b.invoice_number) or 0, b.invoice_date, b.pk))
-    bills = [b for b in every if _in_series(b)]
-    binned = [b for b in series_bin(business.pk, fy) if _in_series(b)]
-    month_bills = [b for b in listed if _in_series(b)]
-    month_bin = [b for b in binned if first <= b.invoice_date <= last]
-    counters = [counter_of(x.invoice_number) for x in (*month_bills, *month_bin)]
-    before = [counter_of(x.invoice_number) for x in (*bills, *binned) if x.invoice_date < first]
-    used = {counter_of(x.invoice_number) for x in (*bills, *binned)}
+    month_bills = [b for b in listed if _numbered(b)]
+    month_bin = [b for b in every_bin if first <= b.invoice_date <= last and _numbered(b)]
+    used = {counter_of(x.invoice_number) for x in (*every, *every_bin) if _numbered(x)}
+    # The span's ends: series shapes only (Ruling 1A-1).
+    ends = [counter_of(x.invoice_number) for x in (*month_bills, *month_bin) if _in_series(x)]
+    before = [counter_of(x.invoice_number) for x in (*every, *every_bin) if _in_series(x) and x.invoice_date < first]
     prev_max = max(before, default=0)
-    lo, hi = min([prev_max + 1, *counters]), max(counters, default=0)
+    lo, hi = min([prev_max + 1, *ends]), max(ends, default=0)
     missing_count = max(hi - lo + 1, 0) - sum(lo <= n <= hi for n in used)
     missing = list(islice((n for n in count(lo) if n not in used), min(missing_count, LISTED)))
     runs = []
-    for n in sorted(set(counters)):
+    for n in sorted({c for c in (counter_of(x.invoice_number) for x in (*month_bills, *month_bin)) if lo <= c <= hi}):
         if runs and n == runs[-1][1] + 1:
             runs[-1][1] = n
         else:
@@ -278,7 +287,7 @@ def paper_book(business, year, month):
         "explained": sorted(explained, key=lambda e: e["counter"]),
         "twice": sorted(n for n, times in twice.items() if times > 1),
         "after": after,
-        "after_months": sorted({x.invoice_date.strftime("%Y-%m") for x in (*bills, *binned)
+        "after_months": sorted({x.invoice_date.strftime("%Y-%m") for x in (*every, *every_bin)
                                 if counter_of(x.invoice_number) in later}),
         "next": {"counter": nxt, "invoice_number": format_number(business, next_day, str(nxt)),
                  "invoice_date": next_day.isoformat()},

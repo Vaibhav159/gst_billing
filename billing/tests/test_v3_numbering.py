@@ -305,9 +305,10 @@ class PaperBookTest(TestCase):
         data = self.book()
         self.assertEqual((data["missing_count"], data["missing"]), (4, [23, 24, 25, 26]))
 
-    def test_only_the_series_shapes_make_the_gaps(self):
-        # An odd number ("P20000") is listed and counted as the month's bill, but the gaps, runs and next number read
-        # the series shapes only, in the month or before it: no 19,998 rows (Ruling 1A-1; review fix 1).
+    def test_only_the_series_shapes_make_the_span(self):
+        # An odd number ("P20000") is listed and counted as the month's bill, but only the series shapes make the span
+        # the gaps and runs are read across, in the month or before it: no 19,998 rows (Ruling 1A-1; review fix 1). A
+        # deleted bill of the month is explained whatever its number's shape (Ruling 1A-29).
         cust = buyer("Odd Import")
         sale(self.kgh, cust, "P20000", "2026-09-10")
         sale(self.kgh, cust, "P1778291284", "2026-08-10")
@@ -316,7 +317,18 @@ class PaperBookTest(TestCase):
         self.assertEqual((data["entered"], data["missing_count"], data["missing"]), (10, 4, [23, 24, 25, 26]))
         self.assertEqual((data["runs"], data["next"]["counter"], data["twice"]), ([[17, 22], [27, 29]], 23, [22]))
         self.assertEqual((data["bills"][-1]["invoice_number"], data["bills"][-1]["counter"]), ("P20000", 20000))
-        self.assertEqual([e["counter"] for e in data["explained"]], [19, 27])
+        self.assertEqual([e["counter"] for e in data["explained"]], [19, 27, 1778345121])
+        self.assertEqual(self.book("2026-10")["next"]["counter"], 32)  # August's stray doesn't start the next month
+
+    def test_a_stray_fills_a_hole_but_never_widens_the_span(self):
+        # Ruling 1A-29 with 1A-1: a stray number's counter fills its hole inside the span the series numbers make
+        # ("P24" is 24); one far past it ("P20000", "P1778291284") widens nothing and adds no run.
+        cust = buyer("Odd Import")
+        for number in ("P24", "P20000", "P1778291284"):
+            sale(self.kgh, cust, number, "2026-09-10")
+        data = self.book()
+        self.assertEqual((data["entered"], data["missing"], data["missing_count"]), (12, [23, 25, 26], 3))
+        self.assertEqual((data["runs"], data["next"]["counter"]), ([[17, 22], [24, 24], [27, 29]], 23))
 
     def test_a_stray_number_is_counted_not_listed(self):
         # A number that is a series shape but far off ("1778291284", as a timestamp) spans a billion numbers: they
@@ -377,9 +389,10 @@ class PaperBookTest(TestCase):
 
 
 class PaperBookEveryBillTest(TestCase):
-    """Review fix 1: the paper book lists every bill of the month and counts it in `entered`, whatever its number's
-    shape, with `counter` as BillRow gives it (the trailing digits, or null). The gaps and the next number still read
-    the series shapes only (Ruling 1A-1). A bill v3's own renumber calls "KGH-18" used to vanish from the list."""
+    """Review fixes 1 and 2: the paper book lists every bill of the month and counts it in `entered`, whatever its
+    number's shape, with `counter` as BillRow gives it (the trailing digits, or null). Every bill's and deleted bill's
+    number part fills its place, so a "KGH-18" is 18: never "not entered yet" or the next number, and entering 18 again
+    shows as twice (Ruling 1A-29). Only the span's ends read the series shapes (Ruling 1A-1)."""
 
     def setUp(self):
         self.owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
@@ -393,21 +406,39 @@ class PaperBookEveryBillTest(TestCase):
     def book(self):
         return self.owner.get(reverse("sale-paper-book"), {"business_id": self.kgh.pk, "month": "2026-09"}).data
 
-    def test_a_bill_renumbered_kgh_18_is_listed(self):
+    def explained(self):
+        return [(e["counter"], e["kind"], e["invoice_number"]) for e in self.book()["explained"]]
+
+    def test_a_bill_renumbered_kgh_18_fills_18(self):
         r = self.owner.post(reverse("sale-renumber", args=[self.b18.pk]), {"invoice_number": "KGH-18"}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         data = self.book()
         self.assertEqual([(b["invoice_number"], b["counter"]) for b in data["bills"]],
                          [("KGH/2026-27/17", 17), ("KGH-18", 18), ("KGH/2026-27/19", 19)])
-        self.assertEqual((data["entered"], data["missing"], data["missing_count"]), (3, [18], 1))
+        self.assertEqual((data["entered"], data["missing"], data["missing_count"], data["runs"], data["twice"]),
+                         (3, [], 0, [[17, 19]], []))
+        self.assertEqual(data["next"], {"counter": 20, "invoice_number": "KGH/2026-27/20", "invoice_date": "2026-09-04"})
+
+    def test_entering_18_again_shows_as_twice(self):
+        Invoice.objects.filter(pk=self.b18.pk).update(invoice_number="KGH-18")
+        sale(self.kgh, buyer("Second Entry"), "KGH/2026-27/18", "2026-09-03")
+        data = self.book()
+        self.assertEqual((data["entered"], data["twice"], data["missing"], data["runs"]), (4, [18], [], [[17, 19]]))
+
+    def test_a_cancelled_or_deleted_kgh_18_is_explained(self):
+        Invoice.objects.filter(pk=self.b18.pk).update(invoice_number="KGH-18", status=BILL_CANCELLED,
+                                                      cancel_reason="Customer returned it")
+        self.assertEqual((self.explained(), self.book()["missing"]), ([(18, "cancelled", "KGH-18")], []))
+        bin_bill(Invoice.objects.get(pk=self.b18.pk), None, "Entered twice by mistake")
+        self.assertEqual((self.explained(), self.book()["missing"]), ([(18, "deleted", "KGH-18")], []))
 
     def test_a_number_of_any_shape_is_listed(self):
         Invoice.objects.filter(pk=self.b18.pk).update(invoice_number="KGH/26-27/18")  # as v2 may have stored it
-        sale(self.kgh, self.cust, "OPENING", "2026-09-01")  # no number part: counter null, listed first
+        sale(self.kgh, self.cust, "OPENING", "2026-09-01")  # no number part: counter null, listed first, fills nothing
         data = self.book()
         self.assertEqual([(b["invoice_number"], b["counter"]) for b in data["bills"]],
                          [("OPENING", None), ("KGH/2026-27/17", 17), ("KGH/26-27/18", 18), ("KGH/2026-27/19", 19)])
-        self.assertEqual((data["entered"], data["runs"], data["missing"]), (4, [[17, 17], [19, 19]], [18]))
+        self.assertEqual((data["entered"], data["runs"], data["missing"]), (4, [[17, 19]], []))
 
 
 class RenumberAndMoveTest(TestCase):

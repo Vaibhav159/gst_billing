@@ -423,10 +423,10 @@ class BinLockTest(TransactionTestCase):
             finally:
                 connection.close()
 
-        a = threading.Thread(target=first)
+        a = threading.Thread(target=first, daemon=True)  # a daemon, so a stuck lock can't keep pytest open
         a.start()
         self.assertTrue(locked.wait(10))
-        b = threading.Thread(target=second)
+        b = threading.Thread(target=second, daemon=True)
         b.start()
         b.join(0.5)
         self.assertTrue(b.is_alive())  # waiting on the first one's lock
