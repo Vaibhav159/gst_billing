@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenVerifyView
 
 from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
+from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .drafts import DraftViewSet
 from .gstin_lookup import GstinLookupView
@@ -66,6 +67,8 @@ urlpatterns = [
     path("captures/<int:pk>/read/", CaptureReadView.as_view(), name="capture-read"),
     path("purchases/read/", PurchaseReadView.as_view(), name="purchase-read"),
     path("ai-reads/", AiReadsView.as_view(), name="ai-reads"),
+    path("purchases/import/", PurchaseImportView.as_view(), name="purchase-import"),
+    path("sales/import/", SalesImportView.as_view(), name="sale-import"),
     # Explicit paths BEFORE router to avoid router's <pk> catching them
     path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
