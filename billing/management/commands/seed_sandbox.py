@@ -9,7 +9,10 @@ login per role.
 
 Edge cases are planted on purpose: invoices on 31 March and 1 April, an
 inter-state B2C sale above the B2CL threshold, a mixed-rate B2B invoice, and
-a buyer whose state is unknown.
+a buyer whose state is unknown. For v3 (part 1): KIRAN's paper bills of last
+month, typed in after this month's with two numbers not entered yet, one
+cancelled and one deleted; bills sent on WhatsApp, one to a walk-in's number;
+a bill over ₹2 lakh to a buyer with no PAN, and one of exactly ₹2 lakh in cash.
 
 Refuses to run unless GST_SANDBOX=1 and the database is the sandbox's own
 Postgres (or a throwaway SQLite, for tests).
@@ -28,7 +31,9 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
 from django.utils import timezone
 
-from billing.constants import B2CL_THRESHOLD, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
+from billing.cache import invalidate
+from billing.constants import B2CL_THRESHOLD, BILL_CANCELLED, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
+from billing.fy import fy_of
 from billing.gstin import check_digit
 from billing.models import (
     AuditLog,
@@ -45,7 +50,9 @@ from billing.models import (
     SavedDraft,
     UserPreference,
 )
+from billing.numbering import format_number, next_counter
 from billing.roles import GROUP_ACCOUNTANT, GROUP_STAFF
+from billing.services.bin import bin_bill
 from billing.services.line_items import build_line_items
 
 D = Decimal
@@ -100,6 +107,11 @@ STATE_CODES = {
     "RAJASTHAN": "08", "GUJARAT": "24", "MAHARASHTRA": "27", "DELHI": "07",
     "MADHYA PRADESH": "23", "TELANGANA": "36", "KERALA": "32",
     "WEST BENGAL": "19", "PUNJAB": "03",
+}
+CITIES = {
+    "RAJASTHAN": "Udaipur", "GUJARAT": "Surat", "MAHARASHTRA": "Mumbai", "DELHI": "Delhi",
+    "MADHYA PRADESH": "Indore", "TELANGANA": "Hyderabad", "KERALA": "Kochi",
+    "WEST BENGAL": "Kolkata", "PUNJAB": "Ludhiana",
 }
 
 # key: name, HSN/SAC, stored rate, unit, (rate low, high), (qty low, high)
@@ -168,6 +180,7 @@ class Command(BaseCommand):
             parties = self._parties(firms)
             self._products()
             n_out = self._outward(firms, parties, opts["scale"])
+            n_out += self._selling(firms, parties)
             n_in = self._inward(firms, parties, opts["scale"])
             n_locked = self._file_periods(firms)
             n_caps = self._captures(firms, parties)
@@ -245,6 +258,11 @@ class Command(BaseCommand):
                 bank_name="Sandbox Bank", bank_account_number=f"00000000000{i}",
                 bank_ifsc_code=f"SBOX000000{i}", bank_branch_name=city,
             ))
+        # Only KIRAN's paper bills carry the full number from last month on.
+        kiran = firms[2]
+        kiran.invoice_prefix = "KGH"
+        kiran.paper_full_number_from = month_add(self.today.replace(day=1), -1)
+        kiran.save(update_fields=["invoice_prefix", "paper_full_number_from"])
         return firms
 
     def _usual_firms(self, firms):
@@ -259,10 +277,13 @@ class Command(BaseCommand):
             gstin = pan = None
             if registered:
                 gstin, pan = self._gstin(STATE_CODES[state], self.rng.choice("FCP"))
+            walkin = name == "Walk-in Customer"
+            mobile = f"98{self.rng.randint(10_000_000, 99_999_999)}"
             party = Customer.objects.create(
                 name=name, address=f"{i + 1} Demo Road, {(state or 'Unknown').title()}",
                 gst_number=gstin, pan_number=pan, state_name=state,
-                mobile_number=f"98{self.rng.randint(10_000_000, 99_999_999)}",
+                mobile_number="" if walkin else mobile,
+                customer_type="walkin" if walkin else "", city=CITIES.get(state, ""),
             )
             party.businesses.add(*(firms if role == "supplier" else self.rng.sample(firms, self.rng.randint(1, 3))))
             pools["all"].append(party)
@@ -349,12 +370,27 @@ class Command(BaseCommand):
         ]))
         specs.append((aarav, this_month, by_name["Walk-in Customer"], [self._line("gold22", qty=4.215, rate=10333.33)]))
 
+        kiran = firms[2]
+        last_month = month_add(this_month, -1)
+        # Keep the original RNG draws, so omitting KIRAN's paper sales leaves the other books unchanged.
+        specs = [(*s, self.rng.choice(PAYMENT_MODES)) for s in sorted(specs, key=lambda s: s[1])]
+        # The later KIRAN sales are still in the paper book, including a planted 31 March.
+        specs = [s for s in specs if not (s[0] == kiran and last_month.replace(day=15) <= s[1] < this_month)]
+        if not any(f == kiran and when >= this_month for f, when, *_ in specs):
+            # Even a sparse seed on the first of the month shows the bills entered before the paper run.
+            specs.append((kiran, this_month, by_name["Anil Gupta"], [self._line("gold22", qty=4, rate=9850)], "cash"))
         specs.sort(key=lambda s: s[1])
         counters = {}
-        for firm, when, buyer, items in specs:
+        self.paper_counter = None
+        for firm, when, buyer, items, payment_mode in specs:
+            if self.paper_counter is None and when >= this_month:
+                # Reserve six paper bills and two not entered yet before this month's numbers are taken.
+                self.paper_counter = next_counter(kiran.pk, fy_of(last_month))
+                counters[(kiran.pk, fy_start(last_month))] = self.paper_counter + 7
             key = (firm.pk, fy_start(when))
             counters[key] = counters.get(key, 0) + 1
-            self._invoice(firm, buyer, when, str(counters[key]), INVOICE_TYPE_OUTWARD, items, self.rng.choice(PAYMENT_MODES))
+            number = format_number(firm, when, str(counters[key]))
+            self._invoice(firm, buyer, when, number, INVOICE_TYPE_OUTWARD, items, payment_mode)
         assert any(
             inv.total_amount > B2CL_THRESHOLD for inv in Invoice.objects.filter(customer=by_name["Arjun Nair"])
         ), "the planted B2CL sale must clear the threshold"
@@ -386,10 +422,56 @@ class Command(BaseCommand):
             month = month_add(month, 1)
         return n
 
-    def _invoice(self, firm, party, when, number, kind, items, payment_mode):
+    def _selling(self, firms, parties):
+        """Part 1's cases: the paper book, cancel and the bin, sends, income-tax checks."""
+        aarav, meera, kiran = firms
+        by_name = {p.name: p for p in parties["all"]}
+        this_month = self.today.replace(day=1)
+        last_month = month_add(this_month, -1)
+
+        # Typed in after this month's bills (higher ids), under the numbers kept free in _outward.
+        n = self.paper_counter
+        names = ("Rohit Verma", "Sunita Jain", "Vikram Singh", "Neha Agarwal", "Kavita Joshi", "Manoj Saini")
+        for step, name in enumerate(names):
+            if step in (2, 4):
+                n += 1  # a paper bill not entered yet: its number is a gap
+            when = last_month + timedelta(days=14 + 2 * step)
+            bill = self._invoice(kiran, by_name[name], when, format_number(kiran, when, str(n)), INVOICE_TYPE_OUTWARD,
+                                 [self._line("gold22", qty=4 + step, rate=9850)], "cash", paper=True)
+            if step == 1:
+                # cancel_bill needs a user; the seed has none (dispatch Ruling 1A-12).
+                Invoice.objects.filter(pk=bill.pk).update(
+                    status=BILL_CANCELLED, cancel_reason="Customer returned the piece the same day",
+                    cancelled_at=timezone.now())
+                invalidate(Invoice)
+            if step == 3:
+                bin_bill(bill, None, "Entered twice by mistake")
+            n += 1
+
+        # No PAN on a bill over ₹2 lakh (Rule 114B), and exactly ₹2,00,000 in cash (Sec 269ST).
+        self._invoice(aarav, by_name["Deepak Choudhary"], self.today,
+                      format_number(aarav, self.today, str(next_counter(aarav.pk, fy_of(self.today)))),
+                      INVOICE_TYPE_OUTWARD, [self._line("gold22", qty=25, rate=10000)], "bank")
+        self._invoice(meera, by_name["Pooja Bhati"], self.today,
+                      format_number(meera, self.today, str(next_counter(meera.pk, fy_of(self.today)))),
+                      INVOICE_TYPE_OUTWARD, [self._line("gold22", qty=1, rate="194174.76")], "cash")
+
+        # Two of every three of this month's app bills went out on WhatsApp; the walk-in's twice.
+        now, walkin = timezone.now(), by_name["Walk-in Customer"]
+        recent = Invoice.objects.sales().filter(invoice_date__gte=this_month, paper=False).exclude(
+            customer=walkin).order_by("id")
+        for i, pk in enumerate(recent.values_list("id", flat=True)):
+            if i % 3 != 2:
+                Invoice.objects.filter(pk=pk).update(sent_at=now, last_sent_at=now, sent_count=1, sent_via="whatsapp")
+        Invoice.objects.filter(customer=walkin, invoice_date__gte=this_month).update(
+            sent_at=now, last_sent_at=now, sent_count=2, sent_via="whatsapp", sent_to="9829041122")
+        invalidate(Invoice)
+        return len(names) + 2
+
+    def _invoice(self, firm, party, when, number, kind, items, payment_mode, paper=False):
         invoice = Invoice.objects.create(
             business=firm, customer=party, invoice_number=number, invoice_date=when,
-            type_of_invoice=kind, payment_mode=payment_mode,
+            type_of_invoice=kind, payment_mode=payment_mode, paper=paper,
         )
         lines, _total = build_line_items(invoice, items, source="api")
         LineItem.objects.bulk_create(lines)
