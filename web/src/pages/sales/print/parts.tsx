@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { pdfCodeMissing } from "@/core/print/make";
 import { hasBank, type PrintBill } from "@/core/print/model";
 import type { FirmOnBill } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
@@ -11,9 +12,9 @@ import { Switch } from "@/core/ui";
 /**
  * What `make` makes for `key` (null: nothing to make yet), made again when the key changes, on retry or on remake. Only
  * the file of the key now showing is handed out, so a choice just changed never prints the one before it. error: why the
- * last attempt failed, kept while a Try again tries, so its words hold. retry: the person's Try again, which clears the
- * failure at once (retrying until that attempt ends); remake: made again quietly, the one made still handed out
- * meanwhile (a PDF that went without its signature), and kept if that attempt fails.
+ * last attempt failed. retry: the person's Try again, which clears the failure at once (retrying until that attempt
+ * ends); remake: made again quietly, the one made still handed out meanwhile (a PDF that went without its signature),
+ * and kept if that attempt fails.
  */
 export function useMade<T>(key: string | null, make: () => Promise<T>): { value: T | null; failed: boolean; error: unknown; retrying: boolean; retry: () => void; remake: () => void } {
   const [tries, setTries] = useState(0);
@@ -31,10 +32,22 @@ export function useMade<T>(key: string | null, make: () => Promise<T>): { value:
     make().then((value) => end({ key, value, failed: false }), (error: unknown) => { if (!remaking) end({ key, value: null, failed: true, error }); });
     return () => { live = false; };
   }, [key, tries]); // eslint-disable-line react-hooks/exhaustive-deps -- `make` changes with `key`
-  const retry = useCallback(() => { quiet.current = null; setMade((m) => (m ? { ...m, value: null, failed: false } : m)); setRetrying(key); setTries((n) => n + 1); }, [key]);
+  const retry = useCallback(() => { quiet.current = null; setMade(null); setRetrying(key); setTries((n) => n + 1); }, [key]);
   const remake = useCallback(() => { quiet.current = key; setTries((n) => n + 1); }, [key]);
   const now = made && made.key === key ? made : null;
   return { value: now?.value ?? null, failed: now?.failed ?? false, error: now?.error ?? null, retrying: retrying !== null && retrying === key, retry, remake };
+}
+
+/**
+ * Why a PDF wasn't made, in words, and whether Try again can help. react-pdf's code that didn't come (the app changed
+ * since the page opened) comes only with a reload, so there's no Try again then, and offline the reload waits for the
+ * internet. what: "PDF" or "batch".
+ */
+export function unmade(error: unknown, offline: boolean, what: string): { body: string; again: boolean } {
+  if (pdfCodeMissing(error)) {
+    return { again: false, body: offline ? "You're offline, and the part of the app that makes PDFs didn't load. Reload the page once the internet is back." : "The part of the app that makes PDFs didn't load. Reload the page, then try again." };
+  }
+  return { again: true, body: offline ? `You're offline, so the ${what} wasn't made. It needs the internet; try again when you're back.` : "Something stopped it part way. Try again." };
 }
 
 /**
@@ -82,15 +95,17 @@ export function byFirm<T extends SpanBill>(bills: T[]): { business: number; name
 }
 /**
  * Several bills in words, never one number range across firms (PROTO sales/lib.js:655-670): "3 bills from 2 firms:
- * KIRAN GOLD HOUSE (2) and MEERA ORNAMENTS (1)". numbers: name a few bills (for the audit log).
+ * KIRAN GOLD HOUSE (2) and MEERA ORNAMENTS (1)". numbers: name a few bills; "all": name every one, however many (the
+ * audit log's line, whose details hold any length).
  */
-export function billsSpan(bills: SpanBill[], { numbers = false } = {}): string {
+export function billsSpan(bills: SpanBill[], { numbers = false }: { numbers?: boolean | "all" } = {}): string {
   if (!bills.length) return "No bills";
   if (bills.length === 1) return bills[0].invoice_number;
   const groups = byFirm(bills);
+  const named = (n: number, few: number) => numbers === "all" || (numbers && n <= few);
   if (groups.length === 1) {
     const { name, list } = groups[0];
-    return `${billsAnd(list)} from ${name}${numbers && list.length <= 4 ? `: ${andList(list.map((b) => b.invoice_number))}` : ""}`;
+    return `${billsAnd(list)} from ${name}${named(list.length, 4) ? `: ${andList(list.map((b) => b.invoice_number))}` : ""}`;
   }
-  return `${billsAnd(bills)} from ${groups.length} firms: ${andList(groups.map(({ name, list }) => `${name} (${numbers && list.length <= 3 ? list.map((b) => b.invoice_number).join(", ") : list.length})`))}`;
+  return `${billsAnd(bills)} from ${groups.length} firms: ${andList(groups.map(({ name, list }) => `${name} (${named(list.length, 3) ? list.map((b) => b.invoice_number).join(", ") : list.length})`))}`;
 }

@@ -25,7 +25,7 @@ import { DeletedBill } from "../bill/DeletedBill";
 import { MissingBill } from "../bill/MissingBill";
 import { useSendBill, useSendReady } from "../actions/useSendBill";
 import { WhatsAppDialog } from "../actions/WhatsAppDialog";
-import { BankSwitch, useMade, whatPrints } from "./parts";
+import { BankSwitch, unmade, useMade, whatPrints } from "./parts";
 
 /** Until the bill comes: the paper's outline, or why it can't come, with Try again when asking again can help. */
 function Preparing({ phone, problem, retry }: { phone: boolean; problem: ApiProblem | null; retry?: () => void }) {
@@ -133,9 +133,12 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   const hasNumber = Boolean(own || before);
   const differs = Boolean(s) && (copies !== s?.copies || showBank !== s?.show_bank);
   const making = !file && !made.failed;
-  const waitWhy = made.failed ? "The PDF couldn't be made. Try again." : making ? "Making the PDF…" : undefined;
-  // a Try again keeps the note on screen, busy, until the PDF is made or fails again
-  const pdfFail = made.failed || made.retrying ? { title: "The PDF wasn't made", body: net === "offline" ? "You're offline, so the PDF wasn't made. It needs the internet; try again when you're back." : "Something stopped it part way. Try again." } : null;
+  // a Try again keeps the note on screen, busy, until the PDF is made or fails again (none for react-pdf's code that
+  // didn't come: only a reload brings it)
+  const why = unmade(made.error, net === "offline", "PDF");
+  const pdfFail = made.failed || made.retrying ? { title: "The PDF wasn't made", body: why.body } : null;
+  const pdfRetry = why.again ? made.retry : undefined;
+  const waitWhy = made.failed ? `The PDF couldn't be made. ${why.again ? "Try again." : "Reload the page."}` : making ? "Making the PDF…" : undefined;
   // every Send waits for the shop's message, so it never goes with the standard one instead
   const sendWait = ready ? undefined : "Getting the shop's WhatsApp message";
   // the bill's exact total, as the PDF prints it (Ruling 1B-12), and the firm's name as useSendBill sends it
@@ -212,7 +215,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
         {note}
         <p className="text-sm text-muted">{copyList.length > 1 ? "All three copies" : `${copyList[0].label} copy`} · {plural(sheets, "page")} · {hasBank(b.firm) ? `bank details ${showBank ? "shown" : "hidden"}` : "no bank account saved"} · {paper.file}</p>
         {!canSend && !cancelled ? <p className="text-sm text-muted flex items-start gap-1.5 -mt-2"><Lock size={15} className="shrink-0 mt-0.5" aria-hidden="true" />Sending on WhatsApp marks the bill sent. {whyNot("bill.send")}</p> : null}
-        <FailNote error={pdfFail} onRetry={made.retry} busy={made.retrying} />
+        <FailNote error={pdfFail} onRetry={pdfRetry} busy={made.retrying} />
         {paperStack}
         <Dialog open={optionsOpen} onClose={() => setOptionsOpen(false)} title="Print options"
           footer={<>
@@ -255,7 +258,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
             <p className="font-medium tnum mt-0.5 break-all">{paper.file}</p>
             <p className="text-sm text-muted">{plural(sheets, "A4 page")}{paper.pages.length > 1 ? ` (${paper.pages.length} per copy)` : ""} · named by its number, so no two files clash</p>
           </div>
-          <FailNote error={pdfFail} onRetry={made.retry} busy={made.retrying} />
+          <FailNote error={pdfFail} onRetry={pdfRetry} busy={made.retrying} />
           {cancelled ? <p className="text-sm text-neg">This bill is cancelled, so it isn&apos;t sent. The printout carries a CANCELLED stamp.</p>
             : canSend ? (hasNumber
               ? <Button variant={b.paper ? "secondary" : "primary"} size="lg" full icon={Send} disabled={!ready} title={sendWait} onClick={sendPress}>{sendLabel}</Button>

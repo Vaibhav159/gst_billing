@@ -12,16 +12,20 @@ import { billQuery, cachedBillNumber, useShopSettings, type BillOutcome } from "
 import { date, dateShort, inr, plural, todayIST } from "@/core/format";
 import { printFile, saveFile } from "@/core/print/files";
 import { batchLog, useLogPrint, type PrintLog } from "@/core/print/log";
-import { makeBillPdf, pdfCodeMissing } from "@/core/print/make";
+import { makeBillPdf } from "@/core/print/make";
 import { copyPages, COPY_MARKS, hasBank, printBill, type PrintBill } from "@/core/print/model";
 import { Paper, PrintCopy, ScaledPaper } from "@/core/print/Paper";
 import type { BillDetail, Copies, ShopSettings } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
 import { Banner, Button, ButtonLink, Card, EmptyState, FailNote, LoadError, Money, Page, Segmented, Skeleton, StaleNote, Switch, useToast } from "@/core/ui";
-import { billsSpan, useMade, whatPrints } from "./parts";
+import { billsSpan, unmade, useMade, whatPrints } from "./parts";
 
-/** A batch takes up to this many bills: each is a request of its own (Neon's free plan), and its PDF is made here, in the browser. */
-const MAX_BILLS = 100;
+/**
+ * A batch takes up to this many bills (Ruling 1E-16): about 90 pages with all three copies. Its PDF is made here, on the
+ * browser's main thread, at about a tenth of a second a page, when the page opens and again after every choice, and its
+ * papers are drawn twice (on screen and for the browser's own print). Each bill is also a request (Neon's free plan).
+ */
+const MAX_BILLS = 30;
 const COPIES: { value: Copies; label: string }[] = [{ value: "original", label: "Original only" }, { value: "all", label: "All three" }];
 const CRUMBS = [{ label: "Sales", to: "/sales" }];
 const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
@@ -31,23 +35,45 @@ const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
  * (asked for again once the batch is on screen), the last two with their number if this device has it.
  */
 type Here = { id: number; bill: BillDetail; stale: ApiProblem | null };
-type Unloaded = { id: number; failed: ApiProblem; number: string | null };
-type Coming = { id: number; coming: true; number: string | null };
+type Unloaded = { id: number; failed: ApiProblem; number: string | null; place: number };
+type Coming = { id: number; coming: true; number: string | null; place: number };
 type Row = Here | Unloaded | Coming | { id: number; gone: true };
 
-function rowOf(id: number, q: UseQueryResult<BillOutcome>, qc: QueryClient): Row {
+/** place: the bill's place in the batch, from 1, which names a bill whose number this device doesn't have. */
+function rowOf(id: number, place: number, q: UseQueryResult<BillOutcome>, qc: QueryClient): Row {
   if (q.data?.kind === "bill") return { id, bill: q.data.bill, stale: q.isError ? problemOf(q.error) : null };
   if (q.data?.kind === "deleted") return { id, gone: true };
-  if (q.isPending && !q.isPaused) return { id, coming: true, number: cachedBillNumber(qc, id) };
+  if (q.isPending && !q.isPaused) return { id, coming: true, number: cachedBillNumber(qc, id), place };
   // nothing came: asking failed, or it waits for the internet
   const p = q.isError ? problemOf(q.error) : OFFLINE;
-  return p.kind === "notfound" ? { id, gone: true } : { id, failed: p, number: cachedBillNumber(qc, id) };
+  return p.kind === "notfound" ? { id, gone: true } : { id, failed: p, number: cachedBillNumber(qc, id), place };
+}
+
+/** "1st", "2nd", "3rd", "11th", "22nd". */
+function ordinal(n: number): string {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  return `${n}${teen ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
 /** Why bills didn't load: offline only when every one waits for the internet, else the first other reason (Try again can help). */
 function whyUnloaded(unloaded: Unloaded[]): ApiProblem | null {
   return unloaded.find((r) => r.failed.kind !== "offline")?.failed ?? unloaded[0]?.failed ?? null;
 }
+
+/**
+ * The bills that didn't load, what happened and what to do. Offline they come by themselves once the internet is back;
+ * a refusal's own words (a 429 already says when to try again) stand as they are. rest: other bills can print meanwhile.
+ */
+function notLoadedWords(p: ApiProblem, one: boolean, rest: boolean): string {
+  const them = one ? "it" : "them";
+  const meanwhile = rest ? " to print the rest" : "";
+  if (p.kind === "offline") return `You're offline, so the batch waits for ${them}. ${one ? "It loads by itself" : "They load by themselves"} when the internet is back, or leave ${them} out${meanwhile}.`;
+  if (p.kind === "unreachable" || p.kind === "server") return `The app couldn't reach the shop's records just now, so the batch waits for ${them}. Try again, or leave ${them} out${meanwhile}.`;
+  return rest ? `${p.message} You can leave ${them} out to print the rest.` : p.message;
+}
+
+/** The Print button's words: "Print all 9 pages", "Print 1 page", or just "Print" with nothing to print yet. */
+const printWords = (pages: number) => (pages === 0 ? "Print" : pages === 1 ? "Print 1 page" : `Print all ${pages} pages`);
 
 /** Bills by number where it's known, the rest counted: "KGH/2026-27/32 and MO/2026-27/7", "KGH/2026-27/32 and 1 more bill", "4 bills". */
 function named(numbers: (string | null)[]): string {
@@ -107,7 +133,7 @@ export default function BatchPrint() {
       </div>,
     );
   }
-  const rows = asked.map((id, i) => rowOf(id, qs[i], qc));
+  const rows = asked.map((id, i) => rowOf(id, i + 1, qs[i], qc));
   // Try again asks again for those bills alone, through the client (Ruling 1B-11)
   const again = (which: number[]) => { for (const id of which) void qc.refetchQueries({ queryKey: billQuery(id).queryKey }); };
   const asking = new Set(asked.filter((_, i) => qs[i].isFetching));
@@ -151,28 +177,20 @@ function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; 
   const key = bills.length > 0 && !unloaded.length && !still.length ? `${copies}|${looks.map((d) => d.prints).join("\n")}` : null;
   const made = useMade(key, () => makeBillPdf(papers, copies, { title: `Sales · ${what}` }));
   const making = key !== null && !made.value && !made.failed;
-  const one = unloaded.length === 1;
-  const them = one ? "it" : "them";
+  // a Try again keeps the note on screen, busy, until the batch is made or fails again; none for react-pdf's code that
+  // didn't come, which only a reload brings
+  const why = unmade(made.error, net === "offline", "batch");
+  const pdfFail = made.failed || made.retrying ? { title: "The batch wasn't made", body: why.body } : null;
   const waitWhy = !kept.length ? "Every bill is left out"
-    : unloaded.length ? (one ? "Waiting for the bill that didn't load" : `Waiting for the ${unloaded.length} bills that didn't load`)
+    : unloaded.length ? (unloaded.length === 1 ? "Waiting for the bill that didn't load" : `Waiting for the ${unloaded.length} bills that didn't load`)
       : still.length ? (still.length === 1 ? "Waiting for the bill still loading" : `Waiting for the ${still.length} bills still loading`)
-        : made.failed ? "The PDF couldn't be made. Try again." : !made.value ? "Making the batch…" : undefined;
-  // the bills that didn't load, by number where this device has it, Print and the PDF waiting for them (Ruling 2).
-  // Offline they come by themselves once the internet is back, so there's no Try again then
+        : made.failed ? `The PDF couldn't be made. ${why.again ? "Try again." : "Reload the page."}` : !made.value ? "Making the batch…" : undefined;
+  // the bills that didn't load, by number where this device has it, Print and the PDF waiting for them (Ruling 2). Offline
+  // there's no Try again: they come by themselves. Its busy state would never show: a bill asked for again is "Loading…"
   const p = whyUnloaded(unloaded);
-  const notLoaded = p ? {
-    title: `${named(unloaded.map((r) => r.number))} didn't load`,
-    body: `${p.kind === "offline" ? `You're offline, so the batch waits for ${them}. ${one ? "It loads by itself" : "They load by themselves"} when the internet is back, or leave ${them} out`
-      : p.kind === "unreachable" || p.kind === "server" ? `The app couldn't reach the shop's records just now, so the batch waits for ${them}. Try again, or leave ${them} out`
-        : `${p.message} Try again, or leave ${them} out`}${bills.length ? " to print the rest" : ""}.`,
-  } : null;
-  // a Try again keeps the note on screen, busy, until the batch is made or fails again
-  const pdfFail = made.failed || made.retrying ? {
-    title: "The batch wasn't made",
-    body: net === "offline" ? "You're offline, so the batch wasn't made. It needs the internet; try again when you're back."
-      : pdfCodeMissing(made.error) ? "The part of the app that makes PDFs didn't load. Reload the page, then try again." : "Something stopped it part way. Try again.",
-  } : null;
-  const audit = (action: PrintLog["action"]) => log(batchLog(action, { what, span: billsSpan(bills, { numbers: true }), pages: pageCount, copies }));
+  const notLoaded = p ? { title: `${named(unloaded.map((r) => r.number))} didn't load`, body: notLoadedWords(p, unloaded.length === 1, bills.length > 0) } : null;
+  // the audit log names every bill, firm by firm, however many (the screen's words stay short)
+  const audit = (action: PrintLog["action"]) => log(batchLog(action, { what, span: billsSpan(bills, { numbers: "all" }), pages: pageCount, copies }));
   // nothing is awaited before the tab opens or the file downloads: the batch was made before the press
   const print = () => {
     if (!made.value) return;
@@ -204,7 +222,7 @@ function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; 
       {capNote}
       {gone ? <Banner tone="brand" icon={Info} title={`${plural(gone, "bill")} left out`}>{gone === 1 ? "It was" : "They were"} deleted after being picked.</Banner> : null}
       {stale.length ? <StaleNote problem={stale[0].stale as ApiProblem} what={named(stale.map((r) => r.bill.invoice_number))} retry={() => again(stale.map((r) => r.id))} busy={stale.some((r) => asking.has(r.id))} /> : null}
-      <FailNote error={notLoaded} onRetry={p && p.kind !== "offline" ? () => again(unloaded.map((r) => r.id)) : undefined} busy={unloaded.some((r) => asking.has(r.id))} />
+      <FailNote error={notLoaded} onRetry={p && p.kind !== "offline" ? () => again(unloaded.map((r) => r.id)) : undefined} />
       <div className="grid gap-6 items-start lg:grid-cols-[minmax(0,1fr)_340px]">
         <div key={`${copies}-${showBank}-${bills.length}`} className="min-w-0 flex flex-col items-center gap-6 anim-rise">
           {papers.flatMap((pp, bi) => copyList.flatMap((cp) => pp.pages.map((pg) => {
@@ -231,10 +249,11 @@ function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; 
               ) : (
                 <li key={r.id} className="flex items-center gap-2 pl-3 pr-1 py-1.5">
                   <span className="flex-1 min-w-0">
-                    {r.number ? <Link to={`/sales/${r.id}`} className="block font-medium tnum hover:text-brand">{r.number}</Link> : <span className="block font-medium">A bill</span>}
+                    {r.number ? <Link to={`/sales/${r.id}`} className="block font-medium tnum hover:text-brand">{r.number}</Link> : <span className="block font-medium">The {ordinal(r.place)} bill picked</span>}
                     {"coming" in r ? <span className="block text-sm text-muted">Loading…</span> : <span className="block text-sm text-neg">Didn&apos;t load</span>}
                   </span>
-                  <Button size="sm" variant="ghost" icon={X} aria-label={`Leave ${r.number ?? ("coming" in r ? "the bill still loading" : "the bill that didn't load")} out`} onClick={() => leaveOut(r.id)} />
+                  <Button size="sm" variant="ghost" icon={X} onClick={() => leaveOut(r.id)}
+                    aria-label={r.number ? `Leave ${r.number} out` : `Leave the ${ordinal(r.place)} bill out (${"coming" in r ? "it's still loading" : "it didn't load"})`} />
                 </li>
               )))}
             </ul>
@@ -247,15 +266,16 @@ function BatchScreen({ rows, capNote, settings, again, asking }: { rows: Row[]; 
           <Switch label="Bank details on the bills" checked={showBank} onChange={(v) => setChosen((c) => ({ ...c, showBank: v }))}
             description={noBank.length ? `Each firm's own bank. ${andList(noBank)} ${noBank.length === 1 ? "has" : "have"} no account saved, so ${noBank.length === 1 ? "its bills print" : "their bills print"} without one.` : "Each firm's own bank"} />
           <p className="text-sm text-fg2 rounded-ctl border border-line bg-field px-4 py-3">{what} · {plural(pageCount, "A4 page")} · {inr(total)}{anyCancelled ? " (cancelled bills not in the total)" : ""}</p>
-          <FailNote error={pdfFail} onRetry={made.retry} busy={made.retrying} />
+          <FailNote error={pdfFail} onRetry={why.again ? made.retry : undefined} busy={made.retrying} />
           <Button variant="primary" size="lg" full icon={Printer} disabled={!made.value} title={waitWhy} loading={making} onClick={print}>
-            {making ? "Making the batch…" : pageCount === 1 ? "Print 1 page" : `Print all ${pageCount} pages`}
+            {making ? "Making the batch…" : printWords(pageCount)}
           </Button>
           <Button full icon={Download} disabled={!made.value} title={waitWhy} onClick={download}>One combined PDF</Button>
           <p className="text-sm text-muted border-t border-rule pt-4">One print dialog for the whole batch, in this order. Each bill keeps its own QR code and copy label.</p>
         </aside>
       </div>
-      {papers.length ? <PrintCopy>{papers.flatMap((pp) => copyList.flatMap((cp) => pp.pages.map((pg) => <Paper key={`${pp.id}-${cp.value}-${pg.index}`} b={pp} copy={cp} page={pg} />)))}</PrintCopy> : null}
+      {/* the browser's own print (Ctrl P) waits for every bill kept, as Print does: never a batch with a bill missing */}
+      {key !== null ? <PrintCopy>{papers.flatMap((pp) => copyList.flatMap((cp) => pp.pages.map((pg) => <Paper key={`${pp.id}-${cp.value}-${pg.index}`} b={pp} copy={cp} page={pg} />)))}</PrintCopy> : null}
     </Page>
   );
 }

@@ -247,7 +247,7 @@ test("the PDF follows the bill on screen: a refresh that changed what prints mak
 
 test("offline: a print page with no bill yet says so, and the bill comes when the internet is back; a PDF that can't be made says why and offers Try again", async () => {
   serve();
-  vi.mocked(billFile).mockRejectedValueOnce(new TypeError("Failed to fetch dynamically imported module")); // react-pdf's code didn't come
+  vi.mocked(billFile).mockRejectedValueOnce(new Error("the font didn't load"));
   onlineManager.setOnline(false);
   act(() => __setNetState("offline"));
   try {
@@ -559,4 +559,21 @@ test("a quiet remake that fails keeps the unsigned PDF made before it, rather th
   await userEvent.click(pdf);
   expect(URL.createObjectURL).toHaveBeenLastCalledWith(unsigned);
   expect(await screen.findByText("Downloaded KGH_2026-27_31.pdf")).toBeInTheDocument();
+});
+
+/* ── Task 7's review (fix round 1) ── */
+
+test("a PDF whose maker's code didn't load (the app changed since the page opened) says to reload the page, with no Try again: it can't help", async () => {
+  serve();
+  vi.mocked(billFile).mockRejectedValueOnce(new TypeError("Failed to fetch dynamically imported module: https://bills.example/assets/react-pdf.browser-Bx1c2.js"));
+  open();
+  const note = (await screen.findByText("The PDF wasn't made")).closest<HTMLElement>("[role=alert]")!;
+  expect(note).toHaveTextContent("The part of the app that makes PDFs didn't load. Reload the page, then try again.");
+  expect(within(note).queryByRole("button")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Print" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Print" })).toHaveAttribute("title", "The PDF couldn't be made. Reload the page.");
+  // offline, the reload waits for the internet
+  act(() => __setNetState("offline"));
+  expect(note).toHaveTextContent("You're offline, and the part of the app that makes PDFs didn't load. Reload the page once the internet is back.");
+  act(() => __setNetState("online"));
 });

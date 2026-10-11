@@ -99,6 +99,8 @@ function openWith(qc: QueryClient, ids: string) {
   );
 }
 const options = () => within(screen.getByRole("complementary", { name: "Batch print options" }));
+/** The papers again, at full size, for the browser's own print (Ctrl P). */
+const printCopy = () => [...document.querySelectorAll("[data-print-copy] [data-paper]")];
 const billAsks = (calls: { url: string }[]) => calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url);
 /** KGH/2026-27/31, already on this device (opened a moment ago). */
 const HERE: BillOutcome = { kind: "bill", bill: toBillDetail(wireDetail()) };
@@ -152,6 +154,8 @@ test("a bill whose read fails is never dropped silently: it's named, Print and t
   expect(note).toHaveTextContent("KGH/2026-27/32 and 1 more bill didn't load");
   expect(note).toHaveTextContent("The app couldn't reach the shop's records just now, so the batch waits for them. Try again, or leave them out to print the rest.");
   expect(papers()).toHaveLength(1);
+  // the browser's own print (Ctrl P) waits for them too: nothing to print but the whole batch
+  expect(printCopy()).toHaveLength(0);
   expect(options().getByRole("link", { name: "KGH/2026-27/32" })).toHaveAttribute("href", "/sales/413");
   const print = screen.getByRole("button", { name: "Print 1 page" });
   expect(print).toBeDisabled();
@@ -169,11 +173,13 @@ test("a bill whose read fails is never dropped silently: it's named, Print and t
   expect(screen.getByRole("alert")).toHaveTextContent("The app couldn't reach the shop's records just now, so the batch waits for it. Try again, or leave it out to print the rest.");
   expect(screen.getByRole("button", { name: "Print all 2 pages" })).toHaveAttribute("title", "Waiting for the bill that didn't load");
   expect(screen.getByRole("button", { name: "Print all 2 pages" })).toBeDisabled();
+  expect(printCopy()).toHaveLength(0);
   // left out, the rest print; the focus goes to the bill now last in the list
-  await userEvent.click(options().getByRole("button", { name: "Leave the bill that didn't load out" }));
+  await userEvent.click(options().getByRole("button", { name: "Leave the 3rd bill out (it didn't load)" }));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(options().getByRole("button", { name: "Leave KGH/2026-27/32 out" })).toHaveFocus();
   await waitFor(() => expect(screen.getByRole("button", { name: "Print all 2 pages" })).toBeEnabled());
+  expect(printCopy().map((p) => p.getAttribute("aria-label"))).toEqual(["Bill KGH/2026-27/31 on paper, original copy", "Bill KGH/2026-27/32 on paper, original copy"]);
   expect(vi.mocked(makeBillPdf).mock.lastCall?.[0].map((b) => b.number)).toEqual(["KGH/2026-27/31", "KGH/2026-27/32"]);
 });
 
@@ -241,8 +247,10 @@ test("offline with one bill this device has: it shows, the other waits for the i
     expect(print).toBeDisabled();
     expect(screen.getByRole("button", { name: "One combined PDF" })).toBeDisabled();
     expect(makeBillPdf).not.toHaveBeenCalled();
+    expect(printCopy()).toHaveLength(0);
     await act(async () => arrive());
     await waitFor(() => expect(papers()).toHaveLength(6));
+    expect(printCopy()).toHaveLength(6);
     expect(screen.getByRole("radio", { name: "All three" })).toBeChecked();
     await waitFor(() => expect(screen.getByRole("button", { name: "Print all 6 pages" })).toBeEnabled());
     expect(vi.mocked(makeBillPdf).mock.calls.map(([bills, copies]) => [bills.map((b) => b.number), copies])).toEqual([[["KGH/2026-27/31", "KGH/2026-27/32"], "all"]]);
@@ -300,14 +308,14 @@ test("each bill is one request, repeats dropped and none for a bill this device 
   expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
 });
 
-test("a batch takes up to 100 bills, in the order picked: it says so, and the rest aren't asked for (Ruling 3)", async () => {
+test("a batch takes up to 30 bills, in the order picked: it says so, and the rest aren't asked for (Rulings 3 and 1E-16)", async () => {
   const { calls } = salesServer([["GET", /^sales\/\d+\/$/, () => new Promise(() => {})], ["GET", "shop-settings/", () => SETTINGS]]);
-  open(Array.from({ length: 103 }, (_, i) => i + 1).join(","));
-  expect(await screen.findByText("Pick up to 100 bills")).toBeInTheDocument();
-  expect(screen.getByText("You picked 103 bills, so the first 100 are here, in the order you picked them. Print them, then tick the other 3 bills in the sales list.")).toBeInTheDocument();
+  open(Array.from({ length: 33 }, (_, i) => i + 1).join(","));
+  expect(await screen.findByText("Pick up to 30 bills")).toBeInTheDocument();
+  expect(screen.getByText("You picked 33 bills, so the first 30 are here, in the order you picked them. Print them, then tick the other 3 bills in the sales list.")).toBeInTheDocument();
   expect(screen.getByRole("status", { name: "Loading the bills" })).toBeInTheDocument();
-  await waitFor(() => expect(billAsks(calls)).toHaveLength(100));
-  expect(billAsks(calls)).toEqual(Array.from({ length: 100 }, (_, i) => `sales/${i + 1}/`));
+  await waitFor(() => expect(billAsks(calls)).toHaveLength(30));
+  expect(billAsks(calls)).toEqual(Array.from({ length: 30 }, (_, i) => `sales/${i + 1}/`));
 });
 
 test("Print all and One combined PDF act within the press itself: the PDF was made before it, so nothing waits first (Ruling 4); a tab the browser stopped says so and isn't logged", async () => {
@@ -331,28 +339,37 @@ test("Print all and One combined PDF act within the press itself: the PDF was ma
   });
 });
 
-test("a batch that couldn't be made says why, with Try again: offline, or the part of the app that makes PDFs not loading (reload the page), or anything else", async () => {
+test("a batch that couldn't be made says why: the part of the app that makes PDFs not loading says to reload the page, with no Try again (it can't help); anything else offers Try again, at work at once", async () => {
   serve();
   vi.mocked(makeBillPdf).mockRejectedValueOnce(new TypeError("Failed to fetch dynamically imported module: https://bills.example/assets/react-pdf.browser-Bx1c2.js"));
-  open("412");
-  expect(await screen.findByText("The batch wasn't made")).toBeInTheDocument();
-  expect(screen.getByText("The part of the app that makes PDFs didn't load. Reload the page, then try again.")).toBeInTheDocument();
+  const view = open("412");
+  const note = (await screen.findByText("The batch wasn't made")).closest<HTMLElement>("[role=alert]")!;
+  expect(note).toHaveTextContent("The part of the app that makes PDFs didn't load. Reload the page, then try again.");
+  expect(within(note).queryByRole("button")).not.toBeInTheDocument();
   const print = screen.getByRole("button", { name: "Print 1 page" });
   expect(print).toBeDisabled();
-  expect(print).toHaveAttribute("title", "The PDF couldn't be made. Try again.");
+  expect(print).toHaveAttribute("title", "The PDF couldn't be made. Reload the page.");
+  // offline, the reload waits for the internet
   act(() => __setNetState("offline"));
-  expect(screen.getByText("You're offline, so the batch wasn't made. It needs the internet; try again when you're back.")).toBeInTheDocument();
+  expect(note).toHaveTextContent("You're offline, and the part of the app that makes PDFs didn't load. Reload the page once the internet is back.");
   act(() => __setNetState("online"));
-  // Try again is at work at once, and keeps the note and its words until the batch is made or fails again
+  view.unmount();
+  // anything else: Try again is at work at once, and keeps the note until the batch is made or fails again
   let failed: (e: Error) => void = () => {};
   let made: (b: Blob) => void = () => {};
   vi.mocked(makeBillPdf)
+    .mockRejectedValueOnce(new Error("the font didn't load"))
     .mockReturnValueOnce(new Promise<Blob>((_, reject) => { failed = reject; }))
     .mockReturnValueOnce(new Promise<Blob>((resolve) => { made = resolve; }));
+  open("412");
+  expect(await screen.findByText("Something stopped it part way. Try again.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Print 1 page" })).toHaveAttribute("title", "The PDF couldn't be made. Try again.");
+  act(() => __setNetState("offline"));
+  expect(screen.getByText("You're offline, so the batch wasn't made. It needs the internet; try again when you're back.")).toBeInTheDocument();
+  act(() => __setNetState("online"));
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(screen.getByRole("button", { name: "Trying…" })).toHaveAttribute("aria-busy", "true");
   expect(screen.getByRole("button", { name: "Making the batch…" })).toHaveAttribute("aria-busy", "true");
-  expect(screen.getByText("The part of the app that makes PDFs didn't load. Reload the page, then try again.")).toBeInTheDocument();
   await act(async () => failed(new Error("the font didn't load")));
   expect(screen.getByText("Something stopped it part way. Try again.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -360,4 +377,41 @@ test("a batch that couldn't be made says why, with Try again: offline, or the pa
   await act(async () => made(new Blob(["%PDF-1.3"], { type: "application/pdf" })));
   expect(screen.queryByText("The batch wasn't made")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Print 1 page" })).toBeEnabled();
+});
+
+test("a refusal's own words stand as they are; two bills this device has no number for are told apart by their place; with only bills that didn't load kept, Print says just that", async () => {
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", /^sales\/41[34]\/$/, () => refuse(429, { detail: "Request was throttled." })],
+    ["GET", "shop-settings/", () => SETTINGS],
+  ]);
+  openWith(testQueryClient(), "412,413,414");
+  const note = await screen.findByRole("alert");
+  expect(note).toHaveTextContent(/^2 bills didn't loadToo many tries\. Wait a minute, then try again\. You can leave them out to print the rest\.Try again$/);
+  expect(options().getByText("The 2nd bill picked")).toBeInTheDocument();
+  expect(options().getByText("The 3rd bill picked")).toBeInTheDocument();
+  expect(options().getByRole("button", { name: "Leave the 2nd bill out (it didn't load)" })).toBeInTheDocument();
+  // only the bills that didn't load kept: nothing to print yet, and the words say no more than that
+  await userEvent.click(options().getByRole("button", { name: "Leave KGH/2026-27/31 out" }));
+  expect(screen.getByRole("button", { name: "Print" })).toBeDisabled();
+  expect(screen.getByRole("alert")).toHaveTextContent(/^2 bills didn't loadToo many tries\. Wait a minute, then try again\.Try again$/);
+  expect(printCopy()).toHaveLength(0);
+});
+
+test("the audit log names every bill, firm by firm, however many the batch holds (its details hold any length)", async () => {
+  const bill = (c: Call) => {
+    const id = Number(c.url.split("/")[1]);
+    return id === 501 ? wireDetail({ id: 501, business: 2, business_name: "MEERA ORNAMENTS", invoice_number: "MO/2026-27/7", firm: MEERA, total_amount: "5000.00" }) : wireDetail({ id, invoice_number: `KGH/2026-27/${id}`, counter: id });
+  };
+  const { calls } = salesServer([["GET", /^sales\/\d+\/$/, bill], ["GET", "shop-settings/", () => SETTINGS], ["POST", "audit-logs/log/", () => ({ ok: true })]]);
+  open("41,42,43,44,45,501");
+  const combined = await screen.findByRole("button", { name: "One combined PDF" });
+  await waitFor(() => expect(combined).toBeEnabled());
+  fireEvent.click(combined);
+  await waitFor(() => expect(calls.find((c) => c.url === "audit-logs/log/")?.body).toEqual({
+    action: "exported", entity: "invoice", entity_id: 0, entity_name: "Combined PDF (6 bills)",
+    details: "6 bills from 2 firms: KIRAN GOLD HOUSE (KGH/2026-27/41, KGH/2026-27/42, KGH/2026-27/43, KGH/2026-27/44, KGH/2026-27/45) and MEERA ORNAMENTS (MO/2026-27/7) · 6 pages",
+  }));
+  // the screen keeps its short words
+  expect(screen.getByText("6 bills from 2 firms: KIRAN GOLD HOUSE (5) and MEERA ORNAMENTS (1) · 6 A4 pages · ₹4,40,416.05")).toBeInTheDocument();
 });
