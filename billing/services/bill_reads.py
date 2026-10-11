@@ -14,8 +14,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, QuerySet, Value, When
-from django.db.models.functions import ExtractYear, Length, TruncMonth
+from django.db.models import Case, Count, Exists, F, IntegerField, OuterRef, Q, QuerySet, Subquery, Sum, Value, When
+from django.db.models.functions import ExtractYear, Length, Round, TruncMonth
 from django.utils import timezone
 
 from billing.cache import uncached
@@ -136,6 +136,7 @@ def itax_flags(invoice, lines):
                     "(CGST Rule 46(f)). Put the bill in the buyer's name, with their address, not Walk-in.")
         else:
             name = customer.name.rstrip()
+            # Mirror web/src/core/format.ts possessive; keep the apostrophe rules in sync.
             possessive = name if re.search(r"['’]s$", name, re.I) else name + ("'" if name.lower().endswith("s") else "'s")
             text = ("A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address "
                     f"(CGST Rule 46(f)). Add {possessive} address.")
@@ -460,13 +461,20 @@ def filter_bills(bills, params, dates=True):
     if p.get("dups") == "1":
         bills = bills.filter(pk__in=duplicated_ids(bills.select_related(None).only("business_id", "invoice_date")))
     if p.get("itax") == "1":
-        # Rule 46(f) uses the lines, never the stored total. Keep every walk-in or blank address as a candidate,
-        # including whitespace and v2 bills whose stored total disagrees with their lines. Read lines in one batch.
+        # Rule 46(f) uses lines, never the stored total. Each line can round up by half a paisa:
+        # this upper bound narrows candidates in SQL without losing a bill at the rounded limit.
+        # Python still decides exactly, with only the candidates' lines read in one uncached batch.
+        # Keep the product's six decimal places (quantity/rate have three each), removing SQLite's
+        # binary sum drift at the boundary; this does not round the bill's taxable value.
+        taxable_upper = (uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")
+                         .annotate(upper=Round(Sum(F("quantity") * F("rate")) + Count("pk") * (PAISA / 2), 6))
+                         .values("upper"))
+        missing_address = (Q(customer__customer_type="walkin") | Q(customer__address__isnull=True)
+                           | Q(customer__address__regex=r"^\s*$"))
         maybe = list(bills.counted().select_related(None).select_related("customer")
-                     .alias(gstin_length=Length("customer__gst_number"))
+                     .alias(gstin_length=Length("customer__gst_number"), taxable_upper=Subquery(taxable_upper))
                      .filter(Q(total_amount__gte=ITAX_LIMIT) | Q(gstin_length__gte=15)
-                             | Q(customer__customer_type="walkin") | Q(customer__address__isnull=True)
-                             | Q(customer__address__regex=r"^\s*$")).only(*ITAX_FIELDS))
+                             | (missing_address & Q(taxable_upper__gte=B2C_ADDRESS_LIMIT))).only(*ITAX_FIELDS))
         lines = lines_of(maybe, ("quantity", "rate"))
         bills = bills.filter(pk__in=[inv.pk for inv in maybe if itax_flags(inv, lines[inv.pk])])
     if p.get("check") == "1":
