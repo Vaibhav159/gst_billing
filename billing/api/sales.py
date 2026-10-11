@@ -334,13 +334,20 @@ class SalesViewSet(viewsets.GenericViewSet):
         page and the summary too, so one request reads them once (Ruling 1A-39).
         """
         params = request.query_params
+        for key, choices, words in (
+            ("facets", ("1", "months", "elsewhere"), "Choose 1, months or elsewhere for facets."),
+            ("summary", ("0", "1"), "Choose 0 or 1 for summary."),
+        ):
+            if key in params and params[key] not in choices:
+                raise serializers.ValidationError({key: [words]})
         bills = filter_bills(self.get_queryset(), params)
         page = self.paginate_queryset(ordered(bills, params))
         reads = Reads()
-        shown = facets(self.get_queryset(), params, reads) if params.get("facets") == "1" else None
+        shown = facets(self.get_queryset(), params, reads) if params.get("facets") else None
         response = self.get_paginated_response(bill_rows(page, reads))
         of = BILL_CANCELLED if params.get("status") == BILL_CANCELLED else BILL_ACTIVE
-        response.data["summary"] = summary(bills, of, reads)
+        if params.get("summary") != "0":
+            response.data["summary"] = summary(bills, of, reads)
         if shown is not None:
             response.data["facets"] = shown
         return response

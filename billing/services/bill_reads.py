@@ -14,8 +14,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Case, Exists, IntegerField, OuterRef, Q, QuerySet, Value, When
-from django.db.models.functions import ExtractYear, Length
+from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, QuerySet, Value, When
+from django.db.models.functions import ExtractYear, Length, TruncMonth
 from django.utils import timezone
 
 from billing.cache import uncached
@@ -168,19 +168,25 @@ def _number_part(number):
     return found.group() if found else ""
 
 
-def _by_number(invoices, reads=None, contains=""):
+def _by_number(invoices, reads=None, narrow=False):
     """{_number_key: [ids]} of every sale in the firms and FYs of `invoices` (any status): one query, for the pairs
-    `reads` hasn't read yet. `contains`: only numbers containing it (and nothing kept in `reads`)."""
+    `reads` hasn't read yet. `narrow`: only the page's number parts, without caching an incomplete FY (1A-43)."""
     pairs = {(inv.business_id, fy_of(inv.invoice_date)) for inv in invoices}
-    known = reads.numbers if reads is not None and not contains else {}
+    known = reads.numbers if reads is not None else {}
+    if narrow:
+        known = known.copy()
     where = Q()
     for firm, fy in pairs - known.keys():
         where |= Q(business_id=firm, invoice_date__range=fy_range(fy))
         known[firm, fy] = []
     if where:
         found = Invoice.objects.sales().filter(where)
-        if contains:
-            found = found.filter(invoice_number__icontains=contains)
+        if narrow:
+            parts = {_number_part(inv.invoice_number) or (inv.invoice_number or "").strip() for inv in invoices}
+            matches = Q(pk__in=[])
+            for part in parts - {""}:
+                matches |= Q(invoice_number__icontains=part)
+            found = found.filter(matches)
         for row in found.values_list("pk", "business_id", "invoice_date", "invoice_number"):
             known[row[1], fy_of(row[2])].append(row)
     groups = defaultdict(list)
@@ -191,10 +197,10 @@ def _by_number(invoices, reads=None, contains=""):
     return groups
 
 
-def duplicated_ids(invoices, reads=None):
+def duplicated_ids(invoices, reads=None, narrow=False):
     """Ids of the sales whose number another sale of the same firm and FY also has (any status, any case), in the
-    firms and FYs of `invoices`."""
-    return {pk for ids in _by_number(invoices, reads).values() if len(ids) > 1 for pk in ids}
+    firms and FYs of `invoices`. `narrow` restricts candidates to these bills' number parts for a list page."""
+    return {pk for ids in _by_number(invoices, reads, narrow=narrow).values() if len(ids) > 1 for pk in ids}
 
 
 def _customer_ref(customer):
@@ -246,7 +252,7 @@ def bill_rows(invoices, reads=None):
     invoices = list(invoices)
     lines = lines_of(invoices, LINE_FIELDS, reads)  # a row shows figures, not items
     closed = closed_months({inv.business_id for inv in invoices})
-    twice = duplicated_ids(invoices, reads)
+    twice = duplicated_ids(invoices, reads, narrow=True)
     return [bill_row(inv, lines[inv.pk], closed, inv.pk in twice) for inv in invoices]
 
 
@@ -275,7 +281,7 @@ def _same_number(invoice):
     """The other sales with this bill's number in its firm and FY, as the list's duplicate check finds them. The
     database reads only the numbers that contain the bill's number part (Ruling 1A-39); _number_key still decides."""
     key = _number_key(invoice.business_id, invoice.invoice_date, invoice.invoice_number)
-    ids = [pk for pk in _by_number([invoice], contains=_number_part(invoice.invoice_number)).get(key, [])
+    ids = [pk for pk in _by_number([invoice], narrow=True).get(key, [])
            if pk != invoice.pk]
     return list(Invoice.objects.sales().filter(pk__in=ids).select_related("customer").order_by("invoice_date", "pk")) if ids else []
 
@@ -292,6 +298,7 @@ def bill_detail(invoice):
     made = (Invoice.history.filter(id=invoice.pk, history_type="+").order_by("history_date")
             .select_related("history_user").first())
     activity = (AuditLog.objects.filter(entity="invoice", entity_id=invoice.pk).select_related("user")
+                .only("timestamp", "action", "details", "user__first_name", "user__last_name", "user__username")
                 .order_by("-timestamp", "-id")[:50])
     by_slab = grouped(lines, lambda li: percent(li.gst_tax_rate))
     by_hsn = grouped(lines, lambda li: (li.hsn_code or "", percent(li.gst_tax_rate), li.unit or ""))
@@ -339,6 +346,12 @@ def bill_detail(invoice):
 
 
 # ── the list ──────────────────────────────────────────────────────────────
+
+def search_text(params):
+    """The first 100 characters and 10 words of q, used by filtering, exact-first order and elsewhere (1A-46)."""
+    found = re.match(r"\S+(?:\s+\S+){0,9}", text_param(params, "q")[:100])
+    return found.group() if found else ""
+
 
 def search(bills, q):
     """Bills whose number contains q; or whose customer's name has words starting with each word of q;
@@ -428,7 +441,7 @@ def filter_bills(bills, params, dates=True):
             large = [inv.pk for inv in unregistered.filter(total_amount__gt=B2CL_THRESHOLD).only(*CHECK_FIELDS)
                      if classify_b2c(inv.business, inv)[0] == "b2cl"]
             bills = unregistered.filter(pk__in=large) if p["segment"] == "b2cl" else unregistered.exclude(pk__in=large)
-    q = text_param(p, "q")
+    q = search_text(p)
     if q:
         bills = search(bills, q)
     # Worked out in Python over what's left: they need the lines, the customer or other bills.
@@ -466,7 +479,7 @@ def ordered(bills, params):
     keys = ORDERINGS.get(params.get("ordering") or "-date", ORDERINGS["-date"])
     if "number" in (params.get("ordering") or ""):
         bills = bills.annotate(fy=_FY_EXPR, number_length=Length("invoice_number"))
-    q = text_param(params, "q")
+    q = search_text(params)
     if q:
         bills = bills.annotate(exact=Case(When(invoice_number__iexact=q, then=Value(0)), default=Value(1),
                                           output_field=IntegerField()))
@@ -501,7 +514,8 @@ def facets(sales, params, reads=None):
     """Month chips, view counts and other years' hits, for the firm and FY whatever else is filtered (part 1 API
     contract, 2.1). The FY's active bills are read once, with their lines, in only the columns the views and checks
     use: a fixed number of queries. They, their lines and the FY's numbers go into `reads`, for the list's page and
-    summary (Ruling 1A-39)."""
+    summary (Ruling 1A-39). `months` uses a grouped count and `elsewhere` skips the FY reads (Ruling 1A-43)."""
+    requested = params.get("facets", "1")
     firm = id_param(params, "business_id", PICK_A_FIRM)
     fy = fy_param(params)
     start, end = fy_range(fy_of(None) if fy is None else fy)
@@ -509,10 +523,24 @@ def facets(sales, params, reads=None):
     scope = sales.filter(invoice_date__range=(start, end))
     if firm is not None:
         scope = scope.filter(business_id=firm)
-    active = list(scope.counted().only(*CHECK_FIELDS))
+    out = {}
+    if requested in ("1", "elsewhere"):
+        out["elsewhere"] = []
+        if search_text(params):
+            hits = Counter(fy_of(day) for day in filter_bills(sales, params, dates=False)
+                           .exclude(invoice_date__range=(start, end)).values_list("invoice_date", flat=True))
+            out["elsewhere"] = [{"fy": fy_label(y), "bills": n} for y, n in sorted(hits.items(), reverse=True)]
+        if requested == "elsewhere":
+            return out
     reads = Reads() if reads is None else reads
-    reads.lines, reads.bills = lines_of(active, LINE_FIELDS), {b.pk: b for b in active}
-    per_month = Counter((b.invoice_date.year, b.invoice_date.month) for b in active)
+    if requested == "months":
+        per_month = Counter({(month.year, month.month): count for month, count in scope.counted().order_by()
+                             .annotate(month=TruncMonth("invoice_date")).values("month")
+                             .annotate(bills=Count("pk")).values_list("month", "bills")})
+    else:
+        active = list(scope.counted().only(*CHECK_FIELDS))
+        reads.lines, reads.bills = lines_of(active, LINE_FIELDS), {b.pk: b for b in active}
+        per_month = Counter((b.invoice_date.year, b.invoice_date.month) for b in active)
     firms = [firm] if firm is not None else list(uncached(Business).values_list("pk", flat=True))
     closed = closed_months(firms)
     months, cursor = [], start
@@ -521,15 +549,14 @@ def facets(sales, params, reads=None):
         months.append({"month": f"{cursor.year}-{cursor.month:02d}", "bills": per_month[key],
                        "locked": bool(firms) and all((f, *key) in closed for f in firms)})
         cursor = date(cursor.year + cursor.month // 12, cursor.month % 12 + 1, 1)
-    out = {"months": months, "views": {
+    out["months"] = months
+    if requested == "months":
+        return out
+    out["views"] = {
         "unsent_today": sum(b.invoice_date == today and not b.paper and b.sent_at is None for b in active),
         "credit_month": sum(b.payment_mode == "credit" and (b.invoice_date.year, b.invoice_date.month)
                             == (today.year, today.month) for b in active),
         "check": len(checked_ids(active, reads)),
         "cash": sum(b.payment_mode == "cash" and (b.total_amount or ZERO) >= ITAX_LIMIT for b in active),
-    }, "elsewhere": []}
-    if text_param(params, "q"):
-        hits = Counter(fy_of(day) for day in filter_bills(sales, params, dates=False)
-                       .exclude(invoice_date__range=(start, end)).values_list("invoice_date", flat=True))
-        out["elsewhere"] = [{"fy": fy_label(y), "bills": n} for y, n in sorted(hits.items(), reverse=True)]
+    }
     return out

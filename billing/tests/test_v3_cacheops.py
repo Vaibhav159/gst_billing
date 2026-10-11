@@ -186,6 +186,17 @@ class ReadsAroundTheCacheTest(TransactionTestCase):
             self.assertEqual(self.client.get(customers).status_code, 200)
         self.assertIn("billing_customer", {table for _op, tables in touched for table in tables})
 
+    def test_selective_facets_never_touch_the_cache(self):
+        # Ruling 1A-43: grouped months and the smaller elsewhere read stay fresh too.
+        with cacheops_on() as touched:
+            for selector in ("months", "elsewhere"):
+                response = self.client.get(reverse("sale-list"), {
+                    "fy": "2026-27", "facets": selector, "summary": "0", "q": "Anil"})
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(set(response.data["facets"]), {selector})
+                self.assertTrue(response.data["results"])
+        self.assertEqual(touched, [])
+
     def test_v3s_draft_reads_never_touch_the_cache(self):
         # 1A Task 10: the drafts list; a keep, which reads its firm; a bill saved from the draft; a keep and a save of
         # the saved draft, whose refusal names the bill; and a discard.
