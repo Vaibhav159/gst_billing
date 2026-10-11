@@ -100,3 +100,27 @@ it("exports the same as-filed amounts, quarters/FY, count checks and optional sp
   expect(cells).toContain("As-filed figures unavailable");
   expect(reconciliationSheet(r, { name: "KIRAN", gstin: "" }, false).rows.some(row => row.cells[0]?.v === "PAYMENT SPLIT (cash / bank)")).toBe(false);
 });
+it("keeps link headers for screen readers only and right-aligns the number headers", async () => {
+  serve({ "GET gst/reconciliation/": wire }); renderApp(<ReconView businessId={3} fy="2026-27" />);
+  const filedTable = await screen.findByRole("table", { name: "Taxable value, books against the returns as filed" });
+  const heads = within(filedTable).getAllByRole("columnheader");
+  expect(heads.at(-1)).toHaveTextContent("Notes"); expect(heads.at(-1)!.firstElementChild).toHaveClass("sr-only");
+  expect(heads.slice(1, -1).every(h => h.classList.contains("text-right"))).toBe(true);
+  const checkHeads = within(screen.getByRole("table", { name: "All arithmetic checks" })).getAllByRole("columnheader");
+  expect(checkHeads.at(-1)!.firstElementChild).toHaveClass("sr-only");
+  expect(checkHeads.filter(h => h.classList.contains("text-right")).map(h => h.textContent)).toEqual(["Expected", "Actual", "Difference"]);
+});
+it("puts a sign only on a check's difference, never on an expected or actual figure that equals it", async () => {
+  const checks = [{ id: "split-taxable", label: "Sections add up", period: "Jul to Sep 2026", expected: "1.20", actual: "0.00", diff: "1.20", status: "fail", link: null }];
+  serve({ "GET gst/reconciliation/": { ...wire, checks, failing: 1, roundings: 0 } }); renderApp(<ReconView businessId={3} fy="2026-27" />);
+  const row = within(await screen.findByRole("table", { name: "All arithmetic checks" })).getByRole("row", { name: /Sections add up/ });
+  const cells = within(row).getAllByRole("cell").map(c => c.textContent);
+  expect(cells.slice(2, 5)).toEqual(["₹1.20", "₹0.00", "+₹1.20"]);
+});
+it("shows the phone notes under each month rather than pairing them with a Bills label", async () => {
+  Object.assign(window, { __phone: true });
+  serve({ "GET gst/reconciliation/": wire }); renderApp(<ReconView businessId={3} fy="2026-27" />);
+  await screen.findByText("1 month differs from the return as filed");
+  expect(screen.queryAllByText("Bills", { selector: "dt" })).toHaveLength(0);
+  expect(screen.getByRole("link", { name: "Open Sep" })).toBeInTheDocument();
+});
