@@ -180,7 +180,7 @@ test("Stop ends after the current PDF and never offers an unfinished zip", async
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
   await act(async () => finish(new Blob(["pdf"])));
   expect(await screen.findByText("Stopped after 1 of 3")).toBeInTheDocument();
-  expect(screen.getByText("The partial zip was discarded. Start again to make every selected bill.")).toBeInTheDocument();
+  expect(screen.getByText("The partial zip was discarded. Start again to make every ticked bill.")).toBeInTheDocument();
   expect(makeBillPdf).toHaveBeenCalledOnce();
   expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
 });
@@ -202,7 +202,7 @@ test("month list reads every page once, deduplicates page boundaries; date, bill
   await waitFor(() => expect(calls.filter((c) => c.url === "sales/").at(-1)?.params).toMatchObject({ start_date: "2026-03-31", end_date: "2026-04-01" }));
   fireEvent.change(screen.getByLabelText("From bill number"), { target: { value: "32" } });
   fireEvent.change(screen.getByLabelText("To bill number"), { target: { value: "7" } });
-  expect(screen.getByText("Check the period and numbers")).toBeInTheDocument();
+  expect(await screen.findByText("Check the period and numbers")).toBeInTheDocument();
 });
 
 test("print caps at 30 and zip at 300, counts the rest and never reads or makes bill 301", async () => {
@@ -358,7 +358,7 @@ test("a failed detail past Print's cap is read only on ZIP press, blocks the zip
   await waitFor(() => expect(zipped.files).toHaveLength(32), { timeout: 5000 });
   await screen.findByText("32 PDFs made");
   expect(asked.mock.calls).toEqual([[{ queryKey: billQuery(31).queryKey }]]);
-  expect(billAsks(calls).slice(count)).toEqual(["sales/31/"]);
+  expect(billAsks(calls).slice(count)).toEqual(["sales/31/", "sales/32/"]);
 });
 
 test("a ready Print stays ready offline and reconnecting does not remake it", async () => {
@@ -486,7 +486,7 @@ test("Stop releases a ZIP detail read paused offline by the app's retry policy",
   await act(async () => finish());
   await waitFor(() => expect(qc.getQueryState(billQuery(31).queryKey)?.fetchStatus).toBe("paused"));
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-  await screen.findByText("The partial zip was discarded. Start again to make every selected bill.");
+  await screen.findByText("The zip was stopped. Start again to make every ticked bill.");
   expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
   expect(qc.getQueryState(billQuery(31).queryKey)?.fetchStatus).toBe("idle");
 });
@@ -522,3 +522,116 @@ test("cap instructions scope the number range to a firm so later firms are not h
   expect(screen.getByText(/pick KIRAN GOLD HOUSE and set the bill numbers from 31/)).toBeInTheDocument();
   expect(screen.getByText(/Clear the number range before picking any later firm/)).toBeInTheDocument();
 });
+
+// Fix round 2: a job owns its read answers for longer than Query's inactive cache.
+const forty = () => Array.from({ length: 40 }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
+const removeExtraDetails = () => { for (let id = 31; id <= 40; id += 1) qc.removeQueries({ queryKey: billQuery(id).queryKey }); };
+
+test("a completed zip survives details leaving the cache during PDF generation", async () => {
+  serve(forty()); open(); await ready(30);
+  let finish!: (blob: Blob) => void;
+  vi.mocked(makeBillPdf).mockImplementationOnce(() => new Promise((done) => { finish = done; }));
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(qc.getQueryData(billQuery(40).queryKey)).toBeDefined();
+  act(removeExtraDetails);
+  expect(qc.getQueryData(billQuery(40).queryKey)).toBeUndefined();
+  await act(async () => finish(new Blob(["pdf"])));
+  await waitFor(() => expect(zipped.files).toHaveLength(40), { timeout: 5000 });
+  expect(await screen.findByText("40 PDFs made")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save the zip" })).toBeEnabled();
+}, 20000);
+
+test("Save and its confirmation survive details leaving the cache after the zip is ready", async () => {
+  serve(forty()); open(); await ready(30);
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(zipped.files).toHaveLength(40), { timeout: 5000 });
+  await screen.findByText("40 PDFs made");
+  act(removeExtraDetails);
+  expect(qc.getQueryData(billQuery(40).queryKey)).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "Save the zip" }));
+  expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+  expect(screen.getByText(/downloaded\. Written to the audit log\./)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save the zip" })).toBeEnabled();
+}, 20000);
+
+test("a read retry retains successful papers after cache removal and asks only for the failed bill", async () => {
+  const rows = forty(); let failed = true;
+  const { calls } = serve(rows, ({ url }) => {
+    const id = Number(url.split("/")[1]);
+    if (id === 40 && failed) refuse(503, {});
+    return wireDetail(rows[id - 1]);
+  });
+  open(); await ready(30);
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await screen.findByText("KGH/2026-27/40 didn't load", {}, { timeout: 5000 });
+  act(removeExtraDetails);
+  const count = billAsks(calls).length;
+  failed = false;
+  const refetch = vi.spyOn(qc, "refetchQueries");
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(zipped.files).toHaveLength(40), { timeout: 5000 });
+  await screen.findByText("40 PDFs made");
+  expect(refetch.mock.calls).toEqual([[{ queryKey: billQuery(40).queryKey }]]);
+  expect(billAsks(calls).slice(count)).toEqual(["sales/40/"]);
+}, 20000);
+
+test("a 40-bill zip stops on its first server failure, with one app retry, then reads only the failed bill and the unread tail", async () => {
+  const rows = forty(); let failed = true;
+  const { calls } = serve(rows, ({ url }) => {
+    const id = Number(url.split("/")[1]);
+    if (id === 31 && failed) refuse(503, {});
+    return wireDetail(rows[id - 1]);
+  });
+  open(); await ready(30);
+  expect(billAsks(calls)).toHaveLength(30);
+  expect(calls).toHaveLength(34);
+  qc.setDefaultOptions({ ...qc.getDefaultOptions(), queries: { ...queryClient.getDefaultOptions().queries, retryDelay: 0 } });
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await screen.findByText("KGH/2026-27/31 didn't load", {}, { timeout: 5000 });
+  expect(billAsks(calls).slice(30)).toEqual(["sales/31/", "sales/31/"]);
+  expect(screen.getByRole("button", { name: "Print 30" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
+  failed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(zipped.files).toHaveLength(40), { timeout: 5000 });
+  await screen.findByText("40 PDFs made");
+  expect(billAsks(calls).slice(32)).toEqual(rows.slice(30).map((r) => `sales/${r.id}/`));
+}, 20000);
+
+test("zip read progress counts each finished read before the next one answers", async () => {
+  const rows = forty(); let finish!: (data: unknown) => void;
+  serve(rows, ({ url }) => url === "sales/32/" ? new Promise((done) => { finish = done; }) : wireDetail(rows[Number(url.split("/")[1]) - 1]));
+  open(); await ready(30);
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(screen.getByText("Reading bills:")).toHaveTextContent("Reading bills: 31 of 40");
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await act(async () => finish(wireDetail(rows[31])));
+}, 20000);
+
+test("zip reads collect and name every deleted bill, then stop at the first other failure with zip words", async () => {
+  const rows = forty(); let failed = true;
+  const { calls } = serve(rows, ({ url }) => {
+    const id = Number(url.split("/")[1]);
+    if (id >= 31 && id <= 34) refuse(404, {});
+    if (id === 35 && failed) refuse(503, {});
+    return wireDetail(rows[id - 1]);
+  });
+  open(); await ready(30);
+  fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
+  const gone = await screen.findByText(/were deleted after being picked/);
+  expect(gone).toHaveTextContent("KGH/2026-27/31, KGH/2026-27/32, KGH/2026-27/33 and KGH/2026-27/34 were deleted after being picked");
+  expect(gone.closest('[role="alert"]')).toHaveTextContent("Untick them.");
+  const failedNote = screen.getByText("KGH/2026-27/35 didn't load").closest('[role="alert"]');
+  expect(failedNote).toHaveTextContent("zip");
+  expect(failedNote).not.toHaveTextContent(/batch|print the rest/);
+  expect(billAsks(calls).slice(30)).toEqual(rows.slice(30, 35).map((r) => `sales/${r.id}/`));
+  failed = false;
+  const count = billAsks(calls).length;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(billAsks(calls)).toContain("sales/40/"));
+  expect(billAsks(calls).slice(count)).toEqual(rows.slice(34).map((r) => `sales/${r.id}/`));
+  expect(screen.getByText(/were deleted after being picked/)).toHaveTextContent("KGH/2026-27/31");
+  expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
+}, 20000);

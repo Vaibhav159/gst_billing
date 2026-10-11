@@ -19,8 +19,9 @@ import type { BillRow, Copies } from "@/core/sales/types";
 import { toSalesPage } from "@/core/sales/wire";
 import { andList, billsAnd } from "@/core/sales/words";
 import { useFirms, useScope } from "@/core/scope";
-import { Badge, Banner, Button, Card, Checkbox, EmptyState, FailNote, Input, LoadError, ListSkeleton, Money, Page, SearchInput, Segmented, Select, Table, Td, Th, Tr, useToast } from "@/core/ui";
+import { Badge, Banner, Button, Card, Checkbox, EmptyState, FailNote, Input, LoadError, ListSkeleton, Money, Page, SearchInput, Segmented, Select, StaleNote, Table, Td, Th, Tr, useToast } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
+import { useDebounced } from "@/core/useDebounced";
 import { billsSpan, byFirm, MAX_BILLS, named, notLoadedWords, unmade, useMade, whatPrints } from "./parts";
 import { zipFiles } from "./zip";
 
@@ -50,14 +51,15 @@ function exportReads(qs: UseQueryResult<BillOutcome>[]) {
   return {
     bills: qs.map((d) => d.data?.kind === "bill" ? d.data.bill : null),
     failures: qs.map((d) => d.data?.kind === "deleted" ? { kind: "notfound", message: "Deleted" } as ApiProblem
-      : d.isError ? problemOf(d.error) : !d.data && d.isPaused ? OFFLINE : null),
+      : !d.data && d.isError ? problemOf(d.error) : !d.data && d.isPaused ? OFFLINE : null),
+    stale: qs.map((d) => d.data?.kind === "bill" && d.isError ? problemOf(d.error) : null),
     coming: qs.some((d) => d.isPending && !d.isPaused),
   };
 }
 
 const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
 type Unread = { row: BillRow; problem: ApiProblem };
-type Job = { sources?: Map<number, string>; list: BillRow[]; unread: Unread[]; reading?: boolean; n: number; total: number; done: boolean; made: BillRow[]; failed: BillRow[]; offline?: boolean; stopped?: boolean; zip?: Blob; name: string; period: string; error?: unknown; saved?: boolean };
+type Job = { papers: Map<number, ReturnType<typeof printBill>>; list: BillRow[]; unread: Unread[]; reading?: boolean; n: number; total: number; done: boolean; made: BillRow[]; failed: BillRow[]; offline?: boolean; stopped?: boolean; zip?: Blob; name: string; period: string; error?: unknown; saved?: boolean };
 
 export default function BulkExport() {
   const [params] = useSearchParams();
@@ -84,6 +86,8 @@ export default function BulkExport() {
   const [which, setWhich] = useState<Which>("all");
   const [nFrom, setNFrom] = useState("");
   const [nTo, setNTo] = useState("");
+  const appliedFrom = useDebounced(nFrom, 300);
+  const appliedTo = useDebounced(nTo, 300);
   const [withCancelled, setWithCancelled] = useState(false);
   const [copies, setCopies] = useState<Copies>("original");
   const [find, setFind] = useState("");
@@ -99,7 +103,7 @@ export default function BulkExport() {
   useEffect(() => { if (!months.includes(month)) setMonth(months.includes(cur) ? cur : months[months.length - 1]); }, [fy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rangeErr = mode === "range" ? (!from || !to ? "Type both dates." : from > to ? "The first date is after the last one." : to > today ? `The last date is after today (${date(today)}).` : "") : "";
-  const numErr = nFrom && nTo && Number(nFrom) > Number(nTo) ? "The first number is bigger than the last one." : "";
+  const numErr = appliedFrom && appliedTo && Number(appliedFrom) > Number(appliedTo) ? "The first number is bigger than the last one." : "";
   const query: SalesQuery | null = rangeErr || scope === null || firmsLoading || firmsError ? null : {
     ...(mode === "month" ? { month } : { start_date: from, end_date: to }),
     ...(which === "unsent" ? { unsent: true } : which === "credit" ? { credit: true } : {}),
@@ -109,7 +113,7 @@ export default function BulkExport() {
   const order = (id: number) => { const i = firms.findIndex((f) => f.id === id); return i < 0 ? firms.length : i; };
   const inPeriod = useMemo(() => [...(q.data ?? [])].sort((a, b) => order(a.business) - order(b.business) || (a.counter ?? 0) - (b.counter ?? 0) || a.invoice_date.localeCompare(b.invoice_date) || a.id - b.id), [q.data, firms]); // eslint-disable-line react-hooks/exhaustive-deps
   const firmKey = firmIds.join(",");
-  const bills = useMemo(() => numErr || rangeErr || q.isError ? [] : inPeriod.filter((b) => firmIds.includes(b.business) && (!nFrom || (b.counter ?? 0) >= Number(nFrom)) && (!nTo || (b.counter ?? 0) <= Number(nTo))), [inPeriod, firmKey, nFrom, nTo, numErr, rangeErr, q.isError]); // eslint-disable-line react-hooks/exhaustive-deps -- firmKey is the selected IDs
+  const bills = useMemo(() => numErr || rangeErr || q.isError ? [] : inPeriod.filter((b) => firmIds.includes(b.business) && (!appliedFrom || (b.counter ?? 0) >= Number(appliedFrom)) && (!appliedTo || (b.counter ?? 0) <= Number(appliedTo))), [inPeriod, firmKey, appliedFrom, appliedTo, numErr, rangeErr, q.isError]); // eslint-disable-line react-hooks/exhaustive-deps -- firmKey is the selected IDs
   const key = bills.map((b) => b.id).join(",");
   useEffect(() => { setTicked(null); }, [key]);
   const isTicked = useCallback((id: number) => (ticked ? ticked.has(id) : true), [ticked]);
@@ -138,6 +142,7 @@ export default function BulkExport() {
   const printRows = pickedBills.slice(0, MAX_BILLS);
   const reads = useQueries({ queries: printRows.map((b) => billQuery(b.id)), combine: exportReads });
   const unread = printRows.flatMap((row, i) => reads.failures[i] ? [{ row, problem: reads.failures[i] }] : []);
+  const stale = printRows.flatMap((row, i) => reads.stale[i] ? [{ row, problem: reads.stale[i] }] : []);
   const coming = reads.coming;
   const here = printRows.length > 0 && !unread.length && !coming && reads.bills.every(Boolean);
   const printPapers = useMemo(() => here ? reads.bills.flatMap((b) => b ? [printBill(b, { showBank })] : []) : [], [here, reads.bills, showBank]);
@@ -148,9 +153,9 @@ export default function BulkExport() {
   const printed = useMade(printKey, () => makeBillPdf(printPapers, copies, { title: `Sales · ${billsAnd(printRows)}` }));
   const printWhy = unmade(printed.error, net === "offline", "batch");
   const [retrying, setRetrying] = useState<Unread[] | null>(null);
-  const retryReads = async () => {
-    setRetrying(unread);
-    try { for (const b of unread) if (b.problem.kind !== "notfound") await qc.refetchQueries({ queryKey: billQuery(b.row.id).queryKey }); }
+  const retryReads = async (rows = unread) => {
+    setRetrying(rows);
+    try { for (const b of rows) if (b.problem.kind !== "notfound") await qc.refetchQueries({ queryKey: billQuery(b.row.id).queryKey }); }
     finally { setRetrying(null); }
   };
   const selection = useMemo(() => JSON.stringify([chosen, [...names], month, mode, from, to, which, withCancelled, copies, showBank, zipName]), [chosen, names, month, mode, from, to, which, withCancelled, copies, showBank, zipName]);
@@ -159,26 +164,27 @@ export default function BulkExport() {
     return () => { generation.current += 1; stop.current = true; cancelRead.current?.(); running.current = false; };
   }, [selection]);
   useEffect(() => {
-    if (!job?.zip || !job.sources) return;
-    const sources = job.sources;
+    if (!job?.zip) return;
+    const papers = job.papers;
     const changed = (id: number) => {
       const value = qc.getQueryData(billQuery(id).queryKey);
-      return value?.kind !== "bill" || whatPrints(printBill(value.bill, { showBank })) !== sources.get(id);
+      return value !== undefined && (value.kind !== "bill" || whatPrints(printBill(value.bill, { showBank })) !== whatPrints(papers.get(id)!));
     };
     // Check at completion too: an edit may have arrived while the PDF maker was working.
-    if ([...sources.keys()].some(changed)) { setJob(null); return; }
+    if ([...papers.keys()].some(changed)) { setJob(null); return; }
     return qc.getQueryCache().subscribe((event) => {
       const id = event.query.queryKey[2];
-      if (event.type === "updated" && typeof id === "number" && sources.has(id) && changed(id)) setJob(null);
+      if (event.type === "updated" && typeof id === "number" && papers.has(id) && changed(id)) setJob(null);
     });
   }, [job, qc, showBank]);
 
   /** Read each detail on the press, then write each Original before making the next. No ZIP if any read failed. */
-  const run = async (list: BillRow[] = pickedBills, retry: Unread[] = []) => {
+  const run = async (list: BillRow[] = pickedBills, retry: Unread[] = [], previous?: Job) => {
     if (running.current || !list.length) return;
-    const initial: Job = { list, unread: [], n: 0, total: list.length, done: false, made: [], failed: [], name: zipName, period: periodText };
+    const papers = new Map([...previous?.papers ?? []].filter(([id]) => list.some((b) => b.id === id)));
+    const initial: Job = { papers, list, unread: [], n: 0, total: list.length, done: false, made: [], failed: [], name: zipName, period: periodText };
     if (net === "offline") { setJob({ ...initial, done: true, failed: list, offline: true }); return; }
-    if ((!here && !retry.length) || !settingsReady) return;
+    if ((!here && !retry.length && !previous) || !settingsReady) return;
     stop.current = false;
     running.current = true;
     const token = ++generation.current;
@@ -193,13 +199,13 @@ export default function BulkExport() {
         const queryKey = billQuery(activeRead).queryKey;
         if (qc.getQueryCache().find({ queryKey })?.getObserversCount() === 0) void qc.cancelQueries({ queryKey });
       }
-      reject(new Error("Stopped"));
+      if (activeRead !== null) reject(new Error("Stopped"));
     }; });
     cancelRead.current = interrupt;
     const made: BillRow[] = [];
     const failed: BillRow[] = [];
-    const missing: Unread[] = [];
-    const papers = new Map<number, ReturnType<typeof printBill>>();
+    const missing = previous?.unread.filter((r) => r.problem.kind === "notfound" && list.some((b) => b.id === r.row.id)) ?? [];
+    let readN = 0;
     let error: unknown;
     let n = 0;
     let progressAt = performance.now();
@@ -210,27 +216,39 @@ export default function BulkExport() {
         activeRead = b.id;
         ownRead = (qc.getQueryState(billQuery(b.id).queryKey)?.fetchStatus ?? "idle") === "idle";
         try {
+          if (missing.some((r) => r.row.id === b.id)) continue;
+          // The job owns successful answers even after Query removes an inactive entry. Use any newer cached answer.
+          if (papers.has(b.id)) {
+            const cached = qc.getQueryData(billQuery(b.id).queryKey);
+            if (cached?.kind === "deleted") { papers.delete(b.id); missing.push({ row: b, problem: { kind: "notfound", message: "Deleted" } }); }
+            else if (cached?.kind === "bill") papers.set(b.id, printBill(cached.bill, { showBank }));
+            continue;
+          }
           let outcome: BillOutcome | undefined;
           if (retry.some((r) => r.row.id === b.id)) {
             await Promise.race([qc.refetchQueries({ queryKey: billQuery(b.id).queryKey }), interrupted]);
             const state = qc.getQueryState(billQuery(b.id).queryKey);
             if (state?.status === "error") throw state.error;
-            if (state?.fetchStatus === "paused") { missing.push({ row: b, problem: OFFLINE }); continue; }
+            if (state?.fetchStatus === "paused") { missing.push({ row: b, problem: OFFLINE }); break; }
             outcome = state?.data ?? await Promise.race([qc.fetchQuery(billQuery(b.id)), interrupted]);
-          } else {
-            // Retrying failed reads keeps the successful answers from that job, even after the normal cache age.
-            const cached = retry.length ? qc.getQueryState(billQuery(b.id).queryKey) : undefined;
-            outcome = cached?.status === "success" ? cached.data : await Promise.race([qc.fetchQuery(billQuery(b.id)), interrupted]);
-          }
+          } else outcome = await Promise.race([qc.fetchQuery(billQuery(b.id)), interrupted]);
           if (!live()) return;
           if (outcome?.kind === "bill") papers.set(b.id, printBill(outcome.bill, { showBank }));
           else missing.push({ row: b, problem: outcome?.kind === "deleted" ? { kind: "notfound", message: "Deleted" } : OFFLINE });
         } catch (failure) { if (live() && !stop.current) missing.push({ row: b, problem: problemOf(failure) }); }
-        finally { activeRead = null; }
+        finally {
+          activeRead = null;
+          if (live() && !stop.current) {
+            readN += 1;
+            setJob({ ...initial, reading: true, n: readN, unread: retry });
+          }
+        }
+        // A deleted bill is collected; a failed connection stops here rather than asking for the unread tail.
+        if (missing.some((r) => r.problem.kind !== "notfound")) break;
       }
       if (!live()) return;
       if (missing.length || stop.current || offlineNow()) {
-        setJob({ ...initial, done: true, unread: missing, stopped: stop.current, offline: offlineNow(), failed: list });
+        setJob({ ...initial, n: readN, done: true, unread: missing, stopped: stop.current, offline: offlineNow(), failed: list });
         return;
       }
       setJob(initial);
@@ -257,7 +275,6 @@ export default function BulkExport() {
       if (live()) {
         const disconnected = offlineNow();
         setJob({ ...initial, n, done: true, made, failed: disconnected ? list : failed, stopped: stop.current, error,
-          sources: new Map([...papers].map(([id, paper]) => [id, whatPrints(paper)])),
           offline: disconnected, zip: !stop.current && !disconnected && made.length ? zip : undefined });
       }
     } catch (failure) {
@@ -266,7 +283,7 @@ export default function BulkExport() {
   };
   useEffect(() => {
     // A failed offline ZIP read is inactive in Query's cache. Resume that job when the line comes back.
-    if (net === "online" && job?.done && job.unread.some((r) => r.problem.kind === "offline")) void run(job.list, job.unread.filter((r) => r.problem.kind !== "notfound"));
+    if (net === "online" && job?.done && job.unread.some((r) => r.problem.kind === "offline")) void run(job.list, job.unread.filter((r) => r.problem.kind !== "notfound"), job);
   }, [net]); // eslint-disable-line react-hooks/exhaustive-deps -- only reconnect resumes these reads
   const printReady = () => {
     if (!printed.value) return;
@@ -367,19 +384,21 @@ export default function BulkExport() {
         </Card>
 
         <Card title="Files that will be made" pad={false}
-          subtitle={`${firmText} · ${periodText} · ${WHICH.find((w) => w.value === which)?.label.toLowerCase()}${nFrom || nTo ? ` · numbers ${nFrom || "first"} to ${nTo || "last"}` : ""}${withCancelled ? ", cancelled included" : ""}`}
+          subtitle={`${firmText} · ${periodText} · ${WHICH.find((w) => w.value === which)?.label.toLowerCase()}${appliedFrom || appliedTo ? ` · numbers ${appliedFrom || "first"} to ${appliedTo || "last"}` : ""}${withCancelled ? ", cancelled included" : ""}`}
           actions={<>
             <Button icon={Printer} disabled={!printed.value} onClick={printReady}>Print {printRows.length || ""}</Button>
             <Button variant="primary" icon={Download} disabled={!chosen.length || busy || ((!here || !settingsReady) && net !== "offline")} onClick={() => void run()}>Download as zip</Button>
           </>}>
           <div ref={listBox} className="px-5 pt-3 pb-4 flex flex-col gap-3">
-            {chosen.length > MAX_BILLS ? <Banner tone="brand" title="Print up to 30 bills">Print the first 30, through {printRows.at(-1)?.invoice_number}. Then pick {chosen[MAX_BILLS].business_name} and set the bill numbers from {chosen[MAX_BILLS].counter ?? chosen[MAX_BILLS].invoice_number} to print the remaining {plural(chosen.length - MAX_BILLS, "bill")}. Clear the number range before picking any later firm.</Banner> : null}
-            {chosen.length > ZIP_CAP ? <Banner tone="brand" title="Export up to 300 bills">Export the first 300, through {pickedBills.at(-1)?.invoice_number}. Then pick {chosen[ZIP_CAP].business_name} and set the bill numbers from {chosen[ZIP_CAP].counter ?? chosen[ZIP_CAP].invoice_number} to export the remaining {plural(chosen.length - ZIP_CAP, "bill")} in another run. Clear the number range before picking any later firm.</Banner> : null}
-            <ReadNote unread={job?.unread.length ? [] : retrying ?? unread} offline={net === "offline"} busy={Boolean(retrying)} onRetry={() => void retryReads()} />
+            {chosen.length > MAX_BILLS ? <Banner tone="brand" title={`Print up to ${MAX_BILLS} bills`}>Print the first {MAX_BILLS}, through {printRows.at(-1)?.invoice_number}. {capNext(chosen[MAX_BILLS], chosen.length - MAX_BILLS, "print", firmIds.length > 1)}</Banner> : null}
+            {chosen.length > ZIP_CAP ? <Banner tone="brand" title={`Export up to ${ZIP_CAP} bills`}>Export the first {ZIP_CAP}, through {pickedBills.at(-1)?.invoice_number}. {capNext(chosen[ZIP_CAP], chosen.length - ZIP_CAP, "export", firmIds.length > 1)}</Banner> : null}
+            <ReadNote unread={job?.unread.length ? [] : retrying?.filter((r) => !reads.bills[printRows.findIndex((b) => b.id === r.row.id)]) ?? unread} offline={net === "offline"} busy={Boolean(retrying)} onRetry={() => void retryReads()} />
+            {stale.length ? <StaleNote problem={stale[0].problem} what={named(stale.map((r) => r.row.invoice_number))} retry={() => void retryReads(stale)} busy={Boolean(retrying)} /> : null}
             {coming && !unread.length ? <p role="status" className="text-sm text-muted">Loading the picked bills…</p> : null}
             {printKey && !printed.value && !printed.failed ? <p role="status" className="text-sm text-muted">Getting the bills ready to print…</p> : null}
-            {printed.failed ? <Banner tone="neg" title="The batch wasn't made" actions={printWhy.again ? <Button size="sm" onClick={printed.retry}>Try again</Button> : <Button size="sm" onClick={() => window.location.reload()}>Reload the page</Button>}>{printWhy.body}</Banner> : null}
-            {job ? <JobPanel job={job} offline={net === "offline"} onReadRetry={() => void run(job.list, job.unread.filter((r) => r.problem.kind !== "notfound"))} onRetry={(list) => void run(list)} onStop={() => { stop.current = true; cancelRead.current?.(); }} onSave={saveReady} onClose={() => setJob(null)} /> : null}
+            <FailNote error={printed.failed || printed.retrying ? { title: "The batch wasn't made", body: printWhy.body } : null} onRetry={printWhy.again ? printed.retry : undefined} busy={printed.retrying} />
+            {printed.failed && !printWhy.again ? <Button size="sm" onClick={() => window.location.reload()}>Reload the page</Button> : null}
+            {job ? <JobPanel job={job} offline={net === "offline"} onReadRetry={() => void run(job.list, job.unread.filter((r) => r.problem.kind !== "notfound"), job)} onRetry={(list) => void run(list, [], job)} onStop={() => { stop.current = true; cancelRead.current?.(); }} onSave={saveReady} onClose={() => setJob(null)} /> : null}
             {firmsError ? <LoadError problem={firmsProblem!} what="the firms" retry={() => { void qc.refetchQueries({ queryKey: ["firms"] }); }} /> : q.isError ? <LoadError problem={problemOf(q.error)} what="the bills" retry={() => { void q.refetch(); }} />
               : q.isPending && (query || firmsLoading || scope === null) ? <ListSkeleton what="the bills" rows={4} />
                 : bills.length ? (!job ? (
@@ -415,19 +434,26 @@ export default function BulkExport() {
   );
 }
 
+/** The next run starts within one firm's numbering; a bill without a numeric counter is identified by its number and date. */
+function capNext(next: BillRow, rest: number, action: "print" | "export", severalFirms: boolean): string {
+  if (next.counter === null) return `Continue with ${next.invoice_number}, dated ${date(next.invoice_date)}. Untick the bills already ${action === "print" ? "printed" : "exported"} to ${action} the remaining ${plural(rest, "bill")} in another run.`;
+  return `Then ${severalFirms ? `pick ${next.business_name} and ` : ""}set the bill numbers from ${next.counter} to ${action} the remaining ${plural(rest, "bill")}${action === "export" ? " in another run" : ""}.${severalFirms ? " Clear the number range before picking any later firm." : ""}`;
+}
+
 function JobPanel({ job, offline, onReadRetry, onRetry, onStop, onSave, onClose }: { job: Job; offline: boolean; onReadRetry: () => void; onRetry: (list: BillRow[]) => void; onStop: () => void; onSave: () => void; onClose: () => void }) {
-  if (job.stopped) return <Banner tone="brand" title={`Stopped after ${job.n} of ${job.total}`} actions={<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}>The partial zip was discarded. Start again to make every selected bill.</Banner>;
-  if (job.unread.length) return <><ReadNote unread={job.unread} offline={offline} busy={job.reading} onRetry={onReadRetry} />{!job.done ? <Button size="sm" variant="ghost" icon={Square} onClick={onStop}>Stop</Button> : null}</>;
+  if (job.stopped) return <Banner tone="brand" title={`Stopped after ${job.n} of ${job.total}`} actions={<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}>{job.made.length ? "The partial zip was discarded." : "The zip was stopped."} Start again to make every ticked bill.</Banner>;
+  const readNote = <ReadNote zip unread={job.unread} offline={offline} busy={job.reading && !job.done} onRetry={onReadRetry} />;
+  if (job.unread.length && job.done) return readNote;
   if (!job.done) {
     const pct = Math.round((job.n / Math.max(job.total, 1)) * 100);
     return (
-      <div className="rounded-card border border-line bg-field px-4 py-3 flex flex-col gap-2 anim-rise" role="status" aria-live="polite">
+      <>{readNote}<div className="rounded-card border border-line bg-field px-4 py-3 flex flex-col gap-2 anim-rise" role="status" aria-live="polite">
         <div className="flex items-center justify-between gap-3">
           <p className="font-semibold">{job.reading ? "Reading bills:" : "Making PDFs:"} <span className="tnum">{job.n} of {job.total}</span></p>
           <Button size="sm" variant="ghost" icon={Square} onClick={onStop}>Stop</Button>
         </div>
         <div className="h-2 rounded-full bg-raised overflow-hidden" aria-hidden="true"><div className="h-full bg-brand transition-[width] duration-150" style={{ width: `${pct}%` }} /></div>
-      </div>
+      </div></>
     );
   }
   if (job.offline) {
@@ -451,14 +477,19 @@ function JobPanel({ job, offline, onReadRetry, onRetry, onStop, onSave, onClose 
 }
 
 
-/** The same not-loaded words as batch print; deleted bills can only be left out, and offline reads wait. */
-function ReadNote({ unread, offline, busy, onRetry }: { unread: Unread[]; offline: boolean; busy?: boolean; onRetry: () => void }) {
+/** Print keeps the batch words; the zip names every failed bill and says where reading stopped. */
+function ReadNote({ unread, offline, busy, onRetry, zip = false }: { unread: Unread[]; offline: boolean; busy?: boolean; onRetry: () => void; zip?: boolean }) {
   const gone = unread.filter((r) => r.problem.kind === "notfound");
   const failed = unread.filter((r) => r.problem.kind !== "notfound");
   const why = !failed.length ? null : offline ? OFFLINE : failed.find((r) => r.problem.kind !== "offline")?.problem ?? failed[0]?.problem;
+  const numbers = (rows: Unread[]) => zip ? andList(rows.map((r) => r.row.invoice_number)) : named(rows.map((r) => r.row.invoice_number));
+  const body = !why ? "" : !zip ? notLoadedWords(why, failed.length === 1, true)
+    : why.kind === "offline" ? "You're offline, so the zip waits for this bill. It loads by itself when the internet is back, or untick it to make the zip without it."
+      : why.kind === "unreachable" || why.kind === "server" ? "The app couldn't reach the shop's records just now, so reading the zip's bills stopped here. Try again, or untick this bill to make the zip without it."
+        : `${why.message} Untick this bill to make the zip without it.`;
   return <>
-    <FailNote error={gone.length ? { title: `${named(gone.map((r) => r.row.invoice_number))} ${gone.length === 1 ? "was" : "were"} deleted after being picked`, body: "Untick the deleted bills to make the rest." } : null} />
-    <FailNote error={why ? { title: `${named(failed.map((r) => r.row.invoice_number))} didn't load`, body: notLoadedWords(why, failed.length === 1, true) } : null}
+    <FailNote error={gone.length ? { title: `${numbers(gone)} ${gone.length === 1 ? "was" : "were"} deleted after being picked`, body: gone.length === 1 ? "Untick it." : "Untick them." } : null} />
+    <FailNote error={why ? { title: `${numbers(failed)} didn't load`, body } : null}
       onRetry={failed.length && why?.kind !== "offline" ? onRetry : undefined} busy={busy} />
   </>;
 }

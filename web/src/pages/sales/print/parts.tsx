@@ -131,10 +131,10 @@ export function billsSpan(bills: SpanBill[], { numbers = false }: { numbers?: bo
   if (!bills.length) return "No bills";
   if (bills.length === 1) return bills[0].invoice_number;
   const groups = byFirm(bills);
-  const named = (n: number, few: number) => numbers === "all" || (numbers && n <= few);
+  const shouldName = (n: number, few: number) => numbers === "all" || (numbers && n <= few);
   if (groups.length === 1) {
     const { name, list } = groups[0];
-    return `${billsAnd(list)} from ${name}${named(list.length, 4) ? `: ${andList(list.map((b) => b.invoice_number))}` : ""}`;
+    return `${billsAnd(list)} from ${name}${shouldName(list.length, 4) ? `: ${andList(list.map((b) => b.invoice_number))}` : ""}`;
   }
-  return `${billsAnd(bills)} from ${groups.length} firms: ${andList(groups.map(({ name, list }) => `${name} (${named(list.length, 3) ? list.map((b) => b.invoice_number).join(", ") : list.length})`))}`;
+  return `${billsAnd(bills)} from ${groups.length} firms: ${andList(groups.map(({ name, list }) => `${name} (${shouldName(list.length, 3) ? list.map((b) => b.invoice_number).join(", ") : list.length})`))}`;
 }
