@@ -7,9 +7,9 @@ import { billQuery, cachedBillNumber, useBill } from "@/core/api/sales";
 import { cn } from "@/core/cn";
 import { LoadError, Page, Skeleton, StaleNote } from "@/core/ui";
 import { useView } from "@/core/view";
+import { BillByNumber, NotASale } from "./bill/BillByNumber";
 import { DeletedBill } from "./bill/DeletedBill";
 import { DesktopBill } from "./bill/DesktopBill";
-import { MissingBill } from "./bill/MissingBill";
 import { PhoneBill } from "./bill/PhoneBill";
 
 /** While the bill loads: its number already when a list or search on this device has it (part 0 carry), else "Sales bill". */
@@ -31,7 +31,7 @@ export function DetailLoading({ title, problem, retry }: { title: string; proble
   );
 }
 
-/** /sales/:id: the bill, its deleted state, or that it isn't here. */
+/** /sales/:id: the bill, its deleted state, or that it isn't here; v2's links by number, and a purchase's id from v2, go on to theirs. */
 export default function BillPage() {
   const { id: raw = "" } = useParams();
   const qc = useQueryClient();
@@ -39,7 +39,8 @@ export default function BillPage() {
   const { isPhone } = useView();
   const id = /^\d+$/.test(raw) ? Number(raw) : null;
   const q = useBill(id);
-  if (id === null) return <MissingBill id={raw} />;
+  // v2's /billing/invoice/KGH-31 arrives here as /sales/KGH-31 (part 0's redirect): a bill number, not an id
+  if (id === null) return <BillByNumber number={raw} />;
   const early = cachedBillNumber(qc, id) ?? "Sales bill";
   // Try again asks again through the client, as every page's does (Ruling 1B-11)
   const retry = () => { void qc.refetchQueries({ queryKey: billQuery(id).queryKey }); };
@@ -50,7 +51,7 @@ export default function BillPage() {
   if (q.data === undefined) {
     // nothing came, and asking failed
     const p = problemOf(q.error);
-    return p.kind === "notfound" ? <MissingBill id={raw} /> : <DetailLoading title={early} problem={p} retry={retry} />;
+    return p.kind === "notfound" ? <NotASale id={id} /> : <DetailLoading title={early} problem={p} retry={retry} />;
   }
   // a refresh that failed (after a send, a cancel, a reconnect…) keeps the bill on screen, with any dialog open on it and
   // what's typed there, and says so (part 0's rule, as QueryView's): one slot, with or without the note

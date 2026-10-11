@@ -459,7 +459,7 @@ test("the sign-in page carries the view too, so phone fields there get the 16 px
   }
 });
 
-test("every v2 address lands on its own new address; v2's number link stays a page", async () => {
+test("every v2 address lands on its own new address; v2's number link opens its bill", async () => {
   const wrong: string[] = [];
   for (const [path, to] of V2_REDIRECTS) {
     const params: Record<string, string> = {};
@@ -470,9 +470,14 @@ test("every v2 address lands on its own new address; v2's number link stays a pa
     cleanup();
   }
   expect(wrong).toEqual([]);
-  const router = mount("/billing/invoice/kgh/2026-27/31");
-  await screen.findByRole("heading", { level: 1, name: "Bills" });
-  expect(router.state.location.pathname).toBe("/billing/invoice/kgh/2026-27/31");
+  // v2's link by firm, year and number opens the bill it names (part 1B)
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url === "sales/"
+    ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: { count: 1, next: null, previous: null,
+      results: [{ id: 412, business: 3, business_name: "KIRAN GOLD HOUSE (SANDBOX)", invoice_number: "31", invoice_date: "2026-10-08", fy: "2026-27" }] } })
+    : answer(config))) as AxiosAdapter;
+  const router = mount("/billing/invoice/kiran-gold-house-sandbox/2026-27/31");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/sales/412"));
 });
 
 test("a sheet on its way out as the page changes doesn't keep focus from the new page's title", async () => {

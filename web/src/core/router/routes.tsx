@@ -7,6 +7,7 @@ import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 import BillPage from "@/pages/sales/BillPage";
+import V2NumberLink from "@/pages/sales/V2NumberLink";
 import SalesList from "@/pages/sales/SalesList";
 import { customerRoutes } from "@/pages/customers/routes";
 import NewBillPage from "@/pages/sales/form/BillFormPage";
@@ -25,10 +26,7 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 /** Every page in the prototype (PROTO/pages/<area>/index.js) that a later part builds, by area. Sign-in and More are already built (below). */
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
-  sales: [
-    "/sales/paper", "/sales/batch", "/sales/export", "/sales/:id/edit", "/sales/:id/print",
-    "/billing/invoice/:bizSlug/:fy/:slug", // v2's links by bill number
-  ],
+  sales: ["/sales/paper", "/sales/batch", "/sales/export", "/sales/:id/edit", "/sales/:id/print"],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
     "/capture", "/import", "/scan", "/suppliers", "/suppliers/:id",
@@ -95,6 +93,7 @@ export const appRoutes: RouteObject[] = [{
         // part 1B: the bills list and a bill's own page
         { path: "/sales", element: <SalesList /> },
         { path: "/sales/:id", element: <BillPage /> },
+        { path: "/billing/invoice/:bizSlug/:fy/:slug", element: <V2NumberLink /> }, // v2's links by bill number
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
