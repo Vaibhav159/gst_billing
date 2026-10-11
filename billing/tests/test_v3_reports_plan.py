@@ -179,11 +179,81 @@ def test_hsn_service_quantity_and_multiple_units_are_distinct():
     assert [(r["hsn"], r["uqc"], r["quantity"]) for r in result["rows"]] == [("710239", "CTM", "6.400"), ("710239", "PCS", "6.400"), ("998800", "NA", "0.000")]
 
 
+def test_reconciliation_keeps_b2cl_separate_and_file_differences_signed():
+    bills = [row(section="b2b"), row(2, section="b2cl"), row(3, section="b2cs"), row(4, status="cancelled")]
+    filed = {"2026-09": {"gstr1": {"taxable": "241180.42", "igst": "0.00", "cgst": "3617.85", "sgst": "3617.85", "bills": 2}, "gstr3b": {"igst": "0.00", "cgst": "3617.85", "sgst": "3617.85"}}}
+    from billing.services.v3_reconciliation import reconcile
+
+    result = reconcile(3, "2026-27", bills, filed=filed, amendments={"2026-09": "2026-10"}, today=date(2026, 10, 8))
+    section = next(s for s in result["sections"] if s["key"] == "q2")
+    assert section["b2b"]["bills"] == section["b2cl"]["bills"] == section["b2c"]["bills"] == 1
+    assert section["all"]["taxable"] == "241190.43"
+    filed_row = next(r for r in result["filed"] if r["month"] == "2026-09")
+    assert filed_row["diff"]["taxable"] == "10.01"
+    assert filed_row["diff"]["bills"] == 1
+    assert filed_row["amended_in"] == "2026-10"
+    assert result["differs"] == ["2026-09"]
+    assert result["periods"][-1]["so_far"] == {"from": "2026-04-01", "to": "2026-10-08"}
+    assert not any(c["id"].startswith("mode-") for c in result["checks"])
+
+def test_reconciliation_widens_only_rate_tolerance_and_links_the_rate():
+    bill = row(price="1", qty="1", taxable="1", cgst="0.025", sgst="0.005", total="1.04")
+    bill["lines"] *= 200  # tax 8 instead of 6: exactly the ₹2 line-count tolerance.
+    bill["total"] = D("208")
+    from billing.services.v3_reconciliation import reconcile
+
+    result = reconcile(3, "2026-27", [bill], split=True, today=date(2026, 10, 8))
+    rates = [c for c in result["checks"] if c["id"].startswith("rate-")]
+    assert {c["status"] for c in rates} == {"rounding"}
+    assert rates[0]["diff"] == "2.00"
+    assert rates[0]["link"] == {"to": "/sales?gst_rate=3", "label": "Open these bills"}
+    bill["total"] = D("210")
+    from billing.services.v3_reconciliation import reconcile
+
+    result = reconcile(3, "2026-27", [bill], split=True, today=date(2026, 10, 8))
+    assert next(c for c in result["checks"] if c["id"] == "mode-value")["status"] == "fail"
+
+def test_reconciliation_empty_and_future_rows_have_complete_zeroes():
+    from billing.services.v3_reconciliation import reconcile
+
+    result = reconcile(3, "2026-27", [row(lines=[], total="0"), row(2, day=date(2026, 11, 1))], today=date(2026, 10, 8))
+    assert len(result["filed"]) == 7
+    assert result["sections"][-1]["all"]["bills"] == 1
+    assert result["sections"][-1]["all"]["taxable"] == "0.00"
+    coverage = next(c for c in result["checks"] if c["id"] == "coverage" and c["period"] == "Jul to Sep 2026")
+    assert coverage["status"] == "pass"
+    assert coverage["link"] == {"to": "/sales?empty=1", "label": "Open bills with no items"}
+
+def test_reconciliation_compares_paise_rounded_books_to_snapshot():
+    bill = row(taxable="1.00", cgst="0.025", sgst="0.015", total="1.04")
+    filed = {"2026-09": {"gstr1": {"taxable": "1.00", "igst": "0.00", "cgst": "0.03", "sgst": "0.02", "bills": 1}}}
+    from billing.services.v3_reconciliation import reconcile
+
+    result = reconcile(3, "2026-27", [bill], filed=filed, today=date(2026, 10, 8))
+    month = next(row for row in result["filed"] if row["month"] == "2026-09")
+    assert month["books"]["cgst"] == "0.03"
+    assert month["books"]["sgst"] == "0.02"
+    assert month["diff"] == {"taxable": "0.00", "igst": "0.00", "cgst": "0.00", "sgst": "0.00", "bills": 0}
+    assert month["differs"] is False
 
 
+def test_reconciliation_line_paise_agrees_across_reports_split_workbook():
+    from billing.services.v3_reconciliation import reconcile
 
-
-
+    bill = row(price="1", qty="1", taxable="1", cgst="0.025", sgst="0.025", total="2.10")
+    bill["lines"].append(deepcopy(bill["lines"][0]))
+    report = build_report("sales", [bill], [], **SEPT, split=True)
+    assert report["totals"]["cgst"] == "0.06"
+    assert report["totals"]["sgst"] == "0.06"
+    assert report["totals"]["round_off"] == "-0.02"
+    assert report["split"][0]["cgst"] == "0.06"
+    workbook = ca_workbook([bill], [], **SEPT)
+    section = workbook["firms"][0]["months"][0]["sales"]
+    assert [line[12] for line in section["rows"]] == ["0.03", "0.03"]
+    assert section["totals"]["cgst"] == "0.06"
+    assert section["rows"][0][15] == "-0.02"
+    recon = reconcile(3, "2026-27", [bill], today=SEPT["today"])
+    assert recon["sections"][-1]["all"]["cgst"] == "0.06"
 
 
 def test_tax_report_before_ledger_widens_range_and_never_invents_cash():
