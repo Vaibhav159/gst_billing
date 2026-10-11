@@ -38,7 +38,7 @@ const mount = (path = "/sales", me?: Partial<Me>) => renderApp(
   </Routes></ScopeProvider>, { path, me });
 
 // 08 Oct 2026 in India, as in the contract's examples; the clock still runs, so pauses and debounces work
-beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true }); vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30")); });
+beforeEach(() => { localStorage.clear(); localStorage.setItem("gst3.scope.1", "all"); vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true }); vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30")); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); queryClient.clear(); });
 // plan 1E: a send downloads its PDF beside the chat; jsdom (no object URLs, no downloads) clicks nothing
 beforeEach(() => {

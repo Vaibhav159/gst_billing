@@ -38,6 +38,7 @@ test("code waits for a real page, not its skeleton, then runs once at idle witho
   const { calls } = salesServer();
   expect(requestIdle).not.toHaveBeenCalled();
   const mounted = mount(shown, [{ path: "/first", element: <Later /> }, { path: "/next", element: <h1>Next page</h1> }]);
+  await act(async () => { await import("./NewShopGate"); });
   expect(screen.getByRole("status")).toHaveTextContent("Loading this page…");
   expect(requestIdle).not.toHaveBeenCalled();
   expect(pages.every(({ load }) => load.mock.calls.length === 0)).toBe(true);

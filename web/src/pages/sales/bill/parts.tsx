@@ -15,6 +15,7 @@ import { ROLES } from "@/core/auth/permissions";
 import { cn } from "@/core/cn";
 import { date, dateShort, inr, mobileText, monthLabel, plural, possessive } from "@/core/format";
 import { billPdfName } from "@/core/sales/files";
+import { BillReference } from "@/core/sales/BillReference";
 import { taxSlips } from "@/core/sales/maths";
 import { gstinNote, SEGMENTS, stateNameOf } from "@/core/sales/pos";
 import type { Activity as ActivityRow, AuditAction, BillDetail } from "@/core/sales/types";
@@ -230,15 +231,15 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
   const out: ReactNode[] = [];
   const month = monthLabel(b.invoice_date.slice(0, 7), { long: true, year: false });
   if (b.replaces) {
-    out.push(<p key="rp" className="text-sm text-fg2 flex items-center gap-1.5"><RefreshCcw size={15} className="text-muted" aria-hidden="true" />Replaces <Link to={`/sales/${b.replaces.id}`} className="link tnum">{b.replaces.invoice_number}</Link>, cancelled.</p>);
+    out.push(<p key="rp" className="text-sm text-fg2 flex items-center gap-1.5"><RefreshCcw size={15} className="text-muted" aria-hidden="true" />Replaces {b.replaces.status === "deleted" ? <BillReference bill={b.replaces} /> : <Link to={`/sales/${b.replaces.id}`} className="link tnum">{b.replaces.invoice_number}</Link>}{b.replaces.status === "deleted" ? "." : ", cancelled."}</p>);
   }
   if (d.cancelled) {
     const repl = b.replaced_by;
     const reason = realReason(b.cancel_reason);
     out.push(<Banner key="x" tone="neg" icon={Ban} title="This bill is cancelled"
-      actions={repl ? <ButtonLink size="sm" to={`/sales/${repl.id}`}>{`Open ${repl.invoice_number}`}</ButtonLink>
+      actions={repl ? repl.status === "deleted" ? undefined : <ButtonLink size="sm" to={`/sales/${repl.id}`}>{`Open ${repl.invoice_number}`}</ButtonLink>
         : <Button size="sm" variant="primary" icon={RefreshCcw} disabled={!d.can("bill.create")} title={d.whyNot("bill.create") || "A new bill with the same customer, items and payment"} onClick={() => d.navigate(`/sales/new?remake=${b.id}`)}>Make it again</Button>}>
-      {reason ? `“${reason}”. ` : ""}It stays in {d.month}&apos;s GSTR-1 as cancelled, with its number. Its amount isn&apos;t in sales or the GST figures.{repl ? ` It was made again as ${repl.invoice_number}.` : " Make it again opens a new bill with the same customer, items and payment."}
+      {reason ? `“${reason}”. ` : ""}It stays in {d.month}&apos;s GSTR-1 as cancelled, with its number. Its amount isn&apos;t in sales or the GST figures.{repl ? <> It was made again as {repl.status === "deleted" ? <BillReference bill={repl} /> : repl.invoice_number}.</> : " Make it again opens a new bill with the same customer, items and payment."}
     </Banner>);
   }
   if (b.duplicates.length) {

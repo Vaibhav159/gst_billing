@@ -22,7 +22,7 @@ test("setup ticks from server counts, leaves walk-in out, and names cancelled bi
   expect(await screen.findByText("You're set up")).toBeInTheDocument();
   expect(screen.getAllByText("Done")).toHaveLength(4);
   expect(screen.getByText("28 customers on file, besides walk-in sales")).toBeInTheDocument();
-  expect(screen.getByText(/332 sales bills made/)).toHaveTextContent("2 cancelled");
+  expect(screen.getByText("332 sales bills made · 2 cancelled not counted")).toBeInTheDocument();
 });
 test("skipping and undoing a step writes only this person's preferences, never invents a completed product", async () => {
   const calls = server({ ...full, products: empty.products, bills: empty.bills });

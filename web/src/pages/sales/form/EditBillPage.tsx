@@ -9,6 +9,7 @@ import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { billQuery, cachedBillNumber, useBill } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { date, inr, monthLabel, qty } from "@/core/format";
+import { BillReference } from "@/core/sales/BillReference";
 import type { BillDetail, BinRow } from "@/core/sales/types";
 import { gstLabel, LOCKED_REASON, rateText, taxLines } from "@/core/sales/words";
 import { Banner, ButtonLink, Card, DL, EmptyState, LoadError, Money, Page } from "@/core/ui";
@@ -110,7 +111,7 @@ export function ReadOnlyBill({ bill, reason }: { bill: BillDetail; reason: strin
         actions={<>
           <ButtonLink size="sm" to={`/sales/${bill.id}`}>Open the bill</ButtonLink>
           {bill.locked ? <ButtonLink size="sm" to={`/gst?firm=${bill.business}&month=${bill.invoice_date.slice(0, 7)}`} icon={Landmark}>GST returns</ButtonLink> : null}
-          {bill.status !== "cancelled" ? null : bill.replaced_by ? <ButtonLink size="sm" variant="primary" to={`/sales/${bill.replaced_by.id}`}>{`Open ${bill.replaced_by.invoice_number}`}</ButtonLink>
+          {bill.status !== "cancelled" ? null : bill.replaced_by ? bill.replaced_by.status === "deleted" ? <BillReference bill={bill.replaced_by} /> : <ButtonLink size="sm" variant="primary" to={`/sales/${bill.replaced_by.id}`}>{`Open ${bill.replaced_by.invoice_number}`}</ButtonLink>
             : can("bill.create") ? <ButtonLink size="sm" variant="primary" to={`/sales/new?remake=${bill.id}`}>Make it again</ButtonLink> : null}
         </>}>
         {reason}

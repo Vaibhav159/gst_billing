@@ -716,3 +716,16 @@ test("among the customer's other bills, a cancelled one says so at the end of it
   expect(row).toHaveTextContent(/^KGH\/2026-27\/1214 Aug 2026 · UPI \/ bank · cancelled₹45,210\.00$/);
   expect(within(row).getByText("₹45,210.00")).toHaveClass("line-through");
 });
+
+test.each([
+  { field: "replaces", viewer: false }, { field: "replaces", viewer: true },
+  { field: "replaced_by", viewer: false }, { field: "replaced_by", viewer: true },
+])("$field deleted reference (viewer $viewer) keeps label and access", async ({ field, viewer }) => {
+  const ref = { id: 205, invoice_number: "KGH/2026-27/33", invoice_date: "2026-10-01", customer_name: "Anil", status: "deleted" };
+  salesServer([["GET", "sales/412/", () => wireDetail({ status: field === "replaced_by" ? "cancelled" : "active", [field]: ref })]]);
+  mount("/sales/412", viewer ? { role: "viewer", permissions: ["view"] } : undefined);
+  expect(await screen.findByText("Deleted")).toBeInTheDocument();
+  if (viewer) expect(screen.queryByRole("link", { name: /KGH\/2026-27\/33/ })).not.toBeInTheDocument();
+  else expect(screen.getByRole("link", { name: "KGH/2026-27/33 · Deleted" })).toHaveAttribute("href", "/sales/205");
+  if (field === "replaces") expect(screen.getByText(/^Replaces/)).not.toHaveTextContent(", cancelled.");
+});

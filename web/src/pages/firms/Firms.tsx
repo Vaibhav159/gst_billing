@@ -6,7 +6,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { date, monthLabel, plural } from "@/core/format";
 import { stateLabel } from "@/core/ids";
 import { useScope } from "@/core/scope";
-import { cancelledNote } from "@/core/sales/words";
+import { cancelledNote } from "@/pages/records/words";
 import { Badge, Button, ButtonLink, Card, cn, DL, EmptyState, Figure, Money, Page, QueryView } from "@/core/ui";
 import { useView } from "@/core/view";
 import { fyPeriod, useJustSaved } from "@/pages/customers/lib";

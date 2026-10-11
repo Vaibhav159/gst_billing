@@ -449,3 +449,13 @@ test("T9 leftovers: typing weight and rate back clears the status and both leave
   await waitFor(() => expect(where(router)).toBe("/sales/412"));
   expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
 });
+
+test.each([false, true])("a deleted replacement in the edit view respects access (viewer %s)", async (viewer) => {
+  fakeToday();
+  const ref = { id: 205, invoice_number: "KGH/2026-27/33", invoice_date: "2026-10-01", customer_name: "Anil", status: "deleted" };
+  formServer([["GET", "sales/412/", () => wireDetail({ status: "cancelled", replaced_by: ref })]]);
+  mountForm("/sales/412/edit", viewer ? { me: { role: "viewer", permissions: ["view"] } } : {});
+  expect(await screen.findByText("Deleted")).toBeInTheDocument();
+  if (viewer) expect(screen.queryByRole("link", { name: /KGH\/2026-27\/33/ })).not.toBeInTheDocument();
+  else expect(screen.getByRole("link", { name: "KGH/2026-27/33 · Deleted" })).toHaveAttribute("href", "/sales/205");
+});

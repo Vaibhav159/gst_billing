@@ -7,7 +7,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { usePrefs, type SetupPrefs } from "@/core/prefs";
 import { useView } from "@/core/view";
 import { cn } from "@/core/cn";
-import { cancelledNote } from "@/core/sales/words";
+import { cancelledNote } from "./words";
 import { AppMark, Badge, Button, ButtonLink, Card, Page, QueryView, SuccessMark, useToast } from "@/core/ui";
 import { SaveError } from "@/pages/customers/parts";
 
@@ -86,4 +86,3 @@ export default function Setup() {
   const query = useSetup();
   return <QueryView query={query} what="the setup checklist">{(data) => <SetupBody data={data} />}</QueryView>;
 }
-

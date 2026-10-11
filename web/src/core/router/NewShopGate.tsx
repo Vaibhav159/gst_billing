@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { firmListQuery } from "@/core/api/firms";
+import { firmListQuery } from "@/core/api/firmList";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { Card, Page, QueryView } from "@/core/ui";
 

@@ -1,9 +1,11 @@
 // Records contract §2. Every list picker uses the slim query; numbers and FY figures are opt-in.
-import { queryOptions, skipToken, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { toPaise } from "@/core/format";
 import type { BillRef, BillStatus, PaymentMode } from "@/core/sales/types";
 import type { Change } from "./catalog";
+import { figures, firmKeys, firmListQuery, type WireFigures } from "./firmList";
+export { firmKeys, firmListQuery, toFirmRow } from "./firmList";
 export type ReturnState = "future" | "open" | "blocked" | "ready" | "gstr1" | "filed" | "unlocked";
 export type FirmNumbers = { fy: string; last: BillRef | null; next: { counter: number; invoice_number: string }; full_number: boolean };
 export type FirmFigures = {
@@ -23,21 +25,11 @@ export type FirmDetail = FirmRow & FirmBody & {
   uses: { sales: number; cancelled: number; purchases: number; bin: number; drafts: number; captures: number; filing_records: number; filing_months: number; filed_periods: number; opening_credits: number };
   plain_after_full_date: number; updated_at: string; changes?: Change[]; frozen_bills?: number;
 };
-type WireFigures = Omit<FirmFigures, "sales" | "purchases"> & { sales: Omit<FirmFigures["sales"], "total" | "tax"> & { total: string; tax: string }; purchases: Omit<FirmFigures["purchases"], "total" | "tax"> & { total: string; tax: string } };
-type WireRow = Omit<FirmRow, "figures"> & { figures?: WireFigures };
-const figures = (f: WireFigures): FirmFigures => ({ ...f, sales: { ...f.sales, total: toPaise(f.sales.total) ?? 0, tax: toPaise(f.sales.tax) ?? 0 }, purchases: { ...f.purchases, total: toPaise(f.purchases.total) ?? 0, tax: toPaise(f.purchases.tax) ?? 0 } });
-export function toFirmRow(raw: unknown): FirmRow { const f = raw as WireRow; return { ...f, figures: f.figures ? figures(f.figures) : undefined }; }
 export function toFirmDetail(raw: unknown): FirmDetail {
   const f = raw as Omit<FirmDetail, "figures" | "recent"> & { figures: WireFigures; recent: (Omit<FirmDetail["recent"][number], "total_amount"> & { total_amount: string })[] };
   return { ...f, figures: figures(f.figures), recent: f.recent.map((b) => ({ ...b, total_amount: toPaise(b.total_amount) ?? 0 })) };
 }
 export type FirmParams = { numbers?: 1; figures?: 1; fy?: string };
-export const firmKeys = { all: ["firms"] as const, list: (params: FirmParams) => ["firms", "list", params] as const, one: (id: number | null, fy: string) => ["firms", "one", id, fy] as const };
-export function firmListQuery(params: FirmParams = {}) {
-  return queryOptions({ queryKey: firmKeys.list(params), staleTime: Object.keys(params).length ? 30_000 : Infinity,
-    queryFn: async ({ signal }) => { const d = (await api.get<{ results: unknown[] } | unknown[]>("firms/", { params, signal })).data; return (Array.isArray(d) ? d : d.results).map(toFirmRow); },
-  });
-}
 export function useFirmNumbers() { return useQuery(firmListQuery({ numbers: 1 })); }
 export function useFirmList(fy: string) { return useQuery(firmListQuery({ numbers: 1, figures: 1, fy })); }
 export function useFirm(id: number | null, fy: string) {

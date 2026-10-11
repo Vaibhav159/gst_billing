@@ -35,6 +35,7 @@ const cardOf = (link: HTMLElement) => link.closest<HTMLElement>("[data-card]")!;
 
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("gst3.scope.1", "all");
   (window as unknown as { __phone?: boolean }).__phone = true;
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30"));

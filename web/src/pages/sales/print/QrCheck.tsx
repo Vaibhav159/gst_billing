@@ -8,7 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Camera, CameraOff, ScanLine } from "lucide-react";
 import { api } from "@/core/api/client";
 import { problemOf } from "@/core/api/errors";
-import { firmListQuery } from "@/core/api/firms";
+import { firmListQuery } from "@/core/api/firmList";
 import { salesParams, type SalesQuery } from "@/core/api/sales";
 import { date, fyOf, inr } from "@/core/format";
 import { parseQr, type QrText } from "@/core/print/qr";

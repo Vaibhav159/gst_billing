@@ -7,7 +7,6 @@ import { useView } from "@/core/view";
 import { ScopeProvider } from "@/core/scope";
 import { ListSkeleton, ToastHost } from "@/core/ui";
 import { ShareHost } from "@/core/print/ShareHost";
-import { NewShopGate } from "@/core/router/NewShopGate";
 import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
@@ -17,6 +16,7 @@ import { Palette } from "./Palette";
 import { ScreenBoundary } from "./ScreenBoundary";
 
 const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(module => ({ default: module.CaptureUploadHost })));
+const NewShopGate = lazy(() => import("@/core/router/NewShopGate").then((module) => ({ default: module.NewShopGate })));
 
 /**
  * Around every route, sign-in included: the app's one ToastHost (a second would show every toast twice), the view on

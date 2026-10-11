@@ -37,7 +37,8 @@ test("opening a new bill", async () => {
   await waitFor(() => expect(customer).toHaveFocus());
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(calls).toHaveLength(8);
+  expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(8);
 });
 
 test("opening an unfinished bill (?draft=)", async () => {
@@ -47,7 +48,8 @@ test("opening an unfinished bill (?draft=)", async () => {
   await screen.findByText(/Finishing an unfinished bill/);
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(calls).toHaveLength(10);
+  expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(10);
 });
 
 test("opening a paper bill from the saved panel's Next paper bill", async () => {
@@ -57,7 +59,8 @@ test("opening a paper bill from the saved panel's Next paper bill", async () => 
   await screen.findByRole("heading", { level: 1, name: "Bill from the paper book" });
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(calls).toHaveLength(10);
+  expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(10);
 });
 
 test("opening an edit", async () => {
@@ -67,7 +70,8 @@ test("opening an edit", async () => {
   await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(calls).toHaveLength(8);
+  expect(calls.filter((c) => c.url === "shop-settings/")).toHaveLength(1);
+  expect(calls.filter((c) => c.url !== "shop-settings/")).toHaveLength(8);
 });
 
 test("a counter bill typed and saved, then what follows", async () => {
@@ -102,7 +106,8 @@ test("a counter bill typed and saved, then what follows", async () => {
   await settle(); await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   expect(router.state.location.pathname).toBe("/sales/501");
-  expect(calls.slice(savingAt).map((c) => `${c.method} ${c.url}`)).toEqual(["POST sales/"]);
+  // A saved sale refreshes Records' shared firm queries, including the mounted slim list.
+  expect(calls.slice(savingAt).map((c) => `${c.method} ${c.url}`)).toEqual(["POST sales/", "GET firms/"]);
 });
 
 test("leaving a new bill with a change not kept yet", async () => {

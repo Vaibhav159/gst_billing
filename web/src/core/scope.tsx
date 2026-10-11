@@ -1,7 +1,8 @@
 import { readStored as read, writeStored as write } from "@/core/storage";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { firmListQuery, type FirmRow } from "@/core/api/firms";
+import { firmListQuery } from "@/core/api/firmList";
+import type { FirmRow } from "@/core/api/firms";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";

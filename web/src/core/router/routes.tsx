@@ -4,7 +4,6 @@ import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { paletteCode } from "@/core/shell/Palette";
 import { AppFailed } from "@/core/shell/ScreenBoundary";
 import Login from "@/pages/core/Login";
-import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 import { capturePages, captureRoutes } from "@/pages/purchases/capture/routes";
@@ -19,6 +18,7 @@ import { idlePages, lazyPage } from "./lazyPage";
 const GstReturns = lazyPage(() => import("@/pages/gst/GstReturns"));
 const SetupPage = lazyPage(() => import("@/pages/records/Setup"));
 const SettingsPage = lazyPage(() => import("@/pages/records/Settings"));
+const More = lazyPage(() => import("@/pages/core/More"));
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -34,7 +34,7 @@ const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, More, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
