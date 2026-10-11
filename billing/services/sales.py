@@ -134,7 +134,7 @@ def record_send(invoice, user, via, to=""):
     """Note that the bill went out (design §4.3). No month check: sending a filed bill is fine.
 
     `to` is a one-off number typed for this bill, kept on the bill and never on the customer;
-    a customer without a mobile number needs one (or the one their last send went to).
+    WhatsApp needs one when the customer has no mobile. The share sheet chooses its own chat.
     """
     with transaction.atomic():
         invoice = locked_bill(invoice)
@@ -142,7 +142,7 @@ def record_send(invoice, user, via, to=""):
         customer = invoice.customer
         if not to and not (customer.mobile_number or "").strip():
             to = invoice.sent_to
-            if not to:
+            if not to and via == "whatsapp":
                 raise ValidationError({"to": [
                     "A walk-in has no number on record. Type theirs to send the bill to their WhatsApp."
                     if customer.kind == "walkin" else
