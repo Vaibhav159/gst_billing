@@ -31,7 +31,8 @@ export function parseCsv(text: string): string[][] {
 export async function readExcel(data: ArrayBuffer): Promise<ReadSheet[]> {
   const bytes = new Uint8Array(data);
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 0x03 || bytes[3] !== 0x04) throw new Error("This isn't an Excel workbook (.xlsx).");
-  const XLSX = await import("xlsx-js-style");
+  // Uploads use patched SheetJS; xlsx-js-style is reserved for app-generated exports (P3-12).
+  const XLSX = await import("xlsx");
   const book = XLSX.read(data, { type: "array", cellNF: true, cellText: true, cellDates: false });
   if (!book.SheetNames.length) throw new Error("The workbook has no sheets.");
   const date1904 = !!book.Workbook?.WBProps?.date1904;
@@ -41,7 +42,7 @@ export async function readExcel(data: ArrayBuffer): Promise<ReadSheet[]> {
       if (!/^[A-Z]+[1-9]\d*$/.test(address)) continue;
       const { r, c } = XLSX.utils.decode_cell(address);
       if (r >= 100000 || c >= 16384) throw new Error("The workbook has too many rows or columns.");
-      const value = cell as import("xlsx-js-style").CellObject;
+      const value = cell as import("xlsx").CellObject;
       let raw: ReadCell = typeof value.v === "string" || typeof value.v === "number" || typeof value.v === "boolean" ? value.v : null;
       if (value.t === "n" && typeof raw === "number" && XLSX.SSF.is_date(value.z ?? "")) {
         const day = XLSX.SSF.parse_date_code(raw, { date1904 }) as { y: number; m: number; d: number } | null;
