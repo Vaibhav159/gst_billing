@@ -2,6 +2,7 @@ from django.urls import include, path, re_path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenVerifyView
 
+from .audit import AuditExportView, AuditView
 from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
@@ -125,6 +126,8 @@ urlpatterns = [
     path("customers/duplicates/", CustomerDuplicatesView.as_view(), name="customer-duplicates"),
     path("customers/<int:pk>/merge-preview/", CustomerMergeView.as_view(http_method_names=["get", "head", "options"]), name="customer-merge-preview"),
     path("customers/<int:pk>/merge-into/", CustomerMergeView.as_view(http_method_names=["post", "options"]), name="customer-merge-into"),
+    path("audit/", AuditView.as_view(), name="audit"),
+    path("audit/export/", AuditExportView.as_view(), name="audit-export"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",
