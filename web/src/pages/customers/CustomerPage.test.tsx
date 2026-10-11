@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
 import { __setNetState } from "@/core/api/network";
 import CustomerPage from "./CustomerPage";
-import { ANIL, FIRMS, mount, NO_BILLS, serve, STAFF, VIEWER, type Call } from "./testing";
+import { ANIL, FIRMS, handClock, pass, mount, NO_BILLS, serve, STAFF, VIEWER, type Call } from "./testing";
 
 const routes = [
   { path: "/customers", element: <p>the list</p> },
@@ -485,4 +485,47 @@ test("on a phone, WhatsApp's Resend names their last bill in the firm picked, an
   act(() => { vi.advanceTimersByTime(400); }); // past the sheet's guard against a double tap's second tap
   await userEvent.click(resend);
   await waitFor(() => expect(router.state.location.pathname).toBe("/sales/104"));
+});
+
+
+test("the walk-in opens with one dated FY statement; all time is read only when picked", async () => {
+  handClock();
+  const c = { ...ANIL, id: 1, name: "Walk-in Customer", type: "walkin", customer_type: "walkin" };
+  const calls = serve({ "GET customers/1/": c, "GET customers/1/statement/": (call: Call) => ({ status: 200, data: statement(call.params.start_date ? BILLS.slice(1) : BILLS) }), "GET sales/": flags([]) });
+  mount(routes, ["/customers/1"]);
+  await pass(400);
+  expect(statementCalls(calls, 1).map((c) => c.params)).toEqual([{ business_id: 3, start_date: "2026-04-01", end_date: "2026-10-08" }]);
+  expect(screen.getByRole("radio", { name: /All time/ })).not.toHaveTextContent(/3 bills|1,12,083/);
+  expect(screen.getByRole("radio", { name: /All time/ })).toHaveTextContent("Every year");
+  fireEvent.click(screen.getByRole("radio", { name: /All time/ }));
+  await pass(0);
+  expect(statementCalls(calls, 1).map((c) => c.params)).toEqual([{ business_id: 3, start_date: "2026-04-01", end_date: "2026-10-08" }, { business_id: 3 }]);
+  expect(screen.getByText("Sales · All time").parentElement).toHaveTextContent("₹1,12,083.21");
+  fireEvent.click(screen.getByRole("radio", { name: /FY 2026-27/ }));
+  await pass(0);
+  expect(statementCalls(calls, 1)).toHaveLength(2);
+});
+
+test.each([false, true])("a stored URP means no GSTIN on the customer page (phone=%s)", async (phone) => {
+  handClock();
+  (window as unknown as { __phone?: boolean }).__phone = phone;
+  serve({ "GET customers/7/": { ...ANIL, gst_number: "URP" }, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  await pass(400);
+  expect(screen.queryByText("URP")).not.toBeInTheDocument();
+  expect(screen.queryByText("GSTIN · B2B bills")).not.toBeInTheDocument();
+  expect(screen.queryByText("It doesn't look like a GSTIN.")).not.toBeInTheDocument();
+  expect(screen.getByText(/No GSTIN/)).toBeInTheDocument();
+});
+
+test("Show all firms moves focus to the customer's heading", async () => {
+  handClock();
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  await pass(400);
+  const button = screen.getByRole("button", { name: "Show all firms" });
+  act(() => button.focus());
+  fireEvent.click(button);
+  await pass(0);
+  expect(screen.getByRole("heading", { level: 1, name: "Anil Gupta" })).toHaveFocus();
 });

@@ -1,4 +1,4 @@
-import { checkGstin, cleanGstin, cleanPan, effectivePan, emailProblem, formatMobile, GST_STATES, gstinCheckDigit, gstinPan, hasGstin, looksLikePhone, mobileDigits, mobileProblem, panProblem, stateCodeOf, stateLabel, stateOptions, stateTitle } from "./ids";
+import { checkGstin, cleanGstin, cleanPan, effectivePan, emailProblem, formatMobile, GST_STATES, gstinCheckDigit, gstinPan, gstinPlaceholder, hasGstin, looksLikePhone, mobileDigits, mobileProblem, panProblem, stateCodeOf, stateLabel, stateOptions, stateTitle } from "./ids";
 
 // Known-real: v2's test vectors (a firm's own GSTIN and GSTN's documented example), and the prototype's Kulkarni Jewellers
 const REAL = ["08AAGPL3375F1ZO", "27AAPFU0939F1ZV", "27XTZPS7585P1ZB"];
@@ -33,6 +33,11 @@ test("hasGstin is the server's loose test; cleanGstin keeps what a GSTIN box may
   expect(hasGstin("08ABCDE1234A1Z5")).toBe(true);
   for (const v of ["", "NA", "URP", "UNREGISTERED123", "08AAGPL3375F1Z", null, undefined]) expect(hasGstin(v), String(v)).toBe(false);
   expect(cleanGstin("08 aagpl-3375f1zo99")).toBe("08AAGPL3375F1ZO");
+});
+
+test("GSTIN placeholders mirror the server's H12 vectors and never swallow a typo with a nonzero digit", () => {
+  for (const value of ["NA", "URP", "-", "N/A", "0", " urp ", "0000000000", "UNREGISTERED"]) expect(gstinPlaceholder(value), value).toBe(true);
+  for (const value of [null, undefined, "", "   ", "08ABCDE1234A1Z", "UNREGISTERED123", "00AAAAAAAAAAAAA", ...REAL]) expect(gstinPlaceholder(value), String(value)).toBe(false);
 });
 
 test("PAN: the pattern, upper case, and the PAN that counts (typed, else from a GSTIN that passes)", () => {

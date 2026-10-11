@@ -262,3 +262,8 @@ export function whoCan(action: Extract<Action, "bill.create" | "bill.edit">): st
   const all = perms.perms as Record<Role, "*" | string[]>;
   return andList((Object.keys(all) as Role[]).filter((r) => can(all[r], action)).map((r) => (r === "owner" ? "the owner" : ROLES[r].label.toLowerCase())));
 }
+
+/** Why an action waits for a read: the internet, a failed read, or its first answer. */
+export function waitingReason(offline: boolean, failed: boolean, what = "bills"): string {
+  return offline ? "Needs the internet" : failed ? `The ${what} didn't load. Use Try again.` : `Waits for the ${what} to load`;
+}

@@ -60,3 +60,12 @@ test("no PAN: none is named; own dates: the range is the period's name, so the h
   expect(text).not.toContain("PAN");
   expect(times(head(text), "1 Apr to 8 Oct 2026")).toBe(1);
 }, 30_000);
+
+
+test("a GSTIN placeholder on file prints No GSTIN, never GSTIN URP", async () => {
+  const d = data("", "FY 2026-27");
+  d.customer.gstin = "URP";
+  const text = await drawn(await makeStatementPdf(d));
+  expect(text).toContain("No GSTIN");
+  expect(text).not.toContain("GSTIN URP");
+}, 30_000);

@@ -1,6 +1,7 @@
+import { testQueryClient } from "@/test/render";
 import type { ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { customerLine } from "./forBills";
 import { homeState, safeReturn, scopeName, SETTLED, tableState, useOnFile } from "./lib";
 import { ANIL, handClock, pass, serve } from "./testing";
@@ -46,7 +47,7 @@ test("how a statement bill was settled, in one set of words that the statement p
 test("customers on file with a phone or GSTIN: asked for once typing pauses, only for a whole number or GSTIN, never the one being edited", async () => {
   const KULKARNI = { ...ANIL, id: 9, name: "Kulkarni Jewellers", gst_number: "27XTZPS7585P1ZB", mobile_number: "9822012345" };
   const calls = serve({ "GET customers/": { count: 1, next: null, results: [KULKARNI] } });
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const qc = testQueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   type Typed = { phone: string; gstin: string };
   // each box a key short of whole: 9 digits, 14 characters
@@ -68,5 +69,11 @@ test("customers on file with a phone or GSTIN: asked for once typing pauses, onl
   // the one being edited has the same answers (one search each), and isn't named
   expect(self.result.current).toEqual({ samePhone: null, sameGstin: null });
   expect(part.result.current).toEqual({ samePhone: null, sameGstin: null });
+  expect(calls.every((c) => c.params.figures === undefined)).toBe(true);
   expect(calls.map((c) => c.params.search).sort()).toEqual(["27XTZPS7585P1ZB", "9822012345"]);
+});
+
+
+test("a placeholder GSTIN reads as No GSTIN in a customer line", () => {
+  expect(customerLine({ ...ANIL, type: "person", gst_number: "URP" })).toBe("98290 41122 · No GSTIN · Udaipur, Rajasthan");
 });

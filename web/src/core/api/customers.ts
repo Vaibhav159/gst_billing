@@ -7,6 +7,7 @@ import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { plural, toPaise } from "@/core/format";
 import { effectivePan, hasGstin, looksLikePhone, mobileDigits } from "@/core/ids";
+import { failText } from "@/core/sales/words";
 import type { PaymentMode } from "@/core/sales/types";
 import type { FirmId } from "@/core/scope";
 
@@ -152,7 +153,7 @@ export const customerKeys = {
   one: (id: number) => ["customers", "one", id] as const,
   statement: (id: number, params: StatementParams | null) => ["customers", "statement", id, params] as const,
   itax: (id: number) => ["customers", "itax", id] as const,
-  search: (term: string, size: number) => ["customers", "search", term, size] as const,
+  search: (term: string, size: number, figures = true) => ["customers", "search", searchTerm(term), size, figures] as const,
   recent: (firm: FirmId | null) => ["customers", "recent", firm] as const,
   walkin: () => ["customers", "walkin"] as const,
 };
@@ -223,8 +224,8 @@ export function useCustomerList(f: CustomerListFilters) {
   });
 }
 /** How many customers there are, filters aside ("3 of 29 match"). */
-export function useCustomerCount() {
-  return useQuery({ queryKey: customerKeys.count(), queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { page_size: 1 }, signal })).data).count });
+export function useCustomerCount(enabled = true) {
+  return useQuery({ queryKey: customerKeys.count(), queryFn: !enabled ? skipToken : async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { page_size: 1 }, signal })).data).count });
 }
 // A query that isn't ready to ask (no customer, firm or period yet) has skipToken for its queryFn: unlike enabled: false,
 // a refetch() or QueryView's Try again can't make it ask either, so it never asks for every firm or for customers/null/.
@@ -254,11 +255,11 @@ export function useItaxBills(customerId: number | null) {
   });
 }
 /** Customers whose name, phone or GSTIN has `term` in it (from 2 characters), with their last bill in any firm. */
-export function useCustomerSearch(term: string, { size = 8, enabled = true }: { size?: number; enabled?: boolean } = {}) {
-  const t = term.trim();
+export function useCustomerSearch(term: string, { size = 8, enabled = true, figures = true }: { size?: number; enabled?: boolean; figures?: boolean } = {}) {
+  const t = searchTerm(term);
   return useQuery({
-    queryKey: customerKeys.search(t, size), enabled: enabled && t.length >= 2, staleTime: 30_000,
-    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { search: searchTerm(t), figures: 1, page_size: size }, signal })).data).rows,
+    queryKey: customerKeys.search(t, size, figures), enabled: enabled && t.length >= 2, staleTime: 30_000,
+    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { search: t, ...(figures ? { figures: 1 } : {}), page_size: size }, signal })).data).rows,
   });
 }
 /** The five customers a firm billed last (never the walk-in record). Waits for the firm. */
@@ -347,7 +348,9 @@ export function deleteRefusal(error: unknown): string {
   const n = count(/(\d+) invoice\(s\) still reference/i) ?? (res?.status === 409 ? Number(obj(res.data).protected) : NaN);
   if (Number.isFinite(n) && n > 0) return `Has ${plural(n, "bill")}. Merge it into the right customer instead.`;
   const p = problemOf(error);
-  if (p.kind === "offline") return "Not deleted: you're offline. Nothing was changed; try again when the internet is back.";
-  if (p.kind === "unreachable" || p.kind === "server") return "Not deleted: the app couldn't get through. Nothing was changed; try again in a minute.";
+  if (p.kind === "offline" || p.kind === "unreachable" || p.kind === "server") {
+    const words = failText(p, "deleted");
+    return `${words.title}. ${words.body}`;
+  }
   return p.message;
 }

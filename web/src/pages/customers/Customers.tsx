@@ -1,7 +1,7 @@
 // Customers: everyone the firms bill, with this year's sales in the firm picked (PROTO pages/records/Customers.jsx).
 // Every figure names its period and firms, and the summary line follows the filters. No balances: the app doesn't
 // record payments received. The duplicate-customers banner ("Review and merge") comes with Merge in part 4.
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowUpDown, Download, MoreVertical, Search, SlidersHorizontal, Upload, UserPlus, Users, X } from "lucide-react";
 import {
@@ -12,8 +12,8 @@ import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, dateShort, mobileText, plural, todayIST } from "@/core/format";
-import { stateOptions, stateTitle } from "@/core/ids";
-import { failText } from "@/core/sales/words";
+import { hasGstin, stateOptions, stateTitle } from "@/core/ids";
+import { failText, waitingReason } from "@/core/sales/words";
 import { useFirms, useScope } from "@/core/scope";
 import {
   Badge, Button, ButtonLink, Card, EmptyState, Field, IconButton, ListRow, ListSkeleton, Menu, Money, Page, QueryView, SearchInput, Segmented, Select, Sheet, StaleNote,
@@ -66,7 +66,9 @@ function useCustomersPage() {
   const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
   const filters: CustomerListFilters = { firmId: worded ? firmId : null, from: period.from, to: period.to, q: term, gst, state, usualFirm: usual, sort };
   const list = useCustomerList(filters);
-  const everyone = useCustomerCount();
+  const filtered = Boolean(term || gst !== "any" || state || usual !== null);
+  const everyone = useCustomerCount(filtered);
+  const searchRef = useRef<HTMLInputElement>(null);
   const pages = list.data?.pages ?? [];
   const rows = once(pages.flatMap((p) => p.rows));
   const count = pages[0]?.count ?? 0;
@@ -95,11 +97,11 @@ function useCustomersPage() {
   const saved = useCustomer(waiting ? justSaved : null);
   const shown: CustomerRow[] = waiting && saved.data ? [{ ...saved.data, figures: null }, ...rows.slice(0, Math.max(0, rows.length - 1))] : rows;
   const noteMore = useMoreFocus(shown.map((c) => c.id));
-  const total = everyone.data ?? count;
+  const total = filtered ? everyone.data ?? count : count;
   return {
     firms, firmId, setFirmId, period, q, setQ, term, gst, setGst, state, setState, usual, setUsual, sort, setSort, list, shown, count, total, summary,
     more: () => { noteMore(); void list.fetchNextPage(); },
-    chips, clearAll, describe, justSaved, ready, failed, actionsOn, offline: net === "offline",
+    chips, clearAll, searchRef, describe, justSaved, ready, failed, actionsOn, offline: net === "offline",
     // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
     // list of firms (still coming, or failed) it waits even for all firms, as the file names each customer's usual firms
     exportable: actionsOn && named && !firmsLoading && !firmsFailed,
@@ -194,7 +196,7 @@ function NoMatch({ d }: { d: D }) {
   return (
     <EmptyState icon={Search} title={q ? `No customer matches “${q}”` : "No customers match these filters"}
       actions={<>
-        <Button onClick={d.clearAll}>Clear search and filters</Button>
+        <Button onClick={() => { d.clearAll(); d.searchRef.current?.focus(); }}>Clear search and filters</Button>
         {q && can("customer.edit") ? <ButtonLink variant="primary" icon={UserPlus} to={`/customers/new?from=list&${box}=${encodeURIComponent(value)}`}>{`Add “${q}” as a customer`}</ButtonLink> : null}
       </>}>
       Search looks at names, phone numbers and GSTINs{d.chips.length ? `, inside the filters: ${d.chips.map((c) => c.label).join(", ")}` : ""}.
@@ -207,7 +209,7 @@ function DesktopCustomers({ d }: { d: D }) {
   const { can, whyNot } = useAuth();
   const navigate = useNavigate();
   const exp = useExport(d);
-  const away = d.offline ? "Needs the internet" : "Waits for the list to load";
+  const away = waitingReason(d.offline, d.failed, "list");
   const firmCol = typeof d.firmId === "number" ? ` · ${scopeName(d.firms, d.firmId, true)}` : "";
   return (
     <Page icon={Users} title="Customers"
@@ -222,7 +224,7 @@ function DesktopCustomers({ d }: { d: D }) {
       {!can("customer.edit") ? <WhyNote className="-mt-3">{whyNot("customer.edit", "add or change customers")}</WhyNote> : null}
       <Card pad={false}>
         <div className="flex flex-wrap items-center gap-3 px-5 pt-4 pb-3">
-          <SearchInput value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers (press /)" className="w-[300px]" data-page-search="" />
+          <SearchInput inputRef={d.searchRef} value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers (press /)" className="w-[300px]" data-page-search="" />
           <Segmented label="GSTIN" options={GST_OPTS} value={d.gst} onChange={d.setGst} />
           <Select aria-label="State" value={d.state} onChange={(e) => d.setState(e.target.value)} className="w-[190px]" options={[{ value: "", label: "All states" }, ...stateOptions(d.home)]} />
           <Select aria-label="Usually billed by" value={d.usual === null ? "" : String(d.usual)} onChange={(e) => d.setUsual(e.target.value ? Number(e.target.value) : null)} className="w-[230px]"
@@ -233,10 +235,10 @@ function DesktopCustomers({ d }: { d: D }) {
         <div className={IN_CARD}>
           <Loaded d={d}>
             <div className="px-5 pb-3 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-sm border-b border-rule">
-              <p className="text-fg2">
+              <p role="status" className="text-fg2">
                 <span className="font-semibold text-fg">{d.count === d.total ? plural(d.count, "customer") : `${d.count} of ${plural(d.total, "customer")} match`}</span>
                 {d.describe ? <span> · {d.describe}</span> : null}
-                {d.describe ? <button type="button" onClick={d.clearAll} className="link ml-2">Clear</button> : null}
+                {d.describe ? <button type="button" onClick={() => { d.clearAll(); d.searchRef.current?.focus(); }} className="link ml-2">Clear</button> : null}
               </p>
               {d.summary ? (
                 <p className="text-muted">
@@ -269,10 +271,10 @@ function DesktopCustomers({ d }: { d: D }) {
                             <Link to={`/customers/${c.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand">{c.name}</Link>
                             {c.type === "walkin" ? <Badge>Cash sales without a name</Badge> : null}
                           </span>
-                          <span className="block text-xs text-muted tnum mt-0.5">{mobileText(c.mobile_number) || (c.type === "walkin" ? "No name or phone kept" : "No phone")}<span className="xl:hidden">{c.gst_number ? ` · ${c.gst_number}` : ""}{igst ? ` · ${stateTitle(c.state_name)}, IGST` : ""}</span></span>
+                          <span className="block text-xs text-muted tnum mt-0.5">{mobileText(c.mobile_number) || (c.type === "walkin" ? "No name or phone kept" : "No phone")}<span className="xl:hidden">{hasGstin(c.gst_number) ? ` · ${c.gst_number}` : " · No GSTIN"}{igst ? ` · ${stateTitle(c.state_name)}, IGST` : ""}</span></span>
                         </Td>
                         <Td className="hidden xl:table-cell">
-                          {c.gst_number ? <span className="tnum">{c.gst_number}</span> : <span className="text-muted">No GSTIN</span>}
+                          {hasGstin(c.gst_number) ? <span className="tnum">{c.gst_number}</span> : <span className="text-muted">No GSTIN</span>}
                           <span className="block text-xs text-muted mt-0.5">{stateTitle(c.state_name) || "No state"}{igst ? " · IGST on bills" : ""}</span>
                         </Td>
                         <Td align="right">{!f ? UNKNOWN : f.bills ? <Money value={f.total} /> : <span className="text-muted">No bills</span>}</Td>
@@ -301,25 +303,26 @@ function PhoneCustomers({ d }: { d: D }) {
   const navigate = useNavigate();
   const exp = useExport(d);
   const [sheet, setSheet] = useState(false);
+  const filtersRef = useRef<HTMLButtonElement>(null);
   const sortLabel = SORTS.find((s) => s.value === d.sort)!.label;
   const chip = "inline-flex items-center gap-1.5 min-h-11 px-3.5 rounded-full border whitespace-nowrap shrink-0 transition-[background-color,border-color,transform] duration-150 active:scale-[0.97]";
   return (
     <Page title="Customers" phoneSubtitle={d.ready ? `${plural(d.total, "customer")} · ${d.period.label} sales · ${scopeName(d.firms, d.firmId, true)}` : d.offline ? "Waiting for the internet" : d.failed ? "The list didn't load" : "Loading…"}
       phoneActions={<Menu title="Customers" items={[
         { label: "Import customers", icon: Upload, disabled: !can("customer.edit"), hint: can("customer.edit") ? "From a spreadsheet, with a check before anything is added" : whyNot("customer.edit", "import customers"), onSelect: () => navigate("/import?type=customers") },
-        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.actionsOn ? d.exportWait : "Waits for the list to load", onSelect: () => void exp.run() },
+        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.actionsOn ? d.exportWait : waitingReason(d.offline, d.failed, "list"), onSelect: () => void exp.run() },
       ]} trigger={(p) => <IconButton {...p} label="Import or export customers" icon={MoreVertical} />} />}
-      actionBar={can("customer.edit") ? (d.failed && !d.actionsOn ? <Button variant="primary" size="lg" icon={UserPlus} disabled title="Needs the internet">Add customer</Button> : <ButtonLink to="/customers/new?from=list" variant="primary" size="lg" icon={UserPlus}>Add customer</ButtonLink>) : null}>
-      <SearchInput value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers" data-page-search="" />
+      actionBar={can("customer.edit") ? (d.failed && !d.actionsOn ? <Button variant="primary" size="lg" icon={UserPlus} disabled title={waitingReason(d.offline, d.failed, "list")}>Add customer</Button> : <ButtonLink to="/customers/new?from=list" variant="primary" size="lg" icon={UserPlus}>Add customer</ButtonLink>) : null}>
+      <SearchInput inputRef={d.searchRef} value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers" data-page-search="" />
       <FirmChips firms={d.firms} value={d.firmId} onChange={d.setFirmId} />
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar">
-        <button type="button" onClick={() => setSheet(true)} aria-haspopup="dialog" className={cn(chip, d.chips.length ? "bg-brand-sel border-brand text-brand font-semibold" : "bg-card border-line text-fg2")}>
+        <button ref={filtersRef} type="button" onClick={() => setSheet(true)} aria-haspopup="dialog" className={cn(chip, d.chips.length ? "bg-brand-sel border-brand text-brand font-semibold" : "bg-card border-line text-fg2")}>
           <SlidersHorizontal size={16} aria-hidden="true" />Filters{d.chips.length ? ` · ${d.chips.length}` : ""}
         </button>
         <Menu title="Sort customers" items={SORTS.map((s) => ({ label: s.label, checked: s.value === d.sort, onSelect: () => d.setSort(s.value) }))}
           trigger={(p) => <button {...p} type="button" className={cn(chip, "bg-card border-line text-fg2")}><ArrowUpDown size={16} aria-hidden="true" />{sortLabel}</button>} />
         {d.chips.map((f) => (
-          <button key={f.key} type="button" onClick={f.clear} aria-label={`Remove filter: ${f.label}`} className={cn(chip, "bg-brand-sel border-brand text-brand font-semibold")}>
+          <button key={f.key} type="button" onClick={(e) => { ((e.currentTarget.nextElementSibling as HTMLElement | null) ?? filtersRef.current)?.focus(); f.clear(); }} aria-label={`Remove filter: ${f.label}`} className={cn(chip, "bg-brand-sel border-brand text-brand font-semibold")}>
             {f.label}<X size={15} aria-hidden="true" />
           </button>
         ))}
@@ -327,7 +330,7 @@ function PhoneCustomers({ d }: { d: D }) {
       {!can("customer.edit") ? <WhyNote>{whyNot("customer.edit", "add or change customers")}</WhyNote> : null}
       <Loaded d={d}>
         <div className="flex flex-col gap-0.5 text-sm">
-          <p className="text-fg2"><span className="font-semibold text-fg">{d.count === d.total ? plural(d.count, "customer") : `${d.count} of ${d.total} match`}</span>{d.describe ? ` · ${d.describe}` : ""}</p>
+          <p role="status" className="text-fg2"><span className="font-semibold text-fg">{d.count === d.total ? plural(d.count, "customer") : `${d.count} of ${d.total} match`}</span>{d.describe ? ` · ${d.describe}` : ""}</p>
           {d.summary ? <p className="text-muted">Their sales · {d.period.label}: <Money value={d.summary.total} className="text-fg" /> in {plural(d.summary.bills, "bill")}{notCounted(d.summary.cancelled)}</p> : null}
         </div>
         <Card pad={false}>

@@ -2,13 +2,13 @@
 // mounted in a data router (useUnsavedGuard needs one) with the app's providers, a clock the test moves by hand, and what
 // a screen reader hears from a live region. Used by the *.test.tsx files beside it only.
 import { act, fireEvent, render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, createMemoryRouter, Outlet, RouterProvider, type RouteObject } from "react-router";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
 import { ScopeProvider } from "@/core/scope";
 import { ToastProvider } from "@/core/ui";
-import { stubAuth } from "@/test/render";
+import { stubAuth, testQueryClient } from "@/test/render";
 import { serve as serveAll, type Answer, type Call } from "@/test/server";
 
 export type { Answer, Call, Reply } from "@/test/server";
@@ -42,7 +42,7 @@ export function mount(routes: RouteObject[], entries: string[], { me, browser = 
   if (browser) window.history.replaceState(null, "", entries[0]);
   const router = browser ? createBrowserRouter(tree) : createMemoryRouter(tree, { initialEntries: entries, initialIndex: entries.length - 1 });
   const view = render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={testQueryClient()}>
       <AuthContext.Provider value={auth}><RoleContext.Provider value={auth.me?.role ?? null}>
         <RouterProvider router={router} />
       </RoleContext.Provider></AuthContext.Provider>

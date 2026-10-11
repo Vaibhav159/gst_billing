@@ -1,6 +1,7 @@
+import { testQueryClient } from "@/test/render";
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider, skipToken } from "@tanstack/react-query";
+import { QueryClientProvider, skipToken } from "@tanstack/react-query";
 import { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { serve, type Call, type Reply } from "@/test/server";
 import {
@@ -10,7 +11,7 @@ import {
 } from "./customers";
 
 function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const qc = testQueryClient();
   return { qc, wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> };
 }
 const ANIL = { id: 7, name: "Anil Gupta", address: "15 Demo Road", gst_number: "", businesses: [3], pan_number: null, mobile_number: "9829041122", email: null, state_name: "RAJASTHAN", created_at: "2025-08-04T11:00:00+05:30", customer_type: "", city: "Udaipur", type: "person", pan: "" };
@@ -18,7 +19,7 @@ const FILTERS: CustomerListFilters = { firmId: 3, from: "2026-04-01", to: "2026-
 /** A page of customers/ as the server answers it (contract §0.3). */
 const page = (results: unknown[], next: string | null = null) => ({ count: results.length, next, previous: null, results });
 
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 test("a customer reads the same whatever the server left out: the type and PAN are worked out as the server does", () => {
   expect(toCustomer(ANIL)).toMatchObject({ id: 7, pan_number: "", email: "", type: "person", businesses: [3] });
@@ -275,12 +276,26 @@ test("refusals read as the form's fields; a taken name and a customer with bills
   // bills in Sales and in the bin: the bills counted are the ones in Sales (`protected` adds the bin's)
   expect(deleteRefusal(refuse(409, { error: "Cannot delete: 2 invoice(s) still reference this record. Reassign or delete them first. 1 bill(s) in the bin reference it too.", protected: 3 }))).toBe("Has 2 bills. Merge it into the right customer instead.");
   const noReply = new AxiosError("Network Error", "ERR_NETWORK");
-  expect(deleteRefusal(noReply)).toBe("Not deleted: the app couldn't get through. Nothing was changed; try again in a minute.");
+  expect(deleteRefusal(noReply)).toBe("Not deleted: the app couldn't get through. Nothing was changed. Try again in a minute.");
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
-  expect(deleteRefusal(noReply)).toBe("Not deleted: you're offline. Nothing was changed; try again when the internet is back.");
+  expect(deleteRefusal(noReply)).toBe("Not deleted: you're offline. Nothing was changed. Try again when the internet is back.");
 });
 
 test("search asks for a phone number as its 10 digits, whatever is typed in front of it; part of a number as typed", () => {
   expect(["+91 98290 41122", "098290 41122", "91 98290 41122", "98290-41122", "+91 98290", "0982", "91 982", "Anil"].map(searchTerm))
     .toEqual(["9829041122", "9829041122", "9829041122", "9829041122", "98290", "0982", "91982", "Anil"]);
+});
+
+
+test("equivalent phone searches reuse the term sent to the server", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const calls = serve({ "GET customers/": page([ANIL]) });
+  const { wrapper: w } = wrapper();
+  const { result, rerender } = renderHook((term: string) => useCustomerSearch(term), { wrapper: w, initialProps: "+91 98290 41122" });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(result.current.isSuccess).toBe(true);
+  rerender("9829041122");
+  expect(result.current.isSuccess).toBe(true);
+  expect(calls).toHaveLength(1);
+  expect(result.current.isFetching).toBe(false);
 });

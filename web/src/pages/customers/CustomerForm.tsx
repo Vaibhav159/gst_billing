@@ -4,15 +4,16 @@
 // check character saves with a warning and stays B2B (part 1 design, decision 3). The GST registry lookup and Merge
 // come in part 4.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { flushSync } from "react-dom";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { AlertTriangle, Check, CheckCircle2, Info, UserPlus, UserRound } from "lucide-react";
-import { customerSaveErrors, useCustomerSearch, useSaveCustomer, useStatement, type Customer, type CustomerBody, type CustomerField } from "@/core/api/customers";
+import { customerKeys, customerSaveErrors, useCustomerSearch, useSaveCustomer, type Customer, type CustomerBody, type CustomerField, type Statement } from "@/core/api/customers";
 import type { ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, plural, possessive } from "@/core/format";
-import { checkGstin, cleanGstin, cleanPan, emailProblem, formatMobile, gstinPan, mobileDigits, mobileProblem, panProblem, stateLabel, stateOptions, stateTitle } from "@/core/ids";
+import { checkGstin, cleanGstin, cleanPan, emailProblem, formatMobile, gstinPan, gstinPlaceholder, hasGstin, mobileDigits, mobileProblem, panProblem, stateLabel, stateOptions, stateTitle } from "@/core/ids";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope, type Firm } from "@/core/scope";
 import { Banner, Button, ButtonLink, Card, ConfirmDialog, Field, Input, ListSkeleton, LoadError, Page, QueryView, Segmented, Select, scrollIntoViewSafe } from "@/core/ui";
@@ -35,7 +36,7 @@ function initialValues(existing: Customer | null, firms: Firm[], home: string, q
     const ticked = all.filter((id) => existing.businesses.includes(id));
     return {
       name: existing.name, phone: formatMobile(existing.mobile_number), email: existing.email, type: existing.type === "business" ? "business" : "person",
-      gstin: existing.gst_number, pan: existing.pan_number || gstinPan(existing.gst_number), address: existing.address, city: existing.city,
+      gstin: gstinPlaceholder(existing.gst_number) ? "" : existing.gst_number, pan: existing.pan_number || gstinPan(existing.gst_number), address: existing.address, city: existing.city,
       // in the table's spelling, as the picker and a GSTIN name it: a stored "JAMMU & KASHMIR" is the GSTIN's own state
       state: tableState(existing.state_name) || home, firms: ticked.length ? ticked : all,
     };
@@ -135,6 +136,7 @@ export default function CustomerForm() {
 type FormProps = { existing: Customer | null; firms: Firm[]; home: string; query: URLSearchParams; back: () => void; onDirty: (dirty: boolean) => void };
 function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
   const { isPhone } = useView();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const save$ = useSaveCustomer();
   const initial = useMemo(() => initialValues(existing, firms, home, query), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -183,25 +185,36 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
   const g = checkGstin(v.gstin);
   const gValid = g.status === "valid";
   // customers already on file: a name like this one (a search once typing pauses), the same phone, the same GSTIN
-  const nameTerm = useDebounced(v.name.trim().length >= 3 ? v.name.trim() : "");
-  const nameHits = useCustomerSearch(nameTerm);
-  const named = nameTerm === v.name.trim() ? (nameHits.data ?? []).filter((c) => c.id !== existing?.id) : [];
+  const nameChanged = !existing || v.name.trim().toLowerCase() !== existing.name.trim().toLowerCase();
+  const nameTerm = useDebounced(nameChanged && v.name.trim().length >= 3 ? v.name.trim() : "");
+  const nameHits = useCustomerSearch(nameTerm, { enabled: nameChanged });
+  const named = nameChanged && nameTerm === v.name.trim() ? (nameHits.data ?? []).filter((c) => c.id !== existing?.id) : [];
   const dupName = named.find((c) => c.name.trim().toLowerCase() === v.name.trim().toLowerCase()) ?? null;
   const suggestions = !existing && !dupName ? nameMatches(named, v.name) : [];
   const digits = mobileDigits(v.phone);
-  const { samePhone: dupPhone, sameGstin: dupGstin } = useOnFile(v.phone, v.gstin, existing?.id);
-  // the firms that have billed them (any year, cancelled bills too), under each firm card
-  const billedQ = useStatement(existing?.id ?? null, existing ? {} : null);
-  const billed = new Set((billedQ.data?.bills ?? []).map((b) => b.business));
+  const phoneChanged = !existing || v.phone !== initial.phone;
+  const gstinChanged = !existing || v.gstin !== initial.gstin;
+  const gstinStored = existing !== null && !gstinChanged;
+  const storedBusinessWithoutGstin = gstinStored && g.status === "empty" && v.type === "business" && v.type === initial.type;
+  const storedGstinWarning = gstinStored && hasGstin(v.gstin) && g.status === "invalid"
+    ? `“${v.gstin}” doesn't look like a GSTIN. It was on file and saves unchanged. Check it against their GST certificate.` : "";
+  const storedStateWarning = gValid && g.state !== v.state && gstinStored && v.state === initial.state
+    ? `The GSTIN is registered in ${stateLabel(g.state)}, but ${stateLabel(v.state)} is on file. It saves unchanged; check the state before making a bill.` : "";
+  const { samePhone: dupPhone, sameGstin: dupGstin } = useOnFile(phoneChanged ? v.phone : "", gstinChanged ? v.gstin : "", existing?.id);
+  // A page visited before may have left statements in the cache. Their bills prove a firm has billed them; a partial
+  // period or one firm's statement cannot prove another firm has no bills. Opening the form never fetches a statement.
+  const statements = existing ? qc.getQueriesData<Statement>({ queryKey: customerKeys.statement(existing.id, null).slice(0, 3) }) : [];
+  const billed = new Set(statements.flatMap(([, statement]) => statement?.bills.map((b) => b.business) ?? []));
+  const storedPlaceholder = existing && gstinPlaceholder(existing.gst_number) ? existing.gst_number : "";
 
   const errs: Partial<Record<CustomerField, string>> = {};
   if (!v.name.trim()) errs.name = "Enter the customer's name, as it should print on bills.";
   else if (dupName) errs.name = `There's already a customer called ${dupName.name}. Add the area or the father's name to tell them apart${dupName.city ? ` (like ${v.name.trim()}, ${dupName.city})` : ""}, or open ${dupName.name}.`;
-  if (mobileProblem(v.phone)) errs.phone = mobileProblem(v.phone);
+  if (phoneChanged && mobileProblem(v.phone)) errs.phone = mobileProblem(v.phone);
   if (emailProblem(v.email)) errs.email = emailProblem(v.email);
-  if (g.status === "short" || g.status === "invalid") errs.gstin = g.problem;
-  else if (v.type === "business" && g.status === "empty") errs.gstin = "A business customer needs its GSTIN: without one, its bills block GSTR-1. Add the GSTIN, or choose Person.";
-  if (gValid && g.state !== v.state) errs.state = `This GSTIN is registered in ${stateLabel(g.state)}. Pick that state, or check the GSTIN.`;
+  if ((g.status === "short" || g.status === "invalid") && !storedGstinWarning) errs.gstin = gstinStored ? `“${v.gstin}” isn't a GSTIN. Clear it, or type the GSTIN.` : g.problem;
+  else if (v.type === "business" && g.status === "empty" && !storedBusinessWithoutGstin) errs.gstin = "A business customer needs its GSTIN: without one, its bills block GSTR-1. Add the GSTIN, or choose Person.";
+  if (gValid && g.state !== v.state && !storedStateWarning) errs.state = `This GSTIN is registered in ${stateLabel(g.state)}. Pick that state, or check the GSTIN.`;
   // a PAN stored before v3 checked them (v2's imports kept "N/A") shows as it is, said in words of its own from the
   // start, as any save sends it and the server refuses it; what the person types gets the usual words
   const panStored = existing !== null && v.pan === existing.pan_number;
@@ -214,7 +227,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
     const has = (x: Values) => { const val = x[k as keyof Values]; return Array.isArray(val) ? true : Boolean(String(val ?? "").trim()); };
     return tried || (k === "name" && dupName) || (k === "pan" && panStored) || serverErrs[k] || (touched[k] && (k === "firms" || has(v) || has(initial))) ? errs[k] ?? "" : "";
   };
-  const gstinErr = errs.gstin && (tried || touched.gstin || v.gstin.length === 15 || serverErrs.gstin) ? errs.gstin : "";
+  const gstinErr = errs.gstin && (gstinStored || tried || touched.gstin || v.gstin.length === 15 || serverErrs.gstin) ? errs.gstin : "";
 
   const onGstin = (raw: string) => {
     const gstin = cleanGstin(raw);
@@ -261,7 +274,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
     setTried(true);
     setSaveError(null);
     const body: CustomerBody = {
-      name: v.name.trim().replace(/\s+/g, " "), mobile_number: digits, email: v.email.trim(), customer_type: v.type, gst_number: v.gstin,
+      name: v.name.trim().replace(/\s+/g, " "), mobile_number: existing && !phoneChanged ? existing.mobile_number : digits, email: v.email.trim(), customer_type: v.type, gst_number: v.gstin,
       pan_number: gValid ? gstinPan(v.gstin) : v.pan, address: v.address.trim(), city: v.city.trim(), state_name: v.state, businesses: v.firms,
     };
     // mutate's callbacks run only while this form is still on screen: an answer after the person left takes no one anywhere
@@ -311,7 +324,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
         <Card title="Customer">
           <div className={grid}>
             <Field label="Name" htmlFor={IDS.name} required error={show("name")} className={isPhone ? "" : "col-span-2"}>
-              <Input id={IDS.name} value={v.name} onChange={(e) => set("name")(e.target.value)} onBlur={touch("name")} autoComplete="off" autoFocus={!existing && !isPhone && !query.get("focus")}
+              <Input id={IDS.name} value={v.name} maxLength={255} onChange={(e) => set("name")(e.target.value)} onBlur={touch("name")} autoComplete="off" autoFocus={!existing && !isPhone && !query.get("focus")}
                 aria-describedby={desc("name", suggestions.length ? "cu-name-found" : null)} placeholder="As it should print on bills" />
               {suggestions.length ? (
                 <div id="cu-name-found" className="rounded-ctl border border-brand-line bg-brand-tint/50 anim-rise" role="status">
@@ -331,8 +344,10 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
               ) : null}
               {dupName ? <p className="text-sm text-fg2 anim-rise"><Link to={`/customers/${dupName.id}`} className="link">Open {dupName.name}</Link></p> : null}
             </Field>
-            <Field label="Type" hint={v.type === "business" ? "Bills go to GSTR-1 as B2B; the buyer can claim the GST." : "Bills go to GSTR-1 as B2C sales."}>
-              <Segmented label="Customer type" full options={[{ value: "person", label: "Person" }, { value: "business", label: "Business" }]} value={v.type} onChange={set("type")} />
+            <Field label="Type" htmlFor={IDS.type} error={show("type")} hint={v.type === "business" ? "Bills go to GSTR-1 as B2B; the buyer can claim the GST." : "Bills go to GSTR-1 as B2C sales."}>
+              <div id={IDS.type} role="group" aria-label="Type" tabIndex={-1} aria-invalid={show("type") ? true : undefined} aria-describedby={show("type") ? desc("type") : `${IDS.type}-hint`}>
+                <Segmented label="Customer type" full options={[{ value: "person", label: "Person" }, { value: "business", label: "Business" }]} value={v.type} onChange={set("type")} />
+              </div>
             </Field>
             <Field label="Mobile number" htmlFor={IDS.phone} error={show("phone")} hint={dupPhone && !show("phone") ? null : "10 digits. Bills are sent here on WhatsApp."}>
               <Input id={IDS.phone} type="tel" inputMode="numeric" autoComplete="off" value={v.phone} prefix="+91" placeholder="10-digit mobile" inputClassName="!pl-12 tnum"
@@ -356,10 +371,12 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
                 placeholder="15 characters" inputClassName="tnum tracking-wide uppercase placeholder:normal-case placeholder:tracking-normal" invalid={Boolean(gstinErr)} aria-describedby={`${IDS.gstin}-status`} maxLength={15} />
               <div id={`${IDS.gstin}-status`} aria-live="polite" className="min-h-5 flex flex-col gap-1">
                 {gstinErr ? <p key={`e-${gstinErr}`} className="text-sm text-neg anim-rise">{gstinErr}</p>
+                  : storedGstinWarning ? <p key="stored" className="text-sm text-brand">{storedGstinWarning}</p>
                   : g.status === "valid" ? <p key="ok" className="text-sm text-sale flex items-center gap-1.5 anim-rise"><CheckCircle2 size={15} aria-hidden="true" />Valid GSTIN · {stateLabel(g.state)} · PAN {g.pan}</p>
                     : g.status === "check" ? <p key="check" className="text-sm text-brand flex items-start gap-1.5 anim-rise"><AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />{g.warning}</p>
                       : v.gstin ? <p key="typing" className="text-sm text-muted tnum">{v.gstin.length} of 15 characters</p>
-                        : <p key="empty" className="text-sm text-muted">The state and PAN fill in from it.</p>}
+                        : <p key="empty" className="text-sm text-muted">{storedPlaceholder ? `“${storedPlaceholder}” was on file; it means no GSTIN.` : "The state and PAN fill in from it."}</p>}
+                {storedBusinessWithoutGstin ? <p className="text-sm text-brand">This business has no GSTIN on file. It saves unchanged; add the GSTIN before making B2B bills.</p> : null}
               </div>
             </Field>
             <Field label="PAN" htmlFor={IDS.pan} error={show("pan")}
@@ -379,14 +396,14 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
 
         <Card title="Address" subtitle="Printed on bills. The state decides IGST or CGST + SGST.">
           <div className={grid}>
-            <Field label="Address" htmlFor={IDS.address} className={isPhone ? "" : "col-span-2"}>
-              <Input id={IDS.address} value={v.address} onChange={(e) => set("address")(e.target.value)} autoComplete="off" placeholder="House, street, area" />
+            <Field label="Address" htmlFor={IDS.address} error={show("address")} className={isPhone ? "" : "col-span-2"}>
+              <Input id={IDS.address} value={v.address} maxLength={255} onChange={(e) => set("address")(e.target.value)} autoComplete="off" placeholder="House, street, area" aria-describedby={desc("address")} />
             </Field>
             <Field label="City" htmlFor={IDS.city} error={show("city")}>
               <Input id={IDS.city} value={v.city} maxLength={100} onChange={(e) => set("city")(e.target.value)} autoComplete="off" aria-describedby={desc("city")} />
             </Field>
             <Field label="State" htmlFor={IDS.state} error={stateErr}
-              hint={stateNote && !errs.state ? null : v.state && v.state !== home ? `Outside ${homeTitle}: every firm's bills to this customer use IGST.` : `${homeTitle}: bills use CGST + SGST.`}>
+              hint={storedStateWarning || (stateNote && !errs.state ? null : v.state && v.state !== home ? `Outside ${homeTitle}: every firm's bills to this customer use IGST.` : `${homeTitle}: bills use CGST + SGST.`)}>
               <Select id={IDS.state} value={v.state} placeholder="Choose the state" onChange={(e) => { set("state")(e.target.value); setStateNote(null); }} options={states} />
               {stateNote && !errs.state ? <p key={stateNote.n} className="text-sm text-sale flex items-center gap-1.5 anim-rise"><CheckCircle2 size={15} aria-hidden="true" />{stateNote.text}</p> : null}
             </Field>
@@ -397,7 +414,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
           actions={<Button size="sm" variant="ghost" onClick={() => { set("firms")(allTicked ? [] : firms.map((x) => x.id)); touch("firms")(); }}>{allTicked ? "Untick all" : `Tick all ${firms.length}`}</Button>}>
           <div id={IDS.firms} tabIndex={-1} className="outline-none flex flex-col gap-2">
             <FirmToggles firms={firms} value={v.firms} onChange={(ids) => { set("firms")(ids); touch("firms")(); }} labelledBy="cu-firms-label" describedBy={show("firms") ? `${IDS.firms}-error` : undefined}
-              note={existing && billedQ.isSuccess ? (f) => (billed.has(f.id) ? `Has billed ${firstName(existing.name)}` : "No bills yet") : undefined} />
+              note={existing ? (f) => (billed.has(f.id) ? `Has billed ${firstName(existing.name)}` : null) : undefined} />
             {show("firms") ? <p id={`${IDS.firms}-error`} className="text-sm text-neg anim-rise">{show("firms")}</p>
               : <p className="text-sm text-muted">{allTicked ? `All ${firms.length} firms ticked.` : `${plural(v.firms.length, "firm")} ticked: ${firms.filter((f) => v.firms.includes(f.id)).map((f) => f.name).join(", ")}.`}</p>}
           </div>

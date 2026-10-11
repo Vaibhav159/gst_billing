@@ -2,9 +2,10 @@
 // always named (the FY picked in the top bar, or all time, both visible), with what was billed on udhaar explained.
 // A register, not a ledger: no balance is ever shown (PROTO pages/records/CustomerDetail.jsx). The page asks for the
 // customer's all-time statement in the firm picked once, and works out the year's figures from its bills, so switching
-// the period asks nothing. The income-tax notes are the server's flags (sales/?itax=1), never worked out again here.
+// the period asks nothing. Walk-in records ask for the FY first, and all time only when picked.
+// The income-tax notes are the server's flags (sales/?itax=1), never worked out again here.
 // Merge waits for part 4; sending a bill again happens on the bill (part 1B).
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   AlertTriangle, Ban, Banknote, ChevronDown, FileText, GitMerge, IdCard, Info, MapPin, MessageCircle, MoreHorizontal, MoreVertical, NotebookPen, Pencil, Plus, ReceiptText, RotateCw, Store,
@@ -15,14 +16,14 @@ import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { addMonths, date, dateShort, fyOf, inr, mobileText, monthLabel, monthOf, plural, possessive, todayIST } from "@/core/format";
-import { checkGstin, stateLabel } from "@/core/ids";
-import { dayOf, PAY, PAY_SHORT } from "@/core/sales/words";
-import { useFirms, useScope, type Firm } from "@/core/scope";
+import { checkGstin, hasGstin, stateLabel } from "@/core/ids";
+import { dayOf, PAY, PAY_SHORT, waitingReason } from "@/core/sales/words";
+import { useFirms, useScope } from "@/core/scope";
 import {
   Badge, Banner, Button, ButtonLink, Card, ConfirmDialog, DL, EmptyState, Figure, IconButton, ListRow, ListSkeleton, Menu, Money, Page, QueryView, Table, Td, Th, Tr, useToast, type MenuItem,
 } from "@/core/ui";
 import { useView } from "@/core/view";
-import { billsWithCancelled, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved, useMoreFocus, useRouteCustomer } from "./lib";
+import { billsWithCancelled, firmShort, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved, useMoreFocus, useRouteCustomer } from "./lib";
 import { MoreButton, useContact } from "./listParts";
 import { Bump, CopyButton, InfoCell, PeriodSwitch, QuickActions, type PeriodOption } from "./pageParts";
 import { MissingRecord, WhyNote } from "./parts";
@@ -72,40 +73,49 @@ function useDetail(c: Customer) {
   // firm's name and nothing says "the firm picked's". scope: the firm in words once it can be worded, its name or "All
   // firms"; "the firm picked" when that list failed
   const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
-  const st = useStatement(c.id, !worded ? null : typeof firmId === "number" ? { business_id: firmId } : {});
+  const dated = c.type === "walkin" && period === "fy";
+  const st = useStatement(c.id, !worded ? null : {
+    ...(typeof firmId === "number" ? { business_id: firmId } : {}),
+    ...(dated ? { start_date: fyP.from, end_date: fyP.to } : {}),
+  });
   const itax = useItaxBills(c.id);
-  const all = st.data?.bills ?? [];
-  const inFy = all.filter((b) => b.invoice_date >= fyP.from && b.invoice_date <= fyP.to);
-  const fyFig = figures(inFy);
-  const allFig = figures(all);
-  const fig = period === "fy" ? fyFig : allFig;
-  const bills = [...(period === "fy" ? inFy : all)].sort(newestFirst);
+  const detail = useMemo(() => {
+    const statement = st.data;
+    const all = statement?.bills ?? [];
+    const inFy = all.filter((b) => b.invoice_date >= fyP.from && b.invoice_date <= fyP.to);
+    const fyFig = figures(inFy);
+    const allFig = figures(all);
+    const fig = period === "fy" ? fyFig : allFig;
+    const bills = [...(period === "fy" ? inFy : all)].sort(newestFirst);
+    // "Customer since" is the record's own date (Call 20). All time runs from the first bill when that's older: a bill
+    // copied in from Tally before the record was made here
+    const since = dayOf(c.created_at);
+    const first = firstDate(all);
+    const allFrom = first && (!since || first < since) ? first : since;
+    const last = [...allFig.active].sort(newestFirst)[0] ?? null;
+    // loaded: figures to show, fresh or kept after asking again failed. ready: fresh, which is what Delete goes by
+    const loaded = statement !== undefined;
+    const plabel = period === "fy" ? fyP.label : "All time";
+    const allRange = allFrom ? `since ${date(allFrom)}` : "";
+    const prange = period === "fy" ? fyP.range : allRange || "every year";
+    const options: PeriodOption<Period>[] = [
+      { value: "fy", title: fyP.label, sub: loaded ? `${fyP.range} · ${plural(fyFig.count, "bill")} · ${inr(fyFig.total)}` : fyP.range },
+      { value: "all", title: "All time", sub: [!dated ? allRange : "", loaded && !dated ? `${plural(allFig.count, "bill")} · ${inr(allFig.total)}` : ""].filter(Boolean).join(" · ") || "Every year" },
+    ];
+    // sales by month for the period, to one scale: the year's months so far, or from the first counted bill
+    const from = period === "fy" ? fyP.from : firstDate(allFig.active) ?? fyP.from;
+    const to = period === "fy" ? fyP.to : todayIST();
+    const trend: { ym: string; total: number; count: number }[] = [];
+    for (let m = monthOf(from); m <= monthOf(to); m = addMonths(m, 1)) {
+      const inMonth = fig.active.filter((b) => monthOf(b.invoice_date) === m);
+      trend.push({ ym: m, total: inMonth.reduce((s, b) => s + b.total_amount, 0), count: inMonth.length });
+    }
+    return { bills, fig, allFig, since, last, loaded, plabel, prange, options, trend };
+  }, [st.data, period, dated, fyP.from, fyP.to, fyP.label, fyP.range, c.created_at]);
+  const { bills, fig, allFig, since, last, loaded, plabel, prange, options, trend } = detail;
+  const ready = st.isSuccess;
   const shown = bills.slice(0, limit);
   const noteMore = useMoreFocus(shown.map((b) => b.id));
-  // "Customer since" is the record's own date (Call 20). All time runs from the first bill when that's older: a bill
-  // copied in from Tally before the record was made here
-  const since = dayOf(c.created_at);
-  const first = firstDate(all);
-  const allFrom = first && (!since || first < since) ? first : since;
-  const last = [...allFig.active].sort(newestFirst)[0] ?? null;
-  // loaded: figures to show, fresh or kept after asking again failed. ready: fresh, which is what Delete goes by
-  const loaded = st.data !== undefined;
-  const ready = st.isSuccess;
-  const plabel = period === "fy" ? fyP.label : "All time";
-  const allRange = allFrom ? `since ${date(allFrom)}` : "";
-  const prange = period === "fy" ? fyP.range : allRange || "every year";
-  const options: PeriodOption<Period>[] = [
-    { value: "fy", title: fyP.label, sub: loaded ? `${fyP.range} · ${plural(fyFig.count, "bill")} · ${inr(fyFig.total)}` : fyP.range },
-    { value: "all", title: "All time", sub: [allRange, loaded ? `${plural(allFig.count, "bill")} · ${inr(allFig.total)}` : ""].filter(Boolean).join(" · ") || "Every year" },
-  ];
-  // sales by month for the period, to one scale: the year's months so far, or from the first counted bill
-  const from = period === "fy" ? fyP.from : firstDate(allFig.active) ?? fyP.from;
-  const to = period === "fy" ? fyP.to : todayIST();
-  const trend: { ym: string; total: number; count: number }[] = [];
-  for (let m = monthOf(from); m <= monthOf(to); m = addMonths(m, 1)) {
-    const inMonth = fig.active.filter((b) => monthOf(b.invoice_date) === m);
-    trend.push({ ym: m, total: inMonth.reduce((s, b) => s + b.total_amount, 0), count: inMonth.length });
-  }
   const home = homeState(firms, firmId);
   const taxWay: TaxWay = !c.state_name || !home ? null : tableState(c.state_name) !== home ? "igst" : "local";
   return {
@@ -117,15 +127,13 @@ function useDetail(c: Customer) {
     inScope: typeof firmId === "number" && scope ? ` in ${scope}` : "",
     usual: firms.filter((f) => c.businesses.includes(f.id)),
     // why what needs the bills (Delete) is off until they come: what happened, and what to do
-    away: offline ? "Needs the internet" : st.isError ? "The bills didn't load. Use Try again." : "Waits for the bills to load",
+    away: waitingReason(offline, st.isError),
   };
 }
 type D = ReturnType<typeof useDetail>;
 
 /** A statement bill as WhatsApp's "Resend <last bill>" names it. */
 const asLast = (b: StatementBill | null): LastBill | null => (b ? { id: b.id, invoice_number: b.invoice_number, invoice_date: b.invoice_date, total_amount: b.total_amount, business: b.business } : null);
-/** The firm a bill is from, by its short name (the server's name until the list of firms comes). */
-const firmShort = (firms: Firm[], b: StatementBill) => firms.find((f) => f.id === b.business)?.short ?? b.business_name;
 /** "GST charged"'s caption. */
 const gstCaption = (d: D) => (!d.fig.count ? "No bills" : d.taxWay === "igst" ? "IGST" : d.taxWay === "local" ? "CGST + SGST" : "CGST + SGST or IGST");
 
@@ -198,7 +206,7 @@ function ScopeBanner({ d }: { d: D }) {
   // one firm's bills, said once its name (or the list of firms' failure) is known
   if (typeof d.firmId !== "number" || !d.scope) return null;
   return (
-    <Banner tone="muted" icon={Store} title={`Showing ${d.whose} bills only`} actions={<Button size="sm" onClick={() => d.setFirmId("all")}>Show all firms</Button>}>
+    <Banner tone="muted" icon={Store} title={`Showing ${d.whose} bills only`} actions={<Button size="sm" onClick={() => { d.setFirmId("all"); document.querySelector<HTMLElement>("[data-page-title]")?.focus(); }}>Show all firms</Button>}>
       The firm picker decides which bills these figures count.
     </Banner>
   );
@@ -294,7 +302,7 @@ function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: strin
   };
   return (
     <ConfirmDialog open={open} busy={del.isPending} busyLabel="Deleting…" onClose={() => { onClose(); setError(null); }} onConfirm={go} tone="danger" title={`Delete ${c.name}?`} confirmLabel="Delete customer"
-      record={[["Customer", c.name], ["Phone", mobileText(c.mobile_number) || "No phone"], ["GSTIN", c.gst_number || "No GSTIN"], ["Bills", bills]]}
+      record={[["Customer", c.name], ["Phone", mobileText(c.mobile_number) || "No phone"], ["GSTIN", hasGstin(c.gst_number) ? c.gst_number : "No GSTIN"], ["Bills", bills]]}
       extra={error ? <p role="alert" className="text-sm text-neg">{error}</p> : null}>
       <p>It goes off the customer list and the bill form. The Audit log can bring it back.</p>
     </ConfirmDialog>
@@ -305,7 +313,7 @@ function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: strin
 function GstinProblem({ c, className }: { c: Customer; className?: string }) {
   const { can } = useAuth();
   const g = checkGstin(c.gst_number);
-  if (!c.gst_number || g.status === "valid") return null;
+  if (!hasGstin(c.gst_number) || g.status === "valid") return null;
   return (
     <span className={cn("text-neg", className)}>
       {g.status === "check" ? "Its last character doesn't match, so you may have mistyped one character." : "It doesn't look like a GSTIN."}
@@ -322,12 +330,12 @@ function IdCell({ c, className }: { c: Customer; className?: string }) {
   const g = checkGstin(c.gst_number);
   const pan = c.pan || (g.status === "valid" ? g.pan : "");
   const panLine = pan ? <span className="flex items-center gap-1">PAN <span className="tnum">{pan}</span><CopyButton value={pan} label="PAN" /></span> : null;
-  const sub = !c.gst_number ? (c.pan ? "No GSTIN" : "Needed for a bill over ₹2,00,000")
+  const sub = !hasGstin(c.gst_number) ? (c.pan ? "No GSTIN" : "Needed for a bill over ₹2,00,000")
     : g.status === "valid" ? panLine
       : <>{panLine}<GstinProblem c={c} /></>;
   return (
-    <InfoCell className={className} label={c.gst_number ? "GSTIN · B2B bills" : "PAN · B2C bills"} sub={sub}>
-      {c.gst_number ? <span className="flex items-center gap-1"><span className="tnum">{c.gst_number}</span><CopyButton value={c.gst_number} label="GSTIN" /></span>
+    <InfoCell className={className} label={hasGstin(c.gst_number) ? "GSTIN · B2B bills" : "PAN · B2C bills"} sub={sub}>
+      {hasGstin(c.gst_number) ? <span className="flex items-center gap-1"><span className="tnum">{c.gst_number}</span><CopyButton value={c.gst_number} label="GSTIN" /></span>
         : c.pan ? <span className="flex items-center gap-1"><span className="tnum">{c.pan}</span><CopyButton value={c.pan} label="PAN" /></span> : <span className="text-muted">No GSTIN or PAN</span>}
     </InfoCell>
   );
@@ -479,7 +487,7 @@ function PhoneDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: () =
           <DL rows={[
             ["Phone", k.tel ? <a key="p" href={k.tel} className="tnum text-brand underline-offset-2 hover:underline inline-flex items-center min-h-11">{mobileText(c.mobile_number)}</a> : <span key="p" className="tnum">{mobileText(c.mobile_number) || "No phone"}</span>],
             c.email ? ["Email", <span key="e" className="break-all">{c.email}</span>] : null,
-            ["GSTIN", c.gst_number ? (
+            ["GSTIN", hasGstin(c.gst_number) ? (
               <span key="g">
                 <span className="inline-flex items-center gap-0.5 tnum">{c.gst_number}<CopyButton value={c.gst_number} label="GSTIN" /></span>
                 <GstinProblem c={c} className="block text-xs" />

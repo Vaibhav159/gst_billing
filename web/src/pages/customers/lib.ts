@@ -2,10 +2,10 @@
 // its home in core: PAY, PAY_SHORT, cancelledNote and failText in @/core/sales/words, useDebounced in @/core/useDebounced.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router";
-import { useCustomer, useCustomerSearch, type Customer, type CustomerRow, type PaidAs } from "@/core/api/customers";
+import { useCustomer, useCustomerSearch, type Customer, type CustomerRow, type PaidAs, type StatementBill } from "@/core/api/customers";
 import { problemOf } from "@/core/api/errors";
 import { mobileText, plural, rangeLabel, todayIST } from "@/core/format";
-import { checkGstin, GST_STATES, looksLikePhone, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
+import { checkGstin, hasGstin, GST_STATES, looksLikePhone, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
 import { cancelledNote } from "@/core/sales/words";
 import type { Firm, FirmId } from "@/core/scope";
 import { useDebounced } from "@/core/useDebounced";
@@ -69,7 +69,7 @@ export function openOnEnter(open: () => void) {
 /** "98290 41122 · GSTIN 08AB… · Udaipur, Rajasthan", or the walk-in's line (PROTO sales/lib.js customerLine). */
 export function customerLine(c: Pick<Customer, "type" | "mobile_number" | "gst_number" | "city" | "state_name">): string {
   if (c.type === "walkin") return "Counter sale · no name or GSTIN on the bill";
-  return [mobileText(c.mobile_number) || "No phone", c.gst_number ? `GSTIN ${c.gst_number}` : "No GSTIN", `${c.city || "City not set"}${c.state_name ? `, ${stateTitle(c.state_name)}` : ""}`].join(" · ");
+  return [mobileText(c.mobile_number) || "No phone", hasGstin(c.gst_number) ? `GSTIN ${c.gst_number}` : "No GSTIN", `${c.city || "City not set"}${c.state_name ? `, ${stateTitle(c.state_name)}` : ""}`].join(" · ");
 }
 
 /**
@@ -105,10 +105,10 @@ export function useRouteCustomer() {
 export function useOnFile(phone: string, gstin: string, except?: number): { samePhone: CustomerRow | null; sameGstin: CustomerRow | null } {
   const digits = mobileDigits(phone);
   const phoneTerm = useDebounced(digits.length === 10 ? digits : "");
-  const phoneHits = useCustomerSearch(phoneTerm, { size: 5 });
+  const phoneHits = useCustomerSearch(phoneTerm, { size: 5, figures: false });
   const g = checkGstin(gstin).status;
   const gTerm = useDebounced(g === "valid" || g === "check" ? gstin : "");
-  const gHits = useCustomerSearch(gTerm, { size: 5 });
+  const gHits = useCustomerSearch(gTerm, { size: 5, figures: false });
   const other = (c: CustomerRow) => c.id !== except;
   return {
     samePhone: phoneTerm && phoneTerm === digits ? (phoneHits.data ?? []).find((c) => other(c) && mobileDigits(c.mobile_number) === digits) ?? null : null,
@@ -189,3 +189,6 @@ export function safeReturn(v: string | null): string | null {
 
 /** Hands a file to the person: the browser downloads it as `name` (core/print's saveFile, the app's one copy: Ruling 1E-6). */
 export { saveFile as downloadFile } from "@/core/print/files";
+
+/** The firm a bill is from, by its short name (the server's name until the list of firms comes). */
+export const firmShort = (firms: Firm[], b: Pick<StatementBill, "business" | "business_name">) => firms.find((f) => f.id === b.business)?.short ?? b.business_name;

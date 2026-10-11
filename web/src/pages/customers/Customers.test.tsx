@@ -58,7 +58,7 @@ const textOf = (b: Blob) => new Promise<string>((resolve) => { const r = new Fil
 test("the list names its period and firm, and each row its sales, bills, last bill and udhaar; the summary counts the matches", async () => {
   const calls = serve({ "GET customers/": list() });
   mount(routes, ["/customers"]);
-  expect(await screen.findByText("29 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), KIRAN GOLD HOUSE")).toBeInTheDocument();
+  expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), KIRAN GOLD HOUSE")).toBeInTheDocument();
   const table = screen.getByRole("table", { name: "Customers" });
   const anil = within(table).getByText("Anil Gupta").closest("tr")!;
   expect(anil).toHaveTextContent("98290 41122");
@@ -71,7 +71,7 @@ test("the list names its period and firm, and each row its sales, bills, last bi
   expect(kulkarni).toHaveTextContent("No bills yet");
   expect(kulkarni).toHaveTextContent("Maharashtra · IGST on bills");
   expect(within(table).getByText("Cash sales without a name")).toBeInTheDocument();
-  expect(screen.getByText("3 of 29 customers match")).toBeInTheDocument();
+  expect(screen.getByText("3 customers")).toBeInTheDocument();
   // (the cancelled-bills words are Selling's own, @/core/sales/words: Ruling 1C-8)
   expect(screen.getByText(/Their sales · FY 2026-27 · KIRAN GOLD HOUSE:/)).toHaveTextContent("₹1,74,166.42 in 28 bills · 1 cancelled bill not counted · billed on udhaar: 2 bills, ₹12,000.00");
   expect(calls.find((c) => c.params.figures === 1)!.params).toMatchObject({ figures_business_id: 3, start_date: "2026-04-01", end_date: "2026-10-08", ordering: "-last_bill", page: 1, page_size: 20 });
@@ -88,7 +88,7 @@ test("a customer in the firm's own state isn't marked IGST, however the state wa
 test("search asks once typing pauses, a phone typed in groups as its digits; with no match it offers to add them", async () => {
   const calls = serve({ "GET customers/": (c: Call) => (c.params.search ? { status: 200, data: { count: 0, next: null, results: [], summary: { ...SUMMARY, customers: 0, bills: 0, total: "0.00" } } } : list()(c)) });
   mount(routes, ["/customers"]);
-  await screen.findByText("3 of 29 customers match");
+  await screen.findByText("3 customers");
   const box = screen.getByRole("searchbox", { name: "Search customers (press /)" });
   handClock();
   typeQuickly(box, "98290 41122");
@@ -114,7 +114,7 @@ test("search asks once typing pauses, a phone typed in groups as its digits; wit
 test("Add … as a customer puts what was typed where it belongs: a phone number in Mobile, a GSTIN in GSTIN, anything else in the name", async () => {
   serve({ "GET customers/": (c: Call) => (c.params.search ? { status: 200, data: { count: 0, next: null, results: [], summary: { ...SUMMARY, customers: 0, bills: 0, total: "0.00" } } } : list()(c)) });
   mount(routes, ["/customers"]);
-  await screen.findByText("3 of 29 customers match");
+  await screen.findByText("3 customers");
   const box = screen.getByRole("searchbox", { name: "Search customers (press /)" });
   handClock();
   for (const [typed, href] of [
@@ -132,7 +132,7 @@ test("Add … as a customer puts what was typed where it belongs: a phone number
 test("a search that can't get through keeps the search box and what was typed, says so with Try again, and clearing it brings the list back", async () => {
   const calls = serve({ "GET customers/": (c: Call) => (c.params.search ? { status: 503 } : list()(c)) });
   mount(routes, ["/customers"]);
-  await screen.findByText("3 of 29 customers match");
+  await screen.findByText("3 customers");
   const box = screen.getByRole("searchbox", { name: "Search customers (press /)" });
   act(() => box.focus());
   handClock();
@@ -216,7 +216,7 @@ test("a Show more that fails says so where it was pressed, and Try again asks fo
   // it isn't a failed refresh: the rows on screen are as they were
   expect(screen.queryByText("Couldn't refresh customers")).not.toBeInTheDocument();
   expect(screen.getByText("Anil Gupta")).toBeInTheDocument();
-  expect(screen.getByText(/^29 customers · sales figures for FY 2026-27/)).toBeInTheDocument();
+  expect(screen.getByText(/^21 customers · sales figures for FY 2026-27/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Export 21 customers" })).toBeEnabled();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.getAllByText("Anil Gupta")).toHaveLength(2));
@@ -228,11 +228,12 @@ test("a refresh that fails keeps the rows where they are, focus included, and sa
   let failing = false;
   serve({ "GET customers/": (c: Call) => (failing && c.params.figures === 1 ? { status: 503 } : list()(c)) });
   mount(routes, ["/customers"]);
-  await screen.findByText("3 of 29 customers match");
+  await screen.findByText("3 customers");
   const table = screen.getByRole("table", { name: "Customers" });
   const anil = within(table).getByRole("link", { name: "Anil Gupta" });
   act(() => anil.focus());
-  // back from a dropped connection, TanStack asks for the list again, and this time the server can't answer
+  // Once the app's 30-second freshness window has passed, reconnecting asks for the list again.
+  vi.setSystemTime(Date.now() + 30_001);
   failing = true;
   act(() => { onlineManager.setOnline(false); });
   act(() => { onlineManager.setOnline(true); });
@@ -264,7 +265,7 @@ test("when the list of firms can't load, the figures never say “All firms” f
   localStorage.setItem("gst3.scope.1", "3");
   serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/": list() });
   mount(routes, ["/customers"]);
-  expect(await screen.findByText("29 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), the firm picked")).toBeInTheDocument();
+  expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), the firm picked")).toBeInTheDocument();
   expect(screen.getByText(/Their sales · FY 2026-27 · the firm picked:/)).toBeInTheDocument();
   expect(screen.queryByText(/All firms/)).not.toBeInTheDocument();
   const exp = screen.getByRole("button", { name: "Export 3 customers" });
@@ -276,7 +277,7 @@ test("with all firms picked, Export still waits when the list of firms can't loa
   localStorage.setItem("gst3.scope.1", "all");
   serve({ "GET businesses/": () => ({ status: 503 }), "GET customers/": list() });
   mount(routes, ["/customers"]);
-  expect(await screen.findByText("29 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), All firms")).toBeInTheDocument();
+  expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), All firms")).toBeInTheDocument();
   const exp = screen.getByRole("button", { name: "Export 3 customers" });
   expect(exp).toBeDisabled();
   expect(exp).toHaveAttribute("title", "The firms didn't load. Reload the page to export.");
@@ -302,7 +303,7 @@ test("on a phone, Export in the ⋯ menu waits for the list of firms too, and sa
   localStorage.setItem("gst3.scope.1", "all");
   serve({ "GET businesses/": () => new Promise(() => {}), "GET customers/": list() });
   mount(routes, ["/customers"]);
-  await screen.findByText("3 of 29 match");
+  await screen.findByText("3 customers");
   await userEvent.click(screen.getByRole("button", { name: "Import or export customers" }));
   const exp = await screen.findByRole("menuitem", { name: /Export 3 customers/ });
   expect(exp).toBeDisabled();
@@ -346,8 +347,9 @@ test("the figures wait for the firm's name, so they never show under another one
   const held = new Promise<void>((resolve) => { firmsCome = resolve; });
   const calls = serve({ "GET businesses/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
   mount(routes, ["/customers"]);
-  // the count, which doesn't wait for anything, has gone; the figures haven't
-  await waitFor(() => expect(calls.some((c) => c.params.page_size === 1)).toBe(true));
+  // No customer reads are needed before the firm is known, including an unfiltered count.
+  await waitFor(() => expect(calls.some((c) => c.url === "businesses/")).toBe(true));
+  expect(calls.some((c) => c.params.page_size === 1)).toBe(false);
   expect(calls.some((c) => c.params.figures === 1)).toBe(false);
   expect(screen.queryByText(/All firms/)).not.toBeInTheDocument();
   await act(async () => { firmsCome(); });
@@ -465,7 +467,7 @@ test("offline before the list came, it says so, with no count and nothing to exp
 test("offline, a new search keeps the rows already showing, says they're from before, and asks once the internet is back", async () => {
   const calls = serve({ "GET customers/": list() });
   mount(routes, ["/customers"]);
-  await screen.findByText("3 of 29 customers match");
+  await screen.findByText("3 customers");
   const box = screen.getByRole("searchbox", { name: "Search customers (press /)" });
   handClock();
   onlineManager.setOnline(false);
@@ -556,9 +558,69 @@ test("on a phone: firm chips, a Filters sheet whose picks show as chips, and Add
   const sheet = await screen.findByRole("dialog", { name: "Filter customers" });
   act(() => { vi.advanceTimersByTime(400); }); // past the sheet's guard against a double tap's second tap
   await userEvent.click(within(sheet).getByRole("radio", { name: "No GSTIN" }));
-  await waitFor(() => expect(calls.at(-1)!.params.has_gstin).toBe(0));
+  await waitFor(() => expect(calls.filter((c) => c.params.figures === 1).at(-1)!.params.has_gstin).toBe(0));
   await userEvent.click(within(sheet).getByRole("button", { name: "Show 3 customers" }));
   expect(await screen.findByRole("button", { name: "Remove filter: No GSTIN" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("radio", { name: "All firms" }));
   await waitFor(() => expect(calls.at(-1)!.params.figures_business_id).toBeUndefined());
+});
+
+
+test.each([false, true])("the list announces its count and skips an unfiltered count request (phone=%s)", async (phone) => {
+  handClock(); (window as unknown as { __phone?: boolean }).__phone = phone;
+  const calls = serve({ "GET customers/": list() });
+  mount(routes, ["/customers"]);
+  await pass(400);
+  expect(calls.filter((c) => c.url === "customers/")).toHaveLength(1);
+  expect(screen.getAllByRole("status").some((s) => s.textContent === "3 customers")).toBe(true);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Anil" } });
+  await pass(250);
+  expect(calls.filter((c) => c.params.page_size === 1)).toHaveLength(1);
+  expect(screen.getAllByRole("status").some((s) => s.textContent?.includes(phone ? "3 of 29 match" : "3 of 29 customers match"))).toBe(true);
+});
+
+test("a stored GSTIN placeholder displays as No GSTIN in the list", async () => {
+  handClock();
+  serve({ "GET customers/": list(1, [{ ...ANIL, gst_number: "URP", figures: FIG }]) });
+  mount(routes, ["/customers"]);
+  await pass(400);
+  const row = screen.getByText("Anil Gupta").closest("tr")!;
+  expect(row).toHaveTextContent("No GSTIN");
+  expect(row).not.toHaveTextContent("URP");
+});
+
+test.each(["Clear", "Clear search and filters"])("%s returns focus to search", async (label) => {
+  handClock();
+  serve({ "GET customers/": (c: Call) => c.params.has_gstin !== undefined && label !== "Clear" ? { status: 200, data: { count: 0, results: [] } } : list()(c) });
+  mount(routes, ["/customers"]);
+  await pass(400);
+  fireEvent.click(screen.getByRole("radio", { name: "No GSTIN" }));
+  await pass(0);
+  const button = screen.getByRole("button", { name: label });
+  act(() => button.focus()); fireEvent.click(button);
+  await pass(0);
+  expect(screen.getByRole("searchbox")).toHaveFocus();
+});
+
+test("removing a phone filter focuses the next chip, then Filters when no chip follows", async () => {
+  handClock(); (window as unknown as { __phone?: boolean }).__phone = true;
+  serve({ "GET customers/": list() });
+  mount(routes, ["/customers"]);
+  await pass(400);
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  await pass(400);
+  const sheet = screen.getByRole("dialog", { name: "Filter customers" });
+  fireEvent.click(within(sheet).getByRole("radio", { name: "No GSTIN" }));
+  fireEvent.change(within(sheet).getByRole("combobox", { name: "State" }), { target: { value: "RAJASTHAN" } });
+  await pass(0);
+  fireEvent.click(within(sheet).getByRole("button", { name: "Show 3 customers" }));
+  await pass(400);
+  const first = screen.getByRole("button", { name: "Remove filter: No GSTIN" });
+  act(() => first.focus()); fireEvent.click(first);
+  await pass(0);
+  const next = screen.getByRole("button", { name: "Remove filter: Rajasthan" });
+  expect(next).toHaveFocus();
+  fireEvent.click(next);
+  await pass(0);
+  expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
 });
