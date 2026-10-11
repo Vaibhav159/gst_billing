@@ -305,6 +305,24 @@ def build_gstr1(business, year, month, *, amendments=True):
     sections["by_rate"] = [{"rate": percent(rt), **wire_figures(row), "tax": money(sum((row[h] for h in HEADS), ZERO)),
                             "value": money(sum((row[h] for h in HEADS), row["taxable"])), "bills": len(row["ids"])}
                            for rt, row in sorted(by_rate.items())]
+    if amendments:
+        from billing.services.filing import pending_amendments
+
+        changes = pending_amendments(business, year, month)
+        extra = build_amendments(business, year, month, changes)
+        for section, rows in extra.items():
+            if section in ("gstin", "fp", "version", "hash"):
+                continue
+            if section in ("b2b", "b2cl"):
+                key = "ctin" if section == "b2b" else "pos"
+                groups = {r[key]: r for r in file_obj.get(section, [])}
+                for row in rows:
+                    groups.setdefault(row[key], {key: row[key], "inv": []})["inv"].extend(row["inv"])
+                file_obj[section] = list(groups.values())
+            else:
+                file_obj.setdefault(section, []).extend(rows)
+            if section in sections["amendments"]:
+                sections["amendments"][section] = sum(len(row.get("inv", [row])) for row in rows)
     return {"file": file_obj, "meta": {"business": business.name, "gstin": clean_gstin(business.gst_number),
                                       "fp": f"{month:02d}{year}", "invoice_counts": counts,
                                       "taxable_total": portal_number(totals["taxable"]),
