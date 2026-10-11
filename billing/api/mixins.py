@@ -35,6 +35,13 @@ def snapshot_of(instance) -> dict:
     return data
 
 
+def links_of(instance) -> dict:
+    """Many-to-many links (a customer's firms) kept beside a delete's snapshot, so a restore brings them back."""
+    links = {field.name: sorted(getattr(instance, field.name).values_list("pk", flat=True))
+             for field in instance._meta.many_to_many}
+    return {"_links": links} if links else {}
+
+
 def mark_undone(entry, user, log, via=None):
     """Spend an audit entry's Undo: v2's undo and v3's restore each mark it, so neither runs twice (H7).
 
@@ -123,7 +130,7 @@ class AuditLogMixin:
     def perform_destroy(self, instance):
         entity_name = self.get_entity_name(instance)
         entity_id = instance.pk
-        full_snapshot = self._full_snapshot(instance)
+        full_snapshot = {**self._full_snapshot(instance), **links_of(instance)}
         user = self.request.user
         super().perform_destroy(instance)
         try:

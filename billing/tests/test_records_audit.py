@@ -94,6 +94,23 @@ class AuditActionsTest(TestCase):
         self.assertEqual(Product.objects.get(pk=pk).name, "Unused gold")
         self.assertEqual(response.data["link"], f"/products/{pk}")
 
+    def test_undo_then_restore_keeps_a_customers_firms_and_added_date(self):
+        from datetime import datetime
+        from datetime import timezone as tz
+        shop = firm()
+        self.customer.businesses.add(shop)
+        added = datetime(2025, 1, 2, 3, 4, 5, tzinfo=tz.utc)
+        Customer.objects.filter(pk=self.customer.pk).update(created_at=added)
+        self.customer.refresh_from_db()
+        created = self.entry("created", self.customer)
+        undone = self.client.post(f"/api/audit/{created.pk}/undo/")
+        self.assertEqual(undone.status_code, 200, undone.data)
+        self.assertFalse(Customer.objects.filter(pk=self.customer.pk).exists())
+        restored = self.client.post(f"/api/audit/{undone.data['new_entry']['id']}/restore/")
+        self.assertEqual(restored.status_code, 200, restored.data)
+        back = Customer.objects.get(pk=self.customer.pk)
+        self.assertEqual((list(back.businesses.values_list("pk", flat=True)), back.created_at), ([shop.pk], added))
+
     def test_restore_name_collision_and_owner_only(self):
         entry = self.entry("deleted", self.customer)
         self.customer.delete()

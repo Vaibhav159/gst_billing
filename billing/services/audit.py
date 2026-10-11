@@ -6,7 +6,7 @@ from django.db.models import Count, Exists, F, OuterRef, Subquery
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import NotFound, ValidationError
 
-from billing.api.mixins import drop_settled_party_rows, mark_undone, snapshot_of
+from billing.api.mixins import drop_settled_party_rows, links_of, mark_undone, snapshot_of
 from billing.cache import uncached
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, InwardCapture, LineItem, Product
 from billing.refusals import Refusal
@@ -516,6 +516,18 @@ def snapshot_values(model, snapshot):
     return values
 
 
+def restore_kept(obj, snapshot):
+    """What a plain insert loses: the first-added date (auto_now_add) and many-to-many links still on file."""
+    from django.utils.dateparse import parse_datetime
+    added = parse_datetime(str(snapshot.get("created_at") or ""))
+    if added and any(field.name == "created_at" for field in obj._meta.concrete_fields):
+        uncached(type(obj)).filter(pk=obj.pk).update(created_at=added)
+        obj.created_at = added
+    for name, ids in (snapshot.get("_links") or {}).items():
+        field = obj._meta.get_field(name)
+        getattr(obj, name).set(uncached(field.related_model).filter(pk__in=ids).values_list("pk", flat=True))
+
+
 def act(entry_id, action, user):
     with transaction.atomic():
         entry = AuditLog.objects.select_for_update().filter(pk=entry_id).first()
@@ -574,7 +586,7 @@ def act(entry_id, action, user):
                     raise Refusal(f"{entry.entity_name} is in use, so it can't be deleted.", "in_use", uses=uses)
                 # Load a full row only for this explicit write's restorable snapshot.
                 obj = uncached(model).get(pk=obj.pk)
-                snapshot = snapshot_of(obj)
+                snapshot = {**snapshot_of(obj), **links_of(obj)}
                 drop_settled_party_rows(obj)
                 obj.delete()
                 new = AuditLog.objects.create(user=user, action="deleted", entity=entry.entity, entity_id=entry.entity_id,
@@ -610,6 +622,7 @@ def act(entry_id, action, user):
                     with transaction.atomic():
                         obj = model(pk=entry.entity_id, **snapshot_values(model, snapshot))
                         obj.save(force_insert=True)
+                        restore_kept(obj, snapshot)
                 except IntegrityError:
                     raise Refusal(f"A record called {entry.entity_name} was added since. Rename one of them first.", "name_taken", holder={"id": entry.entity_id, "name": entry.entity_name}) from None
                 new = AuditLog.objects.create(user=user, action="restored", entity=entry.entity, entity_id=obj.pk,
