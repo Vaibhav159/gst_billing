@@ -49,6 +49,32 @@ def test_two_thousand_bills_use_bounded_queries_and_finish_inside_budget():
     print(f"2000 bills: {len(queries)} queries, {elapsed:.2f}s ({connection.vendor})")
 
 
+def test_three_thousand_bills_into_fifteen_thousand_existing_stay_inside_budget():
+    owner = person("big-book-owner", "admin")
+    business, customer = firm(), buyer()
+    other = firm(name="OTHER GOLD", gstin="08ABCDE1234A2Z4")
+    existing = [Invoice(business=business if n % 3 else other, customer=customer, type_of_invoice="outward",
+                        invoice_number=str(5001 + n), invoice_date=date(2021 + n % 6, 6, 1))
+                for n in range(15000)]
+    Invoice.objects.bulk_create(existing, batch_size=1000)
+    data = many_bills(3000)
+    data["businesses"][0]["name"] = business.name
+    data["customers"][0]["name"] = customer.name
+    data["invoices"][0]["invoice_number"] = "5006"  # an existing number in the same year is still found
+    for row in data["invoices"]:
+        row["invoice_date"] = "2026-07-01"
+    started = monotonic()
+    answer = backup_restore.preview(upload(data))
+    planned = monotonic() - started
+    result = backup_restore.apply_restore(upload(data), answer["fingerprint"], owner)
+    elapsed = monotonic() - started
+    assert result["plan"]["bills"]["add_count"] == 2999
+    assert result["plan"]["bills"]["skip"][0] == {"name": "5006", "why": "already on file as 5006"}
+    assert Invoice.objects.count() == 17999
+    assert elapsed < 30, f"preview {planned:.2f}s, preview and apply {elapsed:.2f}s; P4-8 must stay well inside 60s"
+    print(f"3000 bills into 15000: preview {planned:.2f}s, total {elapsed:.2f}s ({connection.vendor})")
+
+
 def test_fingerprint_ignores_unrelated_invoice_edits_but_keeps_identity():
     owner = person("fingerprint-owner", "admin")
     existing = sale(firm(), buyer(), "9000", date(2026, 3, 31))
@@ -117,15 +143,15 @@ def test_large_backup_requires_each_year_preview_and_rejects_other_year_fingerpr
     data = many_bills(3001)
     for row in data["invoices"][1800:]:
         row["invoice_date"] = "2026-04-01"
-    overview = client.post("/api/backup/restore/preview/", {"file": upload(data)}, format="multipart")
+    with patch.object(backup_restore, "_plan", side_effect=AssertionError("the overview never plans")):
+        overview = client.post("/api/backup/restore/preview/", {"file": upload(data)}, format="multipart")
     assert overview.status_code == 200
+    assert set(overview.data) == {"file", "years", "fy"} and overview.data["fy"] is None
     assert overview.data["years"] == [
         {"fy": "2025-26", "bills": 1800, "words": "Adding 2025-26: 1,800 bills…"},
         {"fy": "2026-27", "bills": 1201, "words": "Adding 2026-27: 1,201 bills…"},
     ]
-    refusal = client.post("/api/backup/restore/", {
-        "file": upload(data), "fingerprint": overview.data["fingerprint"],
-    }, format="multipart")
+    refusal = client.post("/api/backup/restore/", {"file": upload(data), "fingerprint": "0" * 64}, format="multipart")
     assert refusal.status_code == 409 and refusal.data["code"] == "restore_year_required"
     first = client.post("/api/backup/restore/preview/", {"file": upload(data), "fy": "2025-26"}, format="multipart")
     assert first.data["plan"]["bills"]["add_count"] == 1800

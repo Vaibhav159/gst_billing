@@ -222,10 +222,46 @@ def _state():
     return state
 
 
-def _find(rows, row):
-    gstin = key(row.get("gst_number"))
-    return (next((r for r in rows if gstin and key(r.get("gst_number")) == gstin), None)
-            or next((r for r in rows if key(r["name"]) == key(row["name"])), None))
+class _Candidates:
+    """One kind's rows, indexed once: the first GSTIN match wins, then the first name match (P4-8)."""
+
+    def __init__(self, rows):
+        self.ids, self.gstins, self.names = set(), {}, {}
+        for row in rows:
+            self.add(row)
+
+    def add(self, row):
+        self.ids.add(row["id"])
+        if gstin := key(row.get("gst_number")):
+            self.gstins.setdefault(gstin, row)
+        self.names.setdefault(key(row["name"]), row)
+
+    def find(self, row):
+        gstin = key(row.get("gst_number"))
+        return (self.gstins.get(gstin) if gstin else None) or self.names.get(key(row["name"]))
+
+    def __contains__(self, row):
+        return row["id"] in self.ids
+
+
+class _Sales:
+    """Outward bills keyed by (firm, FY, number) and (firm, FY, number part); the first on file wins."""
+
+    def __init__(self, rows):
+        self.numbers, self.counters = {}, {}
+        for bill in rows:
+            self.add(bill)
+
+    def add(self, bill):
+        if bill["type_of_invoice"] != "outward" or bill["invoice_date"] is None:
+            return
+        place = (bill["business_id"], fy_of(bill["invoice_date"]))
+        self.numbers.setdefault((*place, key(bill["invoice_number"])), bill)
+        self.counters.setdefault((*place, counter_of(bill["invoice_number"])), bill)
+
+    def match(self, business, day, number):
+        place = (business, fy_of(day))
+        return self.numbers.get((*place, key(number))), self.counters.get((*place, counter_of(number)))
 
 
 def _purchase_match(firm, supplier, number, day):
@@ -338,7 +374,8 @@ def _plan(data, info, raw_hash):
     state = _state()
     plan = {kind: {"add": [], "skip": [], "fail": [], "add_count": 0, "skip_count": 0, "fail_count": 0} for kind in KINDS}
     ops, maps = {kind: [] for kind in KINDS}, {"firms": {}, "customers": {}}
-    candidates = {kind: list(state[kind]) for kind in MODELS}
+    candidates = {kind: _Candidates(state[kind]) for kind in MODELS}
+    live, binned_sales = _Sales(state["bills"]), _Sales(state["bin"])
     locked, months = [], {}
 
     def record(kind, action, name, why="", detail=""):
@@ -351,7 +388,7 @@ def _plan(data, info, raw_hash):
         for index, raw in enumerate(data[source]):
             row = _master(kind, raw, info["kind"] == "old_v3")
             name = row["name"]
-            hit = _find(candidates[kind], row)
+            hit = candidates[kind].find(row)
             if hit:
                 why = ("listed twice in the file" if isinstance(hit["id"], str) else
                        f"same GSTIN as {hit['name']}" if row.get("gst_number") and key(hit.get("gst_number")) == key(row["gst_number"]) else
@@ -370,7 +407,7 @@ def _plan(data, info, raw_hash):
                     if not isinstance(refs, list):
                         raise ValueError("businesses")
                     hit["_businesses"] = [matched["id"] for ref in refs if (matched := maps["firms"].get(("id", key(ref))))]
-                candidates[kind].append(hit)
+                candidates[kind].add(hit)
                 ops[kind].append(hit)
                 record(kind, "add", name)
             if hit and kind in maps:
@@ -389,7 +426,7 @@ def _plan(data, info, raw_hash):
         kind = "purchases" if row["purchase"] else "bills"
         firm = maps["firms"].get(("id", key(row["firm"]))) or maps["firms"].get(("name", key(row["firm_name"])))
         if not firm and row["firm_name"]:
-            firm = _find(candidates["firms"], {"name": row["firm_name"]})
+            firm = candidates["firms"].find({"name": row["firm_name"]})
         if not firm:
             record(kind, "fail", name, f"No firm called {row['firm_name'] or '(blank)'} on file or in the file")
             continue
@@ -408,7 +445,7 @@ def _plan(data, info, raw_hash):
         if row["purchase"]:
             supplier = maps["customers"].get(("id", key(row["customer"]))) or maps["customers"].get(("name", key(row["customer_name"])))
             if not supplier and row["customer_name"]:
-                supplier = _find(candidates["customers"], {"name": row["customer_name"], "gst_number": row["customer_gstin"]})
+                supplier = candidates["customers"].find({"name": row["customer_name"], "gst_number": row["customer_gstin"]})
                 supplier = supplier or {"id": f"new:purchase-supplier:{key(row['customer_name'])}",
                                         "name": row["customer_name"], "gst_number": row["customer_gstin"]}
             if supplier is None:
@@ -448,7 +485,7 @@ def _plan(data, info, raw_hash):
                 continue
             if supplier not in candidates["customers"]:
                 supplier["state_name"] = supplier.get("state_name", firm.get("state_name", ""))
-                candidates["customers"].append(supplier)
+                candidates["customers"].add(supplier)
                 ops["customers"].append(supplier)
                 record("customers", "add", supplier["name"])
             record("purchases", "add", name, detail=f"deleted {binned_purchase.deleted_at:%d %b %Y}; comes back from the bin" if binned_purchase else "")
@@ -460,18 +497,12 @@ def _plan(data, info, raw_hash):
             record("bills", "skip", name, "listed twice in the file")
             continue
         seen.add(marker)
-        series = [bill for bill in state["bills"] if bill["type_of_invoice"] == "outward" and
-                  bill["business_id"] == firm["id"] and fy_of(bill["invoice_date"]) == fy_of(day)]
-        existing = next((bill for bill in series if key(bill["invoice_number"]) == key(row["number"])), None)
-        clash = next((bill for bill in series if counter_of(bill["invoice_number"]) == counter_of(row["number"])), None)
+        existing, clash = live.match(firm["id"], day, row["number"])
         if existing or clash:
             why = f"already on file as {existing['invoice_number']}" if existing else f"same number part as {clash['invoice_number']} on file"
             record("bills", "skip", name, why)
             continue
-        binned = next((bill for bill in state["bin"] if bill["type_of_invoice"] == "outward" and bill["business_id"] == firm["id"] and fy_of(bill["invoice_date"]) == fy_of(day)
-                       and key(bill["invoice_number"]) == key(row["number"])), None)
-        binned_clash = next((bill for bill in state["bin"] if bill["type_of_invoice"] == "outward" and bill["business_id"] == firm["id"] and fy_of(bill["invoice_date"]) == fy_of(day)
-                             and counter_of(bill["invoice_number"]) == counter_of(row["number"])), None)
+        binned, binned_clash = binned_sales.match(firm["id"], day, row["number"])
         if binned_clash and not binned:
             record("bills", "skip", name, f"same number part as {binned_clash['invoice_number']} on file")
             continue
@@ -487,7 +518,7 @@ def _plan(data, info, raw_hash):
                 continue
         customer = maps["customers"].get(("id", key(row["customer"]))) or maps["customers"].get(("name", key(row["customer_name"])))
         if not customer and row["customer_name"]:
-            customer = _find(candidates["customers"], {"name": row["customer_name"], "gst_number": row["customer_gstin"]})
+            customer = candidates["customers"].find({"name": row["customer_name"], "gst_number": row["customer_gstin"]})
         if not customer and not row["customer_name"]:
             record("bills", "fail", name, "No customer name on the bill")
             continue
@@ -497,7 +528,7 @@ def _plan(data, info, raw_hash):
             if customer["gst_number"] and not valid_gstin(customer["gst_number"])[0]:
                 record("bills", "fail", name, f"Its GSTIN {customer['gst_number']} doesn't check out")
                 continue
-            candidates["customers"].append(customer)
+            candidates["customers"].add(customer)
             ops["customers"].append(customer)
             record("customers", "add", customer["name"])
         draft = Invoice(business=Business(**{k: v for k, v in firm.items() if k in {"name", "gst_number", "state_name"}}),
@@ -511,7 +542,9 @@ def _plan(data, info, raw_hash):
                                     if not field.is_relation}, ("product_name", "hsn_code", "unit", "note"))
         record("bills", "add", name, detail=f"deleted {binned['deleted_at']:%d %b %Y}; comes back from the bin" if binned else "")
         ops["bills"].append({**row, "day": day, "business": firm["id"], "buyer": customer["id"], "bin": binned["id"] if binned else None})
-        state["bills"].append({"id": None, "business_id": firm["id"], "invoice_date": day, "invoice_number": row["number"], "type_of_invoice": "outward"})
+        planned = {"id": None, "business_id": firm["id"], "invoice_date": day, "invoice_number": row["number"], "type_of_invoice": "outward"}
+        state["bills"].append(planned)
+        live.add(planned)
     for plural, action in (("adds", "add"), ("skips", "skip"), ("fails", "fail")):
         plan[plural] = sum(plan[kind][f"{action}_count"] for kind in KINDS)
     names = ("firm", "customer", "product", "sales bill", "purchase bill")
@@ -567,6 +600,9 @@ def _year_data(data, fy):
 
 def _preview(data, info, raw_hash, fy):
     selected, years = _year_data(data, fy)
+    if len(data["invoices"]) > 3000 and fy is None:
+        # Planning every year would outrun gunicorn; the overview only offers the years to walk.
+        return {"file": info, "years": years, "fy": None}, None
     try:
         answer, ops = _plan(selected, info, raw_hash + (fy or ""))
     except (ValueError, TypeError, InvalidOperation, ModelValidationError, OverflowError):
