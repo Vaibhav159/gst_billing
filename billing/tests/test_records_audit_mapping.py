@@ -141,3 +141,10 @@ class AuditMappingIntegrationTest(TestCase):
         capture.delete()
         row = self.request(AuditView, {"entity_id": str(entry.entity_id)}).data["results"][0]
         self.assertIsNone(row["link"])
+
+
+def test_product_kind_changes_read_as_the_picker_words():
+    from billing.models import Product
+    from billing.services.audit import change_rows
+    rows = change_rows(Product, {"kind": {"old": "gold", "new": None}, "purity": {"old": "", "new": "22K"}})
+    assert [(row["from"], row["to"]) for row in rows] == [("Gold", "Worked out from the name"), ("None", "22K")]

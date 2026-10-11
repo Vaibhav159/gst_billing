@@ -120,6 +120,24 @@ class FirmReadTests(TestCase):
         for column in ('"firm_snapshot"', '"source_file"', '"notes"', '"product_name"'):
             self.assertNotIn(column, sql)
 
+    @patch("billing.services.firms.timezone.localdate", return_value=date(2026, 10, 8))
+    def test_numbers_cost_a_small_fixed_count_per_firm(self, today):
+        def count():
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get("/api/firms/", {"numbers": "1"})
+            self.assertEqual(response.status_code, 200)
+            sql = " ".join(q["sql"] for q in queries)
+            for column in ('"firm_snapshot"', '"data"', '"product_name"'):
+                self.assertNotIn(column, sql)
+            return len(queries)
+        sale(self.firm, self.buyer, "1", "2026-09-01")
+        one = count()
+        for index in range(3):
+            extra = firm(name=f"FIRM {index}", short_name=f"F{index}", invoice_prefix=f"F{index}",
+                         gstin=["27AAPFU0939F1ZV", "29AAGCB7383J1Z4", "07AAACI1681G1ZM"][index])
+            sale(extra, self.buyer, "1", "2026-09-01")
+        self.assertLessEqual(count() - one, 3 * 4)
+
 class FirmWriteTests(TestCase):
     def setUp(self):
         self.owner = person("firm-writer", "admin")

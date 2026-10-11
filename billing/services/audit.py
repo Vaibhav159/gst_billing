@@ -76,8 +76,12 @@ def field_label(model, key):
 
 
 def value_words(key, value):
+    if key == "kind" and value in (None, "", "None"):
+        return "Worked out from the name"
     if value is None or value == "" or value == "None":
         return "None"
+    if key == "kind":
+        return dict(Product._meta.get_field("kind").choices).get(value, str(value))
     if key in {"usual_rate", "total_amount"}:
         try:
             return inr(Decimal(str(value)))
