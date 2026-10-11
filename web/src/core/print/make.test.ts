@@ -64,12 +64,13 @@ test("a firm's signature reaches the PDF as a data URL fetched through the app's
   expect(made()[0].bills[0].firm.signature).toBe(src);
 });
 
-test("a signature that can't be read prints none, and the next file asks for it again; only one that got no answer (offline, unreachable) may come by then", async () => {
-  const calls = serveWith((c) => (c.url.startsWith("media/signatures/later.png?") ? { status: 0 } : { status: 404 }));
+test("a signature that can't be read prints none, and the next file asks for it again; only one that got no answer, the proxy's for an app server that didn't (502, 503, 504) or the app's own error (500) may come by then", async () => {
+  const calls = serveWith((c) => ({ status: Number(/[?&]status=(\d+)/.exec(c.url)?.[1] ?? 404) }));
   expect(await signatureData("/api/media/signatures/gone.png?sig=a1")).toEqual({ src: null, again: false });
   expect(await signatureData("/api/media/signatures/gone.png?sig=b2")).toEqual({ src: null, again: false });
-  expect(await signatureData("/api/media/signatures/later.png?sig=a1")).toEqual({ src: null, again: true });
-  expect(calls).toHaveLength(3);
+  for (const status of [0, 500, 502, 503, 504]) expect(await signatureData(`/api/media/signatures/later${status}.png?status=${status}`)).toEqual({ src: null, again: true });
+  expect(await signatureData("/api/media/signatures/barred.png?status=403")).toEqual({ src: null, again: false });
+  expect(calls).toHaveLength(8);
 });
 
 test("a PDF made without a signature that can never be read, a file that's gone (404) or an image that won't decode, is kept: the next Download, Print or Share hands out the same file, with nothing fetched again", async () => {
@@ -84,10 +85,11 @@ test("a PDF made without a signature that can never be read, a file that's gone 
   expect(calls.map((c) => c.url)).toEqual(["media/signatures/gone.png?sig=a1", "media/signatures/odd.webp?sig=a1"]);
 });
 
-test("a PDF made while the firm's signature got no answer (offline, unreachable) is handed out but not kept: the next ask makes it again, with the signature", async () => {
+test.each([["no answer (offline, unreachable)", 0], ["the proxy's 502 for an app server that didn't answer", 502]])("a PDF made while the firm's signature got %s is handed out but not kept: the next ask makes it again, with the signature", async (_, status) => {
   let up = false;
-  serveWith((c) => (c.url.startsWith("media/signatures/later.png?") ? (up ? { status: 200, data: PNG } : { status: 0 }) : { status: 404 }));
-  const d = bill({ firm: { ...(wireDetail().firm as object), signature_url: "/api/media/signatures/later.png?sig=a1" } });
+  const path = `media/signatures/later${status}.png`; // its own: a signature read once is kept by its path
+  serveWith((c) => (c.url.startsWith(`${path}?`) ? (up ? { status: 200, data: PNG } : { status }) : { status: 404 }));
+  const d = bill({ firm: { ...(wireDetail().firm as object), signature_url: `/api/${path}?sig=a1` } });
   const without = await billFile(d, { copies: "original", showBank: true });
   expect(made()[0].bills[0].firm.signature).toBeNull();
   up = true;

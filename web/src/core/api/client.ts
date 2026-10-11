@@ -44,9 +44,13 @@ api.interceptors.request.use((config) => {
 
 /** The proxy answered for an app server that didn't: as good as no reply. */
 const APP_SERVER_DOWN = new Set([502, 503, 504]);
+/** No reply from the app: none at all, or only the proxy's for an app server that didn't answer. */
+export function noAppReply(error: AxiosError): boolean {
+  return !error.response || APP_SERVER_DOWN.has(error.response.status);
+}
 /** What a failed request says about the network: no reply, or only the proxy's, is unreachable; any other reply is reachable. */
 function noteFailure(error: AxiosError) {
-  if (!error.response || APP_SERVER_DOWN.has(error.response.status)) markUnreachable(error);
+  if (noAppReply(error)) markUnreachable(error);
   else markReachable();
 }
 

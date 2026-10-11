@@ -194,14 +194,16 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
 /**
  * Heights in points, each measured on BillDocument's own layout (react-pdf in Node, A4): the room inside the outer border,
  * the header parts, a line's row and every part of the last page, as react-pdf draws them. A Times line is 1.12 em: 10.08
- * pt at 9 pt, 9.52 at 8.5, 8.96 at 8, 8.4 at 7.5. No estimate counts less than the real height, so a page planned full
- * keeps `safety` free. The character counts are how many fit on one line of a column, on the short side (capitals are
- * wide), so a page is planned a little emptier rather than overfull. Names in bold count fewer: a business's name often
- * comes in capitals, as the GST portal spells it.
+ * pt at 9 pt, 9.52 at 8.5, 8.96 at 8, 8.4 at 7.5. No height here is less than the real one, so a page planned full keeps
+ * `safety` free as long as each text wraps on the lines its character count gives it. The character counts are how many
+ * fit on one line of a column, on the short side (capitals are wide), so a page is planned a little emptier rather than
+ * overfull. Names in bold count fewer: a business's name often comes in capitals, as the GST portal spells it.
  */
-// ponytail: the plan counts characters, not widths, so a line of capitals right at a count's edge (a 40-character item name
-// heavy in M and W) and a rate too wide for its narrow column (over ₹99,99,999) wrap unseen; `safety` holds about one
-// such line a page. Upgrade: measure each text with Times's own widths.
+// ponytail: the plan counts characters, not widths, so a text in capitals right at a count's edge wraps unseen: a 40-character
+// item name heavy in M and W, a 58-character address, a rate over ₹99,99,999 in its narrow column. `safety` (12 pt) holds one
+// such line a page and no more: an address prints in both party blocks, so one miss there costs 20.16 pt, and an item name
+// repeated on every line repeats its miss on each; either spills the page onto an unmarked sheet with a wrong "Page n of N".
+// A one-page bill has only `safety` to spare. Upgrade: measure each text with Times's own widths (its AFM), as react-pdf does.
 export const PAGE_FIT = {
   page: 800.49, title: 72.28, titleNext: 24.44, head: 27.16, closing: 20,
   /** A later page's header: its padding and rule, then a line of it (8.5 pt); a line of each half (271 pt) holds shortChars. */
@@ -221,7 +223,10 @@ export const PAGE_FIT = {
    * under them. The tax in words (466 pt) and a bank's value beside its label (148 pt) wrap in theirs.
    */
   footer: 169.56, hsnRow: 14.46, bank: 46.84, wordsChars: 100, taxWordsChars: 96, bankChars: 25,
-  /** A line of the footer's 8 pt text, and the signatory's box: 58 pt, or more for the firm's signature (30) and a long "for {firm}". */
+  /**
+   * A line of the footer's 8 pt text, and the signatory's box: 58 pt, or more for the firm's signature (30) and a long
+   * "for {firm}". BillDocument draws the box and the signature at these heights.
+   */
   footLine: 8.96, sign: 58, signature: 30,
   /** A line that holds a ₹ stands taller, as the ₹'s own font (Tinos, 1.1499 em) is taller than Times (1.12). */
   rupee: 1.027,

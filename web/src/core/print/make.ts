@@ -1,9 +1,9 @@
 // Making PDFs: one bill (memoised per answer from the server and per choice, so the print page, Send and Share don't
 // make the same file twice), or many bills in one file. react-pdf and the document load on demand, the first time a
 // PDF is made, so neither is in the app's first download (Ruling 1B-4).
+import { isAxiosError } from "axios";
 import { createElement, useEffect } from "react";
-import { api } from "@/core/api/client";
-import { problemOf } from "@/core/api/errors";
+import { api, noAppReply } from "@/core/api/client";
 import type { BillDetail, Copies } from "@/core/sales/types";
 import { copyPages, printBill, type PrintBill } from "./model";
 
@@ -14,8 +14,9 @@ export type PdfFile = { blob: Blob; name: string; sheets: number };
 /**
  * A firm's signature for the PDF. src: a data URL that react-pdf draws without fetching, a PNG or JPEG as it is and another
  * kind of image redrawn as PNG; null when there's none or it can't be read (the bill then prints without it, as v2's did).
- * again: it got no answer (offline, or the server unreachable), so it may come next time; an answer that isn't the image
- * (a file that's gone, 404) or an image that won't decode won't.
+ * again: it may come next time. It got no reply from the app (none at all, or only the proxy's 502, 503 or 504, as the
+ * api client reads them), or the app's own error (500): the server may be back by then. A refusal (a file that's gone,
+ * 404) or an image that won't decode won't.
  */
 export type Signature = { src: string | null; again: boolean };
 const signatures = new Map<string, Promise<Signature>>();
@@ -36,8 +37,7 @@ export function signatureData(url: string | null): Promise<Signature> {
     return { src: canvas.toDataURL("image/png"), again: false };
   })().catch((e: unknown) => {
     signatures.delete(key);
-    const { kind } = problemOf(e);
-    return { src: null, again: kind === "offline" || kind === "unreachable" };
+    return { src: null, again: isAxiosError(e) && (noAppReply(e) || (e.response?.status ?? 0) >= 500) };
   });
   signatures.set(key, p);
   return p;

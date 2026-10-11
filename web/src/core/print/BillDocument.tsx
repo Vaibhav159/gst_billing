@@ -5,7 +5,7 @@
 // demand (make.ts imports it), so react-pdf never reaches the app's first download.
 import type { ReactElement } from "react";
 import { Document, Image, Page, Path, StyleSheet, Svg, Text, View, type Styles } from "@react-pdf/renderer";
-import type { CopyMark, PrintBill, PrintPage, Run } from "./model";
+import { PAGE_FIT, type CopyMark, type PrintBill, type PrintPage, type Run } from "./model";
 import { RupeeText } from "./pdfRupee";
 import { qrPath } from "./qr";
 
@@ -65,7 +65,7 @@ const s = StyleSheet.create({
   bank: { padding: 5, borderBottom: B, fontSize: 8 },
   bankRow: { flexDirection: "row" },
   bankValue: { flexGrow: 1, flexBasis: 0 }, // a value too long for its column wraps in it, as on the paper on screen
-  sign: { padding: 5, minHeight: 58, justifyContent: "space-between", alignItems: "flex-end", fontSize: 8 },
+  sign: { padding: 5, minHeight: PAGE_FIT.sign, justifyContent: "space-between", alignItems: "flex-end", fontSize: 8 }, // the plan counts its height
   center: { textAlign: "center", paddingVertical: 3, fontSize: 7.5 },
   stamp: { position: "absolute", top: 380, left: 0, right: 0, alignItems: "center" },
   stampText: { transform: "rotate(-16deg)", border: "4pt solid #c62828", color: "#c62828", fontFamily: "Times-Bold", fontSize: 54, letterSpacing: 6, paddingHorizontal: 20, paddingVertical: 2, opacity: 0.8 },
@@ -191,7 +191,7 @@ function Footer({ b }: { b: PrintBill }) {
           ) : null}
           <View style={s.sign}>
             <Text style={s.bold}>for <RupeeText>{b.firm.name}</RupeeText></Text>
-            {b.firm.signature ? <Image src={b.firm.signature} style={{ width: 90, height: 30, objectFit: "contain" }} /> : null}
+            {b.firm.signature ? <Image src={b.firm.signature} style={{ width: 90, height: PAGE_FIT.signature, objectFit: "contain" }} /> : null}
             <Text>Authorised Signatory</Text>
           </View>
         </View>

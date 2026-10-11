@@ -201,9 +201,9 @@ test("an IGST bill's HSN summary heads its columns on one line, where a local bi
   expect(printBill(bill({ lines: rows(11) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([10, 1]);
 });
 
-test("a line that holds a ₹ stands as tall as the ₹'s own font makes it (Tinos, 1.15 em against Times's 1.12): 6 two-line names with a ₹ over 3 HSN groups break as 5 and 1, where without it they fit one page", () => {
+test("a line that holds a ₹ stands taller in the ₹'s own font (Tinos, 1.15 em against Times's 1.12), and the plan counts each line of a name with one so: 6 names of two lines in the PDF, with a ₹, over 3 HSN groups break as 5 and 1, where without it they fit one page", () => {
   const split = (name: string) => printBill(bill({ lines: rows(6, (i) => ({ product_name: `${name} ${i + 1}` })), hsn_summary: groups(3) }), { showBank: true }).pages.map((x) => x.lines.length);
-  expect([split("Gold Necklace ₹ motif 22K, Kundan and Meenakari work"), split("Gold Necklace 22K motif, Kundan and Meenakari work")]).toEqual([[5, 1], [6]]);
+  expect([split("Gold Necklace ₹ motif 22K, Kundan and Meenakari work with matching earrings"), split("Gold Necklace 22K motif, Kundan and Meenakari work with matching earrings")]).toEqual([[5, 1], [6]]);
 });
 
 test("the 14 boxes and a continued page's header hold one line each: a line break typed there reads as a space", () => {
