@@ -47,6 +47,9 @@ stop only processes you started, by PID.
   reuses it, so nothing in it imports a page. `fixtures.ts` is test data for every sales
   test. The GSTIN, PAN and mobile checks and the state table are `src/core/ids.ts`: build
   on them, never repeat them.
+- `src/pages/sales/` — the bills list (`list/`), the bill page (`bill/`), and a
+  bill's status, sending, menu and dialogs (`actions/`), which plans 1C–1E reuse;
+  beside them the bill form (`form/`), the paper book (`paper/`) and printing (`print/`).
 - `src/core/print/` — printing, which Easy reuses: what a Tally A4 bill says and where its pages
   break (`model.ts`), the PDF (`BillDocument.tsx`, react-pdf, which `make.ts` loads on demand), the
   paper on screen (`Paper.tsx`), the QR code (`qr.ts`), handing a file out (`files.ts`, the app's

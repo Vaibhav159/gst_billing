@@ -91,3 +91,16 @@ Pitfalls:
   `await opened(page)` from `session.js` before the first click inside it,
   however the page opened: a link, a tab, Back or `page.goto`. Clicks in the
   shell around the page (the top bar, the phone's tabs) aren't held back.
+- A spec that needs a bill makes it: `tests-v3/sales-data.js` reads the firms,
+  customers and next number at runtime and makes the bill through the API with
+  the saved session (`client(request)`, `newBill`, `walkIn`), then sends it to
+  the bin in a `finally` (`removeBill`). CI's database has no bills, so a spec
+  never assumes a seed id. A dialog also drops a click within 350 ms of opening:
+  `afterDialog(page)` waits it out. WhatsApp never opens: replace `window.open`
+  with `page.addInitScript` before the page loads, with a stand-in that returns
+  an object, since the app takes `null` for a tab the browser stopped and
+  records nothing.
+- Your own Vite in a worktree: start it with `--force` when its dependency
+  cache (`web/node_modules/.vite`) may be older than an import such as the PDF's
+  `qrcode`. Otherwise Vite optimizes that dependency the first time a page
+  needs it and reloads the page mid-test.

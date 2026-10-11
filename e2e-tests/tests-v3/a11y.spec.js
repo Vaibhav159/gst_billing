@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
-const { SIGNED_OUT } = require("./session");
+const { SIGNED_OUT, opened } = require("./session");
+const { afterDialog, client, newBill, removeBill, today } = require("./sales-data");
 
 /** What axe finds against WCAG 2.2 AA: each rule broken, with the elements that break it. */
 async function problems(page) {
@@ -73,6 +74,37 @@ const STATES = [
     },
   },
 ];
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// What needs a bill: one is made through the API for each check, and goes to the bin after it (sales-data.js).
+const BILL_STATES = [
+  {
+    name: "the bills list with a bill previewed", on: ["desktop"], path: (b) => `/sales?firm=${b.business}&month=today&bill=${b.id}`, landing: "/sales",
+    async show(page, b) { await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toBeVisible(); },
+  },
+  {
+    name: "a bill's page", on: ["desktop", "phone"], path: (b) => `/sales/${b.id}`,
+    async show(page) { await expect(page.getByText("Parties", { exact: true })).toBeVisible(); },
+  },
+  {
+    name: "the cancel dialog", on: ["desktop"], path: (b) => `/sales/${b.id}`,
+    async show(page, b) {
+      await opened(page);
+      await page.getByRole("button", { name: `More actions for ${b.number}`, exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Cancel bill…/ }).click();
+      await expect(page.getByRole("dialog", { name: `Cancel bill ${b.number}?`, exact: true })).toBeVisible();
+      await afterDialog(page);
+    },
+  },
+  {
+    name: "a deleted bill's page", on: ["desktop", "phone"], path: (b) => `/sales/${b.id}`, deleted: true,
+    async show(page) { await expect(page.getByText("This bill was deleted")).toBeVisible(); },
+  },
+  {
+    // a cancelled bill's card among the month's bills, its muted words included (1B Task 8)
+    name: "the phone's bills with a cancelled one", on: ["phone"], path: (b) => `/sales?firm=${b.business}&month=${today().slice(0, 7)}`, landing: "/sales", cancelled: true,
+    async show(page, b) { await expect(page.getByRole("link", { name: new RegExp(`^${esc(b.customerName)}, ${esc(b.number)}, .*, cancelled$`) })).toBeVisible(); },
+  },
+];
 
 for (const theme of ["obsidian", "pearl"]) {
   for (const { path, ...lands } of PAGES) {
@@ -91,6 +123,24 @@ for (const theme of ["obsidian", "pearl"]) {
       await show(page);
       await settle(page);
       expect(await problems(page)).toEqual([]);
+    });
+  }
+  for (const { name, on, path, landing, deleted, cancelled, show } of BILL_STATES) {
+    test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
+      test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
+      const api = client(request);
+      const b = await newBill(api);
+      try {
+        if (cancelled) await api.post(`sales/${b.id}/cancel/`, { reason: "Test bill" });
+        if (deleted) await removeBill(api, b.id);
+        const at = path(b);
+        await openIn(page, theme, at, landing ?? at);
+        await show(page, b);
+        await settle(page);
+        expect(await problems(page)).toEqual([]);
+      } finally {
+        await removeBill(api, b.id);
+      }
     });
   }
 }

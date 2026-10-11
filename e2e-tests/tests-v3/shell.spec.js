@@ -82,9 +82,7 @@ test.describe(() => {
     await opened(page);
     await page.getByRole("link", { name: /products/i }).click();
     await expect(page).toHaveURL(/\/products$/);
-    // Back once the new page has taken focus (its title): the frame focuses a page 90 ms after it opens, and a Back
-    // quicker than that can see the late focus land on the title of the page it returns to (a known race in PageFrame)
-    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    // Back at once: the page that closes can't take the focus back from the link that opened it (Ruling 60)
     await page.goBack();
     await expect(page.getByRole("link", { name: /products/i })).toBeFocused();
     await opened(page);
