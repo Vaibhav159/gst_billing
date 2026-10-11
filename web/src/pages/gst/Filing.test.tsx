@@ -230,3 +230,42 @@ test('relock names failed checks and still permits locking the recorded figures'
   fireEvent.click(screen.getByRole('button', { name: 'Lock September' }));
   expect(submit).toHaveBeenCalledWith({ business: 3, month: '2026-09' });
 });
+
+test('a check that fails after GSTR-1 is filed is not shown as the next step', () => {
+  const blocker = { kind: 'hsn' as const, blocks: true, text: 'A line has no HSN code', detail: '', bills: [], more_bills: 0, customer: null, suggested: null };
+  const m = month({ stage: 'gstr1', checks: { blockers: [blocker], notes: [], passes: [] } }); m.record.gstr1 = filing('gstr1');
+  const view = renderApp(<FilingCard month={m} onAction={vi.fn()} />);
+  const steps = screen.getByRole('list', { name: 'Filing steps' });
+  expect(steps.querySelector('[aria-current="step"]')).toHaveTextContent(/GSTR-3B/);
+  expect(steps).not.toHaveTextContent(/^Fix 1 check/);
+  view.unmount();
+  m.stage = 'filed'; m.record.gstr3b = filing('gstr3b');
+  renderApp(<FilingCard month={m} onAction={vi.fn()} />);
+  expect(screen.getByRole('list', { name: 'Filing steps' }).querySelector('[aria-current="step"]')).toBeNull();
+});
+
+test('moving a late GSTR-3B to on time offers to clear the recorded late fee and interest', () => {
+  const record = filing('gstr3b'), submit = vi.fn(); record.filed_on = '2026-10-24'; record.late_fee = 25000; record.interest = 1849;
+  renderApp(<FilingDialog month={corrected()} kind="gstr3b" record={record} onClose={vi.fn()} onSubmit={submit} />); ready();
+  fireEvent.change(screen.getByLabelText('GSTR-3B filed on'), { target: { value: '19 Oct 2026' } });
+  fireEvent.blur(screen.getByLabelText('GSTR-3B filed on'));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'GSTR-3B is now on time: clear the late fee and interest recorded (₹268.49)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save filing details' }));
+  expect(submit).toHaveBeenCalledWith({ business: 3, month: '2026-09', kind: 'gstr3b', filed_on: '2026-10-19', arn: record.arn, late_fee: null, interest: null });
+});
+
+test('the GSTR-1A summary shows the correction, not the whole month', () => {
+  renderApp(<FilingDialog month={corrected()} kind="gstr1a" onClose={vi.fn()} onSubmit={vi.fn()} />); ready();
+  expect(screen.getByText('Tax change since GSTR-1').parentElement).toHaveTextContent('+₹3.00');
+  expect(screen.queryByText('Tax on sales')).not.toBeInTheDocument();
+});
+
+test('amendment bills open through an in-app link, and a legacy month without a plan corrects in the next GSTR-1', () => {
+  const view = renderApp(<AmendCard month={corrected()} onAction={vi.fn()} />);
+  expect(screen.getByRole('link', { name: 'Open the bill' })).toHaveAttribute('href', '/sales/405');
+  view.unmount();
+  const m = corrected(); m.amendments = null; m.record = { ...m.record, gstr1: null, legacy: true };
+  renderApp(<AmendCard month={m} onAction={vi.fn()} />);
+  expect(screen.getByText("Both returns filed · corrections go in October's GSTR-1")).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Mark GSTR-1A filed…' })).not.toBeInTheDocument();
+});

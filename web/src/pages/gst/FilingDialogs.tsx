@@ -30,6 +30,7 @@ export function FilingDialog({ month: m, kind, record, busy = false, error, onCl
   const [interest, setInterest] = useState<number | null>(record?.interest ?? null);
   const [include1a, setInclude1a] = useState(false);
   const [acked, setAcked] = useState(false);
+  const [clearCharges, setClearCharges] = useState(false);
   const [tried, setTried] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
@@ -59,8 +60,9 @@ export function FilingDialog({ month: m, kind, record, busy = false, error, onCl
       if (!record || (showCredit && touched.credit_left && (!record.credit_left || HEADS.some(h => credit[h] !== record.credit_left![h])))) {
         payment.credit_left = showCredit ? { igst: paiseToDecimal(credit.igst!), cgst: paiseToDecimal(credit.cgst!), sgst: paiseToDecimal(credit.sgst!) } : null;
       }
-      if (!record || (late && lateFee !== record.late_fee)) payment.late_fee = late && lateFee != null ? paiseToDecimal(lateFee) : null;
-      if (!record || (late && interest !== record.interest)) payment.interest = late && interest != null ? paiseToDecimal(interest) : null;
+      // Moving a late return to on time hides the charge fields; the recorded charges stay unless the user asks to clear them.
+      if (!record || (late ? lateFee !== record.late_fee : clearCharges && record.late_fee != null)) payment.late_fee = late && lateFee != null ? paiseToDecimal(lateFee) : null;
+      if (!record || (late ? interest !== record.interest : clearCharges && record.interest != null)) payment.interest = late && interest != null ? paiseToDecimal(interest) : null;
     }
     onSubmit({ business: m.business, month: m.month, kind, filed_on: filed, arn,
       ...(kind === 'both' ? { gstr1_filed_on: g1, gstr1_arn: arn1 } : {}),
@@ -76,7 +78,7 @@ export function FilingDialog({ month: m, kind, record, busy = false, error, onCl
   const changed = m.download?.changed.map((x) => x.invoice_number).join(', ');
   return <Dialog open onClose={busy ? () => {} : onClose} title={title} size="md" footer={<><Button onClick={onClose} disabled={busy}>Cancel</Button><Button variant="primary" loading={busy} disabled={!can('gst.file') || (!record && !acked) || (tried && bad)} onClick={submit}>{busy ? record ? 'Saving…' : 'Marking filed…' : error ? 'Try again' : record ? 'Save filing details' : cashReturn ? 'Mark filed and lock' : `Mark ${labels[kind]} filed`}</Button></>}>
     <div className="flex flex-col gap-3">
-      <div className="rounded-ctl border border-line bg-field px-4 py-1"><DL rows={[["Firm", `${m.firm.name} · ${m.firm.gst_number}`], ['Month', monthLabel(m.month, { long: true })], ['Sales bills', `${m.gstr1?.bills ?? 0} · ${inr(m.gstr1?.total ?? 0)}`], [cashReturn ? 'Tax to pay in cash' : 'Tax on sales', inr(cashReturn ? worked : m.gstr1?.tax ?? 0)]]} /></div>
+      <div className="rounded-ctl border border-line bg-field px-4 py-1"><DL rows={[["Firm", `${m.firm.name} · ${m.firm.gst_number}`], ['Month', monthLabel(m.month, { long: true })], ['Sales bills', `${m.gstr1?.bills ?? 0} · ${inr(m.gstr1?.total ?? 0)}`], kind === 'gstr1a' ? ['Tax change since GSTR-1', inr(m.since_filing?.tax_diff ?? 0, { sign: true })] : [cashReturn ? 'Tax to pay in cash' : 'Tax on sales', inr(cashReturn ? worked : m.gstr1?.tax ?? 0)]]} /></div>
       <p className="text-fg2">{record ? 'The figures as filed stay the same. The change goes in the Audit log with the old and new details.' : kind === 'gstr1' ? `This locks ${name}'s sales bills against edits, cancels and deletes, and keeps GSTR-1 as filed. Purchases stay open for GSTR-3B, due ${date(m.due.gstr3b)}.` : kind === 'gstr1a' ? `This keeps GSTR-1A's corrected figures as filed. File GSTR-3B after GSTR-1A.` : `This locks ${name}: sales, purchases and credit. Every figure is kept as filed; ${next} carries on from it.`}</p>
       {failedChecks ? <Banner tone="neg" title={`${plural(m.checks.blockers.length, 'check')} ${m.checks.blockers.length === 1 ? 'fails' : 'fail'} for ${name}`}><ul className="list-disc pl-4">{m.checks.blockers.map((b, i) => <li key={i}>{b.text}</li>)}</ul><span className="block mt-1">Mark it only if the return is already on the portal (your CA may have filed with the fix made there). The portal file stays blocked here until the checks pass.</span></Banner> : null}
       {!record && (kind === 'gstr1' || kind === 'both') && m.prev_gstr3b_missing ? <Banner tone="muted" title="Previous return not on record">{monthLabel(m.prev_gstr3b_missing, { long: true, year: false })}'s GSTR-3B isn't marked filed. The portal takes {name}'s GSTR-1 only after it.</Banner> : null}
@@ -88,6 +90,7 @@ export function FilingDialog({ month: m, kind, record, busy = false, error, onCl
         {cashReturn ? <><Field label="Cash paid with GSTR-3B" htmlFor="mf-cash" error={show('cash_total')} hint={cash === worked ? `What the app worked out for ${name}.` : `The app worked out ${inr(worked)}. What you type is kept as paid.`}><MoneyInput id="mf-cash" value={cash} onChange={setCash} /></Field>
           {showCredit ? <Disclosure title="Credit left on the portal after this return" defaultOpen><p className="text-sm text-muted mb-3">The cash differs from the app's working, so the credit left on the portal may differ too. Copy it from the portal's electronic credit ledger.</p><div className="grid grid-cols-1 sm:grid-cols-3 gap-3">{HEADS.map((h) => <Field key={h} label={`${h.toUpperCase()} credit`} htmlFor={`mf-credit-${h}`} error={show(`credit_left.${h}`)}><MoneyInput id={`mf-credit-${h}`} value={credit[h]} onChange={(value) => { setCredit((old) => ({ ...old, [h]: value })); setTouched((old) => ({ ...old, credit_left: true })); }} /></Field>)}</div></Disclosure> : null}
           {late ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Late fee paid" htmlFor="mf-fee" hint="Optional. Kept as paid; separate from the tax." error={error?.fields?.late_fee}><MoneyInput id="mf-fee" value={lateFee} onChange={setLateFee} /></Field><Field label="Interest paid" htmlFor="mf-interest" hint="Optional. Kept as paid; separate from the tax." error={error?.fields?.interest}><MoneyInput id="mf-interest" value={interest} onChange={setInterest} /></Field></div> : null}
+          {record && !late && (record.late_fee != null || record.interest != null) ? <Checkbox label={`GSTR-3B is now on time: clear the late fee and interest recorded (${inr((record.late_fee ?? 0) + (record.interest ?? 0))})`} checked={clearCharges} onChange={setClearCharges} /> : null}
         </> : null}
         {!record ? <Checkbox label={ack} checked={acked} onChange={setAcked} /> : null}
       </fieldset>
