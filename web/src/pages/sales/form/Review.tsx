@@ -33,9 +33,10 @@ export function focusReview(): void {
 
 /**
  * onSave: the form's save (it takes the person to a field the server refused); numberId: the number box, for "Change the
- * number"; waiting: the save waits for the draft's last change to reach the shop's list (up to a request's 100 s).
+ * number"; onChangeNumber opens the phone's sheet before focus moves. waiting: the save waits for the draft's last
+ * change to reach the shop's list (up to a request's 100 s).
  */
-export function Review({ F, checks, numberId, onSave, waiting = false }: { F: BillFormApi; checks: CheckRow[]; numberId: string; onSave: (numberOverride?: string) => void; waiting?: boolean }) {
+export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = false }: { F: BillFormApi; checks: CheckRow[]; numberId: string; onSave: (numberOverride?: string) => void; onChangeNumber?: () => void; waiting?: boolean }) {
   const { isPhone } = useView();
   const offline = useNetwork() === "offline";
   const saveRef = useRef<HTMLButtonElement>(null);
@@ -94,7 +95,7 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
     : `It goes into ${month}'s GSTR-1 as a ${seg} sale${sending ? ` as ${sending}` : ""}.`;
   const primaryLabel = F.saving ? "Saving…" : clash ? (offer ? `Save as ${offer}` : "Change the number") : failed ? "Try again" : edit ? "Save changes" : "Save bill";
   // the paper bill's own number never changes by itself: a typed number that's taken is changed by hand
-  const changeNumber = () => { F.closeReview(); focusSoon(numberId, true); };
+  const changeNumber = onChangeNumber ?? (() => { F.closeReview(); focusSoon(numberId, true); });
   const primary = clash ? (offer ? () => onSave(offer) : changeNumber) : () => onSave();
   const blocked = noChange || waits || offlineNew || F.cashBlock;
   const total = (

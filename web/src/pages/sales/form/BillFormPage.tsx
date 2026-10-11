@@ -21,6 +21,7 @@ import { DesktopForm } from "./DesktopForm";
 import { PAY_KEYS } from "./fields";
 import { idParam, startCopy, startDraft, startNew, startPaper, startRemake, type Start } from "./model";
 import { lastPaperDate } from "./paperDates";
+import { PhoneForm } from "./PhoneForm";
 import { parseDateText } from "./rules";
 import { useBillForm } from "./useBillForm";
 import { useDraftKeeping } from "./useDraftKeeping";
@@ -87,7 +88,8 @@ export function BillForm({ start, formKey }: { start: Start; formKey: string }) 
   const F = useBillForm(start);
   const drafts = useDraftKeeping(F, formKey);
   const exit = useFormExit(F.edit && F.dirty, EDIT_UNSAVED, F.savedTo ?? drafts.leaveTo);
-  return <DesktopForm F={F} drafts={drafts}>{exit}</DesktopForm>;
+  const { isPhone } = useView();
+  return isPhone ? <PhoneForm F={F} drafts={drafts}>{exit}</PhoneForm> : <DesktopForm F={F} drafts={drafts}>{exit}</DesktopForm>;
 }
 
 /**

@@ -1,5 +1,6 @@
 // The pieces both the desktop and the phone form show (PROTO pages/sales/BillForm.jsx): the number, the date, the paper
 // switch, the place of supply, the note under Paid by, the figures, and the banner that says where the bill came from.
+import type { Ref } from "react";
 import { AlertTriangle, BookOpenText, Info, RefreshCcw } from "lucide-react";
 import { useNetwork } from "@/core/api/network";
 import { amountInWords, date, fyOf, monthLabel, monthOf, possessive, weekday } from "@/core/format";
@@ -17,7 +18,7 @@ type P = { F: BillFormApi; id: string };
 export const paperBookTo = (firmId: number, ym: string) => `/sales/paper?firm=${firmId}&month=${ym}`;
 
 /** The bill number: always the paper bill's, typed, or the next one confirmed; a saved bill's kept unless renumbered (PROTO BillForm.jsx:262-299). */
-export function NumberField({ F, id }: P) {
+export function NumberField({ F, id, inputRef }: P & { inputRef?: Ref<HTMLInputElement> }) {
   const offline = useNetwork() === "offline";
   const err = F.showErr("number");
   const fy = fyOf(F.f.date || F.today).replace("-", "‑");
@@ -43,7 +44,7 @@ export function NumberField({ F, id }: P) {
     : F.f.numberTyped && F.suggestion && text !== F.suggestion ? <Button size="sm" variant="link" onClick={() => { F.takeSuggestion(); focusSoon(id, true); }}>Use the next free one</Button> : <LabelSpacer />;
   return (
     <Field label={F.paper ? "Number on the paper bill" : "Bill number"} htmlFor={id} error={err} hint={`${saved}${why}`} aside={aside}>
-      <Input id={id} maxLength={16} value={F.numberText} invalid={Boolean(err)} inputClassName="tnum" autoComplete="off" spellCheck={false}
+      <Input ref={inputRef} id={id} maxLength={16} value={F.numberText} invalid={Boolean(err)} inputClassName="tnum" autoComplete="off" spellCheck={false}
         onChange={(e) => F.setNumber(e.target.value)} />
     </Field>
   );

@@ -410,7 +410,7 @@ export function useBillForm(start: Start) {
     mode: start.mode, edit, bill, start, f, set, setLine, addLine, removeLine, setCustomer, setFirm, setPaper, setPayment, setNumber, takeSuggestion,
     firm, firmName, firmState, firms, firmHint: hint, cust, auto, pos, tt, filled, figs, lineFig, newKeys,
     paper: f.paper && !edit, book, lastPaperDay, keep, moved, next, suggestion, numberText, stored, numberError, numberNote, numberState, waitingForNext,
-    today, dateError, dateWarn, offReason, touched, setTouched, tried, errors, showErr, firstError,
+    today, dateError, dateWarn, offReason, touched, setTouched, tried, errors, serverErrors, showErr, firstError,
     itax, cashOver, cashBlock, cashAnyway, setCashAnyway, twin, checks, canMove, whyNot, dirty, changes, sentNote,
     reviewOpen, openReview, closeReview, save, saving, saveError, savedTo, saveEnd, draftId, setDraftId,
   };

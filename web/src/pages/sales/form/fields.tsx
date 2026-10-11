@@ -184,10 +184,10 @@ export function PayPicker({ value, onChange, allowNotRecorded, labelledBy, inval
         return (
           <button key={v || "none"} type="button" role="radio" aria-checked={sel} tabIndex={(at < 0 ? i === 0 : sel) ? 0 : -1} onClick={() => onChange(v)}
             data-autofocus={autoFocus && (at < 0 ? i === 0 : sel) ? "" : undefined}
-            className={cn("inline-flex items-center justify-center gap-1.5 rounded-ctl border px-3.5 whitespace-nowrap transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.98]",
-              isPhone ? "min-h-12 text-md" : "h-9 text-sm",
+            className={cn("inline-flex items-center justify-center gap-1.5 rounded-ctl border px-3.5 transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.98]",
+              isPhone ? "min-h-12 py-2 text-md whitespace-normal" : "h-9 text-sm whitespace-nowrap",
               sel ? "bg-brand-sel border-brand text-brand font-semibold" : cn("bg-field text-fg2 hover:text-fg hover:border-muted/50", invalid ? "border-neg-line" : "border-ctl-line"))}>
-            {sel ? <Check size={15} aria-hidden="true" /> : null}{PAY[v]}
+            {sel ? <Check size={15} className="shrink-0" aria-hidden="true" /> : null}{PAY[v]}
           </button>
         );
       })}
