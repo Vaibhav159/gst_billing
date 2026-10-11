@@ -1,4 +1,4 @@
-import { afterText, dueTone, dueWords, explainedText, missingText, numbersText, paperLink, paperMonths, runsText } from "./book";
+import { afterText, dueTone, dueWords, explainedText, missingText, numbersText, paperLink, paperMonths, runsText, twiceText } from "./book";
 
 test("the months offered are this month and the five before it, newest first", () => {
   expect(paperMonths("2026-10-08")).toEqual(["2026-10", "2026-09", "2026-08", "2026-07", "2026-06", "2026-05"]);
@@ -27,9 +27,23 @@ test("numbers other bills already use are named, with the next free one", () => 
   expect(afterText([30, 31, 32, 33], ["2026-10"], 34)).toBe("30 to 33 are October's bills, so the next free number is 34.");
   expect(afterText([30], ["2026-10"], 31)).toBe("30 is October's bill, so the next free number is 31.");
   // the bills can be in this month, an earlier one or several (an odd-shaped "KGH-30" in any month: contract §2.13)
-  expect(afterText([30, 31], ["2026-08", "2026-10"], 32)).toBe("30 and 31 are other bills, so the next free number is 32.");
-  expect(afterText([30], ["2026-09", "2026-10"], 31)).toBe("30 is another bill, so the next free number is 31.");
+  expect(afterText([30, 31], ["2026-08", "2026-10"], 32)).toBe("30 and 31 are used by other bills, so the next free number is 32.");
+  expect(afterText([30], ["2026-09", "2026-10"], 31)).toBe("30 is used by another bill, so the next free number is 31.");
   expect(afterText([], [], 30)).toBe("");
+});
+
+test("a number on more than one bill says which get new numbers: all but one, never a cancelled one, which keeps its number (Ruling 1D-13)", () => {
+  const A = { status: "active" } as const;
+  const C = { status: "cancelled" } as const;
+  expect(twiceText(20, [A, A])).toEqual({ text: "20 is on two bills: give one a new number before filing.", fix: true });
+  expect(twiceText(20, [A, C])).toEqual({ text: "20 is on two bills: give the active one a new number before filing.", fix: true });
+  expect(twiceText(20, [A, A, A])).toEqual({ text: "20 is on three bills: give all but one a new number before filing.", fix: true });
+  // the cancelled one keeps 20, so every active one moves off it
+  expect(twiceText(20, [A, C, A])).toEqual({ text: "20 is on three bills: give each active one a new number before filing.", fix: true });
+  expect(twiceText(20, [C, A, C])).toEqual({ text: "20 is on three bills: give the active one a new number before filing.", fix: true });
+  // nothing can be done: no instruction
+  expect(twiceText(20, [C, C])).toEqual({ text: "20 is on two cancelled bills: they keep their numbers.", fix: false });
+  expect(twiceText(20, [A, A, A, A, A, A, A, A, A, A, A, A])).toMatchObject({ text: "20 is on 12 bills: give all but one a new number before filing." });
 });
 
 test("the numbers not entered yet, and how many when the book lists only the first 500 of them (Ruling 1D-3)", () => {

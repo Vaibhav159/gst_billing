@@ -1,9 +1,9 @@
 // The paper book's words (PROTO pages/sales/lib.js:704-772, PaperBook.jsx): which months it offers, a month's numbers
 // as runs, why a number is missing, the GSTR-1 due date, and the link that opens the bill form on the next paper bill.
 // The server works the book out (contract §2.13, Ruling 1A-29): these only say what it sent.
-import type { PaperBookExplained } from "@/core/sales/types";
+import type { PaperBookBill, PaperBookExplained } from "@/core/sales/types";
 import { addMonths, dateShort, daysBetween, groupIN, monthLabel, monthOf, plural } from "@/core/format";
-import { realReason } from "@/core/sales/words";
+import { NUMBER_WORDS, realReason } from "@/core/sales/words";
 
 /** This month and the five before it, newest first: the months whose paper bills are still being typed in. */
 export function paperMonths(today: string): string[] {
@@ -47,8 +47,21 @@ export function afterText(after: readonly number[], afterMonths: readonly string
   if (!after.length) return "";
   const one = after.length === 1;
   const which = one ? `${after[0]} is` : after.length === 2 ? `${after[0]} and ${after[1]} are` : `${after[0]} to ${after[after.length - 1]} are`;
-  const whose = afterMonths.length === 1 ? `${monthLabel(afterMonths[0], { long: true, year: false })}'s bill${one ? "" : "s"}` : one ? "another bill" : "other bills";
+  const whose = afterMonths.length === 1 ? `${monthLabel(afterMonths[0], { long: true, year: false })}'s bill${one ? "" : "s"}` : `used by ${one ? "another bill" : "other bills"}`;
   return `${which} ${whose}, so the next free number is ${next}.`;
+}
+
+/**
+ * A number on more than one of the month's bills, and which get new numbers (Ruling 1D-13): all but one, never a
+ * cancelled one, which keeps its number (renumbering refuses it, contract §2.6). A cancelled bill on the number holds it,
+ * so then every active one moves; when all are cancelled there's nothing to do. fix: there is something to do.
+ */
+export function twiceText(n: number, bills: readonly Pick<PaperBookBill, "status">[]): { text: string; fix: boolean } {
+  const many = bills.length > 2 ? NUMBER_WORDS[bills.length] || String(bills.length) : "two";
+  const active = bills.filter((b) => b.status !== "cancelled").length;
+  if (!active) return { text: `${n} is on ${many} cancelled bills: they keep their numbers.`, fix: false };
+  const which = active === bills.length ? (active === 2 ? "one" : "all but one") : active === 1 ? "the active one" : "each active one";
+  return { text: `${n} is on ${many} bills: give ${which} a new number before filing.`, fix: true };
 }
 
 /** "11 Oct (in 3 days)", "11 Oct (tomorrow)", "11 Oct (2 days late)". */

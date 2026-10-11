@@ -19,7 +19,7 @@ import { Banner, Button, ButtonLink, Card, EmptyState, Field, Money, Page, Query
 import { useView } from "@/core/view";
 import { idParam } from "../form/model";
 import { lastPaperDate } from "../form/paperDates";
-import { afterText, dueTone, dueWords, explainedText, missingText, paperLink, paperMonths, runsText } from "./book";
+import { afterText, dueTone, dueWords, explainedText, missingText, paperLink, paperMonths, runsText, twiceText } from "./book";
 
 const TITLE = "Bills from the paper book";
 
@@ -73,9 +73,14 @@ function PaperBookScreen({ firms, firmId, month: ym, months, today, onPick }: Sc
   const { can, whyNot } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const key = salesKeys.paperBook(firmId, ym);
   const book = usePaperBook(firmId, ym);
   // Try again asks again through the client, as every page's does (Ruling 1B-11): the kit's QueryView calls this refetch
-  const view: typeof book = { ...book, refetch: () => qc.refetchQueries({ queryKey: salesKeys.paperBook(firmId, ym) }).then(() => book) };
+  const view: typeof book = { ...book, refetch: () => qc.refetchQueries({ queryKey: key }).then(() => book) };
+  // A bill saved since the book last answered told it to ask again (invalidateSales), and a refresh that fails leaves it
+  // so (TanStack keeps the query invalidated): until a fresh answer comes, its next number may be the bill just saved, so
+  // Enter bill waits, as the saved panel's Next does. The stale note's Try again asks again
+  const waits = Boolean(qc.getQueryState(key)?.isInvalidated);
   const pb = book.data;
   const firm = firms.find((f) => f.id === firmId) as Firm;
   const month = monthLabel(ym, { long: true, year: false });
@@ -85,7 +90,7 @@ function PaperBookScreen({ firms, firmId, month: ym, months, today, onPick }: Sc
   const remembered = lastPaperDate(firmId);
   const nextDate = pb ? (remembered.startsWith(ym) ? remembered : pb.next.invoice_date) : "";
   const blocked = pb?.locked ? `${monthLabel(ym, { long: true })} is filed for ${firm.name}, so no bill can be added until the owner unlocks it in GST returns.`
-    : !can("bill.create") ? whyNot("bill.create") : "";
+    : !can("bill.create") ? whyNot("bill.create") : waits ? "Enter bill waits for the paper book's fresh answer." : "";
   const enterButton = pb ? (
     <Button variant="primary" size="lg" icon={ArrowRight} full={isPhone} disabled={Boolean(blocked)} title={blocked || undefined}
       onClick={() => navigate(paperLink(firmId, nextDate, pb.next.counter))}>
@@ -160,15 +165,21 @@ function BookFacts({ pb, firm, ym, today }: { pb: PaperBook; firm: Firm; ym: str
           })}
           {pb.twice.map((n) => {
             // each of the bills, by its own link: the Sales list's dups=1 matches whole numbers across the year, the book
-            // number parts in the month, so it could show neither
+            // number parts in the month, so it could show neither. A link names the bill's number, date and customer, and
+            // says it's cancelled, so two on one number and customer read apart (Ruling 1D-13)
             const on = pb.bills.filter((b) => b.counter === n);
+            const t = twiceText(n, on);
             return (
-              <li key={`twice-${n}`} className="flex items-start gap-2 text-sm text-neg">
-                <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+              <li key={`twice-${n}`} className={cn("flex items-start gap-2 text-sm", t.fix ? "text-neg" : "text-fg2")}>
+                {t.fix ? <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" /> : <Info size={16} className="text-muted shrink-0 mt-0.5" aria-hidden="true" />}
                 <span className="flex flex-col items-start gap-1">
-                  <span><span className="tnum">{n}</span> is on {on.length > 2 ? on.length : "two"} bills: give one a new number before filing.</span>
+                  <span className="tnum">{t.text}</span>
                   <span className="flex flex-wrap gap-x-4 -ml-1">
-                    {on.map((b) => <ButtonLink key={b.id} size="sm" variant="link" to={`/sales/${b.id}`}>{`${b.invoice_number} · ${b.customer_name}`}</ButtonLink>)}
+                    {on.map((b) => (
+                      <ButtonLink key={b.id} size="sm" variant="link" to={`/sales/${b.id}`}>
+                        {`${b.invoice_number} · ${dateShort(b.invoice_date)} · ${b.customer_name}${b.status === "cancelled" ? " · cancelled" : ""}`}
+                      </ButtonLink>
+                    ))}
                   </span>
                 </span>
               </li>

@@ -14,9 +14,13 @@ import { stubAuth, testQueryClient } from "@/test/render";
 import NewBillPage from "./BillFormPage";
 
 export const TODAY = "2026-10-08";
-/** Fakes the clock (timers and Date) at 08 Oct 2026, 10:00 in India; the clock still moves with real time. Returns a userEvent that moves it too. */
-export function fakeToday() {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+/**
+ * Fakes the clock (timers and Date) at 08 Oct 2026, 10:00 in India; the clock still moves with real time. Returns a
+ * userEvent that moves it too. intervals: setInterval too, where a test holds a query to never asking on a timer
+ * (TanStack's refetchInterval runs on it).
+ */
+export function fakeToday({ intervals = false }: { intervals?: boolean } = {}) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", ...(intervals ? (["setInterval", "clearInterval"] as const) : [])], shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 }

@@ -1,5 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { invalidateSales } from "@/core/api/sales";
 import { refuse } from "@/core/sales/fixtures";
 import { markFresh } from "@/core/sales/fresh";
 import { ACCOUNTANT, fakeToday, formServer, mountForm, wireBook } from "../form/testing";
@@ -33,7 +34,13 @@ const SEPTEMBER = wireBook({
   next: { counter: 22, invoice_number: "KGH/2026-27/22", invoice_date: "2026-09-05" },
 });
 /** The paper book in the app's routes, with the real form beside it (mountForm's stand-in for /sales/paper comes after it). */
-const mountBook = (path: string, opts: Parameters<typeof mountForm>[1] = {}) => mountForm(path, { ...opts, routes: [{ path: "/sales/paper", element: <PaperBookPage /> }] });
+const mountBook = (path: string, opts: Parameters<typeof mountForm>[1] = {}) => mountForm(path, { ...opts, routes: [{ path: "/sales/paper", element: <PaperBookPage /> }, ...(opts.routes ?? [])] });
+/** Somewhere else in the app where a bill is saved: the save tells every bill query to ask again, as the form's does (invalidateSales). */
+function SavedElsewhere() {
+  const qc = useQueryClient();
+  return <button type="button" onClick={() => invalidateSales(qc)}>Save a bill</button>;
+}
+const WAITS = "Enter bill waits for the paper book's fresh answer.";
 
 test("last month's run for the firm: what's entered, why numbers are missing, what's not entered yet, GSTR-1, and each bill's state in words", async () => {
   fakeToday();
@@ -51,9 +58,11 @@ test("last month's run for the firm: what's entered, why numbers are missing, wh
   expect(within(facts).getByRole("link", { name: "19" })).toHaveAttribute("href", "/sales/205");
   expect(facts).toHaveTextContent("21: deleted 03 Oct (Entered twice by mistake)");
   expect(facts).toHaveTextContent("20 is on two bills: give one a new number before filing.");
-  // each of them, by its own bill: the Sales list's dups=1 matches whole numbers across the year, so it could show neither
-  expect(within(facts).getByRole("link", { name: "KGH/2026-27/20 · Lalit Jain" })).toHaveAttribute("href", "/sales/382");
-  expect(within(facts).getByRole("link", { name: "KGH/2026-27/20 · Ramesh Patel" })).toHaveAttribute("href", "/sales/383");
+  // each of them, by its own bill: the Sales list's dups=1 matches whole numbers across the year, so it could show neither.
+  // Each link names its number, date and customer, so two on one number and customer don't share a name (Ruling 1D-13)
+  expect(within(facts).getByRole("link", { name: "KGH/2026-27/20 · 05 Sep · Lalit Jain" })).toHaveAttribute("href", "/sales/382");
+  expect(within(facts).getByRole("link", { name: "KGH/2026-27/20 · 05 Sep · Ramesh Patel" })).toHaveAttribute("href", "/sales/383");
+  expect(within(facts).getByText("20 is on two bills: give one a new number before filing.").closest("li")).toHaveClass("text-neg");
   expect(facts).toHaveTextContent("Not entered yet: 22, 23");
   expect(screen.getByText("September's GSTR-1 is due 11 Oct (in 3 days): enter the rest before filing.")).toHaveClass("text-neg");
   expect(screen.getByText("Opens the bill with KGH/2026-27/22 and 05 Sep 2026 filled in. After each save, Next paper bill keeps the firm and date.")).toBeInTheDocument();
@@ -136,6 +145,40 @@ test("a month that fails to load says so and keeps the pickers, so another can b
   expect(asked).toHaveBeenCalledWith({ queryKey: ["sales", "paper-book", 3, "2026-09"] });
 });
 
+test("after a bill is saved, Enter bill waits for the book's fresh answer and never offers the number just saved; a refresh that fails keeps it waiting, and Try again brings it (T7 review)", async () => {
+  const user = fakeToday();
+  let answer: () => unknown = () => wireBook();
+  let held: Promise<void> | null = null;
+  formServer([["GET", "sales/paper-book/", async () => { await held; return answer(); }]]);
+  const { router } = mountBook("/sales/paper?firm=3&month=2026-09", { routes: [{ path: "/elsewhere", element: <SavedElsewhere /> }] });
+  expect(await screen.findByRole("button", { name: "Enter bill 34" })).toBeEnabled();
+  // bill 34 is saved on the form: every bill query is told to ask again
+  await act(async () => { await router.navigate("/elsewhere"); });
+  await user.click(screen.getByRole("button", { name: "Save a bill" }));
+  // back on the book with its fresh answer on its way: the last answer shows, but its next number isn't offered
+  let land = () => {};
+  held = new Promise<void>((r) => { land = r; });
+  answer = () => wireBook({ runs: [[17, 29], [34, 34]], entered: 14, next: { counter: 35, invoice_number: "KGH/2026-27/35", invoice_date: "2026-09-30" } });
+  await act(async () => { await router.navigate("/sales/paper?firm=3&month=2026-09"); });
+  const waiting = await screen.findByRole("button", { name: "Enter bill 34" });
+  expect(waiting).toBeDisabled();
+  expect(waiting).toHaveAttribute("title", WAITS);
+  expect(screen.getByText(WAITS)).toBeInTheDocument();
+  await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
+  expect(await screen.findByRole("button", { name: "Enter bill 35" })).toBeEnabled();
+  // another bill saved, and the book's answer fails: what it last said stays, said so, and its next number still waits
+  await act(async () => { await router.navigate("/elsewhere"); });
+  await user.click(screen.getByRole("button", { name: "Save a bill" }));
+  held = null;
+  answer = () => refuse(500, {});
+  await act(async () => { await router.navigate("/sales/paper?firm=3&month=2026-09"); });
+  expect(await screen.findByText("Couldn't refresh the month's bills")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Enter bill 35" })).toBeDisabled();
+  answer = () => wireBook({ runs: [[17, 29], [34, 35]], entered: 15, next: { counter: 36, invoice_number: "KGH/2026-27/36", invoice_date: "2026-09-30" } });
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("button", { name: "Enter bill 36" })).toBeEnabled();
+});
+
 test("on a phone, Enter bill is the action bar's and the bills are a list", async () => {
   fakeToday();
   (window as unknown as { __phone?: boolean }).__phone = true;
@@ -181,19 +224,44 @@ test("past the 500 numbers the book lists, it says how many aren't entered yet; 
   expect(facts).toHaveTextContent("19: cancelled (Wrong weight)");
   expect(facts).toHaveTextContent("19: cancelled, no reason was given");
   expect(within(facts).getAllByRole("link", { name: "19" }).map((a) => a.getAttribute("href"))).toEqual(["/sales/205", "/sales/206"]);
+  // both on 19 are cancelled, and a cancelled bill keeps its number: said, with nothing to do (Ruling 1D-13)
+  const kept = within(facts).getByText("19 is on two cancelled bills: they keep their numbers.").closest("li") as HTMLElement;
+  expect(kept).toHaveClass("text-fg2");
+  expect(within(kept).getByRole("link", { name: "KGH/2026-27/19 · 04 Sep · Suresh Jain · cancelled" })).toHaveAttribute("href", "/sales/205");
+  expect(within(kept).getByRole("link", { name: "KGH-19 · 05 Sep · Lalit Jain · cancelled" })).toHaveAttribute("href", "/sales/206");
   // each line of the list is keyed by its own bill, so React never meets two with one key
   expect(errors).not.toHaveBeenCalled();
 });
 
+test("a number on an active bill and a cancelled one: the active one gets a new number, and its link says which is which (Ruling 1D-13)", async () => {
+  fakeToday();
+  formServer([["GET", "sales/paper-book/", () => wireBook({
+    bills: [row(382, 20, "2026-09-05", "Lalit Jain", "30500.00"), row(386, 20, "2026-09-07", "Lalit Jain", "30500.00", { status: "cancelled", invoice_number: "KGH-20" })],
+    entered: 2, runs: [[17, 20]], twice: [20], after: [], after_months: [],
+    explained: [{ counter: 20, kind: "cancelled", id: 386, invoice_number: "KGH-20", reason: "Typed twice" }],
+    next: { counter: 21, invoice_number: "KGH/2026-27/21", invoice_date: "2026-09-07" },
+  })]]);
+  mountBook("/sales/paper?firm=3&month=2026-09");
+  const facts = await screen.findByRole("list", { name: "What's in September" });
+  const twice = within(facts).getByText("20 is on two bills: give the active one a new number before filing.").closest("li") as HTMLElement;
+  expect(twice).toHaveClass("text-neg");
+  expect(within(twice).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["KGH/2026-27/20 · 05 Sep · Lalit Jain", "/sales/382"], ["KGH-20 · 07 Sep · Lalit Jain · cancelled", "/sales/386"],
+  ]);
+});
+
 test("the month is asked for once per firm and month picked: never again on a timer, nor on coming back to the window (Neon's free plan)", async () => {
-  const user = fakeToday();
+  // a refetchInterval runs on setInterval: faked too, so one would fire as the clock moves
+  const user = fakeToday({ intervals: true });
   const { calls } = formServer();
   mountBook("/sales/paper?firm=3&month=2026-09");
   await screen.findByText("13 bills entered · numbers 17 to 29");
   const asks = () => calls.filter((c) => c.url === "sales/paper-book/").map((c) => `${c.params.business_id} ${c.params.month}`);
   expect(asks()).toEqual(["3 2026-09"]);
-  act(() => { window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange")); });
+  // ten minutes on, long past the 30 s an answer counts as fresh; then the window comes back into view, as TanStack hears it
   await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000); });
+  act(() => { window.dispatchEvent(new Event("visibilitychange")); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
   expect(asks()).toEqual(["3 2026-09"]);
   await user.selectOptions(screen.getByLabelText("Month"), "2026-08");
   await screen.findByRole("list", { name: "What's in August" });

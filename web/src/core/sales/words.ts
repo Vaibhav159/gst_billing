@@ -236,7 +236,8 @@ export function filedRangeText(months: MonthFacet[]): string {
   return locked.length === 1 ? a : `${a} to ${b}`;
 }
 
-const NUMBER_WORDS = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+/** "one" to "ten" in words, by the number (none for 0). */
+export const NUMBER_WORDS = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 /** "all three firms" (the prototype's words for every firm in view), "both firms", "the firm". */
 export function firmsWord(n: number): string {
   if (n <= 1) return "the firm";
