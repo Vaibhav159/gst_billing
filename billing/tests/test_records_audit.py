@@ -39,11 +39,16 @@ class AuditReadTest(TestCase):
         self.assertEqual(viewer.get("/api/audit/").status_code, 403)
         self.entry.entity_name = "=SUM(1,2)"
         self.entry.save()
+        self.assertEqual(self.client.head("/api/audit/export/").status_code, 200)
+        self.assertFalse(AuditLog.objects.filter(entity="backup", action="exported").exists())
         response = self.client.get("/api/audit/export/")
         self.assertEqual(response.status_code, 200)
+        # The download is on record as soon as it starts, even if the browser stops it half way.
+        self.assertTrue(AuditLog.objects.filter(entity="backup", action="exported").exists())
         content = b"".join(response.streaming_content).decode("utf-8-sig")
         self.assertIn("'=SUM(1,2)", content)
-        self.assertTrue(AuditLog.objects.filter(entity="backup", action="exported").exists())
+        self.assertNotIn("Audit log ·", content)
+        self.assertEqual(AuditLog.objects.filter(entity="backup", action="exported").count(), 1)
 
 
 class AuditActionsTest(TestCase):

@@ -117,8 +117,11 @@ class AuditExportView(APIView):
     def get(self, request):
         rows = filtered(request.query_params)
         total = rows.count()
-        # Capture IDs before logging the completed export, so this download never includes itself.
+        # Capture IDs before logging the export, so this download never includes itself. The row is written when
+        # the download starts, so one the browser stops half way is still on record.
         upper = AuditLog.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+        if request.method == "GET":  # a HEAD check downloads nothing
+            AuditLog.objects.create(user=request.user, action="exported", entity="backup", entity_id=0, entity_name="Audit log", details=f"Audit log · {total:,} entries")
 
         def chunks():
             yield "\ufeff"
@@ -135,7 +138,6 @@ class AuditExportView(APIView):
                 output.truncate(0)
                 writer.writerow([safe_cell(value) for value in [at.date().isoformat(), at.strftime("%H:%M:%S"), (person(entry.user) or {}).get("name", "Someone no longer here"), words, entry.entity_name, entry.details, changes]])
                 yield output.getvalue()
-            AuditLog.objects.create(user=request.user, action="exported", entity="backup", entity_id=0, entity_name="Audit log", details=f"Audit log · {total:,} entries")
 
         response = StreamingHttpResponse(chunks(), content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="Audit-log_{timezone.localdate().isoformat()}.csv"'
