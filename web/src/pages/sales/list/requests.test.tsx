@@ -5,6 +5,8 @@ import { salesServer, wireDetail, wireFacets, wirePage, wireRow, type Call } fro
 import { ScopeProvider } from "@/core/scope";
 import { renderApp } from "@/test/render";
 import SalesList from "../SalesList";
+// Resolve the PDF stand-in before the fake clock; production loads the maker on the first send (1E Task 1b).
+import "@/core/print/make";
 
 vi.mock("@/core/print/make", async (real) => ({
   ...(await real<typeof import("@/core/print/make")>()),
