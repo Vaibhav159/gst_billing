@@ -136,9 +136,12 @@ const base = (form: FormState, more: Partial<Start> = {}): Start => ({
   mode: "new", form, origin: null, firmSource: "scope", draftId: null, replaces: null, bill: null, bookDate: false, tried: false, ...more,
 });
 
-/** A new bill at the counter: today, the next number suggested, nothing paid yet. A link can pick the customer and the payment. */
-export function startNew({ firmId, firmSource, today, customer = null, payment = null }: { firmId: number | null; firmSource: FirmSource; today: string; customer?: Customer | null; payment?: PaymentMode | null }): Start {
-  return base({ ...blankForm(firmId, today), customer, payment }, { firmSource, origin: customer || payment ? { kind: "prefill" } : null });
+/** Easy's chosen IST day: an earlier day is a paper bill; a blank date is still validated by the shared rules. */
+export const chosenDateFields = (date: string, today: string): Pick<FormState, "date" | "paper"> => ({ date, paper: Boolean(date) && date < today });
+
+/** A new bill at the counter: today by default. Easy can choose an earlier paper day without the book replacing it. */
+export function startNew({ firmId, firmSource, today, date = today, customer = null, payment = null }: { firmId: number | null; firmSource: FirmSource; today: string; date?: string; customer?: Customer | null; payment?: PaymentMode | null }): Start {
+  return base({ ...blankForm(firmId, date), ...chosenDateFields(date, today), customer, payment }, { firmSource, origin: customer || payment ? { kind: "prefill" } : null });
 }
 
 /**
@@ -161,9 +164,9 @@ export function startCopy(bill: BillDetail, today: string): Start {
 }
 
 /** Make a cancelled bill again (?remake=): the same firm, customer, place of supply, payment, note and items; it replaces the cancelled one. */
-export function startRemake(bill: BillDetail, today: string): Start {
+export function startRemake(bill: BillDetail, today: string, date = today): Start {
   const s = startCopy(bill, today);
-  return { ...s, form: { ...s.form, payment: bill.payment_mode || null, notes: bill.notes }, replaces: bill.id, origin: { kind: "remake", number: bill.invoice_number, reason: bill.cancel_reason } };
+  return { ...s, form: { ...s.form, ...chosenDateFields(date, today), payment: bill.payment_mode || null, notes: bill.notes }, replaces: bill.id, origin: { kind: "remake", number: bill.invoice_number, reason: bill.cancel_reason } };
 }
 
 /** Changing a saved bill: everything as saved; the number kept unless it's renumbered or the bill moves. */
@@ -200,7 +203,11 @@ export function toDraftData(f: FormState, replaces: number | null): DraftData {
   return {
     v: 1, firmId: f.firmId, customer: f.customer, date: f.date, number: f.number, numberTyped: f.numberTyped, paper: f.paper, posOverride: f.posOverride,
     payment: f.payment, notes: f.notes, replaces,
-    lines: f.lines.filter(hasContent).map(({ productId, name, hsn, gst, unit, qty, rate, note, custom }) => ({ productId, name, hsn, gst, unit, qty, rate, note, custom })),
+    lines: f.lines.filter(hasContent).map(({ productId, name, hsn, gst, unit, qty, rate, note, custom, kind, purity }) => ({
+      productId, name, hsn, gst, unit, qty, rate, note, custom,
+      ...(typeof kind === "string" || kind === null ? { kind } : {}),
+      ...(typeof purity === "string" ? { purity } : {}),
+    })),
   };
 }
 

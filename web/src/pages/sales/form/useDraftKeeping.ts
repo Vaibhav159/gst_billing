@@ -11,7 +11,7 @@ import { newDraftId, useDiscardDraft, useDraftBusy, useDraftSync, useKeepDraft, 
 import { keepsOnDevice, keptDraft, useKeptDrafts } from "@/core/deviceDrafts";
 import { timeOf } from "@/core/sales/words";
 import { useToast } from "@/core/ui";
-import { hasContent, toDraftData } from "./model";
+import { hasContent, toDraftData, type FormState } from "./model";
 import type { BillFormApi } from "./useBillForm";
 
 export type DraftKeeping = {
@@ -50,7 +50,14 @@ export function draftText(d: DraftKeeping): string {
   return "Kept as a draft once you start";
 }
 
-export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
+export type DraftKeepingOptions = {
+  /** Gate the first keep; once a draft exists, clearing its last weight must also reach that draft. */
+  keepWhen?: (f: FormState) => boolean;
+  /** Put the first draft id in the address. Defaults to true. */
+  address?: boolean;
+};
+
+export function useDraftKeeping(F: BillFormApi, formKey: string, opts: DraftKeepingOptions = {}): DraftKeeping {
   const navigate = useNavigate();
   const { show } = useToast();
   const keep = useKeepDraft();
@@ -59,7 +66,8 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   useDraftSync(isNew);
   const data = toDraftData(F.f, F.start.replaces);
   const sig = JSON.stringify(data);
-  const hasAny = Boolean(F.f.customer || F.f.lines.some(hasContent) || F.f.notes.trim());
+  const hasAny = opts.keepWhen ? Boolean(F.draftId) || opts.keepWhen(F.f) : Boolean(F.f.customer || F.f.lines.some(hasContent) || F.f.notes.trim());
+  const address = opts.address ?? true;
   // what the draft holds now: a draft picked up holds what it started with; an untouched new bill (a copy, too) holds nothing yet
   const keptSig = useRef(JSON.stringify(toDraftData(F.start.form, F.start.replaces)));
   // where it's kept follows this device's copy: a sync that sends it later says so here too
@@ -106,11 +114,11 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
     if (!here) { void keep(draftId, business, d); return draftId; }
     if (fresh) {
       F.setDraftId(draftId);
-      navigate(`/sales/new?draft=${draftId}`, { replace: true, state: { formKey } });
+      if (address) navigate(F.paths.draft(draftId), { replace: true, state: { formKey } });
     }
     void keep(draftId, business, d).then(heard);
     return draftId;
-  }, [keep, navigate, formKey, heard, F.setDraftId]);
+  }, [keep, navigate, formKey, heard, F.setDraftId, F.paths, address]);
 
   // a save that says a bill was made from this draft already (409 draft_saved): nothing more is kept, and the status says
   // so in the server's words (the review shows them too, with a link to that bill)
@@ -162,7 +170,7 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
     const left = (failed = false) => {
       const draftId = unkept() ? keepNow(false) : id.current;
       if (!draftId) return;
-      const open = { label: "Open", onClick: () => navigate(`/sales/new?draft=${draftId}`) };
+      const open = { label: "Open", onClick: () => navigate(F.paths.draft(draftId)) };
       show(failed
         ? { tone: "neg", title: "The bill didn't save", body: "What you typed is kept as an unfinished bill. Open it now?", action: open }
         : { tone: "brand", title: "Bill kept as a draft", body: "New bill lists it until it's finished. Open it now?", action: open });

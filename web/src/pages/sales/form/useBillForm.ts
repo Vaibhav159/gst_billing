@@ -28,7 +28,7 @@ import { useFirms } from "@/core/scope";
 import { useToast } from "@/core/ui";
 import { useDebounced } from "@/core/useDebounced";
 import { focusNow } from "./fields";
-import { blankLine, hasContent, posCustomer, slabOf, stateOf, storedFor, toBillInput, type FormLine, type FormState, type Start } from "./model";
+import { blankLine, chosenDateFields, hasContent, posCustomer, slabOf, stateOf, storedFor, toBillInput, type FormLine, type FormState, type Start } from "./model";
 import { lastPaperDate, rememberPaperDate } from "./paperDates";
 import { changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrder, firmHint, formErrors, numberProblem, prevFy, type Locked, type NumberState } from "./rules";
 
@@ -70,7 +70,25 @@ export function serverErrorsOf(p: ApiProblem | null, sent: FormLine[]): Record<s
   return out;
 }
 
-export function useBillForm(start: Start, formKey?: string) {
+export type BillFormPaths = {
+  draft: (id: string) => string;
+  saved: (id: number, mode: Start["mode"]) => string;
+};
+export type BillFormOptions = {
+  paths?: Partial<BillFormPaths>;
+  /** Easy dates also choose paper mode. Omitted by the Expert and desktop forms. */
+  paperByDate?: boolean;
+};
+const DEFAULT_PATHS: BillFormPaths = {
+  draft: (id) => `/sales/new?draft=${id}`,
+  saved: (id, mode) => `/sales/${id}?saved=${mode}`,
+};
+
+export function useBillForm(start: Start, formKey?: string, opts: BillFormOptions = {}) {
+  const draftPath = opts.paths?.draft ?? DEFAULT_PATHS.draft;
+  const savedPath = opts.paths?.saved ?? DEFAULT_PATHS.saved;
+  const paths = useMemo(() => ({ draft: draftPath, saved: savedPath }), [draftPath, savedPath]);
+  const paperByDate = opts.paperByDate ?? false;
   const { can, whyNot } = useAuth();
   const { firms } = useFirms();
   const net = useNetwork();
@@ -107,12 +125,16 @@ export function useBillForm(start: Start, formKey?: string) {
 
   /* ── setters: any change clears what the server last refused ── */
   const set = useCallback((patch: Partial<FormState> | ((o: FormState) => Partial<FormState>)) => {
+    const change = paperByDate && typeof patch === "function" ? patch(fRef.current) : patch;
     // A day typed or picked wins over a paper book still on its way.
-    if (typeof patch !== "function" && "date" in patch) setBookDate(false);
+    if (typeof change !== "function" && "date" in change) setBookDate(false);
     setSaveError(null);
     setServerProblem(null);
-    setF((o) => ({ ...o, ...(typeof patch === "function" ? patch(o) : patch) }));
-  }, []);
+    setF((o) => {
+      const fields = typeof patch === "function" ? patch(o) : patch;
+      return { ...o, ...fields, ...(paperByDate && fields.date !== undefined ? chosenDateFields(fields.date, today) : {}) };
+    });
+  }, [paperByDate, today]);
   const setLine = useCallback((key: string, patch: Partial<FormLine> | ((l: FormLine) => Partial<FormLine>)) => {
     setSaveError(null);
     setServerProblem(null);
@@ -363,7 +385,7 @@ export function useBillForm(start: Start, formKey?: string) {
       setSaveError(null);
       if (draft && !draftId) setDraftId(draft);
     });
-    if (draft && !draftId) navigate(`/sales/new?draft=${draft}`, { replace: true, state: { formKey } });
+    if (draft && !draftId) navigate(paths.draft(draft), { replace: true, state: { formKey } });
     let ended: (how: SaveEnd) => void = () => {};
     saveEnd.current = new Promise<SaveEnd>((r) => { ended = r; });
     try {
@@ -377,10 +399,10 @@ export function useBillForm(start: Start, formKey?: string) {
       markFresh(d.id);
       // React Router's navigate works after the form is gone (part 0 carry): only a form still showing moves on
       if (!mounted.current) {
-        show({ title: `Saved ${d.invoice_number}`, body: `${d.customer.name} · the bill is in Sales.`, action: { label: "Open", onClick: () => navigate(`/sales/${d.id}`) } });
+        show({ title: `Saved ${d.invoice_number}`, body: `${d.customer.name} · the bill is in Sales.`, action: { label: "Open", onClick: () => navigate(opts.paths?.saved ? paths.saved(d.id, start.mode) : `/sales/${d.id}`) } });
         return none;
       }
-      setSavedTo(`/sales/${d.id}?saved=${edit ? "edit" : "new"}`);
+      setSavedTo(paths.saved(d.id, start.mode));
       return none;
     } catch (e) {
       const p = problemOf(e);
@@ -450,7 +472,7 @@ export function useBillForm(start: Start, formKey?: string) {
 
   return {
     rates: ratesDateReady ? ratesQuery.data : undefined,
-    mode: start.mode, edit, bill, start, f, set, setLine, addLine, removeLine, setCustomer, setFirm, setPaper, setPayment, setNumber, takeSuggestion,
+    mode: start.mode, edit, bill, start, paths, f, set, setLine, addLine, removeLine, setCustomer, setFirm, setPaper, setPayment, setNumber, takeSuggestion,
     firm, firmName, firmState, firms, firmHint: hint, cust, auto, pos, tt, filled, figs, lineFig, newKeys,
     paper: f.paper && !edit, book, lastPaperDay, keep, moved, next, suggestion, numberText, stored, numberError, numberNote, numberState, waitingForNext,
     today, dateError, dateWarn, offReason, touched, setTouched, tried, errors, serverErrors, showErr, firstError,

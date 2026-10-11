@@ -5,7 +5,7 @@ import { toPerson } from "@/core/sales/wire";
 import { PAY } from "@/core/sales/words";
 
 /** A line as an unfinished bill keeps it: what was typed, as typed (rate in rupees, up to 3 decimals; gst a percent). */
-export type DraftLine = { productId: number | null; name: string; hsn: string; gst: string | null; unit: string; qty: number | null; rate: string; note: string; custom: boolean };
+export type DraftLine = { productId: number | null; name: string; hsn: string; gst: string | null; unit: string; qty: number | null; rate: string; note: string; custom: boolean; kind?: string | null; purity?: string };
 /**
  * An unfinished bill's own state (the server only keeps it): the firm, the customer as picked, the number and date as
  * typed or suggested, paper or not, the place of supply chosen (null: the usual), payment (null: not picked yet),
@@ -50,6 +50,8 @@ export function toDraftData(raw: unknown): DraftData {
     lines: lines.map((l) => ({
       productId: idOrNull(l.productId), name: str(l.name), hsn: str(l.hsn), gst: typeof l.gst === "string" && l.gst ? l.gst : null, unit: str(l.unit) || "gms",
       qty: typeof l.qty === "number" && Number.isFinite(l.qty) ? l.qty : null, rate: str(l.rate).replace(/^\./, "0."), note: str(l.note), custom: l.custom === true,
+      ...(typeof l.kind === "string" || l.kind === null ? { kind: l.kind } : {}),
+      ...(typeof l.purity === "string" ? { purity: l.purity } : {}),
     })),
     replaces: idOrNull(d.replaces),
   };
