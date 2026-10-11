@@ -70,3 +70,30 @@ test("a bill with no numeric counter keeps its full saved paper number", () => {
   renderApp(<SavedBody {...props({ bill: toBillDetail(wireDetail({ counter: null, invoice_number: "OLD/A" })) })} />);
   expect(screen.getByRole("heading", { name: "Bill OLD/A saved" })).toBeInTheDocument();
 });
+
+test("an unsent paper bill is never asked to be sent: Print and Make another bill lead, Send waits behind a quiet button", () => {
+  renderApp(<SavedBody {...props({ bill: toBillDetail(wireDetail({ paper: true, invoice_date: "2026-09-30" })) })} />);
+  const another = screen.getByRole("button", { name: "Make another bill" });
+  expect(another).toHaveAttribute("data-variant", "primary");
+  for (const slot of ["Goes to slot", "Send status slot"]) expect(screen.queryByText(slot)).not.toBeInTheDocument();
+  const print = screen.getByText("Print slot");
+  const quiet = screen.getByRole("button", { name: "Send the bill" });
+  expect(quiet).toHaveAttribute("data-variant", "ghost");
+  expect(print.compareDocumentPosition(quiet) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(another.compareDocumentPosition(quiet) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(quiet);
+  for (const slot of ["Goes to slot", "Send status slot"]) expect(screen.getByText(slot)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Send the bill" })).not.toBeInTheDocument();
+});
+
+test("a paper bill already sent shows its shared send status; a viewer's unsent paper bill shows no send line", () => {
+  const sent = { at: "2026-10-08T10:44:00+05:30", last_at: "2026-10-08T10:44:00+05:30", count: 1, via: "share" as const, to: "" };
+  const first = renderApp(<SavedBody {...props({ bill: toBillDetail(wireDetail({ paper: true, sent })) })} />);
+  expect(screen.getByText("Send status slot")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Send the bill" })).not.toBeInTheDocument();
+  first.unmount();
+  renderApp(<SavedBody {...props({ canSend: false, canCreate: false, bill: toBillDetail(wireDetail({ paper: true })) })} />);
+  expect(screen.getByText("Print slot")).toBeInTheDocument();
+  expect(screen.queryByText("Send status slot")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Send the bill" })).not.toBeInTheDocument();
+});
