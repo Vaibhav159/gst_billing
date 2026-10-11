@@ -20,7 +20,7 @@ import { ATTACH_PDF } from "@/core/print/words";
 import { billMessage, mobileOf } from "@/core/sales/share";
 import type { BillDetail, Copies } from "@/core/sales/types";
 import { failText, type FailText } from "@/core/sales/words";
-import { Button, Dialog, Disclosure, FailNote, Field, LoadError, Page, Segmented, Select, Skeleton, StaleNote, useToast } from "@/core/ui";
+import { Banner, Button, Dialog, Disclosure, FailNote, Field, LoadError, Page, Segmented, Select, Skeleton, StaleNote, useToast } from "@/core/ui";
 import { useView } from "@/core/view";
 import { DeletedBill } from "../bill/DeletedBill";
 import { MissingBill } from "../bill/MissingBill";
@@ -189,8 +189,10 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
     ? <Button size="sm" variant="link" className="self-start -mt-3 anim-rise" loading={saveDefaults.isPending} onClick={makeDefault}>{saveDefaults.isPending ? "Saving…" : "Make these the default for every bill"}</Button>
     : <p className="text-sm text-muted -mt-3">For this print only. {whyNot("settings.edit", "set the print defaults")}</p>;
   const copiesNote = copyList.length > 1 ? "Original, Duplicate and Triplicate, each labelled at the top right." : `Marked “${copyList[0].tag}”.`;
+  const addressFlag = cancelled ? undefined : b.itax.find((flag) => flag.kind === "b2c_address");
   const paperStack = (
     <div key={`${copies}-${showBank}`} className="flex flex-col items-center gap-6 anim-rise min-w-0 w-full">
+      {addressFlag ? <Banner tone="amber" className="w-full text-sm">{addressFlag.text}</Banner> : null}
       {copyList.flatMap((cp, ci) => paper.pages.map((pg, pi) => (
         <div key={`${cp.value}-${pi}`} className="flex flex-col gap-2 min-w-0 w-full items-center">
           {sheets > 1 ? <p className="text-sm text-muted self-start">Page {ci * paper.pages.length + pi + 1} of {sheets}{copyList.length > 1 ? ` · ${cp.label.toLowerCase()} copy${paper.pages.length > 1 ? `, its page ${pi + 1} of ${paper.pages.length}` : ""}` : ""}</p> : null}

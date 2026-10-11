@@ -553,6 +553,18 @@ test("the fix sheet keeps what's typed when the same customer is asked for again
   expect(within(sheet).getByLabelText("PAN")).toHaveValue("ABCDE");
 });
 
+test.each([
+  ["", "A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address (CGST Rule 46(f))."],
+  ["URP", "A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address (CGST Rule 46(f))."],
+  ["27XTZPS7585P1ZB", "CGST Rule 46: a B2B tax invoice shows the buyer's address."],
+])("the address fix sheet explains the right rule for GSTIN '%s'", async (gst_number, words) => {
+  handClock(new Date("2026-10-11T10:00:00+05:30"));
+  serve({});
+  mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer({ ...ANIL, gst_number })} field="address" open onClose={() => {}} /> }], ["/"]);
+  await pass(400);
+  expect(within(screen.getByRole("dialog", { name: "Anil Gupta's address" })).getByText(words)).toBeInTheDocument();
+});
+
 test("the fix sheet for an address wants the shop or house, street and area", async () => {
   const user = typingClock();
   const calls = serve({ "PATCH customers/9/": (c: Call) => ({ status: 200, data: { ...ANIL, id: 9, ...(c.data as object) } }) });

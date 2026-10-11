@@ -15,7 +15,7 @@ import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { dateShort, inr, mobileText, possessive } from "@/core/format";
-import { checkGstin, cleanGstin, cleanPan, mobileDigits, mobileProblem, PAN_PROBLEM, PAN_RE, panProblem, stateLabel, stateOptions } from "@/core/ids";
+import { checkGstin, cleanGstin, cleanPan, hasGstin, mobileDigits, mobileProblem, PAN_PROBLEM, PAN_RE, panProblem, stateLabel, stateOptions } from "@/core/ids";
 import { andList, failText, type FailText } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
 import { Avatar, Button, Combobox, Dialog, FailNote, Field, Input, ListRow, SearchInput, Select, Sheet, useToast, type ComboItem, type ComboOption } from "@/core/ui";
@@ -366,9 +366,9 @@ export type CustomerFixSheetProps = {
 };
 
 /**
- * Income Tax Rule 114B asks for the buyer's PAN on a bill over ₹2,00,000, and CGST Rule 46 for a business buyer's
- * address. This saves it to the customer, so every bill shows it from then on. Only for someone who may change
- * customers: a bill page may open it for anyone (Ruling 1C-6).
+ * Income Tax Rule 114B asks for the buyer's PAN on a bill over ₹2,00,000, and CGST Rule 46 for the buyer's address
+ * (Rule 46(f) at ₹50,000 taxable without a GSTIN). This saves it to the customer, so every bill shows it from then on.
+ * Only for someone who may change customers: a bill page may open it for anyone (Ruling 1C-6).
  */
 export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: CustomerFixSheetProps) {
   const { can, whyNot } = useAuth();
@@ -429,7 +429,9 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   };
   return (
     <Sheet open={open} onClose={busy ? () => {} : onClose} title={`${possessive(customer.name)} ${field === "pan" ? "PAN" : "address"}`} width={420}
-      description={field === "pan" ? "Income Tax Rule 114B: a bill over ₹2,00,000 needs the buyer's PAN (or Form 60)." : "CGST Rule 46: a B2B tax invoice shows the buyer's address."}
+      description={field === "pan" ? "Income Tax Rule 114B: a bill over ₹2,00,000 needs the buyer's PAN (or Form 60)."
+        : hasGstin(customer.gst_number) ? "CGST Rule 46: a B2B tax invoice shows the buyer's address."
+          : "A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address (CGST Rule 46(f))."}
       footer={<><Button onClick={onClose} disabled={busy}>Not now</Button><Button variant="primary" loading={busy} onClick={save}>{busy ? "Saving…" : fail ? "Try again" : "Save"}</Button></>}>
       <div className="flex flex-col gap-3">
         <Field label={field === "pan" ? "PAN" : "Address"} htmlFor={id} error={err}>

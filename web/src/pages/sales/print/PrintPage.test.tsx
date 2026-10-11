@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -51,6 +51,49 @@ function openWith(qc: QueryClient, path = "/sales/412/print") {
 const papers = () => screen.getAllByRole("document", { name: /^Bill KGH\/2026-27\/31 on paper/ });
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 
+describe.each([[false, "desktop"], [true, "phone"]] as const)("the buyer's address note on %s (%s)", (on, _device) => {
+  const namedText = "A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address (CGST Rule 46(f)). Add Anil Gupta's address.";
+  const walkinText = "A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's name and address (CGST Rule 46(f)). Put the bill in the buyer's name, with their address, not Walk-in.";
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-11T12:00:00+05:30"));
+    phone(on);
+  });
+
+  test.each([["person", namedText], ["walkin", walkinText]] as const)("shows the %s flag's own text above the preview, outside the printed paper and PDF", async (type, text) => {
+    const customer = { ...(wireDetail().customer as Record<string, unknown>), type, address: "", ...(type === "walkin" ? { name: "Walk-in Customer", mobile_number: "" } : {}) };
+    const itax = [{ kind: "b2c_address", short: "Name and address needed", text }];
+    const detail = { customer, itax };
+    serve([], detail);
+    open();
+    const note = await screen.findByText(text);
+    const paper = papers()[0];
+    expect(note.compareDocumentPosition(paper) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(paper).not.toHaveTextContent(text);
+    const printed = document.querySelector("[data-print-copy]")!;
+    expect(printed).not.toHaveTextContent(text);
+    expect(printed.parentElement).toBe(document.body);
+    // Ctrl P prints this separate tree alone; the PDF uses the unchanged paper model.
+    expect(printBill(toBillDetail(wireDetail(detail)), { showBank: true })).toEqual(
+      printBill(toBillDetail(wireDetail({ ...detail, itax: [] })), { showBank: true }),
+    );
+  });
+
+  test("leaves the note out when the bill has no b2c_address flag", async () => {
+    serve();
+    open();
+    await screen.findByRole("document", { name: "Bill KGH/2026-27/31 on paper, original copy" });
+    expect(screen.queryByText(/CGST Rule 46\(f\)/)).not.toBeInTheDocument();
+  });
+
+  test("leaves the note out on a cancelled bill even if an old flag is present", async () => {
+    serve([], { status: "cancelled", itax: [{ kind: "b2c_address", short: "Name and address needed", text: namedText }] });
+    open();
+    await screen.findByRole("document", { name: "Bill KGH/2026-27/31 on paper, original copy" });
+    expect(screen.queryByText(namedText)).not.toBeInTheDocument();
+  });
+});
+
 test.each([[401, false], [403, false], [401, true], [403, true]] as const)("a refused read (%s, cached %s) never offers a futile Try again", async (status, cached) => {
   let refused = !cached;
   serve([["GET", "sales/412/", () => refused ? refuse(status, { detail: "You can't read this bill." }) : wireDetail()]]);
@@ -97,7 +140,8 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 // (a send's PDF reads the bill and the settings through the app's own cache: plan 1E Task 6)
-afterEach(() => { vi.restoreAllMocks(); vi.mocked(billFile).mockClear(); vi.useRealTimers(); phone(false); queryClient.clear(); });
+// Unmount before clearing calls: cleanup can flush a pending PDF effect from the previous test.
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.mocked(billFile).mockClear(); vi.useRealTimers(); phone(false); queryClient.clear(); });
 
 test("it opens on the shop's defaults, the Original with bank details, and the tab and the file name say which bill", async () => {
   serve();
