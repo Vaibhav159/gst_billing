@@ -7,12 +7,14 @@ import { readStored, writeStored } from "@/core/storage";
 import type { ShopSettings } from "@/core/sales/types";
 
 export const PLACEHOLDERS = [["{customer}", "Customer's name"], ["{number}", "Bill number"], ["{total}", "Bill total"], ["{firm}", "Firm's name"], ["{date}", "Bill date"]] as const;
+/** Characters as the server counts them (Python's len): an emoji is one, not two UTF-16 units. */
+export const messageLength = (message: string) => [...message].length;
 export function messageProblem(message: string): { error?: string; warning?: string } {
   if (!message.trim()) return { error: "Write a message, or put back the standard one." };
   const unknown = [...new Set((message.match(/\{[^{}]*\}/g) ?? []).filter((p) => !PLACEHOLDERS.some(([known]) => known === p)))];
   if (unknown.length) return { error: unknown.join(", ") + (unknown.length === 1 ? " isn't" : " aren't") + " something the app can fill in. Use {customer}, {number}, {total}, {firm} or {date}." };
   if (/[{}]/.test(message.replace(/\{[^{}]*\}/g, ""))) return { error: "A brace is left open. Each placeholder needs { and }." };
-  if (message.length > 500) return { error: "Keep the message to 500 characters." };
+  if (messageLength(message) > 500) return { error: "Keep the message to 500 characters." };
   return message.includes("{number}") ? {} : { warning: "Customers find bills by number. Consider adding {number}." };
 }
 type ShopPatch = Partial<Pick<ShopSettings, "copies" | "show_bank" | "share_message" | "default_business">>;

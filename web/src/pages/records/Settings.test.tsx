@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import Settings from "./Settings";
-import { messageProblem } from "./settingsModel";
+import { messageLength, messageProblem } from "./settingsModel";
 import { mount, VIEWER } from "@/pages/customers/testing";
 import { serve, type Call } from "@/test/server";
 import { DEFAULT_SHARE_MESSAGE } from "@/core/sales/share";
@@ -30,6 +30,9 @@ afterEach(() => vi.useRealTimers());
 test("message validation keeps 500 characters, every placeholder and the nonblocking number warning", () => {
   expect(messageProblem("{number}" + "x".repeat(492))).toEqual({});
   expect(messageProblem("{number}" + "x".repeat(493))).toEqual({ error: "Keep the message to 500 characters." });
+  // the server counts characters as Python does, so an emoji is one, not two
+  expect(messageProblem("{number}" + "🙏".repeat(492))).toEqual({});
+  expect(messageLength("🙏 {number}")).toBe(10);
   expect(messageProblem("{customer} {number} {total} {firm} {date}")).toEqual({});
   expect(messageProblem("{bad} {oops}")).toEqual({ error: "{bad}, {oops} aren't something the app can fill in. Use {customer}, {number}, {total}, {firm} or {date}." });
   expect(messageProblem("Hello {customer")).toEqual({ error: "A brace is left open. Each placeholder needs { and }." });
@@ -164,3 +167,26 @@ test.each([[false, false], [false, true], [true, false], [true, true]])("deleted
   else expect(screen.getByRole("link", { name: "KGH/2026-27/33 · Deleted" })).toHaveAttribute("href", "/sales/205");
 });
 afterEach(() => { (window as unknown as { __phone: boolean }).__phone = false; });
+test("a row that is saving keeps the keyboard on its control and ignores further changes", async () => {
+  const calls = serve({
+    "GET firms/": { results: FIRMS }, "GET preferences/": { data: {} }, "GET setup/": SETUP,
+    "GET shop-settings/": { copies: "original", show_bank: true, share_message: DEFAULT_SHARE_MESSAGE, default_business: 3 },
+    "PATCH preferences/": () => new Promise<never>(() => {}),
+  });
+  mountSettings();
+  const select = await screen.findByLabelText("Your default firm");
+  select.focus();
+  fireEvent.change(select, { target: { value: "4" } });
+  await waitFor(() => expect(select).toHaveAttribute("aria-disabled", "true"));
+  expect(select).toBeEnabled();
+  expect(select).toHaveFocus();
+  fireEvent.change(select, { target: { value: "3" } });
+  const easy = screen.getByRole("radio", { name: /^Easy/ });
+  easy.focus();
+  fireEvent.click(easy);
+  await waitFor(() => expect(easy).toHaveAttribute("aria-disabled", "true"));
+  expect(easy).toBeEnabled();
+  expect(easy).toHaveFocus();
+  fireEvent.click(screen.getByRole("radio", { name: /^Expert/ }));
+  expect(calls.filter((call) => call.method === "PATCH").map((call) => call.data)).toEqual([{ defaultBusinessId: "4" }, { phoneMode: "easy" }]);
+});

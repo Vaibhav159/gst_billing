@@ -17,7 +17,7 @@ import { DEFAULT_SHARE_MESSAGE, fillMessage } from "@/core/sales/share";
 import type { ShopSettings } from "@/core/sales/types";
 import { ShortcutsDialog } from "@/core/shell/ShortcutsDialog";
 import { Badge, Button, ButtonLink, Card, ConfirmDialog, Kbd, Page, QueryView, Select, Switch, Table, Td, Textarea, Th, Tr } from "@/core/ui";
-import { messageProblem, PLACEHOLDERS, useSettingRows } from "./settingsModel";
+import { messageLength, messageProblem, PLACEHOLDERS, useSettingRows } from "./settingsModel";
 
 const SECTIONS = [["set-appearance", "This device"], ["set-you", "You"], ["set-bills", "Bills"], ["set-numbering", "Bill numbers"], ["set-gst", "GST"], ["set-keys", "Keyboard"], ["set-data", "Data and setup"], ["set-about", "About"]] as const;
 function Row({ label, description, htmlFor, children, status, stack = false }: { label: string; description?: ReactNode; htmlFor?: string; children: ReactNode; status?: ReactNode; stack?: boolean }) {
@@ -27,19 +27,19 @@ function Row({ label, description, htmlFor, children, status, stack = false }: {
     <div className={cn("flex items-center gap-3 min-w-0", isPhone || stack ? "flex-wrap" : "shrink-0 justify-end")}>{isPhone || stack ? null : status}{children}{isPhone || stack ? status : null}</div>
   </div>;
 }
-function Choice<T extends string>({ label, value, choices, onChange, disabled = false }: { label: string; value: T; choices: { value: T; label: string; sub: string }[]; onChange(value: T): void; disabled?: boolean }) {
+function Choice<T extends string>({ label, value, choices, onChange, disabled = false, busy = false }: { label: string; value: T; choices: { value: T; label: string; sub: string }[]; onChange(value: T): void; disabled?: boolean; busy?: boolean }) {
   const { isPhone } = useView();
   return <div role="radiogroup" aria-label={label} className={cn("grid gap-2", isPhone ? "grid-cols-1 w-full" : "grid-cols-2 w-[460px]")}
     onKeyDown={(event) => {
-      if (disabled || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      if (disabled || busy || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
       const index = choices.findIndex((choice) => choice.value === value);
       const next = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 : (index + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : choices.length - 1)) % choices.length;
       onChange(choices[next].value);
       event.currentTarget.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
     }}>
-    {choices.map((choice) => <button key={choice.value} type="button" role="radio" aria-checked={value === choice.value} tabIndex={value === choice.value ? 0 : -1} disabled={disabled} onClick={() => onChange(choice.value)}
-      className={cn("text-left rounded-ctl border px-3.5 py-2.5 min-h-11 flex items-start gap-3 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed", value === choice.value ? "bg-brand-sel border-brand" : "bg-field border-ctl-line hover:border-muted")}>
+    {choices.map((choice) => <button key={choice.value} type="button" role="radio" aria-checked={value === choice.value} tabIndex={value === choice.value ? 0 : -1} disabled={disabled} aria-disabled={busy || undefined} onClick={() => { if (!busy) onChange(choice.value); }}
+      className={cn("text-left rounded-ctl border px-3.5 py-2.5 min-h-11 flex items-start gap-3 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50", value === choice.value ? "bg-brand-sel border-brand" : "bg-field border-ctl-line hover:border-muted")}>
       <span className="min-w-0"><span className={cn("block font-medium", value === choice.value && "text-brand")}>{choice.label}</span><span className="block text-sm text-muted">{choice.sub}</span></span>
     </button>)}
   </div>;
@@ -100,11 +100,11 @@ function SettingsBody({ settings, firms, person }: { settings: ShopSettings; fir
     </Card>
     <Card id="set-you" title="You" subtitle={(me?.fullName ?? "Your") + "'s own preferences; they follow you to any device"} actions={<Badge tone="brand">Just for you</Badge>}>
       <Row label="Your default firm" htmlFor="set-myfirm" description={(myFirm ? "Your new bills start with this firm." : "Your new bills start with the shop's default, " + (shopFirm?.name ?? "the first firm") + ".") + " It's the firm you usually work for; you still see every firm."} status={rowStatus("myFirm")}>
-        <Select id="set-myfirm" value={myFirm ?? ""} disabled={!prefsReady || rows.busy.reset || rows.busy.myFirm} onChange={(event) => void rows.mine("myFirm", { defaultBusinessId: event.target.value || null })}
+        <Select id="set-myfirm" value={myFirm ?? ""} disabled={!prefsReady || rows.busy.reset} aria-disabled={rows.busy.myFirm || undefined} onChange={(event) => rows.busy.myFirm ? undefined : void rows.mine("myFirm", { defaultBusinessId: event.target.value || null })}
           options={[{ value: "", label: "Same as the shop (" + (shopFirm?.short ?? "first firm") + ")" }, ...firms.map((firm) => ({ value: String(firm.id), label: firm.name }))]} />
       </Row>
       <Row label="Open on phones in" description="Expert has every screen. Easy has big buttons and the everyday screens. You can switch any time from More." stack status={rowStatus("phoneMode")}>
-        <Choice label="Phone screens" value={phoneMode} disabled={!prefsReady || rows.busy.reset || rows.busy.phoneMode} onChange={(value) => void rows.mine("phoneMode", { phoneMode: value })} choices={[{ value: "expert", label: "Expert", sub: "Every screen" }, { value: "easy", label: "Easy", sub: "Big buttons, everyday screens" }]} />
+        <Choice label="Phone screens" value={phoneMode} disabled={!prefsReady || rows.busy.reset} busy={rows.busy.phoneMode} onChange={(value) => void rows.mine("phoneMode", { phoneMode: value })} choices={[{ value: "expert", label: "Expert", sub: "Every screen" }, { value: "easy", label: "Easy", sub: "Big buttons, everyday screens" }]} />
       </Row>
       {isPhone ? <ButtonLink to="/e" full icon={Sparkles}>Switch to Easy now</ButtonLink> : null}
       <Row label="Reset my preferences" description={hasMine ? "Puts your default firm, phone screens and setup back to the shop's defaults. The shop's settings and your data are untouched." : "You haven't changed any yet; you're on the shop's defaults."} status={rowStatus("reset")}>
@@ -114,13 +114,13 @@ function SettingsBody({ settings, firms, person }: { settings: ShopSettings; fir
     <Card id="set-bills" title="Bills" subtitle="Defaults for new bills, for everyone who signs in" actions={<Badge>Shop-wide</Badge>}>
       {!shop ? <p className="text-sm text-muted pb-2">{whyNot("settings.edit", "change shop-wide settings")}</p> : null}
       <Row label="The shop's default firm" htmlFor="set-firm" description="New bills start with this firm, unless a person picked their own above." status={rowStatus("defaultFirm")}>
-        <Select id="set-firm" value={String(rows.value("defaultFirm", "default_business", settings.default_business ?? null) ?? "")} disabled={!shop || rows.busy.defaultFirm}
-          onChange={(event) => void rows.shop("defaultFirm", { default_business: event.target.value ? Number(event.target.value) : null })}
+        <Select id="set-firm" value={String(rows.value("defaultFirm", "default_business", settings.default_business ?? null) ?? "")} disabled={!shop} aria-disabled={rows.busy.defaultFirm || undefined}
+          onChange={(event) => rows.busy.defaultFirm ? undefined : void rows.shop("defaultFirm", { default_business: event.target.value ? Number(event.target.value) : null })}
           options={[{ value: "", label: "First firm by name" }, ...firms.map((firm) => ({ value: String(firm.id), label: firm.name }))]} />
       </Row>
       <Row label="Copies to print" htmlFor="set-copies" description="What Print picks first. You can still choose at print time." status={rowStatus("copies")}>
-        <Select id="set-copies" value={rows.value("copies", "copies", settings.copies)} disabled={!shop || rows.busy.copies}
-          onChange={(event) => void rows.shop("copies", { copies: event.target.value as ShopSettings["copies"] })}
+        <Select id="set-copies" value={rows.value("copies", "copies", settings.copies)} disabled={!shop} aria-disabled={rows.busy.copies || undefined}
+          onChange={(event) => rows.busy.copies ? undefined : void rows.shop("copies", { copies: event.target.value as ShopSettings["copies"] })}
           options={[{ value: "original", label: "Original" }, { value: "duplicate", label: "Duplicate" }, { value: "triplicate", label: "Triplicate" }, { value: "all", label: "All three" }]} />
       </Row>
       <div className="py-4 border-t border-rule flex flex-col gap-2">
@@ -138,8 +138,8 @@ function SettingsBody({ settings, firms, person }: { settings: ShopSettings; fir
               {PLACEHOLDERS.map(([placeholder, words]) => <button key={placeholder} type="button" disabled={!shop || rows.busy.shareMessage} onClick={() => insert(placeholder)} title={"Insert " + words.toLowerCase()}
                 className={cn("rounded-full border border-line bg-card px-2.5 text-sm tnum text-fg2 hover:text-fg hover:border-muted/50 disabled:opacity-50 transition-colors", isPhone ? "min-h-11" : "h-7")}>{placeholder}</button>)}
             </div>
-            <p id="set-msg-help" className={cn("text-sm", problem.error ? "text-neg" : "text-muted")}>{problem.error ?? problem.warning ?? message.length + " of 500 characters"}</p>
-            {!problem.error && problem.warning ? <p className="text-sm text-muted">{message.length} of 500 characters</p> : null}
+            <p id="set-msg-help" className={cn("text-sm", problem.error ? "text-neg" : "text-muted")}>{problem.error ?? problem.warning ?? messageLength(message) + " of 500 characters"}</p>
+            {!problem.error && problem.warning ? <p className="text-sm text-muted">{messageLength(message)} of 500 characters</p> : null}
             {(settings.warnings ?? []).filter((warning) => warning !== problem.warning).map((warning) => <p key={warning} role="status" className="text-sm text-muted">{warning}</p>)}
           </div>
           <div className="flex flex-col gap-1.5" aria-live="polite"><span className="caps">Preview · example bill to Anil Gupta</span><p className="rounded-card rounded-tl-sm border border-sale-line bg-sale-tint px-4 py-3 text-fg whitespace-pre-wrap break-words">{problem.error ? "Fix the message to see it." : preview}</p></div>
