@@ -1,13 +1,7 @@
 import type { Customer } from "@/core/api/customers";
 import { checkGstin } from "@/core/ids";
-import { autoPos, effectiveType, gstinNote, isInterState, posOptions, segmentOf, stateNameOf, taxType } from "./pos";
+import { autoPos, gstinNote, isInterState, posOptions, segmentOf, stateNameOf, taxType } from "./pos";
 import type { CustomerOnBill, CustomerRef } from "./types";
-
-test("a customer's type: as stored, else business with a GSTIN and person without", () => {
-  expect(effectiveType("walkin", "")).toBe("walkin");
-  expect(effectiveType("", "08ABCPK1234F1Z5")).toBe("business");
-  expect(effectiveType("", "")).toBe("person");
-});
 
 test("a counter sale is taxed where it's handed over: the firm's state unless a registered buyer is elsewhere", () => {
   expect(autoPos("08", { type: "person", gst_number: "" })).toBe("08");

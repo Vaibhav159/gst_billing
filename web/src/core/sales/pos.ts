@@ -6,12 +6,6 @@ import { inr } from "@/core/format";
 import { checkGstin, GST_STATES, hasGstin, stateCodeOf, stateOptions, stateTitle } from "@/core/ids";
 import type { CustomerType, Segment } from "./types";
 
-/** walkin, person or business: the stored type, else business with a GSTIN and person without (the server's `type`). */
-export function effectiveType(stored: string | null | undefined, gstin: string | null | undefined): CustomerType {
-  if (stored === "walkin" || stored === "person" || stored === "business") return stored;
-  return hasGstin(gstin) ? "business" : "person";
-}
-
 /** A state code as people read it: "08" -> "Rajasthan"; a code the table doesn't have -> "Unknown state". */
 export function stateNameOf(code: string | null | undefined): string {
   const name = code ? GST_STATES[code] : undefined;

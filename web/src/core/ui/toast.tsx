@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useInRouterContext, useLocation } from "react-router";
 import { CheckCircle2, Info, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/core/cn";
@@ -21,8 +21,10 @@ const ToastListCtx = createContext<{ toasts: Toast[]; hosted: boolean; acted(id:
 
 /**
  * Holds the toasts (the prototype kept them in its store). show({ title, body, tone, action: { label, onClick }, duration }):
- * the host times each one (paused while pointed at or focused): 6 s, 15 s with an action, 10 s for a problem.
- * A new toast replaces one with the same title, and at most three show. An action labelled Undo can also be run by
+ * the host times each one (paused while pointed at, focused or the tab is hidden): 6 s, 15 s with an action, 10 s for a problem.
+ * duration: Infinity keeps an action available until dismissed.
+ * A new timed toast replaces one with the same title, and at most three timed toasts show. Persistent actions stay
+ * until dismissed, including when another bill's action uses the same title. An action labelled Undo can also be run by
  * Ctrl Z (undoLast) for 30 s, once; pressing it on the toast uses it up.
  * Inside a router the provider shows them itself; above one (the app's case), ToastHost shows them.
  */
@@ -50,7 +52,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const show = useCallback((t: ToastInput) => {
     const id = Math.random().toString(36).slice(2);
     const duration = t.duration || (t.action ? 15000 : t.tone === "neg" ? 10000 : 6000);
-    setToasts((all) => [...all.filter((x) => x.title !== t.title).slice(-2), { id, tone: "sale", ...t, duration, at: Date.now() }]);
+    setToasts((all) => {
+      const timed = all.filter((x) => Number.isFinite(x.duration) && x.title !== t.title).slice(Number.isFinite(duration) ? -2 : -3);
+      return [...all.filter((x) => !Number.isFinite(x.duration) || timed.includes(x)), { id, tone: "sale", ...t, duration, at: Date.now() }];
+    });
     if (t.action && /^undo/i.test(t.action.label)) undo.current = { id, run: t.action.onClick, until: Date.now() + 30_000 };
     return id;
   }, []);
@@ -145,11 +150,14 @@ function ToastStack() {
 function ToastItem({ t, dismiss, acted, isPhone, isEasy }: { t: Toast; dismiss: (id: string) => void; acted: (id: string) => void; isPhone: boolean; isEasy: boolean }) {
   const [I, c] = TOAST_ICON[t.tone ?? "sale"] || TOAST_ICON.sale;
   const paused = useRef(false);
+  const hovered = useRef(false);
+  const focused = useRef(false);
   const left = useRef(isEasy && !t.action ? Math.round(t.duration * 1.35) : t.duration || 6000);
   const started = useRef(Date.now());
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const arm = () => {
     clearTimeout(timer.current);
+    if (!Number.isFinite(left.current)) return;
     started.current = Date.now();
     timer.current = setTimeout(() => dismiss(t.id), left.current);
   };
@@ -159,18 +167,24 @@ function ToastItem({ t, dismiss, acted, isPhone, isEasy }: { t: Toast; dismiss: 
     clearTimeout(timer.current);
     left.current = Math.max(1500, left.current - (Date.now() - started.current));
   };
-  const resume = (e?: SyntheticEvent<HTMLElement>) => {
+  const syncPause = () => {
+    if (document.hidden || hovered.current || focused.current) { pause(); return; }
     if (!paused.current) return;
-    if (e && e.currentTarget.contains(document.activeElement) && e.type !== "focusout") return;
     paused.current = false;
     arm();
   };
-  useEffect(() => { arm(); return () => clearTimeout(timer.current); }, []);
+  useEffect(() => {
+    if (document.hidden) paused.current = true;
+    else arm();
+    document.addEventListener("visibilitychange", syncPause);
+    return () => { clearTimeout(timer.current); document.removeEventListener("visibilitychange", syncPause); };
+  }, []);
   const action = t.action;
   const undo = action && /^undo/i.test(action.label);
   return (
     <div role={t.tone === "neg" ? "alert" : undefined}
-      onPointerEnter={pause} onPointerLeave={resume} onFocus={pause} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) resume(); }}
+      onPointerEnter={() => { hovered.current = true; syncPause(); }} onPointerLeave={() => { hovered.current = false; syncPause(); }}
+      onFocus={() => { focused.current = true; syncPause(); }} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) { focused.current = false; syncPause(); } }}
       className={cn("pointer-events-auto card shadow-pop px-4 py-3 flex items-start gap-3", isEasy && "text-md", t.leaving ? "anim-toast-out" : "anim-toast")}>
       <I size={20} className={cn("shrink-0 mt-0.5", c)} aria-hidden="true" />
       <div className="flex-1 min-w-0">

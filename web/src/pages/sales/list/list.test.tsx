@@ -400,6 +400,7 @@ test("the row's Send double-clicked sends once, even when the record lands betwe
 });
 
 test("an Undo pressed while a stopped delete still shows puts those bills back in its count; Try again then deletes them all, once", async () => {
+  handClock();
   let bin = 50;
   let failOnce = true;
   const { calls } = server(ROWS, {}, [
@@ -411,22 +412,32 @@ test("an Undo pressed while a stopped delete still shows puts those bills back i
     ["POST", /^bin\/\d+\/restore\/$/, () => wireDetail()],
   ]);
   mount();
-  const dialog = await deleteBoth();
-  await userEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
-  expect(await within(dialog).findByText("Stopped after 1 of 2")).toBeInTheDocument();
+  await pass(400); // the page is ready, past its guard against the click that opened it
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/32" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select KGH/2026-27/31" }));
+  fireEvent.click(within(screen.getByRole("region", { name: "Selected bills" })).getByRole("button", { name: "Delete 2 bills…" }));
+  const dialog = screen.getByRole("dialog", { name: "Delete 2 sales bills?" });
+  await pass(400); // past the dialog's 350 ms guard
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 bills" }));
+  await pass(0);
+  expect(within(dialog).getByText("Stopped after 1 of 2")).toBeInTheDocument();
   // the first try's toast sits above the dialog: its Undo brings 413 back while the dialog still shows
-  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
-  expect(await screen.findByText("Restored 1 bill")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  await pass(0);
+  expect(screen.getByText("Restored 1 bill")).toBeInTheDocument();
   // nothing of this delete is deleted now: the dialog is about both bills again, and says so
-  expect(await within(dialog).findByText("Nothing was deleted. Try again in a minute.")).toBeInTheDocument();
+  expect(within(dialog).getByText("Nothing was deleted. Try again in a minute.")).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Delete 2 sales bills?" })).toBe(dialog);
-  await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/413/", "sales/412/"]));
-  expect(await screen.findByText("Deleted 2 bills")).toBeInTheDocument();
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+  await pass(0);
+  expect(deletes(calls)).toEqual(["sales/413/", "sales/412/", "sales/413/", "sales/412/"]);
+  expect(screen.getByText("Deleted 2 bills")).toBeInTheDocument();
+  await pass(170); // the dialog and the old Undo finish closing on the hand clock
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   // its Undo is for the two bills in the bin now, and both come back
-  await userEvent.click(screen.getByRole("button", { name: /^Undo/ }));
-  const restored = (await screen.findByText("Restored 2 bills")).parentElement!;
+  fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  await pass(0);
+  const restored = screen.getByText("Restored 2 bills").parentElement!;
   expect(restored).toHaveTextContent("Back in Sales and in the GST figures.");
   expect(restored).not.toHaveTextContent("in the bin");
   expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/", "bin/53/restore/"]);

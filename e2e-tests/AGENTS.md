@@ -72,6 +72,7 @@ CHROMIUM_PATH=~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/h
 
 Pitfalls:
 
+- A menu choice acts a tick after the click: wait for its result with a web-first assertion before the next step.
 - A spec file whose tests type a password calls `typesPassword(test)` from
   `session.js` at its top level: no trace, and a test that fails goes to
   `about:blank` first, so the page snapshot Playwright writes to

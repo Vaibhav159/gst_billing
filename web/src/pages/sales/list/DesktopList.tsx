@@ -138,6 +138,12 @@ export function DesktopList({ m }: { m: ListModel }) {
     setSelected((s) => { const n = new Set([...s].filter((id) => ids.has(id))); return n.size === s.size ? s : n; });
     // the previewed bill left the rows it was in (deleted, or filtered out): close it. A link's bill past the first page stays
     if (previewId != null && seen.current.has(previewId) && !ids.has(previewId)) setPreview(null);
+    const active = document.activeElement;
+    if (focusId != null && seen.current.has(focusId) && !ids.has(focusId) && (!active || active === document.body || !document.contains(active))) {
+      const next = rows[Math.min([...seen.current].indexOf(focusId), rows.length - 1)];
+      setFocusId(next?.id ?? null);
+      (next ? rowEl(next.id) : document.querySelector<HTMLElement>("#app-main [data-page-title]"))?.focus({ preventScroll: true });
+    }
     seen.current = ids;
   }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -171,6 +177,7 @@ export function DesktopList({ m }: { m: ListModel }) {
       return;
     }
     const k = e.key;
+    if (e.repeat && ["s", "p", " ", "enter", "."].includes(k.toLowerCase())) { e.preventDefault(); return; }
     if (k === "ArrowDown" || k === "j" || k === "J") { e.preventDefault(); goRow(i + 1, { openPreview: true }); }
     else if (k === "ArrowUp" || k === "k" || k === "K") { e.preventDefault(); goRow(i - 1, { openPreview: true }); }
     else if (k === "Home") { e.preventDefault(); goRow(0); }
@@ -187,7 +194,7 @@ export function DesktopList({ m }: { m: ListModel }) {
   const keyRef = useRef(onRowKey);
   keyRef.current = onRowKey;
   const onKeyStable = useCallback((e: KeyboardEvent<HTMLTableRowElement>) => keyRef.current(e), []);
-  const onFocusRow = useCallback((e: FocusEvent<HTMLTableRowElement>) => { if (e.target === e.currentTarget) setFocusId(Number(e.currentTarget.getAttribute("data-row"))); }, []);
+  const onFocusRow = useCallback((e: FocusEvent<HTMLTableRowElement>) => { setFocusId(Number(e.currentTarget.getAttribute("data-row"))); }, []);
   const tabId = focusId != null && rows.some((r) => r.id === focusId) ? focusId : pIndex >= 0 ? previewId : rows[0]?.id ?? null;
   // Esc closes the preview from anywhere outside a field
   useEffect(() => {

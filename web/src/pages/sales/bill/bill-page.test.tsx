@@ -28,9 +28,10 @@ const mount = (path: string, me?: Partial<Me>) => renderApp(
   </Routes>, { path, me });
 const status = (text: string) => screen.getByText(text).closest("[role=status]") as HTMLElement;
 
-afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.restoreAllMocks(); act(() => { onlineManager.setOnline(true); }); appClient.clear(); });
+afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.restoreAllMocks(); vi.unstubAllGlobals(); act(() => { onlineManager.setOnline(true); }); appClient.clear(); });
 // plan 1E: a send downloads its PDF beside the chat; jsdom (no object URLs, no downloads) clicks nothing
 beforeEach(() => {
+  vi.stubGlobal("IntersectionObserver", undefined);
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });

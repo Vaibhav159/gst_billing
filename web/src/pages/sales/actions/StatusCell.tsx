@@ -1,8 +1,8 @@
 import type { ReactElement } from "react";
-import { AlertTriangle, Ban, Lock, Wallet } from "lucide-react";
+import { AlertTriangle, Ban, FileText, Lock, Send, Wallet } from "lucide-react";
 import { date, dateShort } from "@/core/format";
 import type { BillDetail, BillRow } from "@/core/sales/types";
-import { LOCKED_REASON } from "@/core/sales/words";
+import { LOCKED_REASON, sentWhen } from "@/core/sales/words";
 import { Badge } from "@/core/ui";
 
 /** What stops a bill going into GSTR-1 as it is, in words; "" when nothing does (PROTO sales/parts.jsx:315-321). */
@@ -21,6 +21,14 @@ export function UdhaarChip() {
 
 export function TaxTypeBadge({ bill }: { bill: Pick<BillRow, "interstate"> }) {
   return <Badge tone="sale">{bill.interstate ? "Sale · inter-state · IGST" : "Sale · local · CGST + SGST"}</Badge>;
+}
+
+/** The same sending status on the preview and both bill layouts. */
+export function SendStatusBadge({ bill }: { bill: Pick<BillRow, "status" | "sent" | "paper"> }) {
+  if (bill.status === "cancelled") return null;
+  return bill.sent ? <Badge tone="sale" icon={Send}>Sent {sentWhen(bill.sent)}</Badge>
+    : bill.paper ? <Badge tone="muted" icon={FileText} title="Entered from the paper bill book: the customer has the paper bill">On paper</Badge>
+      : <Badge tone="brand">Not sent yet</Badge>;
 }
 
 /**

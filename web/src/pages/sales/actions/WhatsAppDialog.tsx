@@ -4,6 +4,7 @@ import { Printer, Send } from "lucide-react";
 import { useSaveCustomer } from "@/core/api/customers";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { possessive } from "@/core/format";
 import { mobileOf } from "@/core/sales/share";
 import { Button, Checkbox, Dialog, Field, Input, useToast } from "@/core/ui";
 import { useHeldValue } from "./held";
@@ -11,8 +12,8 @@ import { useSendBill, type SendableBill } from "./useSendBill";
 
 /** Why the number didn't reach the customer's record, and what to do: the bill has gone already, so the dialog has closed. */
 function notSaved(p: ApiProblem, name: string, mobile: string): string {
-  if (p.kind === "offline") return `You're offline. Add +91 ${mobile} to ${name}'s record when the internet is back.`;
-  if (p.kind === "unreachable" || p.kind === "server") return `The app couldn't get through. Add +91 ${mobile} to ${name}'s record in a minute.`;
+  if (p.kind === "offline") return `You're offline. Add +91 ${mobile} to ${possessive(name)} record when the internet is back.`;
+  if (p.kind === "unreachable" || p.kind === "server") return `The app couldn't get through. Add +91 ${mobile} to ${possessive(name)} record in a minute.`;
   return p.message;
 }
 
@@ -70,7 +71,7 @@ export function WhatsAppDialog({ bill, onClose, onSent }: { bill: SendableBill |
       onOpened: () => { opened = true; },
       onRecorded: saveIt ? () => {
         saveCustomer.mutateAsync({ id: c.id, body: { mobile_number: to.replace(/\s/g, "") } }).catch((e: unknown) => {
-          show({ tone: "neg", title: `Not saved to ${c.name}'s record`, body: notSaved(problemOf(e), c.name, to) });
+          show({ tone: "neg", title: `Not saved to ${possessive(c.name)} record`, body: notSaved(problemOf(e), c.name, to) });
         });
       } : undefined,
     }).then((ok) => {
@@ -95,7 +96,7 @@ export function WhatsAppDialog({ bill, onClose, onSent }: { bill: SendableBill |
             onChange={(e) => { setText(numberText(e.target.value)); setErr(""); }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }} />
         </Field>
-        {canKeep ? <Checkbox label={onRecord ? `Replace it on ${c.name}'s record` : `Save it to ${c.name}'s record`} description="Next time, Send goes straight to this chat." checked={keepIt} onChange={setKeep} /> : null}
+        {canKeep ? <Checkbox label={onRecord ? `Replace it on ${possessive(c.name)} record` : `Save it to ${possessive(c.name)} record`} description="Next time, Send goes straight to this chat." checked={keepIt} onChange={setKeep} /> : null}
       </div>
     </Dialog>
   );

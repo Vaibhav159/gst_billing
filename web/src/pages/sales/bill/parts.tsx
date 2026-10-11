@@ -1,6 +1,6 @@
 // The bill page's pieces (PROTO sales/BillDetail.jsx:72-387): the state banners, the total, the parties, what happened,
 // the customer's other bills, the e-way bill, payment and sending, and the role note.
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,7 +12,7 @@ import { salesKeys, useFixHeads, useSalesPage } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { ROLES } from "@/core/auth/permissions";
 import { cn } from "@/core/cn";
-import { date, dateShort, inr, mobileText, monthLabel, plural } from "@/core/format";
+import { date, dateShort, inr, mobileText, monthLabel, plural, possessive } from "@/core/format";
 import { billPdfName } from "@/core/sales/files";
 import { taxSlips } from "@/core/sales/maths";
 import { gstinNote, SEGMENTS, stateNameOf } from "@/core/sales/pos";
@@ -20,6 +20,7 @@ import type { Activity as ActivityRow, AuditAction, BillDetail } from "@/core/sa
 import { LOCKED_REASON, PAY, cancelledMark, dayOf, ewayNumberText, failText, realReason, sentLine, taxLines, timeOf, type FailText } from "@/core/sales/words";
 import { Banner, Button, ButtonLink, Card, DL, FailNote, ListRow, Money, Skeleton, useToast } from "@/core/ui";
 import type { Detail } from "./useDetail";
+import { madeByRow } from "../actions/recordRows";
 
 /**
  * Each audit action in words, with its icon (PROTO sales/BillDetail.jsx:72-75; imported, moved, printed, exported and
@@ -76,7 +77,7 @@ export function Parties({ b, stacked = false }: { b: BillDetail; stacked?: boole
         {c.type !== "walkin" ? <Link to={`/customers/${c.id}`} className={cn("font-semibold mt-1 self-start hover:text-brand", stacked && "min-h-11 inline-flex items-center -my-2")}>{c.name}</Link> : <p className="font-semibold mt-1">{c.name}</p>}
         <p className="text-sm text-fg2 tnum">{c.gst_number ? `GSTIN ${c.gst_number}` : c.type === "walkin" ? "Counter sale, no GSTIN" : "No GSTIN: a sale to a person (B2C)"}</p>
         {note ? <p className="text-sm text-neg">{note}</p> : null}
-        <p className="text-sm text-muted">{[c.address, c.city].filter(Boolean).join(", ")}{c.mobile_number ? ` · ${mobileText(c.mobile_number)}` : ""} · {stateNameOf(c.state_code)} ({c.state_code})</p>
+        <p className="text-sm text-muted">{[[c.address, c.city].filter(Boolean).join(", "), c.mobile_number && mobileText(c.mobile_number), c.state_code && `${stateNameOf(c.state_code)} (${c.state_code})`].filter(Boolean).join(" · ")}</p>
       </div>
       <p className={cn("text-sm text-fg2 min-w-0", stacked ? "" : "col-span-2 border-t border-rule pt-3")}>
         Place of supply <span className="font-medium text-fg">{stateNameOf(b.place_of_supply)} ({b.place_of_supply})</span> · {b.interstate ? `inter-state, so IGST: delivered to ${stateNameOf(b.place_of_supply)}` : `local, so CGST + SGST: handed over in ${stateNameOf(firmState)}`} · Reverse charge: No · GSTR-1: {SEGMENTS[b.segment].label}
@@ -105,14 +106,13 @@ export function TotalBlock({ b, d, big = "3xl" }: { b: BillDetail; d: Detail; bi
 
 /** Paid by, sent, who made it and the PDF's name (PROTO sales/BillDetail.jsx:432-440). */
 export function PaymentCard({ b, d }: { b: BillDetail; d: Detail }) {
-  const maker = b.history.created_by?.name ?? "Someone";
   return (
     <Card title="Payment and sending">
       <DL rows={[
         ["Paid by", b.payment_mode ? PAY[b.payment_mode] : <span key="p" className="text-muted">Not recorded</span>],
         b.payment_mode === "credit" ? ["Udhaar", <span key="u" className="text-fg2">Billed on udhaar; payments aren&apos;t tracked</span>] : null,
         ["Sent", b.paper && !b.sent ? "No need: the customer has the paper bill" : b.sent ? `${sentLine(b.sent)}${d.cancelled ? ", before it was cancelled" : ""}` : "Not yet"],
-        b.paper ? ["Typed in by", `${maker} on ${date(dayOf(b.created_at))}`] : ["Made by", `${maker} · ${timeOf(b.created_at)}`],
+        madeByRow(b),
         ["PDF name", <span key="f" className="tnum break-all">{billPdfName(b)}</span>],
       ]} />
     </Card>
@@ -154,35 +154,45 @@ export function OtherBills({ b, phone = false }: { b: BillDetail; phone?: boolea
   const c = b.customer;
   const qc = useQueryClient();
   const query = { customer_id: c.id, ordering: "-date" } as const;
-  const page = useSalesPage("all", query, 6, c.type !== "walkin");
+  const host = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(() => typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    if (visible || !host.current) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) { setVisible(true); observer.disconnect(); }
+    });
+    observer.observe(host.current);
+    return () => observer.disconnect();
+  }, [visible, c.id]);
+  const page = useSalesPage("all", query, 6, visible && c.type !== "walkin");
   if (c.type === "walkin") return null;
   const title = `Other bills for ${c.name}`;
   if (!page.data) {
     return (
-      <Card title={title}>
+      <div ref={host}><Card title={title}>
         {page.isError
           ? <p className="text-sm text-muted">Couldn&apos;t load them just now. <Button size="sm" variant="link" loading={page.isFetching} onClick={() => { void qc.refetchQueries({ queryKey: salesKeys.page("all", query, 6) }); }}>Try again</Button></p>
           : <div className="flex flex-col gap-2"><Skeleton h={16} /><Skeleton w="70%" h={16} /></div>}
-      </Card>
+      </Card></div>
     );
   }
   const others = page.data.results.filter((s) => s.id !== b.id).slice(0, 5);
-  if (!others.length) return <Card title={title}><p className="text-sm text-muted">This is their only bill.</p></Card>;
+  if (!others.length) return <div ref={host}><Card title={title}><p className="text-sm text-muted">This is their only bill.</p></Card></div>;
   const s = page.data.summary;
   const mine = b.status !== "cancelled";
   const bills = s.bills - (mine ? 1 : 0);
   const total = s.total_amount - (mine ? b.total_amount : 0);
   const x = s.cancelled - (mine ? 0 : 1);
   return (
-    <Card title={title} subtitle={`${plural(bills, "bill")} in all years · ${inr(total)}${x ? ` · ${x} cancelled` : ""}`} pad={false}>
+    <div ref={host}><Card title={title} subtitle={`${plural(bills, "bill")} in all years · ${inr(total)}${x ? ` · ${x} cancelled` : ""}`} pad={false}>
       <div className="mt-1">
         {others.map((o) => (
           <ListRow key={o.id} to={`/sales/${o.id}`} title={<span className="tnum">{o.invoice_number}</span>} subtitle={`${date(o.invoice_date)} · ${o.payment_mode ? PAY[o.payment_mode] : "Not recorded"}${cancelledMark(o.status)}`}
             right={<Money value={o.total_amount} className={o.status === "cancelled" ? "line-through text-muted" : ""} />} className={phone ? "" : "min-h-12 py-2"} />
         ))}
       </div>
-      <div className="px-4 py-2 border-t border-rule"><Link to={`/sales?customer=${c.id}&all=1`} className="link inline-flex items-center gap-1 min-h-11">All of {c.name}&apos;s bills <ChevronRight size={15} aria-hidden="true" /></Link></div>
-    </Card>
+      <div className="px-4 py-2 border-t border-rule"><Link to={`/sales?customer=${c.id}&all=1`} className="link inline-flex items-center gap-1 min-h-11">All of {possessive(c.name)} bills <ChevronRight size={15} aria-hidden="true" /></Link></div>
+    </Card></div>
   );
 }
 
@@ -228,12 +238,12 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
         <ButtonLink size="sm" variant="primary" to={`/sales/${o.id}`}>Open the other bill</ButtonLink>
         <Button size="sm" disabled={Boolean(d.editBlock)} title={d.editBlock || undefined} onClick={() => d.dialogs.open("renumber", b)}>Renumber this one</Button>
       </>}>
-      It shares the number with {o.customer_name}&apos;s bill of {date(o.invoice_date)}. {month}&apos;s GSTR-1 can&apos;t be filed until one of them gets a new number.
+      It shares the number with {possessive(o.customer_name)} bill of {date(o.invoice_date)}. {month}&apos;s GSTR-1 can&apos;t be filed until one of them gets a new number.
     </Banner>);
   }
   if (!d.cancelled && b.checks.includes("heads_mismatch")) {
     const fix = () => fixHeads.mutate(b.id, {
-      onSuccess: () => { setFail(null); show({ title: `Tax heads fixed on ${b.invoice_number}`, body: `Now ${b.interstate ? "IGST" : "CGST + SGST"}, worked out again from the place of supply.` }); },
+      onSuccess: () => { requestAnimationFrame(() => document.querySelector<HTMLElement>("#app-main [data-page-title]")?.focus({ preventScroll: true })); setFail(null); show({ title: `Tax heads fixed on ${b.invoice_number}`, body: `Now ${b.interstate ? "IGST" : "CGST + SGST"}, worked out again from the place of supply.` }); },
       onError: (e) => setFail(failText(problemOf(e), "fixed")),
     });
     out.push(<Banner key="h" tone="neg" icon={AlertTriangle} title={`Tax is under ${b.igst > 0 ? "IGST" : "CGST + SGST"}, but this is ${b.interstate ? "an inter-state" : "a local"} sale`}

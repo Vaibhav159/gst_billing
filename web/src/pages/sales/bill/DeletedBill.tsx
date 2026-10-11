@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReceiptText, RotateCcw, Trash2 } from "lucide-react";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
@@ -8,7 +8,8 @@ import { date, inr, monthLabel } from "@/core/format";
 import { markFresh } from "@/core/sales/fresh";
 import type { BinRow } from "@/core/sales/types";
 import { dayOf, failText, realReason, restoreFailure, timeOf } from "@/core/sales/words";
-import { Banner, Button, ButtonLink, Card, DL, FailNote, Money, Page, useToast } from "@/core/ui";
+import { recordRows } from "../actions/recordRows";
+import { Banner, Button, ButtonLink, Card, DL, FailNote, Page, useToast } from "@/core/ui";
 
 /** Failures worth pressing Restore again for: it didn't get through. A refusal (the customer or firm gone, the number taken) stands. */
 const AGAIN: ApiProblem["kind"][] = ["offline", "unreachable", "server", "throttled"];
@@ -23,13 +24,20 @@ export function DeletedBill({ b, note }: { b: BinRow; note?: ReactNode }) {
   const { show } = useToast();
   const qc = useQueryClient();
   const restore = useRestoreBill();
+  const restoring = useRef(false);
+  // The new bill replaces this page: focus its title after that replacement has committed.
+  useEffect(() => () => {
+    if (restoring.current && qc.getQueryData(billQuery(b.original_id).queryKey)?.kind === "bill") {
+      document.querySelector<HTMLElement>("#app-main [data-page-title]")?.focus({ preventScroll: true });
+    }
+  }, [qc, b.original_id]);
   const [problem, setProblem] = useState<ApiProblem | null>(null);
   const ym = b.invoice_date.slice(0, 7);
   // a filed month stays as filed: restoring into it would change a return already on the portal
   const filed = b.locked ? `${monthLabel(ym, { long: true })} is filed and locked, so the bill can't come back into it. The owner can unlock the month in GST returns first.` : "";
   const why = !can("bill.delete") ? whyNot("bill.delete", "restore deleted bills") : filed;
   const reason = realReason(b.reason);
-  const go = () => restore.mutate(b.id, {
+  const go = () => { restoring.current = true; restore.mutate(b.id, {
     onSuccess: () => { markFresh(b.original_id); show({ title: `Restored ${b.invoice_number}`, body: "Back in Sales and in the month's GST figures." }); },
     onError: (e) => {
       const p = problemOf(e);
@@ -38,7 +46,7 @@ export function DeletedBill({ b, note }: { b: BinRow; note?: ReactNode }) {
       // shows the bill if it's back, rather than this page and a Try again that can only fail
       if (p.kind === "notfound" || p.code === "already_restored") void qc.refetchQueries({ queryKey: billQuery(b.original_id).queryKey });
     },
-  });
+  }); };
   // a bin row that has gone says the server's words (contract §3.2), as an Undo's does; anything else as a change's
   const fail = problem ? (problem.kind === "notfound" ? restoreFailure(problem, b.invoice_number) : failText(problem, "restored")) : null;
   const again = problem !== null && AGAIN.includes(problem.kind);
@@ -55,13 +63,7 @@ export function DeletedBill({ b, note }: { b: BinRow; note?: ReactNode }) {
       </Banner>
       <FailNote error={fail} />
       <Card title="What was on the bill" subtitle="Its items come back with it when it's restored">
-        <DL rows={[
-          ["Firm", b.business_name],
-          ["Bill no.", <span key="n" className="tnum">{b.invoice_number}</span>],
-          ["Date", date(b.invoice_date)],
-          ["Customer", b.customer.name],
-          ["Total", <Money key="t" value={b.total_amount} strong />],
-        ]} />
+        <DL rows={recordRows(b)} />
       </Card>
     </Page>
   );

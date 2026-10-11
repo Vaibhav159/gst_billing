@@ -98,8 +98,8 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, open: boolean, onClose
       // focus already moved on (a new page put it in a field): leave it there
       const cur = document.activeElement;
       if (cur && cur !== document.body && !node.contains(cur)) return;
-      // back to what opened it; if that's gone (a menu item, a deleted row), to the page title, never to nothing
-      const back = prev?.focus && document.contains(prev) && prev !== document.body ? prev : document.querySelector<HTMLElement>("#app-main [data-page-title]");
+      // back to what opened it; if that's gone or disabled, to the page title, never to nothing
+      const back = prev?.focus && document.contains(prev) && prev !== document.body && !prev.matches(":disabled") ? prev : document.querySelector<HTMLElement>("#app-main [data-page-title]");
       back?.focus?.({ preventScroll: true });
     };
   }, [open]);

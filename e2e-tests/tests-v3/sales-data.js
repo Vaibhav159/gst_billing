@@ -82,29 +82,33 @@ async function removeBill(api, id) {
  * For a file whose tests make bills, called at its top level: after each test, every bill it made goes to the bin, one
  * renumbered first getting its number back, so the series keeps no gap. A test.afterEach, not each test's finally: a test
  * that times out has its request disposed before a finally could use it, which would leave a live bill or a gap. A bill
- * the server won't check or take (a 429 once the user's requests for the day are used up, a 5xx) fails the hook, saying
- * so, and stays noted for the next test's: never a live test bill left unsaid.
+ * the server won't check or take (a 429 once the user's requests for the day are used up, a 5xx) doesn't stop the rest:
+ * every noted bill is tried, the notes are emptied, then the hook fails once, naming every bill still live or unchecked.
  */
 function makesBills(test) {
   test.afterEach(async ({ request }) => {
     const headers = { Authorization: `Bearer ${savedToken()}` };
     const call = (method, path, data) => request.fetch(`/api/${path}`, { method, headers, data });
-    while (made.length) {
-      const b = made[0];
-      const now = await call("GET", `sales/${b.id}/`);
-      // a 404 is a bill in the bin already: its test deleted it
-      if (now.status() !== 404) {
-        const text = await now.text();
-        expect(now.ok(), `test bill ${b.number} (${b.id}) couldn't be checked before it goes to the bin: ${now.status()} ${text}`).toBe(true);
-        if (JSON.parse(text).invoice_number !== b.number) {
-          const back = await call("POST", `sales/${b.id}/renumber/`, { invoice_number: b.number });
-          expect(back.ok(), `test bill ${b.id} didn't get its number ${b.number} back: ${back.status()} ${await back.text()}`).toBe(true);
+    const failures = [];
+    for (const b of made.splice(0)) {
+      try {
+        const now = await call("GET", `sales/${b.id}/`);
+        // a 404 is a bill in the bin already: its test deleted it
+        if (now.status() !== 404) {
+          const text = await now.text();
+          expect(now.ok(), `couldn't be checked before it goes to the bin: ${now.status()} ${text}`).toBe(true);
+          if (JSON.parse(text).invoice_number !== b.number) {
+            const back = await call("POST", `sales/${b.id}/renumber/`, { invoice_number: b.number });
+            expect(back.ok(), `didn't get its number back: ${back.status()} ${await back.text()}`).toBe(true);
+          }
+          const gone = await call("DELETE", `sales/${b.id}/`, { reason: "Test bill" });
+          expect(gone.ok() || gone.status() === 404, `didn't go to the bin: ${gone.status()} ${await gone.text()}`).toBe(true);
         }
-        const gone = await call("DELETE", `sales/${b.id}/`, { reason: "Test bill" });
-        expect(gone.ok() || gone.status() === 404, `test bill ${b.number} (${b.id}) didn't go to the bin: ${gone.status()} ${await gone.text()}`).toBe(true);
+      } catch (error) {
+        failures.push(`test bill ${b.number} (${b.id}): ${error instanceof Error ? error.message : String(error)}`);
       }
-      made.shift();
     }
+    expect(failures, `Test bills still live or unchecked:\n${failures.join("\n")}`).toEqual([]);
   });
 }
 

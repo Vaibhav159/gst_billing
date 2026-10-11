@@ -36,7 +36,7 @@ export function useDetail(b: BillDetail) {
     sendPress: (e: MouseEvent) => { if (e.detail > 1) return; send(b); },
     month: monthLabel(b.invoice_date.slice(0, 7), { long: true }),
     hasNumber: Boolean(mobileOf(b.customer.mobile_number) || mobileOf(b.sent?.to)),
-    saved: params.get("saved"), sentNow: params.get("sent") === "1",
+    saved: params.get("saved"),
     firmName: b.firm.name || b.business_name,
   };
 }

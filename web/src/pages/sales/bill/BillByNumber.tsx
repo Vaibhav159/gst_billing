@@ -29,7 +29,7 @@ const toV2Row = (w: Record<string, unknown>): V2Row => ({
   id: Number(w.id), invoice_number: String(w.invoice_number ?? ""), invoice_date: String(w.invoice_date ?? ""), business_name: String(w.business_name ?? ""),
   customer_name: String(w.customer_name ?? ""), total: toPaise(w.total_amount as string | number | null | undefined),
 });
-const rowsOf = (d: unknown): Record<string, unknown>[] => { const r = (d as { results?: unknown } | null)?.results; return Array.isArray(r) ? r : []; };
+const v2RowsOf = (d: unknown): Record<string, unknown>[] => { const r = (d as { results?: unknown } | null)?.results; return Array.isArray(r) ? r : []; };
 
 /** The most rows v2's invoices/ gives in one answer (its pagination's max_page_size). */
 const V2_MOST = 1000;
@@ -48,12 +48,12 @@ function useInwardByNumber(number: string, business: number | null, fy: string, 
       // v2 matches the number anywhere in a bill's number, newest first, so an older exact one can lie past these rows:
       // the rest are asked for once (each ask follows a person opening a link: nothing asks on a timer)
       const count = Number((d as { count?: unknown } | null)?.count) || 0;
-      if (count > rowsOf(d).length) {
+      if (count > v2RowsOf(d).length) {
         if (count > V2_MOST) return { rows: null, tooMany: true };
         d = await ask(count);
       }
       // only the exact number counts here
-      return { rows: rowsOf(d).map(toV2Row).filter((r) => sameNumber(r.invoice_number, number)), tooMany: false };
+      return { rows: v2RowsOf(d).map(toV2Row).filter((r) => sameNumber(r.invoice_number, number)), tooMany: false };
     },
   });
 }

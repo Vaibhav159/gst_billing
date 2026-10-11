@@ -16,11 +16,10 @@ export type SendableBill = Pick<BillRow, "id" | "invoice_number" | "invoice_date
   customer: Pick<CustomerRef, "id" | "name" | "type" | "mobile_number">;
 };
 /**
- * to: a number typed for this bill; onNeedNumber: there's no number to send to (ask for one); quiet: no toast once it's
- * recorded; onOpened: WhatsApp has the bill (from then on a record that failed is marked again from its toast, never by
- * sending again); onRecorded: the send is recorded, at once or later by the toast's Mark as sent.
+ * to: a number typed for this bill; onNeedNumber: there's no number to send to (ask for one); onOpened: WhatsApp has
+ * the bill (from then on a record that failed is marked again from its toast, never by sending again); onRecorded: the send is recorded, at once or later by the toast's Mark as sent.
  */
-export type SendOptions = { to?: string; onNeedNumber?: (b: SendableBill) => void; quiet?: boolean; onOpened?: () => void; onRecorded?: () => void };
+export type SendOptions = { to?: string; onNeedNumber?: (b: SendableBill) => void; onOpened?: () => void; onRecorded?: () => void };
 
 /**
  * The shop's WhatsApp message: ready once the settings have answered, or failed (then the standard message goes, and the
@@ -93,13 +92,13 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
           const f = notMarkedSent(problemOf(e), b.invoice_number);
           // one press records it once: a quick second press posts nothing (a failure again brings a new toast)
           let pressed = false;
-          show({ tone: f.tone, title: f.title, body: f.body, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
+          show({ tone: f.tone, title: f.title, body: f.body, duration: Infinity, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
           return false;
         }
         done();
         opts.onRecorded?.();
         if (retry) show({ title: `${b.invoice_number} marked as sent` });
-        else if (!opts.quiet) {
+        else {
           const who = to ? `+91 ${to}` : b.customer.type === "walkin" ? "the customer" : b.customer.name;
           const t = sentToast({ number: b.invoice_number, again, who, mobile: to ? "" : mobile, file: d.file, isPhone });
           show(standard ? { ...t, body: `${t.body} ${STANDARD_MESSAGE}` } : t);

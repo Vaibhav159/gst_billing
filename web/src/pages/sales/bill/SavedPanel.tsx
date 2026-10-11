@@ -9,7 +9,7 @@ import { Button, ButtonLink, SuccessMark } from "@/core/ui";
 import type { Detail } from "./useDetail";
 
 /**
- * Right after a save (?saved=new|edit, &sent=1 when the save sent it; plan 1D), one panel says what happened and owns
+ * Right after a save (?saved=new|edit; plan 1D), one panel says what happened and owns
  * the next step: Send, or Print when there's no number to send to (PROTO sales/BillDetail.jsx:137-201). It takes focus,
  * so the keyboard goes on from here. A paper bill's next step is the next paper bill: the same firm and date, and the
  * paper book's next number, once the paper book has answered since the save; when it can't, the panel says so. An unsent
@@ -79,9 +79,9 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
   // the page), whenever that was: a reload, or a switch of layout that mounts the panel again, doesn't ask for it again
   const edits = b.history.activity.filter((a) => a.action === "updated").map((a) => Date.parse(a.at));
   const sentAfterEdit = Boolean(b.sent) && edits.length > 0 && Date.parse(b.sent?.last_at ?? "") > Math.max(...edits);
-  // sent: the save sent it (&sent=1), a send was made while the panel shows, or (a new bill) it was sent at all, or (an
+  // sent: a send was made while the panel shows, or (a new bill) it was sent at all, or (an
   // edit) since the edit. An edited bill sent only before the edit still owes the customer its corrected copy
-  const sent = Boolean(b.sent) && (d.sentNow || sentHere || !edit || sentAfterEdit);
+  const sent = Boolean(b.sent) && (sentHere || !edit || sentAfterEdit);
   const who = c.type === "walkin" ? (b.sent?.to ? `+91 ${mobileText(b.sent.to)}` : "the customer") : c.name;
   const title = edit ? (sent ? "Changes saved and the corrected bill sent" : "Changes saved") : sent && phone ? "Saved and handed to WhatsApp" : `Saved ${b.invoice_number}`;
   const body = edit

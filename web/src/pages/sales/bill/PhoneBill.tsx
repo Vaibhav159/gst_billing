@@ -3,10 +3,11 @@ import { Lock, MessageCircle, MoreHorizontal, Pencil, Printer, RefreshCcw, Send 
 import { cn } from "@/core/cn";
 import { date, qty } from "@/core/format";
 import type { BillDetail } from "@/core/sales/types";
-import { PAY, dayOf, rateText, sentWhen, timeOf } from "@/core/sales/words";
+import { PAY, rateText } from "@/core/sales/words";
 import { Button, ButtonLink, Card, DL, IconButton, Menu, Money, Page, type MenuItem } from "@/core/ui";
-import { StatusCell, TaxTypeBadge } from "../actions/StatusCell";
+import { SendStatusBadge, StatusCell, TaxTypeBadge } from "../actions/StatusCell";
 import { Activity, EwayCard, OtherBills, Parties, RoleNote, StateBanners, TotalBlock } from "./parts";
+import { madeByRow } from "../actions/recordRows";
 import { SavedPanel } from "./SavedPanel";
 import { useDetail } from "./useDetail";
 
@@ -49,7 +50,6 @@ export function PhoneBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
       </>
     );
   }
-  const maker = b.history.created_by?.name ?? "Someone";
   return (
     <Page title={`Bill ${b.invoice_number}`} phoneSubtitle={`${d.firmName} · ${date(b.invoice_date)}`} back
       phoneActions={<Menu title={`Bill ${b.invoice_number}`} items={linkItems} trigger={(p) => <IconButton {...p} label={`Links for ${b.invoice_number}`} icon={MoreHorizontal} />} />}
@@ -62,12 +62,12 @@ export function PhoneBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex flex-wrap gap-1.5"><TaxTypeBadge bill={b} /><StatusCell bill={b} max={3} /></span>
             {/* a paper bill the customer already has is On paper, never "Not sent yet" */}
-            {!d.cancelled ? (b.sent ? <span className="text-sm text-sale font-semibold">Sent {sentWhen(b.sent)}</span> : b.paper ? <span className="text-sm text-muted font-semibold">On paper</span> : <span className="text-sm text-brand font-semibold">Not sent yet</span>) : null}
+            <SendStatusBadge bill={b} />
           </div>
           <TotalBlock b={b} d={d} />
           <DL rows={[
             ["Paid by", b.payment_mode ? PAY[b.payment_mode] : <span key="p" className="text-muted">Not recorded</span>],
-            b.paper ? ["Typed in by", `${maker} on ${date(dayOf(b.created_at))} · from the paper book`] : ["Made by", `${maker} · ${timeOf(b.created_at)}`],
+            madeByRow(b, true),
           ]} />
         </div>
       </Card>
@@ -89,7 +89,7 @@ export function PhoneBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
       <Card title="Parties"><Parties b={b} stacked /></Card>
       <EwayCard b={b} d={d} />
       <Card title="Activity" subtitle="From the audit log"><Activity b={b} /></Card>
-      <OtherBills b={b} phone />
+      <OtherBills key={`${b.id}-${b.customer.id}`} b={b} phone />
       <RoleNote />
       {d.dialogs.element}
     </Page>

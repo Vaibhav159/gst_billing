@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
-import { Copy, FileText, Lock, MessageCircle, MoreHorizontal, Pencil, Printer, ReceiptText, Send } from "lucide-react";
+import { Copy, Lock, MessageCircle, MoreHorizontal, Pencil, Printer, ReceiptText, Send } from "lucide-react";
 import { date, dateLong } from "@/core/format";
 import type { BillDetail } from "@/core/sales/types";
-import { dayOf, sentWhen, timeOf } from "@/core/sales/words";
-import { Badge, Button, ButtonLink, Card, IconButton, Menu, Page } from "@/core/ui";
-import { StatusCell, TaxTypeBadge } from "../actions/StatusCell";
+import { dayOf, timeOf } from "@/core/sales/words";
+import { Button, ButtonLink, Card, IconButton, Menu, Page } from "@/core/ui";
+import { SendStatusBadge, StatusCell, TaxTypeBadge } from "../actions/StatusCell";
 import { ItemsTable } from "./ItemsTable";
 import { Activity, EwayCard, OtherBills, Parties, PaymentCard, RoleNote, StateBanners, TotalBlock } from "./parts";
 import { SavedPanel } from "./SavedPanel";
@@ -52,13 +52,13 @@ export function DesktopBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
           <Card>
             <div className="flex flex-col gap-4">
               {/* a paper bill the customer already has is On paper, never "Not sent yet" */}
-              <div className="flex flex-wrap gap-1.5"><TaxTypeBadge bill={b} /><StatusCell bill={b} max={3} />{!d.cancelled ? (b.sent ? <Badge tone="sale" icon={Send}>Sent {sentWhen(b.sent)}</Badge> : b.paper ? <Badge tone="muted" icon={FileText}>On paper</Badge> : <Badge tone="brand">Not sent yet</Badge>) : null}</div>
+              <div className="flex flex-wrap gap-1.5"><TaxTypeBadge bill={b} /><StatusCell bill={b} max={3} /><SendStatusBadge bill={b} /></div>
               <TotalBlock b={b} d={d} />
             </div>
           </Card>
           <PaymentCard b={b} d={d} />
           <EwayCard b={b} d={d} />
-          <OtherBills b={b} />
+          <OtherBills key={`${b.id}-${b.customer.id}`} b={b} />
           <RoleNote />
         </div>
       </div>

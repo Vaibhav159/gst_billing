@@ -1,17 +1,19 @@
 // The bill beside the table (PROTO sales/SalesList.jsx:837-907): its figures and status at a glance, its items and who
 // made it once its own answer comes. The list's row draws it at once; the bill's answer fills in the rest.
-import { Ban, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, Printer, Send, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Ban, ChevronDown, ChevronUp, Lock, MoreHorizontal, Printer, Send, X } from "lucide-react";
 import { Link } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { problemOf } from "@/core/api/errors";
-import { billQuery, useBillDetail } from "@/core/api/sales";
+import { billQuery, type BillOutcome } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
-import { date, dateLong, qty } from "@/core/format";
+import { dateLong, qty } from "@/core/format";
 import type { BillDetail, BillRow } from "@/core/sales/types";
-import { LOCKED_REASON, PAY, dayOf, ewayNumberText, rateText, realReason, sentLine, sentWhen, taxLines, timeOf } from "@/core/sales/words";
-import { Badge, Banner, Button, ButtonLink, DL, IconButton, Menu, Money, Skeleton, type DLRow } from "@/core/ui";
+import { LOCKED_REASON, PAY, ewayNumberText, rateText, realReason, sentLine, taxLines, timeOf } from "@/core/sales/words";
+import { Banner, Button, ButtonLink, DL, IconButton, Menu, Money, Skeleton, type DLRow } from "@/core/ui";
 import type { OpenDialog } from "../actions/BillDialogs";
-import { StatusCell, TaxTypeBadge } from "../actions/StatusCell";
+import { SendStatusBadge, StatusCell, TaxTypeBadge } from "../actions/StatusCell";
+import { madeByRow } from "../actions/recordRows";
 import { useBillMenu } from "../actions/useBillMenu";
 import { useSendReady } from "../actions/useSendBill";
 import { customerLine } from "@/pages/customers/forBills";
@@ -24,7 +26,12 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
   // Send stays off until the shop's settings answer, as the list's Send does, so the shop's own message goes with it
   const ready = useSendReady();
   const qc = useQueryClient();
-  const detail = useBillDetail(id);
+  // Keep this bill's cache subscribed while arrow keys move: its row draws at once, but only a pause reads its items.
+  // Each selection gets its own pause, including a quick return to the bill just left.
+  const selection = useMemo(() => ({ id }), [id]);
+  const [settled, setSettled] = useState<typeof selection | null>(null);
+  useEffect(() => { const t = setTimeout(() => setSettled(selection), 200); return () => clearTimeout(t); }, [selection]);
+  const detail = useQuery({ ...billQuery(id), enabled: settled === selection, select: (o: BillOutcome) => o.kind === "bill" ? o.bill : null });
   const d = detail.data ?? null;
   // a bill deleted since the list loaded answers null: it's gone, whatever the row still says
   const b: BillRow | BillDetail | null = detail.data === null ? null : d ?? row;
@@ -52,7 +59,6 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
   if (d) for (const t of taxLines(d)) lines.push([t.label, <Money key={t.key} value={t.value} />]);
   else lines.push(["GST", <Money key="gst" value={b.tax} />]);
   lines.push(["Paid by", b.payment_mode ? PAY[b.payment_mode] : <span key="p" className="text-muted">Not recorded</span>]);
-  const maker = d?.history.created_by?.name ?? "Someone";
   return (
     <aside aria-label={`Preview of bill ${b.invoice_number}`} className="card sticky top-6 flex flex-col max-h-[calc(100vh-150px)] min-w-0 anim-rise">
       <div className="flex items-start gap-1 pl-5 pr-3 pt-4 pb-3 border-b border-rule">
@@ -71,10 +77,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
         <div className="flex flex-wrap gap-1.5">
           <TaxTypeBadge bill={b} />
           <StatusCell bill={b} max={3} />
-          {/* a paper bill the customer already has: no nag to send it (as the list's Send cell) */}
-          {cancelled ? null : b.sent ? <Badge tone="sale" icon={Send}>Sent {sentWhen(b.sent)}</Badge>
-            : b.paper ? <Badge tone="muted" icon={FileText} title="Entered from the paper bill book: the customer has the paper bill">On paper</Badge>
-              : <Badge tone="brand">Not sent yet</Badge>}
+          <SendStatusBadge bill={b} />
         </div>
         {cancelled ? <Banner tone="neg" icon={Ban} title="Cancelled">{realReason(b.cancel_reason) ? `“${realReason(b.cancel_reason)}”.` : "No reason was given."} It stays in GSTR-1 with its number.</Banner> : null}
         {!cancelled && b.checks.length ? (
@@ -104,7 +107,7 @@ export function BillPreview({ id, row, index, total, onClose, onMove, openDialog
         </div>
         {d ? (
           <DL rows={[
-            b.paper ? ["Typed in by", `${maker} on ${date(dayOf(b.created_at))}`] : ["Made by", `${maker} · ${timeOf(b.created_at)}`],
+            madeByRow(d),
             ["Sent", b.sent ? `${sentLine(b.sent)}${cancelled ? ", before it was cancelled" : ""}` : b.paper ? "The customer has the paper bill" : "Not yet"],
             d.eway.eway_bill_number ? ["E-way bill", <span key="e" className="tnum">{ewayNumberText(d.eway.eway_bill_number)}</span>] : null,
           ]} />

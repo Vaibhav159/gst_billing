@@ -6,7 +6,7 @@ import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useBillDetail, useCancelBill, useCheckNumber, useDeleteBill, useMoveBill, useNextNumber, useRenumberBill, useRestoreBill, useSaveEway } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { date, inr, monthLabel } from "@/core/format";
+import { date, inr, monthLabel, possessive } from "@/core/format";
 import { markFresh } from "@/core/sales/fresh";
 import { numberHint, numberShapeProblem, storedFor } from "@/core/sales/numbers";
 import type { BillDetail, BillRow, Eway, TransportMode, VehicleType } from "@/core/sales/types";
@@ -227,7 +227,7 @@ function RenumberDialog({ bill, onClose, onNeedNumber }: { bill: DialogBill | nu
   };
   return (
     <Dialog open={Boolean(bill)} onClose={renumber.isPending ? () => {} : onClose} title={`Give ${b.invoice_number} a new number`} size="sm"
-      description={other ? `This bill (${b.customer.name}, ${date(b.invoice_date)}) shares its number with ${other.customer_name}'s bill of ${date(other.invoice_date)}.` : `${b.customer.name} · ${date(b.invoice_date)} · ${inr(b.total_amount)}`}
+      description={other ? `This bill (${b.customer.name}, ${date(b.invoice_date)}) shares its number with ${possessive(other.customer_name)} bill of ${date(other.invoice_date)}.` : `${b.customer.name} · ${date(b.invoice_date)} · ${inr(b.total_amount)}`}
       footer={<>
         <Button onClick={onClose} disabled={renumber.isPending}>Keep it for now</Button>
         <Button variant="primary" loading={renumber.isPending} onClick={confirm}>{renumber.isPending ? "Renumbering…" : fail ? "Try again" : "Renumber bill"}</Button>
@@ -266,7 +266,7 @@ function MoveDialog({ bill, onClose }: { bill: DialogBill | null; onClose: () =>
     if (no.blocked("move-no")) return;
     move.mutate({ id: b.id, business: target, invoice_number: t }, {
       onSuccess: (r) => {
-        show({ title: `${r.previous.invoice_number} is now ${r.invoice_number}`, body: `Moved to ${firm.name}. ${r.previous.invoice_number} is left unused; the tax follows ${firm.name}'s state and the total stays the same.` });
+        show({ title: `${r.previous.invoice_number} is now ${r.invoice_number}`, body: `Moved to ${firm.name}. ${r.previous.invoice_number} is left unused; the tax follows ${possessive(firm.name)} state and the total stays the same.` });
         onClose();
       },
       onError: (e) => { const p = problemOf(e); if (!no.refused(p)) setFail(failText(p, "moved")); },
