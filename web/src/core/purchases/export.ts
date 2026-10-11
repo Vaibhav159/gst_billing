@@ -101,5 +101,14 @@ export async function purchaseExport(kind: 'csv' | 'xlsx' | 'ca', params: Record
     }
   }
   check(signal);
-  saveFile(blob, kind === 'ca' ? `${base}_for-CA.zip` : `${base}.${kind}`);
+  const name = kind === 'ca' ? `${base}_for-CA.zip` : `${base}.${kind}`;
+  saveFile(blob, name);
+  const label = kind === 'csv' ? 'CSV' : kind === 'xlsx' ? 'Excel' : 'For the CA';
+  const single = bills.length === 1 ? bills[0] : null;
+  // As with sales exports, log only after download; a failed audit never repeats or rejects the completed export.
+  void api.post('audit-logs/log/', {
+    action: 'exported', entity: 'invoice', entity_id: single?.id ?? 0,
+    entity_name: (single ? `#${single.invoice_number} - ${single.supplier.name}` : `Purchases ${label} (${bills.length} bills)`).slice(0, 255),
+    details: `${label} downloaded: ${name} · ${bills.map(b => `${b.business_name} / ${b.supplier.name} / #${b.invoice_number} (ID ${b.id})`).join('; ')}`,
+  }).catch(() => undefined);
 }

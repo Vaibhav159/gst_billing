@@ -1,3 +1,4 @@
+import { waitFor } from '@testing-library/react';
 import { purchaseExport } from './export';
 import { excelBlob } from '@/core/excel/writer';
 import { saveFile } from '@/core/print/files';
@@ -28,7 +29,7 @@ beforeEach(() => { vi.mocked(saveFile).mockClear(); vi.mocked(excelBlob).mockCle
 test('CSV reads every filtered page with lines; keeps paise, quantity/rate precision and credit month across FYs', async () => {
   const calls = serve({ 'GET purchases/': (c: Call) => ({ status: 200, data: c.params.page === 1 ? page([row()], 2, '?page=2') : page([row(2)], 2) }) });
   await purchaseExport('csv', { business_id: 3, credit_month: '2026-10' });
-  expect(calls.map(c => c.params)).toEqual([1, 2].map(page => ({ business_id: 3, credit_month: '2026-10', page, page_size: 200, include: 'lines', summary: 0 })));
+  expect(calls.filter(c => c.method === 'GET').map(c => c.params)).toEqual([1, 2].map(page => ({ business_id: 3, credit_month: '2026-10', page, page_size: 200, include: 'lines', summary: 0 })));
   const [file, name] = vi.mocked(saveFile).mock.calls[0]; expect(name).toMatch(/\.csv$/);
   const csv = await text(file); expect(csv).toContain('Qty,Unit,Rate per unit'); expect(csv).toContain('1.001,gms,99.950'); expect(csv).toContain('100.05,1.51,1.50,0.00,103.06'); expect(csv).toContain('2026-03-31'); expect(csv).toContain('2026-10'); expect(csv).toContain("'=1+1"); expect(csv).toContain('"Supplier, =SUM(1)"');
 });
@@ -54,7 +55,7 @@ test('Excel delegates month sheets, exact stored numbers and cross-FY credit tot
 });
 test.each([['csv', 1001], ['xlsx', 1001], ['ca', 301]] as const)('%s refuses an over-limit set before exporting anything', async (kind, count) => {
   const calls = serve({ 'GET purchases/': page([row()], count, '?page=2') });
-  await expect(purchaseExport(kind, {})).rejects.toThrow(/Narrow/); expect(calls).toHaveLength(1); expect(saveFile).not.toHaveBeenCalled();
+  await expect(purchaseExport(kind, {})).rejects.toThrow(/Narrow/); expect(calls).toHaveLength(1); expect(saveFile).not.toHaveBeenCalled(); expect(calls.some(c => c.url === 'audit-logs/log/')).toBe(false);
 });
 test('selected exports contain only selected IDs and refuse a selected bill that disappeared', async () => {
   serve({ 'GET purchases/': page([row(), row(2, { invoice_number: 'ONLY-2' })]) });
@@ -75,9 +76,9 @@ test('CA zip fetches originals once, names colliding unsafe filenames uniquely a
 test('cancel or failed attachment leaves no partial download; progress can stop the next read', async () => {
   const c = new AbortController(); const calls = serve({ 'GET purchases/': page([row(1, { has_files: true }), row(2, { has_files: true })]), 'GET purchases/1/': { files: [] } });
   await expect(purchaseExport('ca', {}, undefined, { signal: c.signal, onProgress: p => { if (p.stage === 'files' && p.done === 1) c.abort(); } })).rejects.toThrow();
-  expect(calls.some(r => r.url === 'purchases/2/')).toBe(false); expect(saveFile).not.toHaveBeenCalled();
-  serve({ 'GET purchases/': page([row(1, { has_files: true })]), 'GET purchases/1/': { files: [{ name: 'a.pdf', url: '/api/media/no' }] } });
-  await expect(purchaseExport('ca', {})).rejects.toThrow(); expect(saveFile).not.toHaveBeenCalled();
+  expect(calls.some(r => r.url === 'purchases/2/')).toBe(false); expect(saveFile).not.toHaveBeenCalled(); expect(calls.some(r => r.url === 'audit-logs/log/')).toBe(false);
+  const failed = serve({ 'GET purchases/': page([row(1, { has_files: true })]), 'GET purchases/1/': { files: [{ name: 'a.pdf', url: '/api/media/no' }] } });
+  await expect(purchaseExport('ca', {})).rejects.toThrow(); expect(saveFile).not.toHaveBeenCalled(); expect(failed.some(r => r.url === 'audit-logs/log/')).toBe(false);
 });
 test('a shared writer failure stops the export; no fallback workbook or attachment read is attempted', async () => {
   const calls = serve({ 'GET purchases/': page([row(1, { has_files: true })]) });
@@ -107,4 +108,47 @@ test('month totals sum paise-rounded historical lines, including the 0.025 + 0.0
   expect(sheet.rows[2].cells[11]).toEqual({ v: '0.03', num: true });
   expect(sheet.rows.at(-1)?.cells[11]).toEqual({ v: '0.06', num: true });
   expect(sheet.rows.at(-1)?.cells[15]).toEqual({ v: '0.06', num: true });
+});
+
+test.each([
+  ['csv', 'CSV', 'Purchases_2026-10_firm-3.csv'],
+  ['xlsx', 'Excel', 'Purchases_2026-10_firm-3.xlsx'],
+  ['ca', 'For the CA', 'Purchases_2026-10_firm-3_for-CA.zip'],
+] as const)('%s records one invoice audit after download, for the bill actually selected', async (kind, label, filename) => {
+  let downloadedBeforeAudit = false;
+  const calls = serve({
+    'GET purchases/': page([row(1, { invoice_number: 'UNSELECTED' }), row(2, { invoice_number: 'SELECTED-2' })]),
+    'POST audit-logs/log/': () => { downloadedBeforeAudit = vi.mocked(saveFile).mock.calls.length === 1; return { status: 200, data: { status: 'logged' } }; },
+  });
+  await purchaseExport(kind, { business_id: 3, credit_month: '2026-10' }, [2, 2]);
+  await waitFor(() => expect(calls.filter(c => c.url === 'audit-logs/log/')).toHaveLength(1));
+  expect(calls.at(-1)).toMatchObject({ method: 'POST', url: 'audit-logs/log/', data: {
+    action: 'exported', entity: 'invoice', entity_id: 2, entity_name: '#SELECTED-2 - Supplier, =SUM(1)',
+    details: `${label} downloaded: ${filename} · Kiran / Supplier, =SUM(1) / #SELECTED-2 (ID 2)`,
+  } });
+  expect(downloadedBeforeAudit).toBe(true);
+  expect(vi.mocked(saveFile).mock.calls[0][1]).toBe(filename);
+});
+test('a selected batch records one audit containing every actual exported ID and number across pages', async () => {
+  const calls = serve({
+    'GET purchases/': (c: Call) => ({ status: 200, data: c.params.page === 1 ? page([row(1, { invoice_number: 'UNSELECTED' }), row(2, { invoice_number: 'BILL-2' })], 3, '?page=2') : page([row(3, { business: 4, business_name: 'Meera', invoice_number: 'BILL-3' })], 3) }),
+    'POST audit-logs/log/': { status: 'logged' },
+  });
+  await purchaseExport('csv', { fy: '2026-27' }, [3, 2, 3]);
+  await waitFor(() => expect(calls.filter(c => c.url === 'audit-logs/log/')).toHaveLength(1));
+  expect(calls.at(-1)?.data).toEqual({ action: 'exported', entity: 'invoice', entity_id: 0, entity_name: 'Purchases CSV (2 bills)',
+    details: 'CSV downloaded: Purchases_2026-27.csv · Kiran / Supplier, =SUM(1) / #BILL-2 (ID 2); Meera / Supplier, =SUM(1) / #BILL-3 (ID 3)',
+  });
+});
+test.each([0, 500])('audit status %i cannot reject or repeat a completed download', async status => {
+  const calls = serve({ 'GET purchases/': page([row()]), 'POST audit-logs/log/': () => ({ status, data: {} }) });
+  await expect(purchaseExport('csv', {})).resolves.toBeUndefined();
+  await waitFor(() => expect(calls.filter(c => c.url === 'audit-logs/log/')).toHaveLength(1));
+  expect(saveFile).toHaveBeenCalledOnce();
+});
+test('a download that throws produces no exported audit row', async () => {
+  const calls = serve({ 'GET purchases/': page([row()]), 'POST audit-logs/log/': { status: 'logged' } });
+  vi.mocked(saveFile).mockImplementationOnce(() => { throw new Error('Download failed.'); });
+  await expect(purchaseExport('csv', {})).rejects.toThrow('Download failed.');
+  expect(calls.some(c => c.url === 'audit-logs/log/')).toBe(false);
 });
