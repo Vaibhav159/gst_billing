@@ -47,8 +47,12 @@ describe("GST credit wire boundary", () => {
     keys.forEach(k => client.setQueryData(k, {}));
     const { result } = renderHook(() => ({ preview: useOpeningPreview(), save: useSaveOpeningCredit() }), { wrapper });
     const input = { business: 3, igst: 123, cgst: 950000, sgst: 950000 };
-    await act(async () => { await result.current.preview.mutateAsync(input); });
-    expect(result.current.preview.data).toEqual({ ...effectWire, carried_out: { from: 1600000, to: 1600123 }, cash: { month: "2025-05", from: 1250, to: 1127 } });
+    const expected = { ...effectWire, carried_out: { from: 1600000, to: 1600123 }, cash: { month: "2025-05", from: 1250, to: 1127 } };
+    let previewed: unknown;
+    await act(async () => { previewed = await result.current.preview.mutateAsync(input); });
+    expect(previewed).toEqual(expected);
+    // React Query hands mutation state to the hook on its own schedule, so wait for it.
+    await waitFor(() => expect(result.current.preview.data).toEqual(expected));
     expect(keys.every(k => !client.getQueryState(k)?.isInvalidated)).toBe(true);
     await act(async () => { await result.current.save.mutateAsync(input); });
     expect(calls.map(c => c.params)).toEqual([{ preview: 1 }, {}]);
