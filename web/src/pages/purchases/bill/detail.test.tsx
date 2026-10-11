@@ -71,3 +71,13 @@ test("the credit_set activity action is shown as Credit moved", async () => {
   expect(await screen.findByText("Credit moved by Owner")).toBeVisible();
   expect(screen.getByText("August 2026 to October 2026")).toBeVisible();
 });
+
+test.each([false, true])("a deleted linked sale is labelled and linked only for the owner (staff %s)", async (staff) => {
+  salesServer([["GET", "purchases/905/", () => purchaseDetailWire({ linked_sale: { id: 31, invoice_number: "MO/2026-27/31", invoice_date: "2026-10-08", customer_name: "Kiran Gold House", status: "deleted" } })]]);
+  mount("/purchases/905", staff);
+  expect(await screen.findByText("Deleted")).toBeVisible();
+  expect(screen.getByText("MO/2026-27/31")).toBeVisible();
+  const link = screen.queryByRole("link", { name: "MO/2026-27/31" });
+  if (staff) expect(link).not.toBeInTheDocument();
+  else expect(link).toHaveAttribute("href", "/sales/31");
+});

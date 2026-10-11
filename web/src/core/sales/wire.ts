@@ -30,7 +30,7 @@ export function toCustomerRef(w: W): CustomerRef {
   return { id: whole(w?.id), name: text(w?.name), gst_number: text(w?.gst_number), mobile_number: text(w?.mobile_number), type: customerType(w?.type) };
 }
 export function toBillRef(w: W): BillRef {
-  return { id: whole(w?.id), invoice_number: text(w?.invoice_number), invoice_date: text(w?.invoice_date), customer_name: text(w?.customer_name), status: status(w?.status) };
+  return { id: whole(w?.id), invoice_number: text(w?.invoice_number), invoice_date: text(w?.invoice_date), customer_name: text(w?.customer_name), status: w?.status === "deleted" ? "deleted" : status(w?.status) };
 }
 const billRefOrNull = (w: W): BillRef | null => (w ? toBillRef(w) : null);
 export function toSent(w: W): Sent | null {

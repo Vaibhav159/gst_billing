@@ -23,7 +23,7 @@ export type VehicleType = "Regular" | "ODC";
 /** Someone who did something: the full name, else the username. Null when unknown (bulk-made bills, a deleted user). */
 export type Person = { id: number; name: string } | null;
 export type CustomerRef = { id: number; name: string; gst_number: string; mobile_number: string; type: CustomerType };
-export type BillRef = { id: number; invoice_number: string; invoice_date: string; customer_name: string; status: BillStatus };
+export type BillRef = { id: number; invoice_number: string; invoice_date: string; customer_name: string; status: BillStatus | "deleted" };
 /** at: the first send; last_at: the latest; count: how many; to: a number typed for this bill ("" when it went to the customer's own). */
 export type Sent = { at: string; last_at: string; count: number; via: "whatsapp" | "share"; to: string };
 

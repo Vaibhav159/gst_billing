@@ -8,6 +8,10 @@ test('purchase detail reads all money in paise, preserves rates, and reuses sale
   expect(bill.slabs[0].tax).toBe(1434888);
   expect(bill.files[0]).toMatchObject({ id: 'src', kind: 'photo', preview_url: '/api/media/preview?s=synthetic' });
 });
+test('linked deleted sale keeps its original id and deleted status for the owner bin route', () => {
+  const linkedSale = { id: 31, invoice_number: 'MO/2026-27/31', invoice_date: '2026-10-08', customer_name: 'KIRAN GOLD HOUSE', status: 'deleted' };
+  expect(toPurchaseDetail(purchaseDetailWire({ linked_sale: linkedSale })).linked_sale).toEqual(linkedSale);
+});
 test('list preserves optional export lines and all facets while later pages have no invented summary', () => {
   const page = toPurchasePage(purchasePageWire([purchaseDetailWire()]));
   expect(page.results[0].lines?.[0].tax).toBe(1434888);
