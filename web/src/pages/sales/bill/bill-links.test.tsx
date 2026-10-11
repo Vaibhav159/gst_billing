@@ -320,3 +320,34 @@ test.each([
 ])("v2's firm slug of %j is %j", (name, slug) => {
   expect(businessSlug(name)).toBe(slug);
 });
+
+/* ── 1B Task 11, commit A: several sales, and the purchases unknown (Ruling 1B-22) ── */
+
+const TWO_SALES = () => wirePage([wireRow({ id: 512, invoice_number: "KGH-31", ...KIRAN }), wireRow({ id: 613, invoice_number: "KGH-31", invoice_date: "2025-11-02", fy: "2025-26", ...MEERA })]);
+
+test("several sales have the number and the purchases couldn't be checked: the sales are offered, with a line saying so; Try again asks v2 again", async () => {
+  let down = true;
+  const { calls } = salesServer([["GET", "sales/", TWO_SALES], ["GET", "invoices/", () => (down ? refuse(500, {}) : page([INWARD(77, { invoice_number: "KGH-31" })]))]]);
+  mount("/sales/KGH-31");
+  const list = await screen.findByRole("list", { name: "Bills with this number" });
+  expect(within(list).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/sales/512", "/sales/613"]);
+  expect(screen.getByText("The app couldn't check purchases just now, so this list has only the sales with this number.")).toBeInTheDocument();
+  expect(screen.queryByText("Couldn't load this bill")).not.toBeInTheDocument();
+  down = false;
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  // the purchase joins the sales, each row saying which it is, and the line goes
+  expect(await screen.findByRole("link", { name: /^KGH-31 Purchase KIRAN GOLD HOUSE \(SANDBOX\) · 02 May 2026 · Shree Bullion/ })).toHaveAttribute("href", "/purchases/77");
+  expect(within(screen.getByRole("list", { name: "Bills with this number" })).getAllByRole("link")).toHaveLength(3);
+  expect(screen.queryByText(/couldn't check purchases/)).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "invoices/")).toHaveLength(2);
+});
+
+test("several sales have the number and over 1,000 purchases have numbers like it: the sales are offered, with a line saying so", async () => {
+  salesServer([["GET", "sales/", TWO_SALES], ["GET", "invoices/", () => ({ count: 1500, next: "page 2", previous: null, results: [] })]]);
+  mount("/sales/KGH-31");
+  const list = await screen.findByRole("list", { name: "Bills with this number" });
+  expect(within(list).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/sales/512", "/sales/613"]);
+  expect(screen.getByText("Over 1,000 purchases have numbers like “KGH-31”, too many to check here, so this list has only the sales with this number.")).toBeInTheDocument();
+  expect(screen.queryByText("Too many bills to check")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+});

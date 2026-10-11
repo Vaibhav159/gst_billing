@@ -1,6 +1,8 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { onlineManager } from "@tanstack/react-query";
 import { Route, Routes, useLocation } from "react-router";
+import { __setNetState } from "@/core/api/network";
 import { queryClient } from "@/core/api/query";
 import type { Me } from "@/core/auth/AuthProvider";
 import { refuse, salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow, type Call, type Route as ApiRoute } from "@/core/sales/fixtures";
@@ -424,4 +426,89 @@ test("an Undo pressed while a stopped delete still shows puts those bills back i
   expect(restored).toHaveTextContent("Back in Sales and in the GST figures.");
   expect(restored).not.toHaveTextContent("in the bin");
   expect(calls.filter((c) => c.url.startsWith("bin/")).map((c) => c.url)).toEqual(["bin/51/restore/", "bin/52/restore/", "bin/53/restore/"]);
+});
+
+/* ── 1B Task 11, commit A: the customer box's search (Ruling 1B-18), and v2's GST drill links ── */
+
+/** The customer box's list (its own id: a role query would walk the whole table each time). */
+function customerList() {
+  const list = document.getElementById("sl-customer-list");
+  if (!list) throw new Error("The customer box's list isn't open");
+  expect(list).toHaveAttribute("role", "listbox");
+  expect(list).toHaveAccessibleName("Customers");
+  return list;
+}
+
+afterEach(() => { act(() => { __setNetState("online"); onlineManager.setOnline(true); }); });
+
+test("the customer box says it's searching until the answer for what's typed has come, and that no customer matches only then; a pick shows their bills", async () => {
+  let answer: (rows: unknown[]) => void = () => {};
+  const { calls } = server(ROWS, {}, [
+    ["GET", "customers/", () => new Promise((r) => { answer = (rows) => r({ count: rows.length, next: null, previous: null, results: rows }); })],
+    ["GET", "customers/8/", () => ({ ...MEENA })],
+  ]);
+  mount();
+  await screen.findByText("All firms · FY 2026-27");
+  handClock();
+  const box = screen.getByRole("combobox", { name: "Show one customer's bills" });
+  const list = customerList;
+  fireEvent.change(box, { target: { value: "m" } });
+  expect(list()).toHaveTextContent("Keep typing to search");
+  fireEvent.change(box, { target: { value: "meenaz" } });
+  // typing hasn't paused: nothing is asked yet, and nothing is said of a search not made
+  expect(list()).toHaveTextContent("Searching…");
+  await pass(250);
+  expect(calls.filter((c) => c.url === "customers/").map((c) => c.params.search)).toEqual(["meenaz"]);
+  // asked, not answered yet
+  expect(list()).toHaveTextContent("Searching…");
+  expect(list()).not.toHaveTextContent(/No customer matches/);
+  await act(async () => { answer([]); });
+  await pass(0);
+  expect(list()).toHaveTextContent("No customer matches “meenaz”");
+  // a letter less: that answer was for "meenaz", so nothing is said of "meena" until it has been searched for
+  fireEvent.change(box, { target: { value: "meena" } });
+  expect(list()).toHaveTextContent("Searching…");
+  expect(list()).not.toHaveTextContent(/No customer matches/);
+  await pass(250);
+  await act(async () => { answer([{ ...MEENA, city: "Jaipur", state_name: "RAJASTHAN", figures: { bills: 6 } }]); });
+  await pass(0);
+  fireEvent.click(within(list()).getByRole("option", { name: /^Meena Jain.*6 bills$/ }));
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("customer=8");
+  expect(lists(calls).at(-1)?.params).toMatchObject({ customer_id: 8 });
+});
+
+test("the customer box says when its search failed, and when it waits for the internet: never that no customer matches", async () => {
+  server(ROWS, {}, [["GET", "customers/", () => refuse(500, {})]]);
+  mount();
+  await screen.findByText("All firms · FY 2026-27");
+  handClock();
+  const box = screen.getByRole("combobox", { name: "Show one customer's bills" });
+  const list = customerList;
+  fireEvent.change(box, { target: { value: "kamal" } });
+  await pass(250);
+  expect(list()).toHaveTextContent("Couldn't search: the app couldn't get through");
+  expect(list()).not.toHaveTextContent(/No customer matches/);
+  act(() => { onlineManager.setOnline(false); __setNetState("offline"); });
+  fireEvent.change(box, { target: { value: "rekha" } });
+  await pass(250);
+  expect(list()).toHaveTextContent("You're offline: the search runs when you're back online");
+  expect(list()).not.toHaveTextContent(/No customer matches/);
+});
+
+test("v2's GST drill links name the firm as business_id: the list opens on that firm, with the link's rate or segment and dates", async () => {
+  const { calls } = server();
+  // GSTSummary's rate-wise breakdown
+  const view = mount("/sales?gst_rate=3&start_date=2026-04-01&end_date=2026-06-30&business_id=2&type=outward");
+  await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ business_id: 2, gst_rate: "3", start_date: "2026-04-01", end_date: "2026-06-30" }));
+  expect(screen.getByRole("combobox", { name: "Firm (same as the top bar)" })).toHaveValue("2");
+  // the firm is the app's, not the list's: the address keeps the list's words and drops v2's firm
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/sales?gst_rate=3&start_date=2026-04-01&end_date=2026-06-30&type=outward"));
+  view.unmount();
+  localStorage.clear();
+  // its quarter's checks, by segment
+  const before = calls.length;
+  mount("/sales?type=outward&start_date=2026-07-01&end_date=2026-09-30&segment=b2b&business_id=3");
+  await waitFor(() => expect(lists(calls.slice(before)).at(-1)?.params).toMatchObject({ business_id: 3, segment: "b2b", start_date: "2026-07-01", end_date: "2026-09-30" }));
+  await waitFor(() => expect(screen.getByTestId("where")).not.toHaveTextContent("business_id"));
 });

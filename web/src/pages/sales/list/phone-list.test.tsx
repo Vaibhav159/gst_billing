@@ -1,6 +1,8 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { onlineManager } from "@tanstack/react-query";
 import { Route, Routes, useLocation } from "react-router";
+import { __setNetState } from "@/core/api/network";
 import { queryClient } from "@/core/api/query";
 import { refuse, salesServer, wireFacets, wirePage, wireRow, type Call } from "@/core/sales/fixtures";
 import { ScopeProvider } from "@/core/scope";
@@ -36,7 +38,10 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30"));
 });
-afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.useRealTimers(); vi.restoreAllMocks(); queryClient.clear(); });
+afterEach(() => {
+  (window as unknown as { __phone?: boolean }).__phone = false; vi.useRealTimers(); vi.restoreAllMocks(); queryClient.clear();
+  act(() => { __setNetState("online"); onlineManager.setOnline(true); });
+});
 // plan 1E: a send downloads its PDF beside the chat; jsdom (no object URLs, no downloads) clicks nothing
 beforeEach(() => {
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
@@ -185,4 +190,41 @@ test("a screen reader hears a card's status with it: the link's name stays the c
   expect(screen.getByRole("link", { name: "Anil Gupta, KGH/2026-27/30, ₹87,083.21, cancelled" })).toHaveAccessibleDescription("Cancelled");
   // a bill with nothing to say has no description
   expect(screen.getByRole("link", { name: "Anil Gupta, KGH/2026-27/31, ₹87,083.21" })).toHaveAccessibleDescription("");
+});
+
+/* ── 1B Task 11, commit A: the filter sheet's customer search (Ruling 1B-18) ── */
+
+test("the filter sheet's customer search says it's searching until the answer for what's typed has come; failed or offline, it says so, never that no customer matches", async () => {
+  let answer: (rows: unknown[]) => void = () => {};
+  let down = false;
+  const { calls } = salesServer([
+    ["GET", "sales/", (c) => (isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : wirePage(ROWS))],
+    ["GET", "customers/", () => (down ? refuse(500, {}) : new Promise((r) => { answer = (rows) => r({ count: rows.length, next: null, previous: null, results: rows }); }))],
+  ]);
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Filter" }));
+  const sheet = await screen.findByRole("dialog", { name: "Filter bills" });
+  handClock();
+  await pass(400); // past the sheet's guard against the tap that opened it
+  const box = within(sheet).getByRole("searchbox", { name: "Show one customer's bills" });
+  fireEvent.change(box, { target: { value: "m" } });
+  expect(within(sheet).getByRole("status")).toHaveTextContent("Keep typing to search");
+  fireEvent.change(box, { target: { value: "meenaz" } });
+  expect(within(sheet).getByRole("status")).toHaveTextContent("Searching…");
+  await pass(250); // typing has paused: the search asks
+  expect(calls.filter((c) => c.url === "customers/").map((c) => c.params.search)).toEqual(["meenaz"]);
+  // asked, not answered yet
+  expect(within(sheet).getByRole("status")).toHaveTextContent("Searching…");
+  await act(async () => { answer([]); });
+  await pass(0);
+  expect(within(sheet).getByRole("status")).toHaveTextContent("No customer matches “meenaz”.");
+  down = true;
+  fireEvent.change(box, { target: { value: "kamal" } });
+  await pass(250);
+  expect(within(sheet).getByRole("status")).toHaveTextContent("Couldn't search: the app couldn't get through");
+  act(() => { onlineManager.setOnline(false); __setNetState("offline"); });
+  fireEvent.change(box, { target: { value: "rekha" } });
+  await pass(250);
+  expect(within(sheet).getByRole("status")).toHaveTextContent("You're offline: the search runs when you're back online");
+  expect(within(sheet).queryByText(/No customer matches/)).not.toBeInTheDocument();
 });

@@ -4,10 +4,8 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { plural } from "@/core/format";
 import { PAY_FILTER, STATUS, type PayFilter, type StatusFilter } from "@/core/sales/words";
-import { useCustomerSearch } from "@/core/api/customers";
 import { Avatar, Button, Chip, Dialog, Field, IconButton, ListRow, SearchInput, Select } from "@/core/ui";
-import { useDebounced } from "@/core/useDebounced";
-import { customerLine } from "@/pages/customers/forBills";
+import { customerLine, useTypedSearch } from "@/pages/customers/forBills";
 // the firms as chips (PROTO core/common.jsx:130-140): 1C's, one home for them (Ruling 1C-3)
 import { FirmChips } from "@/pages/customers/listParts";
 import type { ListModel } from "./model";
@@ -16,10 +14,9 @@ import { SavedViews } from "./parts";
 export function FilterSheet({ m, open, onClose }: { m: ListModel; open: boolean; onClose: () => void }) {
   const [cq, setCq] = useState("");
   useEffect(() => { if (open) setCq(""); }, [open]);
-  const t = cq.trim();
-  const dt = useDebounced(t, 250);
-  const found = useCustomerSearch(dt, { size: 6 });
-  const custs = t.length >= 2 ? found.data ?? [] : [];
+  // 1C's typed search (Ruling 1B-18): its rows are for exactly what's typed, and its note says what to show meanwhile
+  const search = useTypedSearch(cq, 6);
+  const custs = search.rows ?? [];
   const s = m.summary;
   const x = m.state.status === "cancelled";
   const showing = !s ? "Show the bills" : x ? `Show ${plural(s.bills, "cancelled bill")}` : !s.bills && s.cancelled ? `Show ${plural(s.cancelled, "cancelled bill")}` : `Show ${plural(s.bills, "bill")}`;
@@ -47,8 +44,9 @@ export function FilterSheet({ m, open, onClose }: { m: ListModel; open: boolean;
             <>
               <SearchInput value={cq} onChange={setCq} placeholder="Any customer: a name or phone" label="Show one customer's bills" />
               {custs.length ? <div className="-mx-5 flex flex-col">{custs.map((c) => <ListRow key={c.id} onClick={() => { m.set({ customer: c.id }); setCq(""); }} title={c.name} subtitle={customerLine(c)} chevron={false} />)}</div>
-                // no match is said only of what was searched for: the answer on hand may be for what was typed before the pause
-                : t.length >= 2 && dt === t && found.data ? <p className="text-sm text-muted">No customer matches “{t}”.</p> : null}
+                // searching, offline or failed, it says so, as the bill form's customer sheet does: no match is said only
+                // once the search for what's typed has answered
+                : search.t ? <p role="status" className="text-sm text-muted">{search.note || `No customer matches “${search.t}”.`}</p> : null}
             </>
           )}
         </div>

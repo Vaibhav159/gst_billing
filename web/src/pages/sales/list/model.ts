@@ -1,7 +1,7 @@
 // The bills list's state, and what it asks the server (PROTO sales/SalesList.jsx:48-205). What's picked lives in the
 // address (?month=&q=&paid=&status=&customer=&sort=&only=&bill=, replaced as it changes), so Back from a bill finds the
 // list as it was left. The prototype's own link words still open it: when, all, from/to (start_date/end_date),
-// dups/empty/no_hsn, gst_rate, segment and firm.
+// dups/empty/no_hsn, gst_rate, segment and firm (business_id in v2's links).
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -171,8 +171,9 @@ export function useListModel() {
   // the customer a link or a pick narrowed the list to, by name (1C's useCustomer: a row already loaded names them at once)
   const customerName = useCustomer(state.customer).data?.name || null;
 
-  // a link can name a firm, or a month in another FY: the whole app follows it, as the top bar would (PROTO SalesList.jsx:82-86)
-  const linkFirm = useRef(params.get("firm"));
+  // a link can name a firm, or a month in another FY: the whole app follows it, as the top bar would (PROTO SalesList.jsx:82-86).
+  // v2's GST drill links name the firm as business_id, beside their rate or segment and dates (GSTSummary.tsx's links)
+  const linkFirm = useRef(params.get("firm") || params.get("business_id"));
   useEffect(() => {
     const want = linkFirm.current;
     if (!want || !firms.length) return;
@@ -180,7 +181,7 @@ export function useListModel() {
     const id: FirmId | null = want === "all" ? "all" : firms.some((f) => f.id === Number(want)) ? Number(want) : null;
     if (id !== null) setFirmId(id);
     // the firm is the app's, not the list's: the address keeps only the list's own words
-    setParams((prev) => { const p = new URLSearchParams(prev); p.delete("firm"); return p; }, { replace: true });
+    setParams((prev) => { const p = new URLSearchParams(prev); p.delete("firm"); p.delete("business_id"); return p; }, { replace: true });
   }, [firms]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!MONTH.test(state.month)) return;

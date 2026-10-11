@@ -14,7 +14,7 @@ import { salesKeys, useSalesPage, type SalesQuery } from "@/core/api/sales";
 import { date, fyOf, inr, toPaise } from "@/core/format";
 import { sameNumber } from "@/core/sales/numbers";
 import { useFirms } from "@/core/scope";
-import { Badge, ButtonLink, Card, EmptyState, ListRow, ListSkeleton, LoadError, Page, StaleNote } from "@/core/ui";
+import { Badge, Banner, Button, ButtonLink, Card, EmptyState, ListRow, ListSkeleton, LoadError, Page, StaleNote } from "@/core/ui";
 import { MissingBill } from "./MissingBill";
 
 /** v2's firm slug: "KIRAN GOLD HOUSE (SANDBOX)" -> "kiran-gold-house-sandbox" (v2 useDataStore businessSlug). */
@@ -88,24 +88,33 @@ export function BillByNumber({ number, firmSlug = "", fy = "" }: { number: strin
   const pageKey = salesKeys.page(firmId ?? "all", query, 20);
   const inKey = inwardKey(number, linkFirm, fy);
   if (!page.data) return <Asking title={title} q={page} retry={again(pageKey)} />;
-  // the one sale with the number: it opens when the purchases can't be known (their lookup failed, or found too many)
-  const theSale = bills.length === 1 ? <Navigate to={`/sales/${bills[0].id}`} replace /> : null;
-  if (!inward.data) return inward.isError && theSale ? theSale : <Asking title={title} q={inward} retry={again(inKey)} />;
-  if (inward.data.tooMany) return theSale ?? <TooMany number={number} firm={firms.find((f) => f.id === linkFirm)?.name} fy={fy} />;
+  const firm = firms.find((f) => f.id === linkFirm)?.name;
+  const sales = bills.map((b): Choice => ({ kind: "Sale", to: `/sales/${b.id}`, number: b.invoice_number, total: b.total_amount,
+    line: `${b.business_name} · ${date(b.invoice_date)} · ${b.customer.name}${b.status === "cancelled" ? " · cancelled" : ""}` }));
+  // a refresh that failed keeps what was shown, and says so (part 0's rule, as BillPage's)
+  const stale = (q: { isError: boolean; error: unknown; isFetching: boolean }, key: QueryKey) => (q.isError
+    ? <StaleNote problem={problemOf(q.error)} what="the bills with this number" retry={again(key)} busy={q.isFetching} /> : null);
+  // the purchases can't be known (their lookup failed, or over 1000 have numbers like it): the one sale with the number
+  // opens, several are offered with a line saying the purchases aren't among them, and with none the page says it
+  // couldn't tell (Rulings 1B-20, 1B-22)
+  if (inward.data?.tooMany || (!inward.data && inward.isError)) {
+    if (sales.length === 1) return <Navigate to={sales[0].to} replace />;
+    if (sales.length > 1) {
+      return <PickBill number={number} choices={sales} note={<>{stale(page, pageKey)}<Unchecked failed={!inward.data} retry={again(inKey)} busy={inward.isFetching} number={number} firm={firm} fy={fy} /></>} />;
+    }
+    return inward.data ? <TooMany number={number} firm={firm} fy={fy} /> : <Asking title={title} q={inward} retry={again(inKey)} />;
+  }
+  if (!inward.data) return <Asking title={title} q={inward} retry={again(inKey)} />;
   // the link's firm and year, which v2 matched on its side (its list filters by a firm's id and dates only)
   const purchases = inward.data.rows.filter((r) => named(r) && (!fy || (r.invoice_date !== "" && fyOf(r.invoice_date) === fy)));
   const choices: Choice[] = [
-    ...bills.map((b): Choice => ({ kind: "Sale", to: `/sales/${b.id}`, number: b.invoice_number, total: b.total_amount,
-      line: `${b.business_name} · ${date(b.invoice_date)} · ${b.customer.name}${b.status === "cancelled" ? " · cancelled" : ""}` })),
+    ...sales,
     ...purchases.map((p): Choice => ({ kind: "Purchase", to: `/purchases/${p.id}`, number: p.invoice_number, total: p.total, line: `${p.business_name} · ${date(p.invoice_date)} · ${p.customer_name}` })),
   ];
   // one bill of either kind opens; several are offered
   if (choices.length === 1) return <Navigate to={choices[0].to} replace />;
-  // a refresh that failed keeps what was shown, and says so (part 0's rule, as BillPage's)
-  const stale = page.isError ? { q: page, key: pageKey } : inward.isError ? { q: inward, key: inKey } : null;
-  const note = stale ? <StaleNote problem={problemOf(stale.q.error)} what="the bills with this number" retry={again(stale.key)} busy={stale.q.isFetching} /> : null;
+  const note = stale(page, pageKey) ?? stale(inward, inKey);
   if (choices.length > 1) return <PickBill number={number} choices={choices} note={note} />;
-  const firm = firms.find((f) => f.id === linkFirm)?.name;
   return (
     <Page icon={ReceiptText} title={title} breadcrumbs={[{ label: "Sales", to: "/sales" }]} back="/sales">
       {note}
@@ -134,6 +143,13 @@ function TooMany({ number, firm, fy }: { number: string; firm?: string; fy: stri
       </EmptyState></Card>
     </Page>
   );
+}
+
+/** Several sales have the number and the purchases with it can't be known: why they aren't in the list (Ruling 1B-22). */
+function Unchecked({ failed, retry, busy, number, firm, fy }: { failed: boolean; retry: () => void; busy: boolean; number: string; firm?: string; fy: string }) {
+  return failed
+    ? <Banner tone="neg" title="The app couldn't check purchases just now, so this list has only the sales with this number." actions={<Button size="sm" loading={busy} onClick={retry}>Try again</Button>} />
+    : <Banner tone="muted" title={`Over 1,000 purchases${firm ? ` of ${firm}` : ""}${fy ? ` in FY ${fy}` : ""} have numbers like “${number}”, too many to check here, so this list has only the sales with this number.`} />;
 }
 
 type Choice = { kind: "Sale" | "Purchase"; to: string; number: string; line: string; total: number | null };
