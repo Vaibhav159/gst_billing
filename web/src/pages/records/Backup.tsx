@@ -57,7 +57,7 @@ function FullBackup({ summary }: { summary: BackupSummary }) {
   </div>;
   const panel = <div className="flex flex-col gap-3">
     {download.isSuccess ? <div className="flex flex-col items-center text-center gap-2 py-2 anim-rise" role="status"><SuccessMark size={64} /><p className="font-semibold mt-1">{download.data.name} is ready</p><Button variant="link" icon={RotateCcw} onClick={() => download.reset()}>Make another</Button></div>
-      : download.isPending ? <div role="status" aria-live="polite"><p className="font-semibold">Packing everything on file…</p><p className="text-sm text-muted">{loaded ? `${Math.ceil(loaded / 1024)} KB received` : "Waiting for the server…"}</p></div>
+      : download.isPending ? <div><p className="font-semibold" role="status" aria-live="polite">Packing everything on file…</p><p className="text-sm text-muted">{loaded ? `${Math.ceil(loaded / 1024)} KB received` : "Waiting for the server…"}</p></div>
         : <><Button variant="primary" size="lg" icon={Download} full disabled={!can("backup.download")} title={whyNot("backup.download", "download a full backup") || undefined} onClick={() => { setLoaded(0); download.mutate(); }}>Download full backup</Button><p className="text-sm text-muted text-center tnum">{fallback} · JSON · about {summary.estimated_size}</p></>}
     <p className="text-sm text-muted text-center">Last full backup: {when(summary.last_backup_at)}</p>
     {!can("backup.download") ? <p className="text-sm text-muted">{whyNot("backup.download", "download a full backup")}</p> : null}

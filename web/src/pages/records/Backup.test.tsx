@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { AxiosProgressEvent, InternalAxiosRequestConfig } from "axios";
 import { api } from "@/core/api/client";
 import perms from "@/core/auth/perms.json";
 import type { Action } from "@/core/auth/permissions";
@@ -66,6 +67,20 @@ it("sends only the selected export scope and disables bad date ranges", async ()
   fireEvent.click(screen.getByRole("button", { name: "Customers as CSV" }));
   await waitFor(() => expect(calls.some((c) => c.url === "exports/customers/")).toBe(true));
   expect(calls.find((c) => c.url === "exports/customers/")?.params).toEqual({ format: "csv" });
+});
+
+it("announces only the start of a full backup; the received size stays out of the live region", async () => {
+  server();
+  const inner = api.defaults.adapter as (config: InternalAxiosRequestConfig) => Promise<unknown>;
+  api.defaults.adapter = ((config: InternalAxiosRequestConfig) => config.url === "backup/full/"
+    ? new Promise(() => { setTimeout(() => config.onDownloadProgress?.({ loaded: 2048 } as AxiosProgressEvent), 0); })
+    : inner(config)) as typeof api.defaults.adapter;
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Download full backup" }));
+  const received = await screen.findByText("2 KB received");
+  const status = screen.getByText("Packing everything on file…").closest("[role=status]");
+  expect(status).not.toBeNull();
+  expect(status!.contains(received)).toBe(false);
 });
 
 it("keeps a failed download retryable and never saves a failed response", async () => {
