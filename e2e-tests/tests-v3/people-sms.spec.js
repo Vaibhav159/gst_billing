@@ -1,5 +1,6 @@
 // P4-11 / X-40: run after 4B's fake-file provider lands, on the assigned sandbox under its lock.
 const { isAbsolute } = require("node:path");
+const { randomInt } = require("node:crypto");
 const { test, expect } = require("@playwright/test");
 const { typesPassword, opened } = require("./session");
 const { afterDialog } = require("./sales-data");
@@ -23,7 +24,8 @@ test("fake SMS resets a temporary owner's password and ends their existing sessi
   const owner = { ...row, password: person.password, nextPassword };
   const signedIn = await anotherPage(browser, baseURL, page.viewportSize());
   await signInPerson(signedIn, owner); await choosePassword(signedIn, owner);
-  const phone = "9000000123";
+  // A fresh synthetic mobile each run: a stopped owner from an earlier run never shares it (4B may make phones unique).
+  const phone = `9${String(randomInt(0, 1_000_000_000)).padStart(9, "0")}`;
   await privateCall(request, "PATCH", "account/", { phone }, await accountToken(signedIn));
 
   const guest = await anotherPage(browser, baseURL, page.viewportSize());
@@ -38,6 +40,7 @@ test("fake SMS resets a temporary owner's password and ends their existing sessi
     const responseTo = (endpoint) => guest.waitForResponse((r) => new URL(r.url()).pathname === `/api/auth/reset/${endpoint}/` && r.request().method() === "POST");
     let previous = outboxVersion(file);
     const [started] = await Promise.all([responseTo("start"), dialog.getByRole("button", { name: "Send a code", exact: true }).click()]);
+    test.skip(started.status() === 429, "Reset is throttled at ten an hour: run again after an hour.");
     expect(started.status()).toBe(200);
     const firstCode = readFakeSms(file, { phone, previous });
     await dialog.getByLabel("Code from the SMS", { exact: true }).waitFor({ state: "visible" }); await afterDialog(guest);
@@ -75,6 +78,8 @@ test("fake SMS resets a temporary owner's password and ends their existing sessi
     const me = await privateCall(request, "GET", "me/", undefined, await accountToken(guest));
     expect(me.username).toBe(owner.username);
     expect(me.must_change_password).toBe(false);
+    // Best effort: the stopped temporary owner left behind keeps no mobile number.
+    await privateCall(request, "PATCH", "account/", { phone: "" }, await accountToken(guest)).catch(() => {});
   } finally {
     await guest.goto("about:blank").catch(() => {});
   }
