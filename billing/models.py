@@ -1387,3 +1387,34 @@ class ReturnDownload(models.Model):
     class Meta:
         constraints = [models.CheckConstraint(condition=MONTH_RANGE, name="return_download_month_1_12")]
 
+
+class UserSecurity(models.Model):
+    user = models.OneToOneField("auth.User", on_delete=models.CASCADE, related_name="security", db_constraint=False)
+    phone = models.CharField(max_length=10, default="", db_default="")
+    must_change_password = models.BooleanField(default=False, db_default=False)
+    tokens_after = models.DateTimeField(null=True, blank=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    stopped_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+", db_constraint=False)
+
+
+class SignInSession(models.Model):
+    import uuid
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="sign_in_sessions", db_constraint=False)
+    device = models.CharField(max_length=100, default="", db_default="")
+    created_at = models.DateTimeField(default=timezone.now)
+    last_used_at = models.DateTimeField(default=timezone.now)
+    remember = models.BooleanField(default=True, db_default=True)
+    signed_out_at = models.DateTimeField(null=True, blank=True)
+    signed_out_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+", db_constraint=False)
+    ended_how = models.CharField(max_length=20, default="", db_default="")
+
+
+class PasswordResetCode(models.Model):
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="password_reset_codes", db_constraint=False)
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+    tries = models.PositiveSmallIntegerField(default=0, db_default=0)
+    used_at = models.DateTimeField(null=True, blank=True)
+    ip_hash = models.CharField(max_length=64)
