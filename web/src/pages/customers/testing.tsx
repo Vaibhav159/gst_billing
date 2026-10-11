@@ -1,5 +1,6 @@
-// Test helpers for the customer screens: the shared fake server with the firms and preferences answered, and the screens
-// mounted in a data router (useUnsavedGuard needs one) with the app's providers. Used by the *.test.tsx files beside it only.
+// Test helpers for the customer screens: the shared fake server with the firms and preferences answered, the screens
+// mounted in a data router (useUnsavedGuard needs one) with the app's providers, a clock the test moves by hand, and what
+// a screen reader hears from a live region. Used by the *.test.tsx files beside it only.
 import { act, fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from "react-router";

@@ -134,6 +134,28 @@ test("15 bills at a time, with Show more", async () => {
   expect(within(screen.getByRole("table", { name: "Sales bills to Anil Gupta" })).getAllByRole("row")).toHaveLength(18); // the head, 16 bills, the foot
 });
 
+test("Show more keeps the cursor on its button; the last one takes the button away, so the cursor goes to the first bill it brought, never to the page", async () => {
+  // 31 bills in August, newest first: the last Show more brings the 31st, 1 Aug (bill 200)
+  const many = Array.from({ length: 31 }, (_, i) => bill({ id: 200 + i, date: `2026-08-${String(i + 1).padStart(2, "0")}`, total: "100.00" }));
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(many), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  await userEvent.click(await screen.findByRole("button", { name: "Show 15 more" }));
+  expect(screen.getByRole("button", { name: "Show 1 more" })).toHaveFocus();
+  await userEvent.click(screen.getByRole("button", { name: "Show 1 more" }));
+  const table = screen.getByRole("table", { name: "Sales bills to Anil Gupta" });
+  expect(within(table).getAllByRole("row")).toHaveLength(33);
+  expect(table.querySelector('[data-row="200"]')).toHaveFocus();
+});
+
+test("on a phone too, the last Show more puts the cursor on the first bill it brought", async () => {
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  const many = Array.from({ length: 16 }, (_, i) => bill({ id: 200 + i, date: `2026-09-${String(i + 1).padStart(2, "0")}`, total: "100.00" }));
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(many), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  await userEvent.click(await screen.findByRole("button", { name: "Show 1 more" }));
+  expect(screen.getByText("KGH/2026/200").closest("[data-row]")).toHaveFocus();
+});
+
 test("a bill row that has focus opens with Enter", async () => {
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
   const { router } = mount(routes, ["/customers/7"]);

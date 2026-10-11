@@ -100,9 +100,9 @@ export function FirmToggles({ firms, value, onChange, labelledBy, describedBy, n
 
 /**
  * Words said while the cursor stays where it is. A refusal after Enter, or after a Save that keeps the cursor, leaves the
- * cursor in the refused field, and focusing it again fires nothing a screen reader reads; say(words) has `echo`, a polite
- * live region that is always there (render it once, anywhere), read them. It empties the echo, then gives it the words
- * 100 ms later, so the same words again are read again. A frame isn't enough: its callback runs before the next paint,
+ * cursor in the refused field, and focusing it again fires nothing a screen reader reads. say(words) puts them in `echo`,
+ * a polite live region that is always there (render it once, anywhere), so they're read. It empties the echo, then gives
+ * it the words 100 ms later, so the same words again are read again. A frame isn't enough: its callback runs before the next paint,
  * so the empty echo never reaches the screen, and Chrome with NVDA or JAWS may not read an identical message again
  * (Angular CDK's live announcer waits 100 ms too). say("") (typing) and a newer say cancel words still to come.
  * ponytail: the kit's Field can't say its error again while its field keeps the cursor, so the screens echo it;

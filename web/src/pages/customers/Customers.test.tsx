@@ -199,6 +199,14 @@ test("20 at a time: Show more asks for the next page", async () => {
   await waitFor(() => expect(calls.filter((c) => c.params.figures === 1).map((c) => c.params.page)).toEqual([1, 2]));
 });
 
+test("the last Show more takes its button away, so the cursor goes to the first customer it brought, never to the page", async () => {
+  serve({ "GET customers/": list(21) });
+  mount(routes, ["/customers"]);
+  await userEvent.click(await screen.findByRole("button", { name: "Show 18 more" }));
+  // page 2's first row (ids move on by 100 a page)
+  await waitFor(() => expect(document.querySelector('[data-row="107"]')).toHaveFocus());
+});
+
 test("a Show more that fails says so where it was pressed, and Try again asks for that page again; the rows and the header stay", async () => {
   let fails = 1;
   const calls = serve({ "GET customers/": (c: Call) => (Number(c.params.page) === 2 && fails-- > 0 ? { status: 503 } : list(21)(c)) });

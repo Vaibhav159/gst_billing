@@ -22,7 +22,7 @@ import {
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { customersCsv } from "./exportCsv";
-import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, startFrom, tableState, useJustSaved } from "./lib";
+import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, startFrom, tableState, useJustSaved, useMoreFocus } from "./lib";
 import { CustomerRowMenu, FirmChips, MoreButton } from "./listParts";
 import { WhyNote } from "./parts";
 
@@ -94,9 +94,11 @@ function useCustomersPage() {
   const waiting = justSaved !== null && ready && !rows.some((r) => r.id === justSaved) && !describe;
   const saved = useCustomer(waiting ? justSaved : null);
   const shown: CustomerRow[] = waiting && saved.data ? [{ ...saved.data, figures: null }, ...rows.slice(0, Math.max(0, rows.length - 1))] : rows;
+  const noteMore = useMoreFocus(shown.map((c) => c.id));
   const total = everyone.data ?? count;
   return {
     firms, firmId, setFirmId, period, q, setQ, term, gst, setGst, state, setState, usual, setUsual, sort, setSort, list, shown, count, total, summary,
+    more: () => { noteMore(); void list.fetchNextPage(); },
     chips, clearAll, describe, justSaved, ready, failed, actionsOn, offline: net === "offline",
     // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
     // list of firms (still coming, or failed) it waits even for all firms, as the file names each customer's usual firms
@@ -167,7 +169,7 @@ function Loaded({ d, children }: { d: D; children: ReactNode }) {
 function More({ d }: { d: D }) {
   if (!d.list.hasNextPage) return null;
   return (
-    <MoreButton shown={d.shown.length} total={d.count} what="customers" pageSize={LIST_PAGE} onMore={() => void d.list.fetchNextPage()} loading={d.list.isFetchingNextPage}
+    <MoreButton shown={d.shown.length} total={d.count} what="customers" pageSize={LIST_PAGE} onMore={d.more} loading={d.list.isFetchingNextPage}
       problem={d.list.isFetchNextPageError ? problemOf(d.list.error) : null} />
   );
 }

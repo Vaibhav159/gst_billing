@@ -22,7 +22,7 @@ import {
   Badge, Banner, Button, ButtonLink, Card, ConfirmDialog, DL, EmptyState, Figure, IconButton, ListRow, ListSkeleton, Menu, Money, Page, QueryView, Table, Td, Th, Tr, useToast, type MenuItem,
 } from "@/core/ui";
 import { useView } from "@/core/view";
-import { billsWithCancelled, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved, useRouteCustomer } from "./lib";
+import { billsWithCancelled, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved, useMoreFocus, useRouteCustomer } from "./lib";
 import { MoreButton, useContact } from "./listParts";
 import { Bump, CopyButton, InfoCell, PeriodSwitch, QuickActions, type PeriodOption } from "./pageParts";
 import { MissingRecord, WhyNote } from "./parts";
@@ -80,6 +80,8 @@ function useDetail(c: Customer) {
   const allFig = figures(all);
   const fig = period === "fy" ? fyFig : allFig;
   const bills = [...(period === "fy" ? inFy : all)].sort(newestFirst);
+  const shown = bills.slice(0, limit);
+  const noteMore = useMoreFocus(shown.map((b) => b.id));
   // "Customer since" is the record's own date (Call 20). All time runs from the first bill when that's older: a bill
   // copied in from Tally before the record was made here
   const since = dayOf(c.created_at);
@@ -107,7 +109,7 @@ function useDetail(c: Customer) {
   const home = homeState(firms, firmId);
   const taxWay: TaxWay = !c.state_name || !home ? null : tableState(c.state_name) !== home ? "igst" : "local";
   return {
-    firms, firmId, setFirmId, fy, fyP, period, setPeriod, st, itax, loaded, ready, bills, shown: bills.slice(0, limit), more: () => setLimit((l) => l + PAGE),
+    firms, firmId, setFirmId, fy, fyP, period, setPeriod, st, itax, loaded, ready, bills, shown, more: () => { noteMore(); setLimit((l) => l + PAGE); },
     fig, allFig, since, last, plabel, prange, options, trend, scope, taxWay, key: `${period}|${firmId}`,
     // the firm picked's, by name ("KIRAN GOLD HOUSE's"); without its name, neutral words, never "the firm picked's"
     whose: typeof firmId === "number" && named ? possessive(scopeName(firms, firmId)) : "one firm's",

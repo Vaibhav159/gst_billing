@@ -132,6 +132,24 @@ export function useJustSaved(kind: string): number | null {
   return id;
 }
 
+/**
+ * Show more's cursor. The press that shows the last rows takes the button away, and the cursor with it: it goes to the
+ * first row that press brought (rows carry data-row and tabIndex -1), never to the page. Only a cursor that has gone
+ * to the page moves: one the person put elsewhere meanwhile stays. Call what this returns with each press; ids: the rows
+ * on screen, in order.
+ */
+export function useMoreFocus(ids: readonly number[]): () => void {
+  const from = useRef<number | null>(null);
+  useEffect(() => {
+    const at = from.current;
+    if (at === null || ids.length <= at) return;
+    from.current = null;
+    const a = document.activeElement;
+    if (!a || a === document.body) document.querySelector<HTMLElement>(`[data-row="${ids[at]}"]`)?.focus();
+  });
+  return () => { from.current = ids.length; };
+}
+
 /** Ctrl S (⌘ S) runs `fn` on a desktop. */
 export function useCtrlS(fn: () => void) {
   const { isDesktop } = useView();
