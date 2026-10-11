@@ -154,12 +154,13 @@ class SeedSandboxTest(TestCase):
         cash = Invoice.objects.select_related("customer").get(
             business__name="MEERA ORNAMENTS (SANDBOX)", customer__name="Pooja Bhati",
             invoice_date=date(2026, 10, 8), total_amount=Decimal("200000.00"), payment_mode="cash")
-        self.assertEqual([f["kind"] for f in itax_flags(cash)], ["cash_limit"])
+        self.assertEqual([f["kind"] for f in itax_flags(cash, list(cash.lineitem_set.all()))], ["cash_limit"])
         big = Invoice.objects.select_related("customer").get(
             business__name="AARAV JEWELLERS (SANDBOX)", customer__name="Deepak Choudhary",
             invoice_date=date(2026, 10, 8), total_amount=Decimal("257500.00"), payment_mode="bank")
-        self.assertEqual([f["kind"] for f in itax_flags(big)], ["pan"])
-        kinds = {f["kind"] for inv in Invoice.objects.sales().select_related("customer") for f in itax_flags(inv)}
+        self.assertEqual([f["kind"] for f in itax_flags(big, list(big.lineitem_set.all()))], ["pan"])
+        kinds = {f["kind"] for inv in Invoice.objects.sales().select_related("customer")
+                 for f in itax_flags(inv, list(inv.lineitem_set.all()))}
         self.assertLessEqual({"pan", "cash_limit"}, kinds)
         restored = restore_from_bin(binned, None)
         self.assertIs(restored.paper, True)

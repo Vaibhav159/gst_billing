@@ -48,6 +48,7 @@ from billing.text import in_words, inr, money, percent, person, stamp
 
 ZERO = Decimal("0")
 ITAX_LIMIT = Decimal("200000")  # Sec 269ST (cash, at or over) and Rule 114B (PAN, over)
+B2C_ADDRESS_LIMIT = Decimal("50000")  # CGST Rule 46(f), taxable value at or over
 EWAY_LIMIT = Decimal("50000")
 RATE_PLACES = Decimal("0.0001")  # LineItem.gst_tax_rate keeps 4 places
 
@@ -109,7 +110,7 @@ def figures(totals):
     return {k: money(totals[k]) for k in ("taxable", *HEADS, "tax")}
 
 
-def itax_flags(invoice):
+def itax_flags(invoice, lines):
     """The income-tax checks on a saved bill (design §4.5; PROTO complianceFlags). None on a cancelled bill."""
     if invoice.status == BILL_CANCELLED:
         return []
@@ -128,6 +129,17 @@ def itax_flags(invoice):
     if has_gstin(customer.gst_number) and not (customer.address or "").strip():
         flags.append({"kind": "b2b_address", "short": "No address",
                       "text": "A bill to a business needs the buyer's address (CGST Rule 46). Add it on the customer."})
+    if (not has_gstin(customer.gst_number) and (customer.kind == "walkin" or not (customer.address or "").strip())
+            and sum((line_taxable(li) for li in lines), ZERO) >= B2C_ADDRESS_LIMIT):
+        if customer.kind == "walkin":
+            text = ("A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's name and address "
+                    "(CGST Rule 46(f)). Put the bill in the buyer's name, with their address, not Walk-in.")
+        else:
+            name = customer.name.rstrip()
+            possessive = name if re.search(r"['’]s$", name, re.I) else name + ("'" if name.lower().endswith("s") else "'s")
+            text = ("A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address "
+                    f"(CGST Rule 46(f)). Add {possessive} address.")
+        flags.append({"kind": "b2c_address", "short": "Name and address needed", "text": text})
     return flags
 
 
@@ -221,7 +233,7 @@ def bill_row(invoice, lines, closed, duplicated):
         "interstate": supply_interstate(invoice),
         "gst_percents": sorted({percent(li.gst_tax_rate) for li in lines}, key=Decimal, reverse=True),
         "line_count": len(lines), "status": invoice.status, "cancel_reason": invoice.cancel_reason,
-        "sent": sent_block(invoice), "checks": bill_checks(invoice, lines, duplicated), "itax": itax_flags(invoice),
+        "sent": sent_block(invoice), "checks": bill_checks(invoice, lines, duplicated), "itax": itax_flags(invoice, lines),
         "locked": (invoice.business_id, day.year, day.month) in closed,
     }
 
@@ -448,10 +460,15 @@ def filter_bills(bills, params, dates=True):
     if p.get("dups") == "1":
         bills = bills.filter(pk__in=duplicated_ids(bills.select_related(None).only("business_id", "invoice_date")))
     if p.get("itax") == "1":
-        # A flag needs a total at the limits or a GSTIN (15 characters, once trimmed): the database narrows to those.
-        maybe = (bills.select_related(None).select_related("customer").alias(gstin_length=Length("customer__gst_number"))
-                 .filter(Q(total_amount__gte=ITAX_LIMIT) | Q(gstin_length__gte=15)).only(*ITAX_FIELDS))
-        bills = bills.filter(pk__in=[inv.pk for inv in maybe if itax_flags(inv)])
+        # Rule 46(f) uses the lines, never the stored total. Keep every walk-in or blank address as a candidate,
+        # including whitespace and v2 bills whose stored total disagrees with their lines. Read lines in one batch.
+        maybe = list(bills.counted().select_related(None).select_related("customer")
+                     .alias(gstin_length=Length("customer__gst_number"))
+                     .filter(Q(total_amount__gte=ITAX_LIMIT) | Q(gstin_length__gte=15)
+                             | Q(customer__customer_type="walkin") | Q(customer__address__isnull=True)
+                             | Q(customer__address__regex=r"^\s*$")).only(*ITAX_FIELDS))
+        lines = lines_of(maybe, ("quantity", "rate"))
+        bills = bills.filter(pk__in=[inv.pk for inv in maybe if itax_flags(inv, lines[inv.pk])])
     if p.get("check") == "1":
         bills = bills.filter(pk__in=checked_ids(bills.counted().only(*CHECK_FIELDS)))
     return bills

@@ -37,6 +37,7 @@ class SalesFlowTest(TestCase):
         self.assertEqual(nxt.data["invoice_number"], "KGH/2026-27/1")
         first = self.bill(self.staff, "1").data
         self.assertEqual((first["invoice_number"], first["total_amount"]), ("KGH/2026-27/1", "82808.71"))
+        self.assertEqual([f["kind"] for f in first["itax"]], ["b2c_address"])  # warns, never blocks the save
         clash = self.bill(self.staff, "1")
         self.assertEqual((clash.status_code, clash.data["code"], clash.data["next"]["invoice_number"]),
                          (409, "number_taken", "KGH/2026-27/2"))
@@ -88,11 +89,11 @@ class SalesFlowTest(TestCase):
 
         # The income-tax checks: cash at the limit, and a big bill to a buyer with no PAN.
         cash = self.bill(self.staff, "8", lines=[{**GOLD, "quantity": "1", "rate": "194174.76"}]).data
-        self.assertEqual([f["kind"] for f in cash["itax"]], ["cash_limit"])
+        self.assertEqual([f["kind"] for f in cash["itax"]], ["cash_limit", "b2c_address"])
         big = self.bill(self.staff, "9", payment_mode="bank", lines=[{**GOLD, "quantity": "1", "rate": "250000"}]).data
-        self.assertEqual([f["kind"] for f in big["itax"]], ["pan"])
+        self.assertEqual([f["kind"] for f in big["itax"]], ["pan", "b2c_address"])
         views = self.viewer.get(reverse("sale-list"), {"fy": "2026-27", "itax": "1"}).data["results"]
-        self.assertEqual({row["id"] for row in views}, {cash["id"], big["id"]})
+        self.assertEqual({row["invoice_number"] for row in views}, {f"KGH/2026-27/{n}" for n in (2, 3, 4, 6, 7, 8, 9)})
 
         # A viewer reads everything and changes nothing, and is told who may.
         refused = self.bill(self.viewer, "10")

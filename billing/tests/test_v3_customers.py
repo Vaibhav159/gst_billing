@@ -328,7 +328,7 @@ class StatementTest(TestCase):
         sale(self.kgh, self.anil, "5", "2026-10-06", line(rate="200000"), payment_mode="cash", status=BILL_CANCELLED)
         bills = self.statement(start_date="2026-10-05").data["bills"]
         page = self.client.get(reverse("sale-detail", args=[big.pk])).data
-        self.assertEqual([f["kind"] for f in bills[0]["itax"]], ["cash_limit", "pan"])
+        self.assertEqual([f["kind"] for f in bills[0]["itax"]], ["cash_limit", "pan", "b2c_address"])
         self.assertEqual(bills[0]["itax"], page["itax"])
         self.assertEqual(bills[0]["itax"][0], {
             "kind": "cash_limit", "short": "Cash ≥ ₹2 lakh",
