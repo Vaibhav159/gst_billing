@@ -5,15 +5,45 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest import skipUnless
 from unittest.mock import patch
 
+import pytest
 from django.contrib.auth.models import Group, User
 from django.db import connection, connections
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from billing.models import AuditLog, UserPreference
 from billing.roles import role_of
 from billing.tests.test_v3_cacheops import cacheops_on
 from billing.tests.v3_helpers import ROLE_GROUPS, client_for, firm, person
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("surface", ["people", "users"])
+@pytest.mark.parametrize("password", ["Indigo83724", "short"])
+def test_self_password_reset_is_refused_before_any_account_mutation(surface, password):
+    from billing.models import SignInSession
+    from billing.services.accounts import security_for
+
+    owner = person("kailash", "admin")
+    original_password = owner.password
+    security = security_for(owner)
+    session = SignInSession.objects.create(user=owner, device="Chrome on Windows")
+    client = client_for(owner)
+    data = {"password": password, "role": "viewer", "is_active": False}
+    if surface == "people":
+        response = client.post(f"/api/people/{owner.pk}/password/", data, format="json")
+    else:
+        response = client.patch("/api/users/", {"user_id": str(owner.pk), **data}, format="json")
+    assert response.status_code == 409
+    assert response.data == {"detail": "Change your own password on your profile.", "code": "own_account"}
+    owner.refresh_from_db()
+    security.refresh_from_db()
+    session.refresh_from_db()
+    assert owner.password == original_password and owner.is_active
+    assert role_of(owner) == "owner"
+    assert not security.must_change_password and security.tokens_after is None
+    assert session.signed_out_at is None
+    assert not AuditLog.objects.exists()
 
 
 class PeopleTest(TestCase):
@@ -37,6 +67,12 @@ class PeopleTest(TestCase):
         response = self.post("password", {"password": "Indigo83724"})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["password"], ["It needs: different from your current password."])
+
+    @override_settings(SMS_RESET_ENABLED=True, SMS_PROVIDER="msg91", MSG91_AUTH_KEY="", MSG91_TEMPLATE_ID="", MSG91_SENDER="")
+    def test_profile_hides_sms_reset_when_the_provider_is_not_ready(self):
+        response = self.client.get("/api/account/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["sms_reset"])
 
     def test_list_shape_order_and_unplaced_editor(self):
         old = person("old_editor", "editor", first_name="Asha")

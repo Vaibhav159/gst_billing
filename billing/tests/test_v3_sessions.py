@@ -98,9 +98,14 @@ def test_authentication_reads_only_user_security_and_current_device(django_asser
 
     from billing.api.auth import SessionJWTAuthentication
     user = person("maya", "admin")
+    user.email = "maya@example.com"
+    user.is_staff = True
+    user.save(update_fields=["email", "is_staff"])
     _, tokens = login(user)
     with django_assert_num_queries(1):
         authenticated = SessionJWTAuthentication().get_user(AccessToken(tokens["access"]))
+        assert authenticated.email == "maya@example.com"
+        assert authenticated.is_staff
     assert authenticated.pk == user.pk
 
 
@@ -125,4 +130,64 @@ def test_refresh_never_reads_full_user_rows():
     assert response.status_code == 200
     selects = [row["sql"] for row in queries if row["sql"].lstrip().startswith("SELECT") and '"auth_user".' in row["sql"]]
     assert selects
-    assert all('"auth_user"."email"' not in sql and '"auth_user"."password"' not in sql for sql in selects)
+    assert all('"auth_user"."password"' not in sql and '"auth_user"."last_login"' not in sql for sql in selects)
+
+
+def test_legacy_refresh_creates_one_visible_revocable_device_and_preserves_claims():
+    from rest_framework_simplejwt.tokens import AccessToken
+
+    from billing.api.serializers import CustomTokenObtainPairSerializer
+    from billing.api.session_auth import micros
+
+    user = person("maya", "admin", first_name="Maya", last_name="Li")
+    legacy = CustomTokenObtainPairSerializer.get_token(user)
+    before = micros(timezone.now())
+    response = APIClient().post("/api/token/refresh/", {"refresh": str(legacy)},
+                                HTTP_USER_AGENT="Mozilla/5.0 (Macintosh) Version/17 Safari/605")
+    assert response.status_code == 200
+    session = SignInSession.objects.get(user=user)
+    assert session.device == "Safari on Mac"
+    assert session.remember and session.signed_out_at is None
+    rotated = RefreshToken(response.data["refresh"])
+    access = AccessToken(response.data["access"])
+    for token in (rotated, access):
+        assert token["sid"] == str(session.pk)
+        assert before <= token["issued"] <= micros(timezone.now())
+        for claim in ("user_id", "username", "full_name", "role"):
+            assert token[claim] == legacy[claim]
+    assert access["issued"] == rotated["issued"]
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION="Bearer " + str(access))
+    assert client.get("/api/me/").data["session_id"] == str(session.pk)
+    devices = client.get("/api/account/sessions/")
+    assert devices.status_code == 200
+    assert len(devices.data["results"]) == 1
+    assert devices.data["results"][0]["current"] is True
+    second = APIClient().post("/api/token/refresh/", {"refresh": str(rotated)})
+    assert second.status_code == 200
+    assert RefreshToken(second.data["refresh"])["sid"] == str(session.pk)
+    assert SignInSession.objects.count() == 1
+    assert APIClient().post("/api/token/refresh/", {"refresh": str(legacy)}).status_code == 401
+    assert SignInSession.objects.count() == 1
+    assert client.post("/api/auth/sign-out/", {"refresh": second.data["refresh"]}).status_code == 204
+    for response in (client.get("/api/me/"), APIClient().post("/api/token/refresh/", {"refresh": second.data["refresh"]})):
+        assert response.status_code == 401
+        assert response.data["code"] == "signed_out"
+
+
+@pytest.mark.parametrize("invalid", ["stopped", "revoked", "blacklisted", "expired"])
+def test_invalid_legacy_refresh_never_creates_a_session(invalid):
+    user = person("maya", "admin")
+    legacy = RefreshToken.for_user(user)
+    if invalid == "stopped":
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+    elif invalid == "revoked":
+        revoke_all(user)
+    elif invalid == "blacklisted":
+        legacy.blacklist()
+    else:
+        legacy.set_exp(lifetime=timedelta(seconds=-1))
+    response = APIClient().post("/api/token/refresh/", {"refresh": str(legacy)})
+    assert response.status_code == 401
+    assert not SignInSession.objects.exists()

@@ -66,6 +66,11 @@ class SessionTokenRefreshSerializer(TokenRefreshSerializer):
         uncached(User).select_for_update().only("id").get(pk=user.pk)
         SessionJWTAuthentication().get_user(untyped)
         token = self.token_class(attrs["refresh"])
+        if token.get("sid") is None:
+            session = SignInSession.objects.create(user=user,
+                device=device_name(self.context["request"].META.get("HTTP_USER_AGENT", "")))
+            token["sid"] = str(session.pk)
+            token["issued"] = micros(timezone.now())
         from rest_framework_simplejwt.settings import api_settings as jwt_settings
         result = {"access": str(token.access_token)}
         if jwt_settings.ROTATE_REFRESH_TOKENS:

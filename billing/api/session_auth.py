@@ -30,7 +30,7 @@ class SessionJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed(SIGNED_OUT) from None
         sessions = uncached(SignInSession).filter(pk=sid, user_id=OuterRef("pk"), signed_out_at__isnull=True)
         user = (uncached(User).select_related("security").annotate(live_session=Exists(sessions), session_used=Subquery(sessions.values("last_used_at")[:1]))
-                .only("id", "username", "first_name", "last_name", "is_active", "is_superuser",
+                .only("id", "username", "first_name", "last_name", "email", "is_staff", "is_active", "is_superuser",
                       "security__id", "security__user_id", "security__must_change_password", "security__tokens_after")
                 .filter(pk=user_id).first())
         if user is None or not user.is_active or (sid is not None and not user.live_session):

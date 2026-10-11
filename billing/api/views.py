@@ -3350,6 +3350,9 @@ class UserManagementView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
 
+        if user.pk == request.user.pk and request.data.get("password"):
+            return Response({"detail": "Change your own password on your profile.", "code": "own_account"}, status=409)
+
         # Before any change, so a refused password leaves the role and status as they were.
         problem = request.data.get("password") and _password_problem(request.data["password"], user)
         if problem:

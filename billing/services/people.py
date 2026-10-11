@@ -2,7 +2,6 @@
 
 import re
 
-from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
@@ -124,6 +123,8 @@ def people_rows(actor, pk=None):
 
 
 def account_row(user):
+    from billing.services.sms import sms_enabled
+
     profile = uncached(User).only("id", "username", "first_name", "last_name", "email", "is_superuser").get(pk=user.pk)
     role = role_of(profile)
     owner = role == "owner"
@@ -136,7 +137,7 @@ def account_row(user):
             "last_name": profile.last_name, "email": profile.email, "role": role, "role_label": ROLES[role]["label"],
             "usual_firm": firm, "must_change_password": security.get("must_change_password", False),
             "phone": security.get("phone", "") if owner else None, "phone_allowed": owner,
-            "sms_reset": getattr(settings, "SMS_RESET_ENABLED", False)}
+            "sms_reset": sms_enabled()}
 
 
 def assign_role(user, role):
@@ -203,8 +204,10 @@ def create_person(actor, data):
 def change_person(actor, pk, action, data):
     data = body_object(data)
     user = target_user(pk)
-    if user.pk == actor.pk and action in ("role", "stop"):
-        words = "You can't change your own role. Another owner can." if action == "role" else "You can't stop yourself signing in. Another owner can."
+    if user.pk == actor.pk and action in ("role", "stop", "password"):
+        words = {"role": "You can't change your own role. Another owner can.",
+                 "stop": "You can't stop yourself signing in. Another owner can.",
+                 "password": "Change your own password on your profile."}[action]
         raise Refusal(words, "own_account")
     old = people_rows(actor, pk)[0]
     if action == "role":
