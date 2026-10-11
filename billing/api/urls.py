@@ -16,6 +16,7 @@ from .inward_bills import (
 from .me import MeView
 from .media import SignedMediaView
 from .preferences import PreferencesView
+from .purchase_files import PurchaseFilesView
 from .purchase_reader import AiReadsView, PurchaseReadView
 from .purchases import PurchaseBinViewSet, PurchasesViewSet
 from .reconciliation import ReconciliationView
@@ -57,6 +58,8 @@ router.register(r"drafts", DraftViewSet, basename="draft")
 router.register(r"suppliers", SupplierViewSet, basename="supplier")
 
 urlpatterns = [
+    path("purchases/<int:pk>/files/", PurchaseFilesView.as_view(), name="purchase-files"),
+    path("purchases/<int:pk>/files/<str:file_id>/", PurchaseFilesView.as_view(), name="purchase-file"),
     path("captures/", CapturesView.as_view(), name="capture-list"),
     path("captures/<int:pk>/", CaptureDetailView.as_view(), name="capture-detail"),
     path("captures/<int:pk>/restore/", CaptureRestoreView.as_view(), name="capture-restore"),
