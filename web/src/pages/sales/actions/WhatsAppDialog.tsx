@@ -4,11 +4,12 @@ import { Printer, Send } from "lucide-react";
 import { useSaveCustomer } from "@/core/api/customers";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { useView } from "@/core/view";
 import { possessive } from "@/core/format";
 import { mobileOf } from "@/core/sales/share";
 import { Button, Checkbox, Dialog, Field, Input, useToast } from "@/core/ui";
 import { useHeldValue } from "./held";
-import { useSendBill, type SendableBill } from "./useSendBill";
+import { useSendBill, type SendableBill, type SendOptions } from "./useSendBill";
 
 /** Why the number didn't reach the customer's record, and what to do: the bill has gone already, so the dialog has closed. */
 function notSaved(p: ApiProblem, name: string, mobile: string): string {
@@ -33,12 +34,16 @@ function numberText(raw: string): string {
  * bill. The send carries it as `to`, kept on the bill only: a walk-in's is never kept. A customer's can be saved to their
  * record (customer.edit) once the send is recorded, through plan 1C's customer save, which refreshes the customers and
  * the bills (Ruling 1B-8); a landline already there is named, and replaced only when the person ticks Replace it. Once
- * WhatsApp has the bill the dialog closes, even if the record failed: its toast marks it again, never a second chat.
+ * WhatsApp has the bill the dialog closes, even if the record failed: its toast or inline feedback retries recording, never a second chat.
  */
-export function WhatsAppDialog({ bill, onClose, onSent }: { bill: SendableBill | null; onClose: () => void; onSent?: () => void }) {
+export function WhatsAppDialog({ bill, onClose, onSent, sendOptions }: {
+  bill: SendableBill | null; onClose: () => void; onSent?: () => void;
+  sendOptions?: Pick<SendOptions, "quiet" | "onMarkFailed" | "onRecorded">;
+}) {
   const b = useHeldValue(bill);
   const { can } = useAuth();
   const navigate = useNavigate();
+  const { isEasy } = useView();
   const send = useSendBill();
   const saveCustomer = useSaveCustomer();
   const { show } = useToast();
@@ -65,15 +70,18 @@ export function WhatsAppDialog({ bill, onClose, onSent }: { bill: SendableBill |
     let opened = false;
     setBusy(true);
     // the chat opens now, within this press; the number goes to the customer's record once the send is recorded, at once
-    // or later by the toast's Mark as sent
+    // or later by Mark as sent in the toast or inline feedback
     void send(b, {
+      ...sendOptions,
       to,
       onOpened: () => { opened = true; },
-      onRecorded: saveIt ? () => {
+      onRecorded: () => {
+        sendOptions?.onRecorded?.();
+        if (!saveIt) return;
         saveCustomer.mutateAsync({ id: c.id, body: { mobile_number: to.replace(/\s/g, "") } }).catch((e: unknown) => {
           show({ tone: "neg", title: `Not saved to ${possessive(c.name)} record`, body: notSaved(problemOf(e), c.name, to) });
         });
-      } : undefined,
+      },
     }).then((ok) => {
       setBusy(false);
       // nothing opened (offline, the shop's message still loading): the number stays here to send again
@@ -87,7 +95,7 @@ export function WhatsAppDialog({ bill, onClose, onSent }: { bill: SendableBill |
       description={walkin ? "A walk-in has no number on record. Type theirs to send the bill to their WhatsApp; it isn't kept as a customer."
         : onRecord ? `${c.name} has ${onRecord} on record, which isn't a mobile number.` : `${c.name} has no mobile number on record.`}
       footer={<>
-        <Button onClick={() => { onClose(); navigate(`/sales/${b.id}/print`); }} disabled={busy} icon={Printer}>Print instead</Button>
+        <Button onClick={() => { onClose(); navigate(isEasy ? `/e/bill/${b.id}/print` : `/sales/${b.id}/print`); }} disabled={busy} icon={Printer}>Print instead</Button>
         <Button variant="primary" icon={Send} loading={busy} onClick={go}>{busy ? "Sending…" : "Send"}</Button>
       </>}>
       <div className="flex flex-col gap-3">

@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { problemOf } from "@/core/api/errors";
+import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { useRecordSent, useShopSettings } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
+import { canShareFiles } from "@/core/print/files";
 import { billMessage, mobileOf, sentToast } from "@/core/sales/share";
 import type { BillRow, CustomerRef } from "@/core/sales/types";
 import { notMarkedSent, SEND_WAITING, sendFailure, STANDARD_MESSAGE } from "@/core/sales/words";
@@ -16,10 +17,19 @@ export type SendableBill = Pick<BillRow, "id" | "invoice_number" | "invoice_date
   customer: Pick<CustomerRef, "id" | "name" | "type" | "mobile_number">;
 };
 /**
- * to: a number typed for this bill; onNeedNumber: there's no number to send to (ask for one); onOpened: WhatsApp has
- * the bill (from then on a record that failed is marked again from its toast, never by sending again); onRecorded: the send is recorded, at once or later by the toast's Mark as sent.
+ * to: a number typed for this bill; onNeedNumber: the WhatsApp fallback needs a number; onOpened: WhatsApp has
+ * the bill (a failed record is retried without sending again); onRecorded: the send is recorded, at once or later.
+ * onMarkFailed lets Easy draw the failure inline; retry is null for a refusal that cannot be retried. quiet suppresses
+ * record failure/success toasts only: permission, offline, loading and delivery failures still say what happened.
  */
-export type SendOptions = { to?: string; onNeedNumber?: (b: SendableBill) => void; onOpened?: () => void; onRecorded?: () => void };
+export type SendOptions = {
+  to?: string;
+  onNeedNumber?: (b: SendableBill) => void;
+  onOpened?: () => void;
+  onRecorded?: () => void;
+  onMarkFailed?: (problem: ApiProblem, retry: (() => Promise<boolean>) | null) => void;
+  quiet?: boolean;
+};
 
 /**
  * The shop's WhatsApp message: ready once the settings have answered, or failed (then the standard message goes, and the
@@ -49,7 +59,7 @@ function sendingIn(qc: QueryClient): Set<number> {
 
 /**
  * Send a bill on WhatsApp and record it (PROTO sales/parts.jsx:185-205). Someone who can't send is told why; a customer
- * with no mobile on record (a walk-in) needs a number first, and nothing is marked sent without one; offline, or before
+ * with no mobile on record can share the PDF on a supported phone; the WhatsApp-link fallback needs a number. Offline, or before
  * the shop's message has loaded, nothing opens. The chat opens within the press itself, then the send is recorded. A
  * record that fails after the chat opened says so, with Mark as sent, which records it again and never reopens WhatsApp
  * (Ruling 1B-14). A second send of a bill whose send is on its way does nothing (inFlight); a send that goes wrong says
@@ -69,7 +79,7 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
     // a number typed now, else (no number on record) the one this bill went to before
     const to = mobileOf(opts.to) || (own ? "" : mobileOf(b.sent?.to));
     const mobile = to || own;
-    if (!mobile) { opts.onNeedNumber?.(b); return Promise.resolve(false); }
+    if (!mobile && !(isPhone && canShareFiles())) { opts.onNeedNumber?.(b); return Promise.resolve(false); }
     if (net === "offline") { show(sendFailure({ kind: "offline", message: "You're offline" })); return Promise.resolve(false); }
     if (!ready) { show(SEND_WAITING); return Promise.resolve(false); }
     // the bill's exact total, as its PDF prints it: nothing is rounded to the rupee (Ruling 1B-12)
@@ -89,14 +99,22 @@ export function useSendBill(): (b: SendableBill, opts?: SendOptions) => Promise<
           await record({ id: b.id, via: d.via, to: to.replace(/\s/g, "") });
         } catch (e) {
           done();
-          const f = notMarkedSent(problemOf(e), b.invoice_number);
-          // one press records it once: a quick second press posts nothing (a failure again brings a new toast)
+          const problem = problemOf(e);
+          const f = notMarkedSent(problem, b.invoice_number);
+          // The toast and Easy's inline retry share one press guard and never deliver the PDF again.
           let pressed = false;
-          show({ tone: f.tone, title: f.title, body: f.body, duration: f.again ? Infinity : undefined, action: f.again ? { label: "Mark as sent", onClick: () => { if (pressed) return; pressed = true; void mark(true); } } : undefined });
+          const retry = () => {
+            if (pressed || sending.has(b.id)) return Promise.resolve(false);
+            pressed = true;
+            return mark(true);
+          };
+          opts.onMarkFailed?.(problem, f.again ? retry : null);
+          if (!opts.quiet) show({ tone: f.tone, title: f.title, body: f.body, duration: f.again ? Infinity : undefined, action: f.again ? { label: "Mark as sent", onClick: () => { void retry(); } } : undefined });
           return false;
         }
         done();
         opts.onRecorded?.();
+        if (opts.quiet) return true;
         if (retry) show({ title: `${b.invoice_number} marked as sent` });
         else {
           const who = to ? `+91 ${to}` : b.customer.type === "walkin" ? "the customer" : b.customer.name;
