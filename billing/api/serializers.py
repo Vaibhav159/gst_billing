@@ -78,6 +78,7 @@ class BusinessSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
+    is_supplier = serializers.BooleanField(read_only=True)
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )

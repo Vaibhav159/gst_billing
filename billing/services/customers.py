@@ -11,7 +11,7 @@ figures, and the statement reads each bill and line in the few columns it shows.
 from collections import defaultdict
 from decimal import Decimal
 
-from django.db.models import Case, Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value, When, Window
+from django.db.models import Case, Count, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import RowNumber
 
 from billing.constants import BILL_CANCELLED
@@ -90,6 +90,14 @@ def filter_customers(customers, params):
     """customers/'s v3 filters (6.1): a GSTIN or none, the state, and the effective type, read as Customer.kind
     reads them (the stored customer_type, else business with a GSTIN, else person; a GSTIN is has_gstin's, read in
     the database by tax_rules.registered)."""
+    role = params.get("role")
+    if role in ("customers", "suppliers"):
+        customers = customers.nocache().alias(
+            has_purchase=Exists(Invoice.objects.purchases().filter(customer_id=OuterRef("pk"))),
+            has_sale=Exists(Invoice.objects.sales().filter(customer_id=OuterRef("pk"))),
+        )
+        customers = customers.filter(Q(is_supplier=True) | Q(has_purchase=True)) if role == "suppliers" else customers.filter(
+            Q(has_sale=True) | Q(is_supplier=False, has_purchase=False))
     gstin = registered("gst_number")
     if params.get("has_gstin") == "1":
         customers = customers.filter(gstin)

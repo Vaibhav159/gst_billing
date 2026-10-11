@@ -20,6 +20,7 @@ from .reconciliation import ReconciliationView
 from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
 from .shop import ShopSettingsView
+from .suppliers import SupplierViewSet
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
@@ -51,6 +52,7 @@ router.register(r"filed-periods", FiledPeriodViewSet)
 router.register(r"sales", SalesViewSet, basename="sale")
 router.register(r"bin", BinViewSet, basename="bin")
 router.register(r"drafts", DraftViewSet, basename="draft")
+router.register(r"suppliers", SupplierViewSet, basename="supplier")
 
 urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them

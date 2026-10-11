@@ -317,7 +317,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
 
         # Bulk fetch metrics for all customers on the page; a cancelled bill counts in neither
         invoices = Invoice.objects.counted().filter(customer_id__in=customer_ids)
-        if figures:
+        if figures or request.query_params.get("role") in ("customers", "suppliers"):
             invoices = invoices.nocache()  # v3's list reads around cacheops (Ruling 1A-34)
 
         # Apply date filters
@@ -362,7 +362,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     def get_queryset(self):
         queryset = super().get_queryset()
         params = self.request.query_params
-        if params.get("figures") == "1":
+        if params.get("figures") == "1" or params.get("role") in ("customers", "suppliers"):
             # v3's list reads around cacheops, its firms too: its figures and orders come from bills, which a cached
             # customer query never sees change (Ruling 1A-34). A row shows only its firms' ids.
             queryset = queryset.nocache().prefetch_related(None).prefetch_related(
