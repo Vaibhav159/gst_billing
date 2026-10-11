@@ -16,6 +16,15 @@ import { useShopSettings } from "@/core/api/shopSettings";
 export type Firm = { id: number; name: string; short: string; gstin: string; state: string; prefix?: string };
 export type FirmId = number | "all";
 
+/** One fallback for a single-firm screen; the full view's explicit All firms stays its own choice. */
+export function defaultFirmId(firms: readonly Pick<Firm, "id" | "name">[], personal: unknown, shop: unknown): number | null {
+  for (const value of [personal, shop]) {
+    const id = Number(value);
+    if (Number.isInteger(id) && firms.some(f => f.id === id)) return id;
+  }
+  return [...firms].sort((a, b) => a.name.localeCompare(b.name, "en") || a.id - b.id)[0]?.id ?? null;
+}
+
 // Fallback for older answers; the slim firms endpoint supplies the stored effective short name.
 export function shortName(name: string): string {
   const w = name.trim().split(/\s+/)[0] ?? "";
