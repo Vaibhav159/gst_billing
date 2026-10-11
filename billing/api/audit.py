@@ -107,7 +107,7 @@ class AuditActionView(APIView):
 
 def safe_cell(value):
     text = str(value or "")
-    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
+    return "'" + text if text.lstrip().startswith(("=", "+", "-", "@")) else text
 
 
 class AuditExportView(APIView):
