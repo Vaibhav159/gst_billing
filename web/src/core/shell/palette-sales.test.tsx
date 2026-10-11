@@ -254,6 +254,45 @@ test("a plain number that is a bill's own number puts that bill before customers
 
 /* ── 1B Task 12, commit A: a deleted bill numbered as typed (Ruling 1B-24) ── */
 
+test("a full-number bill whose counter is typed comes before a deleted match and a customer's phone, so Enter opens the live bill", async () => {
+  serve({
+    search: (config) => answer(config, {
+      customers: [{ id: 5, name: "Bharat Soni", mobile_number: "9831012345", gst_number: "", recent_invoices: [] }],
+      invoices: [quick(1, "KGH/2026-27/131", "2026-10-07"), quick(99, "KGH/2026-27/31", "2026-09-02")], products: [],
+    }),
+    bin: (config) => answer(config, { count: 1, next: null, previous: null, results: [wireBin({ invoice_number: "MO/2026-27/31" })] }),
+  });
+  mount();
+  await pass(0);
+  await type("31");
+  expect(headings()).toEqual(["Sales bills", "Deleted bills", "Customers"]);
+  expect(screen.getAllByRole("option")[0]).toHaveTextContent("KGH/2026-27/31Meena Jain");
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
+});
+
+test("a deleted full-number bill whose counter is typed comes before other deletions and a customer's phone, so Enter opens it to restore", async () => {
+  serve({
+    search: (config) => answer(config, {
+      customers: [{ id: 5, name: "Bharat Soni", mobile_number: "9831012345", gst_number: "", recent_invoices: [] }],
+      invoices: [quick(1, "KGH/2026-27/131", "2026-10-07")], products: [],
+    }),
+    bin: (config) => answer(config, { count: 2, next: null, previous: null, results: [
+      wireBin({ id: 8, original_id: 208, invoice_number: "KGH/2026-27/310", deleted_at: "2026-10-06T11:00:00+05:30" }),
+      wireBin({ id: 7, original_id: 207, invoice_number: "KGH/2026-27/31" }),
+    ] }),
+  });
+  mount();
+  await pass(0);
+  await type("31");
+  expect(headings()).toEqual(["Deleted bills", "Customers", "Sales bills"]);
+  expect(screen.getAllByRole("option")[0]).toHaveTextContent("KGH/2026-27/31deleted");
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/207");
+});
+
 test("for the owner, a deleted bill whose number is exactly what's typed comes after the live bills with it and before the customers, so Enter on a deleted paper number opens its page to restore", async () => {
   const bharat = { id: 5, name: "Bharat Soni", mobile_number: "9831012345", gst_number: "", state_name: "RAJASTHAN", recent_invoices: [] };
   const LIVE: Record<string, unknown[]> = { "36": [quick(1, "KGH/2026-27/136", "2026-10-07")], "31": [quick(99, "31", "2026-09-02", { paper: true }), quick(1, "KGH/2026-27/131", "2026-10-07")] };

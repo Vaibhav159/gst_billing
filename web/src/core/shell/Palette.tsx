@@ -10,7 +10,6 @@ import { useBin, useTodaysBills } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, dateShort, inr, mobileText, pct, toPaise, todayIST } from "@/core/format";
-import { sameNumber } from "@/core/sales/numbers";
 import type { BinRow } from "@/core/sales/types";
 import { cancelledMark, dayOf, timeOf } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
@@ -18,7 +17,7 @@ import { Button, Dialog, Kbd, optionClass } from "@/core/ui";
 import { useView } from "@/core/view";
 import { ALT, DESKTOP_NAV, MORE_NAV, NAV_ICON } from "./nav";
 import { recentVisits } from "./recent";
-import { newBillFor, rankBills, suggestions } from "./suggest";
+import { billNumberRank, newBillFor, rankBills, suggestions } from "./suggest";
 
 /** A row: where it goes, under which heading. Actions show their hint as a key; other rows as a second line. */
 type Result = { group: string; label: string; hint?: string; icon?: LucideIcon; to: string };
@@ -38,7 +37,7 @@ type Quick = {
 /**
  * The server's records as rows: customers; sales bills by number or by a customer found, each once, the exact number
  * first then the newest (rankBills); deleted bills (the owner's), each opening its page to restore; products. A bill
- * whose number is exactly what's typed puts its kind's rows ahead of the customers: a plain number ("34", a paper bill's)
+ * whose number or counter is exactly what's typed puts its kind's rows ahead of the customers: a plain number ("34")
  * is also in customers' phone numbers, and Enter opens the first row. A live bill comes before a deleted one with the
  * same number, and a deleted one before the customers (Ruling 1B-24), so Enter on a deleted paper number opens its page
  * to restore it. Each kind keeps its rows together, under one heading.
@@ -53,11 +52,11 @@ function recordRows(d: Quick, term: string, deleted: BinRow[]): Result[] {
   const sales: Result[] = ranked.map((b) => ({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}${cancelledMark(b.status)}`, to: `/sales/${b.id}` }));
   // deleted bills can still be found: their page offers Restore (PROTO core/shell.jsx:493-496). The one numbered as
   // typed first, the rest newest deleted first, as the bin lists them
-  const exactGone = deleted.filter((s) => sameNumber(s.invoice_number, term));
+  const exactGone = deleted.filter((s) => billNumberRank(s.invoice_number, term) < 2);
   const gone: Result[] = [...exactGone, ...deleted.filter((s) => !exactGone.includes(s))].map((s) => ({
     group: "Deleted bills", label: s.invoice_number, icon: FileX, hint: `deleted ${dateShort(dayOf(s.deleted_at))} · ${s.customer.name} · open it to restore`, to: `/sales/${s.original_id}`,
   }));
-  const exact = ranked.some((b) => sameNumber(b.invoice_number, term));
+  const exact = ranked.some((b) => billNumberRank(b.invoice_number, term) < 2);
   const rows = exact ? (exactGone.length ? [...sales, ...gone, ...customers] : [...sales, ...customers, ...gone])
     : exactGone.length ? [...gone, ...customers, ...sales] : [...customers, ...sales, ...gone];
   for (const p of d.products.slice(0, 3)) rows.push({ group: "Products", label: p.name, icon: Package, hint: `HSN ${p.hsn_code}${p.gst_tax_rate == null ? "" : ` · GST ${pct(Number(p.gst_tax_rate))}`}`, to: `/products/${p.id}` });

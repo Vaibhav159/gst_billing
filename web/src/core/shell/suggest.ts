@@ -54,13 +54,14 @@ export function suggestions(text: string, { firms, today, canCreate, customers =
   return out;
 }
 
-/**
- * Bills a search found, the exact number first (PROTO core/shell.jsx:488-490): a full number typed as it is, then for a
- * bare number the bill whose counter it is ("31" finds KGH/2026-27/31 before /131 and /310), then the newest.
- */
-export function rankBills<T extends { id: number; invoice_number: string; invoice_date: string }>(bills: T[], term: string): T[] {
+/** An exact stored number, then a bare counter ("31" finds KGH/2026-27/31), then other matches. */
+export function billNumberRank(number: string, term: string): 0 | 1 | 2 {
   const t = term.trim();
   const n = /^\d+$/.test(t) ? Number(t) : null;
-  const rank = (b: T) => (sameNumber(b.invoice_number, t) ? 0 : n !== null && counterOf(b.invoice_number) === n ? 1 : 2);
-  return [...bills].sort((a, b) => rank(a) - rank(b) || (a.invoice_date === b.invoice_date ? b.id - a.id : a.invoice_date < b.invoice_date ? 1 : -1));
+  return sameNumber(number, t) ? 0 : n !== null && counterOf(number) === n ? 1 : 2;
+}
+
+/** Bills a search found: the exact number or counter first, then the newest (PROTO core/shell.jsx:488-490). */
+export function rankBills<T extends { id: number; invoice_number: string; invoice_date: string }>(bills: T[], term: string): T[] {
+  return [...bills].sort((a, b) => billNumberRank(a.invoice_number, term) - billNumberRank(b.invoice_number, term) || (a.invoice_date === b.invoice_date ? b.id - a.id : a.invoice_date < b.invoice_date ? 1 : -1));
 }
