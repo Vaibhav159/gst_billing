@@ -9,7 +9,7 @@ import { todayIST } from "@/core/format";
 import { problemOf } from "@/core/api/errors";
 import { EasyPage as Page } from "./parts";
 import { Button, LoadError, ListSkeleton } from "@/core/ui";
-import { idParam, startDraft, startNew, startRemake, type Start } from "@/pages/sales/form/model";
+import { chosenDateFields, idParam, startDraft, startNew, startRemake, type Start } from "@/pages/sales/form/model";
 import { useBillForm, type BillFormApi } from "@/pages/sales/form/useBillForm";
 import { useDraftKeeping } from "@/pages/sales/form/useDraftKeeping";
 import { useEasyFirm } from "./state";
@@ -21,10 +21,12 @@ export function useEasyBill(): EasyBill {
   if (!value) throw new Error("useEasyBill needs BillFlow");
   return value;
 }
+// a draft kept on another day takes its paper flag from its date again (P6-3)
+const resumed = (start: Start, today: string): Start => ({ ...start, form: { ...start.form, ...chosenDateFields(start.form.date, today) } });
 const paths = { draft: (id: string) => `/e/new/items?draft=${id}`, saved: (id: number) => `/e/saved/${id}` };
 function Form({ start, formKey }: { start: Start; formKey: string }) {
   const F = useBillForm(start, formKey, { paths, paperByDate: true });
-  const drafts = useDraftKeeping(F, formKey, { keepWhen: form => form.lines.some(line => (line.qty ?? 0) > 0) });
+  const drafts = useDraftKeeping(F, formKey, { keepWhen: form => form.lines.some(line => (line.qty ?? 0) > 0), address: false });
   const navigate = useNavigate();
   useEffect(() => { if (F.savedTo) navigate(F.savedTo, { replace: true }); }, [F.savedTo, navigate]);
   return <Context.Provider value={{ F, drafts }}><Outlet /></Context.Provider>;
@@ -59,18 +61,15 @@ function StartFlow() {
   if (draftId && (!draft || draft.data.firmId !== firm.firmId || draft.business !== firm.firmId || draft.data.posOverride !== null)) {
     return <Page title="Unfinished bill" back="/e"><p>{!draft ? "This unfinished bill couldn't open here." : "This bill needs the full view."}</p><Button onClick={() => full(`/sales/new?draft=${encodeURIComponent(draftId)}`)}>Finish in the full view</Button></Page>;
   }
-  if (draft) { opened.current = startDraft(draft); return <Form start={opened.current} formKey={formKey} />; }
+  const today = todayIST();
+  if (draft) { opened.current = resumed(startDraft(draft), today); return <Form start={opened.current} formKey={formKey} />; }
   if (params.has("again") && (!againId || !source.data || source.data.status !== "cancelled" || source.data.business !== firm.firmId)) {
     return <Page title="Make it again" back="/e"><p>This bill can't be made again here.</p>{againId ? <Button onClick={() => full(`/sales/${againId}`)}>Open in the full view</Button> : null}</Page>;
   }
   if (params.has("customer") && (!customerId || !customer.data)) return <Page title="Who is buying?" back="/e"><p>This customer couldn't load. Go back and choose them again.</p></Page>;
-  const today = todayIST();
-  let start = draft ? startDraft(draft) : source.data ? startRemake(source.data, today) : startNew({ firmId: firm.firmId, firmSource: "mine", today, customer: customer.data ?? null });
+  // a remake re-enters the same bill (X-57): each line's rate stays, and a paper bill keeps its own date (P6-5)
+  const start = source.data ? startRemake(source.data, today, source.data.paper ? source.data.invoice_date : today) : startNew({ firmId: firm.firmId, firmSource: "mine", today, customer: customer.data ?? null });
   if (source.data && start.form.posOverride !== null) return <Page title="Make it again" back="/e"><p>This bill needs the full view.</p><Button onClick={() => full(`/sales/new?remake=${source.data!.id}`)}>Finish in the full view</Button></Page>;
-  if (source.data) {
-    // 6-D3: a copied item's weight survives; its rate is typed from the paper bill again.
-    start = { ...start, form: { ...start.form, lines: start.form.lines.map(line => ({ ...line, rate: "" })) } };
-  }
   opened.current = start;
   return <Form start={start} formKey={formKey} />;
 }
