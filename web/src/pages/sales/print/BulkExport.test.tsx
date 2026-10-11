@@ -36,7 +36,7 @@ function serve(rows = ROWS, detail?: (c: Call) => unknown, list?: (c: Call) => u
     ["GET", "sales/", list ?? (() => wirePage(rows))],
     ["GET", /^sales\/\d+\/$/, detail ?? (({ url }) => {
       const r = rows.find((x) => x.id === Number(url.split("/")[1]))!;
-      return wireDetail({ ...r, firm: { ...(wireDetail().firm as object), name: r.business_name, invoice_prefix: r.business === 2 ? "MO" : "KGH" } });
+      return wireDetail({ ...r, duplicates: rows.filter((b) => b.id !== r.id && b.business === r.business && b.invoice_number === r.invoice_number), firm: { ...(wireDetail().firm as object), name: r.business_name, invoice_prefix: r.business === 2 ? "MO" : "KGH" } });
     })],
     ["GET", "shop-settings/", settings ?? (() => ({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null }))],
     ["POST", "audit-logs/log/", () => ({ ok: true })],
@@ -70,7 +70,7 @@ test("the month's bills, firm by firm, every file named first; duplicates rename
   open();
   await ready();
   const table = screen.getByRole("table", { name: "Files that will be made" });
-  expect(calls.find((c) => c.url === "sales/")?.params).toEqual({ month: "2026-10", status: "active", ordering: "number", page: 1, page_size: 200 });
+  expect(calls.find((c) => c.url === "sales/")?.params).toEqual({ month: "2026-10", status: "active", ordering: "number", summary: 0, page: 1, page_size: 200 });
   expect(within(table).getAllByRole("row").slice(1).map((r) => r.textContent)).toEqual([
     expect.stringContaining("KGH_2026-27_31.pdfKGH/2026-27/31Hemant Dave01 Oct 2026"),
     expect.stringContaining("KGH_2026-27_31_2.pdfrenamedKGH/2026-27/31Anil Gupta08 Oct 2026"),
@@ -80,7 +80,9 @@ test("the month's bills, firm by firm, every file named first; duplicates rename
   expect(screen.getByText(/3 bills.*3 files, every name different/)).toHaveTextContent("3 bills make 3 files, every name different");
   expect(screen.getByRole("checkbox", { name: /^MEERA ORNAMENTS/ })).toHaveAccessibleName(/1 bill in October 2026/);
   await userEvent.click(screen.getByRole("checkbox", { name: /^MEERA ORNAMENTS/ }));
-  expect(within(table).getAllByRole("row")).toHaveLength(3);
+  await ready(2);
+  expect(within(screen.getByRole("table", { name: "Files that will be made" })).getAllByRole("row")).toHaveLength(3);
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: /^MEERA ORNAMENTS/ })).toHaveAccessibleName("MEERA ORNAMENTS"));
 });
 
 test("zip makes Originals one at a time under the shown names; Save the zip delivers within its own press and logs", async () => {
@@ -93,7 +95,7 @@ test("zip makes Originals one at a time under the shown names; Save the zip deli
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   expect(await screen.findByText("2 PDFs made")).toBeInTheDocument();
   expect(vi.mocked(makeBillPdf).mock.calls.map(([bills, copies]) => [bills[0].number, copies])).toEqual([["KGH/2026-27/31", "original"], ["MO/2026-27/7", "original"]]);
-  expect(zipped.files.map((f) => f.name)).toEqual(["KGH_2026-27_31.pdf", "MO_2026-27_7.pdf"]);
+  expect(zipped.files.map((f) => f.name)).toEqual(["KGH_2026-27_31_2.pdf", "MO_2026-27_7.pdf"]);
   expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
   expect(calls.filter((c) => c.url === "audit-logs/log/")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Save the zip" }));
@@ -188,7 +190,7 @@ test("Stop ends after the current PDF and never offers an unfinished zip", async
 test("month list reads every page once, deduplicates page boundaries; date, bill-kind and cancelled filters use salesParams", async () => {
   const { calls } = serve(ROWS, undefined, ({ params }) => params.page === 1 ? { ...wirePage(ROWS.slice(0, 2)), next: "?page=2" } : wirePage(ROWS.slice(1)));
   open(); await ready();
-  expect(calls.filter((c) => c.url === "sales/").map((c) => c.params?.page)).toEqual([1, 2]);
+  expect(calls.filter((c) => c.url === "sales/").map((c) => c.params?.page)).toEqual([1, 3]);
   expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(4);
   await userEvent.click(screen.getByRole("radio", { name: "Not sent yet" }));
   await waitFor(() => expect(calls.filter((c) => c.url === "sales/").at(-1)?.params).toMatchObject({ unsent: 1 }));
@@ -209,8 +211,8 @@ test("print caps at 30 and zip at 300, counts the rest and never reads or makes 
   const rows = Array.from({ length: 301 }, (_, i) => wireRow({ id: i + 1, counter: i + 1, invoice_number: `KGH/2026-27/${i + 1}` }));
   const { calls } = serve(rows);
   open(); await ready(30);
-  expect(screen.getByText(/Print the first 30.*KGH\/2026-27\/30.*bill numbers from 31/)).toBeInTheDocument();
-  expect(screen.getByText(/Export the first 300.*KGH\/2026-27\/300.*bill numbers from 301/)).toBeInTheDocument();
+  expect(screen.getByText(/Print the first 30.*KGH\/2026-27\/30.*Narrow the dates/)).toBeInTheDocument();
+  expect(screen.getByText(/Export the first 300.*KGH\/2026-27\/300.*Narrow the dates/)).toBeInTheDocument();
   expect(vi.mocked(makeBillPdf).mock.lastCall?.[0]).toHaveLength(30);
   expect(billAsks(calls)).toHaveLength(30);
   vi.mocked(makeBillPdf).mockClear();

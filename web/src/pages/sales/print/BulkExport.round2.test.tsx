@@ -185,11 +185,11 @@ test("Stop after a file was made says the partial zip was discarded and names ev
   expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
 });
 
-test("cap advice for one ticked firm gives its numeric continuation without asking to pick a firm", async () => {
+test("a bounded list advises narrowing dates before the next run", async () => {
   serve(rowsOf(301)); open(); await ready(30);
   for (const [action, cap] of [["Print", 30], ["Export", 300]] as const) {
     const advice = screen.getByText(new RegExp(`^${action} the first ${cap}`));
-    expect(advice).toHaveTextContent(`set the bill numbers from ${cap + 1}`);
+    expect(advice).toHaveTextContent("Narrow the dates");
     expect(advice).not.toHaveTextContent(/pick KIRAN GOLD HOUSE|Clear the number range before picking any later firm/);
   }
 }, 20000);
@@ -198,8 +198,8 @@ test.each([["Print", 30], ["Export", 300]] as const)("%s cap advice identifies a
   const rows = Array.from({ length: cap + 1 }, (_, i) => wireRow({ id: i + 1, counter: null, invoice_number: `KGH/MANUAL/${i + 1}`, invoice_date: i === cap ? "2026-10-07" : "2026-10-01" }));
   serve(rows); open(); await ready(30);
   const advice = screen.getByText(new RegExp(`^${action} the first ${cap}`));
-  expect(advice).toHaveTextContent(`KGH/MANUAL/${cap + 1}`);
-  expect(advice).toHaveTextContent("07 Oct 2026");
+  if (cap === 300) expect(advice).toHaveTextContent("Narrow the dates");
+  else { expect(advice).toHaveTextContent(`KGH/MANUAL/${cap + 1}`); expect(advice).toHaveTextContent("07 Oct 2026"); }
   expect(advice).not.toHaveTextContent(/set the bill numbers from/);
 }, 20000);
 

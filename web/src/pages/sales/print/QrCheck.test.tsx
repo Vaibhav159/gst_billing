@@ -34,7 +34,7 @@ function serve(over: Record<string, Record<string, unknown> | null> = {}) {
 test("a code that matches a bill: same firm, number, date and the total printed, to the paisa", async () => {
   const { calls } = serve();
   expect(await checkQr(CODE, FIRMS)).toMatchObject({ kind: "match", firm: { id: 3 }, bill: { id: 412 }, diffs: [] });
-  expect(calls.find((c) => c.url === "sales/")?.params).toEqual({ business_id: 3, number: "KGH/2026-27/31", fy: "2026-27", page: 1, page_size: 10 });
+  expect(calls.find((c) => c.url === "sales/")?.params).toEqual({ business_id: 3, number: "KGH/2026-27/31", fy: "2026-27", summary: 0, page: 1, page_size: 10 });
   // v2's printouts until 2 Sep 2026 carried the total rounded to the rupee: that matches too
   expect(await checkQr("KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083", FIRMS)).toMatchObject({ kind: "match" });
 });

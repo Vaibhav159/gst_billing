@@ -48,7 +48,7 @@ function firmsOf(q: QrText, firms: Firm[]): Firm[] {
 /** A firm's bills with the code's number, in the code's year when it has a date. */
 async function billsNumbered(firm: Firm, q: QrText): Promise<BillRow[]> {
   const fy = q.date ? { fy: fyOf(q.date) } : {};
-  const ask = async (query: SalesQuery, size: number) => toSalesPage((await api.get("sales/", { params: salesParams(firm.id, { ...query, ...fy }, 1, size) })).data).results;
+  const ask = async (query: SalesQuery, size: number) => toSalesPage((await api.get("sales/", { params: salesParams(firm.id, { ...query, ...fy, summary: 0 }, 1, size) })).data).results;
   const exact = (await ask({ number: q.number }, 10)).filter((r) => sameNumber(r.invoice_number, q.number));
   if (exact.length) return exact;
   // The server's number is the stored one but for case, so one saved with a stray space or break isn't found from the
@@ -202,36 +202,36 @@ export function QrCheck({ input, go }: { input: RefObject<HTMLInputElement>; go:
   let result: ReactNode = null;
   if (check.isError) {
     const p = problemOf(check.error);
-    result = <Banner tone="neg" title={p.kind === "offline" ? "You're offline, so it wasn't checked" : "It wasn't checked"}>{p.kind === "offline" ? "The check asks the shop's records, which need the internet. Try again when it's back." : p.kind === "unreachable" || p.kind === "server" ? "The app couldn't get through. Try again in a minute." : p.message}</Banner>;
+    result = <Banner role="presentation" tone="neg" title={p.kind === "offline" ? "You're offline, so it wasn't checked" : "It wasn't checked"}>{p.kind === "offline" ? "The check asks the shop's records, which need the internet. Try again when it's back." : p.kind === "unreachable" || p.kind === "server" ? "The app couldn't get through. Try again in a minute." : p.message}</Banner>;
   } else if (r) {
     result = r.kind === "match" ? (
-      <Banner tone="sale" title={`Matches ${r.bill.invoice_number}`} actions={<Button size="sm" variant="primary" onClick={() => go(`/sales/${r.bill.id}`)}>Open the bill</Button>}>
+      <Banner role="presentation" tone="sale" title={`Matches ${r.bill.invoice_number}`} actions={<Button size="sm" variant="primary" onClick={() => go(`/sales/${r.bill.id}`)}>Open the bill</Button>}>
         {r.firm.name} · {r.bill.customer.name} · {date(r.bill.invoice_date)} · {inr(r.bill.total_amount)}. The bill is genuine and unchanged.
       </Banner>
     ) : r.kind === "mismatch" ? (
-      <Banner tone="neg" title={`${r.bill.invoice_number} doesn't match the QR code`} actions={<Button size="sm" onClick={() => go(`/sales/${r.bill.id}`)}>Open the bill</Button>}>
+      <Banner role="presentation" tone="neg" title={`${r.bill.invoice_number} doesn't match the QR code`} actions={<Button size="sm" onClick={() => go(`/sales/${r.bill.id}`)}>Open the bill</Button>}>
         On your records {r.diffs.join("; ")}. The printout may have been changed, or the bill edited after printing.
       </Banner>
     ) : r.kind === "cancelled" ? (
-      <Banner tone="neg" title={`${r.bill.invoice_number} is cancelled`} actions={<Button size="sm" onClick={() => go(`/sales/${r.bill.id}`)}>Open the bill</Button>}>
+      <Banner role="presentation" tone="neg" title={`${r.bill.invoice_number} is cancelled`} actions={<Button size="sm" onClick={() => go(`/sales/${r.bill.id}`)}>Open the bill</Button>}>
         The QR code is real, but the bill was cancelled{r.bill.cancel_reason ? `: “${r.bill.cancel_reason}”` : ""}. It isn&apos;t a valid sale.
       </Banner>
     ) : r.kind === "deleted" ? (
-      <Banner tone="brand" title={`${r.binned.invoice_number} was deleted`} actions={<Button size="sm" onClick={() => go(`/sales/${r.binned.original_id}`)}>Open it</Button>}>
+      <Banner role="presentation" tone="brand" title={`${r.binned.invoice_number} was deleted`} actions={<Button size="sm" onClick={() => go(`/sales/${r.binned.original_id}`)}>Open it</Button>}>
         {r.binned.reason ? `Deleted because “${r.binned.reason}”. ` : ""}Its page shows what was on it, and the owner can restore it from there.
       </Banner>
     ) : r.kind === "unknown" ? (
-      <Banner tone="neg" title={`No bill ${r.q.number} in ${r.firm.name}`}>
+      <Banner role="presentation" tone="neg" title={`No bill ${r.q.number} in ${r.firm.name}`}>
         The QR code names {r.firm.name}, but no bill with this number exists{r.q.date ? ` in FY ${fyOf(r.q.date)}` : ""}. It may not be one of yours.
       </Banner>
     ) : r.kind === "otherfirm" ? (
-      <Banner tone="neg" title="Not one of your firms">
+      <Banner role="presentation" tone="neg" title="Not one of your firms">
         {r.q.gstin || r.q.firm
           ? <>The QR code carries {r.q.gstin ? `GSTIN ${r.q.gstin}` : `the firm “${r.q.firm}”`}, which isn&apos;t {orList(firms.map((f) => f.name)) || "a firm of yours"}.</>
           : "The QR code carries no GSTIN, and all your firms have one."}
       </Banner>
     ) : (
-      <Banner tone="neg" title="This isn't a bill's QR code">Your bills&apos; QR codes carry number, GSTIN, date and total separated by &quot;|&quot;. Scan again, holding the code flat.</Banner>
+      <Banner role="presentation" tone="neg" title="This isn't a bill's QR code">Your bills&apos; QR codes carry number, GSTIN, date and total separated by &quot;|&quot;. Scan again, holding the code flat.</Banner>
     );
   }
   return (
@@ -249,7 +249,7 @@ export function QrCheck({ input, go }: { input: RefObject<HTMLInputElement>; go:
           <Button variant="primary" icon={ScanLine} loading={check.isPending} onClick={() => run()}>{check.isPending ? "Checking…" : "Check"}</Button>
         </div>
       </Field>
-      {result ? <div key={JSON.stringify(r ?? check.error?.message)} className="anim-rise">{result}</div> : null}
+      <div role="status" aria-live="polite" aria-atomic="true">{result ? <div className="anim-rise">{result}</div> : null}</div>
     </div>
   );
 }

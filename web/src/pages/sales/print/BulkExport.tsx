@@ -14,11 +14,11 @@ import { printFile, saveFile } from "@/core/print/files";
 import { batchLog, exportLog, useLogPrint } from "@/core/print/log";
 import { makeBillPdf } from "@/core/print/make";
 import { copyPages, printBill } from "@/core/print/model";
-import { fileNames } from "@/core/sales/files";
+import { billPdfName, pdfName } from "@/core/sales/files";
 import type { BillRow, Copies } from "@/core/sales/types";
 import { toSalesPage } from "@/core/sales/wire";
 import { andList, billsAnd } from "@/core/sales/words";
-import { useFirms, useScope } from "@/core/scope";
+import { useFirms, useScope, type FirmId } from "@/core/scope";
 import { Badge, Banner, Button, Card, Checkbox, EmptyState, FailNote, Input, LoadError, ListSkeleton, Money, Page, SearchInput, Segmented, Select, StaleNote, Table, Td, Th, Tr, useToast } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { useDebounced } from "@/core/useDebounced";
@@ -31,17 +31,21 @@ type Which = "all" | "unsent" | "credit";
 const WHICH: { value: Which; label: string }[] = [{ value: "all", label: "All bills" }, { value: "unsent", label: "Not sent yet" }, { value: "credit", label: "Udhaar" }];
 const PRINT_COPIES: { value: Copies; label: string }[] = [{ value: "original", label: "Original only" }, { value: "all", label: "All three copies" }];
 
-/** Every bill of the period that matches, all pages of them (200 at a time), in one answer. */
-function useExportBills(query: SalesQuery | null) {
+/** Read at most the zip limit and one continuation bill, without the period's unused summary. */
+function useExportBills(query: SalesQuery | null, firm: FirmId) {
   return useQuery({
-    queryKey: ["sales", "export", query],
+    queryKey: ["sales", "export", firm, query],
     queryFn: query === null ? skipToken : async ({ signal }) => {
       const rows = new Map<number, BillRow>();
-      for (let page = 1; ; page += 1) {
-        const p = toSalesPage((await api.get("sales/", { params: salesParams("all", query, page, 200), signal })).data);
+      let offset = 0;
+      // Page numbers use that request's page size: 1 × 200, 3 × 100, 301 × 1 keep every row, without over-reading.
+      for (const size of [200, ZIP_CAP - 200, 1]) {
+        const p = toSalesPage((await api.get("sales/", { params: salesParams(firm, { ...query, summary: 0 }, offset / size + 1, size), signal })).data);
         for (const row of p.results) rows.set(row.id, row);
-        if (!p.next) return [...rows.values()];
+        offset += size;
+        if (!p.next || rows.size > ZIP_CAP) break;
       }
+      return [...rows.values()].slice(0, ZIP_CAP + 1);
     },
   });
 }
@@ -59,7 +63,7 @@ function exportReads(qs: UseQueryResult<BillOutcome>[]) {
 
 const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
 type Unread = { row: BillRow; problem: ApiProblem };
-type Job = { papers: Map<number, ReturnType<typeof printBill>>; list: BillRow[]; unread: Unread[]; reading?: boolean; n: number; total: number; done: boolean; made: BillRow[]; failed: BillRow[]; offline?: boolean; stopped?: boolean; zip?: Blob; name: string; period: string; error?: unknown; saved?: boolean };
+type Job = { papers: Map<number, ReturnType<typeof printBill>>; list: BillRow[]; unread: Unread[]; reading?: boolean; n: number; total: number; done: boolean; made: BillRow[]; failed: BillRow[]; offline?: boolean; stopped?: boolean; zip?: Blob; name: string; period: string; error?: unknown; saved?: boolean; nameConflict?: string };
 
 export default function BulkExport() {
   const [params] = useSearchParams();
@@ -89,7 +93,8 @@ export default function BulkExport() {
   const appliedFrom = useDebounced(nFrom, 300);
   const appliedTo = useDebounced(nTo, 300);
   const [withCancelled, setWithCancelled] = useState(false);
-  const [copies, setCopies] = useState<Copies>("original");
+  const [pickedCopies, setCopies] = useState<Copies | null>(null);
+  const copies = pickedCopies ?? (settings.data?.copies === "all" ? "all" : "original");
   const [find, setFind] = useState("");
   const [ticked, setTicked] = useState<Set<number> | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -109,7 +114,8 @@ export default function BulkExport() {
     ...(which === "unsent" ? { unsent: true } : which === "credit" ? { credit: true } : {}),
     ...(withCancelled ? {} : { status: "active" as const }), ordering: "number",
   };
-  const q = useExportBills(query);
+  const q = useExportBills(query, firmIds.length === 1 ? firmIds[0] : "all");
+  const capped = (q.data?.length ?? 0) > ZIP_CAP;
   const order = (id: number) => { const i = firms.findIndex((f) => f.id === id); return i < 0 ? firms.length : i; };
   const inPeriod = useMemo(() => [...(q.data ?? [])].sort((a, b) => order(a.business) - order(b.business) || (a.counter ?? 0) - (b.counter ?? 0) || a.invoice_date.localeCompare(b.invoice_date) || a.id - b.id), [q.data, firms]); // eslint-disable-line react-hooks/exhaustive-deps
   const firmKey = firmIds.join(",");
@@ -120,8 +126,6 @@ export default function BulkExport() {
   const chosen = useMemo(() => bills.filter((b) => isTicked(b.id)), [bills, isTicked]);
   const words = find.trim().toLowerCase();
   const shown = useMemo(() => words ? bills.filter((b) => b.invoice_number.toLowerCase().includes(words) || b.customer.name.toLowerCase().includes(words) || b.customer.mobile_number.includes(words.replace(/\s/g, ""))) : bills, [bills, words]);
-  const names = useMemo(() => fileNames(chosen.map((b) => ({ id: b.id, invoice_number: b.invoice_number, invoice_date: b.invoice_date, fy: b.fy, prefix: firms.find((f) => f.id === b.business)?.prefix ?? "", firmName: b.business_name }))), [chosen, firms]);
-  const renamed = chosen.filter((b) => names.get(b.id)?.renamed);
   const total = chosen.filter((b) => b.status !== "cancelled").reduce((a, b) => a + b.total_amount, 0);
   const periodText = mode === "month" ? monthLabel(month, { long: true }) : `${date(from)} to ${date(to)}`;
   const firmText = firmIds.length === firms.length ? (firms.length > 1 ? "All firms" : firms[0]?.name ?? "") : firms.filter((f) => firmIds.includes(f.id)).map((f) => f.name).join(" and ") || "No firm";
@@ -141,6 +145,14 @@ export default function BulkExport() {
   const pickedBills = chosen.slice(0, ZIP_CAP);
   const printRows = pickedBills.slice(0, MAX_BILLS);
   const reads = useQueries({ queries: printRows.map((b) => billQuery(b.id)), combine: exportReads });
+  // A list row cannot name a PDF: the detail owns its frozen prefix and the server's duplicates.
+  const names = useMemo(() => new Map(chosen.map((row) => {
+    const bill = reads.bills.find((b) => b?.id === row.id);
+    const name = bill ? billPdfName(bill) : null;
+    const renamed = bill ? name !== pdfName({ invoice_number: bill.invoice_number, fy: bill.fy, prefix: bill.firm.invoice_prefix, firmName: bill.firm.name }) : false;
+    return [row.id, { name, renamed }] as const;
+  })), [chosen, reads.bills]);
+  const renamed = chosen.filter((b) => names.get(b.id)?.renamed);
   const unread = printRows.flatMap((row, i) => reads.failures[i] ? [{ row, problem: reads.failures[i] }] : []);
   const stale = printRows.flatMap((row, i) => reads.stale[i] ? [{ row, problem: reads.stale[i] }] : []);
   const coming = reads.coming;
@@ -158,7 +170,7 @@ export default function BulkExport() {
     try { for (const b of rows) if (b.problem.kind !== "notfound") await qc.refetchQueries({ queryKey: billQuery(b.row.id).queryKey }); }
     finally { setRetrying(null); }
   };
-  const selection = useMemo(() => JSON.stringify([chosen, [...names], month, mode, from, to, which, withCancelled, copies, showBank, zipName]), [chosen, names, month, mode, from, to, which, withCancelled, copies, showBank, zipName]);
+  const selection = useMemo(() => JSON.stringify([chosen.map((b) => [b.id, b.invoice_number, b.invoice_date, b.fy, b.business]), [...names], month, mode, from, to, which, withCancelled, copies, showBank, zipName]), [chosen, names, month, mode, from, to, which, withCancelled, copies, showBank, zipName]);
   useEffect(() => {
     setJob(null);
     return () => { generation.current += 1; stop.current = true; cancelRead.current?.(); running.current = false; };
@@ -230,8 +242,8 @@ export default function BulkExport() {
             const state = qc.getQueryState(billQuery(b.id).queryKey);
             if (state?.status === "error") throw state.error;
             if (state?.fetchStatus === "paused") { missing.push({ row: b, problem: OFFLINE }); break; }
-            outcome = state?.data ?? await Promise.race([qc.fetchQuery(billQuery(b.id)), interrupted]);
-          } else outcome = await Promise.race([qc.fetchQuery(billQuery(b.id)), interrupted]);
+            outcome = state?.data ?? await Promise.race([qc.ensureQueryData(billQuery(b.id)), interrupted]);
+          } else outcome = await Promise.race([qc.ensureQueryData(billQuery(b.id)), interrupted]);
           if (!live()) return;
           if (outcome?.kind === "bill") papers.set(b.id, printBill(outcome.bill, { showBank }));
           else missing.push({ row: b, problem: outcome?.kind === "deleted" ? { kind: "notfound", message: "Deleted" } : OFFLINE });
@@ -251,6 +263,9 @@ export default function BulkExport() {
         setJob({ ...initial, n: readN, done: true, unread: missing, stopped: stop.current, offline: offlineNow(), failed: list });
         return;
       }
+      const fileNames = [...papers.values()].map((paper) => paper.file);
+      const clash = fileNames.find((name, i) => fileNames.slice(0, i).some((earlier) => earlier.toLowerCase() === name.toLowerCase()));
+      if (clash) { setJob({ ...initial, done: true, nameConflict: clash }); return; }
       setJob(initial);
       async function* files() {
         for (const b of list) {
@@ -262,7 +277,7 @@ export default function BulkExport() {
             const blob = await makeBillPdf([paper], "original", { title: `Tax Invoice ${b.invoice_number}`, subject: paper.qr });
             if (!live()) return;
             made.push(b);
-            yield { name: names.get(b.id)!.name, blob };
+            yield { name: paper.file, blob };
           } catch (failure) { failed.push(b); error ??= failure; }
           n += 1;
           if (live() && performance.now() - progressAt >= 100) {
@@ -309,7 +324,7 @@ export default function BulkExport() {
         {shown.map((b) => {
           const n = names.get(b.id);
           const on = isTicked(b.id);
-          const file = <>{on && n ? n.name : <span className="text-muted">Not made</span>}{on && n?.renamed ? <Badge tone="brand" className="ml-2">renamed</Badge> : null}</>;
+          const file = <>{on ? job?.papers.get(b.id)?.file ?? n?.name ?? <span className="text-muted">Name checked when the bill loads</span> : <span className="text-muted">Not made</span>}{on && n?.renamed ? <Badge tone="brand" className="ml-2">renamed</Badge> : null}</>;
           const bill = <><Link to={`/sales/${b.id}`} className="hover:text-brand tnum">{b.invoice_number}</Link>{b.status === "cancelled" ? <Badge tone="neg" className="ml-2">Cancelled</Badge> : null}</>;
           return (
             <Tr key={b.id} className={on ? "" : "opacity-60"}>
@@ -334,7 +349,7 @@ export default function BulkExport() {
         {!shown.length ? <tr><td colSpan={compact ? 4 : 6} className="px-5 py-6 text-center text-muted">No bill in this list matches “{find.trim()}”.</td></tr> : null}
       </tbody>
     </Table>
-  ) : null), [bills.length, shown, compact, allShown, tickShown, isTicked, names, tick, find]);
+  ) : null), [bills.length, shown, compact, allShown, tickShown, isTicked, names, tick, find, job?.papers, job?.reading, job?.done]);
 
   return (
     <Page icon={Files} title="Bulk PDFs and batch print" breadcrumbs={[{ label: "Sales", to: "/sales" }]}
@@ -345,7 +360,7 @@ export default function BulkExport() {
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium text-fg2 mb-1">Firms</legend>
               {firms.map((f) => (
-                <Checkbox key={f.id} label={f.name} description={q.data ? `${plural(countFor(f.id), "bill")} in ${periodText}` : undefined} checked={firmIds.includes(f.id)} onChange={(on) => toggleFirm(f.id, on)} />
+                <Checkbox key={f.id} label={f.name} description={q.data && (firmIds.length !== 1 || firmIds[0] === f.id) ? `${plural(countFor(f.id), "bill")} in ${capped ? "this list" : periodText}` : undefined} checked={firmIds.includes(f.id)} onChange={(on) => toggleFirm(f.id, on)} />
               ))}
             </fieldset>
             <div className="flex flex-col gap-2">
@@ -355,7 +370,7 @@ export default function BulkExport() {
                 <Select aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)} className="anim-rise" options={[...months].reverse().map((m) => ({ value: m, label: monthLabel(m, { long: true }) }))} />
               ) : (
                 <div className="grid grid-cols-2 gap-3 anim-rise">
-                  <label className="flex flex-col gap-1.5"><span className="text-sm font-medium text-fg2">From</span><Input type="date" value={from} max={today} onChange={(e) => setFrom(e.target.value)} /></label>
+                  <label className="flex flex-col gap-1.5"><span className="text-sm font-medium text-fg2">From</span><Input type="date" value={from} min={`${Number(fy.slice(0, 4)) - 1}-04-01`} max={today} onChange={(e) => setFrom(e.target.value)} /></label>
                   <label className="flex flex-col gap-1.5"><span className="text-sm font-medium text-fg2">To</span><Input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} /></label>
                   {rangeErr ? <p className="col-span-2 text-sm text-neg">{rangeErr}</p> : null}
                 </div>
@@ -390,8 +405,10 @@ export default function BulkExport() {
             <Button variant="primary" icon={Download} disabled={!chosen.length || busy || ((!here || !settingsReady) && net !== "offline")} onClick={() => void run()}>Download as zip</Button>
           </>}>
           <div ref={listBox} className="px-5 pt-3 pb-4 flex flex-col gap-3">
-            {chosen.length > MAX_BILLS ? <Banner tone="brand" title={`Print up to ${MAX_BILLS} bills`}>Print the first {MAX_BILLS}, through {printRows.at(-1)?.invoice_number}. {capNext(chosen[MAX_BILLS], chosen.length - MAX_BILLS, "print", firmIds.length > 1)}</Banner> : null}
-            {chosen.length > ZIP_CAP ? <Banner tone="brand" title={`Export up to ${ZIP_CAP} bills`}>Export the first {ZIP_CAP}, through {pickedBills.at(-1)?.invoice_number}. {capNext(chosen[ZIP_CAP], chosen.length - ZIP_CAP, "export", firmIds.length > 1)}</Banner> : null}
+            {(settings.isError || settings.isPaused) && !settings.data ? <FailNote error={{ title: "The print defaults didn't load", body: `This run uses ${copies === "all" ? "all three copies" : "Original copies"} and bank details. Try again to load the shop's defaults.` }} onRetry={settings.isPaused ? undefined : () => { void settings.refetch(); }} busy={settings.isFetching} /> : null}
+            {capped ? <Banner tone="brand" title="More than 300 bills match">This list shows the first 301 bills. Narrow the dates or pick one firm to read the remaining bills.</Banner> : null}
+            {chosen.length > MAX_BILLS ? <Banner tone="brand" title={`Print up to ${MAX_BILLS} bills`}>Print the first {MAX_BILLS}, through {printRows.at(-1)?.invoice_number}. {capped ? "Narrow the dates to print the remaining bills in another run." : capNext(chosen[MAX_BILLS], chosen.length - MAX_BILLS, "print", firmIds.length > 1)}</Banner> : null}
+            {chosen.length > ZIP_CAP ? <Banner tone="brand" title={`Export up to ${ZIP_CAP} bills`}>Export the first {ZIP_CAP}, through {pickedBills.at(-1)?.invoice_number}. {capped ? "Narrow the dates to export the remaining bills in another run." : capNext(chosen[ZIP_CAP], chosen.length - ZIP_CAP, "export", firmIds.length > 1)}</Banner> : null}
             <ReadNote unread={job?.unread.length ? [] : retrying?.filter((r) => !reads.bills[printRows.findIndex((b) => b.id === r.row.id)]) ?? unread} offline={net === "offline"} busy={Boolean(retrying)} onRetry={() => void retryReads()} />
             {stale.length ? <StaleNote problem={stale[0].problem} what={named(stale.map((r) => r.row.invoice_number))} retry={() => void retryReads(stale)} busy={Boolean(retrying)} /> : null}
             {coming && !unread.length ? <p role="status" className="text-sm text-muted">Loading the picked bills…</p> : null}
@@ -404,7 +421,7 @@ export default function BulkExport() {
                   <div key={`${chosen.length}-${renamed.length}`} className="anim-rise flex flex-col gap-3">
                     <div className="flex flex-wrap items-center gap-3 rounded-card border border-sale-line bg-sale-tint px-4 py-3" role="status">
                       <CheckCircle2 size={20} className="text-sale shrink-0" aria-hidden="true" />
-                      <p className="font-semibold flex items-center gap-2 flex-wrap">{billsAnd(chosen)} <ArrowRight size={16} aria-hidden="true" /><span className="sr-only">make</span> {plural(new Set([...names.values()].map((x) => x.name)).size, "file")}, every name different</p>
+                      <p className="font-semibold flex items-center gap-2 flex-wrap">{billsAnd(chosen)} <ArrowRight size={16} aria-hidden="true" /><span className="sr-only">make</span> {plural(chosen.length, "file")}{[...names.values()].every((x) => x.name) ? new Set([...names.values()].map((x) => x.name?.toLowerCase())).size === chosen.length ? ", every name different" : ", some names overlap" : ", file names checked as bills load"}</p>
                       <p className="text-sm text-fg2 w-full">Ticked bills total {inr(total)} · zip: <span className="tnum">{zipName}</span></p>
                     </div>
                     {renamed.length ? (
@@ -415,8 +432,8 @@ export default function BulkExport() {
                     ) : null}
                   </div>
                 ) : null) : (
-                  <EmptyState icon={Files} title={rangeErr || numErr ? "Check the period and numbers" : firmIds.length ? "No bills match" : "Pick at least one firm"}>
-                    {rangeErr || numErr || (firmIds.length ? `Nothing in ${firmText} for ${periodText} matches. Try another month, All bills, or a wider number range.` : "Tick a firm on the left to see its bills.")}
+                  <EmptyState icon={Files} title={rangeErr || numErr ? "Check the period and numbers" : firmIds.length ? capped ? "No loaded bills match" : "No bills match" : "Pick at least one firm"}>
+                    {rangeErr || numErr || (firmIds.length ? capped ? "The period has more bills than this list holds. Narrow the dates or pick one firm to check the remaining bills." : `Nothing in ${firmText} for ${periodText} matches. Try another month, All bills, or a wider number range.` : "Tick a firm on the left to see its bills.")}
                   </EmptyState>
                 )}
             {bills.length > 8 ? <SearchInput value={find} onChange={setFind} placeholder="Find a bill in this list: name, phone or number" label="Find a bill in this list" /> : null}
@@ -440,15 +457,17 @@ function capNext(next: BillRow, rest: number, action: "print" | "export", severa
 }
 
 function JobPanel({ job, offline, onReadRetry, onRetry, onStop, onSave, onClose }: { job: Job; offline: boolean; onReadRetry: () => void; onRetry: (list: BillRow[]) => void; onStop: () => void; onSave: () => void; onClose: () => void }) {
+  if (job.nameConflict) return <Banner tone="neg" title="These bills would share a file name" actions={<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}>{job.nameConflict} belongs to more than one picked bill. Pick one firm and make its zip before picking the next firm. If both bills belong to that firm, give one a new bill number first.</Banner>;
   if (job.stopped) return <Banner tone="brand" title={`Stopped after ${job.n} of ${job.total}`} actions={<Button size="sm" variant="ghost" onClick={onClose}>Close</Button>}>{job.made.length ? "The partial zip was discarded." : "The zip was stopped."} Start again to make every ticked bill.</Banner>;
   const readNote = <ReadNote zip unread={job.unread} offline={offline} busy={job.reading && !job.done} onRetry={onReadRetry} />;
   if (job.unread.length && job.done) return readNote;
   if (!job.done) {
     const pct = Math.round((job.n / Math.max(job.total, 1)) * 100);
     return (
-      <>{readNote}<div className="rounded-card border border-line bg-field px-4 py-3 flex flex-col gap-2 anim-rise" role="status" aria-live="polite">
+      <>{readNote}<div className="rounded-card border border-line bg-field px-4 py-3 flex flex-col gap-2 anim-rise">
         <div className="flex items-center justify-between gap-3">
-          <p className="font-semibold">{job.reading ? "Reading bills:" : "Making PDFs:"} <span className="tnum">{job.n} of {job.total}</span></p>
+          <p aria-hidden="true" className="font-semibold">{job.reading ? "Reading bills:" : "Making PDFs:"} <span className="tnum">{job.n} of {job.total}</span></p>
+          <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{job.reading ? "Reading bills:" : "Making PDFs:"} {Math.floor(job.n / MAX_BILLS) * MAX_BILLS} of {job.total}</p>
           <Button size="sm" variant="ghost" icon={Square} onClick={onStop}>Stop</Button>
         </div>
         <div className="h-2 rounded-full bg-raised overflow-hidden" aria-hidden="true"><div className="h-full bg-brand transition-[width] duration-150" style={{ width: `${pct}%` }} /></div>
