@@ -486,6 +486,57 @@ def utilise_by_month(months, opening=None):
             carry[h] = month["carry_forward"][h]
     return {"cash": _with_total(cash), "carry_forward": _with_total(carry)}
 
+
+def set_off(output, credit):
+    """Rule 88A, in whole paise; Decimal rupees at the public boundary (3-D5).
+
+    Steps coalesce repeated head pairs in order of first use. v2's deliberately
+    different leftover preference remains in utilise_itc above.
+    """
+    def paise(values):
+        result = {}
+        for head in HEADS:
+            value = Decimal(str(values.get(head) or 0))
+            if not value.is_finite() or value < 0:
+                raise ValueError("Tax and credit must be finite, non-negative amounts.")
+            result[head] = int(to_paise(value) * 100)
+        return result
+
+    due, left = paise(output), paise(credit)
+    original, steps = left.copy(), {}
+
+    def pay(source, target, cap=None):
+        amount = min(left[source], due[target], cap if cap is not None else due[target])
+        if amount:
+            left[source] -= amount
+            due[target] -= amount
+            steps[source, target] = steps.get((source, target), 0) + amount
+
+    pay("igst", "igst")
+    for head in ("cgst", "sgst"):
+        pay("igst", head, max(due[head] - left[head], 0))
+    remainder = min(left["igst"], due["cgst"] + due["sgst"])
+    carry_c, carry_s = left["cgst"] - due["cgst"], left["sgst"] - due["sgst"]
+    to_c = max(0, min((carry_s - carry_c + remainder + 1) // 2, due["cgst"], remainder))
+    to_s = min(due["sgst"], remainder - to_c)
+    to_c = min(due["cgst"], remainder - to_s)
+    pay("igst", "cgst", to_c)
+    pay("igst", "sgst", to_s)
+    for head in ("cgst", "sgst"):
+        pay(head, head)
+        pay(head, "igst")
+
+    def rupees(values):
+        return _with_total({head: Decimal(value) / 100 for head, value in values.items()})
+
+    return {
+        "steps": [{"from": source, "to": target, "amount": Decimal(amount) / 100}
+                  for (source, target), amount in steps.items()],
+        "used": rupees({head: original[head] - left[head] for head in HEADS}),
+        "cash": rupees(due), "carry_on": rupees(left),
+    }
+
+
 def uqc_for(unit, hsn):
     """GST unit code; metric carats are CTM (cross-part ruling X-4)."""
     if (hsn or "").strip().startswith("99"):

@@ -1,0 +1,396 @@
+[
+  {
+    "name": "zero",
+    "output": {
+      "igst": 0,
+      "cgst": 0,
+      "sgst": 0,
+      "total": 0
+    },
+    "credit": {
+      "igst": 0,
+      "cgst": 0,
+      "sgst": 0,
+      "total": 0
+    },
+    "expected": {
+      "steps": [],
+      "used": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      }
+    }
+  },
+  {
+    "name": "own-heads-then-cash",
+    "output": {
+      "igst": 10000,
+      "cgst": 10000,
+      "sgst": 10000,
+      "total": 30000
+    },
+    "credit": {
+      "igst": 3000,
+      "cgst": 5000,
+      "sgst": 7000,
+      "total": 15000
+    },
+    "expected": {
+      "steps": [
+        {
+          "from": "igst",
+          "to": "igst",
+          "amount": 3000
+        },
+        {
+          "from": "cgst",
+          "to": "cgst",
+          "amount": 5000
+        },
+        {
+          "from": "sgst",
+          "to": "sgst",
+          "amount": 7000
+        }
+      ],
+      "used": {
+        "igst": 3000,
+        "cgst": 5000,
+        "sgst": 7000,
+        "total": 15000
+      },
+      "cash": {
+        "igst": 7000,
+        "cgst": 5000,
+        "sgst": 3000,
+        "total": 15000
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      }
+    }
+  },
+  {
+    "name": "deficit-before-equal-carry",
+    "output": {
+      "igst": 0,
+      "cgst": 10000,
+      "sgst": 10000,
+      "total": 20000
+    },
+    "credit": {
+      "igst": 12000,
+      "cgst": 0,
+      "sgst": 10000,
+      "total": 22000
+    },
+    "expected": {
+      "steps": [
+        {
+          "from": "igst",
+          "to": "cgst",
+          "amount": 10000
+        },
+        {
+          "from": "igst",
+          "to": "sgst",
+          "amount": 2000
+        },
+        {
+          "from": "sgst",
+          "to": "sgst",
+          "amount": 8000
+        }
+      ],
+      "used": {
+        "igst": 12000,
+        "cgst": 0,
+        "sgst": 8000,
+        "total": 20000
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 2000,
+        "total": 2000
+      }
+    }
+  },
+  {
+    "name": "equal-carry-odd-paisa-to-cgst",
+    "output": {
+      "igst": 0,
+      "cgst": 100,
+      "sgst": 100,
+      "total": 200
+    },
+    "credit": {
+      "igst": 101,
+      "cgst": 100,
+      "sgst": 100,
+      "total": 301
+    },
+    "expected": {
+      "steps": [
+        {
+          "from": "igst",
+          "to": "cgst",
+          "amount": 51
+        },
+        {
+          "from": "igst",
+          "to": "sgst",
+          "amount": 50
+        },
+        {
+          "from": "cgst",
+          "to": "cgst",
+          "amount": 49
+        },
+        {
+          "from": "sgst",
+          "to": "sgst",
+          "amount": 50
+        }
+      ],
+      "used": {
+        "igst": 101,
+        "cgst": 49,
+        "sgst": 50,
+        "total": 200
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 51,
+        "sgst": 50,
+        "total": 101
+      }
+    }
+  },
+  {
+    "name": "unequal-own-credit-balances-carry",
+    "output": {
+      "igst": 0,
+      "cgst": 10000,
+      "sgst": 10000,
+      "total": 20000
+    },
+    "credit": {
+      "igst": 10000,
+      "cgst": 5000,
+      "sgst": 15000,
+      "total": 30000
+    },
+    "expected": {
+      "steps": [
+        {
+          "from": "igst",
+          "to": "cgst",
+          "amount": 10000
+        },
+        {
+          "from": "sgst",
+          "to": "sgst",
+          "amount": 10000
+        }
+      ],
+      "used": {
+        "igst": 10000,
+        "cgst": 0,
+        "sgst": 10000,
+        "total": 20000
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 5000,
+        "sgst": 5000,
+        "total": 10000
+      }
+    }
+  },
+  {
+    "name": "cgst-sgst-never-cross",
+    "output": {
+      "igst": 0,
+      "cgst": 10000,
+      "sgst": 0,
+      "total": 10000
+    },
+    "credit": {
+      "igst": 0,
+      "cgst": 0,
+      "sgst": 20000,
+      "total": 20000
+    },
+    "expected": {
+      "steps": [],
+      "used": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 10000,
+        "sgst": 0,
+        "total": 10000
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 20000,
+        "total": 20000
+      }
+    }
+  },
+  {
+    "name": "cgst-before-sgst-for-igst",
+    "output": {
+      "igst": 10000,
+      "cgst": 2000,
+      "sgst": 3000,
+      "total": 15000
+    },
+    "credit": {
+      "igst": 1000,
+      "cgst": 7000,
+      "sgst": 10000,
+      "total": 18000
+    },
+    "expected": {
+      "steps": [
+        {
+          "from": "igst",
+          "to": "igst",
+          "amount": 1000
+        },
+        {
+          "from": "cgst",
+          "to": "cgst",
+          "amount": 2000
+        },
+        {
+          "from": "cgst",
+          "to": "igst",
+          "amount": 5000
+        },
+        {
+          "from": "sgst",
+          "to": "sgst",
+          "amount": 3000
+        },
+        {
+          "from": "sgst",
+          "to": "igst",
+          "amount": 4000
+        }
+      ],
+      "used": {
+        "igst": 1000,
+        "cgst": 7000,
+        "sgst": 7000,
+        "total": 15000
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "carry_on": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 3000,
+        "total": 3000
+      }
+    }
+  },
+  {
+    "name": "igst-remaining-after-all-tax",
+    "output": {
+      "igst": 1000,
+      "cgst": 2000,
+      "sgst": 3000,
+      "total": 6000
+    },
+    "credit": {
+      "igst": 10000,
+      "cgst": 1000,
+      "sgst": 1000,
+      "total": 12000
+    },
+    "expected": {
+      "steps": [
+        {
+          "from": "igst",
+          "to": "igst",
+          "amount": 1000
+        },
+        {
+          "from": "igst",
+          "to": "cgst",
+          "amount": 2000
+        },
+        {
+          "from": "igst",
+          "to": "sgst",
+          "amount": 3000
+        }
+      ],
+      "used": {
+        "igst": 6000,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 6000
+      },
+      "cash": {
+        "igst": 0,
+        "cgst": 0,
+        "sgst": 0,
+        "total": 0
+      },
+      "carry_on": {
+        "igst": 4000,
+        "cgst": 1000,
+        "sgst": 1000,
+        "total": 6000
+      }
+    }
+  }
+]
