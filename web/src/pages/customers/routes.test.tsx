@@ -1,12 +1,12 @@
-import type { ReactElement } from "react";
 import { matchRoutes } from "react-router";
 import { appRoutes } from "@/core/router/routes";
+import { loadedPage } from "@/core/router/lazyPage";
 import CustomerForm from "./CustomerForm";
 import CustomerPage from "./CustomerPage";
 import CustomerStatement from "./CustomerStatement";
 import Customers from "./Customers";
 
-test("every customer address opens its screen, not a placeholder; forms hide the phone's tabs, the rest keep them", () => {
+test("every customer address opens its screen, not a placeholder; forms hide the phone's tabs, the rest keep them", async () => {
   const screens: [string, unknown, boolean][] = [
     ["/customers", Customers, false], ["/customers/new", CustomerForm, true], ["/customers/7", CustomerPage, false],
     ["/customers/7/edit", CustomerForm, true], ["/customers/7/statement", CustomerStatement, false],
@@ -14,7 +14,7 @@ test("every customer address opens its screen, not a placeholder; forms hide the
   for (const [path, screen, hidesTabs] of screens) {
     const m = matchRoutes(appRoutes, path)!;
     const route = m[m.length - 1].route;
-    expect((route.element as ReactElement).type, path).toBe(screen);
+    expect(await loadedPage(route.element), path).toBe(screen);
     expect(Boolean(route.handle?.hideNav), path).toBe(hidesTabs);
   }
 });

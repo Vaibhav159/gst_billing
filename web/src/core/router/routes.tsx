@@ -1,25 +1,28 @@
 import { Navigate, useLocation, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
-import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
+import { AppLayout, paletteCode, RootLayout } from "@/core/shell/AppLayout";
 import { AppFailed } from "@/core/shell/ScreenBoundary";
 import Login from "@/pages/core/Login";
 import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
-import BillPage from "@/pages/sales/BillPage";
-import V2NumberLink from "@/pages/sales/V2NumberLink";
-import SalesList from "@/pages/sales/SalesList";
-import { customerRoutes } from "@/pages/customers/routes";
-import NewBillPage from "@/pages/sales/form/BillFormPage";
-import EditBillPage from "@/pages/sales/form/EditBillPage";
-import PaperBookPage from "@/pages/sales/paper/PaperBook";
-import { lazyPage } from "./lazyPage";
+import { customerPages, customerRoutes } from "@/pages/customers/routes";
+import { idlePages, lazyPage } from "./lazyPage";
 
-// pages whose code loads when they first open (Ruling 1B-4): react-pdf and printing stay out of the first download
+// Selling's pages load on demand (Ruling 1B-4): the app's first download is the shell, and each page comes as it opens.
+// react-pdf comes later still, with the first PDF made (core/print/make.ts).
+const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
+const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
+const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
+const NewBillPage = lazyPage(() => import("@/pages/sales/form/BillFormPage"));
+const EditBillPage = lazyPage(() => import("@/pages/sales/form/EditBillPage"));
+const PaperBookPage = lazyPage(() => import("@/pages/sales/paper/PaperBook"));
 const PrintPage = lazyPage(() => import("@/pages/sales/print/PrintPage"));
 const ScanPage = lazyPage(() => import("@/pages/sales/print/ScanPage"));
 const BatchPrint = lazyPage(() => import("@/pages/sales/print/BatchPrint"));
 const BulkExport = lazyPage(() => import("@/pages/sales/print/BulkExport"));
+
+const warmPages = idlePages([SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, ...customerPages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -94,7 +97,7 @@ export const appRoutes: RouteObject[] = [{
     // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
     ...V2_REDIRECTS.map(([path, to]): RouteObject => ({ path, element: <V2Redirect to={to} /> })),
     {
-      element: <RequireAuth><AppLayout /></RequireAuth>,
+      element: <RequireAuth><AppLayout onShown={warmPages} /></RequireAuth>,
       children: [
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,

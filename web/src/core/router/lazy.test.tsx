@@ -1,7 +1,7 @@
 // Ruling 1B-4: Selling's pages load on demand, so the app's first download stays under Vite's 500 kB warning and
 // react-pdf (1.2 MB) never comes with it.
-import { isValidElement, type ComponentType } from "react";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { isValidElement, useState, type ComponentType, type ReactElement } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -9,9 +9,11 @@ import { AppRoutes } from "@/App";
 import { queryClient } from "@/core/api/query";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { salesServer, wireDetail } from "@/core/sales/fixtures";
-import { Page, ToastProvider } from "@/core/ui";
+import { Button, Dialog, Page, ToastProvider } from "@/core/ui";
 import Placeholder from "@/pages/core/Placeholder";
 import CustomerPage from "@/pages/customers/CustomerPage";
+import BillPage from "@/pages/sales/BillPage";
+import { fakeToday } from "@/pages/sales/form/testing";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { lazyPage, loadedPage, type LazyPage } from "./lazyPage";
 import { appRoutes } from "./routes";
@@ -30,6 +32,7 @@ test("home keeps loading up front, so the shell's shown effect cannot mistake it
   expect(isValidElement(route("/")?.element)).toBe(true);
   expect(isLazy(route("/")?.element)).toBe(false);
 });
+
 /** The whole app at `path` (or `routes` in place of the app's own), signed in as the owner, as App renders it. */
 function mount(path: string, routes: RouteObject[] = appRoutes) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
@@ -52,12 +55,25 @@ function heldBack<T extends ComponentType<object>>(page: T): [LazyPage<T>, () =>
   return [lazyPage(() => new Promise<{ default: T }>((resolve) => { arrive = () => resolve({ default: page }); })), () => arrive()];
 }
 
-// Plan 1B's bill page isn't built yet, so in the next two tests 1C's customer page stands in for it: it's routed today,
-// and it loads on demand with the rest of Selling's pages once their imports in the routes change.
+test("every built page of Selling loads on demand: bills, customers and v2's number links (placeholders aside)", () => {
+  const pages = all(appRoutes).filter((r) => /^\/(sales|customers)(\/|$)|^\/billing\/invoice\/:bizSlug/.test(r.path ?? "") && (r.element as ReactElement | undefined)?.type !== Placeholder);
+  expect(pages.map((r) => r.path)).toEqual(expect.arrayContaining(["/sales", "/sales/:id", "/customers", "/customers/:id"]));
+  expect(pages.filter((r) => !isLazy(r.element)).map((r) => r.path)).toEqual([]);
+});
+
 test("a route still says which screen it opens: a lazy page's loaded component, a placeholder's own", async () => {
-  expect(await loadedPage(route("/customers/:id")?.element)).toBe(CustomerPage);
+  expect(await loadedPage(route("/sales/:id")?.element)).toBe(BillPage);
   expect(await loadedPage(route("/purchases")?.element)).toBe(Placeholder);
   expect(await loadedPage(undefined)).toBeUndefined();
+});
+
+test("a page that loads on demand opens through the app's router: a bill's page", async () => {
+  fakeToday();
+  try {
+    salesServer([["GET", "sales/412/", () => wireDetail()]]);
+    mount("/sales/412");
+    expect(await screen.findByRole("heading", { level: 1, name: "KGH/2026-27/31" }, { timeout: 5000 })).toBeInTheDocument();
+  } finally { vi.useRealTimers(); }
 });
 
 test("a page that loads on demand opens through the app's router: a customer's page", async () => {
@@ -97,6 +113,39 @@ test("a move to a page whose code isn't in yet keeps the page on screen, no skel
   await act(async () => arrive());
   expect(await within(main).findByRole("heading", { level: 1, name: "The next page" })).toBeInTheDocument();
   expect(within(main).queryByRole("heading", { level: 1, name: "The first page" })).not.toBeInTheDocument();
+});
+
+test.each(["/later", "/first"])("a delayed page starts its 300 ms click guard when code arrives, and its dialog keeps 350 ms: from %s", async (start) => {
+  fakeToday();
+  let now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  const confirmed = vi.fn();
+  function Probe() {
+    const [open, setOpen] = useState(false);
+    return <Page title="Guarded page"><Button onClick={() => setOpen(true)}>Open dialog</Button><Dialog open={open} onClose={() => setOpen(false)} title="Guarded dialog"><Button onClick={confirmed}>Confirm</Button></Dialog></Page>;
+  }
+  try {
+    salesServer();
+    const [Later, arrive] = heldBack(Probe);
+    const router = mount(start, inAppLayout([{ path: "/first", element: <h1>First page</h1> }, { path: "/later", element: <Later /> }]));
+    if (start === "/first") await act(async () => { await router.navigate("/later"); });
+    now += 1000; // code takes longer than either guard; neither may be spent while it is missing
+    await act(async () => arrive());
+    const open = await screen.findByRole("button", { name: "Open dialog" }, { timeout: 5000 });
+    now += 299;
+    fireEvent.click(open);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    now += 1;
+    fireEvent.click(open);
+    const dialog = screen.getByRole("dialog", { name: "Guarded dialog" });
+    const confirm = within(dialog).getByRole("button", { name: "Confirm" });
+    now += 349;
+    fireEvent.click(confirm);
+    expect(confirmed).not.toHaveBeenCalled();
+    now += 1;
+    fireEvent.click(confirm);
+    expect(confirmed).toHaveBeenCalledTimes(1);
+  } finally { clock.mockRestore(); vi.useRealTimers(); }
 });
 
 /** /api/me/'s answer for the owner, as the sign-in state reads it. */

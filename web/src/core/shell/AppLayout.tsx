@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, startTransition, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
@@ -11,9 +11,12 @@ import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
 import { OfflineBanner } from "./OfflineBanner";
-import { Palette } from "./Palette";
 import { PhoneShell } from "./PhoneShell";
 import { ScreenBoundary } from "./ScreenBoundary";
+
+// Search is fetched with the pages in idle time, keeping its records code out of the first download.
+export const paletteCode = { load: () => import("./Palette").then(({ Palette }) => ({ default: Palette })) };
+const Palette = lazy(paletteCode.load);
 
 /**
  * Around every route, sign-in included: the app's one ToastHost (a second would show every toast twice), the view on
@@ -35,7 +38,7 @@ export function RootLayout() {
   );
 }
 
-export function AppLayout() {
+export function AppLayout({ onShown }: { onShown?: () => void }) {
   const { view, isPhone, isDesktop } = useView();
   const location = useLocation();
   const { pathname } = location;
@@ -43,8 +46,8 @@ export function AppLayout() {
   const { prefs, ready } = usePrefs();
   const net = useNetwork();
   // search: one palette for the app, opened by Ctrl K and the desktop header's button, or the phone header's Search
-  const [palette, setPalette] = useState(false);
-  const openPalette = useCallback(() => setPalette(true), []);
+  const [palette, setPalette] = useState<boolean | null>(null);
+  const openPalette = useCallback(() => startTransition(() => setPalette(true)), []);
   // A phone's home is Easy unless the person chose Expert; an Expert person isn't sent there on a guess before their
   // setting is known. Easy and the phone's More are for phones: on a desktop their addresses open the dashboard.
   const home = isPhone && pathname === "/";
@@ -61,7 +64,7 @@ export function AppLayout() {
   const shown = useRef(false);
   const unsure = home && !ready && location.key === first && net !== "offline" && !shown.current;
   // once a page shows, it stays until the setting moves it on (the greeting after signing in is its frame's to spend)
-  useEffect(() => { if (!opening && !unsure) shown.current = true; });
+  useEffect(() => { if (!opening && !unsure) { shown.current = true; onShown?.(); } });
   if (opening) return <Navigate to={to} replace />;
   // the offline or server-trouble banner is one per screen: above the page here, the phone shell's own (its topmost
   // strip), or under the desktop's top bar, as in the prototype
@@ -82,7 +85,10 @@ export function AppLayout() {
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
         {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"} openPalette={openPalette}>{main}</PhoneShell>}
-        <Palette open={palette} onClose={() => setPalette(false)} />
+        {/* Search keeps its place across phone/desktop changes; only its first open needs its code. */}
+        <ScreenBoundary onHome={() => { setPalette(null); navigate("/"); }}>
+          <Suspense fallback={null}>{palette !== null ? <Palette open={palette} onClose={() => setPalette(false)} /> : null}</Suspense>
+        </ScreenBoundary>
         <ShareHost />
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>

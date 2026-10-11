@@ -462,7 +462,7 @@ test("on a desktop, the header's Search and Ctrl K open search; choosing a page 
   const button = screen.getByRole("button", { name: "Search (Ctrl K)" });
   afterADoubleTap();
   await user.click(button);
-  const dialog = await screen.findByRole("dialog", { name: "Search" });
+  const dialog = await screen.findByRole("dialog", { name: "Search" }, { timeout: 5000 });
   expect(within(dialog).getByRole("combobox")).toHaveFocus();
   await user.keyboard("meena");
   await move(250);
@@ -497,7 +497,7 @@ test("on a phone, Today carries Search last in its header, after its own buttons
   const search = within(header).getByRole("button", { name: "Search customers and bills" });
   afterADoubleTap();
   await user.click(search);
-  const dialog = await screen.findByRole("dialog", { name: "Search" });
+  const dialog = await screen.findByRole("dialog", { name: "Search" }, { timeout: 5000 });
   expect(within(dialog).getByRole("combobox")).toHaveFocus();
   await user.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -521,7 +521,7 @@ test("on a phone only Today carries Search: not Bills, Customers or More, and no
   expect(within(header).getByRole("button", { name: "Search customers and bills" })).toBeInTheDocument();
   for (const [path, title] of [["/sales", "Bills"], ["/customers", "Customers"], ["/more", "More"]]) {
     await act(async () => { await router.navigate(path); });
-    header = (await screen.findByRole("heading", { level: 1, name: title })).closest("header")!;
+    header = (await screen.findByRole("heading", { level: 1, name: title }, { timeout: 5000 })).closest("header")!;
     expect(within(header).queryByRole("button", { name: /^Search/ }), path).not.toBeInTheDocument();
   }
   // the shell gives it only to Expert pages beside the tabs

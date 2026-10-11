@@ -1,10 +1,10 @@
-import type { ReactElement } from "react";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, matchRoutes } from "react-router";
 import { useStatement } from "@/core/api/customers";
 import { GSTIN_CHECK_WARNING, PAN_PROBLEM } from "@/core/ids";
 import { appRoutes } from "@/core/router/routes";
+import { loadedPage } from "@/core/router/lazyPage";
 import CustomerForm from "./CustomerForm";
 import { ANIL, handClock, liveWords, mount, NO_BILLS, pass, serve, typeQuickly, VIEWER, type Call } from "./testing";
 
@@ -463,11 +463,11 @@ test("an address that names no customer says so, without asking the server", asy
   expect(await screen.findByRole("heading", { level: 1, name: "This customer isn't on file" })).toBeInTheDocument();
 });
 
-test("the app opens the form at /customers/new and /customers/:id/edit, ahead of the placeholder, without the phone's tabs", () => {
+test("the app opens the form at /customers/new and /customers/:id/edit, ahead of the placeholder, without the phone's tabs", async () => {
   for (const path of ["/customers/new", "/customers/7/edit"]) {
     const m = matchRoutes(appRoutes, path)!;
     const route = m[m.length - 1].route;
-    expect((route.element as ReactElement).type, path).toBe(CustomerForm);
+    expect(await loadedPage(route.element), path).toBe(CustomerForm);
     expect(route.handle, path).toEqual({ hideNav: true });
   }
 });

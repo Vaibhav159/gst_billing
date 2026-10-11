@@ -57,7 +57,7 @@ test("a new page puts focus on its title and announces it", async () => {
   const router = mount("/purchases");
   await screen.findByRole("heading", { level: 1, name: "Purchases" });
   await act(async () => { await router.navigate("/customers"); });
-  const h1 = await screen.findByRole("heading", { level: 1, name: "Customers" });
+  const h1 = await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
   await waitFor(() => expect(h1).toHaveFocus());
   // Ruling 6: announce() sets the text in a frame after the 90 ms timer, so wait for it
   await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Customers"));
@@ -105,7 +105,8 @@ test("the second click of a double click doesn't land on the page that just open
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   try {
     await act(async () => { await router.navigate("/customers"); });
-    const h1 = screen.getByRole("heading", { level: 1, name: "Customers" });
+    // A zero-time read keeps the 299/300 ms boundary; act contains any pending query commits.
+    const h1 = await act(async () => vi.waitFor(() => screen.getByRole("heading", { level: 1, name: "Customers" }), { timeout: 5000, interval: 0 }));
     const spy = vi.fn();
     h1.addEventListener("click", spy);
     act(() => { vi.advanceTimersByTime(299); });
@@ -477,7 +478,7 @@ test("every v2 address lands on its own new address; v2's number link opens its 
       results: [{ id: 412, business: 3, business_name: "KIRAN GOLD HOUSE (SANDBOX)", invoice_number: "31", invoice_date: "2026-10-08", fy: "2026-27" }] } })
     : answer(config))) as AxiosAdapter;
   const router = mount("/billing/invoice/kiran-gold-house-sandbox/2026-27/31");
-  await waitFor(() => expect(router.state.location.pathname).toBe("/sales/412"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/sales/412"), { timeout: 5000 });
 }, 15_000); // every v2 address mounts the app: past 5 s on a busy 2-CPU machine
 
 test("a v2 address keeps its query string: a list's filter, and v2's ?b= firm hint on a bill number", async () => {
@@ -488,7 +489,7 @@ test("a v2 address keeps its query string: a list's filter, and v2's ?b= firm hi
   router = mount("/billing/invoice/KGH-31?b=3");
   await waitFor(() => expect(router.state.location.pathname).toBe("/sales/KGH-31"));
   expect(router.state.location.search).toBe("?b=3");
-  expect(await screen.findByText("No bill has this number")).toBeInTheDocument();
+  expect(await screen.findByText("No bill has this number", {}, { timeout: 5000 })).toBeInTheDocument();
 });
 
 test("a sheet on its way out as the page changes doesn't keep focus from the new page's title", async () => {

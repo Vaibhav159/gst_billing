@@ -150,7 +150,7 @@ test("a form hides the tabs, and its action bar clears the home indicator itself
 
   // and the app's own routes: a new bill hides them, the bills list keeps them
   open("/sales/new");
-  await screen.findByRole("heading", { level: 1, name: /^New (sales )?bill$/ });
+  await screen.findByRole("heading", { level: 1, name: /^New (sales )?bill$/ }, { timeout: 5000 });
   expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
   cleanup();
   open("/sales");
@@ -209,7 +209,7 @@ test("an Expert person's phone isn't sent to Easy while their setting is on its 
   localStorage.removeItem("gst3.prefs.1");
   const again = server({ prefs: { phoneMode: "expert" }, hold: "get" });
   open("/customers");
-  await screen.findByRole("heading", { level: 1, name: "Customers" });
+  await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
   await waitFor(() => expect(again.pending()).toBe(1));
   expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
   await again.release();
@@ -383,7 +383,7 @@ test("the greeting after signing in is spent once a page stays: a later redraw o
   server({ prefs: { phoneMode: "expert" } });
   await signIn("/login?next=%2Fsales");
   const announcer = () => document.getElementById("route-announcer")!;
-  await waitFor(() => expect(announcer()).toHaveTextContent("Sales")); // greeted (the desktop list's title)
+  await waitFor(() => expect(announcer()).toHaveTextContent("Sales"), { timeout: 5000 }); // greeted (the desktop list's title)
   act(() => { announcer().textContent = ""; });
   act(() => { phone(true); crossings.forEach((cb) => cb()); }); // the phone shell takes over, and the page is drawn afresh in it
   await screen.findByRole("navigation", { name: /tabs/i });
@@ -570,7 +570,7 @@ test("offline, the phone shell carries has-offline", async () => {
   open("/customers");
   const shell = (await screen.findByRole("navigation", { name: /tabs/i })).parentElement!;
   // the page's own answers first: one landing after this test would mark the network reachable outside act()
-  await screen.findByText("No customers yet");
+  await screen.findByText("No customers yet", {}, { timeout: 5000 });
   expect(shell).not.toHaveClass("has-offline");
   act(() => __setNetState("offline"));
   expect(shell).toHaveClass("has-offline");
@@ -614,7 +614,7 @@ test("the topmost strip clears the notch (the banner, else Back to Easy, else th
   server(); // no mode chosen: Easy, so a full-view page has Back to Easy at the top
   open("/customers");
   const back = await screen.findByRole("link", { name: /back to easy/i });
-  expect(header()).toBeInTheDocument();
+  await waitFor(() => expect(header()).toBeInTheDocument(), { timeout: 5000 });
   // the bar sits under the notch; what it says keeps its 44 px below it
   expect(back).toHaveClass(NOTCH, "min-h-[calc(44px+env(safe-area-inset-top,0px))]");
   expect(header()).not.toHaveClass(NOTCH);
@@ -630,7 +630,7 @@ test("the topmost strip clears the notch (the banner, else Back to Easy, else th
   // an Expert person's phone has nothing above the page, so its own header clears the notch, until the banner shows
   const s = server({ prefs: { phoneMode: "expert" } });
   open("/customers");
-  await screen.findByRole("heading", { level: 1, name: "Customers" });
+  await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
   await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
   await wait(50);
   expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();

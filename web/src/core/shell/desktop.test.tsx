@@ -438,7 +438,7 @@ test("on a desktop every signed-in page has the shell, and Skip to main content 
   const nav = await screen.findByRole("navigation", { name: "Main" });
   expect(within(nav).getByRole("link", { name: "Customers" })).toHaveAttribute("aria-current", "page");
   expect(await screen.findByRole("button", { name: "Firm: Kiran" })).toBeInTheDocument();
-  expect(await screen.findByRole("heading", { level: 1, name: "Customers" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("link", { name: "Skip to main content" }));
   expect(document.getElementById("app-main")).toHaveFocus();
 });
@@ -447,7 +447,7 @@ test("a phone doesn't get the desktop shell", async () => {
   phone(true);
   try {
     mountApp("/customers");
-    await screen.findByRole("heading", { level: 1, name: "Customers" });
+    await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
     expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Skip to main content" })).not.toBeInTheDocument();
   } finally {

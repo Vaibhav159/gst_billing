@@ -1,9 +1,15 @@
 // The customer screens' routes (part 1C). core/router/routes.tsx puts them ahead of the placeholders.
 import type { RouteObject } from "react-router";
-import CustomerForm from "./CustomerForm";
-import CustomerPage from "./CustomerPage";
-import CustomerStatement from "./CustomerStatement";
-import Customers from "./Customers";
+import { lazyPage } from "@/core/router/lazyPage";
+
+// each screen loads on demand (Ruling 1B-4, plan 1E)
+const CustomerForm = lazyPage(() => import("./CustomerForm"));
+const CustomerPage = lazyPage(() => import("./CustomerPage"));
+const CustomerStatement = lazyPage(() => import("./CustomerStatement"));
+const Customers = lazyPage(() => import("./Customers"));
+
+// The form has two addresses, but its code needs only one idle load.
+export const customerPages = [CustomerForm, CustomerPage, CustomerStatement, Customers];
 
 export const customerRoutes: RouteObject[] = [
   { path: "/customers", element: <Customers /> },

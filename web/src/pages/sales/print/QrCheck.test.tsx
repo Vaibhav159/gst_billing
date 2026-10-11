@@ -162,7 +162,7 @@ test("/scan holds the same check on a page of its own, and v2's QR scanner link 
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   try {
     const router = mountApp("/billing/qr-scanner");
-    expect(await screen.findByRole("heading", { level: 1, name: "Check a bill's QR code" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Check a bill's QR code" }, { timeout: 5000 })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/scan");
     // the page puts focus on its title, as every page does, so on a computer its card says how a USB scanner reads in
     // (PROTO's words): a scan made before the field is clicked would be lost

@@ -1,10 +1,10 @@
-import { isValidElement, type ReactElement } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager, QueryClient } from "@tanstack/react-query";
 import { matchRoutes } from "react-router";
 import { __setNetState } from "@/core/api/network";
 import { billQuery, invalidateSales, type BillOutcome } from "@/core/api/sales";
 import { appRoutes } from "@/core/router/routes";
+import { loadedPage } from "@/core/router/lazyPage";
 import { refuse, wireBin, wireDetail, WIRE_LINES, type Route } from "@/core/sales/fixtures";
 import { toBillDetail, toBinRow } from "@/core/sales/wire";
 import EditBillPage from "./EditBillPage";
@@ -131,10 +131,10 @@ test("a deleted bill says so and where it went; an address with no bill says tha
 
 /* ── The rulings (task 8's dispatch) ── */
 
-test("the app's /sales/:id/edit is this page, the phone's tabs making way, and no longer a placeholder (Ruling 1E-1: a plain import)", () => {
+test("the app's /sales/:id/edit is this page, the phone's tabs making way, and no longer a placeholder", async () => {
   const m = matchRoutes(appRoutes, "/sales/412/edit");
   const route = m?.[m.length - 1].route;
-  expect(isValidElement(route?.element) && (route?.element as ReactElement).type).toBe(EditBillPage);
+  expect(await loadedPage(route?.element)).toBe(EditBillPage);
   expect(route?.handle).toEqual({ hideNav: true });
 });
 
