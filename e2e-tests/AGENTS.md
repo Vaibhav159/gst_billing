@@ -102,14 +102,20 @@ Pitfalls:
   stops half-way leaves one, so a file whose tests type in the form calls
   `startsDrafts(test)` (`tests-v3/bill-form-data.js`): after each test, the
   unfinished bills its user started during it are deleted, in a
-  `test.afterEach` as `makesBills` is. The cleanup leaves the page first and
-  waits for its last writes (`leaveForm`): a keep the form still had waiting
-  would otherwise land after it. A bill the form saves isn't `newBill`'s:
-  `notesSavedBills(page)` notes each one as the server answers (`noteBill`), so
-  `makesBills` sends it to the bin too, even after a failure. A second person
-  signs in with `signIn(page, role)`: LOGINS_FILE's line for `E2E_OTHER_ROLE`
-  on the sandbox. CI has one user, so `hasLogin(role)` is false there and the
-  handover runs as the same person on a second device.
+  `test.afterEach` as `makesBills` is. Leaving the form is itself what fires a
+  keep (a change not kept yet goes on pagehide), and `page.on("request")` never
+  sees that request, so the cleanup (`leaveForm`) first stops the page's writes to
+  the shop's list with a route that aborts them, lets the ones already on their
+  way land, and only then leaves the page. Declare `startsDrafts(test)` before
+  `makesBills` and `typesPassword`: afterEach hooks run in the order they're
+  declared, and it has to leave the page before `typesPassword`'s hook moves a
+  failed test's page. A bill the form saves isn't `newBill`'s:
+  `notesSavedBills(page)` notes each one as the server answers (`noteBill`), and
+  `startsDrafts`' hook waits for any note still being read before `makesBills`
+  empties its list, so a bill saved just before a failure goes to the bin too.
+  A second person signs in with `signIn(page, role)`: LOGINS_FILE's line for
+  `E2E_OTHER_ROLE` on the sandbox. CI has one user, so `hasLogin(role)` is false
+  there and the handover runs as the same person on a second device.
 - A new WCAG check measures with `measure(page)` (`tests-v3/axe.js`) rather than
   after a fixed wait: it waits for the heading and for nothing `aria-busy`, then
   fails if the page reloaded while axe ran (the sandbox's Vite reloads it when v3

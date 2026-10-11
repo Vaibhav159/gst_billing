@@ -17,7 +17,8 @@ function useHeld<T>(open: boolean, value: T): T {
 /**
  * Whether the body is a region the keyboard reaches (WCAG 2.1.1, Ruling 1D-18): while it overflows with nothing focusable
  * inside (the bill's review once payment is picked), so Tab reaches it and the arrows scroll it. Asked again as the body
- * resizes or its content changes; the focus trap never puts the first focus there.
+ * resizes or its content changes, and forgotten as the dialog closes, so it reopens as no region until measured; the
+ * focus trap never puts the first focus there.
  */
 function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): boolean {
   const [region, setRegion] = useState(false);
@@ -30,7 +31,7 @@ function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): boolean {
     resized.observe(el);
     const changed = new MutationObserver(check);
     changed.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
-    return () => { resized.disconnect(); changed.disconnect(); };
+    return () => { resized.disconnect(); changed.disconnect(); setRegion(false); };
   }, [open, body]);
   return region;
 }

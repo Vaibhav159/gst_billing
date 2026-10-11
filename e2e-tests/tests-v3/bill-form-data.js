@@ -55,15 +55,20 @@ function possessive(name) {
   return /['’]s$/i.test(n) ? n : /s$/i.test(n) ? `${n}'` : `${n}'s`;
 }
 
+/** Saves whose answer is still being read: each note is taken here as the answer comes, and settles once read. */
+const noting = new Set();
+
 /**
- * Notes each bill `page` saves (POST sales/ answered 201) as the server answers, so makesBills sends it to the bin after
- * the test: one saved just before a failure or a timeout is never left live.
+ * Notes each bill `page` saves (POST sales/ answered 201), so makesBills sends it to the bin after the test. The note is
+ * taken the moment the answer comes (its id is in the body, still to be read), and startsDrafts waits for every note
+ * still being read before makesBills empties its list, so a bill saved just before a failure or a timeout goes to the bin
+ * too. A page closed meanwhile can't throw inside the listener.
  */
 function notesSavedBills(page) {
-  page.on("response", async (r) => {
+  page.on("response", (r) => {
     if (r.request().method() !== "POST" || new URL(r.url()).pathname !== "/api/sales/" || r.status() !== 201) return;
-    const bill = await r.json();
-    noteBill(bill.id, bill.invoice_number);
+    const note = r.json().then((bill) => noteBill(bill.id, bill.invoice_number)).catch(() => {}).finally(() => noting.delete(note));
+    noting.add(note);
   });
 }
 
@@ -91,19 +96,25 @@ function draftWrites(page) {
 }
 
 /**
- * Leaves the bill form on `page` and waits for its last writes to the shop's list (`writes`, from draftWrites) to land:
- * a form keeps a change 1.2 s after it, and as it's left, so a keep still waiting could otherwise land after a cleanup.
+ * Leaves the bill form on `page` so that nothing it does afterwards can make an unfinished bill: the bills it saved are
+ * noted first; then its writes to the shop's list are stopped (a route aborts them, reads go through); the writes already
+ * on their way (`writes`, from draftWrites) land; and it goes to about:blank. Stopped, because leaving is itself what fires
+ * a keep: the form keeps a change it hadn't kept yet on pagehide, and page.on("request") never sees that request.
  */
 async function leaveForm(page, writes) {
+  await Promise.all([...noting]);
   if (page.isClosed()) return;
+  await page.route("**/api/drafts/**", (r) => (r.request().method() === "GET" ? r.fallback() : r.abort()));
+  await expect.poll(() => writes.size, { message: "the page's writes of its unfinished bill already on their way" }).toBe(0);
   await page.goto("about:blank");
-  await expect.poll(() => writes.size, { message: "the page's last writes of its unfinished bill" }).toBe(0);
 }
 
 /**
- * For a file whose tests type in the bill form, called at its top level: after each test, its page leaves the form and
- * the unfinished bills its user started during the test are deleted (a bill saved took its own with it). A test.afterEach,
- * as makesBills: a test that times out has its request disposed before a finally could use it.
+ * For a file whose tests type in the bill form, called at its top level before makesBills and typesPassword (afterEach
+ * hooks run in the order they're declared): after each test, the bills its page saved are noted before makesBills empties
+ * its list, the page leaves the form (leaveForm) before typesPassword would move it, and the unfinished bills its user
+ * started during the test are deleted (a bill saved took its own with it). A test.afterEach, as makesBills: a test that
+ * times out has its request disposed before a finally could use it.
  */
 function startsDrafts(test) {
   let since = null;

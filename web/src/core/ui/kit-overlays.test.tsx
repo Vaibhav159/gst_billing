@@ -324,6 +324,42 @@ test("a dialog's body that scrolls with nothing to focus inside takes the keyboa
   }
 });
 
+test("a dialog that closed as a region doesn't reopen drawn as one, not even before it measures its body again", async () => {
+  const sized = HTMLElement.prototype as unknown as Record<string, unknown>;
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return (this as HTMLElement).querySelector("[data-tall]") ? 900 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return (this as HTMLElement).querySelector("[data-tall]") ? 500 : 0; } });
+  function Review({ open, long }: { open: boolean; long: boolean }) {
+    return <MemoryRouter><ToastProvider>
+      <Dialog open={open} onClose={() => {}} title="Check the bill" footer={<Button>Go back and edit</Button>}>
+        <p data-tall={long ? "" : undefined}>Every line, to the paisa</p>
+      </Dialog>
+    </ToastProvider></MemoryRouter>;
+  }
+  try {
+    const { rerender } = render(<Review open long />);
+    await screen.findByRole("region", { name: "Check the bill" });
+    rerender(<Review open={false} long />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // reopened with a body that fits: drawn as a region at any point, its role would be added or taken away again
+    const seen: string[] = [];
+    const look = (records: MutationRecord[]) => records.forEach((r) => {
+      if (r.type === "attributes" && r.oldValue === "region") seen.push("its role was region, then taken away");
+      r.addedNodes.forEach((n) => { if (n instanceof HTMLElement && n.querySelector('[data-dialog-body][role="region"]')) seen.push("drawn as a region"); });
+    });
+    const watch = new MutationObserver(look);
+    watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeOldValue: true, attributeFilter: ["role"] });
+    rerender(<Review open long={false} />);
+    await screen.findByRole("dialog", { name: "Check the bill" });
+    look(watch.takeRecords());
+    watch.disconnect();
+    expect(seen).toEqual([]);
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+  } finally {
+    delete sized.scrollHeight;
+    delete sized.clientHeight;
+  }
+});
+
 test("a closing sheet says so, as a closing dialog does, on desktop and on phones", async () => {
   function Probe() { const [open, setOpen] = useState(true); return <Sheet open={open} onClose={() => setOpen(false)} title="Filter customers"><p>Owing</p></Sheet>; }
   for (const onPhone of [false, true]) {

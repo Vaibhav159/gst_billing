@@ -1,18 +1,11 @@
 const { test, expect } = require("@playwright/test");
-const AxeBuilder = require("@axe-core/playwright").default;
-const { measure } = require("./axe");
-const { cleanDrafts, draftWrites, leaveForm, monthBefore } = require("./bill-form-data");
+const { measure, problems } = require("./axe");
+const { cleanDrafts, draftWrites, leaveForm, monthBefore, possessive } = require("./bill-form-data");
 const { SIGNED_OUT, opened } = require("./session");
 const { afterDialog, client, esc, makesBills, newBill, today } = require("./sales-data");
 
 // every bill a check makes goes to the bin after it (sales-data.js)
 makesBills(test);
-
-/** What axe finds against WCAG 2.2 AA: each rule broken, with the elements that break it. */
-async function problems(page) {
-  const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
-  return r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
 
 /** Opens `path` in `theme` and waits for the page it lands on (`landing`): the page itself, not the app still loading. */
 async function openIn(page, theme, path, landing = path) {
@@ -170,12 +163,13 @@ for (const theme of ["obsidian", "pearl"]) {
   }
 }
 
-// The bill form (part 1D), in both themes: a new bill; the paper book (last month's, of the firm that has numbers in it
-// missing or explained, the most it can show: the sandbox's KIRAN, else the first firm); Check and save on a copy of a
-// bill made for it; the date's calendar (F14); the customer box while it searches and with no match (Ruling 1C-20a: web
-// has no axe of its own); and the review once how it was paid is picked, with nothing left in its body to focus, so the
-// body itself takes the keyboard (Ruling 1D-18), measured where it scrolls: a 1280×720 desktop and a phone. A copy keeps
-// no unfinished bill until something on it changes; picking how it was paid does, so that one is deleted after the test.
+// The bill form (part 1D), in both themes: a new bill; the paper book (last month's, the first firm's with numbers not
+// entered yet and a cancelled bill, as the sandbox's KIRAN has, else the fullest there is: bookToMeasure, and the test
+// notes which); Check and save on a copy of a bill made for it; the date's calendar (F14); the customer box while it
+// searches and with no match (Ruling 1C-20a: web has no axe of its own); and the review once how it was paid is picked,
+// with nothing left in its body to focus, so the body itself takes the keyboard (Ruling 1D-18), measured where it
+// scrolls: a 1280×720 desktop and a phone. A copy keeps no unfinished bill until something on it changes; picking how it
+// was paid does, so that one is deleted after the test.
 let draftsSince = null;
 let drafted = null;
 test.afterEach(async ({ page, request }) => {
@@ -202,16 +196,23 @@ async function openReview(page, project) {
   return { dialog, title };
 }
 let book = null;
-/** Last month's paper book with the most in it: the first firm's that has numbers missing or explained, else the first firm's. */
+/**
+ * Last month's paper book to measure, with what it shows: the first firm's with numbers not entered yet and a cancelled
+ * bill (the sandbox's KIRAN: 23 and 26 not entered, 22 cancelled), the page's fullest. The specs never make such a book
+ * (their paper bills go to the bin: deleted, not missing), so where none has both, as on CI, it falls back to the first
+ * firm's with any number missing or explained, else the first firm's, and `why` says so.
+ */
 async function bookToMeasure(api) {
   if (book) return book;
   const month = monthBefore(today());
   const { results: firms } = await api.get("businesses/", { page_size: 100 });
-  for (const f of firms) {
-    const pb = await api.get("sales/paper-book/", { business_id: f.id, month });
-    if (pb.missing.length || pb.explained.length) return (book = { firm: f.id, month });
-  }
-  return (book = { firm: firms[0].id, month });
+  const books = [];
+  for (const f of firms) books.push({ f, pb: await api.get("sales/paper-book/", { business_id: f.id, month }) });
+  const full = books.find(({ pb }) => pb.missing.length && pb.explained.some((x) => x.kind === "cancelled"));
+  const { f, pb } = full ?? books.find((b) => b.pb.missing.length || b.pb.explained.length) ?? books[0];
+  const holds = `${pb.missing.length} not entered yet, ${pb.explained.length} cancelled or deleted`;
+  const why = full ? `${f.name}, ${month}: ${holds}` : `fallback: no firm's ${month} has numbers not entered yet and a cancelled bill; measured ${possessive(f.name)} (${holds})`;
+  return (book = { firm: f.id, month, why });
 }
 const FORM_STATES = [
   {
@@ -219,7 +220,7 @@ const FORM_STATES = [
     async show(page, c, project) { await formDrawn(page, project); },
   },
   {
-    name: "the paper book", on: ["desktop", "phone"], prepare: bookToMeasure, path: (c) => `/sales/paper?firm=${c.firm}&month=${c.month}`, landing: "/sales/paper",
+    name: "the paper book", on: ["desktop", "phone"], prepare: bookToMeasure, note: (c) => c.why, path: (c) => `/sales/paper?firm=${c.firm}&month=${c.month}`, landing: "/sales/paper",
     async show(page) { await expect(page.getByRole("button", { name: /^Enter bill \d+$/ })).toBeVisible(); },
   },
   {
@@ -281,11 +282,13 @@ const FORM_STATES = [
   },
 ];
 for (const theme of ["obsidian", "pearl"]) {
-  for (const { name, on, prepare, path, landing, desktopSize, keepsDraft, show } of FORM_STATES) {
+  for (const { name, on, prepare, note, path, landing, desktopSize, keepsDraft, show } of FORM_STATES) {
     test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
       test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
       test.slow(); // the form's data, then axe, once or more
       const c = prepare ? await prepare(client(request)) : null;
+      // what was measured, in the report: the paper book's choice, or that it fell back
+      if (note) info.annotations.push({ type: "measured", description: note(c) });
       if (desktopSize && info.project.name === "desktop") await page.setViewportSize(desktopSize);
       if (keepsDraft) { draftsSince = new Date(); drafted = draftWrites(page); }
       const at = path(c);

@@ -7,9 +7,11 @@ const { AUTH, SIGNED_OUT, hasLogin, opened, signIn, typesPassword } = require(".
 const { afterDialog, client, esc, makesBills, someCustomer } = require("./sales-data");
 const { aProduct, draftWrites, leaveForm, notesSavedBills, possessive, startsDrafts, typeBill } = require("./bill-form-data");
 
+// startsDrafts first (afterEach hooks run in the order they're declared): its hook leaves the form, with its writes
+// stopped, before typesPassword's moves a failed test's page, and notes the bill saved there before makesBills' runs
+startsDrafts(test);
 typesPassword(test);
 makesBills(test);
-startsDrafts(test);
 const OTHER = process.env.E2E_OTHER_ROLE || "staff";
 
 test("desktop: a bill started on one device is finished on another, by someone else", async ({ page, request, browser }, info) => {
@@ -68,8 +70,8 @@ test("desktop: a bill started on one device is finished on another, by someone e
     // saved as a bill, it's off the shop's list of unfinished bills
     expect(await listed()).toBeUndefined();
   } finally {
-    // the form left (and its last writes landed) before the cleanup; and closing a context after a failure snapshots its
-    // page, so a password in its field is never what that shows (typesPassword)
+    // the form left with its writes stopped (leaveForm) before the cleanup; and closing a context after a failure snapshots
+    // its page, so a password in its field is never what that shows (typesPassword)
     try { await leaveForm(there, writes); } finally { await other.close(); }
   }
 });

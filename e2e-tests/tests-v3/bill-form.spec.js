@@ -8,8 +8,9 @@ const { opened } = require("./session");
 const { afterDialog, client, esc, firstFirm, makesBills, someCustomer, today } = require("./sales-data");
 const { aProduct, monthBefore, notesSavedBills, savedId, startsDrafts, typeBill } = require("./bill-form-data");
 
-makesBills(test);
+// startsDrafts first: its afterEach notes the bills the form saved before makesBills' empties the list
 startsDrafts(test);
+makesBills(test);
 
 test("desktop: a counter bill by keyboard alone, from the customer box to Save", async ({ page, request }, info) => {
   test.skip(info.project.name !== "desktop", "the keyboard flow is the desktop's");
