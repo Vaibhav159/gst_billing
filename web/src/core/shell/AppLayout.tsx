@@ -13,7 +13,7 @@ import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
 import { OfflineBanner } from "./OfflineBanner";
 import { PhoneShell } from "./PhoneShell";
-import { Palette } from "./Palette";
+import { AttentionPalette } from "./AttentionPalette";
 import { ScreenBoundary } from "./ScreenBoundary";
 
 const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(module => ({ default: module.CaptureUploadHost })));
@@ -88,7 +88,7 @@ export function AppLayout({ onShown }: { onShown?: () => void }) {
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
         {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"} openPalette={openPalette}>{main}</PhoneShell>}
-        <Palette open={palette} onClose={() => setPalette(false)} />
+        <AttentionPalette open={palette} onClose={() => setPalette(false)} />
         <ShareHost />
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>

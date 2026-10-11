@@ -4,7 +4,9 @@ import { GST_PAGES } from "@/core/gst/palette";
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Camera, CornerDownLeft, FileText, FileX, Package, Plus, ShoppingBag, Truck, UserRound, type LucideIcon } from "lucide-react";
+import { Bell, Building2, Camera, CornerDownLeft, FileText, FileX, Package, Plus, ShoppingBag, Truck, UserRound, type LucideIcon } from "lucide-react";
+import type { DueItem } from "@/core/api/dashboard";
+import { dueLink } from "@/core/due";
 import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useBin, useTodaysBills } from "@/core/api/sales";
@@ -82,10 +84,10 @@ function troubleText(p: ApiProblem): string {
 }
 
 export type PaletteRecordsHandle = { onKey(e: KeyboardEvent<HTMLInputElement>): void };
-type Props = { open: boolean; q: string; i: number; setI: Dispatch<SetStateAction<number>>; input: RefObject<HTMLInputElement>; onClose(): void };
+type Props = { open: boolean; q: string; i: number; setI: Dispatch<SetStateAction<number>>; input: RefObject<HTMLInputElement>; onClose(): void; attention?: DueItem[] };
 
 /** Only the records code is deferred; the dialog and typed text stay in Palette (Ruling 1E-20). */
-const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteRecords({ open, q, i, setI, input, onClose }, ref) {
+const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteRecords({ open, q, i, setI, input, onClose, attention }, ref) {
   const { me, can } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -159,6 +161,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
       const out: Result[] = [];
       const recent = meId == null ? [] : recentVisits(meId).filter((v) => typeof v?.to === "string" && typeof v.label === "string");
       for (const v of recent.slice(0, 5)) out.push({ group: "Opened recently", label: v.label || v.to, icon: RECENT_ICON[v.to.split("/")[1] ?? ""], to: v.to });
+      for (const a of (attention ?? []).slice(0, 3)) out.push({ group: "Needs attention", label: a.title, hint: a.detail, icon: Bell, to: dueLink(a) });
       out.push(...actions);
       for (const b of (todays ?? []).slice(0, 3)) {
         out.push({ group: "Today's bills", label: b.invoice_number, icon: FileText, hint: `${b.customer.name} · ${b.paper ? "paper bill" : timeOf(b.created_at)} · ${inr(b.total_amount)}${cancelledMark(b.status)}`, to: `/sales/${b.id}` });
@@ -179,7 +182,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
       for (const s of suppliers.data ?? []) out.push({ group: 'Suppliers', label: s.name, icon: Truck, hint: [s.gst_number, s.city].filter(Boolean).join(' · ') || 'Supplier', to: `/suppliers/${s.id}` });
     }
     return out.slice(0, 24);
-  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted, products, current, purchases.data, suppliers.data]);
+  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted, products, current, purchases.data, suppliers.data, attention]);
   const go = (r: Result) => { onClose(); navigate(r.to); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((x) => Math.max(0, Math.min(results.length - 1, x + 1))); }
@@ -225,7 +228,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
                 {head ? <p className="caps px-3 pt-3 pb-1" aria-hidden="true">{head}</p> : null}
                 <div id={`pal-${k}`} role="option" aria-selected={k === i} onMouseEnter={() => setI(k)} onClick={() => go(r)}
                   className={cn("flex items-center gap-3 px-3 rounded-ctl cursor-pointer", isPhone ? "min-h-14" : "min-h-11", optionClass(k === i))}>
-                  {r.icon ? <r.icon size={18} className={cn("shrink-0", r.group === "Deleted bills" ? "text-neg" : "text-fg2")} aria-hidden="true" /> : null}
+                  {r.icon ? <r.icon size={18} className={cn("shrink-0", r.group === "Needs attention" ? "text-brand" : r.group === "Deleted bills" ? "text-neg" : "text-fg2")} aria-hidden="true" /> : null}
                   <span className="flex-1 min-w-0"><span className="block truncate">{r.label}</span>{r.hint && r.group !== "Actions" ? <span className="block text-sm text-muted truncate">{r.hint}</span> : null}</span>
                   {r.group === "Actions" && r.hint && !isPhone ? <Kbd>{r.hint}</Kbd> : null}
                   {k === i && !isPhone ? <CornerDownLeft size={16} className="text-muted" aria-hidden="true" /> : null}

@@ -4,6 +4,7 @@ import { Search } from "lucide-react";
 import { Dialog, FailNote, Kbd } from "@/core/ui";
 import { useView } from "@/core/view";
 import type { PaletteRecordsHandle } from "./PaletteRecords";
+import type { DueItem } from "@/core/api/dashboard";
 
 export const paletteCode = { load: () => import("./PaletteRecords") };
 const PaletteRecords = lazy(paletteCode.load);
@@ -20,7 +21,7 @@ class RecordsBoundary extends Component<{ children: ReactNode; hasText: boolean 
   }
 }
 
-export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
+export function Palette({ open, onClose, attention }: { open: boolean; onClose(): void; attention?: DueItem[] }) {
   const { isPhone } = useView();
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
@@ -41,7 +42,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
         </div>
         <RecordsBoundary hasText={Boolean(q)}>
           <Suspense fallback={<><p role="status" className="px-3 py-6 text-center text-muted">Loading search…</p><ul id="palette-list" role="listbox" aria-label="Results" className="hidden" /></>}>
-            <PaletteRecords ref={records} open={open} q={q} i={i} setI={setI} input={input} onClose={onClose} />
+            <PaletteRecords ref={records} open={open} q={q} i={i} setI={setI} input={input} onClose={onClose} attention={attention} />
           </Suspense>
         </RecordsBoundary>
       </div>
