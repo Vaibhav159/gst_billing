@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Case, Exists, IntegerField, OuterRef, Q, QuerySet, Value, When
-from django.db.models.functions import Coalesce, ExtractYear, Length, Trim
+from django.db.models.functions import ExtractYear, Length
 from django.utils import timezone
 
 from billing.cache import uncached
@@ -29,7 +29,6 @@ from billing.params import PICK_A_CUSTOMER, PICK_A_FIRM, date_param, fy_param, i
 from billing.period_lock import closed_months
 from billing.services.sales import FIRM_FIELDS, firm_snapshot, sent_block
 from billing.tax_rules import (
-    GSTIN_SHAPE,
     HEADS,
     PAISA,
     THOUSANDTH,
@@ -40,6 +39,7 @@ from billing.tax_rules import (
     normalize_rate,
     place_of_supply,
     rate_as_percent,
+    registered,
     state_code,
     supply_interstate,
     to_paise,
@@ -420,12 +420,11 @@ def filter_bills(bills, params, dates=True):
         no_hsn = LineItem.objects.filter(Q(hsn_code__isnull=True) | Q(hsn_code__regex=r"^\s*$"), invoice=OuterRef("pk"))
         bills = bills.counted().filter(Exists(no_hsn))
     if p.get("segment") in ("b2b", "b2cl", "b2cs"):
-        registered = Q(segment_gstin__regex=GSTIN_SHAPE)
-        bills = bills.annotate(segment_gstin=Coalesce(Trim("customer__gst_number"), Value("")))
+        gstin = registered("customer__gst_number")
         if p["segment"] == "b2b":
-            bills = bills.filter(registered)
+            bills = bills.filter(gstin)
         else:
-            unregistered = bills.exclude(registered)
+            unregistered = bills.exclude(gstin)
             large = [inv.pk for inv in unregistered.filter(total_amount__gt=B2CL_THRESHOLD).only(*CHECK_FIELDS)
                      if classify_b2c(inv.business, inv)[0] == "b2cl"]
             bills = unregistered.filter(pk__in=large) if p["segment"] == "b2cl" else unregistered.exclude(pk__in=large)

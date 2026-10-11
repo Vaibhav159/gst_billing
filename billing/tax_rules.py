@@ -7,6 +7,8 @@ tested without a request.
 
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.db.models import Q
+
 PAISA = Decimal("0.01")
 
 
@@ -261,8 +263,20 @@ def has_gstin(value):
     return len(v) == 15 and v[:2].isdigit()
 
 
-# has_gstin for a database filter, matched against the trimmed value.
-GSTIN_SHAPE = r"^[0-9]{2}.{13}$"
+# has_gstin for a database filter, matched against the value as stored: the whitespace around it (spaces, tabs, line
+# breaks; SQL's TRIM strips spaces only), then 15 characters, the first two digits and the last not whitespace. "(?s)"
+# lets "." take a line break in Python's re (SQLite's REGEXP) as it does in Postgres. The whitespace is ASCII's, so
+# both databases read a value alike; str.strip() also trims Unicode's own spaces (a no-break space), which this reads
+# as part of the value.
+_SPACE, _NOT_SPACE = r"[ \t\n\r\f\v]", r"[^ \t\n\r\f\v]"
+GSTIN_SHAPE = rf"(?s)^{_SPACE}*[0-9]{{2}}.{{12}}{_NOT_SPACE}{_SPACE}*$"
+
+
+def registered(path="gst_number"):
+    """has_gstin as a database filter on the GSTIN at `path` ("gst_number", or "customer__gst_number" from a bill): the
+    one expression every list uses to split registered parties from the rest (Ruling 1A-11). Excluded, it keeps the
+    parties with no GSTIN at all (NULL)."""
+    return Q(**{f"{path}__regex": GSTIN_SHAPE})
 
 
 def clean_gstin(value):

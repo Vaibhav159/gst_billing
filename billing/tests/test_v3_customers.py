@@ -1,17 +1,22 @@
 """Customers' figures and statement, and the shop settings (plan 1A, Task 9)."""
 
+import sys
+import threading
 from unittest.mock import patch
 
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import Model
-from django.test import TestCase
+from django.db.models.query import QuerySet
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 
 from billing.constants import BILL_CANCELLED
 from billing.gstin import check_digit
 from billing.models import DEFAULT_SHARE_MESSAGE, AuditLog, Customer, Invoice, ShopSetting
 from billing.services.bin import bin_bill
+from billing.tax_rules import has_gstin
 from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, line, person, sale
 
 GSTIN = "08AAKFS4821M1Z9"
@@ -207,6 +212,23 @@ class CustomerFiguresTest(TestCase):
             with self.subTest(scope=scope):
                 rows = self.rows(ordering="-last_bill", **scope)["results"]
                 self.assertEqual([c["name"] for c in rows], order)
+                last = [(c["figures"]["last_bill"]["invoice_date"], c["figures"]["last_bill"]["id"]) for c in rows[:-1]]
+                self.assertEqual(last, sorted(last, reverse=True))  # the rows' own last_bill, newest first
+
+    def test_the_bill_made_last_decides_not_the_customer_or_their_newest_typed_bill(self):
+        # Task 9's re-review: Aadi is billed on 9 Oct, then Zoya on 9 Oct, then an Aadi paper bill dated 15 Sep is
+        # typed in last. Zoya's 9 Oct bill was made after Aadi's, so Zoya lists first. Neither the customer's own id
+        # (Aadi's record is the newer one) nor the customer's newest bill of any date (Aadi's paper bill) decides, and
+        # neither does the name.
+        zoya, aadi = buyer("Zoya Gems"), buyer("Aadi Traders")
+        sale(self.kgh, aadi, "11", "2026-10-09")
+        sale(self.kgh, zoya, "12", "2026-10-09")
+        sale(self.kgh, aadi, "13", "2026-09-15", paper=True)
+        for scope in ({}, {"figures_business_id": self.kgh.pk}):
+            with self.subTest(scope=scope):
+                rows = self.rows(ordering="-last_bill", **scope)["results"]
+                self.assertEqual([c["name"] for c in rows[:2]], ["Zoya Gems", "Aadi Traders"])
+                self.assertEqual(rows[-1]["name"], "Walk-in Customer")
                 last = [(c["figures"]["last_bill"]["invoice_date"], c["figures"]["last_bill"]["id"]) for c in rows[:-1]]
                 self.assertEqual(last, sorted(last, reverse=True))  # the rows' own last_bill, newest first
 
@@ -443,6 +465,81 @@ class ReadsTest(TestCase):
         self.assertEqual(loads, [])
 
 
+class OneGstinRuleTest(TestCase):
+    """Ruling 1A-11 (Task 9's review, minor 1): one database filter says whether a party has a GSTIN, and it reads a
+    value as tax_rules.has_gstin does: 15 characters once the whitespace around them is trimmed, the first two
+    digits. SQL's TRIM strips spaces only, while str.strip() also strips tabs and line breaks, so a GSTIN pasted with
+    a tab was a business on the bill's page and a person in the lists."""
+
+    # Values a GSTIN box has been seen to hold, and the edges of the rule: whitespace around the 15 characters (spaces,
+    # tabs, line breaks, a vertical tab, a form feed), inside them, and around only 14 of them.
+    VALUES = (None, "", "NA", "URP", " " * 15, GOOD_GSTIN, f" {GOOD_GSTIN} ", f"\t{GOOD_GSTIN}", f"{GOOD_GSTIN}\n",
+              f"\r\n{GOOD_GSTIN}\r\n", f"\x0b{GOOD_GSTIN}\x0c", f"{GOOD_GSTIN[:14]}\t", f"\t{GOOD_GSTIN[1:]}",
+              f" \t {GOOD_GSTIN[:14]} \t ", f"{GOOD_GSTIN}X", f"X{GOOD_GSTIN[1:]}", f"{GOOD_GSTIN[:7]} {GOOD_GSTIN[8:]}",
+              f"{GOOD_GSTIN[:7]}\n{GOOD_GSTIN[8:]}", f"\n{GOOD_GSTIN[:7]}\n{GOOD_GSTIN[8:]}\n", f"A8{GOOD_GSTIN[2:]}",
+              f"{GOOD_GSTIN[:2]}\t{GOOD_GSTIN[3:]}\t")
+
+    def test_the_database_reads_a_gstin_as_has_gstin_does(self):
+        from billing.tax_rules import registered
+
+        made = {Customer.objects.create(name=f"Party {n}", gst_number=value).pk: value
+                for n, value in enumerate(self.VALUES)}
+        with_gstin = {pk for pk, value in made.items() if has_gstin(value)}
+        self.assertEqual(len(with_gstin), 10)  # the rule's own answers, so the test can't pass on an empty match
+        self.assertEqual(set(Customer.objects.filter(registered("gst_number")).values_list("pk", flat=True)),
+                         with_gstin)
+        self.assertEqual(set(Customer.objects.exclude(registered("gst_number")).values_list("pk", flat=True)),
+                         set(made) - with_gstin)  # no GSTIN at all (NULL) included
+        kgh = firm()
+        bills = {sale(kgh, Customer.objects.get(pk=pk), str(n + 1), "2026-10-01").pk: pk for n, pk in enumerate(made)}
+        self.assertEqual({bills[pk] for pk in Invoice.objects.filter(registered("customer__gst_number"))
+                          .values_list("pk", flat=True)}, with_gstin)
+        self.assertEqual({bills[pk] for pk in Invoice.objects.exclude(registered("customer__gst_number"))
+                          .values_list("pk", flat=True)}, set(made) - with_gstin)
+
+    def test_a_gstin_stored_with_a_tab_is_one_in_every_list(self):
+        kgh = firm()
+        tabbed = Customer.objects.create(name="Tab Gems", gst_number=f"\t{GOOD_GSTIN}\n", state_name="RAJASTHAN")
+        b2b, b2c = sale(kgh, tabbed, "1", "2026-10-01"), sale(kgh, buyer(), "2", "2026-10-02")
+        owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
+
+        def listed(url, key, **params):
+            r = owner.get(reverse(url), params)
+            self.assertEqual(r.status_code, 200, r.data)
+            return [row[key] for row in r.data["results"]]
+
+        for params, names in (({"has_gstin": "1"}, ["Tab Gems"]), ({"has_gstin": "0"}, ["Anil Gupta"]),
+                              ({"type": "business"}, ["Tab Gems"]), ({"type": "person"}, ["Anil Gupta"])):
+            with self.subTest(params=params):
+                self.assertEqual(listed("customer-list", "name", figures="1", **params), names)
+        self.assertEqual(listed("sale-list", "id", segment="b2b"), [b2b.pk])  # v3's bills list
+        self.assertEqual(listed("sale-list", "id", segment="b2cs"), [b2c.pk])
+        self.assertEqual(listed("invoice-list", "id", segment="b2b"), [b2b.pk])  # v2's reconciliation drill-down
+        self.assertEqual(listed("invoice-list", "id", segment="b2c"), [b2c.pk])
+        # ... as the bill's page and the customer's own type read it, in Python
+        self.assertEqual(owner.get(reverse("sale-detail", args=[b2b.pk])).data["segment"], "b2b")
+        self.assertEqual(tabbed.kind, "business")
+
+
+class LimitTest(TestCase):
+    """Task 9's review, minor 4: v2's paginator read limit=0 as "no pages", so customers/ answered a 500 and
+    invoices/ every bill at once. A limit below 1 is ignored now, and the default page applies."""
+
+    def test_a_limit_below_1_is_ignored(self):
+        owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
+        kgh = firm()
+        for n in range(16):
+            sale(kgh, buyer(f"Party {n:02d}"), str(n + 1), "2026-10-01")
+        for url in (reverse("customer-list"), reverse("invoice-list")):
+            for limit in ("0", "-1", "-40", "00"):
+                with self.subTest(url=url, limit=limit):
+                    r = owner.get(url, {"limit": limit})
+                    self.assertEqual(r.status_code, 200)
+                    self.assertEqual((r.data["count"], len(r.data["results"])), (16, 15))
+            with self.subTest(url=url, limit="3"):
+                self.assertEqual(len(owner.get(url, {"limit": "3"}).data["results"]), 3)  # 1 or more still sets it
+
+
 class ShopSettingsTest(TestCase):
     def setUp(self):
         self.owner = person("kailash", *ROLE_GROUPS["owner"], first_name="Kailash", last_name="Mehta")
@@ -561,3 +658,86 @@ class ShopSettingsTest(TestCase):
         ShopSetting.objects.filter(pk=1).update(updated_by=self.owner)
         self.owner.delete()
         self.assertIsNone(ShopSetting.load().updated_by)
+
+    def test_a_save_that_changes_nothing_answers_the_stored_row(self):
+        # Task 9's re-review: on Postgres a save that waited for the row lock behind another owner's change re-reads
+        # the changed row, but its join to the person can come back empty, so the answer said nobody changed them.
+        # A save that changes nothing answers a fresh read instead: the row as stored, with who changed it last. Here
+        # the locked read comes back as Postgres's recheck can give it (BusySettingsTest has the race itself).
+        url = reverse("shop-settings")
+        vimla = person("vimla", *ROLE_GROUPS["owner"], first_name="Vimla", last_name="Jain")
+        client_for(vimla).put(url, {"copies": "all"}, format="json")
+        found = QuerySet.get_or_create
+
+        def rechecked(queryset, *args, **kwargs):
+            setting, made = found(queryset, *args, **kwargs)
+            if queryset.model is ShopSetting:
+                setting.updated_by = None  # the person the lock's recheck couldn't join
+            return setting, made
+
+        with patch.object(QuerySet, "get_or_create", rechecked):
+            r = client_for(self.owner).put(url, {"copies": "all", "show_bank": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["updated_by"], {"id": vimla.pk, "name": "Vimla Jain"})
+        self.assertEqual(r.data, client_for(self.owner).get(url).data)
+
+    def test_the_settings_need_nothing_from_the_sales_views(self):
+        # Task 9's review, minor 2: shop.py took the generic valid() from the sales view module. It lives where every
+        # v3 endpoint can share it, so the settings work without the sales views loaded.
+        import importlib
+
+        import billing.api
+
+        loaded = sys.modules["billing.api.shop"]
+        try:
+            with patch.dict(sys.modules, {"billing.api.sales": None}):  # importing it fails
+                del sys.modules["billing.api.shop"]
+                shop = importlib.import_module("billing.api.shop")
+        finally:
+            billing.api.shop = loaded  # the module the URLs use stays the one every other test sees
+        self.assertEqual(shop.valid(shop.ShopSettingSerializer, {"copies": "all"}, partial=True), {"copies": "all"})
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class BusySettingsTest(TransactionTestCase):
+    """Task 9's re-review on a database with row locks: a save of the same values that waited behind another owner's
+    change answers who made that change, not nobody."""
+
+    def test_a_save_of_the_same_that_waited_names_who_changed_them(self):
+        url = reverse("shop-settings")
+        kailash = person("kailash", *ROLE_GROUPS["owner"], first_name="Kailash", last_name="Mehta")
+        vimla = person("vimla", *ROLE_GROUPS["owner"], first_name="Vimla", last_name="Jain")
+        client_for(kailash).put(url, {"copies": "all"}, format="json")  # Kailash changed them last
+        locked, release, answer = threading.Event(), threading.Event(), {}
+
+        def vimlas_change():
+            try:
+                with transaction.atomic():
+                    setting = ShopSetting.objects.select_for_update().get(pk=1)
+                    setting.show_bank, setting.updated_by, setting.updated_at = False, vimla, timezone.now()
+                    setting.save()
+                    locked.set()
+                    release.wait(10)
+            finally:
+                connection.close()
+
+        def kailashs_same_save():
+            try:
+                answer["put"] = client_for(kailash).put(url, {"copies": "all", "show_bank": False}, format="json").data
+            finally:
+                connection.close()
+
+        first = threading.Thread(target=vimlas_change, daemon=True)  # a daemon, so a stuck lock can't keep pytest open
+        first.start()
+        self.assertTrue(locked.wait(10))
+        second = threading.Thread(target=kailashs_same_save, daemon=True)
+        second.start()
+        second.join(0.5)
+        self.assertTrue(second.is_alive())  # waiting on Vimla's lock
+        release.set()
+        first.join(10)
+        second.join(10)
+        self.assertEqual((answer["put"]["show_bank"], answer["put"]["updated_by"]),
+                         (False, {"id": vimla.pk, "name": "Vimla Jain"}))
+        self.assertFalse(AuditLog.objects.filter(entity="settings", user=kailash).exclude(details="Changed copies")
+                         .exists())  # Kailash's second save changed nothing and logged nothing

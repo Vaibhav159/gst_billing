@@ -703,3 +703,47 @@ class QuickSearchTest(TestCase):
         bill = sale(biz, cust, "31", str(timezone.localdate()))
         r = client_for(person("manoj", *ROLE_GROUPS["viewer"])).get(reverse("quick-search"), {"q": "31\x00"})
         self.assertEqual((r.status_code, [row["id"] for row in r.data["invoices"]]), (200, [bill.pk]))
+
+    def test_a_bare_paper_number_finds_its_bills_past_newer_numbers_that_hold_it(self):
+        # Ruling 1A-40: "31" found at most 8 numbers containing 31, newest first. Once nine newer numbers held 31
+        # (/310 to /316, /131, /231), bill 31 itself fell out. A number whose number part is 31 now comes before them,
+        # in any firm, newest first, after a number that is exactly "31".
+        kgh, mo, cust = firm(), firm("MEERA ORNAMENTS", gstin="08AAAAA0000A1Z5"), buyer()
+        today = timezone.localdate()
+        ours = sale(kgh, cust, "KGH/2026-27/31", str(today - timedelta(days=40)))
+        theirs = sale(mo, cust, "MO-031", str(today - timedelta(days=50)), status=BILL_CANCELLED)
+        newer = [sale(kgh, cust, f"KGH/2026-27/{n}", str(today - timedelta(days=k)))
+                 for k, n in enumerate((310, 311, 312, 313, 314, 315, 316, 131, 231))]
+        viewer = client_for(person("manoj", *ROLE_GROUPS["viewer"]))
+
+        def found(q):
+            r = viewer.get(reverse("quick-search"), {"q": q})
+            self.assertEqual(r.status_code, 200)
+            return [row["id"] for row in r.data["invoices"]]
+
+        self.assertEqual(found("31"), [ours.pk, theirs.pk, *(b.pk for b in newer[:6])])
+        self.assertEqual(found("031"), [ours.pk, theirs.pk])  # leading zeros say the same number
+        self.assertEqual(found("0031"), [ours.pk, theirs.pk])
+        exact = sale(firm("NEW FIRM", gstin="08BBBBB0000B1Z5"), cust, "31", str(today - timedelta(days=90)))
+        self.assertEqual(found("31")[:3], [exact.pk, ours.pk, theirs.pk])  # the exact number still first
+        # Only plain digits are a number part: "/31" finds what holds it, newest first, as before, and another
+        # script's digits find nothing.
+        self.assertEqual(found("/31"), [*(b.pk for b in newer[:7]), ours.pk])
+        self.assertEqual(found("٣١"), [])
+
+    def test_the_search_for_a_number_stays_one_narrow_bounded_read(self):
+        # Ruling 1A-40 within Rulings 1A-34 and 1A-39: one read of the bills, at most 8 rows, around the cache (the
+        # pin in test_v3_cacheops runs q=31), in only the columns the rows show.
+        kgh, cust = firm(), buyer()
+        for n in range(1, 41):
+            sale(kgh, cust, f"KGH/2026-27/{n}31", "2026-10-01", notes="Order note " * 5)
+        viewer = client_for(person("manoj", *ROLE_GROUPS["viewer"]))
+        viewer.get(reverse("quick-search"), {"q": "31"})  # anything a first request sets up
+        with CaptureQueriesContext(connection) as seen:
+            r = viewer.get(reverse("quick-search"), {"q": "31"})
+        self.assertEqual(len(r.data["invoices"]), 8)
+        bills = [q["sql"] for q in seen.captured_queries if 'FROM "billing_invoice"' in q["sql"]]
+        self.assertEqual(len(bills), 1, bills)
+        self.assertIn("LIMIT 8", bills[0])
+        self.assertEqual([column for column in ('"notes"', '"firm_snapshot"', '"place_of_supply"', '"cancel_reason"',
+                                                '"address"', '"pan_number"') if column in bills[0]], [])

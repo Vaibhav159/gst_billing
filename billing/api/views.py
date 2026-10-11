@@ -20,7 +20,7 @@ from django.db.models import (
     Sum,
     Value,
 )
-from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear, Trim
+from django.db.models.functions import Cast, Coalesce, Concat, ExtractMonth, ExtractYear
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -60,7 +60,7 @@ from billing.services.customers import (
 from billing.services.customers import statement as customer_statement
 from billing.services.line_items import build_line_items
 from billing.services.sales import CANCELLED_WORDS
-from billing.tax_rules import GSTIN_SHAPE, itc_refusal
+from billing.tax_rules import itc_refusal, registered
 from billing.utils import (
     AIInvoiceProcessingError,
     AIInvoiceProcessor,
@@ -115,9 +115,14 @@ class StandardResultsSetPagination(PageNumberPagination):
         limit = request.query_params.get("limit")
         if limit:
             try:
-                return min(int(limit), self.max_page_size)
+                limit = int(limit)
             except ValueError:
                 pass
+            else:
+                # Below 1 is no page size: 0 read as "no pages" (customers/ was a 500, invoices/ sent every bill at
+                # once) and -1 as an invalid page. The default page applies instead (Task 9's review, minor 4).
+                if limit >= 1:
+                    return min(limit, self.max_page_size)
         return super().get_page_size(request)
 
 
@@ -951,9 +956,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # the rollup's own test (has_gstin): "NA" or "URP" isn't a GSTIN.
         segment = self.request.query_params.get("segment")
         if segment in ("b2b", "b2c"):
-            queryset = queryset.annotate(segment_gstin=Coalesce(Trim("customer__gst_number"), Value("")))
-            registered = Q(segment_gstin__regex=GSTIN_SHAPE)
-            queryset = queryset.filter(registered) if segment == "b2b" else queryset.exclude(registered)
+            gstin = registered("customer__gst_number")
+            queryset = queryset.filter(gstin) if segment == "b2b" else queryset.exclude(gstin)
 
         # Filter by payment mode; "none" selects rows where it was never set.
         payment_mode = self.request.query_params.get("payment_mode")

@@ -12,13 +12,13 @@ from collections import defaultdict
 from decimal import Decimal
 
 from django.db.models import Case, Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value, When, Window
-from django.db.models.functions import Coalesce, RowNumber, Trim
+from django.db.models.functions import RowNumber
 
 from billing.constants import BILL_CANCELLED
 from billing.models import Invoice
 from billing.params import text_param
 from billing.services.bill_reads import itax_flags, lines_of, sums
-from billing.tax_rules import GSTIN_SHAPE, HEADS
+from billing.tax_rules import HEADS, registered
 from billing.text import money
 
 ZERO = Decimal("0")
@@ -88,14 +88,13 @@ def figures_summary(customers, firm=None, start=None, end=None, count=None):
 
 def filter_customers(customers, params):
     """customers/'s v3 filters (6.1): a GSTIN or none, the state, and the effective type, read as Customer.kind
-    reads them (the stored customer_type, else business with a GSTIN, else person; a GSTIN is has_gstin's, the
-    value trimmed)."""
-    customers = customers.alias(gstin=Coalesce(Trim("gst_number"), Value("")))
-    registered = Q(gstin__regex=GSTIN_SHAPE)
+    reads them (the stored customer_type, else business with a GSTIN, else person; a GSTIN is has_gstin's, read in
+    the database by tax_rules.registered)."""
+    gstin = registered("gst_number")
     if params.get("has_gstin") == "1":
-        customers = customers.filter(registered)
+        customers = customers.filter(gstin)
     elif params.get("has_gstin") == "0":
-        customers = customers.exclude(registered)
+        customers = customers.exclude(gstin)
     state = text_param(params, "state_name")
     if state:
         customers = customers.filter(state_name__iexact=state)
@@ -103,9 +102,9 @@ def filter_customers(customers, params):
     if kind == "walkin":
         customers = customers.filter(customer_type="walkin")
     elif kind == "business":
-        customers = customers.filter(Q(customer_type="business") | (Q(customer_type="") & registered))
+        customers = customers.filter(Q(customer_type="business") | (Q(customer_type="") & gstin))
     elif kind == "person":
-        customers = customers.filter(Q(customer_type="person") | (Q(customer_type="") & ~registered))
+        customers = customers.filter(Q(customer_type="person") | (Q(customer_type="") & ~gstin))
     return customers
 
 

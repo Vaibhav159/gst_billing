@@ -15,6 +15,16 @@ from billing.params import text_param
 
 from .permissions import RoleBasedPermission
 
+# What a bill found by its number shows: these columns and its customer's name (Ruling 1A-39).
+BILL_FIELDS = ("invoice_number", "invoice_date", "total_amount", "type_of_invoice", "business", "status", "paper",
+               "customer__name")
+
+
+def number_part(digits):
+    """The bills whose number part is `digits` as a number, a database filter: the trailing digits numbering.counter_of
+    reads, so "31" (or "031") finds KGH/2026-27/31, MO-031 and 31, and never 131 or 310."""
+    return Q(invoice_number__regex=rf"(^|[^0-9])0*{digits.lstrip('0') or '0'}[ \t\n\r\f\v]*$")
+
 
 class QuickSearchView(APIView):
     permission_classes = [RoleBasedPermission]
@@ -56,8 +66,15 @@ class QuickSearchView(APIView):
                 ],
             })
 
-        # A bill whose number is exactly q comes first: "31" finds 31 before 131 (part 0 carry).
-        exact = Case(When(invoice_number__iexact=q, then=Value(0)), default=Value(1), output_field=IntegerField())
+        # A bill whose number is exactly q comes first: "31" finds 31 before 131 (part 0 carry). Then, for plain
+        # digits, the bills whose number part is q, any firm, newest first (Ruling 1A-40): eight newer numbers holding
+        # 31 (/310 to /317) no longer push KGH/2026-27/31 out of the eight rows. One read, in the columns the rows show.
+        number, first = Q(invoice_number__icontains=q), [When(invoice_number__iexact=q, then=Value(0))]
+        if q.isascii() and q.isdigit():
+            part = number_part(q)
+            number |= part
+            first.append(When(part, then=Value(1)))
+        rank = Case(*first, default=Value(2), output_field=IntegerField())
         invoices = [
             {
                 "id": i.id,
@@ -70,10 +87,11 @@ class QuickSearchView(APIView):
                 "status": i.status,
                 "paper": i.paper,
             }
-            for i in uncached(Invoice).filter(invoice_number__icontains=q)
+            for i in uncached(Invoice).filter(number)
             .select_related("customer")
-            .annotate(exact=exact)
-            .order_by("exact", "-invoice_date", "-id")[:8]
+            .only(*BILL_FIELDS)
+            .annotate(rank=rank)
+            .order_by("rank", "-invoice_date", "-id")[:8]
         ]
 
         products = [

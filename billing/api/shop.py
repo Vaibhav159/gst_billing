@@ -9,8 +9,8 @@ from rest_framework.views import APIView
 from billing.models import AuditLog, ShopSetting
 from billing.text import person, stamp
 
+from .body import valid
 from .permissions import V3Permission
-from .sales import valid
 
 COPIES_WORDS = "Choose Original, Duplicate, Triplicate or All three."
 BANK_WORDS = "Choose whether bills show the bank details."
@@ -75,4 +75,7 @@ class ShopSettingsView(APIView):
                 AuditLog.objects.create(action="updated", entity="settings", entity_id=setting.pk,
                                         entity_name="Shop settings", user=request.user,
                                         details=f"Changed {', '.join(changed)}")
-        return Response(shown(setting))
+        # A save that changed nothing answers the row as stored, read afresh: on Postgres one that waited for the lock
+        # behind another owner's change re-reads the changed row, but its join can miss the person who changed it
+        # (Task 9's re-review), so the locked read's own person can be nobody.
+        return Response(shown(setting if changed else ShopSetting.load()))
