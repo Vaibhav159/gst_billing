@@ -37,6 +37,7 @@ from .purchases import PurchaseBinViewSet, PurchasesViewSet
 from .reconciliation import ReconciliationView
 from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
+from .setup import SetupView
 from .shop import ShopSettingsView
 from .suppliers import SupplierViewSet
 from .views import (
@@ -117,6 +118,7 @@ urlpatterns = [
     path("firms/<int:pk>/signature/", FirmSignatureView.as_view(), name="firm-signature"),
     path("catalog/", CatalogList.as_view(), name="catalog"),
     path("catalog/<int:pk>/", CatalogDetail.as_view(), name="catalog-detail"),
+    path("setup/", SetupView.as_view(), name="setup"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",

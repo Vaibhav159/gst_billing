@@ -549,7 +549,7 @@ class ShopSettingsTest(TestCase):
         self.assertEqual(r.data, {
             "copies": "original", "show_bank": True,
             "share_message": "Namaste {customer}, your bill {number} for {total} from {firm} is attached. Thank you!",
-            "updated_at": None, "updated_by": None})
+            "updated_at": None, "updated_by": None, "default_business": None, "default_business_name": None})
         self.assertFalse(ShopSetting.objects.exists())
 
     def test_the_owner_makes_them_the_default(self):
@@ -575,7 +575,7 @@ class ShopSettingsTest(TestCase):
         saved = owner.put(reverse("shop-settings"), {"share_message": "  Your bill {number} is attached.  "},
                           format="json").data
         read = client_for(person("manoj", *ROLE_GROUPS["viewer"])).get(reverse("shop-settings")).data
-        self.assertEqual(saved, read)
+        self.assertEqual(saved, {**read, "warnings": []})
         self.assertEqual((read["copies"], read["show_bank"], read["share_message"]),
                          ("original", True, "Your bill {number} is attached."))
         self.assertRegex(read["updated_at"], r"^2\d{3}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+\+05:30$")
@@ -595,7 +595,7 @@ class ShopSettingsTest(TestCase):
         # the defaults and no stamp, so everyone reads exactly what they read before.
         owner, url = client_for(self.owner), reverse("shop-settings")
         defaults = owner.get(url).data
-        self.assertEqual(owner.put(url, {"copies": "original", "show_bank": True}, format="json").data, defaults)
+        self.assertEqual(owner.put(url, {"copies": "original", "show_bank": True}, format="json").data, {**defaults, "warnings": []})
         self.assertEqual((owner.get(url).data, defaults["updated_at"], defaults["updated_by"]), (defaults, None, None))
         saved = owner.put(url, {"copies": "all"}, format="json").data
         other = client_for(person("vimla", *ROLE_GROUPS["owner"], first_name="Vimla", last_name="Jain"))
@@ -631,8 +631,8 @@ class ShopSettingsTest(TestCase):
             ({"share_message": {"text": "Hi"}}, {"share_message": message}),
             ({"share_message": "Hi\x00there"}, {"share_message": message}),
             ({"share_message": " " * 600}, {"share_message": message}),
-            ([1, 2], {"copies": copies, "show_bank": bank, "share_message": message}),
-            ("copies", {"copies": copies, "show_bank": bank, "share_message": message}),
+            ([1, 2], {"copies": copies, "show_bank": bank, "share_message": message, "default_business": ["Pick a firm from the list."]}),
+            ("copies", {"copies": copies, "show_bank": bank, "share_message": message, "default_business": ["Pick a firm from the list."]}),
         ):
             with self.subTest(body=body):
                 r = owner.put(reverse("shop-settings"), body, format="json")
@@ -679,7 +679,7 @@ class ShopSettingsTest(TestCase):
             r = client_for(self.owner).put(url, {"copies": "all", "show_bank": True}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual(r.data["updated_by"], {"id": vimla.pk, "name": "Vimla Jain"})
-        self.assertEqual(r.data, client_for(self.owner).get(url).data)
+        self.assertEqual(r.data, {**client_for(self.owner).get(url).data, "warnings": []})
 
     def test_the_settings_need_nothing_from_the_sales_views(self):
         # Task 9's review, minor 2: shop.py took the generic valid() from the sales view module. It lives where every

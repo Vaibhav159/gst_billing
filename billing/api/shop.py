@@ -1,15 +1,18 @@
 """/api/shop-settings/: the shop's printing and sharing defaults (part 1 API contract, section 5)."""
 
+import re
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.models import AuditLog, ShopSetting
+from billing.cache import uncached
+from billing.models import AuditLog, Business, ShopSetting
 from billing.text import person, stamp
 
-from .body import valid
+from .body import Picked, valid
 from .permissions import V3Permission
 
 COPIES_WORDS = "Choose Original, Duplicate, Triplicate or All three."
@@ -32,10 +35,23 @@ class ShareMessage(serializers.CharField):
 
 class ShopSettingSerializer(serializers.ModelSerializer):
     share_message = ShareMessage(max_length=500)
+    default_business = Picked(Business, "Pick a firm from the list.", fields=("id", "name"), allow_null=True, required=False)
+
+    def validate_share_message(self, value):
+        placeholders = re.findall(r"\{([^{}]*)\}", value)
+        rest = re.sub(r"\{[^{}]*\}", "", value)
+        if "{" in rest or "}" in rest:
+            raise serializers.ValidationError("A brace is left open. Each placeholder needs { and }.")
+        unknown = sorted(set(placeholders) - {"customer", "number", "total", "firm", "date"})
+        if unknown:
+            names = ", ".join("{" + name + "}" for name in unknown)
+            verb = "isn't" if len(unknown) == 1 else "aren't"
+            raise serializers.ValidationError(f"{names} {verb} something the app can fill in. Use {{customer}}, {{number}}, {{total}}, {{firm}} or {{date}}.")
+        return value
 
     class Meta:
         model = ShopSetting
-        fields = ["copies", "show_bank", "share_message"]
+        fields = ["copies", "show_bank", "share_message", "default_business"]
         extra_kwargs = {
             "copies": {"error_messages": {"invalid_choice": COPIES_WORDS, "null": COPIES_WORDS}},
             "show_bank": {"error_messages": {"invalid": BANK_WORDS, "null": BANK_WORDS}},
@@ -44,7 +60,9 @@ class ShopSettingSerializer(serializers.ModelSerializer):
 
 def shown(setting):
     """ShopSettings (contract 5)."""
-    return {"copies": setting.copies, "show_bank": setting.show_bank, "share_message": setting.share_message,
+    name = uncached(Business).filter(pk=setting.default_business_id).values_list("name", flat=True).first() if setting.default_business_id else None
+    return {"default_business": setting.default_business_id, "default_business_name": name,
+            "copies": setting.copies, "show_bank": setting.show_bank, "share_message": setting.share_message,
             "updated_at": stamp(setting.updated_at), "updated_by": person(setting.updated_by)}
 
 
@@ -66,7 +84,13 @@ class ShopSettingsView(APIView):
             # is joined (only the row locked), so one v2 deleted since answers as nobody (Ruling 1A-6).
             setting = (ShopSetting.objects.select_related("updated_by").select_for_update(of=("self",))
                        .get_or_create(pk=1)[0])
-            changed = [key for key, value in data.items() if getattr(setting, key) != value]
+            changed = [key for key, value in data.items() if
+                       (setting.default_business_id != getattr(value, "pk", None) if key == "default_business" else getattr(setting, key) != value)]
+            old_firm_name = (uncached(Business).filter(pk=setting.default_business_id).values_list("name", flat=True).first()
+                             if "default_business" in changed else None)
+            changes = {key: {"old": old_firm_name if key == "default_business" else str(getattr(setting, key)),
+                             "new": getattr(data[key], "name", None) if key == "default_business" else str(data[key])}
+                       for key in changed}
             if changed:
                 for key in changed:
                     setattr(setting, key, data[key])
@@ -74,8 +98,10 @@ class ShopSettingsView(APIView):
                 setting.save()
                 AuditLog.objects.create(action="updated", entity="settings", entity_id=setting.pk,
                                         entity_name="Shop settings", user=request.user,
-                                        details=f"Changed {', '.join(changed)}")
+                                        details=f"Changed {', '.join(changed)}", changes=changes)
         # A save that changed nothing answers the row as stored, read afresh: on Postgres one that waited for the lock
         # behind another owner's change re-reads the changed row, but its join can miss the person who changed it
         # (Task 9's re-review), so the locked read's own person can be nobody.
-        return Response(shown(setting if changed else ShopSetting.load()))
+        answer = shown(setting if changed else ShopSetting.load())
+        answer["warnings"] = [] if "{number}" in answer["share_message"] else ["Customers find bills by number. Consider adding {number}."]
+        return Response(answer)
