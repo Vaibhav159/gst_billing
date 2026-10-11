@@ -151,10 +151,10 @@ function Detail({ c }: { c: Customer }) {
 }
 
 /** "KGH/2026-27/18, KGH/2026-27/22, MO/2026-27/7 and 2 more". */
-const numbers = (list: ItaxBill[]) => list.slice(0, 3).map((b) => b.invoice_number).join(", ") + (list.length > 3 ? ` and ${list.length - 3} more` : "");
+const numbers = (list: ItaxBill[], examples = false) => (examples ? "For example, " : "") + list.slice(0, 3).map((b) => b.invoice_number).join(", ") + (!examples && list.length > 3 ? ` and ${list.length - 3} more` : "");
 
 /** The income-tax checks the bill form runs, for this customer's saved bills in every firm and year: the server's flags, by kind (Call 7). */
-function ComplianceNotes({ c, bills }: { c: Customer; bills: ItaxBill[] }) {
+function ComplianceNotes({ c, bills, count }: { c: Customer; bills: ItaxBill[]; count: number }) {
   const { can } = useAuth();
   const by = (...kinds: ItaxKind[]) => bills.filter((b) => b.itax.some((f) => kinds.includes(f.kind)));
   // on the walk-in record a big bill's flag is walkin_limit: it needs the buyer's PAN all the same
@@ -162,29 +162,31 @@ function ComplianceNotes({ c, bills }: { c: Customer; bills: ItaxBill[] }) {
   const b2cFlag = b2cAddr[0]?.itax.find((f) => f.kind === "b2c_address");
   if (!pan.length && !addr.length && !b2cAddr.length && !cash.length) return null;
   const walkin = c.type === "walkin";
+  const partial = count > bills.length;
   const edit = (field: string) => (can("customer.edit") && !walkin ? `/customers/${c.id}/edit?focus=${field}` : null);
   const panTo = edit("pan"), addrTo = edit("address");
   return (
     <div className="flex flex-col gap-2">
+      {partial ? <Banner tone="brand" title={`Income-tax checks: ${plural(count, "bill")}`}>Showing examples from the latest {plural(bills.length, "flagged bill")}.</Banner> : null}
       {pan.length ? (
-        <Banner tone="brand" icon={IdCard} title={`PAN needed: ${plural(pan.length, "bill")} over ₹2,00,000`}
+        <Banner tone="brand" icon={IdCard} title={partial ? "PAN needed on bills over ₹2,00,000" : `PAN needed: ${plural(pan.length, "bill")} over ₹2,00,000`}
           actions={walkin ? (can("customer.edit") ? <ButtonLink size="sm" to="/customers/new?from=list" icon={UserPlus}>Add the buyer</ButtonLink> : null) : panTo ? <ButtonLink size="sm" to={panTo}>Add PAN</ButtonLink> : null}>
-          {numbers(pan)}. A bill over ₹2,00,000 needs the buyer's PAN (Income Tax Rule 114B).{walkin ? " Add the buyer as a customer with their PAN." : ""}
+          {numbers(pan, partial)}. A bill over ₹2,00,000 needs the buyer's PAN (Income Tax Rule 114B).{walkin ? " Add the buyer as a customer with their PAN." : ""}
         </Banner>
       ) : null}
       {addr.length ? (
-        <Banner tone="brand" icon={MapPin} title={`Address needed: ${plural(addr.length, "bill")} to a business`} actions={addrTo ? <ButtonLink size="sm" to={addrTo}>Add the address</ButtonLink> : null}>
+        <Banner tone="brand" icon={MapPin} title={partial ? "Address needed on bills to a business" : `Address needed: ${plural(addr.length, "bill")} to a business`} actions={addrTo ? <ButtonLink size="sm" to={addrTo}>Add the address</ButtonLink> : null}>
           A bill to a GST-registered buyer carries their address. Add it once here; it prints on every bill from now on.
         </Banner>
       ) : null}
       {b2cFlag ? (
-        <Banner tone="brand" icon={MapPin} title={`${b2cFlag.short}: ${plural(b2cAddr.length, "bill")}`} actions={addrTo ? <ButtonLink size="sm" to={addrTo}>Add the address</ButtonLink> : null}>
-          {numbers(b2cAddr)}. {b2cFlag.text}
+        <Banner tone="brand" icon={MapPin} title={`${walkin ? b2cFlag.short : "The buyer's address is missing"}${partial ? "" : `: ${plural(b2cAddr.length, "bill")}`}`} actions={addrTo ? <ButtonLink size="sm" to={addrTo}>Add the address</ButtonLink> : null}>
+          {numbers(b2cAddr, partial)}. {b2cFlag.text}
         </Banner>
       ) : null}
       {cash.length ? (
-        <Banner tone="neg" icon={Banknote} title={`Cash at the limit: ${plural(cash.length, "bill")} of ₹2,00,000 or more taken in cash`}>
-          {numbers(cash)}. Income Tax Sec 269ST doesn't allow ₹2,00,000 or more in cash for one bill. Check with your CA.
+        <Banner tone="neg" icon={Banknote} title={partial ? "Cash at the limit" : `Cash at the limit: ${plural(cash.length, "bill")} of ₹2,00,000 or more taken in cash`}>
+          {numbers(cash, partial)}. Income Tax Sec 269ST doesn't allow ₹2,00,000 or more in cash for one bill. Check with your CA.
         </Banner>
       ) : null}
     </div>
@@ -198,7 +200,7 @@ function ComplianceNotes({ c, bills }: { c: Customer; bills: ItaxBill[] }) {
  */
 function IncomeTaxNotes({ c, q }: { c: Customer; q: D["itax"] }) {
   const offline = useNetwork() === "offline";
-  if (q.data) return <ComplianceNotes c={c} bills={q.data} />;
+  if (q.data) return <ComplianceNotes c={c} bills={q.data} count={q.count ?? 0} />;
   if (!q.isError && !(offline && q.isPaused)) return null;
   return (
     <Banner tone="muted" icon={offline ? WifiOff : AlertTriangle} title="Couldn't check their bills for income tax"

@@ -216,7 +216,7 @@ test.each([false, true])("Rule 46(f) counts missing name-and-address bills along
   serve({ "GET customers/7/": { ...ANIL, address: "" }, "GET customers/7/statement/": statement(), "GET sales/": rows });
   mount(routes, ["/customers/7"]);
   await pass(400);
-  const note = screen.getByText("Name and address needed: 2 bills").closest("[role=status]") as HTMLElement;
+  const note = screen.getByText("The buyer's address is missing: 2 bills").closest("[role=status]") as HTMLElement;
   expect(note).toHaveTextContent("KGH/2026-27/18, KGH/2026-27/22");
   expect(note).toHaveTextContent(text);
   expect(within(note).getByRole("link", { name: "Add the address" })).toHaveAttribute("href", "/customers/7/edit?focus=address");

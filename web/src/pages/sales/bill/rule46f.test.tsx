@@ -29,7 +29,7 @@ test.each([false, true])("Rule 46(f): a named buyer's address is fixed in place 
   const { router } = mount(routes, ["/sales/412"]);
   await pass(400);
   const banner = screen.getByText(namedText).closest("[role=status]") as HTMLElement;
-  expect(banner).toHaveTextContent(short);
+  expect(banner).toHaveTextContent("The buyer's address is missing");
   fireEvent.click(within(banner).getByRole("button", { name: "Add the address" }));
   await pass(400);
   const sheet = screen.getByRole("dialog", { name: "Anil Gupta's address" });
@@ -50,7 +50,7 @@ test.each([false, true])("Rule 46(f): the walk-in fix opens the bill's customer 
   await pass(400);
   const banner = screen.getByText(walkinText).closest("[role=status]") as HTMLElement;
   expect(banner).toHaveTextContent(short);
-  fireEvent.click(within(banner).getByRole("button", { name: "Choose the buyer" }));
+  fireEvent.click(within(banner).getByRole("button", { name: "Choose customer" }));
   await pass(400);
   expect(router.state.location.pathname + router.state.location.search).toBe("/sales/412/edit?focus=customer");
   const picker = screen.getByRole("dialog", { name: "Customer" });
@@ -65,8 +65,8 @@ test("Rule 46(f): the walk-in fix respects a filed month's bill lock", async () 
   formServer([["GET", "sales/412/", () => wireDetail({ customer: WALKIN, itax: [flag(walkinText)], locked: true })]]);
   mount(routes, ["/sales/412"]);
   await pass(400);
-  expect(screen.getByRole("button", { name: "Choose the buyer" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Choose the buyer" })).toHaveAttribute("title", LOCKED_REASON);
+  expect(screen.getByRole("button", { name: "Choose customer" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Choose customer" })).toHaveAttribute("title", LOCKED_REASON);
 });
 
 test.each([ANIL, WALKIN])("Rule 46(f): a viewer sees the flag without a write action for $name", async (customer) => {

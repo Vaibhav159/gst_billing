@@ -134,8 +134,9 @@ export function toStatement(raw: unknown): Statement {
     months: list(d.months).map(obj).map((m) => ({ month: str(m.month), bills: num(m.bills), total: money(m.total) })),
   };
 }
-function toItaxBills(raw: unknown): ItaxBill[] {
-  return list(obj(raw).results).map(obj).map((b) => ({ id: num(b.id), invoice_number: str(b.invoice_number), invoice_date: str(b.invoice_date), total_amount: money(b.total_amount), itax: readItaxFlags(b.itax) }));
+function toItaxBills(raw: unknown): { count: number; rows: ItaxBill[] } {
+  const d = obj(raw);
+  return { count: num(d.count), rows: list(d.results).map(obj).map((b) => ({ id: num(b.id), invoice_number: str(b.invoice_number), invoice_date: str(b.invoice_date), total_amount: money(b.total_amount), itax: readItaxFlags(b.itax) })) };
 }
 
 /* ── Query keys ────────────────────────────────────────── */
@@ -246,11 +247,12 @@ export function useStatement(id: number | null, params: StatementParams | null) 
 }
 /** A customer's bills with an income-tax flag, every firm and year, newest first (200 at most). */
 export function useItaxBills(customerId: number | null) {
-  return useQuery({
+  const q = useQuery({
     queryKey: customerKeys.itax(customerId ?? 0),
-    // ponytail: one page of 200 flagged bills; a customer with more would show the first 200's numbers and counts
+    // ponytail: one page of 200 examples, with the response's total; exact per-kind totals would need a server summary.
     queryFn: customerId === null ? skipToken : async ({ signal }) => toItaxBills((await api.get("sales/", { params: { customer_id: customerId, itax: 1, ordering: "-date", page_size: 200 }, signal })).data),
   });
+  return { ...q, data: q.data?.rows, count: q.data?.count };
 }
 /** Customers whose name, phone or GSTIN has `term` in it (from 2 characters), with their last bill in any firm. */
 export function useCustomerSearch(term: string, { size = 8, enabled = true, figures = true }: { size?: number; enabled?: boolean; figures?: boolean } = {}) {

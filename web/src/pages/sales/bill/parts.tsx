@@ -207,7 +207,7 @@ export function RoleNote() {
 
 const ITAX_TITLE: Record<string, string> = {
   cash_limit: "Cash at or over the ₹2,00,000 limit", pan: "The buyer's PAN is missing", walkin_limit: "A walk-in bill over ₹2,00,000", b2b_address: "The buyer's address is missing",
-  b2c_address: "Name and address needed",
+  b2c_address: "The buyer's address is missing",
 };
 
 /**
@@ -291,10 +291,10 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
     if (canFix && b.itax.some((x) => x.kind === "b2b_address")) acts.push(<ButtonLink key="addr" size="sm" to={`/customers/${c.id}/edit?focus=address`}>Add the address</ButtonLink>);
     if (b.itax.some((x) => x.kind === "b2c_address")) {
       if (canFix) acts.push(<Button key="b2c-address" size="sm" onClick={() => setFixAddress(true)}>Add the address</Button>);
-      else if (c.type === "walkin" && d.can("bill.edit")) acts.push(<Button key="buyer" size="sm" disabled={Boolean(d.editBlock)} title={d.editBlock || undefined} onClick={() => d.navigate(`/sales/${b.id}/edit?focus=customer`)}>Choose the buyer</Button>);
+      else if (c.type === "walkin" && d.can("bill.edit")) acts.push(<Button key="buyer" size="sm" disabled={Boolean(d.editBlock)} title={d.editBlock || undefined} onClick={() => d.navigate(`/sales/${b.id}/edit?focus=customer`)}>Choose customer</Button>);
     }
     out.push(<Banner key="it" tone={b.itax.some((x) => x.kind === "cash_limit") ? "neg" : "brand"} icon={Scale}
-      title={b.itax.length === 1 ? ITAX_TITLE[b.itax[0].kind] : `${b.itax.length} things to check on this bill`} actions={acts.length ? <>{acts}</> : null}>
+      title={b.itax.length === 1 ? b.itax[0].kind === "b2c_address" && c.type === "walkin" ? "Name and address needed" : ITAX_TITLE[b.itax[0].kind] : `${b.itax.length} things to check on this bill`} actions={acts.length ? <>{acts}</> : null}>
       {b.itax.length === 1 ? b.itax[0].text : <ul className="list-disc pl-5 flex flex-col gap-1">{b.itax.map((x) => <li key={x.kind}>{x.text}</li>)}</ul>}
     </Banner>);
   }
@@ -310,5 +310,5 @@ export function StateBanners({ b, d }: { b: BillDetail; d: Detail }) {
       This bill can be printed and sent, not edited, cancelled or deleted. Unlock the month in GST returns first (owner only).
     </Banner>);
   }
-  return <>{out}<CustomerFixSheet customer={toCustomer(b.customer)} field="address" open={fixAddress} onClose={() => setFixAddress(false)} /></>;
+  return <>{out}<CustomerFixSheet customer={toCustomer(b.customer)} field="address" open={fixAddress} onClose={() => setFixAddress(false)} onSaved={() => document.querySelector<HTMLElement>("#app-main [data-page-title]")?.focus({ preventScroll: true })} /></>;
 }

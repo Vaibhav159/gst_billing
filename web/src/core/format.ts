@@ -90,6 +90,7 @@ export function plural(n: number, one: string, many?: string): string {
 /**
  * A name's possessive: "Anil Gupta's", and the apostrophe alone after a final s: "Kulkarni Jewellers'". A name that is
  * one already ("Ram Lal & Son's") stays as it is; a space kept after a name is dropped.
+ * Keep the server twin in billing/services/bill_reads.py, itax_flags, in sync.
  */
 export function possessive(name: string): string {
   const n = name.trimEnd();
