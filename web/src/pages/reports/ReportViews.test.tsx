@@ -52,6 +52,12 @@ it("keeps CTM, 0.25% and three decimal quantities, and switches HSN side", () =>
   fireEvent.click(screen.getByRole("radio", { name: "Purchases" }));
   expect(onSide).toHaveBeenCalledWith("purchases");
 });
+it("describes April's filing summary without claiming every period has a buyer split", () => {
+  const data: HsnReport = { rows: [], bills: 0, totals: { taxable: 0, heads: zero } };
+  renderApp(<HsnView ctx={{ ...ctx, from: "2025-04-01", to: "2025-04-30", period: "Apr 2025" }} data={data} side="sales" onSide={vi.fn()} />);
+  expect(screen.getByText(/For filing, each firm's HSN summary is on GST returns\./)).toBeVisible();
+  expect(screen.queryByText(/split into B2B and B2C/)).not.toBeInTheDocument();
+});
 it("keeps customer udhaar as billed credit and product quantities by unit on phones", () => {
   Object.assign(window, { __phone: true });
   const data: CustomersReport = { rows: [{ customer, bills: 2, total: 10300, udhaar_bills: 1, udhaar_total: 5000, last_bill: "2026-09-12" }], sales_total: 10300, walk_in: { bills: 0, total: 0 } };

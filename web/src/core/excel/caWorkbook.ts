@@ -48,7 +48,9 @@ function gstr1Rows(rows: Row[], firm: string, value: CaWorkbook["firms"][number]
   table(rows, "B2CS", records(data.b2cs), [["Place of supply", "place_of_supply"], ["State", "place_of_supply_name"], ["Inter-state", "interstate"], ["GST rate", "rate", true], ["Bills", "bills", true], ...moneyColumns]);
   table(rows, "Nil and exempt", records(data.nil), [["Supply", "supply"], ["Bills", "bills", true], ["Value", "value", true]]);
   table(rows, "By GST rate", records(data.by_rate), [["GST rate", "rate", true], ["Bills", "bills", true], ...moneyColumns, ["Tax", "tax", true], ["Value", "value", true]]);
-  for (const side of ["b2b", "b2c"]) table(rows, `HSN ${side.toUpperCase()}`, records(record(data.hsn)[side]), [["HSN", "hsn"], ["Description", "description"], ["UQC", "uqc"], ["Qty", "quantity", true], ["GST rate", "rate", true], ...moneyColumns, ["Bills", "bills", true], ["Service", "service"]]);
+  const hsn = record(data.hsn);
+  const hsnGroups = Array.isArray(hsn.data) ? [["HSN · all buyers", hsn.data]] as const : [["HSN B2B", hsn.b2b], ["HSN B2C", hsn.b2c]] as const;
+  for (const [label, values] of hsnGroups) table(rows, label, records(values), [["HSN", "hsn"], ["Description", "description"], ["UQC", "uqc"], ["Qty", "quantity", true], ["GST rate", "rate", true], ...moneyColumns, ["Bills", "bills", true], ["Service", "service"]]);
   table(rows, "Table 13 · Documents issued", records(data.docs), [["From", "from"], ["To", "to"], ["Total", "total", true], ["Cancelled", "cancelled", true], ["Net issued", "net", true]]);
   if (Array.isArray(data.docs_notes)) for (const note of data.docs_notes) rows.push({ kind: "sub", cells: [{ v: scalar(note), span: 12 }] });
   table(rows, "Cancelled and deleted bills", records(data.cancelled), [["Bill No.", "bill.invoice_number"], ["Date", "bill.invoice_date"], ["Kind", "kind"], ["Bill value", "total", true], ["Reason", "reason"], ["On", "on"]]);
@@ -78,7 +80,7 @@ function gstr3bRows(rows: Row[], firm: string, value: CaWorkbook["firms"][number
   if (data.late) {
     const late = record(data.late);
     table(rows, "Late fee · estimate", ["gstr1", "gstr3b"].map(kind => ({ ...record(late[kind]), kind: kind === "gstr1" ? "GSTR-1" : "GSTR-3B" })), [["Return", "kind"], ["Days", "days", true], ["Per day", "per_day", true], ["Late fee", "fee", true], ["Cap", "cap", true], ["Capped", "capped"]]);
-    table(rows, "Late fee and interest · estimate", [late], [["Interest", "interest", true], ["Interest on", "interest_on", true], ["Interest from", "interest_from"], ["Total", "total", true]]);
+    table(rows, "Late fee and interest · estimate", [{ ...late, interest_note: data.interest_note ?? "" }], [["Interest", "interest", true], ["Interest on", "interest_on", true], ["Interest from", "interest_from"], ["Total", "total", true], ["Interest note", "interest_note"]]);
   }
   if (data.opening_missing) rows.push({ kind: "sub", cells: [{ v: "The opening credit isn't typed yet, so the credit carried in may be too low.", span: 12 }] });
 }
