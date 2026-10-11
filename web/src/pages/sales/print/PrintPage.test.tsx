@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { __setNetState } from "@/core/api/network";
+import { queryClient } from "@/core/api/query";
 import { billQuery, type BillOutcome } from "@/core/api/sales";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
@@ -50,13 +51,15 @@ function openWith(qc: QueryClient, path = "/sales/412/print") {
 const papers = () => screen.getAllByRole("document", { name: /^Bill KGH\/2026-27\/31 on paper/ });
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 
-// jsdom has no object URLs and no downloads: a file handed out is a link clicked with its name
+// jsdom has no object URLs and no downloads: a file handed out is a link clicked with its name. window.open answers with
+// the tab it opened (Print's PDF, WhatsApp's chat), or null for one the browser stopped
 beforeEach(() => {
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({ addEventListener: () => {} }) as unknown as Window);
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
-afterEach(() => { vi.restoreAllMocks(); vi.mocked(billFile).mockClear(); vi.useRealTimers(); phone(false); });
+// (a send's PDF reads the bill and the settings through the app's own cache: plan 1E Task 6)
+afterEach(() => { vi.restoreAllMocks(); vi.mocked(billFile).mockClear(); vi.useRealTimers(); phone(false); queryClient.clear(); });
 
 test("it opens on the shop's defaults, the Original with bank details, and the tab and the file name say which bill", async () => {
   serve();
@@ -105,11 +108,11 @@ test("Print opens the PDF in a tab and goes into the audit log; PDF downloads it
   open();
   const print = await screen.findByRole("button", { name: "Print" });
   await waitFor(() => expect(print).toBeEnabled());
+  vi.mocked(window.open).mockReturnValueOnce(null);
   await userEvent.click(print);
   expect(window.open).toHaveBeenCalledWith("blob:pdf", "_blank");
   // the browser stopped the tab (window.open answered null): it says so
   expect(await screen.findByText("The PDF didn't open")).toBeInTheDocument();
-  vi.mocked(window.open).mockReturnValue({ addEventListener: () => {} } as unknown as Window);
   await userEvent.click(print);
   await waitFor(() => expect(calls.filter((c) => c.url === "audit-logs/log/").map((c) => c.body)).toEqual([
     { action: "printed", entity: "invoice", entity_id: 412, entity_name: "#KGH/2026-27/31 - Anil Gupta", details: "Printed: original copy" },
@@ -207,7 +210,7 @@ test("Send waits for the shop's WhatsApp message, and the second click of a doub
   fireEvent.click(send, { detail: 2 });
   expect(window.open).not.toHaveBeenCalled();
   fireEvent.click(send, { detail: 1 });
-  expect(window.open).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/wa\.me\/919829041122\?text=Namaste%20Anil%20Gupta/), "_blank", "noopener");
+  expect(window.open).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/wa\.me\/919829041122\?text=Namaste%20Anil%20Gupta/), "_blank");
   expect(await screen.findByRole("button", { name: "Send again" })).toBeInTheDocument();
   expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1);
 });
@@ -428,4 +431,81 @@ test("on a phone, a bill sent before whose customer now has no mobile reads Rese
   serve([], { sent: SENT, customer: { ...(wireDetail().customer as object), mobile_number: "" } });
   open();
   expect(await screen.findByRole("button", { name: "Resend to a WhatsApp number" })).toHaveTextContent(/^Resend$/);
+});
+
+/* ── A send and a share carry the PDF (Task 6) ── */
+
+test("Send from here: WhatsApp opens at once, the Original's PDF downloads beside it, and the send is recorded", async () => {
+  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
+  open();
+  await userEvent.click(await screen.findByRole("radio", { name: "All three" }));
+  await userEvent.click(screen.getByRole("switch", { name: "Bank details on the bill" }));
+  await userEvent.click(screen.getByRole("button", { name: "Send on WhatsApp" }));
+  expect(window.open).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/wa\.me\/919829041122\?text=Namaste%20Anil%20Gupta/), "_blank");
+  await waitFor(() => expect(calls.find((c) => c.url === "sales/412/sent/")?.body).toEqual({ via: "whatsapp", to: "" }));
+  // the customer gets the Original, with the bank details as this page shows them
+  expect(billFile).toHaveBeenLastCalledWith(expect.objectContaining({ id: 412 }), { copies: "original", showBank: false });
+  expect(await screen.findByText("KGH_2026-27_31.pdf downloads and WhatsApp opens a chat with Anil Gupta (+91 98290 41122). Attach the PDF there.")).toBeInTheDocument();
+});
+
+test("on a computer, Send downloads the Original this page made, rather than making it again", async () => {
+  const { calls } = serve([["POST", "sales/412/sent/", () => ({ id: 412, sent: SENT })]]);
+  open();
+  const send = await screen.findByRole("button", { name: "Send on WhatsApp" });
+  await waitFor(() => expect(screen.getByRole("button", { name: "PDF" })).toBeEnabled());
+  await waitFor(() => expect(send).toBeEnabled());
+  const made = (await vi.mocked(billFile).mock.results[0].value).blob;
+  await userEvent.click(send);
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/412/sent/")).toHaveLength(1));
+  expect(URL.createObjectURL).toHaveBeenCalledWith(made);
+  expect(billFile).toHaveBeenCalledTimes(1);
+});
+
+test("on a phone, Send hands the share sheet the Original made before the press, so it opens within the press itself", async () => {
+  // the shop prints all three copies, so the page makes those, then the Original a send carries
+  const { calls } = serve([["GET", "shop-settings/", () => ({ ...SETTINGS, copies: "all" })], ["POST", "sales/412/sent/", () => ({ id: 412, sent: { ...SENT, via: "share" } })]]);
+  phone(true);
+  const share = vi.fn(async () => {});
+  // a press counts only while its click is being dispatched, as a browser's does: it ends once the click's handlers have run
+  let pressing = false;
+  const start = () => { pressing = true; queueMicrotask(() => { pressing = false; }); };
+  window.addEventListener("click", start, true);
+  Object.assign(navigator, { share, canShare: () => true, userActivation: { get isActive() { return pressing; }, hasBeenActive: true } });
+  try {
+    open();
+    await waitFor(() => expect(billFile).toHaveBeenCalledWith(expect.objectContaining({ id: 412 }), { copies: "original", showBank: true }));
+    expect(billFile).toHaveBeenCalledWith(expect.objectContaining({ id: 412 }), { copies: "all", showBank: true });
+    await act(async () => { await Promise.all(vi.mocked(billFile).mock.results.map((r) => r.value)); });
+    const send = screen.getByRole("button", { name: "Send" });
+    await waitFor(() => expect(send).toBeEnabled());
+    await userEvent.click(send);
+    expect(share).toHaveBeenCalledWith({ files: [expect.objectContaining({ name: "KGH_2026-27_31.pdf" })], title: "KGH/2026-27/31", text: expect.stringContaining("KGH/2026-27/31") });
+    await waitFor(() => expect(calls.find((c) => c.url === "sales/412/sent/")?.body).toEqual({ via: "share", to: "" }));
+    expect(billFile).toHaveBeenCalledTimes(2);
+    expect(window.open).not.toHaveBeenCalled();
+  } finally {
+    window.removeEventListener("click", start, true);
+    Object.assign(navigator, { share: undefined, canShare: undefined, userActivation: undefined });
+  }
+});
+
+test("v2's Share PDF link (…/print?share=1) arrives with Share ready: it takes focus once the PDF is made, and nothing shares without a press", async () => {
+  serve();
+  const share = vi.fn(async () => {});
+  Object.assign(navigator, { share, canShare: () => true });
+  try {
+    const view = open("/sales/412/print?share=1");
+    const button = await screen.findByRole("button", { name: "Share" });
+    await waitFor(() => expect(button).toHaveFocus());
+    expect(button).toBeEnabled();
+    expect(share).not.toHaveBeenCalled();
+    view.unmount();
+    // an ordinary visit leaves the focus where it is
+    open();
+    const plain = await screen.findByRole("button", { name: "Share" });
+    await waitFor(() => expect(plain).toBeEnabled());
+    expect(plain).not.toHaveFocus();
+  } finally {
+    Object.assign(navigator, { share: undefined, canShare: undefined });
+  }
 });

@@ -13,6 +13,12 @@ import { ToastProvider } from "@/core/ui";
 import { renderApp, stubAuth, testQueryClient } from "@/test/render";
 import BillPage from "../BillPage";
 
+// plan 1E: a send makes the bill's PDF (core/print's own tests make real ones); here a stand-in
+vi.mock("@/core/print/make", async (real) => ({
+  ...(await real<typeof import("@/core/print/make")>()),
+  billFile: vi.fn(async () => ({ blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "bill.pdf", sheets: 1 })),
+}));
+
 const STAFF: Partial<Me> = { role: "staff", permissions: ["view", "bill.create", "bill.send", "customer.edit"] };
 function Where() { const l = useLocation(); return <p data-testid="where">{`${l.pathname}${l.search}`}</p>; }
 const mount = (path: string, me?: Partial<Me>) => renderApp(
@@ -22,7 +28,12 @@ const mount = (path: string, me?: Partial<Me>) => renderApp(
   </Routes>, { path, me });
 const status = (text: string) => screen.getByText(text).closest("[role=status]") as HTMLElement;
 
-afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.restoreAllMocks(); act(() => { onlineManager.setOnline(true); }); });
+afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.restoreAllMocks(); act(() => { onlineManager.setOnline(true); }); appClient.clear(); });
+// plan 1E: a send downloads its PDF beside the chat; jsdom (no object URLs, no downloads) clicks nothing
+beforeEach(() => {
+  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+});
 
 test("a bill's page: its number and firm, the exact total, the items, parties, what happened and the customer's other bills", async () => {
   const { calls } = salesServer([
@@ -177,13 +188,15 @@ test.each([
   ["the phone bar's", "Resend", "/sales/412", true, "Send"],
 ])("%s Send waits for the shop's WhatsApp message, sends once on a double click even when the record lands between the clicks, and reads %s in its place", async (_where, after, path, phone, before) => {
   (window as unknown as { __phone?: boolean }).__phone = phone;
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window); // the tab it opened (null: one the browser stopped)
   let settings: (w: unknown) => void = () => {};
+  // every ask waits for the one answer, as a server's do (plan 1E: a send's PDF asks again, through the app's own client)
+  const answer = new Promise((resolve) => { settings = resolve; });
   let sent: typeof SENT | null = null;
   // the record answers at once: on a quick connection it lands between a double click's two clicks
   const { calls } = salesServer([
     ["GET", "sales/412/", () => wireDetail({ sent })],
-    ["GET", "shop-settings/", () => new Promise((resolve) => { settings = resolve; })],
+    ["GET", "shop-settings/", () => answer],
     ["POST", "sales/412/sent/", () => { sent = SENT; return { id: 412, sent: SENT }; }],
   ]);
   mount(path);
@@ -444,7 +457,7 @@ test("a lasting refusal of Restore says the server's words and keeps Restore it;
 });
 
 test("the saved panel's words follow a send made from it: a new bill's say WhatsApp opened; an edited one's say the corrected bill went", async () => {
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window); // the tab it opened (null: one the browser stopped)
   const BEFORE = { at: "2026-10-08T11:00:00+05:30", last_at: "2026-10-08T11:00:00+05:30", count: 1, via: "whatsapp", to: "" };
   let sent: typeof SENT | null = null;
   salesServer([

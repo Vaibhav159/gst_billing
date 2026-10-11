@@ -1,11 +1,18 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router";
+import { queryClient } from "@/core/api/query";
 import type { Me } from "@/core/auth/AuthProvider";
 import { refuse, salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow, type Call, type Route as ApiRoute } from "@/core/sales/fixtures";
 import { ScopeProvider } from "@/core/scope";
 import { renderApp } from "@/test/render";
 import SalesList from "../SalesList";
+
+// plan 1E: a send makes the bill's PDF (core/print's own tests make real ones); here a stand-in
+vi.mock("@/core/print/make", async (real) => ({
+  ...(await real<typeof import("@/core/print/make")>()),
+  billFile: vi.fn(async () => ({ blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "bill.pdf", sheets: 1 })),
+}));
 
 const MEENA = { id: 8, name: "Meena Jain", gst_number: "", mobile_number: "9414126508", type: "person" };
 /** Two bills today and a cancelled one yesterday, newest first, as the server sends them. */
@@ -29,7 +36,12 @@ const mount = (path = "/sales", me?: Partial<Me>) => renderApp(
 
 // 08 Oct 2026 in India, as in the contract's examples; the clock still runs, so pauses and debounces work
 beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true }); vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30")); });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); queryClient.clear(); });
+// plan 1E: a send downloads its PDF beside the chat; jsdom (no object URLs, no downloads) clicks nothing
+beforeEach(() => {
+  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+});
 
 /**
  * From here the clock moves only when the test says (Ruling 1B-10), however busy the machine: a search's pause (300 ms)
@@ -194,13 +206,15 @@ test("a link's bill opens in the preview; with more than 160 bills still to come
 /* ── Beyond the brief: Task 5's carry (every Send waits for the shop's message) ── */
 
 test("the preview's Send waits for the shop's WhatsApp message, then sends the bill once however fast it's pressed", async () => {
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window); // the tab it opened (null: one the browser stopped)
   let settings: (w: unknown) => void = () => {};
+  // every ask waits for the one answer, as a server's do (plan 1E: a send's PDF asks again, through the app's own client)
+  const answer = new Promise((resolve) => { settings = resolve; });
   // the record answers at once: on a quick connection it lands between the two clicks of a double click, and the button
   // reads "Send again" by the second
   const { calls } = server(ROWS, {}, [
     ["GET", "sales/412/", () => wireDetail()],
-    ["GET", "shop-settings/", () => new Promise((resolve) => { settings = resolve; })],
+    ["GET", "shop-settings/", () => answer],
     ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })],
   ]);
   mount("/sales?bill=412");
@@ -319,7 +333,7 @@ test("bills deleted together ask for the list and the period chips once afterwar
 });
 
 test("one bill sends once whichever button sends it: the row's Send then S make one chat and one record, and the row reads Sent at once", async () => {
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window); // the tab it opened (null: one the browser stopped)
   let recorded: (w: unknown) => void = () => {};
   let hold = false;
   const { calls } = salesServer([
@@ -367,7 +381,7 @@ test("an unsent paper bill's preview says On paper, with no Send to nag", async 
 /* ── Fix round 2 (the re-review) ── */
 
 test("the row's Send double-clicked sends once, even when the record lands between the two clicks", async () => {
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window); // the tab it opened (null: one the browser stopped)
   const { calls } = server(ROWS, {}, [["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })]]);
   mount();
   const row = await waitFor(() => { const r = document.querySelector<HTMLElement>('tr[data-row="412"]'); expect(r).not.toBeNull(); return r!; });

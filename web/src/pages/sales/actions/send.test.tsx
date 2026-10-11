@@ -2,6 +2,7 @@ import { useState } from "react";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { __setNetState } from "@/core/api/network";
+import { queryClient } from "@/core/api/query";
 import { useBillDetail } from "@/core/api/sales";
 import type { Me } from "@/core/auth/AuthProvider";
 import { todayIST } from "@/core/format";
@@ -32,9 +33,19 @@ async function whenReady<T extends HTMLElement>(el: T): Promise<T> {
 }
 // India's clock reads 11:00 on 8 Oct 2026, the contract's day: nothing here waits on real time (Ruling 1B-10)
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30")); });
-// a browser opens WhatsApp in a new tab: here window.open only records what it was asked
-beforeEach(() => { vi.spyOn(window, "open").mockImplementation(() => null); });
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); act(() => __setNetState("online")); });
+// plan 1E: a send makes the bill's PDF (core/print's own tests make real ones); here a stand-in
+vi.mock("@/core/print/make", async (real) => ({
+  ...(await real<typeof import("@/core/print/make")>()),
+  billFile: vi.fn(async () => ({ blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "bill.pdf", sheets: 1 })),
+}));
+// a browser opens WhatsApp in a new tab and downloads the PDF: here window.open only records what it was asked, and
+// jsdom (no object URLs, no downloads) clicks nothing. It answers with the tab it opened (null: one the browser stopped)
+beforeEach(() => {
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window);
+  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+});
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); act(() => __setNetState("online")); queryClient.clear(); });
 
 /** A send that may need a number: the WhatsApp dialog opens when it does, as on the bill page. Off until the shop's message is in. */
 function Harness({ bill }: { bill: BillRow }) {
@@ -94,10 +105,10 @@ test("Send opens the customer's WhatsApp chat with the shop's message, records t
   renderApp(<SendCell bill={row()} />);
   await userEvent.click(await whenReady(screen.getByRole("button", { name: "Send KGH/2026-27/31 on WhatsApp" })));
   // the shop's own message, with the bill's exact total: nothing is rounded to the rupee (Ruling 1B-12)
-  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta ji, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is ready. Dhanyavaad.")}`, "_blank", "noopener");
+  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta ji, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is ready. Dhanyavaad.")}`, "_blank");
   await waitFor(() => expect(calls.find((c) => c.url === "sales/412/sent/")?.body).toEqual({ via: "whatsapp", to: "" }));
   expect(await screen.findByText("KGH/2026-27/31 sent")).toBeInTheDocument();
-  expect(screen.getByText("WhatsApp opens a chat with Anil Gupta (+91 98290 41122), with the bill's message typed in.")).toBeInTheDocument();
+  expect(screen.getByText("bill.pdf downloads and WhatsApp opens a chat with Anil Gupta (+91 98290 41122). Attach the PDF there.")).toBeInTheDocument();
 });
 
 test("Send stays off until the shop's settings answer; a send pressed sooner holds back; settings that fail send the standard message and say so", async () => {
@@ -118,8 +129,9 @@ test("Send stays off until the shop's settings answer; a send pressed sooner hol
   await waitFor(() => expect(calls.some((c) => c.url === "shop-settings/")).toBe(true));
   await act(async () => { fail(); });
   await userEvent.click(await whenReady(send));
-  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is attached. Thank you!")}`, "_blank", "noopener");
-  expect(await screen.findByText(/The shop's own message didn't load, so the standard one is typed in\.$/)).toBeInTheDocument();
+  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is attached. Thank you!")}`, "_blank");
+  // (the send's PDF asks for the settings through the app's own client, which asks once more a second after a failure)
+  expect(await screen.findByText(/The shop's own message didn't load, so the standard one is typed in\.$/, {}, { timeout: 3000 })).toBeInTheDocument();
 });
 
 test("offline, nothing opens and nothing is marked sent", async () => {
@@ -148,9 +160,9 @@ test("a walk-in asks for a number: a wrong one says so; a right one opens that c
   await userEvent.clear(field);
   await userEvent.type(field, "98290 41122{Enter}");
   // the shop's own message: "Namaste {customer} ji" reads "Namaste ji" for a walk-in
-  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste ji, your bill KGH/2026-27/33 for ₹17,464.29 from KIRAN GOLD HOUSE is ready. Dhanyavaad.")}`, "_blank", "noopener");
+  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste ji, your bill KGH/2026-27/33 for ₹17,464.29 from KIRAN GOLD HOUSE is ready. Dhanyavaad.")}`, "_blank");
   await waitFor(() => expect(calls.find((c) => c.url === "sales/33/sent/")?.body).toEqual({ via: "whatsapp", to: "9829041122" }));
-  expect(await screen.findByText("WhatsApp opens a chat with +91 98290 41122, with the bill's message typed in.")).toBeInTheDocument();
+  expect(await screen.findByText("bill.pdf downloads and WhatsApp opens a chat with +91 98290 41122. Attach the PDF there.")).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(calls.some((c) => c.url.startsWith("customers/"))).toBe(false);
 });
@@ -164,7 +176,7 @@ test("a number pasted with +91 in front fits whole", async () => {
   await userEvent.paste("+91 98290 41122");
   expect(field).toHaveValue("+91 98290 41122");
   await userEvent.keyboard("{Enter}");
-  expect(window.open).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/wa\.me\/919829041122\?text=/), "_blank", "noopener");
+  expect(window.open).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/wa\.me\/919829041122\?text=/), "_blank");
   await waitFor(() => expect(calls.find((c) => c.url === "sales/33/sent/")?.body).toEqual({ via: "whatsapp", to: "9829041122" }));
 });
 
@@ -238,7 +250,7 @@ test("Sent opens its menu with when, where and how often; Send again for a walk-
   const again = await screen.findByRole("menuitem", { name: /Send again on WhatsApp/ });
   expect(again).toHaveTextContent("Sent at 09:15 to +91 98290 41122 · 2 times");
   await userEvent.click(await whenReady(again));
-  await waitFor(() => expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste ji, your bill KGH/2026-27/33 for ₹17,464.29 from KIRAN GOLD HOUSE is ready. Dhanyavaad.")}`, "_blank", "noopener"));
+  await waitFor(() => expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste ji, your bill KGH/2026-27/33 for ₹17,464.29 from KIRAN GOLD HOUSE is ready. Dhanyavaad.")}`, "_blank"));
   await waitFor(() => expect(calls.find((c) => c.url === "sales/33/sent/")?.body).toEqual({ via: "whatsapp", to: "9829041122" }));
   expect(await screen.findByText("KGH/2026-27/33 sent again")).toBeInTheDocument();
 });
@@ -305,10 +317,11 @@ test("a Send whose chat didn't open (offline) can be pressed again", async () =>
 });
 
 test("after the shop's settings failed, Send stays on while they're asked again, and still says the standard message went", async () => {
-  // the first answer fails; a later ask waits (Show more's new row asks again, as a query with no answer does)
+  // the first answer fails; a later ask waits (Show more's new row asks again, as a query with no answer does). Plan 1E:
+  // the send's PDF asks once more, through the app's own client, and that ask fails at once
   let asked = 0;
   const { calls } = salesServer([
-    ["GET", "shop-settings/", () => (asked++ ? new Promise(() => {}) : refuse(500, {}))],
+    ["GET", "shop-settings/", () => (asked++ === 1 ? new Promise(() => {}) : refuse(500, {}))],
     ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:09:00+05:30", last_at: "2026-10-08T12:09:00+05:30", count: 1, via: "whatsapp", to: "" } })],
   ]);
   function ShowMore() {
@@ -322,8 +335,9 @@ test("after the shop's settings failed, Send stays on while they're asked again,
   expect(send).toBeEnabled();
   expect(screen.getByRole("button", { name: "Send KGH/2026-27/32 on WhatsApp" })).toBeEnabled();
   await userEvent.click(send);
-  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is attached. Thank you!")}`, "_blank", "noopener");
-  expect(await screen.findByText(/The shop's own message didn't load, so the standard one is typed in\.$/)).toBeInTheDocument();
+  expect(window.open).toHaveBeenCalledWith(`https://wa.me/919829041122?text=${encodeURIComponent("Namaste Anil Gupta, your bill KGH/2026-27/31 for ₹87,083.21 from KIRAN GOLD HOUSE is attached. Thank you!")}`, "_blank");
+  // (that client asks once more a second after a failure)
+  expect(await screen.findByText(/The shop's own message didn't load, so the standard one is typed in\.$/, {}, { timeout: 3000 })).toBeInTheDocument();
 });
 
 test("from the dialog, a record that fails still closes it once WhatsApp has the bill; Mark as sent records it, then keeps the number", async () => {

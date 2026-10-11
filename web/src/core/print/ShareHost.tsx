@@ -25,7 +25,7 @@ export async function sharePdf(file: PdfFile, { title, text }: { title: string; 
   });
 }
 
-/** A word about a PDF from code with no screen of its own (a send runs in deliver, outside React). */
+/** A word from code with no screen of its own (a send runs in deliver, outside React): about its PDF, or a tab the browser stopped. */
 export function tellAboutPdf(t: ToastInput): void {
   teller?.(t);
 }

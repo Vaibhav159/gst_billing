@@ -1,10 +1,17 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router";
+import { queryClient } from "@/core/api/query";
 import { refuse, salesServer, wireFacets, wirePage, wireRow, type Call } from "@/core/sales/fixtures";
 import { ScopeProvider } from "@/core/scope";
 import { renderApp } from "@/test/render";
 import SalesList from "../SalesList";
+
+// plan 1E: a send makes the bill's PDF (core/print's own tests make real ones); here a stand-in
+vi.mock("@/core/print/make", async (real) => ({
+  ...(await real<typeof import("@/core/print/make")>()),
+  billFile: vi.fn(async () => ({ blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "bill.pdf", sheets: 1 })),
+}));
 
 const MEENA = { id: 8, name: "Meena Jain", gst_number: "", mobile_number: "9414126508", type: "person" };
 const ROWS = [
@@ -29,7 +36,12 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30"));
 });
-afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; vi.useRealTimers(); vi.restoreAllMocks(); queryClient.clear(); });
+// plan 1E: a send downloads its PDF beside the chat; jsdom (no object URLs, no downloads) clicks nothing
+beforeEach(() => {
+  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+});
 
 /**
  * From here the clock moves only when the test says (Ruling 1B-10), however busy the machine: the customer search's 250 ms
@@ -117,12 +129,14 @@ test("the filter sheet picks a customer, how it was paid and the order, and says
 });
 
 test("a card's Send waits for the shop's message and sends once on a double tap; a paper bill says On paper, with no Send to nag", async () => {
-  vi.spyOn(window, "open").mockImplementation(() => null);
+  vi.spyOn(window, "open").mockImplementation(() => ({}) as Window); // the tab it opened (null: one the browser stopped)
   const PAPER = wireRow({ id: 406, invoice_number: "KGH/2026-27/29", counter: 29, customer: MEENA, paper: true });
   let settingsIn: (s: unknown) => void = () => {};
+  // every ask waits for the one answer, as a server's do (plan 1E: a send's PDF asks again, through the app's own client)
+  const answer = new Promise((r) => { settingsIn = r; });
   const { calls } = salesServer([
     ["GET", "sales/", (c) => (isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : wirePage([ROWS[1], PAPER, ROWS[2]]))],
-    ["GET", "shop-settings/", () => new Promise((r) => { settingsIn = r; })],
+    ["GET", "shop-settings/", () => answer],
     ["POST", "sales/412/sent/", () => ({ id: 412, sent: { at: "2026-10-08T12:31:00+05:30", last_at: "2026-10-08T12:31:00+05:30", count: 1, via: "whatsapp", to: "" } })],
   ]);
   mount();

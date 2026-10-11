@@ -5,7 +5,7 @@ import { renderHook } from "@testing-library/react";
 import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { serveWith } from "@/test/server";
-import { billFile, makeBillPdf, sendBankChoice, signatureData, useSendBankChoice } from "./make";
+import { billFile, makeBillPdf, sendBankChoice, sendFile, signatureData, useSendBankChoice, useSendFile, type PdfFile } from "./make";
 import { copyPages, printBill, type PrintBill } from "./model";
 
 const pdf = vi.hoisted(() => vi.fn());
@@ -116,6 +116,21 @@ test("while the print page shows a bill, a send from it carries the page's bank 
   expect(sendBankChoice(412)).toBe(true);
   unmount();
   expect(sendBankChoice(412)).toBeUndefined();
+});
+
+test("while the print page shows a bill, a send from it hands out the Original the page made; one without the firm's signature isn't, so a send tries again for it", () => {
+  const blob = new Blob(["%PDF-1.3"], { type: "application/pdf" });
+  const signed = { blob, name: "KGH_2026-27_31.pdf", sheets: 1, again: false };
+  const unsigned = { ...signed, again: true };
+  const { rerender, unmount } = renderHook(({ file }: { file: PdfFile | null }) => useSendFile(412, file), { initialProps: { file: null as PdfFile | null } });
+  expect(sendFile(412)).toBeUndefined();
+  rerender({ file: signed });
+  expect([sendFile(412), sendFile(413)]).toEqual([signed, undefined]);
+  rerender({ file: unsigned });
+  expect(sendFile(412)).toBeUndefined();
+  rerender({ file: signed });
+  unmount();
+  expect(sendFile(412)).toBeUndefined();
 });
 
 test("the document maker is handed every bill, each with its copies, in one file", async () => {

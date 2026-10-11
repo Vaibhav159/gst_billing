@@ -1,27 +1,121 @@
 import { useCallback } from "react";
-import { useNavigate } from "react-router";
+import { queryClient } from "@/core/api/query";
+import { billQuery, shopSettingsQuery } from "@/core/api/sales";
+import { canShareFiles, saveFile } from "@/core/print/files";
+import { billFile, sendBankChoice, sendFile, type PdfFile } from "@/core/print/make";
+import { copiesWords } from "@/core/print/model";
+import { sharePdf, tellAboutPdf } from "@/core/print/ShareHost";
 import { waLink } from "@/core/sales/share";
+import type { BillDetail, Copies } from "@/core/sales/types";
 import { useToast } from "@/core/ui";
+import { useView } from "@/core/view";
+import { useLogPrint } from "../print/parts";
 
 export type DeliverInput = { billId: number; invoiceNumber: string; mobile: string; message: string; isPhone: boolean };
 /** How the bill went (the send's `via`) and the PDF's name when one was made; null when the person stopped (a share sheet closed). */
 export type Delivered = { via: "whatsapp" | "share"; file: string | null } | null;
 
+/** What a PDF can't be made without: the shop's settings (its copies and bank details), or a bill that's still there. */
+class Unmade extends Error {
+  constructor(readonly lack: "settings" | "bill") { super(lack === "settings" ? "The shop's settings didn't load." : "This bill was deleted."); }
+}
+type Made = { file: PdfFile; bill: BillDetail; copies: Copies };
+
 /**
- * Hands a bill to WhatsApp: the chat with the mobile (or WhatsApp's own picker), the shop's message typed in.
- * Plan 1E replaces this body to make the PDF and attach it (the phone's share sheet, or a download beside the chat on
- * a computer), keeping this signature. It runs within the press itself: a browser blocks a window opened after an
- * await, so nothing here may await before window.open.
+ * A bill's PDF as it's handed out. A send carries the Original (CGST Rule 48: the recipient's copy), with bank details
+ * as the print page shows them while it's open, else as the shop's default; a share carries the shop's default copies.
+ * The bill and the settings come from the app's cache when a screen already has them.
  */
-export async function deliver(input: DeliverInput): Promise<Delivered> {
-  window.open(waLink(input.mobile, input.message), "_blank", "noopener");
-  return { via: "whatsapp", file: null };
+async function pdfFor(billId: number, purpose: "send" | "share"): Promise<Made> {
+  // a send from the print page carries the page's bank choice, so it needs nothing from the shop's settings
+  const chosen = purpose === "send" ? sendBankChoice(billId) : undefined;
+  const [o, settings] = await Promise.all([
+    queryClient.ensureQueryData(billQuery(billId)),
+    chosen === undefined ? queryClient.ensureQueryData(shopSettingsQuery).catch(() => { throw new Unmade("settings"); }) : null,
+  ]);
+  if (o.kind !== "bill") throw new Unmade("bill");
+  const copies: Copies = purpose === "share" && settings ? settings.copies : "original";
+  return { file: await billFile(o.bill, { copies, showBank: chosen ?? settings?.show_bank ?? true }), bill: o.bill, copies };
 }
 
-/** "Share the PDF…": the print page makes and shares it (plan 1E replaces this with the share sheet or a download, keeping the signature). */
+/** Why a PDF wasn't made, and what to do (nothing, for a deleted bill). */
+function noPdf(e: unknown): { why: string; todo: string } {
+  if (e instanceof Unmade && e.lack === "bill") return { why: "This bill was deleted.", todo: "" };
+  if (navigator.onLine === false) return { why: "You're offline, so the PDF wasn't made.", todo: "Try again when the internet is back." };
+  if (e instanceof Unmade) return { why: "The shop's settings didn't load, and the PDF needs them.", todo: "Try again in a minute." };
+  return { why: "Something stopped the PDF part way.", todo: "Try again in a minute." };
+}
+const words = (...parts: string[]) => parts.filter(Boolean).join(" ");
+
+/**
+ * Hands a bill to WhatsApp with its PDF (PROTO core/common.jsx:57-62, sales/parts.jsx:177-184). On a computer the chat
+ * opens within the press (a browser blocks a window opened after an await) and the PDF downloads beside it to attach.
+ * On a phone the share sheet opens with the PDF and the message: pick WhatsApp and the chat. The print page's own
+ * Original goes at once, so its share sheet opens within the press; elsewhere the PDF is made first, and a share sheet
+ * that outlasts the press asks for one more (ShareHost). A tab the browser stopped, a share sheet closed, or a phone's
+ * PDF that couldn't be made sends nothing (null), and says why. Once WhatsApp has the bill nothing here throws (a throw
+ * says the bill wasn't sent): a PDF that wasn't made, or didn't download, comes back as no file, with a word.
+ */
+export async function deliver(input: DeliverInput): Promise<Delivered> {
+  const sheet = input.isPhone && canShareFiles();
+  const ready = sendFile(input.billId);
+  if (!sheet) {
+    // Opened as 1C's chat link opens one, then cut off from the app: with "noopener" window.open answers null whether
+    // or not the tab opened, so one the browser stopped would count as sent
+    const tab = window.open(waLink(input.mobile, input.message), "_blank");
+    if (!tab) {
+      tellAboutPdf({ tone: "neg", title: "WhatsApp didn't open", body: "The browser stopped the new tab, so nothing was marked as sent. Allow pop-ups for this app, then send it again." });
+      return null;
+    }
+    try { tab.opener = null; } catch { /* WhatsApp's own page already, which can't reach back */ }
+    const made = ready ?? await pdfFor(input.billId, "send").then((m) => m.file, () => null);
+    const without = "WhatsApp opened without it. Download it from Print and share, then attach it there.";
+    if (!made) {
+      tellAboutPdf({ tone: "neg", title: "The PDF wasn't made", body: without });
+      return { via: "whatsapp", file: null };
+    }
+    try {
+      saveFile(made.blob, made.name);
+    } catch {
+      tellAboutPdf({ tone: "neg", title: "The PDF didn't download", body: without });
+      return { via: "whatsapp", file: null };
+    }
+    return { via: "whatsapp", file: made.name };
+  }
+  let made = ready;
+  if (!made) {
+    try {
+      made = (await pdfFor(input.billId, "send")).file;
+    } catch (e) {
+      const { why, todo } = noPdf(e);
+      tellAboutPdf({ tone: "neg", title: "The bill wasn't sent", body: words(why, "Nothing was marked as sent.", todo) });
+      return null;
+    }
+  }
+  const r = await sharePdf(made, { title: input.invoiceNumber, text: input.message });
+  if (r === "unsupported") tellAboutPdf({ tone: "neg", title: "The share sheet didn't open", body: "Nothing was sent. Use Print and share to download the PDF, then send it on WhatsApp." });
+  return r === "shared" ? { via: "share", file: made.name } : null;
+}
+
+/**
+ * "Share the PDF…" (email, Drive, a printer app), the shop's default copies: the share sheet on a phone, a download on a
+ * computer, which goes into the audit log as the print page's PDF does. Not a send.
+ */
 export function useShareBill(): (b: { id: number; invoice_number: string }) => void {
-  const navigate = useNavigate();
-  return useCallback((b) => navigate(`/sales/${b.id}/print`), [navigate]);
+  const { isPhone } = useView();
+  const { show } = useToast();
+  const log = useLogPrint();
+  return useCallback((b) => {
+    const sheet = isPhone && canShareFiles();
+    const download = ({ file, bill, copies }: Made) => {
+      saveFile(file.blob, file.name);
+      log({ action: "exported", entity_id: bill.id, entity_name: `#${bill.invoice_number} - ${bill.customer.name}`, details: `PDF downloaded: ${copiesWords(copies).toLowerCase()}` });
+      show({ tone: "brand", title: `${file.name} downloaded`, body: "Attach it to an email, or put it on Drive, from your Downloads folder." });
+    };
+    void pdfFor(b.id, "share")
+      .then(async (m) => { if (!sheet || (await sharePdf(m.file, { title: b.invoice_number })) === "unsupported") download(m); })
+      .catch((e: unknown) => { const { why, todo } = noPdf(e); show({ tone: "neg", title: "The PDF wasn't made", body: words(why, todo) }); });
+  }, [isPhone, show, log]);
 }
 
 /** "Copy link": the bill's address, for anyone signed in (PROTO sales/parts.jsx:376); where copying is refused, the link is shown instead. */

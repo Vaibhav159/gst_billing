@@ -1,8 +1,8 @@
 // Print and share, /sales/:id/print (PROTO sales/BillPrint.jsx): the Tally A4 paper as it prints, the copies chosen
 // each time (CGST Rule 48), bank details on or off, the owner's "Make these the default", the PDF's name, and Send,
 // PDF, Print and Share. The PDF is made as soon as the choices are known, so Print and Share act within the press.
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
-import { useParams } from "react-router";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useParams, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, Lock, MessageCircle, Printer, Send, Share2, SlidersHorizontal } from "lucide-react";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
@@ -11,7 +11,7 @@ import { billQuery, useBill, useSaveShopSettings, useShopSettings } from "@/core
 import { useAuth } from "@/core/auth/AuthProvider";
 import { inr, plural } from "@/core/format";
 import { printFile, saveFile } from "@/core/print/files";
-import { billFile, useSendBankChoice } from "@/core/print/make";
+import { billFile, useSendBankChoice, useSendFile } from "@/core/print/make";
 import { COPY_OPTIONS, copiesWords, copyPages, hasBank, printBill } from "@/core/print/model";
 import { Paper, PrintCopy, ScaledPaper } from "@/core/print/Paper";
 import { sharePdf } from "@/core/print/ShareHost";
@@ -107,6 +107,25 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   useEffect(() => { if (unsignedWith !== null && unsignedWith !== sign) remake(); }, [unsignedWith, sign, remake]);
   const cancelled = b.status === "cancelled";
   const canSend = can("bill.send");
+  const sendable = !cancelled && canSend;
+  // A send carries the Original (CGST Rule 48): this page's own file when that's the choice. On a phone, whose share
+  // sheet opens only within a press, the page makes it too, once its own is made (a computer's chat opens at once, and
+  // its download can wait), so a send from here hands it out within the press itself
+  const sendsOwn = copies === "original";
+  const original = useMade(phone && sendable && !sendsOwn && file ? `original|${prints}` : null, () => billFile(b, { copies: "original", showBank }));
+  useSendFile(b.id, sendsOwn ? file : original.value);
+  // v2's "Share PDF" links (…/print?share=1, followed here with their query) asked for the share sheet at once. It
+  // opens only within a press, so Share takes the focus once the PDF is made, unless the person has put it somewhere
+  const askedShare = useSearchParams()[0].get("share") === "1";
+  const shareRef = useRef<HTMLButtonElement>(null);
+  const focusedShare = useRef(false);
+  useEffect(() => {
+    if (!askedShare || !file || focusedShare.current) return;
+    focusedShare.current = true;
+    const a = document.activeElement;
+    if (a && a !== document.body && !a.hasAttribute("data-page-title")) return;
+    shareRef.current?.focus({ preventScroll: true });
+  }, [askedShare, file]);
   const c = b.customer;
   // where a send goes, as useSendBill decides: the customer's mobile, else the number this bill went to before (a landline isn't one)
   const own = mobileOf(c.mobile_number);
@@ -179,7 +198,6 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
     <PrintCopy>{copyList.flatMap((cp) => paper.pages.map((pg) => <Paper key={`${cp.value}-${pg.index}`} b={paper} copy={cp} page={pg} />))}</PrintCopy>
   </>;
   // a paper bill's customer has it already: its copy is offered, never the main step
-  const sendable = !cancelled && canSend;
   const sendLabel = b.sent ? "Send again" : b.paper ? "Send a copy on WhatsApp" : "Send on WhatsApp";
   const messageBox = <Disclosure title="Message sent with the PDF" summary={own ? `To ${c.name} (${own})` : before ? `To +91 ${before}` : "No number on record"}><p className="text-fg2">{message}</p></Disclosure>;
 
@@ -189,7 +207,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
         actionBar={<>
           <Button size="lg" icon={SlidersHorizontal} onClick={() => setOptionsOpen(true)}>Options</Button>
           {/* a touch screen never shows a title: the PDF on its way shows on the button itself */}
-          <Button size="lg" icon={Share2} variant={sendable && !b.paper ? "secondary" : "primary"} disabled={!file} loading={making} title={waitWhy} onClick={share}>Share</Button>
+          <Button ref={shareRef} size="lg" icon={Share2} variant={sendable && !b.paper ? "secondary" : "primary"} disabled={!file} loading={making} title={waitWhy} onClick={share}>Share</Button>
           {sendable ? <Button size="lg" variant={b.paper ? "secondary" : "primary"} icon={hasNumber ? Send : MessageCircle} disabled={!ready} title={sendWait} onClick={sendPress} {...(hasNumber ? {} : { "aria-label": `${b.sent ? "Resend" : "Send"} to a WhatsApp number` })}>{b.sent ? "Resend" : "Send"}</Button> : null}
         </>}>
         {note}
@@ -258,7 +276,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
           <div className="grid grid-cols-3 gap-2">
             <Button icon={Download} disabled={!file} title={waitWhy} onClick={download}>PDF</Button>
             <Button icon={Printer} disabled={!file} title={waitWhy} onClick={print}>Print</Button>
-            <Button icon={Share2} disabled={!file} title={waitWhy} onClick={share}>Share</Button>
+            <Button ref={shareRef} icon={Share2} disabled={!file} title={waitWhy} onClick={share}>Share</Button>
           </div>
           {messageBox}
           <p className="text-sm text-muted border-t border-rule pt-4">One bill style for every firm, with a QR code anyone can check against your records.</p>
