@@ -59,6 +59,12 @@ test("duplicate groups link to a source page with the suggested kept customer", 
   expect(screen.getByRole("link", { name: "Review and merge" })).toHaveAttribute("href", "/customers/31?merge=7");
 });
 
+test("a failed or refused duplicates check shows nothing on the Customers list", async () => {
+  serve({ ...base, "GET customers/duplicates/": () => ({ status: 403, data: { detail: "You can't see this." } }) });
+  const { container } = mount([{ path: "/customers", element: <div data-testid="dups"><CustomerDuplicates /></div> }], ["/customers"]); await pass(400);
+  expect(container.querySelector("[data-testid=dups]")?.textContent).toBe("");
+});
+
 test("an existing customer's unchanged duplicate phone still offers Merge into", async () => {
   serve({ ...base, "GET customers/duplicates/": { groups: [{ what: "phone", value: ANIL.mobile_number,
     customers: [ANIL, { ...ANIL, id: 31, name: "Anil G" }] }] } });

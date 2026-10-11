@@ -32,6 +32,15 @@ test("a warning puts the customer first but never selects them or previews until
   expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
 });
 
+test("picking a target again always asks for a fresh preview, never a cached one", async () => {
+  const meena = { ...ANIL, id: 8, name: "Meena Jain" };
+  const calls = serve({ ...replies(), "GET customers/": { results: [ANIL, meena] } }); open(); await pass(400);
+  fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  fireEvent.click(screen.getByRole("radio", { name: /Meena Jain/ })); await pass();
+  fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  expect(calls.filter(c => c.url.includes("merge-preview") && (c.params as { into: number }).into === 7)).toHaveLength(2);
+});
+
 test("an explicit irreversible acknowledgement sends only into once and opens the kept customer", async () => {
   const calls = serve(replies()); const { router } = open(); await pass(400);
   fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();

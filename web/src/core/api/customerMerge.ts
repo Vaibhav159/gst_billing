@@ -24,7 +24,8 @@ export function useMergeCandidates(term: string) {
     toCustomerPage((await api.get("customers/", { signal, params: { search: term, ordering: "name", page_size: 9 } })).data).rows });
 }
 export function useMergePreview(source: number, target: number | null) {
-  return useQuery({ queryKey: ["customers", "merge-preview", source, target],
+  // The merge has no fingerprint: what the owner ticks must be this visit's answer, never a cached one.
+  return useQuery({ queryKey: ["customers", "merge-preview", source, target], staleTime: 0,
     queryFn: target === null ? skipToken : async ({ signal }) =>
       (await api.get<MergePreview>(`customers/${source}/merge-preview/`, { params: { into: target }, signal })).data });
 }
