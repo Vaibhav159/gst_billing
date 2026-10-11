@@ -81,17 +81,17 @@ async function findBin(match: (row: BinWire) => boolean, signal: AbortSignal, q?
     page += 1;
   }
 }
-/** A restore link carries a bin row id. The list contract has no get-by-id: scan bounded pages on this explicit visit. */
+/** Sales-only bin links scan bounded pages. Purchases restore from their Audit action (P4-9). */
 export function useAuditRestoreEntry(binId: number, enabled: boolean) {
   return useQuery({
     queryKey: ["audit", "restore-entry", binId], enabled: enabled && Number.isSafeInteger(binId) && binId > 0,
     queryFn: async ({ signal }): Promise<{ entry: AuditEntry; record: AuditRecord } | null> => {
-      const bin = await findBin((row) => row.id === binId, signal);
+      const bin = await findBin((row) => row.id === binId && row.type !== "purchase", signal);
       if (!bin) return null;
       let page = 1;
       while (true) {
         const answer = (await api.get<AuditPage>("audit/", { params: { entity_id: bin.original_id, kind: "sales", group: "delete", page, page_size: 30 }, signal })).data;
-        const entry = answer.results.find((row) => row.entity_id === bin.original_id && row.can?.kind === "restore");
+        const entry = answer.results.find((row) => row.entity_id === bin.original_id && row.kind === "sales" && row.can?.kind === "restore");
         if (entry) return { entry, record: binRecord(bin) };
         if (!answer.next) return null;
         page += 1;
