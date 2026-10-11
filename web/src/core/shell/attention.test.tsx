@@ -1,13 +1,15 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { ScopeProvider, useScope } from "@/core/scope";
-import { dueNextKeys, type DueItem, type DueNext } from "@/core/api/dashboard";
+import { dueNextKeys, useDueNext, type DueItem, type DueNext } from "@/core/api/dashboard";
+import { useCachedDue } from "@/core/due/cache";
 import { testQueryClient, stubAuth } from "@/test/render";
 import { serve, type Answer } from "@/test/server";
 import { handClock, pass } from "@/test/clock";
-import { AttentionButton } from "./AttentionButton";
+import { AttentionButton, attentionCode } from "./AttentionButton";
 
 const item: DueItem = { kind: "unsent", due: null, count: 27, title: "27 of today's bills haven't been sent",
   detail: "31 · Anil Gupta", firm: null, month: null, draft_id: null, from: null, to: null, badge: null };
@@ -16,16 +18,21 @@ function ScopeControls() {
   const scope = useScope();
   return <><button onClick={() => scope.setFirmId(4)}>Meera</button><button onClick={() => scope.setFy("2025-26")}>Past year</button></>;
 }
-function setup({ cached, rich = false, age = 0, reply = answer }: { cached?: DueNext; rich?: boolean; age?: number; reply?: Answer } = {}) {
+function VisibleRich() {
+  useDueNext(3, true);
+  return null;
+}
+function setup({ cached, rich = false, age = 0, reply = answer, visibleRich = false }: { cached?: DueNext; rich?: boolean; age?: number; reply?: Answer; visibleRich?: boolean } = {}) {
   const qc = testQueryClient();
   if (cached) qc.setQueryData(dueNextKeys.one(3, rich), cached, { updatedAt: Date.now() - age });
   const calls = serve({ "GET preferences/": { data: {} }, "GET businesses/": { results: [
     { id: 3, name: "KIRAN GOLD HOUSE" }, { id: 4, name: "MEERA ORNAMENTS" },
   ] }, "GET due-next/": reply });
-  const router = createMemoryRouter([{ path: "*", element: <ScopeProvider><AttentionButton /><ScopeControls /></ScopeProvider> }], { initialEntries: ["/sales"] });
+  const router = createMemoryRouter([{ path: "*", element: <ScopeProvider>{visibleRich ? <VisibleRich /> : null}<AttentionButton /><ScopeControls /></ScopeProvider> }], { initialEntries: ["/sales"] });
   const view = render(<QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><RouterProvider router={router} /></AuthContext.Provider></QueryClientProvider>);
   return { ...view, qc, router, calls, reads: () => calls.filter(c => c.url === "due-next/") };
 }
+beforeAll(async () => { await attentionCode.load(); });
 beforeEach(() => { handClock(new Date("2026-10-08T11:00:00+05:30")); localStorage.clear(); localStorage.setItem("gst3.scope.1", "3"); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
@@ -111,4 +118,38 @@ test.each([false, true])("the last answer stays visible after ten closed minutes
   await pass(600_000);
   expect(screen.getByRole("button", { name: "Needs attention: 1" })).toBeInTheDocument();
   expect(h.reads()).toHaveLength(0);
+});
+
+test("the sheet displays the newest plain answer even while an older rich answer is active", async () => {
+  const h = setup({ cached: { ...answer, items: [] }, rich: true, visibleRich: true }); await pass(1);
+  act(() => h.qc.setQueryData(dueNextKeys.one(3, false), answer)); await pass();
+  fireEvent.click(screen.getByRole("button", { name: "Needs attention: 1" })); await pass();
+  const dialog = screen.getByRole("dialog", { name: "Needs attention" });
+  expect(within(dialog).queryByText("All clear")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("link", { name: /27 of today's bills/ })).toBeInTheDocument();
+  expect(within(dialog).getByText("1 thing across KIRAN GOLD HOUSE")).toBeInTheDocument();
+  expect(h.reads()).toHaveLength(0);
+});
+
+test("a passive mount preserves the visible reader's fetch function and retains both exact variants", async () => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const qc = testQueryClient();
+  qc.setQueryData(dueNextKeys.one(3, true), { ...answer, items: [] }, { updatedAt: Date.now() - 1000 });
+  qc.setQueryData(dueNextKeys.one(3, false), answer);
+  const calls = serve({ "GET due-next/": answer });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  const visible = renderHook(() => useDueNext(3, true), { wrapper }); await pass();
+  const passive = renderHook(() => useCachedDue(3), { wrapper }); await pass();
+  expect(passive.result.current.data?.items).toEqual(answer.items);
+  await act(() => qc.invalidateQueries({ queryKey: dueNextKeys.all })); await pass();
+  expect(calls).toHaveLength(1);
+  expect(qc.getQueryCache().find({ queryKey: dueNextKeys.one(3, false), exact: true })?.getObserversCount()).toBeGreaterThan(0);
+  expect(visible.result.current.isSuccess).toBe(true);
+  expect(visible.result.current.data?.items).toEqual(answer.items);
+  visible.unmount();
+  await act(() => qc.invalidateQueries({ queryKey: dueNextKeys.all })); await pass(600_000);
+  expect(calls).toHaveLength(1);
+  expect(passive.result.current.data?.items).toEqual(answer.items);
+  expect(errors).not.toHaveBeenCalled();
+  passive.unmount(); qc.clear();
 });

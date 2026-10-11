@@ -1,19 +1,20 @@
 // The desktop shell: a top bar with every section visible (overflow under More), firm and year scope,
 // search (Ctrl K) and the account menu. The page's <main id="app-main"> comes in as children.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router";
 import { Search } from "lucide-react";
 import { cn } from "@/core/cn";
 import { useFirms } from "@/core/scope";
 import { AppMark, Kbd } from "@/core/ui";
 import { AccountMenu } from "./AccountMenu";
-import { AttentionButton } from "./AttentionButton";
 import { MOD } from "@/core/modifierKeys";
 import { MORE_NAV, sectionOf } from "./nav";
 import { NavBar } from "./NavBar";
 import { FirmPicker, FyPicker } from "./ScopePickers";
 import { useShortcuts } from "./shortcuts";
 import { ShortcutsDialog } from "./ShortcutsDialog";
+
+const AttentionButton = lazy(() => import("./AttentionButton"));
 
 export function DesktopShell({ children, openPalette }: { children: ReactNode; openPalette: () => void }) {
   const { pathname } = useLocation();
@@ -48,7 +49,7 @@ export function DesktopShell({ children, openPalette }: { children: ReactNode; o
                 <Search size={16} aria-hidden="true" />{narrow ? null : <><span className="text-sm">Search</span> <Kbd>{MOD} K</Kbd></>}
               </button>
             )}
-            {empty ? null : <><FirmPicker /><FyPicker /><AttentionButton /></>}
+            {empty ? null : <><FirmPicker /><FyPicker /><Suspense fallback={<span className="h-10 w-10" aria-hidden="true" />}><AttentionButton /></Suspense></>}
             <AccountMenu onShortcuts={() => setKeys(true)} />
           </div>
         </div>
