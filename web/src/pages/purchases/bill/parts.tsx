@@ -8,7 +8,7 @@ import type { PurchaseRow } from "@/core/purchases/types";
 import { Badge, ConfirmDialog, Field, Input, Money, useToast } from "@/core/ui";
 
 export function purchaseLock(p: PurchaseRow, action: "changed" | "deleted" = "changed"): string {
-  const month = monthLabel(p.credit.month, { long: true });
+  const month = p.credit.month ? monthLabel(p.credit.month, { long: true }) : "its credit month";
   return `${month}'s GSTR-3B is filed for ${p.business_name}, with this bill's credit in it, so it can't be ${action}. Have the owner unlock ${month} in GST returns first.`;
 }
 
@@ -16,7 +16,7 @@ export function PurchaseBadges({ p }: { p: PurchaseRow }) {
   return <span className="flex flex-wrap gap-1.5">
     {p.needs_review ? <Badge tone="brand" icon={AlertTriangle}>Needs a check</Badge> : null}
     {p.has_files ? <Badge icon={Camera}>From a photo</Badge> : null}
-    {p.credit.lapsed ? <Badge tone="neg">Credit lapsed</Badge> : !p.credit.eligible ? <Badge>Credit not allowed</Badge> : p.credit.late ? <Badge tone="file">Credit in {monthLabel(p.credit.month)}</Badge> : null}
+    {p.credit.state === "outside" ? <Badge>Outside the credit ledger</Badge> : p.credit.lapsed ? <Badge tone="neg">Credit lapsed</Badge> : !p.credit.eligible ? <Badge>Credit not allowed</Badge> : p.credit.late && p.credit.month ? <Badge tone="file">Credit in {monthLabel(p.credit.month)}</Badge> : null}
     {p.locked ? <Badge tone="file" icon={Lock}>GSTR-3B filed</Badge> : null}
     {p.checks.includes("duplicate") ? <Badge tone="neg">Same bill twice</Badge> : null}
     {p.checks.includes("no_lines") ? <Badge tone="neg">No items</Badge> : null}

@@ -11,7 +11,7 @@ export function deadlineNote(invoiceDate: string, deadline: string): string {
   return `The last day is ${date(deadline)}, or the day FY ${fyOf(invoiceDate)}'s annual return (GSTR-9) is filed, if that's earlier.`;
 }
 export const earliestCreditWords = 'The earliest return not filed yet: the safer choice.';
-export const beforeLedgerWords = 'This bill predates April 2025. Its credit belongs in the opening balance, or has lapsed.';
+export const beforeLedgerWords = 'This bill is before April 2025. Its credit is in the opening balance or lapsed.';
 export function creditWords({ eligible = true, supplier, noGstin, lapsed, month, firm, option }: { eligible?: boolean; supplier?: string; noGstin?: boolean; lapsed?: boolean; month?: string; firm?: string; option?: CreditMonthOption }): string {
   if (noGstin) return `${supplier} has no GSTIN, so this bill carries no GST to claim.`;
   if (lapsed) return "Too late to claim: no return open now can carry this bill's credit.";

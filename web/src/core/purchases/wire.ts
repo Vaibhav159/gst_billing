@@ -20,7 +20,7 @@ export function toSupplierRecord(w: W): SupplierRecord {
   return { ...toSupplierRef(w), address: text(w?.address), pan: text(w?.pan), mobile_number: text(w?.mobile_number), email: text(w?.email), gstin_valid: w?.gstin_valid == null ? null : Boolean(w.gstin_valid), prefix: text(w?.prefix) };
 }
 export function toCredit(w: W): Credit {
-  return { month: text(w?.month), chosen: nullableText(w?.chosen), late: Boolean(w?.late), eligible: w?.eligible !== false, lapsed: Boolean(w?.lapsed), claimed: money(w?.claimed), state: w?.state === 'filed' ? 'filed' : 'open', filed_on: nullableText(w?.filed_on), deadline: text(w?.deadline) };
+  return { month: nullableText(w?.month), chosen: nullableText(w?.chosen), late: Boolean(w?.late), eligible: w?.eligible !== false, lapsed: Boolean(w?.lapsed), claimed: money(w?.claimed), state: w?.state === 'outside' || w?.state === 'filed' ? w.state : 'open', filed_on: nullableText(w?.filed_on), deadline: text(w?.deadline) };
 }
 export function toPurchaseRef(w: W): PurchaseRef {
   return { id: whole(w?.id), invoice_number: text(w?.invoice_number), invoice_date: text(w?.invoice_date), supplier_name: text(w?.supplier_name), total_amount: money(w?.total_amount), business_name: text(w?.business_name) };

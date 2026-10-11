@@ -1,5 +1,5 @@
 import { toCredit, toCreditMonths, toDuplicateCheck, toPurchaseDetail, toPurchasePage, toPurchaseRead, toSupplierDetail, toSupplierMemory } from './wire';
-import { purchaseDetailWire, purchasePageWire } from './fixtures';
+import { OUTSIDE_CREDIT, OUTSIDE_CREDIT_MONTHS, purchaseDetailWire, purchasePageWire } from './fixtures';
 
 test('purchase detail reads all money in paise, preserves rates, and reuses sales lines', () => {
   const bill = toPurchaseDetail(purchaseDetailWire());
@@ -38,4 +38,16 @@ test('supplier figures and rates preserve precision, memory carries no invented 
 });
 test('credit options keep the server default and unchoosable out-of-time months', () => {
   expect(toCreditMonths({ bill_month: '2025-08', default: '2026-11', lapsed: true, options: [{ month: '2026-11', due: '2026-12-20', running: true, in_time: false }] })).toMatchObject({ default: '2026-11', lapsed: true, options: [{ in_time: false }] });
+});
+test.each([true, false])('before-ledger credit keeps null month and stored eligibility %s across purchase and supplier reads', (eligible) => {
+  const credit = { ...OUTSIDE_CREDIT, eligible };
+  const bill = purchaseDetailWire({ invoice_date: '2025-03-31', fy: '2024-25', credit });
+  const expected = { ...credit, claimed: 0 };
+  expect(toCredit(credit)).toEqual(expected);
+  expect(toPurchaseDetail(bill)).toMatchObject({ locked: false, credit: expected });
+  expect(toPurchasePage(purchasePageWire([bill])).results[0].credit).toEqual(expected);
+  expect(toSupplierDetail({ bills: [bill] }).bills[0].credit).toEqual(expected);
+});
+test('before-ledger month options retain the real bill month without a default or lapsed inference', () => {
+  expect(toCreditMonths(OUTSIDE_CREDIT_MONTHS)).toEqual(OUTSIDE_CREDIT_MONTHS);
 });

@@ -61,8 +61,8 @@ function Purchase({ p }: { p: PurchaseDetail }) {
   const [error, setError] = useState("");
   const [fileError, setFileError] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  const month = monthLabel(p.credit.month, { long: true });
-  const beforeLedger = p.invoice_date < "2025-04-01";
+  const month = p.credit.month ? monthLabel(p.credit.month, { long: true }) : "";
+  const beforeLedger = p.credit.state === "outside";
   const noGst = !p.supplier.gst_number && !p.tax;
   const editWhy = p.locked ? purchaseLock(p) : !can("purchase.edit") ? whyNot("purchase.edit") : "";
   const ownsRecent = me?.id === p.history.created_by?.id && Date.now() - Date.parse(p.created_at) <= 86_400_000;
@@ -113,7 +113,7 @@ function Purchase({ p }: { p: PurchaseDetail }) {
 function MoveCredit({ p, onClose }: { p: PurchaseDetail; onClose(): void }) {
   const q = useCreditMonths(p.business, p.invoice_date);
   const move = useMovePurchaseCredit();
-  const [month, setMonth] = useState(p.credit.month);
+  const [month, setMonth] = useState(p.credit.month ?? "");
   const [error, setError] = useState("");
   return <Dialog open title="Claim the credit in" description={`Purchase ${p.invoice_number} · ${p.supplier.name}`} onClose={move.isPending ? () => {} : onClose} footer={<><Button disabled={move.isPending} onClick={onClose}>Keep this month</Button><Button variant="primary" loading={move.isPending} disabled={!q.data || month === p.credit.month || !q.data.options.some((o) => o.month === month && o.in_time)} onClick={() => move.mutate({ id: p.id, itc_month: month }, { onSuccess: onClose, onError: (e) => setError(problemOf(e).message) })}>Move credit</Button></>}><QueryView query={q} what="open credit months">{(data) => <Field label="Claim the credit in" htmlFor="move-credit"><Select id="move-credit" value={month} onChange={(e) => setMonth(e.target.value)} options={data.options.map((o) => ({ value: o.month, label: `${monthLabel(o.month, { long: true })} (not filed yet, 3B due ${date(o.due)})`, disabled: !o.in_time }))} /></Field>}</QueryView><p className="text-sm text-muted">The earliest return not filed yet: the safer choice.</p>{error ? <p role="alert" className="text-neg">{error}</p> : null}</Dialog>;
 }

@@ -1,5 +1,5 @@
 import { inwardKey, duplicateKey, slabFrom, creditDeadline, lastCreditMonth, rateCheck } from './model';
-import { claimLabel, lateNote, creditWords } from './words';
+import { beforeLedgerWords, claimLabel, lateNote, creditWords } from './words';
 
 test.each([['SJ-101', 'SJ/101'], [' ubs/26-27/0850 ', 'UBS-26-27-0850']])('duplicate key folds %s and %s', (a, b) => expect(inwardKey(a)).toBe(inwardKey(b)));
 test('digit boundaries, supplier registration, firm and FY belong to the duplicate key', () => {
@@ -13,6 +13,10 @@ test.each([[3, '3'], ['3%', '3'], [0.03, '3'], ['0.25%', '0.25'], [0.0025, '0.25
 test('credit deadline observes the IST financial year and October cutoff', () => {
   expect(creditDeadline('2026-03-31')).toBe('2026-11-30');
   expect(lastCreditMonth('2026-04-01')).toBe('2027-10');
+  expect(creditDeadline('2025-03-31')).toBe('2025-11-30');
+});
+test('before-ledger wording leaves opening credit and lapse undecided', () => {
+  expect(beforeLedgerWords).toBe('This bill is before April 2025. Its credit is in the opening balance or lapsed.');
 });
 test('late wording follows returned options and never silently disables eligibility', () => {
   const option = { month: '2026-09', due: '2026-10-20', running: false, in_time: true };

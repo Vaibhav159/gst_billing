@@ -55,9 +55,9 @@ test("a file upload reports a failure on the page", async () => {
 });
 
 test("a bill before April 2025 is outside the credit ledger and cannot move credit", async () => {
-  const { calls } = salesServer([["GET", "purchases/905/", () => purchaseDetailWire({ invoice_date: "2024-03-31", fy: "2023-24", credit: { month: "2024-03", chosen: null, late: false, eligible: true, lapsed: true, claimed: "0.00", state: "open", filed_on: null, deadline: "2024-11-30" } })]]);
+  const { calls } = salesServer([["GET", "purchases/905/", () => purchaseDetailWire({ invoice_date: "2024-03-31", fy: "2023-24", credit: { month: null, chosen: null, late: false, eligible: true, lapsed: false, claimed: "0.00", state: "outside", filed_on: null, deadline: "2024-11-30" } })]]);
   mount();
-  expect(await screen.findByText("This bill predates April 2025. Its credit belongs in the opening balance, or has lapsed.")).toBeVisible();
+  expect(await screen.findByText("This bill is before April 2025. Its credit is in the opening balance or lapsed.")).toBeVisible();
   expect(screen.queryByRole("button", { name: /Move.*credit|Change credit month/i })).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Claim the credit in")).not.toBeInTheDocument();
   expect(screen.queryByText(/GSTR-3B.*March 2024|March 2024.*GSTR-3B|March 2024 · not filed yet/)).not.toBeInTheDocument();

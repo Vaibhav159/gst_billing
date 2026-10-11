@@ -113,7 +113,7 @@ export function useCheckPurchase() {
 }
 export function useMovePurchaseCredit() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, itc_month }: { id: number; itc_month: string | null }) => { const { data } = await api.put(`purchases/${id}/credit-month/`, { itc_month }); return { id, credit: toCredit(data?.credit), previous: String(data?.previous ?? '') }; }, onSuccess: () => invalidatePurchases(qc) });
+  return useMutation({ mutationFn: async ({ id, itc_month }: { id: number; itc_month: string | null }) => { const { data } = await api.put(`purchases/${id}/credit-month/`, { itc_month }); return { id, credit: toCredit(data?.credit), previous: data?.previous == null ? null : String(data.previous) }; }, onSuccess: () => invalidatePurchases(qc) });
 }
 export function usePurchaseFiles() {
   const qc = useQueryClient();

@@ -3,7 +3,7 @@ import type { BillRef, BinRow, Line, PaymentMode, Person, Slab } from '@/core/sa
 // Part 2 contract: money is integer paise after wire.ts; quantities, unit rates and GST percentages remain decimal strings.
 export type SupplierRef = { id: number; name: string; gst_number: string; state_code: string; state_name: string; city: string };
 export type SupplierRecord = SupplierRef & { address: string; pan: string; mobile_number: string; email: string; gstin_valid: boolean | null; prefix: string };
-export type Credit = { month: string; chosen: string | null; late: boolean; eligible: boolean; lapsed: boolean; claimed: number; state: 'open' | 'filed'; filed_on: string | null; deadline: string };
+export type Credit = { month: string | null; chosen: string | null; late: boolean; eligible: boolean; lapsed: boolean; claimed: number; state: 'outside' | 'open' | 'filed'; filed_on: string | null; deadline: string };
 export type PurchaseCheck = 'duplicate' | 'no_lines' | 'no_hsn' | 'billed_to_other';
 export type PurchaseSource = 'typed' | 'capture' | 'photos' | 'excel' | '';
 export type PurchaseRef = { id: number; invoice_number: string; invoice_date: string; supplier_name: string; total_amount: number; business_name: string };

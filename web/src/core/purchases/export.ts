@@ -3,43 +3,51 @@ import { paiseToDecimal } from '@/core/format';
 import { saveFile } from '@/core/print/files';
 import { zipFiles } from '@/core/files/zip';
 import type { PurchaseFile, PurchaseRow } from '@/core/purchases/types';
-import type { ExcelCell, ExcelSheet } from '@/core/excel';
+import type { Cell, Row, Sheet } from '@/core/excel/writer';
 import { toPurchasePage } from '@/core/purchases/wire';
 
-type Cell = ExcelCell;
+type ExportCell = Cell | string;
 type Progress = { stage: 'bills' | 'files'; done: number; total: number };
 type Options = { signal?: AbortSignal; onProgress?: (progress: Progress) => void };
-const money = (paise: number): Cell => ({ n: paiseToDecimal(paise), format: '0.00' });
+const money = (paise: number): Cell => ({ v: paiseToDecimal(paise), num: true });
 const headings = ['Firm', 'Supplier', 'GSTIN', 'Bill number', 'Bill date', 'Item', 'HSN code', 'Qty', 'Unit', 'Rate per unit', 'GST rate', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total', 'Credit month', 'Input tax credit'];
 const check = (signal?: AbortSignal) => { if (signal?.aborted) throw new DOMException('Export cancelled.', 'AbortError'); };
-const value = (cell: Cell) => typeof cell === 'string' ? cell : cell.n;
+const value = (cell: ExportCell) => typeof cell === 'string' ? cell : String(cell.v);
 const safeName = (name: string) => name.replace(/[\x00-\x1f<>:"/\\|?*]/g, '_').replace(/\.\.+/g, '_').replace(/^[. ]+|[. ]+$/g, '').slice(0, 100) || 'bill';
-function register(rows: PurchaseRow[]): Cell[][] {
+function register(rows: PurchaseRow[]): ExportCell[][] {
   return [headings, ...rows.flatMap(b => (b.lines?.length ? b.lines : [null]).map((line, i) => [
     b.business_name, b.supplier.name, b.supplier.gst_number, b.invoice_number, b.invoice_date,
-    line?.product_name ?? '', line?.hsn_code ?? '', line ? { n: line.quantity, format: '0.000' } : '', line?.unit ?? '', line ? { n: line.rate, format: '0.000' } : '', line ? { n: line.gst_percent } : '',
+    line?.product_name ?? '', line?.hsn_code ?? '', line ? { v: line.quantity, num: true } : '', line?.unit ?? '', line ? { v: line.rate, num: true } : '', line ? { v: line.gst_percent, num: true } : '',
     money(line?.taxable ?? b.taxable), money(line?.cgst ?? b.cgst), money(line?.sgst ?? b.sgst), money(line?.igst ?? b.igst), money(line?.amount ?? b.total_amount),
-    b.credit.month, i === 0 ? money(b.credit.claimed) : '',
+    b.credit.month ?? '', i === 0 ? money(b.credit.claimed) : '',
   ]))];
 }
-const csvCell = (cell: Cell) => {
+const csvCell = (cell: ExportCell) => {
   // A CSV reader must never evaluate text supplied as a bill number, item or supplier as a formula.
   const raw = value(cell), text = typeof cell === 'string' && /^[\s]*[=+@\-]/.test(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
+const sheetRow = (kind: Row['kind'], cells: ExportCell[]): Row => ({ kind, cells: cells.map(c => typeof c === 'string' ? { v: c } : c) });
 /** Purchase data projection only; 3D Task 1 owns workbook encoding. */
 async function workbook(bills: PurchaseRow[]): Promise<Blob> {
   const months = [...new Set(bills.map(b => b.invoice_date.slice(0, 7)))].sort();
-  const sheets: ExcelSheet[] = months.map(month => {
+  const sheets: Sheet[] = months.map(month => {
     const rows = bills.filter(b => b.invoice_date.startsWith(month));
-    const sum = (key: 'taxable' | 'cgst' | 'sgst' | 'igst' | 'total_amount') => money(rows.reduce((total, b) => total + b[key], 0));
-    return { name: month, rows: [...register(rows), ['Totals', '', '', '', '', '', '', '', '', '', '', sum('taxable'), sum('cgst'), sum('sgst'), sum('igst'), sum('total_amount'), '', money(rows.reduce((total, b) => total + b.credit.claimed, 0))]] };
+    // wire.ts rounds each stored line half-up to paise. X-36 totals those lines, including historical 3-decimal rows.
+    const sum = (key: 'taxable' | 'cgst' | 'sgst' | 'igst' | 'total_amount') => money(rows.reduce((total, b) => total + (b.lines?.length ? b.lines.reduce((n, line) => n + line[key === 'total_amount' ? 'amount' : key], 0) : b[key]), 0));
+    return { name: month, cols: headings.map((_, i) => [0, 1, 5].includes(i) ? 180 : 120), rows: [
+      ...register(rows).map((cells, i) => sheetRow(i === 0 ? 'head' : 'data', cells)),
+      sheetRow('total', ['Totals', '', '', '', '', '', '', '', '', '', '', sum('taxable'), sum('cgst'), sum('sgst'), sum('igst'), sum('total_amount'), '', money(rows.reduce((total, b) => total + b.credit.claimed, 0))]),
+    ] };
   });
-  sheets.push({ name: 'Credit by month', rows: [['Credit month', 'Bills', 'Input tax credit'], ...[...new Set(bills.map(b => b.credit.month))].sort().map(month => {
-    const rows = bills.filter(b => b.credit.month === month); return [month, { n: String(rows.length) }, money(rows.reduce((total, b) => total + b.credit.claimed, 0))];
+  // Pre-April-2025 purchases stay in the bill-date register, without creating a credit month or credit twice (X-11).
+  const withinLedger = bills.filter(b => b.credit.month !== null);
+  sheets.push({ name: 'Credit by month', cols: [160, 90, 150], rows: [sheetRow('head', ['Credit month', 'Bills', 'Input tax credit']), ...[...new Set(withinLedger.map(b => b.credit.month))].sort().map(month => {
+    const rows = withinLedger.filter(b => b.credit.month === month);
+    return sheetRow('data', [month ?? '', { v: String(rows.length), num: true }, money(rows.reduce((total, b) => total + b.credit.claimed, 0))]);
   })] });
-  const { writeWorkbook } = await import('@/core/excel');
-  return writeWorkbook(sheets);
+  const { excelBlob } = await import('@/core/excel/writer');
+  return excelBlob(sheets);
 }
 /** Export the list's wire params, optionally only its selected IDs. Cancel/failure never downloads a partial file. */
 export async function purchaseExport(kind: 'csv' | 'xlsx' | 'ca', params: Record<string, unknown>, ids?: number[], { signal, onProgress }: Options = {}): Promise<void> {

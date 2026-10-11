@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { testQueryClient } from '@/test/render';
 import { serve, type Call } from '@/test/server';
-import { purchaseDetailWire, purchaseBinWire, purchasePageWire, purchasesServer } from '@/core/purchases/fixtures';
+import { OUTSIDE_CREDIT, OUTSIDE_CREDIT_MONTHS, purchaseDetailWire, purchaseBinWire, purchasePageWire, purchasesServer } from '@/core/purchases/fixtures';
 import type { PurchaseInput } from '@/core/purchases/types';
 import { purchasesParams, purchasesKeys, rowsOf, usePurchasesList, usePurchase, useCreatePurchase, useDeletePurchase, useRestorePurchase, useCheckPurchase, useMovePurchaseCredit, useReadPurchase, usePurchaseFiles, useDeletePurchaseFile, useCreditMonths, useCheckDuplicate, useUsualRate, useDeletePurchases } from './purchases';
 const setup = () => { const qc = testQueryClient(); return { qc, wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> }; };
@@ -68,6 +68,24 @@ test('check, credit move and file writes use their contract methods and convert 
   await act(async () => { await checked.result.current.mutateAsync(905); expect((await moved.result.current.mutateAsync({ id: 905, itc_month: '2026-10' })).credit.claimed).toBe(123); await attached.result.current.mutateAsync({ id: 905, file }); await removed.result.current.mutateAsync({ id: 905, fileId: 'src' }); });
   expect(calls[1].data).toEqual({ itc_month: '2026-10' });
   expect((calls[2].data as FormData).get('file')).toBe(file);
+});
+test('clearing a before-ledger credit month preserves the no-op response and null previous month', async () => {
+  const calls = serve({ 'PUT purchases/905/credit-month/': { id: 905, previous: null, credit: OUTSIDE_CREDIT } });
+  const { wrapper } = setup();
+  const moved = renderHook(() => useMovePurchaseCredit(), { wrapper });
+  await act(async () => {
+    expect(await moved.result.current.mutateAsync({ id: 905, itc_month: null })).toEqual({ id: 905, previous: null, credit: { ...OUTSIDE_CREDIT, claimed: 0 } });
+  });
+  expect(calls[0].data).toEqual({ itc_month: null });
+  expect(calls).toHaveLength(1);
+});
+test('before-ledger month lookup returns no choices while retaining the real bill month', async () => {
+  const calls = serve({ 'GET purchases/credit-months/': OUTSIDE_CREDIT_MONTHS });
+  const { wrapper } = setup();
+  const credit = renderHook(() => useCreditMonths(3, '2025-03-31'), { wrapper });
+  await waitFor(() => expect(credit.result.current.isSuccess).toBe(true));
+  expect(credit.result.current.data).toEqual(OUTSIDE_CREDIT_MONTHS);
+  expect(calls[0].params).toMatchObject({ business_id: 3, invoice_date: '2025-03-31' });
 });
 test('read is explicit multipart and counts AI reads without retrying or polling', async () => {
   const calls = serve({ 'POST purchases/read/': { printed_total: '123.45', lines_total: '123.46', lines: [] } });

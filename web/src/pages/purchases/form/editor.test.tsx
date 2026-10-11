@@ -147,7 +147,7 @@ test('supplier GSTIN confidence is confirmed beside the supplier, not the buyer'
 });
 test('a bill before the ledger starts offers no credit month and sends null, keeping eligibility', async () => {
   const calls = server(); mount({ ...valid(), invoice_date: '2024-03-31' });
-  expect(await screen.findAllByText('This bill predates April 2025. Its credit belongs in the opening balance, or has lapsed.')).not.toHaveLength(0);
+  expect(await screen.findAllByText('This bill is before April 2025. Its credit is in the opening balance or lapsed.')).not.toHaveLength(0);
   expect(screen.queryByLabelText('Claim the credit in')).not.toBeInTheDocument();
   await tick(400); fireEvent.click(screen.getByRole('button', { name: 'Save purchase' }));
   await waitFor(() => expect(calls.some(c => c.method === 'POST')).toBe(true));

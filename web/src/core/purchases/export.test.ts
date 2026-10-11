@@ -1,9 +1,9 @@
 import { purchaseExport } from './export';
-import { writeWorkbook } from '@/core/excel';
+import { excelBlob } from '@/core/excel/writer';
 import { saveFile } from '@/core/print/files';
-import { bytesOf } from '@/pages/sales/print/zip';
+import { bytesOf } from '@/core/files/zip';
 import { serve, type Call } from '@/test/server';
-vi.mock('@/core/excel', () => ({ writeWorkbook: vi.fn(async () => new Blob(['3D-owned Excel codec test double'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })) }));
+vi.mock('@/core/excel/writer', () => ({ excelBlob: vi.fn(async () => new Blob(['3D-owned Excel codec test double'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })) }));
 vi.mock('@/core/print/files', () => ({ saveFile: vi.fn() }));
 const row = (id = 1, overrides: Record<string, unknown> = {}) => ({
   id, business: 3, business_name: 'Kiran', invoice_number: 'UBS/0850', invoice_date: '2026-03-31', fy: '2025-26',
@@ -24,7 +24,7 @@ async function entries(blob: Blob) {
   }
   return out;
 }
-beforeEach(() => { vi.mocked(saveFile).mockClear(); vi.mocked(writeWorkbook).mockClear(); });
+beforeEach(() => { vi.mocked(saveFile).mockClear(); vi.mocked(excelBlob).mockClear(); });
 test('CSV reads every filtered page with lines; keeps paise, quantity/rate precision and credit month across FYs', async () => {
   const calls = serve({ 'GET purchases/': (c: Call) => ({ status: 200, data: c.params.page === 1 ? page([row()], 2, '?page=2') : page([row(2)], 2) }) });
   await purchaseExport('csv', { business_id: 3, credit_month: '2026-10' });
@@ -35,18 +35,22 @@ test('CSV reads every filtered page with lines; keeps paise, quantity/rate preci
 test('Excel delegates month sheets, exact stored numbers and cross-FY credit totals to the 3D shared writer', async () => {
   serve({ 'GET purchases/': page([row(), row(2, { invoice_date: '2026-10-01', credit: { month: '2026-10', claimed: '0.00' } })]) });
   await purchaseExport('xlsx', {});
-  expect(writeWorkbook).toHaveBeenCalledTimes(1);
-  const sheets = vi.mocked(writeWorkbook).mock.calls[0][0];
+  expect(excelBlob).toHaveBeenCalledTimes(1);
+  const sheets = vi.mocked(excelBlob).mock.calls[0][0];
   expect(sheets.map(s => s.name)).toEqual(['2026-03', '2026-10', 'Credit by month']);
-  expect(sheets[0].rows[0].slice(7, 10)).toEqual(['Qty', 'Unit', 'Rate per unit']);
-  expect(sheets[0].rows[1][5]).toBe('=1+1'); // codec must force strings to literal cells; 3D tests that byte boundary
-  expect(sheets[0].rows[1].slice(7, 10)).toEqual([{ n: '1.001', format: '0.000' }, 'gms', { n: '99.950', format: '0.000' }]);
-  expect(sheets[0].rows[1][11]).toEqual({ n: '100.05', format: '0.00' });
-  expect(sheets[0].rows.at(-1)?.[0]).toBe('Totals');
-  expect(sheets[0].rows.at(-1)?.[15]).toEqual({ n: '103.06', format: '0.00' });
-  expect(sheets[2].rows[1]).toEqual(['2026-10', { n: '2' }, { n: '3.01', format: '0.00' }]);
+  expect(sheets[0].cols).toHaveLength(18);
+  expect(sheets[0].rows[0].kind).toBe('head');
+  expect(sheets[0].rows[0].cells.slice(7, 10)).toEqual([{ v: 'Qty' }, { v: 'Unit' }, { v: 'Rate per unit' }]);
+  expect(sheets[0].rows[1].kind).toBe('data');
+  expect(sheets[0].rows[1].cells[5]).toEqual({ v: '=1+1' }); // shared codec owns safe literal bytes
+  expect(sheets[0].rows[1].cells.slice(7, 10)).toEqual([{ v: '1.001', num: true }, { v: 'gms' }, { v: '99.950', num: true }]);
+  expect(sheets[0].rows[1].cells[11]).toEqual({ v: '100.05', num: true });
+  expect(sheets[0].rows.at(-1)?.kind).toBe('total');
+  expect(sheets[0].rows.at(-1)?.cells[0]).toEqual({ v: 'Totals' });
+  expect(sheets[0].rows.at(-1)?.cells[15]).toEqual({ v: '103.06', num: true });
+  expect(sheets[2].rows[1]).toEqual({ kind: 'data', cells: [{ v: '2026-10' }, { v: '2', num: true }, { v: '3.01', num: true }] });
   const [file] = vi.mocked(saveFile).mock.calls[0];
-  expect(file).toBe(await vi.mocked(writeWorkbook).mock.results[0].value);
+  expect(file).toBe(await vi.mocked(excelBlob).mock.results[0].value);
 });
 test.each([['csv', 1001], ['xlsx', 1001], ['ca', 301]] as const)('%s refuses an over-limit set before exporting anything', async (kind, count) => {
   const calls = serve({ 'GET purchases/': page([row()], count, '?page=2') });
@@ -77,7 +81,30 @@ test('cancel or failed attachment leaves no partial download; progress can stop 
 });
 test('a shared writer failure stops the export; no fallback workbook or attachment read is attempted', async () => {
   const calls = serve({ 'GET purchases/': page([row(1, { has_files: true })]) });
-  vi.mocked(writeWorkbook).mockRejectedValueOnce(new Error('Shared Excel writer failed.'));
+  vi.mocked(excelBlob).mockRejectedValueOnce(new Error('Shared Excel writer failed.'));
   await expect(purchaseExport('ca', {})).rejects.toThrow('Shared Excel writer failed.');
   expect(calls).toHaveLength(1); expect(saveFile).not.toHaveBeenCalled();
+});
+
+test('pre-ledger purchases stay in CSV and bill-date sheets with blank credit month, outside the credit summary', async () => {
+  serve({ 'GET purchases/': page([row(1, { invoice_date: '2024-03-31', credit: { month: null, claimed: '0.00', eligible: true, state: 'outside' } })]) });
+  await purchaseExport('csv', {});
+  expect(await text(vi.mocked(saveFile).mock.calls[0][0])).toContain('2024-03-31');
+  expect(await text(vi.mocked(saveFile).mock.calls[0][0])).toContain('103.06,,0.00');
+  await purchaseExport('xlsx', {});
+  const sheets = vi.mocked(excelBlob).mock.calls[0][0];
+  expect(sheets.map(s => s.name)).toEqual(['2024-03', 'Credit by month']);
+  expect(sheets[0].rows[1].cells[16]).toEqual({ v: '' });
+  expect(sheets[0].rows[1].cells[17]).toEqual({ v: '0.00', num: true });
+  expect(sheets[1].rows).toEqual([{ kind: 'head', cells: [{ v: 'Credit month' }, { v: 'Bills' }, { v: 'Input tax credit' }] }]);
+});
+test('month totals sum paise-rounded historical lines, including the 0.025 + 0.025 boundary', async () => {
+  const line = { ...row().lines[0], taxable: '0.025', cgst: '0', sgst: '0', igst: '0', amount: '0.025' };
+  serve({ 'GET purchases/': page([row(1, { taxable: '0.05', total_amount: '0.05', cgst: '0', sgst: '0', igst: '0', lines: [line, { ...line, id: 11 }] })]) });
+  await purchaseExport('xlsx', {});
+  const sheet = vi.mocked(excelBlob).mock.calls[0][0][0];
+  expect(sheet.rows[1].cells[11]).toEqual({ v: '0.03', num: true });
+  expect(sheet.rows[2].cells[11]).toEqual({ v: '0.03', num: true });
+  expect(sheet.rows.at(-1)?.cells[11]).toEqual({ v: '0.06', num: true });
+  expect(sheet.rows.at(-1)?.cells[15]).toEqual({ v: '0.06', num: true });
 });
