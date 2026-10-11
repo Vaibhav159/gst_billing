@@ -40,7 +40,7 @@ export function canShareFiles(): boolean {
  * (making the PDF took too long), so it needs another press; "unsupported": no share sheet for files here (download it).
  */
 export async function shareFile(blob: Blob, name: string, { title, text }: { title: string; text?: string }): Promise<"shared" | "cancelled" | "late" | "unsupported"> {
-  const file = new File([blob], name, { type: "application/pdf" });
+  const file = new File([blob], name, { type: blob.type || "application/pdf" });
   if (typeof navigator.share !== "function" || typeof navigator.canShare !== "function" || !navigator.canShare({ files: [file] })) return "unsupported";
   if (navigator.userActivation && !navigator.userActivation.isActive) return "late";
   try {

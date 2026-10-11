@@ -205,7 +205,7 @@ test("cancel posts the reason; afterwards bills, the bin, customers and search a
   await act(async () => { done = await result.current.mutateAsync({ id: 412, reason: "Customer returned it" }); });
   expect(calls.find((c) => c.url === "sales/412/cancel/")?.body).toEqual({ reason: "Customer returned it" });
   expect(done).toMatchObject({ status: "cancelled", cancelled_by: { name: "Kailash Mehta" } });
-  expect(spy.mock.calls.map(([f]) => f?.queryKey)).toEqual([["sales"], ["bin"], ["customers"], ["search"]]);
+  expect(spy.mock.calls.map(([f]) => f?.queryKey)).toEqual([["sales"], ["bin"], ["customers"], ["search"], ["gst"], ["reports"]]);
 });
 
 test("delete sends its reason in the body and answers the bin row that Undo restores; a closed month keeps the server's code and words", async () => {

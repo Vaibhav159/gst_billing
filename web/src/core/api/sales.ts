@@ -207,7 +207,7 @@ export function useShopSettings() {
  */
 export function invalidateSales(qc: QueryClient, keep?: number): void {
   void qc.invalidateQueries({ queryKey: salesKeys.all, predicate: (q) => !(keep !== undefined && q.queryKey[1] === "bill" && q.queryKey[2] === keep) });
-  for (const queryKey of [["bin"], ["customers"], ["search"]]) void qc.invalidateQueries({ queryKey });
+  for (const queryKey of [["bin"], ["customers"], ["search"], ["gst"], ["reports"]]) void qc.invalidateQueries({ queryKey });
 }
 
 /** A write that answers with the bill: its page shows that answer at once, and everything else asks again. */

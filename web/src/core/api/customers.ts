@@ -292,7 +292,7 @@ export function useWalkinFigures(customer: Customer | null, firm: FirmId | null)
 
 /* ── Writing ───────────────────────────────────────────── */
 const refreshedBySave = (keep?: number) => (q: Query) =>
-  ["sales", "search", "suppliers", "purchases"].includes(String(q.queryKey[0])) || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
+  ["gst", "sales", "search", "suppliers", "purchases"].includes(String(q.queryKey[0])) || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
 /** Adds a customer (no id) or changes one (PATCH, any fields). Answers the saved customer. */
 export function useSaveCustomer() {
   const qc = useQueryClient();
