@@ -140,7 +140,6 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
-        from billing.cache import uncached
         list(uncached(Business).order_by("pk").select_for_update(no_key=True).values_list("pk", flat=True))
         return super().update(request, *args, **kwargs)
 

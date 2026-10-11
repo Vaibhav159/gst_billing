@@ -7,7 +7,7 @@ from billing.api.permissions import V3Permission
 from billing.cache import uncached
 from billing.gstin import lookup
 from billing.models import Business, Customer
-from billing.services.bill_reads import _customer_ref
+from billing.services.bill_reads import customer_ref
 from billing.services.firms import firm_ref
 
 
@@ -36,6 +36,6 @@ class RegistryView(APIView):
         result.update(status="found" if found else "unknown", registry=registry,
                       lookup=data["source"] if found else "unreachable",
                       **{key: data[key] for key in ("state_code", "state_name", "pan")},
-                      on_file={"customers": [_customer_ref(customer) for customer in customers],
+                      on_file={"customers": [customer_ref(customer) for customer in customers],
                                "firms": [firm_ref(firm) for firm in firms]})
         return Response(result)

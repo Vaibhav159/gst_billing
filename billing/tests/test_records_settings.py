@@ -24,6 +24,22 @@ class RecordsSettingsTest(TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertEqual(str(response.data["default_business"][0]), "Pick a firm from the list.")
 
+    def test_a_firm_deleted_while_saving_gives_words_not_a_dangling_default(self):
+        from unittest.mock import patch
+
+        from billing.api import shop
+        real = shop.valid
+
+        def valid_then_deleted(*args, **kwargs):
+            data = real(*args, **kwargs)
+            type(self.firm).objects.filter(pk=self.firm.pk).delete()
+            return data
+        with patch.object(shop, "valid", side_effect=valid_then_deleted):
+            response = self.client.put("/api/shop-settings/", {"default_business": self.firm.pk}, format="json")
+        self.assertEqual((response.status_code, str(response.data["default_business"][0])), (400, "Pick a firm from the list."))
+        self.assertFalse(ShopSetting.objects.filter(default_business_id=self.firm.pk).exists())
+        self.assertFalse(AuditLog.objects.exists())
+
     def test_share_placeholder_words_and_warnings(self):
         for message, words in [
             ("Hi {unknown}", "{unknown} isn't something the app can fill in. Use {customer}, {number}, {total}, {firm} or {date}."),

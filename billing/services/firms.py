@@ -465,10 +465,20 @@ def save_signature(business, image, user, remove=False):
                 picture.verify()
             image.seek(0)
         except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError):
-            raise ValidationError({"image": [f"{image.name} isn't a picture. Pick a PNG or JPG of the signature."]}) from None
+            raise ValidationError({"image": [f"{image.name} isn't a picture. Pick a PNG, JPG or WebP of the signature."]}) from None
     with transaction.atomic():
         business = uncached(Business).select_for_update().get(pk=business.pk)
         before = snapshot_of(business)
+        if remove and not business.signature_image:
+            # No picture to remove: only switching printing off is a real change worth a row.
+            if not business.signature_on_bills:
+                return business
+            business.signature_on_bills = False
+            business.save(update_fields=["signature_on_bills", "updated_at"])
+            AuditLog.objects.create(action="updated", entity="business", entity_id=business.pk, entity_name=business.name,
+                                    user=user, changes={"signature_on_bills": {"old": True, "new": False}}, snapshot=before,
+                                    details="Signature on bills: Printed → Not printed")
+            return business
         # Old files stay for Audit log restore/revert; only the model's path changes.
         business.signature_image = "" if remove else image
         business.signature_on_bills = not remove

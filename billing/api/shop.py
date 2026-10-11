@@ -5,6 +5,7 @@ import re
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -76,7 +77,7 @@ class ShopSettingsView(APIView):
         return Response(shown(ShopSetting.load()))  # the defaults until someone saves: reading never writes
 
     def put(self, request):
-        data = valid(ShopSettingSerializer, request.data, partial=True)  # any of the three
+        data = valid(ShopSettingSerializer, request.data, partial=True)  # any of the four
         with transaction.atomic():
             # The row locked, so two saves at once can't both make it or lose each other's change. A save that
             # changes nothing writes nothing, so the "last changed" stamp agrees with the audit log; on a fresh
@@ -84,6 +85,10 @@ class ShopSettingsView(APIView):
             # is joined (only the row locked), so one v2 deleted since answers as nobody (Ruling 1A-6).
             setting = (ShopSetting.objects.select_related("updated_by").select_for_update(of=("self",))
                        .get_or_create(pk=1)[0])
+            # A firm delete takes this lock first, so once it is held a picked firm that is still here stays here.
+            picked = data.get("default_business")
+            if picked is not None and not uncached(Business).filter(pk=picked.pk).exists():
+                raise ValidationError({"default_business": ["Pick a firm from the list."]})
             changed = [key for key, value in data.items() if
                        (setting.default_business_id != getattr(value, "pk", None) if key == "default_business" else getattr(setting, key) != value)]
             old_firm_name = (uncached(Business).filter(pk=setting.default_business_id).values_list("name", flat=True).first()

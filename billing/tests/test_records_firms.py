@@ -271,8 +271,8 @@ class FirmWriteTests(TestCase):
         capture.save()
         self.assertEqual(self.client.delete(f"/api/firms/{old.pk}/").status_code, 409)
         capture.delete()
-        from billing.services.firms import assert_firm_unused, firm_uses
         from billing.refusals import Refusal
+        from billing.services.firms import assert_firm_unused, firm_uses
         for uses, words in (({"bin": 1}, "1 bill in the bin"), ({"sales": 2, "cancelled": 1, "purchases": 1},
                             "2 sales bills, 1 cancelled bill and 1 purchase bill"), ({"drafts": 2, "captures": 3},
                             "2 sales drafts and 3 purchase photos")):
@@ -329,6 +329,17 @@ class FirmSignatureTests(TestCase):
         self.assertEqual(AuditLog.objects.filter(entity="business").count(), 2)
         self.assertEqual(AuditLog.objects.latest("id").details, "Signature picture: A picture → Removed")
 
+    def test_removing_a_missing_picture_tells_no_false_story(self):
+        from billing.models import AuditLog
+        type(self.firm).objects.filter(pk=self.firm.pk).update(signature_on_bills=False)
+        response = self.client.delete(self.url)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(AuditLog.objects.filter(entity="business").exists())
+        type(self.firm).objects.filter(pk=self.firm.pk).update(signature_on_bills=True)
+        response = self.client.delete(self.url)
+        self.assertEqual((response.status_code, response.data["signature_on_bills"]), (200, False))
+        self.assertEqual(AuditLog.objects.get(entity="business").details, "Signature on bills: Printed → Not printed")
+
     def test_invalid_missing_large_and_wrong_format_images(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         response = self.client.put(self.url, {}, format="multipart")
@@ -337,7 +348,7 @@ class FirmSignatureTests(TestCase):
         for image in (SimpleUploadedFile("fake.png", b"not an image", content_type="image/png"), self.picture("animated.gif", "GIF")):
             response = self.client.put(self.url, {"image": image}, format="multipart")
             self.assertEqual(response.status_code, 400, response.data)
-            self.assertIn("isn't a picture. Pick a PNG or JPG of the signature.", response.data["image"][0])
+            self.assertIn("isn't a picture. Pick a PNG, JPG or WebP of the signature.", response.data["image"][0])
         response = self.client.put(self.url, {"image": SimpleUploadedFile("large.png", b"x" * (1024 * 1024 + 1))}, format="multipart")
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["image"], ["That picture is 1.0 MB. Pick one under 1 MB; a phone photo cropped to the signature is fine."])

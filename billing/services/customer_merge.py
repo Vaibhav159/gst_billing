@@ -17,7 +17,7 @@ from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice,
 from billing.numbering import bill_ref
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
-from billing.services.bill_reads import _customer_ref
+from billing.services.bill_reads import customer_ref
 from billing.services.firms import firm_ref
 from billing.services.sales import refile_heads
 from billing.tax_rules import classify_b2c, clean_gstin, state_code, supply_interstate
@@ -53,7 +53,7 @@ def duplicates():
     groups = {"gstin": defaultdict(list), "phone": defaultdict(list)}
     customers = uncached(Customer).exclude(customer_type="walkin").only(*REF_FIELDS).order_by("name", "pk")
     for customer in customers:
-        reference = _customer_ref(customer)
+        reference = customer_ref(customer)
         gstin = (customer.gst_number or "").strip().upper()
         digits = re.sub(r"[^0-9]", "", customer.mobile_number or "")
         if gstin:
@@ -225,8 +225,8 @@ def _preview(source, target, bills, bins, drafts):
         refusal = {"code": "month_closed", "detail": words, "months": months, "bills": []}
     elif sent:
         refusal = {"code": "sent_changes", "detail": _sent_refusal(sent[0], source, target), "months": [], "bills": sent}
-    return ({"source": {**_customer_ref(source), "state_name": source.state_name or ""},
-             "target": {**_customer_ref(target), "state_name": target.state_name or "",
+    return ({"source": {**customer_ref(source), "state_name": source.state_name or ""},
+             "target": {**customer_ref(target), "state_name": target.state_name or "",
                         "since": timezone.localtime(target.created_at).date().isoformat()},
              "can_merge": refusal is None, "refusal": refusal,
              "bills": {"count": sum(bill.status != BILL_CANCELLED for bill in sales),

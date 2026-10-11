@@ -222,6 +222,9 @@ def _customer_ref(customer):
             "mobile_number": customer.mobile_number or "", "type": customer.kind}
 
 
+customer_ref = _customer_ref  # the public name other services import
+
+
 def bill_row(invoice, lines, closed, duplicated):
     """A sale as a list row (BillRow). `closed`: closed months of its firm; `duplicated`: its number is used twice."""
     day = invoice.invoice_date
