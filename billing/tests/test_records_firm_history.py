@@ -54,7 +54,7 @@ class FirmFilingReadTests(TestCase):
         other = firm("SECOND FIRM")
         ids = [self.business.pk, other.pk]
         filing, checks = ModuleType("billing.services.filing"), ModuleType("billing.services.gst_checks")
-        filing.month_stages = Mock(return_value=({(pk, "2026-09"): "blocked" for pk in ids}, {pk: "2026-08" for pk in ids}))
+        filing.month_stages = Mock(return_value={"stages": {(pk, "2026-09"): "blocked" for pk in ids}, "latest_gstr1": {pk: "2026-08" for pk in ids}})
         words = "Bill number KGH/2026-27/17 is used twice"
         checks.gstr1_blockers = Mock(return_value={(pk, "2026-09"): {"count": 1, "first_two": [words, "Another blocker"]} for pk in ids})
         dates = {(pk, "2026-08", kind): day for pk in ids for kind, day in (("gstr1", "2026-09-10"), ("gstr3b", "2026-09-18"))}
@@ -77,7 +77,7 @@ class FirmFilingReadTests(TestCase):
         filing, checks = ModuleType("billing.services.filing"), ModuleType("billing.services.gst_checks")
         stages = {(self.business.pk, "2026-08"): "gstr1", (self.business.pk, "2026-09"): "blocked",
                   (other.pk, "2026-08"): "blocked", (other.pk, "2026-09"): "gstr1"}
-        filing.month_stages = Mock(return_value=(stages, {pk: None for pk in ids}))
+        filing.month_stages = Mock(return_value={"stages": stages, "latest_gstr1": {pk: None for pk in ids}})
         words = "Bill number KGH/2026-27/17 is used twice"
         checks.gstr1_blockers = Mock(return_value={key: {"count": 1, "first_two": [words]} for key in stages})
         with patch.dict("sys.modules", {filing.__name__: filing, checks.__name__: checks}):
@@ -91,13 +91,14 @@ class FirmFilingReadTests(TestCase):
         filing, checks = ModuleType("billing.services.filing"), ModuleType("billing.services.gst_checks")
         stages = ["future", "open", "blocked", "ready", "gstr1", "filed", "unlocked"]
         labels = [f"2026-{month:02d}" for month in range(4, 11)]
-        filing.month_stages = Mock(return_value=({(self.business.pk, label): stage for label, stage in zip(labels, stages, strict=True)}, {self.business.pk: "2026-09"}))
+        filing.month_stages = Mock(return_value={"stages": {(self.business.pk, label): stage for label, stage in zip(labels, stages, strict=True)}, "latest_gstr1": {self.business.pk: "2026-09"}})
         checks.gstr1_blockers = Mock(return_value={(self.business.pk, "2026-06"): {"count": 1, "first_two": ["A line needs its HSN"]}})
         with patch.dict("sys.modules", {filing.__name__: filing, checks.__name__: checks}), patch("billing.services.firms.filing_dates", return_value={}):
             response = self.client.get(f"/api/firms/{self.business.pk}/", {"fy": "2026-27"})
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual([row["state"] for row in response.data["months"]], stages)
         filing.month_stages.assert_called_once_with([self.business.pk], labels, today=date(2026, 10, 8))
+        checks.gstr1_blockers.assert_called_once_with([self.business.pk], ["2026-06"])
         self.assertEqual(response.data["figures"]["previous_month"], {"month": "2026-09", "state": "filed", "blocker": ""})
 
     def test_future_filing_models_and_zero_opening_rows_all_count(self):
@@ -124,16 +125,17 @@ class FirmFilingReadTests(TestCase):
             except ModuleNotFoundError as missing:
                 if missing.name != name:
                     raise
-                self.skipTest(f"Requires 3A Tasks 4 and 9: {name}.{helper} (X-40).")
+                self.skipTest(f"Requires 3A Tasks 4 and 6: {name}.{helper} (X-40).")
             if not hasattr(modules[name], helper):
-                self.skipTest(f"Requires 3A Task 9's complete grouped interface: {name}.{helper} (X-40).")
+                self.skipTest(f"Requires 3A Task 6's complete grouped interface: {name}.{helper} (X-40).")
         today = timezone.localdate()
         previous = date(today.year - (today.month == 1), 12 if today.month == 1 else today.month - 1, 1)
         label = previous.strftime("%Y-%m")
         FiledPeriod.objects.create(business=self.business, year=previous.year, month=previous.month)
-        # Contract §11 leaves the carrier unspecified. Confirm this two-tuple against 3A's plan before combined landing.
-        stages, _latest = modules["billing.services.filing"].month_stages([self.business.pk], [label], today=today)
-        self.assertEqual(stages[self.business.pk, label], "filed")
+        # Published 3A Task 6 returns this dictionary, including legacy locks in latest_gstr1.
+        result = modules["billing.services.filing"].month_stages([self.business.pk], [label], today=today)
+        self.assertEqual(result["stages"][self.business.pk, label], "filed")
+        self.assertEqual(result["latest_gstr1"][self.business.pk], label)
         blockers = modules["billing.services.gst_checks"].gstr1_blockers([self.business.pk], [label])
         self.assertFalse(blockers.get((self.business.pk, label), {}).get("first_two"))
         response = self.client.get("/api/firms/", {"figures": "1"})
@@ -141,6 +143,9 @@ class FirmFilingReadTests(TestCase):
         figures = response.data["results"][0]["figures"]
         self.assertEqual(figures["previous_month"], {"month": label, "state": "filed", "blocker": ""})
         self.assertEqual(figures["last_filed"], {"month": label, "gstr1_filed_on": None, "gstr3b_filed_on": None})
+        detail = self.client.get(f"/api/firms/{self.business.pk}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["figures"]["previous_month"], figures["previous_month"])
 
 
 class FirmHistoryProtectionTests(TestCase):

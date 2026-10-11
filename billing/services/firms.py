@@ -110,20 +110,21 @@ def read_filings(ids, months):
     from importlib import import_module
     today = timezone.localdate()
     months = sorted(set(months))
-    closed = set(uncached(FiledPeriod).filter(business_id__in=ids).values_list("business_id", "year", "month"))
-    latest = {pk: max((f"{year}-{month:02d}" for firm, year, month in closed if firm == pk), default=None) for pk in ids}
+    grouped_blockers = None
     try:
         filing = import_module("billing.services.filing")
     except ModuleNotFoundError as missing:
         if missing.name != "billing.services.filing":
             raise
         # ponytail: only the absence of part 3 selects its explicitly approved v2-lock fallback.
+        closed = set(uncached(FiledPeriod).filter(business_id__in=ids).values_list("business_id", "year", "month"))
+        latest = {pk: max((f"{year}-{month:02d}" for firm, year, month in closed if firm == pk), default=None) for pk in ids}
         stages = {(pk, label): "filed" if (pk, *map(int, label.split("-"))) in closed else "open"
                   for pk in ids for label in months}
     else:
-        # Contract §11 names two results; confirm this (stage_map, latest_gstr1) carrier with 3A.
-        stages, latest_gstr1 = filing.month_stages(ids, months, today=today)
-        latest = {pk: max(filter(None, (latest[pk], latest_gstr1.get(pk))), default=None) for pk in ids}
+        result = filing.month_stages(ids, months, today=today)
+        stages, latest = result["stages"], result["latest_gstr1"]
+        grouped_blockers = result.get("blockers")
     dates = filing_dates(ids, set(months) | {label for label in latest.values() if label})
     def dates_for(pk, label):
         return {"month": label, "gstr1_filed_on": dates.get((pk, label, "gstr1")),
@@ -132,9 +133,10 @@ def read_filings(ids, months):
     blocked = [(pk, label) for (pk, label), state in stages.items() if state == "blocked"]
     blockers = {}
     if blocked:
-        from billing.services.gst_checks import gstr1_blockers
-        blockers = {key: (value.get("first_two") or [""])[0] for key, value in
-                    gstr1_blockers(sorted({pk for pk, _ in blocked}), sorted({label for _, label in blocked})).items()}
+        if grouped_blockers is None:
+            from billing.services.gst_checks import gstr1_blockers
+            grouped_blockers = gstr1_blockers(sorted({pk for pk, _ in blocked}), sorted({label for _, label in blocked}))
+        blockers = {key: (grouped_blockers.get(key, {}).get("first_two") or [""])[0] for key in blocked}
     return {"months": shown, "last": {pk: dates_for(pk, label) if label else None for pk, label in latest.items()},
             "blockers": blockers}
 
@@ -356,14 +358,25 @@ def check_firm_unique(values, business=None):
 
 
 def freeze_older_bills(business, changed_fields):
+    """Freeze pre-snapshot sales, including restorable bin rows, while holding the firm's lock."""
     from billing.cache import invalidate
     from billing.services.sales import firm_snapshot
     if not IDENTITY_FIELDS.intersection(changed_fields):
         return 0
-    total = Invoice.objects.sales().filter(business=business, firm_snapshot__isnull=True).update(firm_snapshot=firm_snapshot(business))
+    snapshot = firm_snapshot(business)
+    total = Invoice.objects.sales().filter(business=business, firm_snapshot__isnull=True).update(firm_snapshot=snapshot)
     if total:
         invalidate(Invoice)
-    return total
+    binned = list(uncached(BinnedInvoice).live().select_for_update().filter(
+        Q(data__invoice__firm_snapshot__isnull=True) | Q(data__invoice__firm_snapshot=None),
+        business=business, type_of_invoice=INVOICE_TYPE_OUTWARD,
+    ).only("data").order_by("pk"))
+    for row in binned:
+        row.data = {**row.data, "invoice": {**row.data["invoice"], "firm_snapshot": snapshot}}
+    if binned:
+        BinnedInvoice.objects.bulk_update(binned, ["data"], batch_size=100)
+        invalidate(BinnedInvoice)
+    return total + len(binned)
 
 
 def save_firm(data, user, business=None):

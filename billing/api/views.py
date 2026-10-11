@@ -3085,6 +3085,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     skip = {"id"}
                     if model is Invoice:
                         skip |= {"total_amount", *Invoice.V3_FIELDS, *_renumbered_since(entry)}
+                    if model is Business:
+                        from billing.services.firms import IDENTITY_FIELDS, freeze_older_bills
+                        changed = []
+                        for name in IDENTITY_FIELDS.intersection(snap):
+                            value = snap[name]
+                            if value is None or value == "None":
+                                value = None if model._meta.get_field(name).null else ""
+                            if getattr(obj, name) != value:
+                                changed.append(name)
+                        freeze_older_bills(obj, changed)
                     for k, v in snap.items():
                         if k not in field_names or k in skip:
                             continue

@@ -106,8 +106,11 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
     already_restored names (Ruling 1A-9).
     """
     with transaction.atomic():
-        # The audit entry, then the bin row: the Audit log's Undo locks them in that order too.
+        # Audit Undo holds the entry first. Firm edits freeze bin data while holding Business,
+        # so restore must acquire that firm before locking and re-reading the bin row.
         entry = AuditLog.objects.select_for_update().filter(pk=binned.audit_log_id).first() if binned.audit_log_id else None
+        business_id = uncached(BinnedInvoice).filter(pk=binned.pk).values_list("business_id", flat=True).get()
+        firm = uncached(Business).select_for_update(no_key=True).filter(pk=business_id).first()
         binned = BinnedInvoice.objects.select_for_update().get(pk=binned.pk)
         undone = (entry.snapshot or {}).get("_undo") if entry else None
         if binned.restored_at or undone:
@@ -115,7 +118,6 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
             source = (undone or {}).get("via") or ("bin" if binned.restored_at else "audit_log")
             raise Refusal(f"{binned.invoice_number} is back already: it was restored from {RESTORED_FROM[source]}.",
                           "already_restored", bill=bill_ref(back) if back else None)
-        firm = uncached(Business).select_for_update(no_key=True).filter(pk=binned.business_id).first()
         if firm is None:
             raise Refusal("The firm on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again in the right firm.", "firm_gone")
