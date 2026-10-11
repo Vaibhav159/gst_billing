@@ -5,6 +5,7 @@ import { cn } from "@/core/cn";
 import { noteVisit } from "@/core/shell/recent";
 import { useView } from "@/core/view";
 import { useToast } from "@/core/ui";
+import { screenKey } from "./screenKey";
 
 /** A record's own page (a bill, a customer, a purchase, a product, a supplier) for search's "Opened recently"; not a form or a tool beside them. */
 const RECORD_PAGE = /^\/(sales|customers|purchases|products|suppliers)\/[^/]+$/;
@@ -157,7 +158,7 @@ export function PageFrame({ children, onShown }: { children: ReactNode; onShown?
   };
   return (
     <PlaceKeeper pathname={pathname} entry={key} clicked={clicked}>
-      <div key={pathname} onClickCapture={onClickCapture} className={cn("h-full", visit.anim)}>{children}</div>
+      <div key={screenKey(pathname)} onClickCapture={onClickCapture} className={cn("h-full", visit.anim)}>{children}</div>
     </PlaceKeeper>
   );
 }

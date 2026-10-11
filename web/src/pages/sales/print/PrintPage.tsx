@@ -71,6 +71,7 @@ export default function PrintPage() {
 }
 
 function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: ReactNode }) {
+  const { isEasy } = useView();
   const { can, whyNot } = useAuth();
   const { show } = useToast();
   const net = useNetwork();
@@ -212,7 +213,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
 
   if (phone) {
     return (
-      <Page title="Print and share" phoneSubtitle={`${b.invoice_number} · ${c.name}`} back={`/sales/${b.id}`}
+      <Page title="Print and share" phoneSubtitle={`${b.invoice_number} · ${c.name}`} back={isEasy ? `/e/bill/${b.id}` : `/sales/${b.id}`}
         actionBar={<>
           <Button size="lg" icon={SlidersHorizontal} onClick={() => setOptionsOpen(true)}>Options</Button>
           {/* a touch screen never shows a title: the PDF on its way shows on the button itself */}

@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { lazy, Suspense } from "react";
 import { Navigate, useLocation, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
@@ -26,6 +26,7 @@ const ChoosePassword = lazyPage(() => import("@/pages/people/ChoosePassword"));
 const Login = lazyPage(() => import("@/pages/core/Login"));
 const More = lazyPage(() => import("@/pages/core/More"));
 
+const EasyBillFlow = lazy(() => import("@/pages/easy/BillFlow"));
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -69,7 +70,7 @@ const PAGES: Record<string, string[]> = {
     "/settings", "/setup",
   ],
   easy: [
-    "/e", "/e/bills", "/e/new", "/e/new/items", "/e/saved/:id", "/e/bill/:id", "/e/capture", "/e/customers", "/e/customers/new", "/e/customers/:id/edit",
+    "/e", "/e/bills", "/e/saved/:id", "/e/bill/:id", "/e/capture", "/e/customers", "/e/customers/new", "/e/customers/:id/edit",
     "/e/gst", "/e/profile",
   ],
 };
@@ -122,6 +123,13 @@ export const appRoutes: RouteObject[] = [{
     {
       element: <RequireAuth><AppLayout onShown={warmPages} /></RequireAuth>,
       children: [
+        // The screens arrive in 6C–6E; their routes and shared form live here from 6B.
+        { path: "/e/new", element: <EasyBillFlow />, handle: { hideNav: true }, children: [
+          { index: true, element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
+          { path: "items", element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
+          { path: "customer", element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
+        ] },
+        { path: "/e/bill/:id/print", element: <PrintPage />, handle: { hideNav: true } },
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,
         ...captureRoutes,
