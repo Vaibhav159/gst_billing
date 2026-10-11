@@ -43,3 +43,30 @@ class RatesView(APIView):
                 user=request.user, details=f"Gold 22K {inr(quoted['gold-22K'])} per 10 g · "
                                            f"Silver 999 {inr(quoted['silver-999'])} per kg")
         return Response(rates.board_row(board), status=201)
+
+
+def scope(request):
+    from billing.params import PICK_A_FIRM, id_param
+    from billing.services.dashboard import firms_in_scope
+    raw = request.query_params.get("business_id")
+    business_id = id_param(request.query_params, "business_id", PICK_A_FIRM)
+    if raw == "":
+        raise ValidationError({"business_id": [PICK_A_FIRM]})
+    firms = firms_in_scope(business_id)
+    if business_id is not None and not firms:
+        raise ValidationError({"business_id": [PICK_A_FIRM]})
+    return firms, business_id
+
+
+class DashboardView(APIView):
+    permission_classes = [V3Permission]
+
+    def get(self, request):
+        from billing.fy import fy_of, parse_fy
+        from billing.services.dashboard import dashboard
+        today = timezone.localdate()
+        year = parse_fy(request.query_params["fy"]) if "fy" in request.query_params else fy_of(today)
+        if year is None:
+            raise ValidationError({"fy": ["Give the year like 2026-27."]})
+        firms, _business = scope(request)
+        return Response(dashboard(request.user, firms, year, today))
