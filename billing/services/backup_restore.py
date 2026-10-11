@@ -1,24 +1,28 @@
 """Add-only backup restore. Preview and apply share normalization and planning."""
 
 import hashlib
+import hmac
 import json
 import re
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as ModelValidationError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import transaction
 from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
 from billing.api.inward_bills_service import find_duplicate, inward_number_key, supplier_key
-from billing.cache import uncached
+from billing.api.mixins import snapshot_of
+from billing.cache import invalidate, uncached
 from billing.constants import GST_CODE
 from billing.fy import fy_of
 from billing.gstin import validate as valid_gstin
-from billing.models import BinnedInvoice, Business, Customer, Invoice, LineItem, Product
-from billing.numbering import counter_of
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem, Product
+from billing.numbering import counter_of, lock_firms
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
+from billing.services.bin import restore_from_bin, v2_snapshot
 from billing.services.line_items import build_line_items
 from billing.services.sales import FIRM_FIELDS, LINE_MOST, MOST, _too_big
 from billing.tax_rules import normalize_rate, normalize_state_name
@@ -395,3 +399,72 @@ def preview(file):
         return _plan(data, info, raw_hash)[0]
     except (ValueError, TypeError, InvalidOperation, ModelValidationError, OverflowError):
         _bad(info["name"])
+
+
+def _imported(instance, kind, user, filename):
+    AuditLog.objects.create(user=user, action="imported", entity={"firms": "business", "customers": "customer", "products": "product", "bills": "invoice"}[kind],
+                            entity_id=instance.pk, entity_name=instance.invoice_number if kind == "bills" else instance.name,
+                            details=f"From the backup {filename}",
+                            snapshot=v2_snapshot(instance) if kind == "bills" else snapshot_of(instance))
+
+
+def _restore_locks():
+    # Restore against an empty book still needs a shared row: every authenticated request has a User.
+    # Only its primary key is read. This serializes two owners restoring a previously unseen firm.
+    from django.contrib.auth import get_user_model
+    get_user_model().objects.order_by("pk").select_for_update().values_list("pk", flat=True).first()
+    # Bin restores lock audit -> bin -> firm (part 1); acquiring the firm first reverses that order.
+    ids = BinnedInvoice.objects.live().exclude(audit_log_id=None).values_list("audit_log_id", flat=True)
+    list(AuditLog.objects.select_for_update().filter(pk__in=ids).order_by("pk").values_list("pk", flat=True))
+    list(BinnedInvoice.objects.live().select_for_update().order_by("pk").values_list("pk", flat=True))
+    lock_firms(*uncached(Business).values_list("pk", flat=True))
+    for model in (Customer, Product):
+        list(uncached(model).select_for_update().order_by("pk").values_list("pk", flat=True))
+
+
+def apply_restore(file, fingerprint, user):
+    data, info, raw_hash = _read(file)
+    with transaction.atomic():
+        _restore_locks()
+        try:
+            answer, ops = _plan(data, info, raw_hash)
+        except (ValueError, TypeError, InvalidOperation, ModelValidationError, OverflowError):
+            _bad(info["name"])
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint) or not hmac.compare_digest(answer["fingerprint"], fingerprint):
+            raise Refusal(CHANGED, "plan_changed", plan=answer["plan"])
+        added, mapped = {kind: [] for kind in KINDS}, {"firms": {}, "customers": {}}
+        for kind, model in MODELS.items():
+            for row in ops[kind]:
+                instance = model.objects.create(**{k: v for k, v in row.items() if k != "id" and not k.startswith("_")})
+                if kind in mapped:
+                    mapped[kind][row["id"]] = instance
+                if kind == "customers":
+                    instance.businesses.set([mapped["firms"][ref].pk if ref in mapped["firms"] else ref
+                                             for ref in row.get("_businesses", [])])
+                added[kind].append(instance.pk)
+                _imported(instance, kind, user, info["name"])
+        for row in ops["bills"]:
+            business = mapped["firms"].get(row["business"])
+            if business is None:
+                business = uncached(Business).only("id", "name", "gst_number", "state_name").get(pk=row["business"])
+            assert_sales_open(business.pk, row["day"], "backup_restore")
+            if row["bin"]:
+                invoice = restore_from_bin(BinnedInvoice.objects.get(pk=row["bin"]), user, check_month=False)
+            else:
+                customer = mapped["customers"].get(row["buyer"])
+                if customer is None:
+                    customer = uncached(Customer).only("id", "name", "gst_number", "state_name").get(pk=row["buyer"])
+                invoice = Invoice(business=business, customer=customer, invoice_number=row["number"], invoice_date=row["day"],
+                                  type_of_invoice="outward", **row["fields"])
+                lines, invoice.total_amount = build_line_items(invoice, row["lines"], source="api")
+                invoice.save(force_insert=True)
+                for item in lines:
+                    item.invoice_id = invoice.pk
+                LineItem.objects.bulk_create(lines)
+            _imported(invoice, "bills", user, info["name"])
+            added["bills"].append(invoice.pk)
+        invalidate(Invoice, LineItem)
+        plan = answer["plan"]
+        AuditLog.objects.create(user=user, action="restored", entity="backup", entity_id=0, entity_name=info["name"],
+                                details=f"Added {plan['words']} · skipped {plan['skips']} · couldn't add {plan['fails']}")
+        return {"plan": plan, "added": {kind: ids[:50] for kind, ids in added.items()}}

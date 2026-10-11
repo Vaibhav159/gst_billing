@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.api.permissions import V3Permission
-from billing.services.backup_restore import preview
+from billing.services.backup_restore import apply_restore, preview
 
 
 class BackupRestorePreview(APIView):
@@ -15,3 +15,8 @@ class BackupRestorePreview(APIView):
 
     def post(self, request):
         return Response(preview(request.FILES.get("file")))
+
+
+class BackupRestoreApply(BackupRestorePreview):
+    def post(self, request):
+        return Response(apply_restore(request.FILES.get("file"), request.data.get("fingerprint"), request.user))

@@ -2,14 +2,15 @@
 
 import json
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.exceptions import ValidationError
 
-from billing.models import AuditLog, Business, FiledPeriod
+from billing.models import AuditLog, Business, Customer, FiledPeriod, Invoice
 from billing.services.backup_restore import preview
-from billing.tests.v3_helpers import buyer, firm, line, sale
+from billing.tests.v3_helpers import buyer, firm, line, person, sale
 
 pytestmark = pytest.mark.django_db
 
@@ -126,6 +127,303 @@ def test_bad_money_refuses_file_before_any_write(bad):
     assert not Business.objects.exists()
 
 
+def apply(data, owner, fingerprint=None):
+    from billing.services.backup_restore import apply_restore
+    return apply_restore(upload(data), fingerprint or preview(upload(data))["fingerprint"], owner)
+
+
+def test_apply_recomputes_diamond_total_keeps_number_and_does_not_copy_secrets():
+    owner = person("owner", "admin")
+    data = payload("5.0")
+    data["app"] = "gst-billing"
+    data["businesses"][0].update(invoice_prefix="GOLD", paper_full_number_from="2026-01-01")
+    data["v3"] = {"people": [{"username": "hacker", "password": "ignored"}], "shop_settings": {"anything": "ignored"}}
+    result = apply(data, owner)
+    invoice = Invoice.objects.get(pk=result["added"]["bills"][0])
+    assert invoice.invoice_number == "001"
+    assert invoice.total_amount == Decimal("100.25")
+    assert invoice.lineitem_set.get().gst_tax_rate == Decimal("0.0025")
+    assert invoice.customer.name == "New Buyer"
+    assert AuditLog.objects.filter(action="imported").count() == 4
+    assert AuditLog.objects.filter(action="restored", entity="backup").count() == 1
+    assert set(AuditLog.objects.values_list("entity", "action")) == {
+        ("business", "imported"), ("customer", "imported"), ("product", "imported"),
+        ("invoice", "imported"), ("backup", "restored"),
+    }
+    assert all(entry.snapshot for entry in AuditLog.objects.filter(action="imported"))
+    assert not type(owner).objects.filter(username="hacker").exists()
+    second = apply(data, owner)
+    assert second["plan"]["adds"] == 0
+    assert second["plan"]["skips"] == 4
+
+
+def test_stale_preview_and_changed_file_roll_back_everything():
+    from billing.refusals import Refusal
+    owner = person("owner", "admin")
+    data = payload()
+    fingerprint = preview(upload(data))["fingerprint"]
+    buyer("Someone added since")
+    with pytest.raises(Refusal) as error:
+        apply(data, owner, fingerprint)
+    assert error.value.detail["code"] == "plan_changed"
+    assert error.value.detail["detail"] == "The books changed since the preview. Check the new plan, then restore."
+    assert "plan" in error.value.detail
+    assert not Business.objects.exists()
+    fingerprint = preview(upload(data))["fingerprint"]
+    data["invoices"][0]["line_items"][0]["rate"] = "110"
+    with pytest.raises(Refusal):
+        apply(data, owner, fingerprint)
+    assert not AuditLog.objects.exists()
+
+
+def test_old_v3_apply_and_same_counter_inside_file():
+    owner = person("owner", "admin")
+    data = payload("3.0")
+    data["products"] = [{"name": "Diamond", "hsn": "7102", "gstRate": "0.25"}]
+    raw = {"businessId": 901, "customerId": 902, "invoiceNumber": "007", "invoice_date": "2026-03-31",
+           "items": [{"productName": "Diamond", "hsn": "7102", "gstRate": "0.25", "qty": "2", "rate": "100"}]}
+    data["invoices"] = [raw, {**raw, "invoiceNumber": "G/2025-26/7"}]
+    result = apply(data, owner)
+    assert result["plan"]["bills"]["add_count"] == 1
+    assert result["plan"]["bills"]["skip_count"] == 1
+    assert Invoice.objects.get().total_amount == Decimal("200.50")
+
+
+def test_current_bin_is_restored_and_its_saved_values_win():
+    from billing.services.bin import bin_bill
+    owner = person("owner", "admin")
+    business, customer = firm(), buyer()
+    original = sale(business, customer, "001", date(2026, 3, 31))
+    binned, deleted = bin_bill(original, owner)
+    data = payload()
+    data["businesses"][0]["name"] = business.name
+    data["customers"][0]["name"] = customer.name
+    result = apply(data, owner)
+    assert result["added"]["bills"] == [binned.original_id]
+    assert "comes back from the bin" in result["plan"]["bills"]["add"][0]["detail"]
+    assert Invoice.objects.get().total_amount == Decimal("10300")
+    deleted.refresh_from_db()
+    assert deleted.snapshot["_undo"]
+    binned.refresh_from_db()
+    assert binned.restored_at is not None
+    assert AuditLog.objects.filter(action="restored", entity="invoice", entity_id=binned.original_id).exists()
+    assert AuditLog.objects.filter(action="imported", entity="invoice", entity_id=binned.original_id).exists()
+
+
+def test_new_customer_from_bill_name_is_in_plan_and_made_once():
+    owner = person("owner", "admin")
+    data = payload()
+    data["customers"] = []
+    raw = data["invoices"][0]
+    raw.update(customer=None, customer_name="Walked in buyer")
+    data["invoices"].append({**raw, "invoice_number": "002"})
+    result = apply(data, owner)
+    assert result["plan"]["customers"]["add_count"] == 1
+    assert Customer.objects.count() == 1
+    assert Invoice.objects.count() == 2
+
+
+def test_added_id_lists_cap_at_50_but_all_records_are_created():
+    owner = person("owner", "admin")
+    data = payload()
+    data["customers"] = [{"name": f"Buyer {n}"} for n in range(55)]
+    data["invoices"] = []
+    result = apply(data, owner)
+    assert len(result["added"]["customers"]) == 50
+    assert Customer.objects.count() == 55
+
+
+def test_failure_during_apply_rolls_back_records_and_audits(monkeypatch):
+    import billing.services.backup_restore as service
+    owner = person("owner", "admin")
+    def refuse(*args, **kwargs):
+        raise RuntimeError("synthetic write failure")
+    monkeypatch.setattr(service, "_imported", refuse)
+    with pytest.raises(RuntimeError, match="synthetic write failure"):
+        apply(payload(), owner)
+    assert not Business.objects.exists()
+    assert not AuditLog.objects.exists()
+
+
+def test_preview_and_apply_are_owner_only_api_views():
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from billing.api.backup_restore import BackupRestoreApply, BackupRestorePreview
+    for view in (BackupRestoreApply, BackupRestorePreview):
+        for role in ("viewer", "editor", "accountant", "counter_staff"):
+            user = person(f"{view.__name__}-{role}", role)
+            request = APIRequestFactory().post("/", {"file": upload()}, format="multipart")
+            force_authenticate(request, user=user)
+            response = view.as_view()(request)
+            assert response.status_code == 403
+            assert response.data["needs"] == "backup.restore"
+    owner = person("owner", "admin")
+    request = APIRequestFactory().post("/", {"file": upload()}, format="multipart")
+    force_authenticate(request, user=owner)
+    assert BackupRestorePreview.as_view()(request).status_code == 200
+
+
+def test_missing_reference_never_matches_an_unidentified_master():
+    data = payload()
+    data["customers"] = [{"name": "Not the bill's buyer"}]
+    data["invoices"][0]["customer"] = None
+    assert preview(upload(data))["plan"]["bills"]["fail"] == [{"name": "001", "why": "No customer name on the bill"}]
+
+
+def test_same_counter_in_bin_is_not_added_as_another_bill():
+    from billing.services.bin import bin_bill
+    owner = person("owner", "admin")
+    business, customer = firm(), buyer()
+    bin_bill(sale(business, customer, "001", date(2026, 3, 31)), owner)
+    data = payload()
+    data["businesses"][0]["name"] = business.name
+    data["invoices"][0]["invoice_number"] = "KGH/2025-26/1"
+    assert preview(upload(data))["plan"]["bills"]["skip"] == [{"name": "KGH/2025-26/1", "why": "same number part as 001 on file"}]
+
+
+@pytest.mark.parametrize("rate", ["-0.03", "1000"])
+def test_negative_or_impossible_tax_rate_is_a_file_error(rate):
+    data = payload()
+    data["invoices"][0]["line_items"][0]["gst_tax_rate"] = rate
+    with pytest.raises(ValidationError):
+        preview(upload(data))
+
+
+def test_existing_parties_are_unchanged_and_local_id_collision_is_ignored():
+    owner = person("owner", "admin")
+    existing = buyer("Existing Buyer", mobile_number="9000000001")
+    data = payload()
+    data["customers"][0].update(id=existing.pk, mobile_number="9000000002")
+    result = apply(data, owner)
+    existing.refresh_from_db()
+    assert existing.name == "Existing Buyer"
+    assert existing.mobile_number == "9000000001"
+    assert result["added"]["customers"] != [existing.pk]
+
+
+def test_ids_and_names_have_separate_namespaces():
+    owner = person("owner", "admin")
+    data = payload()
+    data["businesses"].append({"id": 999, "name": "901", "gst_number": "", "state_name": "GUJARAT"})
+    result = apply(data, owner)
+    assert Invoice.objects.get(pk=result["added"]["bills"][0]).business.name == "NEW GOLD"
+
+
+def test_new_customer_keeps_only_its_mapped_usual_firms():
+    owner = person("owner", "admin")
+    data = payload()
+    data["customers"][0]["businesses"] = [901]
+    apply(data, owner)
+    assert list(Customer.objects.get().businesses.values_list("name", flat=True)) == ["NEW GOLD"]
+
+
+def test_cancelled_and_sent_metadata_stays_on_restored_new_sale():
+    owner = person("owner", "admin")
+    data = payload("5.0")
+    data["app"] = "gst-billing"
+    data["invoices"][0].update(status="cancelled", cancel_reason="Written twice", paper=True,
+                               sent_at="2026-03-31T15:00:00+05:30", sent_count=1,
+                               sent_via="whatsapp", sent_to="9000000001", notes="Keep this")
+    apply(data, owner)
+    invoice = Invoice.objects.get()
+    assert invoice.status == "cancelled"
+    assert invoice.cancel_reason == "Written twice"
+    assert invoice.paper
+    assert invoice.sent_count == 1
+    assert invoice.notes == "Keep this"
+    assert invoice.sent_at is not None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_owners_cannot_apply_the_same_preview_twice():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from django.db import close_old_connections, connection
+
+    from billing.refusals import Refusal
+    from billing.services.backup_restore import apply_restore
+
+    if connection.vendor != "postgresql":
+        pytest.skip("Row-lock serialization is verified on Postgres 16")
+    first, second = person("first", "admin"), person("second", "admin")
+    data = payload()
+    fingerprint = preview(upload(data))["fingerprint"]
+    start = Barrier(2)
+
+    def restore(owner):
+        close_old_connections()
+        try:
+            start.wait(timeout=10)
+            try:
+                apply_restore(upload(data), fingerprint, owner)
+                return "added"
+            except Refusal as error:
+                return error.detail["code"]
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(restore, (first, second)))
+    assert sorted(results) == ["added", "plan_changed"]
+    assert Invoice.objects.count() == 1
+    assert AuditLog.objects.filter(action="restored", entity="backup").count() == 1
+
+
+def test_actual_v5_stream_restores_into_empty_books():
+    from django.utils import timezone
+
+    from billing.models import Product
+    from billing.services.backups import full_stream
+
+    owner = person("owner", "admin")
+    business, customer = firm(gstin="08VRHFA2322D1ZI"), buyer()
+    customer.businesses.add(business)
+    Product.objects.create(name="Diamond", hsn_code="7102", gst_tax_rate=Decimal("0.0025"))
+    sale(business, customer, "007", date(2026, 3, 31), line(rate="100", gst="0.0025"))
+    data = json.loads(b"".join(full_stream(owner, timezone.localtime(), "roundtrip.json")))
+    Invoice.objects.all().delete()
+    Customer.objects.all().delete()
+    Business.objects.all().delete()
+    Product.objects.all().delete()
+    result = apply(data, owner)
+    assert result["plan"]["adds"] == 4
+    assert Invoice.objects.get().total_amount == Decimal("100.25")
+    assert Customer.objects.get().businesses.get().name == business.name
+
+
+def test_frozen_firm_never_imports_a_media_path_or_unknown_json():
+    owner = person("owner", "admin")
+    data = payload("5.0")
+    data["app"] = "gst-billing"
+    data["invoices"][0]["firm_snapshot"] = {"name": "Earlier firm", "signature_image": "private/signature.png", "unknown": 1.5}
+    apply(data, owner)
+    assert Invoice.objects.get().firm_snapshot == {"name": "Earlier firm", "signature_image": ""}
+
+
+@pytest.mark.parametrize("invalid", [["bad"], "bad\x00", "bad\ud800"])
+def test_nested_frozen_firm_text_is_refused_before_writes(invalid):
+    data = payload()
+    data["invoices"][0]["firm_snapshot"] = {"name": invalid}
+    with pytest.raises(ValidationError):
+        preview(upload(data))
+    assert not Business.objects.exists()
+
+
+def test_bin_uses_its_actual_month_even_when_backup_date_is_different():
+    from billing.services.bin import bin_bill
+    owner = person("owner", "admin")
+    business, customer = firm(), buyer()
+    bin_bill(sale(business, customer, "001", date(2026, 3, 31)), owner)
+    FiledPeriod.objects.create(business=business, year=2026, month=3)
+    data = payload()
+    data["businesses"][0]["name"] = business.name
+    data["invoices"][0]["invoice_date"] = "2026-02-01"
+    result = preview(upload(data))
+    assert result["plan"]["bills"]["fail"] == [{"name": "001", "why": "March 2026 is filed for KIRAN GOLD HOUSE. Have the owner unlock March 2026 in GST returns first."}]
+    assert not Invoice.objects.exists()
+
+
 
 def purchase_payload(number="SUP/001"):
     data = payload("5.0")
@@ -203,3 +501,37 @@ def test_purchase_duplicate_matcher_reads_narrowly_without_cacheops():
     sql = " ".join(query["sql"] for query in queries)
     for unused in ("firm_snapshot", "notes", "source_file", "source_preview", "total_amount"):
         assert f'"{unused}"' not in sql
+
+
+def test_apply_rechecks_purchase_identity_without_crossing_sale_numbers():
+    from billing.refusals import Refusal
+
+    owner = person("owner", "admin")
+    business, supplier = firm(), buyer("Supplier")
+    data = purchase_payload("001")
+    data["businesses"][0]["name"] = business.name
+    data["customers"][0]["name"] = supplier.name
+    first = data["invoices"][0]
+    data["invoices"].append({**first, "type_of_invoice": "outward"})
+    answer = preview(upload(data))
+    assert answer["plan"]["bills"]["add_count"] == 1
+    assert answer["plan"]["purchases"]["fail_count"] == 1
+    sale(business, supplier, "001", date(2026, 3, 31), kind="inward")
+    with pytest.raises(Refusal) as error:
+        apply(data, owner, answer["fingerprint"])
+    assert error.value.detail["plan"]["purchases"]["skip_count"] == 1
+    assert not Invoice.objects.filter(type_of_invoice="outward").exists()
+
+
+def test_filing_object_is_archival_and_never_adds_closed_periods():
+    data = payload("5.0")
+    data["app"] = "gst-billing"
+    data["v3"] = {"filing": {
+        "filing_records": [{"business": 901, "year": 2026, "month": 3, "kind": "gstr1"}],
+        "filing_months": [{"business": 901, "year": 2026, "month": 3}],
+        "opening_credits": [{"business": 901, "cgst": "100.00"}],
+    }, "filed_periods": [{"business": 901, "year": 2026, "month": 3}]}
+    owner = person("owner", "admin")
+    result = apply(data, owner)
+    assert result["plan"]["bills"]["add_count"] == 1
+    assert not FiledPeriod.objects.exists()

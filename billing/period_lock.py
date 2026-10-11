@@ -75,6 +75,7 @@ CLOSED_WORDS = {
     "renumber": "its bills can't be renumbered",
     "move": "its bills can't move to another firm",
     "merge": "its bills can't move to another customer",
+    "backup_restore": "a bill from the backup can't go into it",
 }
 
 
