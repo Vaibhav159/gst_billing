@@ -39,7 +39,8 @@ export function useSaleProducts(enabled = true) {
     queryKey: productKeys.forSale(), staleTime: 30 * 60_000, enabled,
     queryFn: async ({ signal }) => {
       const rows = new Map<number, SaleProduct>();
-      for (let page = 1; ; page++) {
+      // 100 pages of 1,000 is far past any shop; a server that keeps naming a next page fails here instead of looping
+      for (let page = 1; page <= 100; page++) {
         // Only our own endpoint receives the JWT, never the host named by a next URL.
         const d = (await api.get("products/", { params: { page_size: 1000, ordering: "name", ...(page > 1 ? { page } : {}) }, signal })).data as { results?: Raw[]; next?: string | null } | Raw[] | null;
         for (const raw of Array.isArray(d) ? d : d?.results ?? []) {
@@ -48,6 +49,7 @@ export function useSaleProducts(enabled = true) {
         }
         if (Array.isArray(d) || !d?.next) return [...rows.values()];
       }
+      throw new Error("The product list didn't end after 100 pages.");
     },
   });
 }

@@ -105,3 +105,9 @@ test("the shared picker adapter keeps nullable kind, effective kind and purity f
   expect(toSaleProduct({ ...DIAMOND, kind: null, kind_effective: "diamond", purity: "VVS", usual_rate: "123.456", purchase_only: false })).toMatchObject({ kind: null, kind_effective: "diamond", purity: "VVS", usual_rate: "123.456", purchase_only: false });
   expect(toSaleProduct({ ...DIAMOND, kind: "packing", kind_effective: "packing", purity: "999" })).toMatchObject({ kind: "packing", kind_effective: "packing", purity: "999" });
 });
+test("a server that never stops naming a next page is read to a cap, then the list fails instead of looping", async () => {
+  const { calls } = salesServer([["GET", "products/", () => ({ count: 1, next: "https://example.invalid/api/products/?page=2", results: [RING] })]]);
+  const { result } = renderHook(() => useSaleProducts(), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(calls).toHaveLength(100);
+});

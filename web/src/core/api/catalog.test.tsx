@@ -41,7 +41,7 @@ test("product mutation sends whole contract body and invalidates catalog, sales 
   expect(qc.getQueryState(["products", "for-sale"])?.isInvalidated).toBe(true);
   expect(qc.getQueryState(["setup"])?.isInvalidated).toBe(true);
 });
-test("missing product id cannot be fetched even by retry", async () => {
+test("a missing product id is never fetched", async () => {
   const calls = serve({});
   const { result } = renderHook(() => useProduct(null, { fy: "2026-27", firmId: "all" }), wrap());
   expect(result.current.data).toBeUndefined();

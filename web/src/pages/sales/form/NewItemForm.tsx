@@ -66,7 +66,7 @@ export function NewItemForm({ initialName = "", idBase = "np", onDone, onCancel,
       onError: (x) => {
         const p = problemOf(x);
         const said = p.fields?.name;
-        if (said) showProblems({ name: /already exists/i.test(said) ? `Products already has ${line.name}. Pick it from the list, or name this one differently.` : said });
+        if (said) showProblems({ name: /already exists|already a product called/i.test(said) ? `Products already has ${line.name}. Pick it from the list, or name this one differently.` : said });
         else setFail(failText(p));
       },
     });

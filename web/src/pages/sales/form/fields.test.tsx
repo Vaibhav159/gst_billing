@@ -396,7 +396,7 @@ test("the owner keeps it in Products; a name Products already has is said under 
   let tries = 0;
   const { calls } = salesServer([["POST", "catalog/", ({ body }) => {
     tries += 1;
-    if (tries === 1) return refuse(400, { name: ["product with this Product Name already exists."] });
+    if (tries === 1) return refuse(400, { name: ["There's already a product called Silver idol. Names that differ only in capital letters confuse the bill form; use a different name."] });
     if (tries === 2) throw new AxiosError("Network Error", "ERR_NETWORK");
     return { id: 12, ...(body as object) };
   }]]);
@@ -437,7 +437,7 @@ test("the owner can use it on this bill only: unticked, nothing is sent; it need
 });
 
 test("a problem puts the cursor on its field with its words read out: the form's own, and a name Products already has", async () => {
-  salesServer([["POST", "catalog/", () => refuse(400, { name: ["product with this Product Name already exists."] })]]);
+  salesServer([["POST", "catalog/", () => refuse(400, { name: ["There's already a product called Silver idol. Names that differ only in capital letters confuse the bill form; use a different name."] })]]);
   renderApp(<NewItemForm initialName="Silver idol" onDone={() => {}} />);
   const name = screen.getByLabelText(/^Name/);
   const hsn = screen.getByLabelText(/^HSN code/);
