@@ -1,6 +1,6 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import axios from "axios";
+import { downloadBackupFile } from "./backup";
 import { problemOf } from "./errors";
 import { saveFile } from "@/core/print/files";
 import { todayIST, toPaise } from "@/core/format";
@@ -35,18 +35,14 @@ export function useAuditExport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (filters: AuditFilters) => {
-      try {
-        const res = await api.get<Blob>("audit/export/", { params: auditParams(filters), responseType: "blob", timeout: 600_000 });
-        const name = /filename="?([^";]+)"?/i.exec(String(res.headers["content-disposition"] ?? ""))?.[1];
-        saveFile(res.data, name?.split(/[\\/]/).pop() || `Audit-log_${todayIST()}.csv`);
-      } catch (error) {
-        if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
-          try { error.response.data = JSON.parse(await error.response.data.text()); } catch { /* Shared problemOf handles a non-JSON failure. */ }
-        }
-        throw error;
-      }
+      const { blob, name } = await downloadBackupFile("audit/export/", auditParams(filters), `Audit-log_${todayIST()}.csv`);
+      saveFile(blob, name);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["audit"] }),
+    // The export adds one entry: refetch only the first loaded page, not every page of the log.
+    onSuccess: () => {
+      qc.setQueriesData<InfiniteData<AuditPage, number>>({ queryKey: ["audit", "list"] }, (data) => data && { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) });
+      return qc.invalidateQueries({ queryKey: ["audit", "list"] });
+    },
   });
 }
 
@@ -71,31 +67,31 @@ type BillWire = { invoice_number: string; invoice_date: string; total_amount: st
 type BinWire = BillWire & { id: number; original_id: number; type?: "sale" | "purchase"; deleted_at: string; deleted_by: Person };
 const recordOf = (bill: BillWire): AuditRecord => ({ number: bill.invoice_number, date: bill.invoice_date, party: bill.supplier?.name ?? bill.customer?.name ?? "", total: toPaise(bill.total_amount) });
 const binRecord = (bill: BinWire): AuditRecord => ({ ...recordOf(bill), deletedAt: bill.deleted_at, deletedBy: bill.deleted_by });
+/** A stale link stops after this many pages instead of walking the whole bin or log. */
+const SCAN_PAGES = 20;
 async function findBin(match: (row: BinWire) => boolean, signal: AbortSignal, q?: string): Promise<BinWire | null> {
-  let page = 1;
-  while (true) {
+  for (let page = 1; page <= SCAN_PAGES; page += 1) {
     const answer = (await api.get<{ results: BinWire[]; next: string | null }>("bin/", { params: { page, page_size: 100, ...(q ? { q } : {}) }, signal })).data;
     const row = answer.results.find(match);
     if (row) return row;
     if (!answer.next) return null;
-    page += 1;
   }
+  return null;
 }
-/** Sales-only bin links scan bounded pages. Purchases restore from their Audit action (P4-9). */
+/** Sales-only bin links scan at most SCAN_PAGES pages. Purchases restore from their Audit action (P4-9). */
 export function useAuditRestoreEntry(binId: number, enabled: boolean) {
   return useQuery({
     queryKey: ["audit", "restore-entry", binId], enabled: enabled && Number.isSafeInteger(binId) && binId > 0,
     queryFn: async ({ signal }): Promise<{ entry: AuditEntry; record: AuditRecord } | null> => {
       const bin = await findBin((row) => row.id === binId && row.type !== "purchase", signal);
       if (!bin) return null;
-      let page = 1;
-      while (true) {
+      for (let page = 1; page <= SCAN_PAGES; page += 1) {
         const answer = (await api.get<AuditPage>("audit/", { params: { entity_id: bin.original_id, kind: "sales", group: "delete", page, page_size: 30 }, signal })).data;
         const entry = answer.results.find((row) => row.entity_id === bin.original_id && row.kind === "sales" && row.can?.kind === "restore");
         if (entry) return { entry, record: binRecord(bin) };
         if (!answer.next) return null;
-        page += 1;
       }
+      return null;
     },
   });
 }

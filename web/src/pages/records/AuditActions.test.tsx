@@ -107,6 +107,18 @@ test.each(["purchase", "sale"] as const)("a bin-id link never opens a purchase r
   expect(calls.some((c) => c.url.startsWith("purchases/") || c.method === "POST")).toBe(false);
 });
 
+test("a purchase bin row whose original id matches a deleted sales bill never opens that sales restore", async () => {
+  const sale: AuditEntry = { ...entry, id: 9020, entity: "invoice", entity_id: 205, kind: "sales", group: "delete", action: "deleted", changes: [],
+    words: { text: "Deleted bill", target: "MO/2026-27/27", after: "" }, link: null, can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "" } };
+  const purchaseRow = { ...binned, type: "purchase", invoice_number: "UBS/26-27/0850", customer: undefined, supplier: { id: 8, name: "Udaipur Bullion" } };
+  const calls = serve({ "GET audit/": page(sale), "GET bin/": { count: 1, next: null, results: [purchaseRow] } });
+  renderApp(<Audit />, { path: "/audit?restore=11" });
+  expect(await screen.findByText("That deleted bill isn't in the bin any more.")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByText("UBS/26-27/0850")).not.toBeInTheDocument();
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+});
+
 test("restoring a record is immediate, and a server refusal stays on its row", async () => {
   const restored: AuditEntry = { ...entry, action: "deleted", changes: [], can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "" } };
   const calls = serve({ "GET audit/": page(restored), "POST audit/9012/restore/": () => ({ status: 409, data: { code: "name_taken", detail: "A customer called Priya Sharma was added since. Rename one of them first." } }) });

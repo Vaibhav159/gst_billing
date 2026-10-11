@@ -56,7 +56,7 @@ test("exports the active filters through the API, then invalidates the new downl
   const csv = new Blob(["date,time,person"], { type: "text/csv" });
   const calls = serve({ "GET audit/export/": csv });
   const { qc, wrapper } = setup();
-  qc.setQueryData(["audit", "list", {}], PAGE);
+  qc.setQueryData(["audit", "list", {}], { pages: [PAGE], pageParams: [1] });
   const { result } = renderHook(() => useAuditExport(), { wrapper });
   await act(async () => { await result.current.mutateAsync({ kind: "records", group: "change", q: "Priya", by: "none" }); });
   expect(calls[0].params).toEqual({ kind: "records", group: "change", q: "Priya", by: "none" });
@@ -104,6 +104,27 @@ test("restore links resolve a bin id, not an invoice id, through bounded pages",
   ]);
 });
 
+test("a stale restore link stops scanning the bin after twenty pages", async () => {
+  const calls = serve({ "GET bin/": ({ params }: { params: Record<string, unknown> }) => ({ status: 200, data: { count: 9999, next: `/api/bin/?page=${Number(params.page) + 1}`, results: [{ id: 1, original_id: 1 }] } }) });
+  const { wrapper } = setup();
+  const { result } = renderHook(() => useAuditRestoreEntry(11, true), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data).toBeNull();
+  expect(calls).toHaveLength(20);
+});
+
+test("a restore link stops scanning the audit log after twenty pages", async () => {
+  const calls = serve({
+    "GET bin/": { count: 1, next: null, results: [{ id: 11, original_id: 205 }] },
+    "GET audit/": ({ params }: { params: Record<string, unknown> }) => ({ status: 200, data: { ...PAGE, next: `/api/audit/?page=${Number(params.page) + 1}`, results: [] } }),
+  });
+  const { wrapper } = setup();
+  const { result } = renderHook(() => useAuditRestoreEntry(11, true), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data).toBeNull();
+  expect(calls.filter((c) => c.url === "audit/")).toHaveLength(20);
+});
+
 test("invalid restore links and a person without undo permission never read the bin", async () => {
   const calls = serve({});
   const { wrapper } = setup();
@@ -122,6 +143,27 @@ test("CSV has its own transfer timeout and uses the server's filename", async ()
   await act(async () => { await result.current.mutateAsync({}); });
   expect(get).toHaveBeenCalledWith("audit/export/", expect.objectContaining({ responseType: "blob", timeout: 600_000 }));
   expect(saveFile).toHaveBeenCalledWith(csv, "Audit-log_2026-10-08.csv");
+});
+
+test("CSV export decodes an encoded filename and strips path parts and control characters, like backup downloads", async () => {
+  const csv = new Blob(["csv"]);
+  vi.spyOn(api, "get").mockResolvedValue({ data: csv, headers: { "content-disposition": "attachment; filename=\"x.csv\"; filename*=UTF-8''..%2FAudit%E2%80%93log%0A_2026-10-08.csv" } });
+  const { wrapper } = setup();
+  const { result } = renderHook(() => useAuditExport(), { wrapper });
+  await act(async () => { await result.current.mutateAsync({}); });
+  expect(saveFile).toHaveBeenCalledWith(csv, "Audit\u2013log_2026-10-08.csv");
+});
+
+test("an export refetches only the log's first page, never every loaded page", async () => {
+  serve({ "GET audit/export/": new Blob(["csv"]) });
+  const { qc, wrapper } = setup();
+  qc.setQueryData(["audit", "list", {}], { pages: [PAGE, PAGE, PAGE], pageParams: [1, 2, 3] });
+  qc.setQueryData(["audit", "record", 9012], { number: "MO/1", date: "2026-10-01", party: "P", total: 1 });
+  const { result } = renderHook(() => useAuditExport(), { wrapper });
+  await act(async () => { await result.current.mutateAsync({}); });
+  expect(qc.getQueryData<{ pageParams: number[] }>(["audit", "list", {}])?.pageParams).toEqual([1]);
+  expect(qc.getQueryState(["audit", "list", {}])?.isInvalidated).toBe(true);
+  expect(qc.getQueryState(["audit", "record", 9012])?.isInvalidated).toBe(false);
 });
 
 test("a JSON refusal received as a Blob retains its exact field words", async () => {
