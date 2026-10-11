@@ -483,12 +483,16 @@ def _supplement_changes(business, year, month, changes, month_builds):
             {key: amount for key, amount in nil.items() if amount})
 
 
-def attach_amendments(built, business, year, month, changes, *, month_builds=None, strict=False):
-    """Attach carried tables to a copy; a page may show an error that blocks export."""
+def attach_amendments(built, business, year, month, changes, *, month_builds=None, strict=False, today=None):
+    """Attach carried tables to a copy; a page may show an error that blocks export.
+
+    today is the carrying GSTR-1's filing day when it is being recorded (R3A-7).
+    """
     result = deepcopy(built)
-    changes = _exportable_changes(changes, timezone.localdate())
+    today = today or timezone.localdate()
+    changes = _exportable_changes(changes, today)
     try:
-        extra = build_amendments(business, year, month, changes, month_builds=month_builds)
+        extra = build_amendments(business, year, month, changes, month_builds=month_builds, today=today)
     except ValidationError as exc:
         if strict:
             raise

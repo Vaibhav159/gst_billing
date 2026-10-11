@@ -436,11 +436,55 @@ def nil_returns(t31a, t31c, position, t4a5, t4d2):
     claimed in the period: this month's credit and its corrections. Credit
     carried in from earlier months doesn't count.
     """
-    sales = bool(t31a["taxable"] or t31c["taxable"])
-    claimed = [position["base_credit"], *(entry["credit"] for entry in position["amendments"]),
+    sales = bool(to_paise(t31a.get("taxable") or 0) or to_paise(t31c.get("taxable") or 0))
+    claimed = [position.get("base_credit"), *(entry["credit"] for entry in position.get("amendments", [])),
                t4a5["heads"], t4d2["heads"]]
     tax = any(heads(values)[head] for values in (t31a, *claimed) for head in HEADS)
     return {"gstr1": not sales, "gstr3b": not (sales or tax)}
+
+
+def _lapsed(business, day, filed_on):
+    rows = list(_purchase_lines(business, filing_month=day, filing_date=filed_on, today=filed_on)
+                .filter(credit_month=day, credit_eligible=True, lapsed=True)
+                .values("invoice_id", "invoice__invoice_number", "invoice__customer__name").annotate(**_sums()).order_by())
+    items = [{"id": row["invoice_id"], "bill_no": row["invoice__invoice_number"], "supplier_name": row["invoice__customer__name"],
+              "heads": heads(row)} for row in rows if heads(row)["total"]]
+    return {"heads": add_heads(*(item["heads"] for item in items)), "list": items}
+
+
+def refresh_filing_date(business, year, month, figures, old, new):
+    """R3A-7: a GSTR-3B's new filing day re-works its late costs and Sec 16(4) credit.
+
+    Only the date-bound figures move; the rest of the snapshot stays as filed.
+    Returns the new figures and the credit that moved into (or out of) 4(D)(2).
+    """
+    day, figures = date(year, month, 1), deepcopy(figures)
+    tables = figures.setdefault("tables", {}) or {}
+    before, after = _lapsed(business, day, old), _lapsed(business, day, new)
+    moved = subtract_heads(after["heads"], before["heads"])
+    if any(moved[head] for head in HEADS):
+        for kind in ("credit", "base_credit"):
+            figures[kind] = subtract_heads(heads(figures.get(kind)), moved)
+        available = subtract_heads(heads(figures.get("available")), moved)
+        output = heads(figures.get("setoff_output", figures.get("output")))
+        for head in HEADS:
+            if available[head] < 0:
+                output[head] -= available[head]
+                available[head] = Decimal(0)
+        output, available = heads(output), heads(available)
+        figures.update(setoff_output=output, available=available, **set_off(output, available))
+        bills = len(after["list"]) - len(before["list"])
+        t4a5, t4d2 = tables.setdefault("t4a5", {}), tables.setdefault("t4d2", {})
+        t4a5.update(heads=subtract_heads(heads(t4a5.get("heads")), moved), bills=t4a5.get("bills", 0) - bills)
+        t4d2.update(heads=add_heads(heads(t4d2.get("heads")), moved), bills=len(after["list"]), list=after["list"])
+        tables["t4c"] = subtract_heads(t4a5["heads"], heads((tables.get("t4b1") or {}).get("heads")))
+        tables.update({field: figures[field] for field in ("available", "steps", "used", "cash", "carry_on")})
+    old_late = tables.get("late") or {}
+    nil = old_late.get("nil") or nil_returns(tables.get("t31a") or {}, tables.get("t31c") or {}, figures,
+                                              tables.get("t4a5") or {}, tables.get("t4d2") or {})
+    tables["late"] = late_cost(year, month, cash=heads(figures.get("cash")), turnover=_turnover(business, day), nil=nil,
+                               filed={"gstr1": True}, today=new)
+    return json_money(figures), moved
 
 
 def recorded_late(worked, record):

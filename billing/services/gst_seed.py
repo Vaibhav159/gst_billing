@@ -67,7 +67,9 @@ def seed_gst(firms, owner, today=None):
     if binned:
         unlock_month(aarav, changed_month, owner, "A deleted bill was a real sale")
         restore_from_bin(binned, owner)
-    mark_filed(kiran, last, owner, {"kind": "gstr1", "filed_on": today.isoformat(), "confirm_checks": True})
+    # Kiran's month is already locked as filed before the app, so both returns are recorded together (R3A-6).
+    mark_filed(kiran, last, owner, {"kind": "both", "gstr1_filed_on": today.isoformat(), "filed_on": today.isoformat(),
+                                    "confirm_checks": True})
     FiledPeriod.objects.filter(business=meera, year=last.year, month=last.month).delete()
     built = build_gstr1(meera, last.year, last.month)
     record_download(meera, last, "gstr1", owner, "download", built["file"])

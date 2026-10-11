@@ -188,12 +188,15 @@ def _paid(record, data):
             setattr(record, f"credit_left_{head}", value)
 
 
+def _late_working(figures):
+    late = (figures.get("tables") or {}).get("late") or {}
+    return {"late_fee": sum((Decimal(str((late.get(kind) or {}).get("fee", 0))) for kind in ("gstr1", "gstr3b")), Decimal(0)),
+            "interest": Decimal(str(late.get("interest", 0)))}
+
+
 def _worked_late(record, data):
     """R3A-4: untyped late fee and interest default to the frozen working, like cash."""
-    late = (record.figures.get("tables") or {}).get("late") or {}
-    worked = {"late_fee": sum((Decimal(str((late.get(kind) or {}).get("fee", 0))) for kind in ("gstr1", "gstr3b")), Decimal(0)),
-              "interest": Decimal(str(late.get("interest", 0)))}
-    for key, value in worked.items():
+    for key, value in _late_working(record.figures).items():
         if key not in data:
             setattr(record, key, value)
 
@@ -209,14 +212,18 @@ def _snapshot(business, month, kind, *, filing_date=None):
     from billing.services.gstr1_file import attach_amendments, build_amendments, build_gstr1
 
     month_builds = {}
+    # R3A-7: the 30 Nov amendment deadline is checked on the day this return is filed, else today.
     built = build_gstr1(business, month.year, month.month, amendments=False, month_builds=month_builds)
-    changes = pending_amendments(business, month.year, month.month, month_builds=month_builds) if kind == "gstr1" else []
+    changes = (pending_amendments(business, month.year, month.month, month_builds=month_builds, today=filing_date)
+               if kind == "gstr1" else [])
     if kind == "gstr1":
-        built = attach_amendments(built, business, month.year, month.month, changes, month_builds=month_builds, strict=True)
+        built = attach_amendments(built, business, month.year, month.month, changes, month_builds=month_builds, strict=True,
+                                  today=filing_date)
         file = built["file"]
     else:
         file = build_amendments(business, month.year, month.month,
-            changes_for_month(business, month.year, month.month, built=built), before_gstr3b=True, month_builds=month_builds)
+            changes_for_month(business, month.year, month.month, built=built), before_gstr3b=True, month_builds=month_builds,
+            today=filing_date)
     figures = {**built["figures"], "sections": built["sections"], "amendments": changes}
     figures["digest"] = digest({"file": file, "bills": built["bills"]})
     return json_money(figures), built["bills"], file
@@ -232,8 +239,12 @@ def _sync_lock(business, month):
         FiledPeriod.objects.filter(business=business, year=month.year, month=month.month).delete()
 
 
-def _create(business, month, user, kind, data, legacy=False):
-    figures, bills, file = _snapshot(business, month, kind, **({"filing_date": data["filed_on"]} if kind == "gstr3b" else {}))
+def _create(business, month, user, kind, data, legacy=False, frozen=None):
+    # R3A-6: a legacy month frozen at unlock files those books, never today's.
+    if frozen and kind in frozen:
+        figures, bills, file = (deepcopy(frozen[kind][part]) for part in SNAPSHOTS)
+    else:
+        figures, bills, file = _snapshot(business, month, kind, filing_date=data["filed_on"])
     record = FilingRecord(business=business, year=month.year, month=month.month, kind=kind,
                          filed_on=data["filed_on"], arn=_arn(data.get("arn")), figures={**figures, "legacy": legacy},
                          bills=bills, file=file, marked_by=user)
@@ -267,6 +278,18 @@ def mark_filed(business, month, user, data):
             record = records[one]
             raise Refusal(f"{month:%B %Y}'s {NAMES[one]} is already marked filed ({day_text(record.filed_on)}).",
                           "already_filed", filing=filing_data(record))
+    state = uncached(FilingMonth).filter(business=business, year=month.year, month=month.month).only(
+        "legacy_frozen_at", "legacy_snapshot").first()
+    frozen = state.legacy_snapshot if state and state.legacy_frozen_at and not records else None
+    legacy = not records and (frozen is not None or uncached(FiledPeriod).filter(
+        business=business, year=month.year, month=month.month).exists())
+    if legacy and kind != "both":
+        raise Refusal(f"{month:%B %Y} was filed before the app kept filing records, so record both returns together: "
+                      "GSTR-1 and GSTR-3B.", "legacy_both")
+    if kind == "gstr3b" and data.get("gstr1a_filed_on") and "gstr1a" in records:
+        words = (f"{month:%B %Y}'s GSTR-1A is already on record (filed {day_text(records['gstr1a'].filed_on)}). "
+                 "Leave its details out, or change that record.")
+        raise ValidationError({"gstr1a_filed_on": [words]})
     if kind in ("gstr1a", "gstr3b") and "gstr1" not in records:
         raise Refusal(f"Mark {month:%B %Y}'s GSTR-1 filed first. GSTR-3B comes after it.", "needs_gstr1")
     if kind == "gstr1a" or data.get("gstr1a_filed_on"):
@@ -279,11 +302,10 @@ def mark_filed(business, month, user, data):
         if blockers and data.get("confirm_checks") is not True:
             count = len(blockers)
             raise ValidationError({"confirm_checks": [f"{count} check{'s fail' if count != 1 else ' fails'} for {month:%B}. Tick that the return is already on the GST portal to record it."]})
-    legacy = not records and uncached(FiledPeriod).filter(business=business, year=month.year, month=month.month).exists()
     made = []
     if kind == "both":
         first = _date(data.get("gstr1_filed_on"), month, "gstr1", "gstr1_filed_on")
-        made.append(_create(business, month, user, "gstr1", {"filed_on": first, "arn": _arn(data.get("gstr1_arn"), "gstr1_arn")}, legacy))
+        made.append(_create(business, month, user, "gstr1", {"filed_on": first, "arn": _arn(data.get("gstr1_arn"), "gstr1_arn")}, legacy, frozen))
     else:
         first = records["gstr1"].filed_on if "gstr1" in records else None
     if kind == "gstr3b" and data.get("gstr1a_filed_on") and "gstr1a" not in records:
@@ -294,7 +316,7 @@ def mark_filed(business, month, user, data):
     one_a = next((row for row in made if row.kind == "gstr1a"), records.get("gstr1a"))
     if target == "gstr3b" and one_a and filed < one_a.filed_on:
         raise ValidationError({"filed_on": [f"GSTR-3B is filed on or after GSTR-1A ({day_text(one_a.filed_on)})."]})
-    made.append(_create(business, month, user, target, {**data, "filed_on": filed}, legacy))
+    made.append(_create(business, month, user, target, {**data, "filed_on": filed}, legacy, frozen))
     if target == "gstr3b":
         state = uncached(FilingMonth).filter(business=business, year=month.year, month=month.month,
                                               unlocked_at__isnull=False).first()
@@ -324,16 +346,38 @@ def edit_filing(record, user, data):
     if "arn" in data:
         record.arn = _arn(data["arn"])
     _paid(record, data)
+    refreshed = record.kind == "gstr3b" and record.filed_on != old["filed_on"]
+    if refreshed:
+        _refresh_date(record, old, data)
     changed = {key: {"old": value, "new": getattr(record, key)} for key, value in old.items() if value != getattr(record, key)}
     if not changed:
         return record
     record.updated_by, record.updated_at = user, timezone.now()
-    record.save(update_fields=[*changed, "updated_by", "updated_at"])
+    record.save(update_fields=[*changed, *(["figures"] if refreshed else []), "updated_by", "updated_at"])
     labels = {"filed_on": "the filing date", "arn": "the ARN", "cash_total": "the cash paid", "late_fee": "the late fee", "interest": "the interest"}
     words = list(dict.fromkeys(labels.get(key, "the credit left" if key.startswith("credit_left") else "the cash paid") for key in changed))
     _audit(record.business, user, "updated", "filing", "Changed " + " and ".join(words), record=record, changes=changed)
     _sync_lock(record.business, day)
     return record
+
+
+def _refresh_date(record, old, data):
+    """R3A-7: a new GSTR-3B date re-works its late fee, interest and Sec 16(4) credit."""
+    from billing.services.ledger import refresh_filing_date
+
+    figures, moved = refresh_filing_date(record.business, record.year, record.month, record.figures, old["filed_on"], record.filed_on)
+    if any(moved[head] for head in HEADS):
+        later = uncached(FilingRecord).filter(business_id=record.business_id, kind="gstr3b").filter(
+            Q(year__gt=record.year) | Q(year=record.year, month__gt=record.month)).exists()
+        if later:
+            words = (f"That date moves {inr(abs(moved['total']))} of credit across the 30 November deadline, "
+                     "and a later GSTR-3B is on record. Remove the later records first.")
+            raise ValidationError({"filed_on": [words]})
+    worked = _late_working(record.figures)
+    record.figures = figures
+    for key, value in _late_working(record.figures).items():
+        if key not in data and getattr(record, key) == worked[key]:
+            setattr(record, key, value)
 
 
 def _reason(value, words):
@@ -367,14 +411,16 @@ def remove_filing(record, user, reason):
     if kind == "gstr3b":
         FiledPeriod.objects.filter(business=business, year=day.year, month=day.month).delete()
     if not _records(business.pk, day).exists():
-        FilingMonth.objects.filter(business=business, year=day.year, month=day.month).delete()
+        # R3A-7: a legacy freeze outlives the records; the month goes back to its legacy lock.
+        FilingMonth.objects.filter(business=business, year=day.year, month=day.month, legacy_frozen_at__isnull=True).delete()
+        _sync_lock(business, day)
 
 
 @transaction.atomic
 def unlock_month(business, month, user, reason):
     lock_firms(business.pk)
     state = month_status(business.pk, month.year, month.month)
-    where = "GSTR-1A" if state.stage == "gstr1" else "October's GSTR-1"
+    where = "GSTR-1A" if state.stage == "gstr1" else f"{_carrying_month(business.pk, month):%B}'s GSTR-1"
     reason = _reason(reason, f"Write why {month:%B} needs unlocking, for example “Wrong GSTIN on KGH/2026-27/21: correct it and amend in {where}”.")
     if state.unlocked:
         who = person(state.unlocked.unlocked_by)
@@ -416,6 +462,8 @@ def filed_before(business, up_to, user):
         raise ValidationError({"up_to": ["Pick a month that is over."]})
     existing = set(uncached(FiledPeriod).filter(business=business).values_list("year", "month"))
     existing.update(uncached(FilingRecord).filter(business=business).values_list("year", "month"))
+    # R3A-6: a month the owner unlocked stays unlocked until they lock it again.
+    existing.update(uncached(FilingMonth).filter(business=business, unlocked_at__isnull=False).values_list("year", "month"))
     made, day = [], date(2025, 4, 1)
     while day <= up_to:
         if (day.year, day.month) not in existing:
@@ -475,7 +523,7 @@ def _carrying_month(business_id, source):
     return day
 
 
-def pending_amendments(business, year, month, *, month_builds=None):
+def pending_amendments(business, year, month, *, month_builds=None, today=None):
     """Only corrections routed here and not previously frozen by a carrying GSTR-1."""
     target = date(year, month, 1)
     unlocked = uncached(FilingMonth).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
@@ -484,10 +532,10 @@ def pending_amendments(business, year, month, *, month_builds=None):
         Q(year__lt=year) | Q(year=year, month__lt=month)).exclude(Exists(unlocked)).values_list("year", "month")
     legacy = uncached(FilingMonth).filter(business=business, legacy_frozen_at__isnull=False, unlocked_at__isnull=True).filter(
         Q(year__lt=year) | Q(year=year, month__lt=month)).values_list("year", "month")
-    changes = []
+    changes, today = [], today or timezone.localdate()
     for source_year, source_month in set(sources) | set(legacy):
         source = date(source_year, source_month, 1)
-        if timezone.localdate() > date(fy_of(source) + 1, 11, 30):
+        if today > date(fy_of(source) + 1, 11, 30):
             continue
         if _carrying_month(business.pk, source) == target:
             changes.extend(changes_for_month(business, source_year, source_month, month_builds=month_builds))

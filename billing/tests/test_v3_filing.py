@@ -219,3 +219,150 @@ def test_gstr3b_record_keeps_late_fee_and_interest_worked_out_to_its_filing_day(
             "billing.services.ledger.gstr3b_tables", side_effect=tables):
         real_snapshot(firm, DAY, "gstr3b", filing_date=date(2026, 10, 11))
     assert seen == {"position": date(2026, 10, 11), "tables": date(2026, 10, 11)}
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_legacy_month_records_both_returns_only(shop, frozen):
+    # R3A-6: GSTR-1 alone on a legacy month would drop its lock.
+    firm, user = shop
+    FiledPeriod.objects.create(business=firm, year=2026, month=9, note="v2")
+    if frozen:
+        unlock_month(firm, DAY, user, "Correct the GSTIN")
+    with pytest.raises(Refusal) as exc:
+        mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})
+    assert exc.value.detail["code"] == "legacy_both"
+    assert "record both returns together" in str(exc.value.detail)
+    assert FiledPeriod.objects.exists() is not frozen
+    assert not FilingRecord.objects.exists()
+
+
+def test_filed_before_skips_months_the_owner_unlocked(shop):
+    from billing.period_lock import month_status
+
+    firm, user = shop
+    FiledPeriod.objects.create(business=firm, year=2026, month=8, note="v2")
+    unlock_month(firm, date(2026, 8, 1), user, "Fix a bill")
+    result = filed_before(firm, DAY, user)
+    assert "2026-08" not in result["months"] and "2026-09" in result["months"]
+    assert not FiledPeriod.objects.filter(year=2026, month=8).exists()
+    assert month_status(firm.pk, 2026, 8, include_checks=False).stage == "unlocked"
+
+
+def test_recording_an_unlocked_legacy_month_files_its_frozen_books(shop):
+    firm, user = shop
+    FiledPeriod.objects.create(business=firm, year=2026, month=9, note="v2")
+    books = {"total": "1030.00"}
+
+    def current_books(_business, _month, kind, **kwargs):
+        return {"cash": HEADS, "carry_on": HEADS, "kind": kind}, {"1": dict(books)}, dict(books)
+
+    with patch("billing.services.filing._snapshot", side_effect=current_books):
+        unlock_month(firm, DAY, user, "Correct the old bill")
+        books["total"] = "2060.00"
+        rows = mark_filed(firm, DAY, user, {"kind": "both", "gstr1_filed_on": "2026-10-08", "filed_on": "2026-10-09"})
+    state = FilingMonth.objects.get()
+    for row in rows:
+        assert row.bills == state.legacy_snapshot[row.kind]["bills"] == {"1": {"total": "1030.00"}}
+        assert row.file == {"total": "1030.00"}
+        assert row.figures["legacy"] is True and row.figures["kind"] == row.kind
+    assert state.unlocked_at is None
+    assert FiledPeriod.objects.exists()
+
+
+def test_unlock_hint_names_the_month_that_carries_the_correction(shop):
+    firm, user = shop
+    with patch("billing.services.filing.timezone.localdate", return_value=date(2026, 12, 2)):
+        mark_filed(firm, DAY, user, {"kind": "both", "gstr1_filed_on": "2026-10-08", "filed_on": "2026-10-09"})
+        mark_filed(firm, date(2026, 10, 1), user, {"kind": "both", "gstr1_filed_on": "2026-11-08", "filed_on": "2026-11-09"})
+        with pytest.raises(ValidationError) as exc:
+            unlock_month(firm, DAY, user, " ")
+    assert "amend in November's GSTR-1" in str(exc.value.detail)
+
+
+def test_gstr1a_details_with_gstr3b_are_refused_when_gstr1a_is_on_record(shop):
+    firm, user = shop
+    mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})
+    with patch("billing.services.filing.changes_for_month", return_value=[{"month": "2026-09", "before": {}, "after": {"id": 1}}]):
+        mark_filed(firm, DAY, user, {"kind": "gstr1a", "filed_on": "2026-10-09"})
+    with pytest.raises(ValidationError) as exc:
+        mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-10", "gstr1a_filed_on": "2026-10-10"})
+    assert "GSTR-1A is already on record" in str(exc.value.detail["gstr1a_filed_on"])
+    assert not FilingRecord.objects.filter(kind="gstr3b").exists()
+
+
+def test_removing_the_last_record_keeps_the_legacy_freeze_and_lock(shop):
+    firm, user = shop
+    FiledPeriod.objects.create(business=firm, year=2026, month=9, note="v2")
+    unlock_month(firm, DAY, user, "Correct the old bill")
+    frozen = FilingMonth.objects.get().legacy_snapshot
+    rows = mark_filed(firm, DAY, user, {"kind": "both", "gstr1_filed_on": "2026-10-08", "filed_on": "2026-10-09"})
+    remove_filing(rows[1], user, "Wrong ARN")
+    remove_filing(rows[0], user, "Wrong ARN")
+    state = FilingMonth.objects.get()
+    assert state.legacy_snapshot == frozen and state.legacy_frozen_at is not None
+    assert FiledPeriod.objects.filter(business=firm, year=2026, month=9).exists()
+
+
+def test_gstr1_snapshot_checks_the_amendment_deadline_on_its_filing_day(shop):
+    from billing.services import filing
+
+    firm, _user = shop
+    seen = {}
+    with patch("billing.services.gstr1_file.build_gstr1", return_value={"figures": {}, "sections": {}, "bills": {}}), \
+            patch.object(filing, "pending_amendments", side_effect=lambda *a, **k: seen.setdefault("pending", k["today"]) and []), \
+            patch("billing.services.gstr1_file.attach_amendments",
+                  side_effect=lambda built, *a, **k: seen.setdefault("attach", k["today"]) and {**built, "file": {}}):
+        real_snapshot(firm, DAY, "gstr1", filing_date=date(2026, 11, 28))
+    assert seen == {"pending": date(2026, 11, 28), "attach": date(2026, 11, 28)}
+
+
+def test_pending_amendments_use_the_given_day_for_the_30_november_deadline(shop):
+    from billing.services.filing import pending_amendments
+
+    firm, _user = shop
+    FilingRecord.objects.create(business=firm, year=2025, month=9, kind="gstr3b", filed_on=date(2025, 10, 20))
+    day = date(2025, 10, 1)
+    while day < date(2026, 11, 1):
+        FiledPeriod.objects.create(business=firm, year=day.year, month=day.month)
+        day = date(day.year + (day.month == 12), day.month % 12 + 1, 1)
+    change = [{"month": "2025-09", "before": {}, "after": {"id": 1}}]
+    with patch("billing.services.filing.timezone.localdate", return_value=date(2026, 12, 2)), \
+            patch("billing.services.filing.changes_for_month", return_value=change):
+        assert pending_amendments(firm, 2026, 11) == []
+        assert pending_amendments(firm, 2026, 11, today=date(2026, 11, 28)) == change
+
+
+@patch("billing.services.filing.timezone.localdate", return_value=date(2026, 11, 2))
+def test_changing_a_gstr3b_date_refreshes_late_costs_and_16_4_credit(_today, shop):
+    # R3A-7: Sep 2026 GSTR-3B moved from 20 Oct to 30 Oct (10 days late, turnover under 1.5 Cr).
+    from billing.services.gst_amounts import heads
+
+    firm, user = shop
+    figures = {"cash": {"igst": "1000.00", "cgst": "0.00", "sgst": "0.00", "total": "1000.00"},
+               "setoff_output": {"igst": "1100.00", "cgst": "0.00", "sgst": "0.00", "total": "1100.00"},
+               "output": {"igst": "1100.00", "cgst": "0.00", "sgst": "0.00", "total": "1100.00"},
+               "available": {"igst": "100.00", "cgst": "0.00", "sgst": "0.00", "total": "100.00"},
+               "credit": {"igst": "100.00", "cgst": "0.00", "sgst": "0.00", "total": "100.00"},
+               "base_credit": {"igst": "100.00", "cgst": "0.00", "sgst": "0.00", "total": "100.00"},
+               "carry_on": {"igst": "0.00", "cgst": "0.00", "sgst": "0.00", "total": "0.00"}, "amendments": [],
+               "tables": {"late": None, "t31a": {"taxable": "1100.00", "igst": "1100.00"}, "t31c": {"taxable": "0.00"},
+                          "t4a5": {"heads": {"igst": "100.00"}}, "t4b1": {"heads": {}}, "t4d2": {"heads": {}, "list": []}}}
+    mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})
+    with patch("billing.services.filing._snapshot", return_value=(figures, {}, {})):
+        record = mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-20"})[0]
+    assert (record.late_fee, record.interest) == (Decimal(0), Decimal(0))
+    lapsed = {date(2026, 10, 20): {"heads": heads(), "list": []},
+              date(2026, 10, 30): {"heads": heads({"igst": "40"}), "list": [{"id": 1, "bill_no": "P1"}]}}
+    with patch("billing.services.ledger._lapsed", side_effect=lambda business, day, filed_on: lapsed[filed_on]), \
+            patch("billing.services.ledger._turnover", return_value=Decimal(0)):
+        edit_filing(record, user, {"filed_on": "2026-10-30"})
+    record.refresh_from_db()
+    late = record.figures["tables"]["late"]
+    assert (late["gstr3b"]["days"], late["gstr3b"]["fee"]) == (10, "500.00")
+    assert record.figures["credit"]["igst"] == record.figures["base_credit"]["igst"] == "60.00"
+    assert record.figures["cash"]["igst"] == "1040.00"
+    assert record.figures["tables"]["t4d2"]["heads"]["igst"] == "40.00"
+    assert record.figures["tables"]["t4a5"]["heads"]["igst"] == "60.00"
+    # 18% on ₹1,040 for 10 days = ₹5.128… → ₹5.13.
+    assert late["interest"] == "5.13"
+    assert (record.late_fee, record.interest) == (Decimal("500.00"), Decimal("5.13"))
