@@ -2,6 +2,7 @@
 import json
 import os
 import stat
+from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -27,10 +28,8 @@ def provider_ready():
 
 def private_folder(folder):
     # The sandbox default sits in /tmp: never write into a folder (or symlink) someone else made.
-    try:
+    with suppress(FileExistsError):
         folder.mkdir(parents=True, mode=0o700)
-    except FileExistsError:
-        pass
     info = folder.lstat()
     return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
 

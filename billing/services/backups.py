@@ -1,8 +1,8 @@
 """Streaming, credential-free v2-shaped backups, with bounded uncached reads."""
 
 import json
-from datetime import date, datetime
 from contextlib import contextmanager
+from datetime import date, datetime
 from importlib import import_module
 from itertools import islice
 

@@ -91,7 +91,7 @@ def test_five_tries_persist_and_expiry_is_enforced():
     client.post("/api/auth/reset/start/", {"username": "maya"})
     correct = fake_outbox["9000000000"]
     wrong = "000000" if correct != "000000" else "111111"
-    for remaining in range(4, -1, -1):
+    for _ in range(5):
         response = client.post("/api/auth/reset/finish/", {"username": "maya", "code": wrong, "password": "Harbour873!"})
         assert response.status_code == 400 and response.data["code"] == ["That code isn't right or has run out. Ask for a new code."]
     assert PasswordResetCode.objects.get().tries == 5
