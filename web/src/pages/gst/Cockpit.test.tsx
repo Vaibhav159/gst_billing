@@ -18,3 +18,8 @@ test('viewer keyboard cannot download or mark; filing sheet shows literal zero c
   fireEvent.click(screen.getByRole('button',{name:'Print filing sheet'}));
   expect(screen.getByRole('dialog',{name:/Filing sheet/})).toBeInTheDocument();expect(screen.getAllByText('₹0.00').length).toBeGreaterThan(0);
 });
+test('cockpit does not count the firms and shows every shortcut key as a key', () => {
+  const {container}=renderApp(<Cockpit data={endFixture()} onOpen={vi.fn()} onDownload={vi.fn()} onMark={vi.fn()} />);
+  expect(screen.queryByText(/for the three/)).not.toBeInTheDocument();
+  expect([...container.querySelectorAll('kbd')].map(k=>k.textContent)).toEqual(expect.arrayContaining(['J','K','F','D','M','Enter']));
+});
