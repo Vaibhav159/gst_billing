@@ -245,7 +245,7 @@ def _hsn_rows(bills):
             for column in COLUMNS:
                 value[column] += rounded[column]
     return [{"hsn": hsn, "description": hsn_description(hsn, descriptions=descriptions[hsn]), "uqc": uqc,
-             "quantity": f"{value['quantity']:.3f}", "rate": percent(rate),
+             "quantity": f"{to_paise(value['quantity']):.2f}", "rate": percent(rate),
              **wire({column: value[column] for column in COLUMNS}), "bills": len(value["ids"])}
             for (hsn, uqc, rate), value in sorted(groups.items())]
 

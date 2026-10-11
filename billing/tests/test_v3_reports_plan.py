@@ -83,7 +83,7 @@ def test_hsn_groups_rate_and_uqc_and_does_not_double_count_bills():
     bill = diamond()
     bill["lines"].append(deepcopy(bill["lines"][0]))
     result = build_report("hsn", [], [bill], **SEPT, side="purchases")
-    assert result["rows"] == [{"hsn": "710239", "description": "Diamonds, cut and polished", "uqc": "CTM", "quantity": "12.800", "rate": "0.25", "taxable": "721920.00", "igst": "0.00", "cgst": "902.40", "sgst": "902.40", "bills": 1}]
+    assert result["rows"] == [{"hsn": "710239", "description": "Diamonds, cut and polished", "uqc": "CTM", "quantity": "12.80", "rate": "0.25", "taxable": "721920.00", "igst": "0.00", "cgst": "902.40", "sgst": "902.40", "bills": 1}]
 
 def test_months_clip_days_and_cross_fy_without_carrying_cancelled_bills():
     context = {**SEPT, "start": date(2026, 3, 31), "end": date(2026, 4, 1)}
@@ -176,7 +176,7 @@ def test_hsn_service_quantity_and_multiple_units_are_distinct():
     bill = diamond()
     bill["lines"].extend([{**bill["lines"][0], "unit": "pcs"}, {**bill["lines"][0], "hsn": "998800"}])
     result = build_report("hsn", [], [bill], **SEPT, side="purchases")
-    assert [(r["hsn"], r["uqc"], r["quantity"]) for r in result["rows"]] == [("710239", "CTM", "6.400"), ("710239", "PCS", "6.400"), ("998800", "NA", "0.000")]
+    assert [(r["hsn"], r["uqc"], r["quantity"]) for r in result["rows"]] == [("710239", "CTM", "6.40"), ("710239", "PCS", "6.40"), ("998800", "NA", "0.00")]
 
 
 def test_reconciliation_keeps_b2cl_separate_and_file_differences_signed():
