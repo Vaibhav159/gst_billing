@@ -164,3 +164,29 @@ test("a bank-confirmed partial save tells the truth inside the still-open dialog
   expect(within(dialog).getByText("Firm details were saved")).toBeInTheDocument();
   expect(dialog).not.toHaveTextContent("Nothing changed");
 });
+test("while a new picture is pending the first save keeps the stored switch, so a failed upload never turns the old signature on", async () => {
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:signature" });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  const off = { ...FIRM_DETAIL, signature_url: "/api/media/old", signature_on_bills: false };
+  const calls = server({ "GET firms/3/": off, "PUT firms/3/": ({ data }: Call) => ({ status: 200, data: { ...off, ...(data as object) } }), "PUT firms/3/signature/": () => ({ status: 400, data: { image: ["sign.png isn't a picture. Pick a PNG or JPG of the signature."] } }) });
+  mount(routes, ["/firms/3/edit"]);
+  fireEvent.change(await screen.findByLabelText("Signature picture"), { target: { files: [new File(["x"], "sign.png", { type: "image/png" })] } });
+  fireEvent.click(screen.getAllByRole("button", { name: "Save firm details" })[0]);
+  expect(await screen.findByText("Firm details were saved")).toBeInTheDocument();
+  const writes = calls.filter((c) => c.method === "PUT");
+  expect(writes[0].data).toMatchObject({ signature_on_bills: false });
+});
+test("when the upload worked but switching printing off failed, retry only switches it off and says so", async () => {
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:signature" });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  let puts = 0;
+  const calls = server({ "PUT firms/3/": ({ data }: Call) => ++puts === 2 ? { status: 503 } : { status: 200, data: { ...FIRM_DETAIL, ...(data as object) } }, "PUT firms/3/signature/": { ...FIRM_DETAIL, signature_url: "/api/media/sign", signature_on_bills: true } });
+  const { router } = mount(routes, ["/firms/3/edit"]);
+  fireEvent.change(await screen.findByLabelText("Signature picture"), { target: { files: [new File(["x"], "sign.png", { type: "image/png" })] } });
+  fireEvent.click(screen.getByRole("switch", { name: "Print the signature on bills" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Save firm details" })[0]);
+  expect(await screen.findByText(/The signature was saved, but it still prints on bills/)).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "Save firm details" })[0]);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/firms/3"));
+  expect(calls.filter((c) => c.method === "PUT").map((c) => c.url)).toEqual(["firms/3/", "firms/3/signature/", "firms/3/", "firms/3/"]);
+});

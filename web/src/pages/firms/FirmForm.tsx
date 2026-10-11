@@ -36,7 +36,7 @@ function Form({ firm, firms, first, title }: { firm: FirmDetail | null; firms: F
   const [touched, setTouched] = useState<Partial<Record<keyof FirmBody, boolean>>>({}); const [serverErrors, setServerErrors] = useState<Partial<Record<keyof FirmBody, string>>>({});
   const [saveError, setSaveError] = useState<ApiProblem | null>(null); const [signError, setSignError] = useState(""); const [picture, setPicture] = useState<File | null | undefined>();
   const [preview, setPreview] = useState<string | null>(firm?.signature_url ?? null); const [filled, setFilled] = useState<{ gstin: string; fields: string[] }>({ gstin: "", fields: [] });
-  const [bankCheck, setBankCheck] = useState(false); const [busy, setBusy] = useState(false); const [done, setDone] = useState<string | null>(null); const [partial, setPartial] = useState(false);
+  const [bankCheck, setBankCheck] = useState(false); const [busy, setBusy] = useState(false); const [done, setDone] = useState<string | null>(null); const [partial, setPartial] = useState<false | "sign" | "switch">(false);
   const sending = useRef(false); const savedId = useRef(firm?.id); const fileRef = useRef<HTMLInputElement>(null); const objectUrl = useRef<string | null>(null);
   const saveFirm = useSaveFirm(); const signature = useSignature(); const shop = useShopSettings(); const navigate = useNavigate(); const toast = useToast(); const { isPhone } = useView(); const { echo, say } = useEcho();
   const backTo = firm ? `/firms/${firm.id}` : first ? "/setup" : "/firms"; const back = useBack(backTo);
@@ -64,22 +64,24 @@ function Form({ firm, firms, first, title }: { firm: FirmDetail | null; firms: F
     if (errorKeys.length || signError) { const key = errorKeys[0]; const el = document.getElementById(key ? IDS[key] : "fm-sign"); if (el === document.activeElement) say(key ? errs[key]! : signError); el?.focus({ preventScroll: true }); scrollIntoViewSafe(el, { block: "center" }); return; }
     if (bankChanged && !checked) { setBankCheck(true); return; }
     sending.current = true; setBusy(true); setSaveError(null);
-    const body = { ...f, mobile_number: firm && f.mobile_number === initial.mobile_number ? f.mobile_number : mobileDigits(f.mobile_number) }; let stored = false;
+    const body = { ...f, mobile_number: firm && f.mobile_number === initial.mobile_number ? f.mobile_number : mobileDigits(f.mobile_number) }; let stored = false; let stage: "sign" | "switch" = "sign";
     try {
-      let result = await saveFirm.mutateAsync({ id: savedId.current, body }); savedId.current = result.id; stored = true;
+      // While a new picture waits to upload, the first save keeps the stored switch: a refused upload must not turn the old signature on
+      const opening = picture ? { ...body, signature_on_bills: firm?.signature_on_bills ?? false } : body;
+      let result = await saveFirm.mutateAsync({ id: savedId.current, body: opening }); savedId.current = result.id; stored = true;
       if (picture !== undefined) {
         result = await signature.mutateAsync({ id: result.id, image: picture });
-        // Upload enables the picture. An explicit switch-off still wins.
-        if (picture && !body.signature_on_bills) result = await saveFirm.mutateAsync({ id: result.id, body });
-        setPicture(undefined);
+        setPicture(undefined); stage = "switch";
       }
+      // Upload enables the picture. An explicit switch-off still wins.
+      if (picture && !body.signature_on_bills) result = await saveFirm.mutateAsync({ id: result.id, body });
       setPartial(false); setBankCheck(false); markSaved("firm", result.id);
       if (firm) {
         const words = [f.bank_account_number !== initial.bank_account_number ? `Account number changed: ${initial.bank_account_number || "None"} → ${f.bank_account_number || "None"}.` : "", f.bank_ifsc_code !== initial.bank_ifsc_code ? `IFSC changed: ${initial.bank_ifsc_code || "None"} → ${f.bank_ifsc_code || "None"}.` : "", bankChanged ? "Every bill now prints the new account." : "", changedGstin ? `New bills print GSTIN ${f.gst_number}; bills already made keep theirs.` : "", changedPrefix ? `New bills are numbered ${next} onwards.` : ""].filter(Boolean);
         if (words.length) toast.show({ title: `${result.name} saved`, body: words.join(" ") });
       }
       setDone(first ? "/setup" : `/firms/${result.id}`);
-    } catch (e) { const problem = problemOf(e); setSaveError(problem); setServerErrors(problem.fields ?? {}); if (stored) { setPartial(true); if (problem.fields?.image) setSignError(problem.fields.image); } }
+    } catch (e) { const problem = problemOf(e); setSaveError(problem); setServerErrors(problem.fields ?? {}); if (stored) { setPartial(stage); if (problem.fields?.image) setSignError(problem.fields.image); } }
     finally { sending.current = false; setBusy(false); }
   };
   useCtrlS(() => { void save(); });
@@ -105,7 +107,7 @@ function Form({ firm, firms, first, title }: { firm: FirmDetail | null; firms: F
   const saveLabel = busy ? "Saving…" : firm ? "Save firm details" : first ? "Save and continue" : "Add firm";
   const saveButton = <Button variant="primary" icon={Check} loading={busy && !bankCheck} onClick={() => { void save(); }} title="Ctrl S" {...keepFocus}>{saveLabel}</Button>;
   const lookup = registry.data?.gstin === f.gst_number ? registry.data : null; const record = lookup?.registry;
-  const partialMessage = <Banner tone="brand" title="Firm details were saved">The signature wasn't saved. What you chose is still here. Save again to finish.{saveError ? <p>{saveError.message}</p> : null}</Banner>;
+  const partialMessage = <Banner tone="brand" title="Firm details were saved">{partial === "switch" ? "The signature was saved, but it still prints on bills: switching that off didn't go through. Save again to switch it off." : "The signature wasn't saved. What you chose is still here. Save again to finish."}{saveError ? <p>{saveError.message}</p> : null}</Banner>;
   const errors = (Object.keys(IDS) as (keyof FirmBody)[]).filter((k) => errs[k]).map((k) => ({ field: IDS[k], text: errs[k]! }));
   return <Page narrow icon={first ? Sparkles : Building2} title={title} back={backTo} breadcrumbs={first ? [{ label: "Set up", to: "/setup" }] : [{ label: "Firms", to: "/firms" }]} context={first ? "Your GST registration: its GSTIN, address and bill numbers print on every bill. Four things are required; the rest can wait." : firm ? `Prints on every ${firm.short} bill · bills already made keep their details` : "A new GST registration with its own bill numbers"} phoneSubtitle={first ? "Step 1 of 4 · your GST registration" : firm ? "Owner only · prints on every bill" : "A new GST registration"} actions={<><Button variant="ghost" onClick={back} disabled={busy}>Cancel</Button>{saveButton}</>} actionBar={saveButton}>
     {guard}{echo}<form noValidate onSubmit={(e) => { e.preventDefault(); void save(); }} className="flex flex-col gap-5">{tried && errors.length ? <ErrorSummary items={errors} /> : null}
