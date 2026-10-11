@@ -66,6 +66,8 @@ the server. CI runs it as the `web-e2e` job.
   `Sharma` and `Priya Sharma`). The app lists its own pages, actions and firms,
   so one of those proves nothing about the server.
 - `CHROMIUM_PATH`: a browser to launch instead of Playwright's own download.
+- `E2E_PDF_DIR`: where `print.spec.js` keeps the PDFs it downloads and prints,
+  for a person to look at (default: each test's own output folder).
 
 On the sandbox VM:
 
@@ -133,15 +135,31 @@ Pitfalls:
   replace `window.open` with `page.addInitScript` before the page loads, with a
   stand-in that returns an object, since the app takes `null` for a tab the
   browser stopped and records nothing.
+- A PDF's text is read back with `tests-v3/pdf-text.js` (`pdfPages`,
+  `pdfSubject`, `pdfPageCount`, `pdfFonts`): react-pdf stores Times text as hex
+  WinAnsi codes in compressed streams, and the ₹, drawn in its own one-glyph
+  font, reads back through that font's ToUnicode map, so a page reads
+  "₹ 6,707.88" as printed (a "¹" is a ₹ that fell into Times). A page makes its
+  PDF ahead: wait for the button to be enabled before the click that downloads
+  it. The page itself (`<html>`) is a `document` to `getByRole`, so count papers
+  by name.
+- `print.spec.js` needs a firm with a bank account and a second firm. It uses
+  the server's, a firm with a prefix first (the sandbox's KIRAN prints its full
+  numbers, KGH/2026-27/N). Where no firm has an account (CI) it makes
+  `TEST PRINT FIRM (e2e)` once, by name, and keeps it; its name sorts after
+  CI's TEST JEWELLERS, so every other spec's first firm stays CI's own. It
+  sets the copies and bank details it needs on the page, which saves nothing:
+  the shop's print defaults can be anything, and stay as they were.
 - What the specs leave behind, on the sandbox as on CI: the bills they make stay
-  in the bin, which nothing empties. A full run uses about 27 of the first
+  in the bin, which nothing empties. A full run uses about 39 of the first
   firm's numbers, 3 of them on last month's paper bills (on a fresh database the
   earlier specs use up its one-digit numbers before search needs a number of two
-  digits), and they show in that firm's bin and in its paper book as deleted test
-  bills. `walkIn` makes "Walk-in Customer (e2e)" where there's no
-  walk-in record (the sandbox had none) and keeps it for every later run: don't
-  delete it. Its bills in the bin protect it anyway, and each run would make a
-  new one.
+  digits), and 4 of the firm `print.spec.js` prints from (the sandbox's KIRAN,
+  CI's `TEST PRINT FIRM (e2e)`). They show in those firms' bins, and in the
+  first firm's paper book, as deleted test bills. `walkIn` makes "Walk-in
+  Customer (e2e)" where there's no walk-in record (the sandbox had none) and
+  keeps it for every later run: don't delete it. Its bills in the bin protect it
+  anyway, and each run would make a new one.
 - Your own Vite in a worktree: start it with `--force` when its dependency
   cache (`web/node_modules/.vite`) may be older than an import such as the PDF's
   `qrcode`. Otherwise Vite optimizes that dependency the first time a page

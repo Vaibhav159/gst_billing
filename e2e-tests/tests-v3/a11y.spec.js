@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 const { measure, problems } = require("./axe");
 const { cleanDrafts, draftWrites, leaveForm, monthBefore, possessive } = require("./bill-form-data");
 const { SIGNED_OUT, opened } = require("./session");
-const { afterDialog, client, esc, makesBills, newBill, today } = require("./sales-data");
+const { afterDialog, client, esc, makesBills, newBill, today, walkIn } = require("./sales-data");
 
 // every bill a check makes goes to the bin after it (sales-data.js)
 makesBills(test);
@@ -120,6 +120,44 @@ const BILL_STATES = [
       { name: "a deleted bill's page", deleted: true, path: (b) => `/sales/${b.id}`, async show(page) { await expect(page.getByText("This bill was deleted")).toBeVisible(); } },
     ],
   },
+  {
+    // a walk-in's bill, which has no number to send to: its e-way dialog (from its menu) and the WhatsApp dialog Send
+    // opens to ask for one, on a desktop and a phone; then, cancelled, the desktop's list with its row and with that row
+    // previewed (1B's final review, Minor 13). The phone's cancelled card is the first bill's
+    name: "a walk-in's bill: its dialogs, then cancelled in the list", on: ["desktop", "phone"], walkin: true,
+    steps: [
+      {
+        name: "the e-way dialog", path: (b) => `/sales/${b.id}`,
+        async show(page, b, project) {
+          await opened(page);
+          // a phone's menu is a dialog of its own, with a dialog's guard
+          if (project === "phone") {
+            await page.getByRole("button", { name: `More for ${b.number}`, exact: true }).click();
+            await expect(page.getByRole("dialog", { name: `Bill ${b.number}`, exact: true })).toBeVisible();
+            await afterDialog(page);
+          } else await page.getByRole("button", { name: `More actions for ${b.number}`, exact: true }).click();
+          await page.getByRole("menuitem", { name: /^E-way bill…/ }).click();
+          await expect(page.getByRole("dialog", { name: `E-way bill for ${b.number}`, exact: true })).toBeVisible();
+        },
+      },
+      {
+        name: "the WhatsApp dialog", path: (b) => `/sales/${b.id}`,
+        async show(page, b) {
+          await opened(page);
+          await page.getByRole("button", { name: "Send to a number" }).click();
+          await expect(page.getByRole("dialog", { name: `Send ${b.number} on WhatsApp`, exact: true })).toBeVisible();
+        },
+      },
+      {
+        name: "the desktop's list with a cancelled row", on: ["desktop"], cancelled: true, path: (b) => `/sales?firm=${b.business}&month=today`, landing: "/sales",
+        async show(page, b) { await expect(page.locator(`tr[data-row="${b.id}"]`)).toContainText("Cancelled"); },
+      },
+      {
+        name: "a cancelled bill in the list's preview", on: ["desktop"], path: (b) => `/sales?firm=${b.business}&month=today&bill=${b.id}`, landing: "/sales",
+        async show(page, b) { await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toContainText("Total when issued"); },
+      },
+    ],
+  },
 ];
 
 for (const theme of ["obsidian", "pearl"]) {
@@ -141,12 +179,12 @@ for (const theme of ["obsidian", "pearl"]) {
       expect(await problems(page)).toEqual([]);
     });
   }
-  for (const { name, on, paper, steps } of BILL_STATES) {
+  for (const { name, on, paper, walkin, steps } of BILL_STATES) {
     test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
       test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
       test.slow(); // several pages, each measured
       const api = client(request);
-      const b = await newBill(api, { paper });
+      const b = await newBill(api, { paper, customer: walkin ? await walkIn(api) : undefined });
       for (const step of steps.filter((x) => !x.on || x.on.includes(info.project.name))) {
         await test.step(step.name, async () => {
           if (step.sent) await api.post(`sales/${b.id}/sent/`, { via: "whatsapp" });
@@ -154,9 +192,8 @@ for (const theme of ["obsidian", "pearl"]) {
           if (step.deleted) await api.del(`sales/${b.id}/`, { reason: "Test bill" });
           const at = step.path(b);
           await openIn(page, theme, at, step.landing ?? at);
-          await step.show(page, b);
-          await settle(page);
-          expect(await problems(page), step.name).toEqual([]);
+          await step.show(page, b, info.project.name);
+          expect(await measure(page), step.name).toEqual([]);
         });
       }
     });

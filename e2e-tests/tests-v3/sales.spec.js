@@ -111,6 +111,7 @@ test("desktop: renumber starts on the next free number and the bill takes it", a
 
 test("desktop: a walk-in's bill goes to the number typed: that chat opens, and the send is recorded on the bill", async ({ page, request }, info) => {
   test.skip(info.project.name !== "desktop");
+  test.slow(); // the send can wait a minute for its PDF (below), past the suite's 60 s for a test
   const api = client(request);
   const bill = await newBill(api, { customer: await walkIn(api) });
   // WhatsApp would open in a new tab: here window.open notes the address it was asked for and answers a stand-in
@@ -123,8 +124,9 @@ test("desktop: a walk-in's bill goes to the number typed: that chat opens, and t
   await afterDialog(page);
   await dialog.getByLabel("WhatsApp number").fill("98290 41122");
   await dialog.getByLabel("WhatsApp number").press("Enter");
-  // the chat opens at once; the bill's PDF is made and downloads beside it before the send is recorded (plan 1E)
-  await expect(page.getByText(`${bill.number} sent`, { exact: true })).toBeVisible({ timeout: 30_000 });
+  // the chat opens at once; the bill's PDF is made and downloads beside it before the send is recorded (plan 1E), and
+  // the first PDF loads react-pdf: one run on the shared VM took over 30 s, and CI's 2-CPU runners may be as slow
+  await expect(page.getByText(`${bill.number} sent`, { exact: true })).toBeVisible({ timeout: 60_000 });
   expect(await page.evaluate(() => window.__opened)).toEqual([expect.stringMatching(/^https:\/\/wa\.me\/919829041122\?text=/)]);
   expect((await api.get(`sales/${bill.id}/`)).sent).toMatchObject({ via: "whatsapp", to: "9829041122" });
 });
