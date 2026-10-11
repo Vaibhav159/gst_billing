@@ -103,3 +103,18 @@ def closed_months(business_ids):
     from billing.models import FiledPeriod
 
     return set(FiledPeriod.objects.filter(business_id__in=business_ids).values_list("business_id", "year", "month"))
+
+
+def credit_month_closed(business_id, month):
+    """Part 3 replaces this source with the GSTR-3B filing stage."""
+    from billing.cache import uncached
+    from billing.models import FiledPeriod
+    return uncached(FiledPeriod).filter(business_id=business_id, year=month.year, month=month.month).exists()
+
+
+def closed_credit_months(business_ids):
+    """Batch twin of credit_month_closed; keep both on the same source."""
+    from billing.cache import uncached
+    from billing.models import FiledPeriod
+    return set(uncached(FiledPeriod).filter(business_id__in=business_ids).values_list("business_id", "year", "month"))
+

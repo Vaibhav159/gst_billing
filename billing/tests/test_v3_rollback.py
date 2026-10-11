@@ -35,8 +35,22 @@ class AddOnlyMigrationsTest(SimpleTestCase):
         loader, found = part1_migrations()
         self.assertTrue(found)
         v2_models = {name for app, name in loader.project_state(V2_LAST).models if app == "billing"}
+        added = {}
         for name, migration in found:
             for op in migration.operations:
+                if isinstance(op, migrations.AddField):
+                    added[op.model_name, op.name] = op.field
+                if isinstance(op, migrations.AddConstraint):
+                    # X-31: uniqueness on new nullable columns cannot reject a v2 insert.
+                    self.assertIsInstance(op.constraint, models.UniqueConstraint)
+                    self.assertIsNone(op.constraint.condition)
+                    self.assertFalse(op.constraint.expressions)
+                    self.assertIsNot(op.constraint.nulls_distinct, False)
+                    self.assertTrue(op.constraint.fields)
+                    for field_name in op.constraint.fields:
+                        self.assertIn((op.model_name, field_name), added)
+                        self.assertTrue(added[op.model_name, field_name].null)
+                    continue
                 self.assertIsInstance(op, migrations.AddField | migrations.CreateModel, f"{name}: {op!r}")
                 fields = [(op.model_name, op.name, op.field)] if isinstance(op, migrations.AddField) else [
                     (op.name.lower(), fname, f) for fname, f in op.fields]

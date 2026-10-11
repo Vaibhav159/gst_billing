@@ -189,6 +189,7 @@ class Business(AbstractBaseModel):
 
 
 class Customer(AbstractBaseModel):
+    is_supplier = models.BooleanField(default=False, db_default=False)
     name = models.CharField(
         max_length=255,
         verbose_name="Customer Name",
@@ -291,6 +292,9 @@ class InvoiceQuerySet(models.QuerySet):
         billing.cache): a v3 page shows a cancel or an edit at once."""
         return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD).nocache()
 
+    def purchases(self):
+        return self.filter(type_of_invoice="inward").nocache()
+
     def counted(self):
         """The bills every figure counts: all but the cancelled ones.
 
@@ -392,6 +396,14 @@ class Invoice(AbstractBaseModel):
     # Copied in later from the paper book: it has the paper's number and date, and no send nag.
     paper = models.BooleanField(default=False, db_default=False)
 
+    itc_month = models.DateField(null=True, blank=True)
+    itc_eligible = models.BooleanField(default=True, db_default=True)
+    needs_review = models.BooleanField(default=False, db_default=False)
+    buyer_gstin = models.CharField(max_length=15, blank=True, default="", db_default="")
+    buyer_ack = models.BooleanField(default=False, db_default=False)
+    linked_sale = models.IntegerField(null=True, blank=True)
+    source = models.CharField(max_length=10, blank=True, default="", db_default="")
+
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
     # audit trail of what the OCR actually saw. Nothing else writes
@@ -425,7 +437,8 @@ class Invoice(AbstractBaseModel):
     # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
     V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces",
                  "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via",
-                 "place_of_supply", "firm_snapshot", "notes", "paper")
+                 "place_of_supply", "firm_snapshot", "notes", "paper",
+                 "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "buyer_ack", "linked_sale", "source")
 
     @classmethod
     def v2_columns(cls):
@@ -1186,6 +1199,21 @@ class InwardCapture(AbstractBaseModel):
 
     STATUS_CHOICES = [("new", "New"), ("converted", "Converted")]
 
+    client_id = models.UUIDField(null=True, blank=True)
+    read_status = models.CharField(max_length=10, blank=True, default="", db_default="")
+    read_data = models.JSONField(null=True, blank=True)
+    read_error = models.CharField(max_length=255, blank=True, default="", db_default="")
+    read_started_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    captured_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL,
+                                   db_constraint=False, related_name="+")
+    label = models.CharField(max_length=120, blank=True, default="", db_default="")
+    pdf = models.BooleanField(default=False, db_default=False)
+    pages = models.PositiveSmallIntegerField(default=1, db_default=1)
+    discarded_at = models.DateTimeField(null=True, blank=True)
+    discarded_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL,
+                                    db_constraint=False, related_name="+")
+
     business = models.ForeignKey(
         Business, on_delete=models.SET_NULL, null=True, blank=True,
         help_text="Best guess at the buying firm; confirmed at conversion.",
@@ -1207,5 +1235,35 @@ class InwardCapture(AbstractBaseModel):
         help_text="The inward invoice this capture became.",
     )
 
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["captured_by", "client_id"], name="uniq_capture_uploader_client")]
+
     def __str__(self):
         return f"Capture #{self.pk} ({self.status})"
+
+
+class CapturePage(models.Model):
+    capture = models.ForeignKey(InwardCapture, on_delete=models.CASCADE, db_constraint=False,
+                                related_name="v3_pages")
+    position = models.PositiveSmallIntegerField()
+    file = models.FileField(upload_to="inward_captures/%Y/%m/")
+    preview = models.FileField(upload_to="inward_captures/%Y/%m/previews/", null=True, blank=True)
+    content_type = models.CharField(max_length=100)
+    size = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["capture", "position"], name="uniq_capture_page")]
+
+
+class AiRead(models.Model):
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+    user = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL,
+                             db_constraint=False, related_name="+")
+    kind = models.CharField(max_length=10)
+    business = models.ForeignKey(Business, null=True, blank=True, on_delete=models.SET_NULL,
+                                 db_constraint=False, related_name="+")
+    ok = models.BooleanField(default=False, db_default=False)
+    pages = models.PositiveSmallIntegerField(default=1, db_default=1)
+    capture = models.ForeignKey(InwardCapture, null=True, blank=True, on_delete=models.DO_NOTHING,
+                                db_constraint=False, related_name="+")
