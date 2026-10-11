@@ -139,7 +139,7 @@ test("a toast on its way out ignores its action: a quick second press, or one af
 import { fireEvent, within } from "@testing-library/react";
 import { useLocation } from "react-router";
 import { applyTextSize } from "@/core/device";
-import { Sheet, ToastHost, menuPlace, type DLRow } from "./index";
+import { ActionBarSlot, Page, Sheet, ToastHost, menuPlace, type DLRow } from "./index";
 import { overlayLayer } from "./Overlay";
 
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
@@ -384,6 +384,22 @@ test("a sheet is a side panel on desktop and a bottom sheet on phones", () => {
   const sheet = screen.getByRole("dialog", { name: "Filter customers" });
   expect(sheet.style.width).toBe("");
   expect(sheet).toHaveClass("rounded-t-xl");
+});
+
+test("a page drawn inside a sheet keeps its action bar in the sheet, never in the phone shell's place behind the overlay", () => {
+  phone(true);
+  const place = document.createElement("div"); // the phone shell's place for the page's bar (ActionBarSlot)
+  document.body.appendChild(place);
+  try {
+    wrap(<ActionBarSlot.Provider value={place}><Sheet open onClose={() => {}} title="New customer">
+      <Page title="New customer" actionBar={<Button>Save customer</Button>}>The form</Page>
+    </Sheet></ActionBarSlot.Provider>);
+    const bar = screen.getByRole("button", { name: "Save customer" }).closest<HTMLElement>("[data-actionbar]")!;
+    expect(screen.getByRole("dialog", { name: "New customer" })).toContainElement(bar);
+    expect(place).toBeEmptyDOMElement();
+  } finally {
+    place.remove();
+  }
 });
 
 test("a confirmation can wait for a tick, and while it saves nothing closes it", async () => {

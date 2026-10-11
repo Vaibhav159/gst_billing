@@ -190,5 +190,6 @@ export function PhoneActionBar({ children, className }: PhoneActionBarProps) {
   // above the tab bar the tabs already clear the home indicator; in flows without tabs the bar does.
   // It rides above the phone's keyboard when it's open (--kb, measured by the app), and the page's scroll ends above it there too
   const el = <div ref={bar} data-actionbar="" style={{ marginBottom: "var(--kb, 0px)" }} className={cn("border-t border-rule bg-bar px-4 pt-3 flex gap-2 [&>*]:flex-1 [&>*]:min-w-0", hideNav ? "pb-[calc(12px+env(safe-area-inset-bottom,0px))]" : "pb-3", className)}>{children}</div>;
+  // an in-page lazy() needs its own <Suspense>: a page that suspends again outside a transition is hidden, its portalled bar isn't
   return slot === undefined ? el : slot ? createPortal(el, slot) : null;
 }

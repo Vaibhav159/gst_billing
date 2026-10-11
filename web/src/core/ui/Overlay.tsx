@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { useView } from "@/core/view";
+import { ActionBarSlot } from "./Page";
 
 /* ── Overlays: dialog, sheet, menu, toasts ─────────────── */
 
@@ -40,7 +41,8 @@ export function Portal({ children }: { children: ReactNode }) {
   const layer = overlayLayer();
   // the [data-view] rules (16 px fields on phones, Easy's big fields) reach inside overlays too
   useLayoutEffect(() => { layer.setAttribute("data-view", view); }, [layer, view]);
-  return createPortal(children, layer);
+  // a page drawn inside an overlay keeps its action bar there, not in the phone shell's place behind the overlay
+  return createPortal(<ActionBarSlot.Provider value={undefined}>{children}</ActionBarSlot.Provider>, layer);
 }
 
 /** What Tab reaches inside `node`, drawn (laid out, or holding focus). */

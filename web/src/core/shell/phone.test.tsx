@@ -162,8 +162,9 @@ test("a form hides the tabs, and its action bar clears the home indicator itself
 // has no layout, so this pins where the bar is; the e2e WCAG checks measure the rest.
 test("the action bar sits under the page's scroll, between <main> and the tabs, not pinned over the page", async () => {
   server({ prefs: { phoneMode: "expert" } });
-  renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
+  const router = renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
     { path: "/customers", element: <Page title="Customers" actionBar={<Button>Add customer</Button>}>The list</Page> },
+    { path: "/sales", element: <Page title="Bills">The list</Page> },
   ] }], { initialEntries: ["/customers"] }));
   const bar = (await screen.findByRole("button", { name: "Add customer" })).closest<HTMLElement>("[data-actionbar]")!;
   const main = document.getElementById("app-main")!;
@@ -173,6 +174,11 @@ test("the action bar sits under the page's scroll, between <main> and the tabs, 
   expect(main.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(bar.compareDocumentPosition(screen.getByRole("navigation", { name: /tabs/i })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(bar.className).not.toMatch(/\b(sticky|fixed|absolute)\b/);
+  // a page with no bar leaves the place empty: nothing stays from the page before
+  await act(async () => { await router.navigate("/sales"); });
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  expect(main.nextElementSibling).toBeEmptyDOMElement();
+  expect(document.querySelector("[data-actionbar]")).toBeNull();
 });
 
 test("the bar is still the page's: a tap within 300 ms of the page opening is dropped, and Back puts focus back on the bar's link", async () => {
@@ -606,6 +612,31 @@ test("on a phone a toast sits above the tabs, never over them", async () => {
   }
 });
 
+test("with the keyboard up the tabs make way, and a toast sits above the action bar on the keyboard", async () => {
+  let toast!: ToastApi;
+  function Grab() { toast = useToast(); return null; }
+  server({ prefs: { phoneMode: "expert" } });
+  renderIn(createMemoryRouter(appRoutes, { initialEntries: ["/customers"] }), stubAuth(), <Grab />);
+  await screen.findByRole("navigation", { name: /tabs/i });
+  await waitFor(() => expect(document.querySelector("[data-actionbar]")).not.toBeNull());
+  // an 844 px tall phone with a 300 px keyboard: the tabs are hidden (no box), and Add customer's bar sits on the keyboard
+  const box = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: bottom ? 390 : 0, width: bottom ? 390 : 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const real = Element.prototype.getBoundingClientRect;
+  const rects = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.id === "overlay-root") return box(0, 844);
+    if (this.classList.contains("phone-tabs")) return box(0, 0);
+    if (this.hasAttribute("data-actionbar")) return box(471, 544);
+    return real.call(this);
+  });
+  try {
+    act(() => { toast.show({ title: "Customer saved" }); });
+    const stack = (await screen.findByText("Customer saved")).closest<HTMLElement>('[aria-live="polite"]')!;
+    expect(stack.style.bottom).toBe("385px"); // the bar's top is 373 px up, and 12 px clear of it
+  } finally {
+    rects.mockRestore();
+  }
+});
+
 test("offline, the phone shell carries has-offline", async () => {
   server({ prefs: { phoneMode: "expert" } });
   open("/customers");
@@ -684,25 +715,36 @@ test("the topmost strip clears the notch (the banner, else Back to Easy, else th
 
 // Task 6 hand-off and the keyboard inset
 
-test("on a phone the keyboard's height is --kb on the app, in the app's own pixels, and the overlay layer follows it", async () => {
+test("on a phone the keyboard's height is --kb on the app, in the app's own pixels, and the overlay layer follows it; while it's up the tabs make way", async () => {
   const root = makeRoot();
   document.getElementById("overlay-root")?.remove(); // made again below, beside this #root
   try {
     const { keyboard } = viewport();
     function Probe() { useKeyboardInset(); return null; }
-    render(<Probe />);
+    const { unmount } = render(<Probe />);
     expect(root.style.getPropertyValue("--kb")).toBe("0px");
+    expect(root).not.toHaveAttribute("data-kb");
     const layer = overlayLayer();
     keyboard(300);
     expect(root.style.getPropertyValue("--kb")).toBe("300px");
+    expect(root).toHaveAttribute("data-kb");
     await waitFor(() => expect(layer.style.getPropertyValue("--kb")).toBe("300px"));
     keyboard(44); // the browser's own bars moving, not a keyboard
     expect(root.style.getPropertyValue("--kb")).toBe("0px");
+    expect(root).not.toHaveAttribute("data-kb");
     root.style.zoom = "1.2"; // Larger text: each of the app's pixels is 1.2 of the screen's
     keyboard(300, "scroll");
     expect(root.style.getPropertyValue("--kb")).toBe("250px");
+    expect(root).toHaveAttribute("data-kb");
     keyboard(0);
     expect(root.style.getPropertyValue("--kb")).toBe("0px");
+    expect(root).not.toHaveAttribute("data-kb");
+    // the mark goes with the hook, keyboard up or not
+    keyboard(300);
+    unmount();
+    expect(root).not.toHaveAttribute("data-kb");
+    // under the keyboard the tabs would only hold the page's action bar a tab bar's height above it, over an empty band
+    expect(readFileSync(resolve(__dirname, "../../styles.css"), "utf8")).toMatch(/#root\[data-kb\] \.phone-tabs \{ display: none; \}/);
   } finally {
     root.remove();
     document.getElementById("overlay-root")?.remove();
@@ -718,6 +760,7 @@ test("on a desktop the keyboard inset stays off", () => {
     render(<Probe />);
     keyboard(300);
     expect(root.style.getPropertyValue("--kb")).toBe("");
+    expect(root).not.toHaveAttribute("data-kb");
   } finally {
     root.remove();
   }

@@ -306,6 +306,9 @@
   [data-actionbar] > :is(button, a):not([data-variant="primary"]):has(svg) > .btn-label { display: none; }
   [data-actionbar] > :is(button, a):not([data-variant="primary"]):has(svg) { flex: 0 0 auto; padding-left: 14px; padding-right: 14px; }
 }
+/* While the phone's keyboard is up (keyboard.ts marks #root), the tabs make way: they're under it anyway, and kept
+   they'd hold the page's action bar a tab bar's height above the keyboard, over an empty band. */
+#root[data-kb] .phone-tabs { display: none; }
 
 /* The overlay layer exists only while something is in it (an empty full-screen layer confuses
    accessibility checkers and swallows nothing, but there's no reason to keep it in the way). */
