@@ -9,7 +9,7 @@ import re
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, viewsets
@@ -51,6 +51,7 @@ from billing.text import person, stamp
 
 from .body import UNSTORABLE, Picked, valid
 from .permissions import V3Permission
+from .search import number_part
 
 SAY_WHY = "Say why in a few words. It goes into the audit log."
 
@@ -471,7 +472,16 @@ class BinViewSet(viewsets.GenericViewSet):
         q = text_param(params, "q")
         if q:
             # The customer's name as the row shows it, the bill's own: the customer may be gone since.
-            qs = qs.filter(Q(invoice_number__icontains=q) | Q(data__customer_name__icontains=q))
+            matches = Q(invoice_number__icontains=q) | Q(data__customer_name__icontains=q)
+            first = [When(invoice_number__iexact=q, then=Value(0))]
+            if q.isascii() and q.isdigit():
+                part = number_part(q)
+                matches |= part
+                first.append(When(part, then=Value(1)))
+            # Ruling 1B-24: exact numbers, then number parts, before newer partial matches. Rank in SQL so
+            # the page stays bounded; ties keep the bin's deletion order.
+            qs = qs.filter(matches).alias(rank=Case(*first, default=Value(2), output_field=IntegerField()))
+            qs = qs.order_by("rank", "-deleted_at", "-id")
         return qs
 
     def list(self, request):
