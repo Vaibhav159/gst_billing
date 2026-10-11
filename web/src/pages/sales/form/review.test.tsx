@@ -5,7 +5,7 @@ import { __setNetState } from "@/core/api/network";
 import { __resetDeviceDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
 import { takeFresh } from "@/core/sales/fresh";
-import { ANIL, formServer, fakeToday, mountForm, settle, wireNext } from "./testing";
+import { ANIL, BIG, formServer, fakeToday, mountForm, settle, wireNext } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -13,8 +13,6 @@ vi.setConfig({ testTimeout: 20_000 });
 beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
 afterEach(() => { vi.useRealTimers(); act(() => __setNetState("online")); takeFresh(); });
 
-/** 40 g of a 22K necklace at ₹6,500: ₹2,67,800.00 with GST, over the income-tax limits. */
-const BIG = [{ id: 1, product_name: "Gold Necklace 22K", hsn_code: "711319", quantity: "40.000", unit: "gms", rate: "6500.000", gst_percent: "3", taxable: "260000.00", cgst: "3900.00", sgst: "3900.00", igst: "0.00", tax: "7800.00", amount: "267800.00", note: "" }];
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
 const posts = (calls: { method: string; body: unknown }[]) => calls.filter((c) => c.method === "POST").map((c) => (c.body as { invoice_number: string }).invoice_number);
 /** What a row of the review says: its label and value ("Bill no.KGH/2026-27/34"). */
@@ -161,7 +159,7 @@ test("a PAN added from the review's own checks: the check and its Add PAN go, an
   expect(dialog).toContainElement(document.activeElement as HTMLElement);
 });
 
-test("a change to a saved bill with nothing changed yet: Save changes is off, and Ctrl S doesn't send it either", async () => {
+test("a change to a saved bill with nothing changed yet: Save changes is off, with its reason, and Ctrl S doesn't send it either (Ruling 1D-14)", async () => {
   const user = fakeToday();
   const { calls } = formServer([["GET", "sales/412/", () => wireDetail()]]);
   mountForm("/sales/412/edit");
@@ -170,10 +168,14 @@ test("a change to a saved bill with nothing changed yet: Save changes is off, an
   await user.keyboard("{Control>}s{/Control}");
   const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
   act(() => { vi.advanceTimersByTime(400); });
-  expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(dialog).toHaveTextContent("What changesNothing has changed yet. Go back and edit, or close this.");
+  const save = within(dialog).getByRole("button", { name: "Save changes" });
+  expect(save).toBeDisabled();
+  expect(save).toHaveAttribute("title", "Nothing has changed yet");
   await user.keyboard("{Control>}s{/Control}");
   await act(async () => { await vi.advanceTimersByTimeAsync(50); });
   expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  expect(screen.getByRole("dialog", { name: "Check the changes to KGH/2026-27/31" })).toBeInTheDocument();
 });
 
 test.each([

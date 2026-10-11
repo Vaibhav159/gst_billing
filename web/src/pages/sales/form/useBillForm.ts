@@ -178,13 +178,11 @@ export function useBillForm(start: Start) {
   const next = useNextNumber(...nextFor);
   const bookFor = [f.paper && !edit ? f.firmId : null, f.paper && !edit ? monthOf(f.date || today) : null] as const;
   const book = usePaperBook(...bookFor);
-  // An answer cached before this form opened that a write has marked since (invalidateSales; a refresh that fails leaves
-  // it so) may be older than a bill just saved: its next number may be that bill's, and a check may call that number free.
-  // It's no answer until a fresh one comes, as the paper book's Enter bill waits (T7 re-review). One asked while the form
-  // is open can't be older than a bill this tab saved, so a customer saved from the form (which marks every bill query)
-  // leaves its answers be, and the number never empties under the cursor or the review
-  const [openedAt] = useState(() => Date.now());
-  const current = (key: QueryKey) => { const s = qc.getQueryState(key); return !s?.isInvalidated || s.dataUpdatedAt >= openedAt; };
+  // An answer a write has marked since it came (invalidateSales; a refresh that fails leaves it so) may be older than a
+  // bill just saved: its next number may be that bill's, and a check may call that number free. It's no answer until a
+  // fresh one comes, as the paper book's Enter bill waits (T7 re-review). A customer saved from the form marks every bill
+  // query too: the number then waits for its fresh answer, and the review holds Save till it comes (Ruling 1D-15)
+  const current = (key: QueryKey) => !qc.getQueryState(key)?.isInvalidated;
   const nextNow = next.data && current(salesKeys.nextNumber(...nextFor)) ? next.data : undefined;
   const bookNow = book.data && current(salesKeys.paperBook(...bookFor)) ? book.data : undefined;
   const suggestion = f.paper && !edit ? (bookNow && !bookNow.locked ? String(bookNow.next.counter) : "") : nextNow ? String(nextNow.counter) : "";
@@ -198,10 +196,10 @@ export function useBillForm(start: Start) {
   // one from before a save
   const answer = f.numberTyped && typedNow === f.number.trim() && current(salesKeys.checkNumber(checkFor)) ? check.data ?? null : null;
   const known = checkedNumber(answer);
-  // the next number on its way: the first answer, or a fresh one in place of an answer from before a save
-  const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline"
-    && (f.paper && !edit ? book.isPending || (book.isFetching && !bookNow) : next.isPending || (next.isFetching && !nextNow));
-  const numberError = keep ? "" : numberProblem(numberText, nextNow?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
+  // no number yet, with the next one being asked for: the first answer, or a fresh one in place of one a write marked.
+  // Nothing is wrong with it meanwhile: it's coming (Ruling 1D-15)
+  const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline" && (f.paper && !edit ? book.isFetching && !bookNow : next.isFetching && !nextNow);
+  const numberError = keep || waitingForNext ? "" : numberProblem(numberText, nextNow?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
   const numberNote = !numberError && known?.note ? known.note : "";
   // "checking" only while a check is coming: typing hasn't paused yet, the server hasn't answered, or a fresh answer is on
   // its way in place of one from before a save. One that failed (a 500, the network) or can't be sent (no firm, or no
@@ -209,7 +207,7 @@ export function useBillForm(start: Start) {
   // for ever (T4 re-review)
   const asking = f.numberTyped && !keep && f.firmId !== null && Boolean(f.date) && Boolean(f.number.trim()) && net !== "offline"
     && (typedNow !== f.number.trim() || check.isPending || (check.isFetching && !answer));
-  const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : asking && !answer ? "checking" : "unknown";
+  const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : waitingForNext ? "waiting" : asking && !answer ? "checking" : "unknown";
   const setNumber = useCallback((text: string) => set({ number: text, numberTyped: true }), [set]);
   const takeSuggestion = useCallback(() => set({ number: "", numberTyped: false }), [set]);
 
@@ -295,8 +293,9 @@ export function useBillForm(start: Start) {
   const startSig = useRef(JSON.stringify(start.form, (k, v) => (k === "key" ? undefined : v)));
   const dirty = JSON.stringify(f, (k, v) => (k === "key" ? undefined : v)) !== startSig.current;
   const changes = edit && bill && reviewOpen ? changesOf(bill, f, { firmName, number: stored, pos, inter: tt.inter, total: figs.total, customerName: cust?.name ?? "" }) : [];
-  // the customer has the bill already, and its total changes: the saved page offers to send the corrected one
-  const sentNote = edit && bill?.sent && bill.total_amount !== figs.total ? bill : null;
+  // the customer has the bill already, and a change changes its total: the saved page offers to send the corrected one.
+  // Never for a bill nothing was changed on, whose stored total v3's maths puts a paisa off (Ruling 1D-16)
+  const sentNote = edit && bill?.sent && changes.length > 0 && bill.total_amount !== figs.total ? bill : null;
 
   /* ── review and save ── */
   const openReview = useCallback((): { ok: true } | { ok: false; first: string } => {
@@ -381,8 +380,11 @@ export function useBillForm(start: Start) {
         // cancelled while it was being changed (a PUT): the bill itself is the way on, where it can be made again
         setSaveError({ kind: "cancelled", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
       } else if (p.kind === "notfound" && edit && bill) {
-        // deleted while it was being changed (the PUT's 404): the bill's page says so, and is where it's restored from
-        setSaveError({ kind: "gone", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
+        // deleted while it was being changed (the PUT's 404, whose own words name nothing): said by name, in the server's
+        // words when it sends its own. The bill's page says where it is, and is where the owner restores it
+        const said = p.code === "deleted" ? (p.body as { detail?: unknown } | undefined)?.detail : undefined;
+        const body = typeof said === "string" && said ? said : `${bill.invoice_number} isn't in Sales any more. It was deleted while you were changing it, so nothing was saved.`;
+        setSaveError({ kind: "gone", title: "Not saved", body, link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
       } else {
         // what the server refused under a field the form has goes there, and the review closes for it; a refusal of
         // something the form has no field for (replaces, draft_id, payment_mode) stays in the review, in its words

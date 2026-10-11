@@ -108,8 +108,14 @@ test("a typed number is saved in the firm's format when the firm uses full numbe
   expect(storedFor(undefined, "34")).toBe("34");
 });
 
-test("a saved bill's lines: as stored, with no product link (lines keep their names)", () => {
-  expect(linesFromBill(bill().lines)[0]).toMatchObject({ productId: null, custom: false, name: "Gold Ring 22K", hsn: "711319" });
+test("a saved bill's lines: as stored, with no product link (lines keep their names), each knowing the saved line it is", () => {
+  const lines = linesFromBill(bill().lines);
+  expect(lines[0]).toMatchObject({ productId: null, custom: false, name: "Gold Ring 22K", hsn: "711319", savedId: 901 });
+  expect(lines[1]).toMatchObject({ name: "Gold Pendant 22K", savedId: 902 });
+  // which saved line it is goes nowhere else: not into what's saved, nor into an unfinished bill
+  const f = { ...startEdit(bill()).form };
+  expect(toBillInput(f, { mode: "edit", pos: "08", number: "KGH/2026-27/31", draftId: null, replaces: null }).lines[0]).not.toHaveProperty("savedId");
+  expect(toDraftData(f, null).lines[0]).not.toHaveProperty("savedId");
 });
 
 test("an id from a link is a whole number above 0, or nothing", () => {

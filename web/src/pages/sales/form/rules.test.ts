@@ -1,5 +1,5 @@
 import { toCustomer } from "@/core/api/customers";
-import { wireDetail } from "@/core/sales/fixtures";
+import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { blankLine, startEdit, startNew, type FormLine, type FormState } from "./model";
 import type { NumberCheck } from "@/core/sales/types";
@@ -109,6 +109,8 @@ test("the checks beside the total: number, customer, period, lines, tax type and
   expect(checksOf(input({ paper: true }))[0].text).toBe("KGH/2026-27/34 from the paper bill is free in FY 2026-27");
   expect(checksOf(input({ numberState: "checking" }))[0]).toMatchObject({ ok: null, text: "Checking that KGH/2026-27/34 is free" });
   expect(checksOf(input({ numberError: "KGH/2026-27/34 is already used…" }))[0]).toMatchObject({ ok: false, text: "KGH/2026-27/34 can't be used" });
+  // no number yet, with the next one on its way: said so, never "can't be used" (Ruling 1D-15)
+  expect(checksOf(input({ stored: "", numberState: "waiting" }))[0]).toMatchObject({ ok: null, text: "Getting the next number" });
 });
 
 test("a GST rate that isn't one of the 11 slabs (an old product's 7%) is a problem on its line and beside the total, so it can be fixed", () => {
@@ -184,6 +186,37 @@ test("what an edit changes, old to new, for the review", () => {
   // a weight cleared reads as a dash
   const cleared = { ...s.form, lines: [{ ...s.form.lines[0], qty: null }, s.form.lines[1]] };
   expect(changesOf(b, cleared, { firmName: "KIRAN GOLD HOUSE", number: "KGH/2026-27/31", pos: "08", inter: false, total: 8708321, customerName: "Anil Gupta" })).toEqual([["Gold Ring 22K weight", "12.345 gms", "—"]]);
+});
+
+/** KGH/2026-27/31 with a necklace between the ring and the pendant. */
+const NECKLACE_LINE = { ...WIRE_LINES[0], id: 905, product_name: "Gold Necklace 22K", quantity: "18.200", rate: "6400.000" };
+const same = (b: ReturnType<typeof toBillDetail>) => ({ firmName: "KIRAN GOLD HOUSE", number: "KGH/2026-27/31", pos: "08", inter: false, total: b.total_amount, customerName: "Anil Gupta" });
+
+test("an edit's lines pair with the saved lines they came from, never by place: the first removed, one put in between, a middle one changed (T8 review)", () => {
+  const two = toBillDetail(wireDetail());
+  const [ring, pendant] = startEdit(two).form.lines;
+  // the ring removed: the pendant is still the pendant
+  expect(changesOf(two, { ...startEdit(two).form, lines: [pendant] }, same(two))).toEqual([["Items removed", "Gold Ring 22K", "None"]]);
+  // a necklace put between them: only it is new
+  const necklace: FormLine = { ...blankLine(), name: "Gold Necklace 22K", hsn: "711319", gst: "3", qty: 18.2, rate: "6400" };
+  expect(changesOf(two, { ...startEdit(two).form, lines: [ring, necklace, pendant] }, same(two))).toEqual([["Items added", "None", "Gold Necklace 22K"]]);
+  // three lines: the ring removed and the necklace (the middle one) weighed again
+  const three = toBillDetail(wireDetail({ lines: [WIRE_LINES[0], NECKLACE_LINE, WIRE_LINES[1]] }));
+  const [, saved, last] = startEdit(three).form.lines;
+  expect(changesOf(three, { ...startEdit(three).form, lines: [{ ...saved, qty: 19 }, last] }, same(three))).toEqual([
+    ["Gold Necklace 22K weight", "18.200 gms", "19.000 gms"], ["Items removed", "Gold Ring 22K", "None"],
+  ]);
+});
+
+test("the tax and the total follow from what was changed: listed beside a change, never as one by themselves (Ruling 1D-16)", () => {
+  const b = toBillDetail(wireDetail());
+  const s = startEdit(b);
+  // a v2 bill whose stored total is a paisa off v3's maths, and whose heads read the other way: nothing the person changed
+  expect(changesOf(b, s.form, { ...same(b), inter: true, total: b.total_amount + 1 })).toEqual([]);
+  // a real change lists them beside it
+  expect(changesOf(b, { ...s.form, payment: "bank" }, { ...same(b), total: b.total_amount + 1 })).toEqual([
+    ["Paid by", "Cash", "UPI / bank"], ["Total", "₹87,083.21", "₹87,083.22"],
+  ]);
 });
 
 test("the hint under Firm says where the firm came from, or where an edit moves the bill", () => {

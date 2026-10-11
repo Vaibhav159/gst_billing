@@ -170,7 +170,8 @@ export function lineWarning(l: FormLine): string {
 
 /* ── The checks beside the total ── */
 export type Check = { key: string; ok: true | false | null | "warn"; text: string; fix?: "pan" | "address" };
-export type NumberState = "free" | "checking" | "unknown";
+/** waiting: no number yet, the next one on its way (Ruling 1D-15). */
+export type NumberState = "free" | "checking" | "waiting" | "unknown";
 export type CheckInput = {
   mode: "new" | "edit"; paper: boolean; f: FormState; customer: Customer | null; today: string;
   /** What the number is saved as; its problem; whether the server has said it's free. */
@@ -196,6 +197,7 @@ export function checksOf(c: CheckInput): Check[] {
       : c.numberState === "free" ? { key: "num", ok: true, text: renumber }
         : { key: "num", ok: null, text: `${renumber}: ${c.numberState === "checking" ? "checking that it's free" : "checked when it saves"}` });
   }
+  else if (c.numberState === "waiting") out.push({ key: "num", ok: null, text: "Getting the next number" });
   else if (c.numberError) out.push({ key: "num", ok: false, text: `${shown} can't be used` });
   else if (c.numberState === "free") out.push({ key: "num", ok: true, text: c.paper ? `${c.stored} from the paper bill is free in FY ${fyOf(c.f.date || c.today)}` : `Bill number ${c.stored} is free` });
   else out.push({ key: "num", ok: null, text: c.numberState === "checking" ? `Checking that ${c.stored} is free` : `Bill number ${c.stored}: checked when it saves` });
@@ -245,6 +247,12 @@ export function paymentNote(payment: FormState["payment"], cashOver: boolean): s
 
 /* ── What an edit changes, for the review and the audit log (PROTO useBillForm.js:507-534) ── */
 export type Change = [field: string, before: string, after: string];
+/**
+ * What a change to a saved bill changes, old to new. Each line pairs with the saved line it came from (its savedId),
+ * never by place: a saved line no line came from is removed, and a line from none is added. The tax type and the total
+ * follow from the rest, so they're listed beside a change but never alone: a v2 bill's stored total can be a paisa off
+ * v3's maths with nothing changed (Ruling 1D-16).
+ */
 export function changesOf(bill: BillDetail, f: FormState, now: { firmName: string; number: string; pos: string; inter: boolean; total: number; customerName: string }): Change[] {
   const out: Change[] = [];
   if (f.firmId !== bill.business) out.push(["Firm", bill.business_name, now.firmName]);
@@ -252,23 +260,29 @@ export function changesOf(bill: BillDetail, f: FormState, now: { firmName: strin
   if (f.date !== bill.invoice_date) out.push(["Date", date(bill.invoice_date), date(f.date)]);
   if (f.customer?.id !== bill.customer.id) out.push(["Customer", bill.customer.name, now.customerName]);
   if (now.pos !== bill.place_of_supply) out.push(["Place of supply", stateNameOf(bill.place_of_supply), stateNameOf(now.pos)]);
-  if (now.inter !== bill.interstate) out.push(["Tax", bill.interstate ? "IGST" : "CGST + SGST", now.inter ? "IGST" : "CGST + SGST"]);
+  const tax: Change | null = now.inter !== bill.interstate ? ["Tax", bill.interstate ? "IGST" : "CGST + SGST", now.inter ? "IGST" : "CGST + SGST"] : null;
+  if (tax) out.push(tax);
   if (bill.payment_mode !== (f.payment ?? "")) out.push(["Paid by", PAY[bill.payment_mode], PAY[f.payment ?? ""]]);
   const lines = f.lines.filter(hasContent);
-  const n = Math.min(bill.lines.length, lines.length);
-  for (let i = 0; i < n; i++) {
-    const a = bill.lines[i];
-    const b = lines[i];
-    if (a.product_name !== b.name) { out.push([`Line ${i + 1}`, a.product_name, b.name]); continue; }
+  // each saved line pairs once: a line from none, or a second from the same one, is added
+  const kept = new Set<number>();
+  const added: FormLine[] = [];
+  lines.forEach((b, i) => {
+    const a = bill.lines.find((l) => l.id === b.savedId && !kept.has(l.id));
+    if (!a) { added.push(b); return; }
+    kept.add(a.id);
+    if (a.product_name !== b.name) { out.push([`Line ${i + 1}`, a.product_name, b.name]); return; }
     if (Number(a.quantity) !== b.qty || a.unit !== b.unit) out.push([`${b.name} weight`, qtyLabel(Number(a.quantity), a.unit), qtyLabel(b.qty, b.unit)]);
     if (Number(a.rate) !== Number(b.rate)) out.push([`${b.name} rate`, `${rateText(a.rate)}/${a.unit}`, `${rateText(b.rate)}/${b.unit}`]);
     if (Number(a.gst_percent) !== Number(b.gst)) out.push([`${b.name} GST rate`, `${a.gst_percent}%`, `${b.gst ?? "—"}%`]);
     if (a.hsn_code !== b.hsn) out.push([`${b.name} HSN`, a.hsn_code || "Missing", b.hsn]);
     if (a.note !== b.note.trim()) out.push([`${b.name} note`, a.note || "None", b.note.trim() || "None"]);
-  }
-  if (lines.length > n) out.push(["Items added", "None", lines.slice(n).map((l) => l.name).join(", ")]);
-  if (bill.lines.length > n) out.push(["Items removed", bill.lines.slice(n).map((l) => l.product_name).join(", "), "None"]);
+  });
+  if (added.length) out.push(["Items added", "None", added.map((l) => l.name).join(", ")]);
+  const removed = bill.lines.filter((l) => !kept.has(l.id));
+  if (removed.length) out.push(["Items removed", removed.map((l) => l.product_name).join(", "), "None"]);
   if (bill.notes !== f.notes.trim()) out.push(["Note", bill.notes || "None", f.notes.trim() || "None"]);
+  if (out.length === (tax ? 1 : 0)) return [];
   if (bill.total_amount !== now.total) out.push(["Total", inr(bill.total_amount), inr(now.total)]);
   return out;
 }

@@ -60,6 +60,10 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   // once it has moved past that (another counter took it too). The review shows the number Save sends, as it is now
   const offer = clash && err?.next ? ((counterOf(F.stored) ?? 0) > (counterOf(err.next) ?? 0) ? F.stored : err.next) : "";
   const sending = offer || F.stored;
+  // the next number asked for again (a PAN added from the checks marks every bill query): Save waits for it, never
+  // closing the review onto the number box (Ruling 1D-15)
+  const waits = F.waitingForNext;
+  const numberShown = sending ? <span key="n" className="tnum">{sending}</span> : <span key="n" className="text-muted">{waits ? "Getting the next number" : "—"}</span>;
   // a failure is said first, at the top, and the sheet scrolls to it; so is a save that waits
   useEffect(() => { if ((failed || held) && body.current) body.current.closest("[role=dialog]")?.querySelector(".overflow-y-auto")?.scrollTo({ top: 0 }); }, [failed, err, held]);
   // Save goes with such a refusal, and the cursor with it: it goes to the way on, else to Go back and edit
@@ -87,12 +91,12 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const seg = SEGMENTS[segmentOf(c.gst_number, F.tt.inter, F.figs.total)].label;
   const nextText = edit && F.bill
     ? (sending !== F.bill.invoice_number ? `It becomes ${sending}. The change is written to the audit log.` : "The bill keeps its number. The change is written to the audit log.")
-    : `It goes into ${month}'s GSTR-1 as a ${seg} sale as ${sending}.`;
+    : `It goes into ${month}'s GSTR-1 as a ${seg} sale${sending ? ` as ${sending}` : ""}.`;
   const primaryLabel = F.saving ? "Saving…" : clash ? (offer ? `Save as ${offer}` : "Change the number") : failed ? "Try again" : edit ? "Save changes" : "Save bill";
   // the paper bill's own number never changes by itself: a typed number that's taken is changed by hand
   const changeNumber = () => { F.closeReview(); focusSoon(numberId, true); };
   const primary = clash ? (offer ? () => onSave(offer) : changeNumber) : () => onSave();
-  const blocked = noChange || offlineNew || F.cashBlock;
+  const blocked = noChange || waits || offlineNew || F.cashBlock;
   const total = (
     <div className={cn("flex flex-col min-w-0", isPhone ? "" : "mr-auto")}>
       <span className="flex items-baseline gap-2"><span className="text-sm text-fg2">Total</span><Money value={F.figs.total} size="2xl" tone="sale" /></span>
@@ -106,7 +110,7 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
       <Button ref={backRef} onClick={F.closeReview} disabled={F.saving}>Go back and edit</Button>
       {final ? (way ? <ButtonLink ref={wayRef} to={way.to} variant="primary">{way.label}</ButtonLink> : null)
         : <Button ref={saveRef} variant="primary" icon={offer ? Check : undefined} onClick={primary} disabled={blocked} loading={F.saving}
-            title={noChange ? "Nothing has changed yet" : offlineNew ? "Saving needs the internet" : undefined}>{primaryLabel}</Button>}
+            title={noChange ? "Nothing has changed yet" : waits ? "Getting the next number" : offlineNew ? "Saving needs the internet" : undefined}>{primaryLabel}</Button>}
       {isPhone ? total : null}
     </>
   );
@@ -152,7 +156,7 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
         <Changes F={F} />
         {isPhone ? (
           <DL rows={[
-            ["Bill no.", <span key="n" className="tnum">{sending}</span>], ["Date", date(F.f.date)], ["Firm", F.firmName], ["Customer", c.name],
+            ["Bill no.", numberShown], ["Date", date(F.f.date)], ["Firm", F.firmName], ["Customer", c.name],
             ["Place of supply", posName], ["Tax type", <span key="t" className="text-sale">{taxWord}</span>], ["Paid by", paidBy],
           ]} />
         ) : (
@@ -163,7 +167,7 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
             </div>
             <div className="rounded-ctl border border-line divide-y divide-rule">
               <div className="grid grid-cols-3 divide-x divide-rule">
-                {([["Bill no.", <span key="n" className="tnum">{sending}</span>], ["Date", date(F.f.date)], ["Paid by", paidBy]] as const).map(([k, v]) => (
+                {([["Bill no.", numberShown], ["Date", date(F.f.date)], ["Paid by", paidBy]] as const).map(([k, v]) => (
                   <div key={k} className="px-4 py-2.5 min-w-0"><p className="caps">{k}</p><div className="mt-0.5">{v}</div></div>
                 ))}
               </div>

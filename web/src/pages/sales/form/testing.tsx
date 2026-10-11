@@ -49,6 +49,9 @@ export const RING = { id: 5, name: "Gold Ring 22K", hsn_code: "711319", gst_tax_
 export const NECKLACE = { id: 6, name: "Gold Necklace 22K", hsn_code: "711319", gst_tax_rate: "0.0300", default_unit: "gms", description: "", usage_count: 4 };
 export const DIAMOND = { id: 9, name: "Cut Diamond", hsn_code: "710239", gst_tax_rate: "0.0025", default_unit: "ct", description: "", usage_count: 1 };
 
+/** A bill's lines (a BillDetail's): 40 g of a 22K necklace at ₹6,500, ₹2,67,800.00 with GST, over the income-tax limits. */
+export const BIG = [{ id: 1, product_name: "Gold Necklace 22K", hsn_code: "711319", quantity: "40.000", unit: "gms", rate: "6500.000", gst_percent: "3", taxable: "260000.00", cgst: "3900.00", sgst: "3900.00", igst: "0.00", tax: "7800.00", amount: "267800.00", note: "" }];
+
 /** KIRAN's paper book for September: 17 to 29 entered, 30 to 33 are October's, so the next is 34 on 30 Sep. */
 export function wireBook(over: Record<string, unknown> = {}) {
   return {

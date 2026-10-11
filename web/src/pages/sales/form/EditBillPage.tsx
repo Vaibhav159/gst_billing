@@ -1,14 +1,14 @@
 // /sales/:id/edit (PROTO pages/sales/BillForm.jsx:48-60, 96-132): the bill form on a saved bill, for those who may change
 // bills. A cancelled bill, a bill in a filed month, or someone who can't change bills sees what's on it and why it can't
 // change, with the way on; a deleted bill says so. A change to a saved bill keeps no draft: it's saved, or it isn't.
-import { useRef } from "react";
+import { useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Landmark, Lock, ReceiptText, SquarePen } from "lucide-react";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { billQuery, cachedBillNumber, useBill } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
-import { date, qty } from "@/core/format";
+import { date, inr, monthLabel, qty } from "@/core/format";
 import type { BillDetail, BinRow } from "@/core/sales/types";
 import { gstLabel, LOCKED_REASON, rateText, taxLines } from "@/core/sales/words";
 import { Banner, ButtonLink, Card, DL, EmptyState, LoadError, Money, Page } from "@/core/ui";
@@ -30,11 +30,13 @@ function EditBill({ raw }: { raw: string }) {
   const { can, whyNot } = useAuth();
   const location = useLocation();
   const qc = useQueryClient();
-  // once the form is open it stays, whatever the bill's answer says next (cancelled, deleted or filed meanwhile): the
-  // save then says what happened, in the server's words. Nor is the bill asked for again behind it
-  const opened = useRef<Start | null>(null);
-  const q = useBill(opened.current ? null : billId);
-  if (opened.current) return <BillForm start={opened.current} formKey={location.key} />;
+  // Once the form is open it stays, whatever the bill's answer says next (cancelled, deleted or filed meanwhile): the
+  // save then says what happened, in the server's words. Its start is state set as it opens, so the render React keeps
+  // already lets the bill's query go: nothing behind the form asks for the bill again (a save elsewhere on this device
+  // marks every bill query; Neon's free plan)
+  const [opened, setOpened] = useState<Start | null>(null);
+  const q = useBill(opened ? null : billId);
+  if (opened) return <BillForm start={opened} formKey={location.key} />;
   if (billId === null) return <MissingBill id={raw} />;
   if (q.data === undefined) {
     // named already when a list or search on this device has it (part 0 carry)
@@ -54,8 +56,9 @@ function EditBill({ raw }: { raw: string }) {
     : bill.status === "cancelled" ? `Cancelled bills can't be changed. ${remade ? `It was made again as ${remade.invoice_number}.` : "Make it again from the bill instead."}`
       : bill.locked ? `${LOCKED_REASON} The change then goes into a revised return.` : "";
   if (reason) return <ReadOnlyBill bill={bill} reason={reason} />;
-  opened.current = startEdit(bill);
-  return <BillForm start={opened.current} formKey={location.key} />;
+  // (React draws this again at once, with the start, before anything shows)
+  setOpened(startEdit(bill));
+  return null;
 }
 
 function EditFailed({ title, problem, retry }: { title: string; problem: ApiProblem; retry?: () => void }) {
@@ -66,14 +69,20 @@ function EditFailed({ title, problem, retry }: { title: string; problem: ApiProb
   );
 }
 
-/** A deleted bill: changed only once it's back, from its own page (where the owner restores it). */
+/**
+ * A deleted bill: what was on it (its bin row), and that it's changed only once it's back, from its own page, where the
+ * owner restores it. A filed month's says why it can't come back, in the bill page's words (1B's DeletedBill).
+ */
 function WasDeleted({ binned }: { binned: BinRow }) {
   const { can } = useAuth();
+  const why = binned.locked ? ` ${monthLabel(binned.invoice_date.slice(0, 7), { long: true })} is filed and locked, so the bill can't come back into it. The owner can unlock the month in GST returns first.`
+    : can("bill.delete") ? " Restore it from the bill's page first." : " The owner can restore it.";
   return (
     <Page icon={ReceiptText} title={`Edit ${binned.invoice_number}`} breadcrumbs={[{ label: "Sales", to: "/sales" }]} back="/sales">
       <Card><EmptyState icon={ReceiptText} title={`${binned.invoice_number} was deleted`}
         actions={<><ButtonLink to={`/sales/${binned.original_id}`} variant="primary">Open the bill</ButtonLink><ButtonLink to="/sales">Go to Sales</ButtonLink></>}>
-        {`A deleted bill can't be changed.${can("bill.delete") ? " Restore it from the bill's page first." : " The owner can restore it."}`}
+        <p className="tnum">{`${binned.customer.name} · ${date(binned.invoice_date)} · ${inr(binned.total_amount)}`}</p>
+        <p className="mt-1">{`A deleted bill can't be changed.${why}`}</p>
       </EmptyState></Card>
     </Page>
   );

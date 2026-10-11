@@ -2,12 +2,12 @@ import { isValidElement, type ReactElement } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager, QueryClient } from "@tanstack/react-query";
 import { matchRoutes } from "react-router";
-import { billQuery, type BillOutcome } from "@/core/api/sales";
+import { billQuery, invalidateSales, type BillOutcome } from "@/core/api/sales";
 import { appRoutes } from "@/core/router/routes";
 import { refuse, wireBin, wireDetail, WIRE_LINES, type Route } from "@/core/sales/fixtures";
 import { toBillDetail, toBinRow } from "@/core/sales/wire";
 import EditBillPage from "./EditBillPage";
-import { formServer, fakeToday, mountForm, settle, STAFF } from "./testing";
+import { asksOnClose, formServer, fakeToday, mountForm, settle, STAFF } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -207,36 +207,23 @@ test("on a phone, a bill that can't change lists its items one to a line, with t
   expect(screen.getByText("KIRAN GOLD HOUSE · 08 Oct 2026")).toBeInTheDocument();
 });
 
-test("an unchanged edit can't be saved: Save changes is off with its reason, and Ctrl S sends nothing (Ruling 1D-14)", async () => {
-  const user = fakeToday();
-  const { calls } = formServer([["GET", "sales/412/", () => wireDetail()]]);
-  mountForm("/sales/412/edit");
-  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
-  await user.click(screen.getByRole("button", { name: "Check and save changes" }));
-  const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
-  act(() => { vi.advanceTimersByTime(400); });
-  expect(dialog).toHaveTextContent("What changesNothing has changed yet. Go back and edit, or close this.");
-  const save = within(dialog).getByRole("button", { name: "Save changes" });
-  expect(save).toBeDisabled();
-  expect(save).toHaveAttribute("title", "Nothing has changed yet");
-  await user.keyboard("{Control>}s{/Control}");
-  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-  expect(calls.some((c) => c.method === "PUT")).toBe(false);
-  expect(screen.getByRole("dialog", { name: "Check the changes to KGH/2026-27/31" })).toBeInTheDocument();
-});
-
 const CANCELLED = "Cancelled bills can't be changed. Make it again from the bill instead.";
 const FILED_OCT = "October 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be changed. Have the owner unlock October 2026 in GST returns first.";
 const OCTOBER = { id: 7, business: 3, year: 2026, month: 10 };
+/** A change saved after the bill was deleted (a PUT's 404 names nothing): the form names the bill, and says what happened. */
+const GONE = "KGH/2026-27/31 isn't in Sales any more. It was deleted while you were changing it, so nothing was saved.";
 test.each([
   ["cancelled", () => ({ kind: "bill", bill: toBillDetail(wireDetail({ status: "cancelled", cancel_reason: "Customer returned the piece" })) }), () => refuse(409, { detail: CANCELLED, code: "cancelled" }), "Not saved", CANCELLED, true],
-  ["deleted", () => ({ kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) }), () => refuse(404, { detail: "No Invoice matches the given query." }), "Not saved", "That isn't there any more.", true],
+  ["deleted", () => ({ kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) }), () => refuse(404, { detail: "No Invoice matches the given query." }), "Not saved", GONE, true],
+  ["deleted, the server saying so in its own words", () => ({ kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) }), () => refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin({ original_id: 412 }) }), "Not saved", "This bill was deleted.", true],
   ["put in a filed month", () => ({ kind: "bill", bill: toBillDetail(wireDetail({ locked: true })) }), () => refuse(409, { detail: FILED_OCT, code: "month_closed", locked_period: OCTOBER }), "October 2026 was just filed", FILED_OCT, false],
 ] as const)("once the form is open it stays, though the bill is %s meanwhile; the save then says what happened, in the server's words", async (_, now, put, title, words, final) => {
   const user = fakeToday();
-  const { calls, client } = await changeWeight(user, wireDetail(), [["PUT", "sales/412/", put]]);
-  // the bill's own answer says so now (a refresh elsewhere on this device): the form and what's typed stay
+  const { calls, client, router } = await changeWeight(user, wireDetail(), [["PUT", "sales/412/", put]]);
+  // the bill's own answer says so now (a refresh elsewhere on this device), and the page draws again (its address
+  // changes, the same bill's): the form and what's typed stay
   act(() => { client.setQueryData<BillOutcome>(billQuery(412).queryKey, now() as BillOutcome); });
+  await act(async () => { await router.navigate("/sales/412/edit?again=1"); });
   await act(async () => { await vi.advanceTimersByTimeAsync(50); });
   expect(screen.getByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" })).toBeInTheDocument();
   expect(screen.queryByText("This bill can't be changed")).not.toBeInTheDocument();
@@ -277,4 +264,99 @@ test.each([
   expect(within(dialog).getByRole("list", { name: "What changes" })).toHaveTextContent("Date: 08 Oct 2026 →becomes 30 Sep 2026");
   await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(`${month} was just filed${words}`);
+});
+
+/* ── Review fix 1 ── */
+
+/** The review of the edit as it stands, opened from the form, past its guard; and what its "What changes" lists. */
+async function reviewChanges(user: ReturnType<typeof fakeToday>) {
+  await user.click(screen.getByRole("button", { name: "Check and save changes" }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
+  act(() => { vi.advanceTimersByTime(400); });
+  const list = within(dialog).queryByRole("list", { name: "What changes" });
+  return { dialog, changes: list ? within(list).getAllByRole("listitem").map((li) => li.textContent) : [] };
+}
+async function openEdit(bill = wireDetail()) {
+  const server = formServer([["GET", "sales/412/", () => bill]]);
+  const view = mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
+  return { ...server, ...view };
+}
+
+test("the first line removed is named as removed, never as the second line changed into it (T8 review)", async () => {
+  const user = fakeToday();
+  await openEdit();
+  await user.click(screen.getByRole("button", { name: "Remove line 1, Gold Ring 22K" }));
+  // the cursor moves to the pendant's product box a moment later, inside act
+  await settle();
+  const { changes } = await reviewChanges(user);
+  expect(changes).toEqual(["Items removed: Gold Ring 22K →becomes None", "Total: ₹87,083.21 →becomes ₹4,274.50"]);
+});
+
+test("an untouched v2 bill whose stored total is a paisa off v3's maths offers nothing to save; a real change lists the total beside it (Ruling 1D-16)", async () => {
+  const user = fakeToday();
+  const { calls } = await openEdit(wireDetail({ total_amount: "87083.22", sent: SENT }));
+  expect(screen.getByText("No changes yet")).toBeInTheDocument();
+  let { dialog } = await reviewChanges(user);
+  expect(dialog).toHaveTextContent("What changesNothing has changed yet. Go back and edit, or close this.");
+  // nothing to send again either: the customer's bill hasn't changed
+  expect(dialog).not.toHaveTextContent("You sent");
+  const save = within(dialog).getByRole("button", { name: "Save changes" });
+  expect(save).toBeDisabled();
+  expect(save).toHaveAttribute("title", "Nothing has changed yet");
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the changes to KGH/2026-27/31" })).not.toBeInTheDocument());
+  // a real change: the total it's saved with is listed beside it, and the customer has the old one
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  let changes: (string | null)[];
+  ({ dialog, changes } = await reviewChanges(user));
+  expect(changes).toEqual(["Paid by: Cash →becomes UPI / bank", "Total: ₹87,083.22 →becomes ₹87,083.21"]);
+  expect(dialog).toHaveTextContent("You sent Anil Gupta this bill on 05 Oct at 12:09, with ₹87,083.22. After saving, send the corrected one from the bill's page.");
+  await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1));
+});
+
+test("a sent bill whose total stays the same gets no word about sending it again", async () => {
+  const user = fakeToday();
+  await openEdit(wireDetail({ sent: SENT }));
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  const { dialog, changes } = await reviewChanges(user);
+  expect(changes).toEqual(["Paid by: Cash →becomes UPI / bank"]);
+  expect(dialog).not.toHaveTextContent("You sent");
+});
+
+test("leaving an unchanged edit asks nothing, in the app or as the tab closes", async () => {
+  const user = fakeToday();
+  const { router } = await openEdit();
+  await settle();
+  expect(asksOnClose()).toBe(false);
+  await user.click(screen.getByRole("link", { name: "Cancel" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/412"));
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
+});
+
+test("the open form asks for the bill once: saves elsewhere on this device leave it be (Neon's free plan; T8 review)", async () => {
+  fakeToday();
+  const { calls, client } = await openEdit();
+  await settle();
+  const asked = () => calls.filter((c) => c.method === "GET" && c.url === "sales/412/").length;
+  expect(asked()).toBe(1);
+  for (let i = 0; i < 2; i += 1) await act(async () => { invalidateSales(client); await vi.advanceTimersByTimeAsync(50); });
+  expect(asked()).toBe(1);
+  expect(screen.getByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" })).toBeInTheDocument();
+});
+
+test("a deleted bill shows what was on it; one deleted from a filed month says why it can't come back (T8 review)", async () => {
+  fakeToday();
+  formServer([["GET", "sales/412/", () => refuse(404, { code: "deleted", binned: wireBin({ original_id: 412 }) })]]);
+  const first = mountForm("/sales/412/edit");
+  expect(await screen.findByText("KGH/2026-27/27 was deleted")).toBeInTheDocument();
+  expect(screen.getByText("Walk-in Customer · 24 Sep 2026 · ₹45,000.00")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open the bill" })).toHaveAttribute("href", "/sales/412");
+  first.unmount();
+  formServer([["GET", "sales/412/", () => refuse(404, { code: "deleted", binned: wireBin({ original_id: 412, locked: true }) })]]);
+  mountForm("/sales/412/edit");
+  expect(await screen.findByText("KGH/2026-27/27 was deleted")).toBeInTheDocument();
+  expect(screen.getByText("A deleted bill can't be changed. September 2026 is filed and locked, so the bill can't come back into it. The owner can unlock the month in GST returns first.")).toBeInTheDocument();
+  expect(screen.queryByText(/Restore it/)).not.toBeInTheDocument();
 });

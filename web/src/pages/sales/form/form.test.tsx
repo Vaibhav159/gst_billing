@@ -3,7 +3,7 @@ import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-li
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { MemoryRouter } from "react-router";
-import { toCustomer, useSaveCustomer } from "@/core/api/customers";
+import { toCustomer } from "@/core/api/customers";
 import { __resetDrafts, useKeepDraft, useUnfinishedBills } from "@/core/api/drafts";
 import { __setNetState } from "@/core/api/network";
 import { salesKeys } from "@/core/api/sales";
@@ -17,7 +17,7 @@ import { LINE_COLS } from "./lines";
 import { startCopy, startDraft, startEdit, startNew, startRemake, toDraftData, type Start } from "./model";
 import { useBillForm } from "./useBillForm";
 import { useDraftKeeping } from "./useDraftKeeping";
-import { ACCOUNTANT, ANIL, formServer, fakeToday, mountForm, RING, SavedElsewhere, STAFF, TODAY, wireBook, wireNext } from "./testing";
+import { ACCOUNTANT, ANIL, BIG, formServer, fakeToday, mountForm, RING, SavedElsewhere, STAFF, TODAY, wireBook, wireNext } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -741,27 +741,58 @@ test("a number checked before a bill was saved isn't called free on the next bil
   expect(await screen.findByText(/^KGH\/2026-27\/36 is already used in FY 2026-27/)).toBeInTheDocument();
 });
 
-test("a customer saved from the form (a PAN added from the review) marks every bill query, yet the number stays: an answer asked while the form is open is never older than a bill this tab saved (T7 re-review)", async () => {
-  fakeToday();
+test.each([
+  ["came before the form opened (a bill just saved, then a new one)", true],
+  ["came as the form opened", false],
+] as const)("a PAN added from the review asks for the next number again, whose answer %s: while the fresh answer comes, Save waits and says why, never closing the review onto the number box; then it saves (Ruling 1D-15)", async (_, cachedFirst) => {
+  const user = fakeToday();
   let held: Promise<void> | null = null;
   const { calls } = formServer([
+    ["GET", "sales/412/", () => wireDetail({ lines: BIG })],
     ["GET", "sales/next-number/", async ({ params }) => { await held; return wireNext(Number(params.business_id), String(params.invoice_date)); }],
-    ["PATCH", "customers/7/", () => ({ ...ANIL, pan_number: "ABCPK1234F", pan: "ABCPK1234F" })],
+    ["PATCH", "customers/7/", () => ({ ...ANIL, pan_number: "ABCPG1234K", pan: "ABCPG1234K" })],
   ]);
-  const { result } = renderHook(() => ({ form: useBillForm(COPY()), customer: useSaveCustomer() }), { wrapper: inRouter });
-  await waitFor(() => expect(result.current.form.suggestion).toBe("34"));
-  act(() => { result.current.form.setPayment("cash"); });
-  act(() => { expect(result.current.form.openReview()).toEqual({ ok: true }); });
-  const asked = () => calls.filter((c) => c.url === "sales/next-number/").length;
-  const before = asked();
+  // a new bill opened first puts the next number in the cache before the copy below opens on it
+  const { router } = mountForm(cachedFirst ? "/sales/new" : "/sales/new?from=412");
+  if (cachedFirst) {
+    await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+    await act(async () => { await router.navigate("/sales/new?from=412"); });
+  }
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  // the PAN, from the review's own checks: the customer's save asks every bill query again, the next number's answer held
   let land = () => {};
   held = new Promise<void>((r) => { land = r; });
-  await act(async () => { await result.current.customer.mutateAsync({ id: 7, body: { pan_number: "ABCPK1234F" } }); });
-  // the next number is asked again; while it comes, the number stays, free, and the review can save it
-  await waitFor(() => expect(asked()).toBe(before + 1));
-  expect(result.current.form).toMatchObject({ suggestion: "34", numberText: "34", numberState: "free", waitingForNext: false, firstError: null });
+  await user.click(within(within(dialog).getByRole("list", { name: "Checked before saving" })).getByRole("button", { name: "Add PAN" }));
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await user.click(within(sheet).getByRole("textbox"));
+  await user.keyboard("ABCPG1234K{Enter}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument());
+  await settle();
+  const save = within(dialog).getByRole("button", { name: "Save bill" });
+  expect(save).toBeDisabled();
+  expect(save).toHaveAttribute("title", "Getting the next number");
+  expect(dialog).toHaveTextContent("Bill no.Getting the next number");
+  // nothing is wrong with the number meanwhile: it's coming, so no problem under its box, nor in the checks
+  expect(screen.queryByText("Type the number written on the paper bill.")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("list", { name: "Checked before saving" })).toHaveTextContent("Getting the next number");
+  // pressed anyway, it does nothing: the review stays, and nothing is sent
+  await user.keyboard("{Control>}s{/Control}");
+  await settle();
+  expect(screen.getByRole("dialog", { name: "Check the bill before saving" })).toBeInTheDocument();
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+  // the answer comes: Save is on, and saves the number it shows
   await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
-  expect(result.current.form.suggestion).toBe("34");
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeEnabled());
+  expect(dialog).toHaveTextContent("Bill no.KGH/2026-27/34");
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("bill page at /sales/501?saved=new"));
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ invoice_number: "34" });
 });
 
 test("a refusal the form can't put under a field (the cancelled bill was made again already: ?remake=412) keeps the review open with the server's words", async () => {
