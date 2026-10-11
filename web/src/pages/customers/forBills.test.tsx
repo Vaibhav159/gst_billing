@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { useState } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -678,4 +679,24 @@ test("on the phone's sheet, closing a new customer asks first once something is 
   // only the number from the search box is there: it closes without asking
   await user.keyboard("{Escape}");
   expect(onClose).toHaveBeenCalled();
+});
+
+
+test.each(["Escape", "outside"])("desktop New customer asks before discarding typed changes through %s", async (close) => {
+  handClock();
+  serve({ "GET customers/": NONE });
+  function New() {
+    const [open, setOpen] = useState(true);
+    return <NewCustomerSheet open={open} initialName="Anil" homeState="RAJASTHAN" onClose={() => setOpen(false)} onSaved={() => {}} />;
+  }
+  mount([{ path: "/", element: <New /> }], ["/"]);
+  await pass(400, 1);
+  fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "9829041122" } });
+  const dialog = screen.getByRole("dialog", { name: "New customer" });
+  if (close === "Escape") fireEvent.keyDown(dialog, { key: "Escape" });
+  else fireEvent.click(dialog.previousElementSibling!);
+  await pass(0, 1);
+  expect(screen.getByText("Discard this customer?")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(screen.getByLabelText("Mobile number")).toHaveValue("9829041122");
 });

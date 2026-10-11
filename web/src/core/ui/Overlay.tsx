@@ -102,8 +102,10 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, open: boolean, onClose
       // focus already moved on (a new page put it in a field): leave it there
       const cur = document.activeElement;
       if (cur && cur !== document.body && !node.contains(cur)) return;
-      // back to what opened it; if that's gone or disabled, to the page title, never to nothing
-      const back = prev?.focus && document.contains(prev) && prev !== document.body && !prev.matches(":disabled") ? prev : document.querySelector<HTMLElement>("#app-main [data-page-title]");
+      // back to what opened it; if that's gone or disabled, stay in the topmost dialog, or use the page title
+      const parent = openDialogs[openDialogs.length - 1]?.node;
+      const fallback = parent ? parent.querySelector<HTMLElement>("[data-dialog-title]") || parent : document.querySelector<HTMLElement>("#app-main [data-page-title]");
+      const back = prev?.focus && document.contains(prev) && prev !== document.body && !prev.matches(":disabled") ? prev : fallback;
       back?.focus?.({ preventScroll: true });
     };
   }, [open]);

@@ -69,6 +69,10 @@ export function gstinPlaceholder(raw: string | null | undefined): boolean {
   const g = (raw ?? "").trim();
   return Boolean(g) && !hasGstin(g) && !/[1-9]/.test(g);
 }
+/** A stored GSTIN value to show, including a typo; only blanks and placeholders mean no GSTIN. Not a tax classification. */
+export function gstinOnFile(raw: string | null | undefined): boolean {
+  return Boolean(raw?.trim()) && !gstinPlaceholder(raw);
+}
 /** What a GSTIN box holds while typing: upper case, letters and digits only, at most 15. */
 export function cleanGstin(raw: string): string {
   return raw.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 15);

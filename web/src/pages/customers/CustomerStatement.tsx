@@ -6,6 +6,7 @@ import { Link } from "react-router";
 import { Calendar, Download, FileText, Info, MoreVertical, NotebookPen, Printer, Share2, UserRound } from "lucide-react";
 import { useStatement, type Customer, type PaidAs, type StatementBill, type StatementParams } from "@/core/api/customers";
 import { useNetwork } from "@/core/api/network";
+import { canShareFiles } from "@/core/print/files";
 import { cn } from "@/core/cn";
 import { addMonths, date, dateShort, inr, lastDayOfMonth, mobileText, monthLabel, monthOf, plural, rangeLabel, todayIST } from "@/core/format";
 import { formatMobile, mobileProblem, stateTitle } from "@/core/ids";
@@ -86,7 +87,7 @@ function Statement({ c }: { c: Customer }) {
   } : null), [st.data, badRange, named, c.name, c.mobile_number, c.gst_number, c.pan, c.address, c.city, c.state_name, span.label, span.range, scope, today]);
   const pdf = useStatementPdf(data);
   const making = pdf.making;
-  const off = !data || making || pdf.failed;
+  const off = !data || pdf.failed;
   const printButton = useRef<HTMLButtonElement>(null);
   const [printReady, setPrintReady] = useState<typeof data>(null);
   const readyToPrint = Boolean(data && printReady === data && pdf.blob);
@@ -113,14 +114,17 @@ function Statement({ c }: { c: Customer }) {
     show({ title: `Downloaded ${file}`, body: `${plural(bills.length, "bill")} · ${span.label} · ${scope}.` });
   };
   const onShare = async () => {
+    // A desktop chat must open inside the press; generating a large PDF outlasts the browser's user activation.
+    const sheet = canShareFiles();
+    const chat = !sheet && !mobileProblem(c.mobile_number) && contact.chat?.();
     const blob = pdf.blob ?? await pdf.make();
     if (!blob) return;
-    const r = await sharePdf(blob, file, `Statement · ${c.name}`);
+    const r = sheet ? await sharePdf(blob, file, `Statement · ${c.name}`) : "unsupported";
     if (r !== "unsupported") return;
     // no share sheet for files here (most computers): download it, and open WhatsApp's chat with the customer to attach it
     downloadFile(blob, file);
-    const chat = !mobileProblem(c.mobile_number) && contact.chat?.();
-    show({ title: `Downloaded ${file}`, body: chat ? `WhatsApp opens a chat with ${c.name} (+91 ${formatMobile(c.mobile_number)}). Attach the PDF there.` : "Attach it in WhatsApp, or wherever you send it." });
+    const opened = chat || (sheet && !mobileProblem(c.mobile_number) && contact.chat?.());
+    show({ title: `Downloaded ${file}`, body: opened ? `WhatsApp opens a chat with ${c.name} (+91 ${formatMobile(c.mobile_number)}). Attach the PDF there.` : "Attach it in WhatsApp, or wherever you send it." });
   };
   const periodOptions = [
     { value: "fy" as const, label: isPhone ? "This FY" : P.fy.label },
@@ -173,8 +177,8 @@ function Statement({ c }: { c: Customer }) {
     return (
       <Page title="Statement" back={`/customers/${c.id}`} phoneSubtitle={[c.name, scope].filter(Boolean).join(" · ")}
         phoneActions={<Menu title="Statement" items={[
-          { label: "Print", icon: Printer, hint: why ?? "On A4, with the totals at the end", disabled: off, onSelect: onPrint },
-          { label: "Download the PDF", icon: Download, hint: why ?? file, disabled: off, onSelect: onDownload },
+          { label: "Print", icon: Printer, hint: why ?? "On A4, with the totals at the end", disabled: off || making, onSelect: onPrint },
+          { label: "Download the PDF", icon: Download, hint: why ?? file, disabled: off || making, onSelect: onDownload },
         ]} trigger={(p) => <IconButton {...p} label="Print or download the statement" icon={MoreVertical} />} />}
         actionBar={<Button variant="primary" size="lg" icon={Share2} onClick={() => void onShare()} disabled={off} loading={making} title={why}>Share PDF</Button>}>
         {chooser}
@@ -209,8 +213,8 @@ function Statement({ c }: { c: Customer }) {
     <Page icon={FileText} breadcrumbs={[{ label: "Customers", to: "/customers" }, { label: c.name, to: `/customers/${c.id}` }]} title="Statement" back={`/customers/${c.id}`}
       context={[c.name, mobileText(c.mobile_number), "bills register", scope].filter(Boolean).join(" · ")}
       actions={<>
-        <Button ref={printButton} icon={Printer} onClick={onPrint} disabled={off} title={why}>Print</Button>
-        <Button icon={Download} onClick={onDownload} disabled={off} title={why}>Download PDF</Button>
+        <Button ref={printButton} icon={Printer} onClick={onPrint} disabled={off} loading={making} title={why}>Print</Button>
+        <Button icon={Download} onClick={onDownload} disabled={off} loading={making} title={why}>Download PDF</Button>
         <Button variant="primary" icon={Share2} onClick={() => void onShare()} disabled={off} loading={making} title={why}>Share PDF</Button>
       </>}>
       <Card>

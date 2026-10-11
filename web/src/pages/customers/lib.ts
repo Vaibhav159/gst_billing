@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "react-router";
 import { useCustomer, useCustomerSearch, type Customer, type CustomerRow, type PaidAs, type StatementBill } from "@/core/api/customers";
 import { problemOf } from "@/core/api/errors";
 import { mobileText, plural, rangeLabel, todayIST } from "@/core/format";
-import { checkGstin, hasGstin, GST_STATES, looksLikePhone, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
+import { checkGstin, gstinOnFile, GST_STATES, looksLikePhone, mobileDigits, stateCodeOf, stateTitle } from "@/core/ids";
 import { cancelledNote } from "@/core/sales/words";
 import type { Firm, FirmId } from "@/core/scope";
 import { useDebounced } from "@/core/useDebounced";
@@ -69,7 +69,7 @@ export function openOnEnter(open: () => void) {
 /** "98290 41122 · GSTIN 08AB… · Udaipur, Rajasthan", or the walk-in's line (PROTO sales/lib.js customerLine). */
 export function customerLine(c: Pick<Customer, "type" | "mobile_number" | "gst_number" | "city" | "state_name">): string {
   if (c.type === "walkin") return "Counter sale · no name or GSTIN on the bill";
-  return [mobileText(c.mobile_number) || "No phone", hasGstin(c.gst_number) ? `GSTIN ${c.gst_number}` : "No GSTIN", `${c.city || "City not set"}${c.state_name ? `, ${stateTitle(c.state_name)}` : ""}`].join(" · ");
+  return [mobileText(c.mobile_number) || "No phone", gstinOnFile(c.gst_number) ? `GSTIN ${c.gst_number}` : "No GSTIN", `${c.city || "City not set"}${c.state_name ? `, ${stateTitle(c.state_name)}` : ""}`].join(" · ");
 }
 
 /**

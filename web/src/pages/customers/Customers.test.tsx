@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { StrictMode } from "react";
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,7 +7,7 @@ import { __setNetState } from "@/core/api/network";
 import Customers from "./Customers";
 import { customersCsv } from "./exportCsv";
 import { markSaved, useJustSaved } from "./lib";
-import { ANIL, FIRMS, handClock, mount, pass, serve, typeQuickly, VIEWER, type Call } from "./testing";
+import { ANIL, FIRMS, mount, serve, typeQuickly, VIEWER, type Call } from "./testing";
 
 const routes = [
   { path: "/customers", element: <Customers /> },
@@ -93,11 +94,11 @@ test("search asks once typing pauses, a phone typed in groups as its digits; wit
   handClock();
   typeQuickly(box, "98290 41122");
   // nothing is asked while the number is being typed, nor before the pause is over
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual([]);
   // and the rows on screen aren't said to match it before it's asked
   expect(screen.queryByText(/matching “/)).not.toBeInTheDocument();
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["9829041122"]);
   expect(screen.getByText("No customer matches “98290 41122”")).toBeInTheDocument();
   expect(screen.getByText(/· matching “98290 41122”/)).toBeInTheDocument();
@@ -106,7 +107,7 @@ test("search asks once typing pauses, a phone typed in groups as its digits; wit
   // until the list comes back the answer on screen is still the search's: it never reads as a shop with no customers
   expect(screen.queryByText("No customers yet")).not.toBeInTheDocument();
   expect(screen.getByText("No customer matches “98290 41122”")).toBeInTheDocument();
-  await pass(250);
+  await pass(250, 1);
   expect(screen.getByText("Anil Gupta")).toBeInTheDocument();
   expect(searches(calls)).toEqual(["9829041122"]);
 });
@@ -124,7 +125,7 @@ test("Add … as a customer puts what was typed where it belongs: a phone number
     ["Shop 123", "/customers/new?from=list&name=Shop%20123"],
   ]) {
     fireEvent.change(box, { target: { value: typed } });
-    await pass(250);
+    await pass(250, 1);
     expect(screen.getByRole("link", { name: `Add “${typed}” as a customer` }), typed).toHaveAttribute("href", href);
   }
 });
@@ -137,7 +138,7 @@ test("a search that can't get through keeps the search box and what was typed, s
   act(() => box.focus());
   handClock();
   typeQuickly(box, "Kul");
-  await pass(250);
+  await pass(250, 1);
   expect(screen.getByText("Couldn't load customers")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   // only the search failed, after the list had come: the header's actions don't depend on it, so they stay on (Export
@@ -151,7 +152,7 @@ test("a search that can't get through keeps the search box and what was typed, s
   expect(box).toHaveFocus();
   expect(screen.getByRole("radio", { name: "No GSTIN" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
-  await pass(250);
+  await pass(250, 1);
   expect(screen.getByText("Anil Gupta")).toBeInTheDocument();
   expect(screen.queryByText("Couldn't load customers")).not.toBeInTheDocument();
   expect(searches(calls)).toEqual(["Kul"]);
@@ -474,7 +475,7 @@ test("offline, a new search keeps the rows already showing, says they're from be
   act(() => __setNetState("offline"));
   try {
     typeQuickly(box, "Kul");
-    await pass(250);
+    await pass(250, 1);
     expect(screen.getByText("Couldn't refresh customers")).toBeInTheDocument();
     expect(screen.getByText("You're offline, so this is what was last loaded. It refreshes when you're back online.")).toBeInTheDocument();
     expect(screen.getByText("Anil Gupta")).toBeInTheDocument();
@@ -483,7 +484,7 @@ test("offline, a new search keeps the rows already showing, says they're from be
     onlineManager.setOnline(true);
     act(() => __setNetState("online"));
   }
-  await pass(0);
+  await pass(0, 1);
   expect(searches(calls)).toEqual(["Kul"]);
   expect(screen.queryByText("Couldn't refresh customers")).not.toBeInTheDocument();
 });
@@ -570,11 +571,11 @@ test.each([false, true])("the list announces its count and skips an unfiltered c
   handClock(); (window as unknown as { __phone?: boolean }).__phone = phone;
   const calls = serve({ "GET customers/": list() });
   mount(routes, ["/customers"]);
-  await pass(400);
+  await pass(400, 1);
   expect(calls.filter((c) => c.url === "customers/")).toHaveLength(1);
   expect(screen.getAllByRole("status").some((s) => s.textContent === "3 customers")).toBe(true);
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Anil" } });
-  await pass(250);
+  await pass(250, 1);
   expect(calls.filter((c) => c.params.page_size === 1)).toHaveLength(1);
   expect(screen.getAllByRole("status").some((s) => s.textContent?.includes(phone ? "3 of 29 match" : "3 of 29 customers match"))).toBe(true);
 });
@@ -583,7 +584,7 @@ test("a stored GSTIN placeholder displays as No GSTIN in the list", async () => 
   handClock();
   serve({ "GET customers/": list(1, [{ ...ANIL, gst_number: "URP", figures: FIG }]) });
   mount(routes, ["/customers"]);
-  await pass(400);
+  await pass(400, 1);
   const row = screen.getByText("Anil Gupta").closest("tr")!;
   expect(row).toHaveTextContent("No GSTIN");
   expect(row).not.toHaveTextContent("URP");
@@ -593,12 +594,12 @@ test.each(["Clear", "Clear search and filters"])("%s returns focus to search", a
   handClock();
   serve({ "GET customers/": (c: Call) => c.params.has_gstin !== undefined && label !== "Clear" ? { status: 200, data: { count: 0, results: [] } } : list()(c) });
   mount(routes, ["/customers"]);
-  await pass(400);
+  await pass(400, 1);
   fireEvent.click(screen.getByRole("radio", { name: "No GSTIN" }));
-  await pass(0);
+  await pass(0, 1);
   const button = screen.getByRole("button", { name: label });
   act(() => button.focus()); fireEvent.click(button);
-  await pass(0);
+  await pass(0, 1);
   expect(screen.getByRole("searchbox")).toHaveFocus();
 });
 
@@ -606,21 +607,34 @@ test("removing a phone filter focuses the next chip, then Filters when no chip f
   handClock(); (window as unknown as { __phone?: boolean }).__phone = true;
   serve({ "GET customers/": list() });
   mount(routes, ["/customers"]);
-  await pass(400);
+  await pass(400, 1);
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await pass(400);
+  await pass(400, 1);
   const sheet = screen.getByRole("dialog", { name: "Filter customers" });
   fireEvent.click(within(sheet).getByRole("radio", { name: "No GSTIN" }));
   fireEvent.change(within(sheet).getByRole("combobox", { name: "State" }), { target: { value: "RAJASTHAN" } });
-  await pass(0);
+  await pass(0, 1);
   fireEvent.click(within(sheet).getByRole("button", { name: "Show 3 customers" }));
-  await pass(400);
+  await pass(400, 1);
   const first = screen.getByRole("button", { name: "Remove filter: No GSTIN" });
   act(() => first.focus()); fireEvent.click(first);
-  await pass(0);
+  await pass(0, 1);
   const next = screen.getByRole("button", { name: "Remove filter: Rajasthan" });
   expect(next).toHaveFocus();
   fireEvent.click(next);
-  await pass(0);
+  await pass(0, 1);
   expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
+});
+
+
+test("a stored GSTIN typo stays visible in the list, and absent GSTIN adds nothing to the name sub-line", async () => {
+  handClock();
+  serve({ "GET customers/": list(2, [{ ...ANIL, gst_number: "08ABCDE1234A1Z", figures: FIG }, { ...ANIL, id: 8, name: "Meena Jain", figures: FIG }]) });
+  mount(routes, ["/customers"]);
+  await pass(400, 1);
+  const typo = screen.getByText("Anil Gupta").closest("tr")!;
+  expect(typo).toHaveTextContent("08ABCDE1234A1Z");
+  expect(typo).not.toHaveTextContent("No GSTIN");
+  const nameCell = screen.getByText("Meena Jain").closest("td")!;
+  expect(nameCell).not.toHaveTextContent("No GSTIN");
 });

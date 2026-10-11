@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, matchRoutes } from "react-router";
@@ -6,7 +7,7 @@ import { GSTIN_CHECK_WARNING, PAN_PROBLEM } from "@/core/ids";
 import { appRoutes } from "@/core/router/routes";
 import { loadedPage } from "@/core/router/lazyPage";
 import CustomerForm from "./CustomerForm";
-import { ANIL, handClock, liveWords, mount, NO_BILLS, pass, serve, typeQuickly, VIEWER, type Call } from "./testing";
+import { ANIL, liveWords, mount, NO_BILLS, serve, typeQuickly, VIEWER, type Call } from "./testing";
 
 const routes = [
   { path: "/customers", element: <p>the list</p> },
@@ -169,17 +170,17 @@ test("customers already on file show up once typing pauses; the same name is ref
   handClock();
   typeQuickly(name, "Mahesh");
   // nothing is asked while the name is typed ("Mah" on is long enough to ask), nor before typing has paused for 250 ms
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual([]);
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["Mahesh"]);
   const found = screen.getByText("Already on file? 2 customers with a name like this");
   expect(found.parentElement).toHaveTextContent("94140 12345 · Udaipur · last bill 02 Sep 2026");
   expect(found.parentElement).toHaveTextContent("No phone · no bills yet");
   typeQuickly(name, "Mahesh Soni");
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual(["Mahesh"]);
-  await pass(1);
+  await pass(1, 1);
   expect(screen.getByText("There's already a customer called Mahesh Soni. Add the area or the father's name to tell them apart (like Mahesh Soni, Udaipur), or open Mahesh Soni.")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open Mahesh Soni" })).toHaveAttribute("href", "/customers/12");
 });
@@ -192,15 +193,15 @@ test("a phone or GSTIN another customer has is named, with the way to them", asy
   handClock();
   // each is looked up once whole and once typing has paused: never at the last key, never part of one
   typeQuickly(phone, "98220 12345");
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual([]);
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["9822012345"]);
   expect(screen.getByText(/has this number too\. Fine for family members; if it's the same person, use Kulkarni Jewellers instead\./)).toBeInTheDocument();
   typeQuickly(screen.getByLabelText("GSTIN"), "27XTZPS7585P1ZB");
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual(["9822012345"]);
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["9822012345", "27XTZPS7585P1ZB"]);
   expect(screen.getByText("Kulkarni Jewellers already has this GSTIN")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open Kulkarni Jewellers" })).toHaveAttribute("href", "/customers/9");
@@ -477,14 +478,14 @@ test("Add PAN for a stored GSTIN placeholder opens blank, explains it, and saves
   const calls = serve({ "GET customers/7/": { ...ANIL, gst_number: "URP" }, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS,
     "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }) });
   const { router } = mount(routes, ["/customers/7", "/customers/7/edit?focus=pan"]);
-  await pass(400);
+  await pass(400, 1);
   expect(screen.getByLabelText("GSTIN")).toHaveValue("");
   expect(screen.getByLabelText("GSTIN")).toHaveAccessibleDescription("“URP” was on file; it means no GSTIN.");
-  await pass(80);
+  await pass(80, 1);
   expect(screen.getByLabelText("PAN")).toHaveFocus();
   fireEvent.change(screen.getByLabelText("PAN"), { target: { value: "ABCDE1234F" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ gst_number: "", pan_number: "ABCDE1234F" });
   expect(router.state.location.pathname).toBe("/customers/7");
 });
@@ -495,13 +496,13 @@ test.each(["Anil Gupta", "ANIL GUPTA"])("editing the name as %s ignores an exist
     "GET customers/": { count: 1, next: null, results: [{ ...ANIL, id: 8, name: "ANIL GUPTA" }] },
     "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }) });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: name } });
-  await pass(250);
+  await pass(250, 1);
   expect(searches(calls)).toEqual([]);
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "Jaipur" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ name, city: "Jaipur" });
 });
 
@@ -510,18 +511,18 @@ test("an unchanged placeholder mobile saves, but a changed bad mobile is still r
   const calls = serve({ "GET customers/7/": { ...ANIL, mobile_number: "0000000000" }, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS,
     "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }) });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   const phone = screen.getByLabelText("Mobile number");
   fireEvent.change(phone, { target: { value: "1234567890" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(phone).toHaveAttribute("aria-invalid", "true");
   expect(phone).toHaveAccessibleDescription("Indian mobile numbers start with 6, 7, 8 or 9. Check the first digit.");
   expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   fireEvent.change(phone, { target: { value: "0000000000" } });
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "Jaipur" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ mobile_number: "0000000000", city: "Jaipur" });
 });
 
@@ -530,23 +531,23 @@ test("opening an edit asks only for its record; name, mobile and GSTIN searches 
   const customer = { ...ANIL, gst_number: "27XTZPS7585P1ZB", state_name: "MAHARASHTRA" };
   const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS });
   mount(routes, ["/customers/7/edit"]);
-  await pass(1000);
+  await pass(1000, 1);
   expect(calls.map((c) => c.url).sort()).toEqual(["businesses/", "customers/7/", "preferences/"]);
   expect(screen.queryByText(/^Has billed /)).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Anil Kumar" } });
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual([]);
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["Anil Kumar"]);
   fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "9829041133" } });
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual(["Anil Kumar"]);
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["Anil Kumar", "9829041133"]);
   fireEvent.change(screen.getByLabelText("GSTIN"), { target: { value: "08AAGPL3375F1ZO" } });
-  await pass(249);
+  await pass(249, 1);
   expect(searches(calls)).toEqual(["Anil Kumar", "9829041133"]);
-  await pass(1);
+  await pass(1, 1);
   expect(searches(calls)).toEqual(["Anil Kumar", "9829041133", "08AAGPL3375F1ZO"]);
 });
 
@@ -559,9 +560,9 @@ test("an earlier page's cached statement supplies Has billed notes without anoth
   const calls = serve({ "GET customers/7/": ANIL, "GET customers/": NONE, "GET customers/7/statement/": { ...NO_BILLS,
     bills: [{ id: 1, business: 3, invoice_date: "2026-09-01", status: "active", total_amount: "1.00" }] } });
   mount([{ path: "/earlier", element: <EarlierPage /> }, ...routes], ["/earlier"]);
-  await pass(400);
+  await pass(400, 1);
   fireEvent.click(screen.getByRole("link", { name: "Edit customer" }));
-  await pass(400);
+  await pass(400, 1);
   expect(screen.getByText("Has billed Anil")).toBeInTheDocument();
   // A dated, one-firm cache says nothing about another firm's whole history.
   expect(screen.queryByText("No bills yet")).not.toBeInTheDocument();
@@ -575,9 +576,9 @@ test.each([
   handClock();
   serve({ "GET customers/": NONE, "POST customers/": () => ({ status: 400, data: { [key]: [words] } }) });
   mount(routes, ["/customers/new?name=Anil"]);
-  await pass(400);
+  await pass(400, 1);
   fireEvent.click(screen.getAllByRole("button", { name: "Save customer" })[0]);
-  await pass(0);
+  await pass(0, 1);
   const field = label === "Type" ? document.getElementById("cu-type") : screen.getByRole("textbox", { name: "Address" });
   expect(field).toHaveFocus();
   expect(field).toHaveAttribute("aria-invalid", "true");
@@ -589,7 +590,7 @@ test("name and address stop at the model's 255-character limit", async () => {
   handClock();
   serve({ "GET customers/": NONE });
   mount(routes, ["/customers/new"]);
-  await pass(400);
+  await pass(400, 1);
   expect(screen.getByLabelText(/^Name/)).toHaveAttribute("maxlength", "255");
   expect(screen.getByRole("textbox", { name: "Address" })).toHaveAttribute("maxlength", "255");
 });
@@ -601,19 +602,19 @@ test("an unchanged GSTIN accepted by the server's loose rule saves with its shap
   const calls = serve({ "GET customers/7/": { ...ANIL, gst_number: stored }, "GET customers/": NONE,
     "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }) });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   const gstin = screen.getByLabelText("GSTIN");
   expect(gstin).not.toHaveAttribute("aria-invalid");
   expect(gstin).toHaveAccessibleDescription(expect.stringContaining("It was on file and saves unchanged."));
   fireEvent.change(gstin, { target: { value: "08INVALID000001" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(gstin).toHaveAttribute("aria-invalid", "true");
   expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   fireEvent.change(gstin, { target: { value: stored } });
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "Jaipur" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ gst_number: stored, city: "Jaipur" });
 });
 
@@ -621,7 +622,7 @@ test("a stored GSTIN the server would refuse says to clear it from the start", a
   handClock();
   serve({ "GET customers/7/": { ...ANIL, gst_number: "08ABCDE1234A1Z" }, "GET customers/": NONE });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   expect(screen.getByLabelText("GSTIN")).toHaveAttribute("aria-invalid", "true");
   expect(screen.getByLabelText("GSTIN")).toHaveAccessibleDescription("“08ABCDE1234A1Z” isn't a GSTIN. Clear it, or type the GSTIN.");
 });
@@ -632,7 +633,7 @@ test.each(["", "URP"])("an unchanged business with %s on file for GSTIN saves wi
   const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE,
     "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...customer, ...(c.data as object) } }) });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   const box = screen.getByLabelText("GSTIN");
   expect(box).toHaveValue("");
   expect(box).not.toHaveAttribute("aria-invalid");
@@ -640,7 +641,7 @@ test.each(["", "URP"])("an unchanged business with %s on file for GSTIN saves wi
   if (gstin) expect(screen.getByText("“URP” was on file; it means no GSTIN.")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "Jaipur" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ gst_number: "", customer_type: "business", city: "Jaipur" });
 });
 
@@ -648,11 +649,11 @@ test("a business whose GSTIN was just cleared still needs it before saving", asy
   handClock();
   const calls = serve({ "GET customers/7/": { ...ANIL, customer_type: "business", type: "business", gst_number: "27XTZPS7585P1ZB", state_name: "MAHARASHTRA" }, "GET customers/": NONE });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   const gstin = screen.getByLabelText("GSTIN");
   fireEvent.change(gstin, { target: { value: "" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(gstin).toHaveAttribute("aria-invalid", "true");
   expect(gstin).toHaveAccessibleDescription("A business customer needs its GSTIN: without one, its bills block GSTR-1. Add the GSTIN, or choose Person.");
   expect(calls.some((c) => c.method === "PATCH")).toBe(false);
@@ -664,18 +665,34 @@ test("an unchanged stored state mismatch is a warning that saves; changing the s
   const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE,
     "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...customer, ...(c.data as object) } }) });
   mount(routes, ["/customers/7/edit"]);
-  await pass(400);
+  await pass(400, 1);
   const state = screen.getByLabelText("State");
   expect(state).not.toHaveAttribute("aria-invalid");
   expect(state).toHaveAccessibleDescription("The GSTIN is registered in Maharashtra (27), but Rajasthan (08) is on file. It saves unchanged; check the state before making a bill.");
   fireEvent.change(state, { target: { value: "GUJARAT" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(state).toHaveAttribute("aria-invalid", "true");
   expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   fireEvent.change(state, { target: { value: "RAJASTHAN" } });
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "Jaipur" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
-  await pass(0);
+  await pass(0, 1);
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ state_name: "RAJASTHAN", gst_number: "27XTZPS7585P1ZB", city: "Jaipur" });
+});
+
+
+test("a valid stored GSTIN with no state saves its own state, never the firm's home state", async () => {
+  handClock();
+  const customer = { ...ANIL, customer_type: "business", type: "business", gst_number: "27XTZPS7585P1ZB", state_name: "" };
+  const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE,
+    "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...customer, ...(c.data as object) } }) });
+  mount(routes, ["/customers/7/edit"]);
+  await pass(400, 1);
+  expect(screen.getByLabelText("State")).toHaveValue("MAHARASHTRA");
+  expect(screen.queryByText(/Rajasthan.*on file/)).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("City"), { target: { value: "Pune" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+  await pass(0, 1);
+  expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ state_name: "MAHARASHTRA", gst_number: "27XTZPS7585P1ZB" });
 });

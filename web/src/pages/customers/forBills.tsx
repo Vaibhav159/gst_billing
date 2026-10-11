@@ -81,7 +81,7 @@ export function customerOptions({ typed, firmId, firms, walkin, recent, matches,
   if (!t) {
     return [
       ...(walkin ? [{ key: String(walkin.id), value: walkin, title: walkin.name, sub: "Counter sale: no name or GSTIN on the bill" }] : []),
-      { key: "__new", value: null, title: "+ New customer…", sub: "Add someone without leaving the bill", tone: "brand" as const },
+      { key: "__new", action: true, value: null, title: "+ New customer…", sub: "Add someone without leaving the bill", tone: "brand" as const },
       ...(recent.length ? [{ heading: "Recent customers" }, ...recent.map(row)] : []),
     ];
   }
@@ -93,7 +93,7 @@ export function customerOptions({ typed, firmId, firms, walkin, recent, matches,
     ...(note ? [{ heading: note }] : []),
     ...shown.map(row),
     {
-      key: "__new", value: null, title: `+ New customer “${t}”…`, tone: "brand" as const,
+      key: "__new", action: true, value: null, title: `+ New customer “${t}”…`, tone: "brand" as const,
       sub: shown.length ? "Not one of these? Add them without leaving the bill" : note ? "Add them without leaving the bill" : "No customer matches. Add them without leaving the bill",
     },
   ];
@@ -119,9 +119,9 @@ export type CustomerPickerProps = {
 /** The bill form's Customer field, on a desktop (PROTO BillForm.jsx CustomerField). */
 export function CustomerPicker({ firmId, value, onPick, onNew, error, id = "bf-customer", autoFocus, enabled = true }: CustomerPickerProps) {
   const { firms } = useFirms();
-  const [q, setQ] = useState(value ? value.name : "");
+  const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(false);
-  useEffect(() => { if (!editing) setQ(value ? value.name : ""); }, [value, editing]);
+  const q = editing ? query : value?.name ?? "";
   const typed = editing && q !== (value?.name ?? "") ? q : "";
   const search = useTypedSearch(typed, undefined, enabled);
   const walkin = useWalkin(enabled);
@@ -132,15 +132,14 @@ export function CustomerPicker({ firmId, value, onPick, onNew, error, id = "bf-c
   const pick = (o: ComboOption<Customer | null>) => {
     setEditing(false);
     if (!o.value) { onNew(typed.trim()); return; }
-    setQ(o.value.name);
     onPick(o.value);
   };
   return (
     <Field label="Customer" htmlFor={id} error={error} hint={value ? customerLine(value) : "Type a name, phone or GSTIN. Recent customers show first."}
       // A press keeps the cursor in the box; tabbing to the link also keeps the name until it is used.
       aside={<Button id={`${id}-new`} size="sm" variant="link" icon={UserPlus} onClick={() => { setEditing(false); onNew(typed.trim()); }} onBlur={() => setEditing(false)} {...keepFocus}>New customer</Button>}>
-      <Combobox id={id} query={q} onQuery={(t) => { setQ(t); setEditing(true); }} options={options} onPick={pick} listLabel="Customers" note={search.note}
-        invalid={Boolean(error)} describedBy={error ? `${id}-error` : `${id}-hint`} autoFocus={autoFocus} onFocus={() => setEditing(true)}
+      <Combobox id={id} query={q} onQuery={(t) => { setQuery(t); setEditing(true); }} options={options} onPick={pick} listLabel="Customers" note={search.note}
+        invalid={Boolean(error)} describedBy={error ? `${id}-error` : `${id}-hint`} autoFocus={autoFocus} onFocus={() => { setQuery(q); setEditing(true); }}
         onBlur={(e) => { if (e.relatedTarget?.id !== `${id}-new`) setEditing(false); }} />
     </Field>
   );
@@ -345,9 +344,10 @@ export type NewCustomerSheetProps = { open: boolean; initialName: string; homeSt
 
 /** The new-customer form in a side sheet (a dialog on phones), for the desktop bill form's "+ New customer…". */
 export function NewCustomerSheet({ open, initialName, homeState, onClose, onSaved }: NewCustomerSheetProps) {
+  const [typed, setTyped] = useState(false);
   return (
-    <Sheet open={open} onClose={onClose} title="New customer" description="Saved to Customers and picked for this bill. You stay on the bill.">
-      <NewCustomerForm key={initialName} initialName={initialName} idBase="nc" homeState={homeState} onCancel={onClose} onSaved={onSaved} />
+    <Sheet open={open} onClose={onClose} confirmClose={typed ? "Discard this customer?" : undefined} title="New customer" description="Saved to Customers and picked for this bill. You stay on the bill.">
+      <NewCustomerForm key={initialName} initialName={initialName} idBase="nc" homeState={homeState} onCancel={onClose} onSaved={onSaved} onTyped={setTyped} />
     </Sheet>
   );
 }

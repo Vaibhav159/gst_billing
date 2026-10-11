@@ -62,10 +62,25 @@ test("no PAN: none is named; own dates: the range is the period's name, so the h
 }, 30_000);
 
 
-test("a GSTIN placeholder on file prints No GSTIN, never GSTIN URP", async () => {
+test("a GSTIN placeholder on file prints no GSTIN label, never GSTIN URP", async () => {
   const d = data("", "FY 2026-27");
   d.customer.gstin = "URP";
   const text = await drawn(await makeStatementPdf(d));
-  expect(text).toContain("No GSTIN");
+  expect(head(text)).not.toContain("No GSTIN");
   expect(text).not.toContain("GSTIN URP");
+}, 30_000);
+
+
+test.each(["", "ABCDE1234F"])("a B2C statement head omits No GSTIN with PAN %s", async (pan) => {
+  const text = await drawn(await makeStatementPdf(data(pan, "FY 2026-27")));
+  expect(head(text)).not.toContain("No GSTIN");
+  if (pan) expect(head(text)).toContain(`PAN ${pan}`);
+}, 30_000);
+
+test("a stored GSTIN typo with digits is printed as stored", async () => {
+  const d = data("", "FY 2026-27");
+  d.customer.gstin = "08ABCDE1234A1Z";
+  const text = await drawn(await makeStatementPdf(d));
+  expect(head(text)).toContain("GSTIN 08ABCDE1234A1Z");
+  expect(head(text)).not.toContain("No GSTIN");
 }, 30_000);

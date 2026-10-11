@@ -12,9 +12,10 @@ import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, dateShort, mobileText, plural, todayIST } from "@/core/format";
-import { hasGstin, stateOptions, stateTitle } from "@/core/ids";
+import { gstinOnFile, stateOptions, stateTitle } from "@/core/ids";
 import { failText, waitingReason } from "@/core/sales/words";
 import { useFirms, useScope } from "@/core/scope";
+import { FirmChips } from "@/core/shell/ScopePickers";
 import {
   Badge, Button, ButtonLink, Card, EmptyState, Field, IconButton, ListRow, ListSkeleton, Menu, Money, Page, QueryView, SearchInput, Segmented, Select, Sheet, StaleNote,
   Table, Td, Th, Tr, useToast,
@@ -23,7 +24,7 @@ import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { customersCsv } from "./exportCsv";
 import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, startFrom, tableState, useJustSaved, useMoreFocus } from "./lib";
-import { CustomerRowMenu, FirmChips, MoreButton } from "./listParts";
+import { CustomerRowMenu, MoreButton } from "./listParts";
 import { WhyNote } from "./parts";
 
 const SORTS: { value: CustomerSort; label: string }[] = [{ value: "recent", label: "Recent bill" }, { value: "name", label: "Name" }, { value: "sales", label: "Most sales" }];
@@ -271,10 +272,10 @@ function DesktopCustomers({ d }: { d: D }) {
                             <Link to={`/customers/${c.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand">{c.name}</Link>
                             {c.type === "walkin" ? <Badge>Cash sales without a name</Badge> : null}
                           </span>
-                          <span className="block text-xs text-muted tnum mt-0.5">{mobileText(c.mobile_number) || (c.type === "walkin" ? "No name or phone kept" : "No phone")}<span className="xl:hidden">{hasGstin(c.gst_number) ? ` · ${c.gst_number}` : " · No GSTIN"}{igst ? ` · ${stateTitle(c.state_name)}, IGST` : ""}</span></span>
+                          <span className="block text-xs text-muted tnum mt-0.5">{mobileText(c.mobile_number) || (c.type === "walkin" ? "No name or phone kept" : "No phone")}<span className="xl:hidden">{gstinOnFile(c.gst_number) ? ` · ${c.gst_number}` : ""}{igst ? ` · ${stateTitle(c.state_name)}, IGST` : ""}</span></span>
                         </Td>
                         <Td className="hidden xl:table-cell">
-                          {hasGstin(c.gst_number) ? <span className="tnum">{c.gst_number}</span> : <span className="text-muted">No GSTIN</span>}
+                          {gstinOnFile(c.gst_number) ? <span className="tnum">{c.gst_number}</span> : <span className="text-muted">No GSTIN</span>}
                           <span className="block text-xs text-muted mt-0.5">{stateTitle(c.state_name) || "No state"}{igst ? " · IGST on bills" : ""}</span>
                         </Td>
                         <Td align="right">{!f ? UNKNOWN : f.bills ? <Money value={f.total} /> : <span className="text-muted">No bills</span>}</Td>

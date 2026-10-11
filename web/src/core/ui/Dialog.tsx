@@ -101,34 +101,44 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   );
 }
 
-export type SheetProps = { open: boolean; onClose: () => void; title: string; description?: ReactNode; footer?: ReactNode; width?: number; children: ReactNode };
+export type SheetProps = { open: boolean; onClose: () => void; title: string; description?: ReactNode; footer?: ReactNode; width?: number; confirmClose?: string; children: ReactNode };
 
 /** Side panel on desktop, bottom sheet on phones. */
-export function Sheet({ open, onClose, title, description, children, footer, width = 460 }: SheetProps) {
+export function Sheet({ open, onClose, title, description, children, footer, width = 460, confirmClose }: SheetProps) {
   const { isPhone } = useView();
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
   const { mounted, closing } = usePresence(open, 190);
-  useFocusTrap(ref, open && !isPhone, onClose);
+  const [asking, setAsking] = useState(false);
+  useEffect(() => { if (!open) setAsking(false); }, [open]);
+  const tryClose = confirmClose ? () => setAsking(true) : onClose;
+  useFocusTrap(ref, open && !isPhone, tryClose);
   const guard = useGhostGuard(open);
   const held = { children: useHeld(open, children), footer: useHeld(open, footer), title: useHeld(open, title), description: useHeld(open, description) };
-  if (isPhone) return <Dialog open={open} onClose={onClose} title={title} description={description} footer={footer}>{children}</Dialog>;
+  if (isPhone) return <Dialog open={open} onClose={onClose} title={title} description={description} footer={footer} confirmClose={confirmClose}>{children}</Dialog>;
   if (!mounted) return null;
   ({ children, footer, title, description } = held);
   return (
     <Portal>
       <div onClickCapture={guard} className={cn("absolute inset-0 z-sheet flex justify-end", closing ? "pointer-events-none" : "pointer-events-auto")}>
-        <div className={cn("absolute inset-0 bg-scrim/50", closing ? "anim-fade-out" : "anim-fade")} onClick={onClose} aria-hidden="true" />
+        <div className={cn("absolute inset-0 bg-scrim/50", closing ? "anim-fade-out" : "anim-fade")} onClick={tryClose} aria-hidden="true" />
         {/* data-closing while it animates out, as Dialog: the shortcuts and the page frame pass over a sheet on its way out */}
         <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id + "t"} tabIndex={-1} style={{ width }} data-closing={closing ? "" : undefined}
           className={cn("relative h-full max-w-full flex flex-col bg-card border-l border-line shadow-pop outline-none", closing ? "anim-side-out" : "anim-side")}>
           <div className="flex items-start gap-3 px-6 pt-5 pb-3 border-b border-rule">
             <div className="flex-1 min-w-0">
-              <h2 id={id + "t"} className="text-lg font-semibold">{title}</h2>
+              <h2 id={id + "t"} tabIndex={-1} data-dialog-title="" className="text-lg font-semibold outline-none">{title}</h2>
               {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
             </div>
-            <IconButton label="Close" icon={X} onClick={onClose} size="sm" className="-mr-2" />
+            <IconButton label="Close" icon={X} onClick={tryClose} size="sm" className="-mr-2" />
           </div>
+          {asking ? (
+            <div role="alert" className="mx-6 mt-3 rounded-ctl border border-neg-line bg-neg-tint px-3 py-2 flex flex-wrap items-center gap-2 anim-rise">
+              <span className="flex-1 min-w-[10rem] font-medium">{confirmClose}</span>
+              <Button size="sm" onClick={() => setAsking(false)} autoFocus>Keep editing</Button>
+              <Button size="sm" variant="danger" onClick={() => { setAsking(false); onClose(); }}>Discard</Button>
+            </div>
+          ) : null}
           <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">{children}</div>
           {footer ? <div className="px-6 py-4 border-t border-rule flex justify-end gap-2">{footer}</div> : null}
         </div>

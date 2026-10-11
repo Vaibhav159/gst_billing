@@ -34,11 +34,12 @@ function initialValues(existing: Customer | null, firms: Firm[], home: string, q
   const all = firms.map((f) => f.id);
   if (existing) {
     const ticked = all.filter((id) => existing.businesses.includes(id));
+    const g = checkGstin(existing.gst_number);
     return {
       name: existing.name, phone: formatMobile(existing.mobile_number), email: existing.email, type: existing.type === "business" ? "business" : "person",
       gstin: gstinPlaceholder(existing.gst_number) ? "" : existing.gst_number, pan: existing.pan_number || gstinPan(existing.gst_number), address: existing.address, city: existing.city,
       // in the table's spelling, as the picker and a GSTIN name it: a stored "JAMMU & KASHMIR" is the GSTIN's own state
-      state: tableState(existing.state_name) || home, firms: ticked.length ? ticked : all,
+      state: tableState(existing.state_name) || (g.status === "valid" || g.status === "check" ? g.state : home), firms: ticked.length ? ticked : all,
     };
   }
   // a GSTIN in the address (?gstin=) fills the state, type and PAN, as typing it would

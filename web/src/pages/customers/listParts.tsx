@@ -1,5 +1,5 @@
-// The list's own pieces: Show more, the phone's firm chips, and each customer's Call · WhatsApp · New bill · Statement
-// (PROTO pages/records/shared.jsx MoreButton, core/common.jsx FirmChips, CustomerDetail.jsx useContact and CustomerRowMenu).
+// The list's own pieces: Show more and each customer's Call · WhatsApp · New bill · Statement
+// (PROTO pages/records/shared.jsx MoreButton, CustomerDetail.jsx useContact and CustomerRowMenu).
 import { ChevronDown, FileText, MessageCircle, MoreHorizontal, Phone, Plus, RotateCw, Send } from "lucide-react";
 import type { Customer, LastBill } from "@/core/api/customers";
 import type { ApiProblem } from "@/core/api/errors";
@@ -7,7 +7,6 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { dateShort, inr } from "@/core/format";
 import { formatMobile, mobileDigits, mobileProblem } from "@/core/ids";
-import type { Firm, FirmId } from "@/core/scope";
 import { Button, IconButton, Menu, useToast, type MenuItem } from "@/core/ui";
 import { useView } from "@/core/view";
 import { firstName } from "./lib";
@@ -28,19 +27,6 @@ export function MoreButton({ shown, total, what, pageSize, onMore, loading, prob
     <div className={cn("flex items-center gap-3 border-t border-rule", isPhone ? "flex-col px-4 py-3" : "justify-between px-5 py-3")}>
       <span className="text-sm text-muted tnum">Showing {shown} of {total} {what}{failed ? <>{". "}<span role="alert" className="text-neg">{failed}</span></> : null}</span>
       <Button icon={failed ? RotateCw : ChevronDown} onClick={onMore} loading={loading} full={isPhone}>{failed ? "Try again" : `Show ${next} more`}</Button>
-    </div>
-  );
-}
-
-/** The firm the lists follow, as chips on phones (the desktop has it in the top bar). */
-export function FirmChips({ firms, value, onChange }: { firms: Firm[]; value: FirmId | null; onChange: (id: FirmId) => void }) {
-  const opts: { id: FirmId; label: string }[] = [{ id: "all", label: "All firms" }, ...firms.map((f) => ({ id: f.id, label: f.short }))];
-  return (
-    <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar" role="radiogroup" aria-label="Firm">
-      {opts.map((o) => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} onClick={() => onChange(o.id)}
-          className={cn("min-h-11 px-4 rounded-full border whitespace-nowrap transition-colors shrink-0", value === o.id ? "bg-brand-sel border-brand text-brand font-semibold" : "bg-card border-line text-fg2")}>{o.label}</button>
-      ))}
     </div>
   );
 }

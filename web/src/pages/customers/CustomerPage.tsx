@@ -11,12 +11,12 @@ import {
   AlertTriangle, Ban, Banknote, ChevronDown, FileText, GitMerge, IdCard, Info, MapPin, MessageCircle, MoreHorizontal, MoreVertical, NotebookPen, Pencil, Plus, ReceiptText, RotateCw, Store,
   Trash2, UserPlus, UserRound, WifiOff,
 } from "lucide-react";
-import { deleteRefusal, useDeleteCustomer, useItaxBills, useStatement, type Customer, type ItaxBill, type ItaxKind, type LastBill, type StatementBill } from "@/core/api/customers";
+import { deleteRefusal, useDeleteCustomer, useItaxBills, useStatement, useWalkinFigures, type Customer, type ItaxBill, type ItaxKind, type LastBill, type StatementBill } from "@/core/api/customers";
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { addMonths, date, dateShort, fyOf, inr, mobileText, monthLabel, monthOf, plural, possessive, todayIST } from "@/core/format";
-import { checkGstin, hasGstin, stateLabel } from "@/core/ids";
+import { checkGstin, gstinOnFile, hasGstin, stateLabel } from "@/core/ids";
 import { dayOf, PAY, PAY_SHORT, waitingReason } from "@/core/sales/words";
 import { useFirms, useScope } from "@/core/scope";
 import {
@@ -73,6 +73,7 @@ function useDetail(c: Customer) {
   // firm's name and nothing says "the firm picked's". scope: the firm in words once it can be worded, its name or "All
   // firms"; "the firm picked" when that list failed
   const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
+  const walkin = useWalkinFigures(c.type === "walkin" && worded ? c : null, firmId);
   const dated = c.type === "walkin" && period === "fy";
   const st = useStatement(c.id, !worded ? null : {
     ...(typeof firmId === "number" ? { business_id: firmId } : {}),
@@ -92,7 +93,7 @@ function useDetail(c: Customer) {
     const since = dayOf(c.created_at);
     const first = firstDate(all);
     const allFrom = first && (!since || first < since) ? first : since;
-    const last = [...allFig.active].sort(newestFirst)[0] ?? null;
+    const last = c.type === "walkin" ? walkin.data?.last_bill ?? null : [...allFig.active].sort(newestFirst)[0] ?? null;
     // loaded: figures to show, fresh or kept after asking again failed. ready: fresh, which is what Delete goes by
     const loaded = statement !== undefined;
     const plabel = period === "fy" ? fyP.label : "All time";
@@ -111,7 +112,7 @@ function useDetail(c: Customer) {
       trend.push({ ym: m, total: inMonth.reduce((s, b) => s + b.total_amount, 0), count: inMonth.length });
     }
     return { bills, fig, allFig, since, last, loaded, plabel, prange, options, trend };
-  }, [st.data, period, dated, fyP.from, fyP.to, fyP.label, fyP.range, c.created_at]);
+  }, [st.data, period, dated, fyP.from, fyP.to, fyP.label, fyP.range, c.created_at, c.type, walkin.data]);
   const { bills, fig, allFig, since, last, loaded, plabel, prange, options, trend } = detail;
   const ready = st.isSuccess;
   const shown = bills.slice(0, limit);
@@ -133,7 +134,7 @@ function useDetail(c: Customer) {
 type D = ReturnType<typeof useDetail>;
 
 /** A statement bill as WhatsApp's "Resend <last bill>" names it. */
-const asLast = (b: StatementBill | null): LastBill | null => (b ? { id: b.id, invoice_number: b.invoice_number, invoice_date: b.invoice_date, total_amount: b.total_amount, business: b.business } : null);
+const asLast = (b: LastBill | null): LastBill | null => (b ? { id: b.id, invoice_number: b.invoice_number, invoice_date: b.invoice_date, total_amount: b.total_amount, business: b.business } : null);
 /** "GST charged"'s caption. */
 const gstCaption = (d: D) => (!d.fig.count ? "No bills" : d.taxWay === "igst" ? "IGST" : d.taxWay === "local" ? "CGST + SGST" : "CGST + SGST or IGST");
 
@@ -302,7 +303,7 @@ function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: strin
   };
   return (
     <ConfirmDialog open={open} busy={del.isPending} busyLabel="Deleting…" onClose={() => { onClose(); setError(null); }} onConfirm={go} tone="danger" title={`Delete ${c.name}?`} confirmLabel="Delete customer"
-      record={[["Customer", c.name], ["Phone", mobileText(c.mobile_number) || "No phone"], ["GSTIN", hasGstin(c.gst_number) ? c.gst_number : "No GSTIN"], ["Bills", bills]]}
+      record={[["Customer", c.name], ["Phone", mobileText(c.mobile_number) || "No phone"], ["GSTIN", gstinOnFile(c.gst_number) ? c.gst_number : "No GSTIN"], ["Bills", bills]]}
       extra={error ? <p role="alert" className="text-sm text-neg">{error}</p> : null}>
       <p>It goes off the customer list and the bill form. The Audit log can bring it back.</p>
     </ConfirmDialog>
@@ -313,7 +314,7 @@ function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: strin
 function GstinProblem({ c, className }: { c: Customer; className?: string }) {
   const { can } = useAuth();
   const g = checkGstin(c.gst_number);
-  if (!hasGstin(c.gst_number) || g.status === "valid") return null;
+  if (!gstinOnFile(c.gst_number) || g.status === "valid") return null;
   return (
     <span className={cn("text-neg", className)}>
       {g.status === "check" ? "Its last character doesn't match, so you may have mistyped one character." : "It doesn't look like a GSTIN."}
@@ -330,12 +331,12 @@ function IdCell({ c, className }: { c: Customer; className?: string }) {
   const g = checkGstin(c.gst_number);
   const pan = c.pan || (g.status === "valid" ? g.pan : "");
   const panLine = pan ? <span className="flex items-center gap-1">PAN <span className="tnum">{pan}</span><CopyButton value={pan} label="PAN" /></span> : null;
-  const sub = !hasGstin(c.gst_number) ? (c.pan ? "No GSTIN" : "Needed for a bill over ₹2,00,000")
+  const sub = !gstinOnFile(c.gst_number) ? (c.pan ? "No GSTIN" : "Needed for a bill over ₹2,00,000")
     : g.status === "valid" ? panLine
       : <>{panLine}<GstinProblem c={c} /></>;
   return (
-    <InfoCell className={className} label={hasGstin(c.gst_number) ? "GSTIN · B2B bills" : "PAN · B2C bills"} sub={sub}>
-      {hasGstin(c.gst_number) ? <span className="flex items-center gap-1"><span className="tnum">{c.gst_number}</span><CopyButton value={c.gst_number} label="GSTIN" /></span>
+    <InfoCell className={className} label={gstinOnFile(c.gst_number) ? (hasGstin(c.gst_number) ? "GSTIN · B2B bills" : "GSTIN") : "PAN · B2C bills"} sub={sub}>
+      {gstinOnFile(c.gst_number) ? <span className="flex items-center gap-1"><span className="tnum">{c.gst_number}</span><CopyButton value={c.gst_number} label="GSTIN" /></span>
         : c.pan ? <span className="flex items-center gap-1"><span className="tnum">{c.pan}</span><CopyButton value={c.pan} label="PAN" /></span> : <span className="text-muted">No GSTIN or PAN</span>}
     </InfoCell>
   );
@@ -487,7 +488,7 @@ function PhoneDetail({ c, d, openDelete }: { c: Customer; d: D; openDelete: () =
           <DL rows={[
             ["Phone", k.tel ? <a key="p" href={k.tel} className="tnum text-brand underline-offset-2 hover:underline inline-flex items-center min-h-11">{mobileText(c.mobile_number)}</a> : <span key="p" className="tnum">{mobileText(c.mobile_number) || "No phone"}</span>],
             c.email ? ["Email", <span key="e" className="break-all">{c.email}</span>] : null,
-            ["GSTIN", hasGstin(c.gst_number) ? (
+            ["GSTIN", gstinOnFile(c.gst_number) ? (
               <span key="g">
                 <span className="inline-flex items-center gap-0.5 tnum">{c.gst_number}<CopyButton value={c.gst_number} label="GSTIN" /></span>
                 <GstinProblem c={c} className="block text-xs" />

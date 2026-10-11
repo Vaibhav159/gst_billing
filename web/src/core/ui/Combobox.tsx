@@ -7,7 +7,7 @@ import { Input } from "./Input";
 import { optionClass } from "./Menu";
 
 /** A match: a row of the list. */
-export type ComboOption<T> = { key: string; title: string; sub?: string; right?: string; tone?: "brand"; value: T };
+export type ComboOption<T> = { key: string; title: string; sub?: string; right?: string; tone?: "brand"; action?: boolean; value: T };
 /** A label over the matches that follow it; never picked. */
 export type ComboHeading = { heading: string };
 export type ComboItem<T> = ComboOption<T> | ComboHeading;
@@ -29,7 +29,8 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
   // A listbox needs an option. Search notes stay visible in their own panel until choices arrive.
   const listed = open && items.length > 0;
   const headings = options.filter((o): o is ComboHeading => "heading" in o);
-  const status = note || (!items.length ? headings.map((o) => o.heading).join(". ") : "") || `${items.length} matches`;
+  const matches = items.filter((o) => !o.action).length;
+  const status = note || (!matches ? headings.map((o) => o.heading).join(". ") : "") || `${matches} ${matches === 1 ? "match" : "matches"}`;
   const panelClass = "absolute z-pop left-0 top-full mt-1.5 w-full min-w-[min(340px,80vw)] card shadow-pop py-1.5 max-h-[340px] overflow-y-auto anim-pop";
   useEffect(() => { setActive(0); }, [query, open]);
   const pick = (o: ComboOption<T>) => { setOpen(false); onPick(o); };
@@ -41,13 +42,13 @@ export function Combobox<T>({ id, query, onQuery, options, onPick, placeholder, 
     else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey) { if (open && query.trim() && items[active]) { e.preventDefault(); pick(items[active]); } else setOpen(false); }
   };
   // Esc shuts the list, drawn or not, so matches that come later (a search still out) don't drop it open. A list on
-  // screen keeps the key, taken on its way down (capture): a dialog around the box (useFocusTrap) listens on its own
+  // screen, or a heading-only note, keeps the key, taken on its way down (capture): a dialog around the box (useFocusTrap) listens on its own
   // element, which a key reaches before React's bubbling handlers, so it would close the dialog first. With nothing on
   // screen, Esc goes on.
   const onKeyDownCapture = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Escape" || !open) return;
     setOpen(false);
-    if (listed) { e.preventDefault(); e.stopPropagation(); }
+    if (listed || headings.length) { e.preventDefault(); e.stopPropagation(); }
   };
   let k = -1;
   return (

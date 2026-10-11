@@ -19,7 +19,7 @@ import { useRepairBoxes } from "./useRepairBoxes";
 export function productOptions(list: SaleProduct[] | undefined, failed: boolean, typed: string, canAdd: boolean): ComboItem<SaleProduct | null>[] {
   const t = typed.trim();
   const add: ComboOption<SaleProduct | null> = {
-    key: "__new", value: null, tone: "brand", title: t ? `+ An item that isn't in Products: “${t}”…` : "+ An item that isn't in Products…",
+    key: "__new", value: null, tone: "brand", action: true, title: t ? `+ An item that isn't in Products: “${t}”…` : "+ An item that isn't in Products…",
     sub: canAdd ? "Name, HSN, GST rate, unit; keep it in Products or use it once" : "Name, HSN, GST rate, unit; used on this bill only",
   };
   // while the products load, Enter picks nothing: a fast typist never lands on "+ An item…" by mistake

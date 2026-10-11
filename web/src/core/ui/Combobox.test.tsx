@@ -6,6 +6,48 @@ import { Combobox, Dialog, type ComboItem, type ComboOption } from "./index";
 
 const PEOPLE = ["Anil Gupta", "Meena Jain", "Mahesh Soni"];
 
+test.each([1, 2])("the announced count excludes action rows and uses the right grammar for %s matches", (count) => {
+  const options = [
+    ...PEOPLE.slice(0, count).map((title, value) => ({ key: title, title, value })),
+    { key: "new", title: "+ New customer…", value: -1, action: true },
+  ];
+  const onPick = vi.fn();
+  renderApp(<Combobox id="cb" ariaLabel="Customer" query="a" onQuery={() => {}} options={options} onPick={onPick} />);
+  const box = screen.getByRole("combobox", { name: "Customer" });
+  fireEvent.focus(box);
+  expect(screen.getByRole("status").textContent).toBe(`${count} ${count === 1 ? "match" : "matches"}`);
+  fireEvent.click(screen.getByRole("option", { name: "+ New customer…" }));
+  expect(onPick).toHaveBeenCalledWith(options[count]);
+});
+
+test("an action row preserves a heading note when there are no matches", () => {
+  const note = "Products couldn't load: add the item by hand";
+  renderApp(<Combobox id="cb" ariaLabel="Product" query="" onQuery={() => {}} options={[
+    { heading: note }, { key: "new", title: "+ An item that isn't in Products…", value: null, action: true },
+  ]} onPick={() => {}} />);
+  fireEvent.focus(screen.getByRole("combobox", { name: "Product" }));
+  expect(screen.getByRole("status")).toHaveTextContent(note);
+});
+
+test("inside a dialog, the first Escape closes a heading-only note and the second closes the dialog", () => {
+  vi.useFakeTimers();
+  try {
+    const onClose = vi.fn();
+    renderApp(<Dialog open onClose={onClose} title="Pick a customer">
+      <Combobox id="cb" ariaLabel="Customer" query="" onQuery={() => {}} options={[{ heading: "Searching…" }]} onPick={() => {}} />
+    </Dialog>);
+    const box = screen.getByRole("combobox", { name: "Customer" });
+    act(() => box.focus());
+    expect(screen.getByRole("status")).toHaveTextContent("Searching…");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByText("Searching…")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(box).toHaveFocus();
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
 test.each(["Keep typing to search", "Searching…", "Couldn't search: the app couldn't get through", "No customer matches “Kamal”"])("a note without choices is announced without an empty listbox: %s", (note) => {
   vi.useFakeTimers();
   try {

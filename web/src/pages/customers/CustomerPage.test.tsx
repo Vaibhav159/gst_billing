@@ -1,9 +1,10 @@
+import { handClock, pass } from "@/test/clock";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
 import { __setNetState } from "@/core/api/network";
 import CustomerPage from "./CustomerPage";
-import { ANIL, FIRMS, handClock, pass, mount, NO_BILLS, serve, STAFF, VIEWER, type Call } from "./testing";
+import { ANIL, FIRMS, mount, NO_BILLS, serve, STAFF, VIEWER, type Call } from "./testing";
 
 const routes = [
   { path: "/customers", element: <p>the list</p> },
@@ -493,16 +494,16 @@ test("the walk-in opens with one dated FY statement; all time is read only when 
   const c = { ...ANIL, id: 1, name: "Walk-in Customer", type: "walkin", customer_type: "walkin" };
   const calls = serve({ "GET customers/1/": c, "GET customers/1/statement/": (call: Call) => ({ status: 200, data: statement(call.params.start_date ? BILLS.slice(1) : BILLS) }), "GET sales/": flags([]) });
   mount(routes, ["/customers/1"]);
-  await pass(400);
+  await pass(400, 1);
   expect(statementCalls(calls, 1).map((c) => c.params)).toEqual([{ business_id: 3, start_date: "2026-04-01", end_date: "2026-10-08" }]);
   expect(screen.getByRole("radio", { name: /All time/ })).not.toHaveTextContent(/3 bills|1,12,083/);
   expect(screen.getByRole("radio", { name: /All time/ })).toHaveTextContent("Every year");
   fireEvent.click(screen.getByRole("radio", { name: /All time/ }));
-  await pass(0);
+  await pass(0, 1);
   expect(statementCalls(calls, 1).map((c) => c.params)).toEqual([{ business_id: 3, start_date: "2026-04-01", end_date: "2026-10-08" }, { business_id: 3 }]);
   expect(screen.getByText("Sales · All time").parentElement).toHaveTextContent("₹1,12,083.21");
   fireEvent.click(screen.getByRole("radio", { name: /FY 2026-27/ }));
-  await pass(0);
+  await pass(0, 1);
   expect(statementCalls(calls, 1)).toHaveLength(2);
 });
 
@@ -511,7 +512,7 @@ test.each([false, true])("a stored URP means no GSTIN on the customer page (phon
   (window as unknown as { __phone?: boolean }).__phone = phone;
   serve({ "GET customers/7/": { ...ANIL, gst_number: "URP" }, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
   mount(routes, ["/customers/7"]);
-  await pass(400);
+  await pass(400, 1);
   expect(screen.queryByText("URP")).not.toBeInTheDocument();
   expect(screen.queryByText("GSTIN · B2B bills")).not.toBeInTheDocument();
   expect(screen.queryByText("It doesn't look like a GSTIN.")).not.toBeInTheDocument();
@@ -522,10 +523,58 @@ test("Show all firms moves focus to the customer's heading", async () => {
   handClock();
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
   mount(routes, ["/customers/7"]);
-  await pass(400);
+  await pass(400, 1);
   const button = screen.getByRole("button", { name: "Show all firms" });
   act(() => button.focus());
   fireEvent.click(button);
-  await pass(0);
+  await pass(0, 1);
   expect(screen.getByRole("heading", { level: 1, name: "Anil Gupta" })).toHaveFocus();
+});
+
+
+test.each([false, true])("a stored GSTIN typo stays visible with a Check the GSTIN link (phone=%s)", async (isPhone) => {
+  handClock();
+  (window as unknown as { __phone?: boolean }).__phone = isPhone;
+  serve({ "GET customers/7/": { ...ANIL, gst_number: "08ABCDE1234A1Z" }, "GET customers/7/statement/": statement(), "GET sales/": flags([]) });
+  mount(routes, ["/customers/7"]);
+  await pass(400, 1);
+  expect(screen.getByText("08ABCDE1234A1Z")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Check the GSTIN" })).toHaveAttribute("href", "/customers/7/edit?focus=gstin");
+  expect(screen.queryByText(/No GSTIN/)).not.toBeInTheDocument();
+});
+
+test("the walk-in's last bill comes from its scoped figures even when the picked FY has no bills", async () => {
+  handClock();
+  const c = { ...ANIL, id: 1, name: "Walk-in Customer", type: "walkin", customer_type: "walkin" };
+  const calls = serve({ "GET customers/1/": c, "GET customers/1/statement/": statement([]), "GET sales/": flags([]),
+    "GET customers/": { count: 1, next: null, results: [{ ...c, figures: { last_bill: { id: 88, invoice_number: "KGH/2025/88", invoice_date: "2025-11-02", total_amount: "5000.00", business: 3 } } }] } });
+  mount(routes, ["/customers/1"]);
+  await pass(400, 1);
+  expect(screen.getByText("Walk-in record · last bill 02 Nov 2025")).toBeInTheDocument();
+  expect(calls.find((c) => c.url === "customers/")?.params).toMatchObject({ type: "walkin", figures: 1, figures_business_id: 3 });
+  expect(statementCalls(calls, 1).map((c) => c.params)).toEqual([{ business_id: 3, start_date: "2026-04-01", end_date: "2026-10-08" }]);
+});
+
+test("two walk-in records with the same name keep their own last bill across pages and customer changes", async () => {
+  handClock();
+  const walkin = (id: number, day: string) => ({ ...ANIL, id, name: "Walk-in Customer", type: "walkin", customer_type: "walkin",
+    figures: { last_bill: { id: id + 80, invoice_number: `KGH/2025/${id + 80}`, invoice_date: day, total_amount: "5000.00", business: 3 } } });
+  const first = walkin(1, "2025-11-02");
+  const second = walkin(2, "2025-11-05");
+  const calls = serve({ "GET customers/1/": first, "GET customers/2/": second,
+    "GET customers/1/statement/": statement([]), "GET customers/2/statement/": statement([]), "GET sales/": flags([]),
+    "GET customers/": (call: Call) => ({ status: 200, data: Number(call.params.page ?? 1) === 1
+      ? { count: 2, next: "?page=2", results: [first] } : { count: 2, next: null, results: [second] } }) });
+  const { router } = mount(routes, ["/customers/2"]);
+  await pass(400, 1);
+  expect(screen.getByText("Walk-in record · last bill 05 Nov 2025")).toBeInTheDocument();
+  expect(screen.queryByText("Walk-in record · last bill 02 Nov 2025")).not.toBeInTheDocument();
+  const figures = () => calls.filter((c) => c.url === "customers/");
+  expect(figures().map((c) => c.params.page)).toEqual([1, 2]);
+  expect(figures()[0].params).toMatchObject({ type: "walkin", search: "Walk-in Customer", figures: 1, figures_business_id: 3 });
+  await act(async () => { await router.navigate("/customers/1"); });
+  await pass(0, 1);
+  expect(screen.getByText("Walk-in record · last bill 02 Nov 2025")).toBeInTheDocument();
+  expect(screen.queryByText("Walk-in record · last bill 05 Nov 2025")).not.toBeInTheDocument();
+  expect(figures().map((c) => c.params.page)).toEqual([1, 2, 1, 2]);
 });

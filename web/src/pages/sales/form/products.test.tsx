@@ -1,13 +1,22 @@
 import type { ReactNode } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { salesServer } from "@/core/sales/fixtures";
-import { testQueryClient } from "@/test/render";
+import { renderApp, testQueryClient } from "@/test/render";
+import { Combobox } from "@/core/ui";
+import { productOptions } from "./lines";
 import { matchProducts, percentOf, quickProducts, toSaleProduct, useCreateProduct, useSaleProducts } from "./products";
 
 const RING = { id: 5, name: "Gold Ring 22K", hsn_code: "711319", gst_tax_rate: "0.0300", default_unit: "gms", description: "", usage_count: 9 };
 const DIAMOND = { id: 6, name: "Cut Diamond", hsn_code: "710239", gst_tax_rate: "0.0025", default_unit: "ct", description: "VVS1", usage_count: 2 };
 const CHAIN = { id: 7, name: "Silver Chain", hsn_code: "711311", gst_tax_rate: "0.0300", default_unit: "gms", description: "", usage_count: 30 };
+
+test("the product picker announces products alone, keeping its add-item action available", () => {
+  renderApp(<Combobox id="products" ariaLabel="Product" query="gold" onQuery={() => {}} options={productOptions([toSaleProduct(RING)], false, "gold", true)} onPick={() => {}} />);
+  fireEvent.focus(screen.getByRole("combobox", { name: "Product" }));
+  expect(screen.getByRole("status").textContent).toBe("1 match");
+  expect(screen.getByRole("option", { name: /An item that isn't in Products/ })).toBeInTheDocument();
+});
 
 /** The app's own cache defaults (a save never retries or queues), as every hook test's wrapper. */
 function wrapper() {

@@ -8,6 +8,7 @@ import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { plural, toPaise } from "@/core/format";
 import { effectivePan, hasGstin, looksLikePhone, mobileDigits } from "@/core/ids";
 import { failText } from "@/core/sales/words";
+import { readItaxFlags } from "@/core/sales/itax";
 import type { PaymentMode } from "@/core/sales/types";
 import type { FirmId } from "@/core/scope";
 
@@ -107,10 +108,6 @@ export function toCustomerPage(raw: unknown): CustomerPage {
     summary: s ? { customers: num(s.customers), bills: num(s.bills), total: money(s.total), cancelled: num(s.cancelled), udhaar_bills: num(s.udhaar_bills), udhaar_total: money(s.udhaar_total) } : null,
   };
 }
-function toFlags(raw: unknown): ItaxFlag[] {
-  return list(raw).map(obj).filter((f) => ["cash_limit", "pan", "walkin_limit", "b2b_address"].includes(str(f.kind)))
-    .map((f) => ({ kind: str(f.kind) as ItaxKind, short: str(f.short), text: str(f.text) }));
-}
 const countTotal = (raw: unknown): CountTotal => ({ bills: num(obj(raw).bills), total: money(obj(raw).total) });
 const PAID: readonly PaidAs[] = ["billing", "udhaar", "not_recorded", "cancelled"];
 export function toStatement(raw: unknown): Statement {
@@ -128,7 +125,7 @@ export function toStatement(raw: unknown): Statement {
       id: num(b.id), business: num(b.business), business_name: str(b.business_name), invoice_number: str(b.invoice_number), invoice_date: str(b.invoice_date),
       payment_mode: str(b.payment_mode) as PaymentMode, taxable: money(b.taxable), tax: money(b.tax), total_amount: money(b.total_amount),
       status: b.status === "cancelled" ? "cancelled" : "active", cancel_reason: str(b.cancel_reason),
-      paid: PAID.includes(b.paid as PaidAs) ? (b.paid as PaidAs) : b.status === "cancelled" ? "cancelled" : "not_recorded", itax: toFlags(b.itax),
+      paid: PAID.includes(b.paid as PaidAs) ? (b.paid as PaidAs) : b.status === "cancelled" ? "cancelled" : "not_recorded", itax: readItaxFlags(b.itax),
     })),
     totals: {
       bills: num(t.bills), billed: money(t.billed), taxable: money(t.taxable), tax: money(t.tax), cancelled: num(t.cancelled),
@@ -138,7 +135,7 @@ export function toStatement(raw: unknown): Statement {
   };
 }
 function toItaxBills(raw: unknown): ItaxBill[] {
-  return list(obj(raw).results).map(obj).map((b) => ({ id: num(b.id), invoice_number: str(b.invoice_number), invoice_date: str(b.invoice_date), total_amount: money(b.total_amount), itax: toFlags(b.itax) }));
+  return list(obj(raw).results).map(obj).map((b) => ({ id: num(b.id), invoice_number: str(b.invoice_number), invoice_date: str(b.invoice_date), total_amount: money(b.total_amount), itax: readItaxFlags(b.itax) }));
 }
 
 /* ── Query keys ────────────────────────────────────────── */
@@ -156,6 +153,7 @@ export const customerKeys = {
   search: (term: string, size: number, figures = true) => ["customers", "search", searchTerm(term), size, figures] as const,
   recent: (firm: FirmId | null) => ["customers", "recent", firm] as const,
   walkin: () => ["customers", "walkin"] as const,
+  walkinFigures: (id: number | null, name: string, firm: FirmId | null) => ["customers", "walkin", id, name, firm] as const,
 };
 /** A customer row already in the cache (a list, a search, recent customers), so its page can show the name at once. */
 function cachedCustomer(qc: QueryClient, id: number): Customer | undefined {
@@ -278,6 +276,15 @@ export function useWalkin(enabled = true) {
   return useQuery({
     queryKey: customerKeys.walkin(), enabled, staleTime: 5 * 60_000,
     queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { type: "walkin", page_size: 1 }, signal })).data).rows.find((r) => r.type === "walkin") ?? null,
+  });
+}
+/** A particular walk-in's figures. Names can repeat: read every matching page and pick only this customer's ID. */
+export function useWalkinFigures(customer: Customer | null, firm: FirmId | null) {
+  return useQuery({
+    queryKey: customerKeys.walkinFigures(customer?.id ?? null, customer?.name ?? "", firm),
+    queryFn: !customer || firm === null ? skipToken : async () => (await fetchAllCustomers({
+      type: "walkin", search: customer.name, figures: 1, ...(typeof firm === "number" ? { figures_business_id: firm } : {}),
+    })).find((c) => c.id === customer.id)?.figures ?? null,
   });
 }
 

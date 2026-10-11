@@ -4,7 +4,7 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type { Statement } from "@/core/api/customers";
 import { date, inr, plural } from "@/core/format";
-import { hasGstin } from "@/core/ids";
+import { gstinOnFile } from "@/core/ids";
 import { PAY } from "@/core/sales/words";
 // The built-in Helvetica has no ₹ (it would print as "¹"): the one-glyph Tinos font carries it, as v2's Tally invoice
 // does, registered once for every PDF by core/print (Ruling 1E-6), whose RupeeText draws typed text that can hold one
@@ -47,7 +47,7 @@ function Rupees({ paise, bold }: { paise: number; bold?: boolean }) {
 export function StatementDocument({ data }: { data: StatementPdfData }) {
   const { customer: c, statement: st } = data;
   const t = st.totals;
-  const ids = [c.mobile ? `Mobile ${c.mobile}` : "", hasGstin(c.gstin) ? `GSTIN ${c.gstin}` : c.pan ? `PAN ${c.pan} · No GSTIN` : "No GSTIN"].filter(Boolean).join(" · ");
+  const ids = [c.mobile ? `Mobile ${c.mobile}` : "", gstinOnFile(c.gstin) ? `GSTIN ${c.gstin}` : c.pan ? `PAN ${c.pan}` : ""].filter(Boolean).join(" · ");
   return (
     <Document title={`Statement · ${c.name} · ${data.periodLabel}`} author="GST Billing">
       <Page size="A4" style={s.page}>

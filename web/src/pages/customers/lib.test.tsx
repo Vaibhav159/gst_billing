@@ -1,10 +1,11 @@
+import { handClock, pass } from "@/test/clock";
 import { testQueryClient } from "@/test/render";
 import type { ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { customerLine } from "./forBills";
 import { homeState, safeReturn, scopeName, SETTLED, tableState, useOnFile } from "./lib";
-import { ANIL, handClock, pass, serve } from "./testing";
+import { ANIL, serve } from "./testing";
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -59,11 +60,11 @@ test("customers on file with a phone or GSTIN: asked for once typing pauses, onl
   const part = onFile();
   // the last key: a whole number and a whole GSTIN, and nothing is asked until typing has paused for 250 ms
   for (const h of [other, self]) h.rerender({ phone: "98220 12345", gstin: "27XTZPS7585P1ZB" });
-  await pass(0);
+  await pass(0, 1);
   expect(calls).toEqual([]);
-  await pass(249);
+  await pass(249, 1);
   expect(calls).toEqual([]);
-  await pass(1);
+  await pass(1, 1);
   expect(other.result.current.samePhone?.name).toBe("Kulkarni Jewellers");
   expect(other.result.current.sameGstin?.name).toBe("Kulkarni Jewellers");
   // the one being edited has the same answers (one search each), and isn't named
@@ -76,4 +77,9 @@ test("customers on file with a phone or GSTIN: asked for once typing pauses, onl
 
 test("a placeholder GSTIN reads as No GSTIN in a customer line", () => {
   expect(customerLine({ ...ANIL, type: "person", gst_number: "URP" })).toBe("98290 41122 · No GSTIN · Udaipur, Rajasthan");
+});
+
+
+test("a stored GSTIN typo with digits remains visible in a customer line", () => {
+  expect(customerLine({ ...ANIL, type: "person", gst_number: "08ABCDE1234A1Z" })).toContain("GSTIN 08ABCDE1234A1Z");
 });

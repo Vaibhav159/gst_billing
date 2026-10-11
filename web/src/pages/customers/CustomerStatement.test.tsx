@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
@@ -6,7 +7,7 @@ import { __setNetState } from "@/core/api/network";
 import { ShareHost } from "@/core/print/ShareHost";
 import CustomerStatement from "./CustomerStatement";
 import { makeStatementPdf } from "./statementPdf";
-import { ANIL, FIRMS, handClock, mount, pass, serve, type Call } from "./testing";
+import { ANIL, FIRMS, mount, serve, type Call } from "./testing";
 
 // the real PDF is statementPdf.test.tsx's: here a small stand-in comes back at once
 vi.mock("./statementPdf", () => ({ makeStatementPdf: vi.fn(async () => new Blob(["%PDF-1.3"], { type: "application/pdf" })) }));
@@ -92,9 +93,9 @@ test("this month, last month and own dates ask for their period; a start after t
   handClock();
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-05" } });
   fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-10-01" } });
-  await pass(249);
+  await pass(249, 1);
   expect(screen.queryByText("The start date is after the end date.")).not.toBeInTheDocument();
-  await pass(1);
+  await pass(1, 1);
   expect(screen.getByText("The start date is after the end date.")).toBeInTheDocument();
   expect(screen.getByText("Fix the dates to see bills")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Download PDF" })).toHaveAttribute("title", "Fix the dates first");
@@ -113,11 +114,11 @@ test("own dates ask once the boxes pause: a year typed a digit at a time is a da
   const fromBox = screen.getByLabelText("From");
   for (const year of ["0002", "0020", "0202", "2026"]) {
     fireEvent.change(fromBox, { target: { value: `${year}-09-01` } });
-    await pass(100);
+    await pass(100, 1);
   }
-  await pass(149);
+  await pass(149, 1);
   expect(asked()).toEqual(["2026-04-01..2026-10-08"]);
-  await pass(1);
+  await pass(1, 1);
   expect(asked()).toEqual(["2026-04-01..2026-10-08", "2026-09-01..2026-10-08"]);
   expect(made()).toEqual(["FY 2026-27", "1 Apr to 8 Oct 2026", "1 Sep to 8 Oct 2026"]);
 });
@@ -316,7 +317,7 @@ test("a 200-bill period opens without making a PDF; Download makes one on press 
   const ready = heldPdf();
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByRole("table");
   expect(makeStatementPdf).not.toHaveBeenCalled();
   const download = screen.getByRole("button", { name: "Download PDF" });
@@ -336,9 +337,9 @@ test.each([100, 150])("a %i-bill period still makes its PDF ahead", async (count
   handClock();
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(count) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByRole("table");
-  await pass(0);
+  await pass(0, 1);
   expect(makeStatementPdf).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("button", { name: "Download PDF" })).toBeEnabled();
 });
@@ -351,7 +352,7 @@ test("a 200-bill phone Share makes its PDF on press and uses the host's late pat
   Object.assign(navigator, { share, canShare: () => true, userActivation: { isActive: false } });
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByText("Bills · FY 2026-27");
   expect(makeStatementPdf).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Share PDF" }));
@@ -360,10 +361,10 @@ test("a 200-bill phone Share makes its PDF on press and uses the host's late pat
   const dialog = screen.getByRole("dialog", { name: "Your PDF is ready" });
   expect(share).not.toHaveBeenCalled();
   expect(clicked).toEqual([]);
-  await pass(400); // past the sheet's 350 ms click guard
+  await pass(400, 1); // past the sheet's 350 ms click guard
   Object.assign(navigator, { userActivation: { isActive: true } });
   fireEvent.click(within(dialog).getByRole("button", { name: "Share" }));
-  await pass(0);
+  await pass(0, 1);
   expect(share).toHaveBeenCalledTimes(1);
   expect(share).toHaveBeenCalledWith(expect.objectContaining({ files: [expect.objectContaining({ name: "Anil-Gupta_statement_FY-2026-27.pdf" })] }));
 });
@@ -376,12 +377,12 @@ test.each(["Download PDF", "Print", "Share PDF"])("a period switch while %s make
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": (c: Call) => c.params.start_date === "2026-04-01" ? { status: 200, data: manyBills(200) } : answer(c) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByRole("table");
   fireEvent.click(screen.getByRole("button", { name: action }));
   expect(makeStatementPdf).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("radio", { name: "October 2026" }));
-  await pass(0);
+  await pass(0, 1);
   screen.getByText("No bills to Anil Gupta in October 2026");
   await act(async () => { ready(); });
   expect(clicked).toEqual([]);
@@ -398,7 +399,7 @@ test("a big period's first Print makes the file without opening a tab; a second 
   const open = vi.spyOn(window, "open").mockReturnValue({ addEventListener: vi.fn() } as unknown as Window);
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByRole("table");
   expect(makeStatementPdf).not.toHaveBeenCalled();
   const print = screen.getByRole("button", { name: "Print" });
@@ -417,20 +418,20 @@ test("switching periods between Print presses drops the ready file and status", 
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByRole("table");
   fireEvent.click(screen.getByRole("button", { name: "Print" }));
-  await pass(0);
+  await pass(0, 1);
   expect(screen.getByText("The PDF is ready.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", { name: "September 2026" }));
-  await pass(0);
+  await pass(0, 1);
   screen.getByText("Bills · September 2026");
   expect(screen.queryByText("The PDF is ready.")).not.toBeInTheDocument();
   expect(makeStatementPdf).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name: "Print" }));
   expect(makeStatementPdf).toHaveBeenCalledTimes(2);
   expect(open).not.toHaveBeenCalled();
-  await pass(0);
+  await pass(0, 1);
   expect(screen.getByText("The PDF is ready.")).toBeInTheDocument();
 });
 
@@ -441,13 +442,13 @@ test("the phone's first Print offers and focuses a visible Print button for the 
   const open = vi.spyOn(window, "open").mockReturnValue({ addEventListener: vi.fn() } as unknown as Window);
   serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
   mount(routes, ["/customers/7/statement"]);
-  await pass(400);
+  await pass(400, 1);
   screen.getByText("Bills · FY 2026-27");
   fireEvent.click(screen.getByRole("button", { name: "Print or download the statement" }));
   const menu = screen.getByRole("dialog", { name: "Statement" });
-  await pass(400); // past the sheet's 350 ms click guard
+  await pass(400, 1); // past the sheet's 350 ms click guard
   fireEvent.click(within(menu).getByRole("menuitem", { name: /^Print / }));
-  await pass(0);
+  await pass(0, 1);
   expect(makeStatementPdf).toHaveBeenCalledTimes(1);
   await act(async () => { ready(); });
   expect(open).not.toHaveBeenCalled();
@@ -455,4 +456,39 @@ test("the phone's first Print offers and focuses a visible Print button for the 
   expect(print).toHaveFocus();
   fireEvent.click(print);
   expect(open).toHaveBeenCalledWith("blob:statement", "_blank");
+});
+
+
+test("a large statement's busy Download keeps keyboard focus and ignores repeated presses", async () => {
+  handClock();
+  const ready = heldPdf();
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400, 1);
+  const download = screen.getByRole("button", { name: "Download PDF" });
+  act(() => download.focus());
+  fireEvent.click(download);
+  expect(download).not.toBeDisabled();
+  expect(download).toHaveAttribute("aria-busy", "true");
+  expect(download).toHaveFocus();
+  fireEvent.click(download);
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  await act(async () => ready());
+  expect(download).toHaveFocus();
+  expect(clicked).toHaveLength(1);
+});
+
+test("a large statement's desktop Share opens WhatsApp within the press before the PDF is made", async () => {
+  handClock();
+  const ready = heldPdf();
+  const open = vi.spyOn(window, "open").mockReturnValue({ opener: {} } as Window);
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400, 1);
+  fireEvent.click(screen.getByRole("button", { name: "Share PDF" }));
+  expect(open).toHaveBeenCalledWith("https://wa.me/919829041122", "_blank");
+  expect(clicked).toEqual([]);
+  await act(async () => ready());
+  expect(clicked).toEqual(["Anil-Gupta_statement_FY-2026-27.pdf"]);
+  expect(open).toHaveBeenCalledTimes(1);
 });
