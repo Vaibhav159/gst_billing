@@ -6,7 +6,7 @@ import { serve } from "@/test/server";
 import { api } from "./client";
 import { problemOf } from "./errors";
 import { saveFile } from "@/core/print/files";
-import { auditParams, useAuditExport, useAuditLog, type AuditEntry, type AuditPage } from "./audit";
+import { auditParams, useAuditExport, useAuditLog, useAuditAction, useAuditRestoreEntry, invalidateRecords, type AuditEntry, type AuditPage } from "./audit";
 
 vi.mock("@/core/print/files", () => ({ saveFile: vi.fn() }));
 export const ENTRY: AuditEntry = {
@@ -62,6 +62,55 @@ test("exports the active filters through the API, then invalidates the new downl
   expect(calls[0].params).toEqual({ kind: "records", group: "change", q: "Priya", by: "none" });
   expect(saveFile).toHaveBeenCalledWith(csv, expect.stringMatching(/^Audit-log_\d{4}-\d{2}-\d{2}\.csv$/));
   expect(qc.getQueryState(["audit", "list", {}])?.isInvalidated).toBe(true);
+});
+
+
+test("audit actions send no body, keep server words, and invalidate every affected cache", async () => {
+  const calls = serve({ "POST audit/9012/revert/": { entry: { ...ENTRY, result: "reverted", can: null }, new_entry: { ...ENTRY, id: 9013 }, link: "/customers/7" } });
+  const { qc, wrapper } = setup();
+  for (const root of ["sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "audit", "drafts"]) qc.setQueryData([root, "list"], []);
+  qc.setQueryData(["customers", "one", 7], { name: "Priya" });
+  const { result } = renderHook(() => useAuditAction(), { wrapper });
+  await act(async () => { await result.current.mutateAsync({ id: 9012, kind: "revert" }); });
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ method: "POST", url: "audit/9012/revert/", data: undefined });
+  expect(qc.getQueryCache().getAll().every((q) => q.state.isInvalidated)).toBe(true);
+  await invalidateRecords(qc);
+});
+
+test("a raced refusal leaves caches unchanged and carries the exact server words", async () => {
+  const calls = serve({ "POST audit/9012/revert/": () => ({ status: 409, data: { code: "changed_since", detail: "Phone changed again since. Revert the later change first." } }) });
+  const { qc, wrapper } = setup();
+  qc.setQueryData(["customers", "one", 7], { name: "Priya" });
+  const { result } = renderHook(() => useAuditAction(), { wrapper });
+  await act(async () => { await expect(result.current.mutateAsync({ id: 9012, kind: "revert" })).rejects.toMatchObject({ response: { data: { code: "changed_since" } } }); });
+  expect(qc.getQueryState(["customers", "one", 7])?.isInvalidated).toBe(false);
+  expect(calls).toHaveLength(1);
+});
+
+test("restore links resolve a bin id, not an invoice id, through bounded pages", async () => {
+  const calls = serve({
+    "GET bin/": ({ params }: { params: Record<string, unknown> }) => ({ status: 200, data: { count: 101, next: params.page === 1 ? "/api/bin/?page=2" : null, results: params.page === 1 ? [{ id: 205, original_id: 999 }] : [{ id: 11, original_id: 205, invoice_number: "KGH/2026-27/31", invoice_date: "2026-10-04", customer: { id: 8, name: "Priya Sharma" }, total_amount: "492645.00", deleted_at: "2026-10-07T12:00:00+05:30", deleted_by: { id: 1, name: "Kailash Mehta" } }] } }),
+    "GET audit/": { ...PAGE, results: [{ ...ENTRY, entity_id: 205, kind: "sales", can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "October's sales go up." } }] },
+  });
+  const { wrapper } = setup();
+  const { result } = renderHook(() => useAuditRestoreEntry(11, true), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data?.entry.entity_id).toBe(205);
+  expect(result.current.data?.record.total).toBe(49264500);
+  expect(calls.map((c) => [c.url, c.params])).toEqual([
+    ["bin/", { page: 1, page_size: 100 }], ["bin/", { page: 2, page_size: 100 }],
+    ["audit/", { entity_id: 205, kind: "sales", group: "delete", page: 1, page_size: 30 }],
+  ]);
+});
+
+test("invalid restore links and a person without undo permission never read the bin", async () => {
+  const calls = serve({});
+  const { wrapper } = setup();
+  renderHook(() => useAuditRestoreEntry(NaN, true), { wrapper });
+  renderHook(() => useAuditRestoreEntry(11, false), { wrapper });
+  await act(async () => {});
+  expect(calls).toHaveLength(0);
 });
 
 
