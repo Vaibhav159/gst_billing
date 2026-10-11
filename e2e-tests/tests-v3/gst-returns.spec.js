@@ -139,6 +139,7 @@ test("GST figures, portal sections and WCAG 2.2 AA in both themes", async ({ pag
     await expect(line(page, "Net credit", phone)).toContainText(money(g3.t4c.total));
     await expect(line(page, "Credit not allowed", phone)).toContainText("4(B)(1)");
     await expect(line(page, "Credit too late to claim", phone)).toContainText("4(D)(2)");
+    await expect(page.locator("#gst-ledger")).toContainText("Interest in the GSTR-3B JSON: worked out to today; check on the portal.");
     await expect(page.locator("html")).toHaveClass(theme === "obsidian" ? "" : "theme-pearl");
     expect(await measure(page)).toEqual([]);
     const b2cl = await section(page, "B2CL bills", phone);
@@ -147,7 +148,17 @@ test("GST figures, portal sections and WCAG 2.2 AA in both themes", async ({ pag
     await expect(b2cl).toContainText(money(g1.b2cl[0].total));
     await closeSheet(page, phone);
     const hsn = await section(page, "HSN summary", phone);
-    expect(g1.hsn.b2b.length + g1.hsn.b2c.length, "positive-sales fixture must exercise HSN rows").toBeGreaterThan(0);
+    const hsnRows = g1.hsn.data ?? [...g1.hsn.b2b, ...g1.hsn.b2c];
+    expect(hsnRows.length, "positive-sales fixture must exercise HSN rows").toBeGreaterThan(0);
+    for (const row of hsnRows) {
+      expect(row.quantity, "P3-15: the server sends the portal quantity with two decimals").toMatch(/^-?\d+\.\d{2}$/);
+      await expect(hsn).toContainText(phone ? `${row.uqc} · ${row.quantity}` : row.quantity);
+    }
+    if (g1.hsn.data !== undefined) {
+      await expect(hsn.getByRole("heading", { name: "All buyers" })).toBeVisible();
+      await expect(hsn.getByRole("heading", { name: /B2B · bills/ })).toHaveCount(0);
+    }
+    await expect(hsn).toContainText("From May 2025, B2B and B2C are listed apart");
     await expect(hsn).toContainText("PCS for pieces, NOS for numbers, CTM for carats");
     await expect(hsn).not.toContainText("CTM, which is centimetres");
     expect(await measure(page)).toEqual([]);

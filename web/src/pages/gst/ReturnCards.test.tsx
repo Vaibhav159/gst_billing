@@ -22,7 +22,7 @@ const sections = {
   b2cs: [{ place_of_supply: "08", place_of_supply_name: "RAJASTHAN", interstate: false, rate: "0.25", bills: 1, taxable: 40000, igst: 0, cgst: 50, sgst: 50 }],
   nil: [{ supply: "INTRAB2C", bills: 1, value: 120000 }],
   by_rate: [{ rate: "0.25", taxable: 40000, igst: 0, cgst: 50, sgst: 50, tax: 100, value: 40100, bills: 1 }],
-  hsn: { b2b: [], b2c: [{ hsn: "710239", description: "Diamonds", uqc: "CTM", quantity: "6.400", rate: "0.25", taxable: 40000, igst: 0, cgst: 50, sgst: 50, service: false, bills: 1 }] },
+  hsn: { b2b: [], b2c: [{ hsn: "710239", description: "Diamonds", uqc: "CTM", quantity: "6.40", rate: "0.25", taxable: 40000, igst: 0, cgst: 50, sgst: 50, service: false, bills: 1 }] },
   docs: [{ from: "KGH/2026-27/17", to: "KGH/2026-27/34", total: 18, cancelled: 1, net: 17 }],
   docs_notes: ["Numbers used in another month of the year (a back-dated bill) split the series into 2 rows, so nothing counts as cancelled twice."],
   cancelled: [{ bill: { id: null, bin_id: 4, invoice_number: "KGH/2026-27/27", invoice_date: "2026-09-24", customer_name: "Walk-in Customer", status: "deleted" }, kind: "deleted", total: 12500, reason: "Entered twice by mistake", on: "2026-10-03" }],
@@ -75,7 +75,7 @@ it("keeps the diamond slab at 0.25%, displays nil Table 8, and exposes all three
 it("keeps CTM and exact filed quantity; exposes documents notes and deleted bill reasons", () => {
   const first = renderApp(<Gstr1Card data={sections} month={month()} section="hsn" onSection={vi.fn()} />);
   expect(screen.getByText("CTM")).toBeVisible();
-  expect(screen.getByText("6.400")).toBeVisible();
+  expect(screen.getByText("6.40")).toBeVisible();
   expect(screen.getByText(/PCS for pieces, NOS for numbers, CTM for carats/)).toBeVisible();
   expect(screen.queryByText(/no carat unit/)).not.toBeInTheDocument();
   first.unmount();
@@ -94,7 +94,7 @@ it("shows a phone HSN sheet with label/value lists and no wide table", () => {
   fireEvent.click(screen.getByRole("button", { name: /HSN summary/ }));
   act(() => vi.advanceTimersByTime(400));
   const sheet = screen.getByRole("dialog", { name: "HSN summary" });
-  expect(within(sheet).getByText("CTM · 6.400")).toBeVisible();
+  expect(within(sheet).getByText("CTM · 6.40")).toBeVisible();
   expect(within(sheet).queryByRole("table")).not.toBeInTheDocument();
 });
 
@@ -239,4 +239,33 @@ it.each(["b2b", "b2cl", "cancelled"] as const)("routes deleted %s references to 
   delete (bill as { bin_id?: number }).bin_id;
   renderApp(<Gstr1Card data={data} month={month()} section={section} onSection={vi.fn()} asFiled />);
   expect(screen.queryByRole("link", { name: bill.invoice_number })).not.toBeInTheDocument();
+});
+
+
+it.each([false, true])("shows April's combined portal HSN rows and exact two-decimal quantities (phone=%s)", (phone) => {
+  const april = month({ month: "2025-04", fy: "2025-26" });
+  const data = { ...sections, hsn: { b2b: [], b2c: [], data: [
+    { ...sections.hsn.b2c[0], hsn: "711319", description: "Gold jewellery", uqc: "GMS", quantity: "512.35", taxable: 100000, igst: 0, cgst: 1500, sgst: 1500, rate: "3" },
+    { ...sections.hsn.b2c[0], hsn: "9988", description: "Making service", uqc: "NA", quantity: "0.00", service: true },
+  ] } };
+  if (phone) { vi.useFakeTimers(); (window as unknown as { __phone: boolean }).__phone = true; }
+  renderApp(<Gstr1Card data={data} month={april} section="hsn" onSection={vi.fn()} phone={phone} />);
+  if (phone) {
+    expect(screen.getByRole("button", { name: "HSN summary 2" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "HSN summary 2" }));
+    act(() => vi.advanceTimersByTime(400));
+  } else expect(screen.getByRole("tab", { name: "HSN 2" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "All buyers" })).toBeVisible();
+  expect(screen.getByText(phone ? "GMS · 512.35" : "512.35")).toBeVisible();
+  expect(screen.getByText(phone ? "NA · 0.00" : "0.00")).toBeVisible();
+  expect(screen.queryByRole("heading", { name: /B2B · bills/ })).not.toBeInTheDocument();
+  expect(screen.getByText(/From May 2025, B2B and B2C are listed apart/)).toBeVisible();
+  expect(screen.queryByText(/512.350/)).not.toBeInTheDocument();
+  if (!phone) expect(screen.getByRole("table", { name: /HSN totals/ })).toHaveTextContent("₹1,400.00₹0.00₹15.50₹15.50");
+  else expect(screen.getByText("₹1,400.00")).toBeVisible();
+});
+
+it("labels the downloadable GSTR-3B interest for the CA to check on the portal", () => {
+  renderApp(<Gstr3bCard month={month()} data={ledger()} />);
+  expect(screen.getByText("Interest in the GSTR-3B JSON: worked out to today; check on the portal.")).toBeVisible();
 });

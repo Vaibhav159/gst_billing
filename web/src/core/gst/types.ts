@@ -32,7 +32,7 @@ export type Gstr1 = { b2b: (Figures & { bill: BillRef; customer: Person & { gst_
   b2cl: { bill: BillRef; customer: Person; place_of_supply: string; place_of_supply_name: string; total: number; rates: { rate: string; taxable: number; igst: number }[] }[];
   b2cs: (Omit<Figures, 'total'> & { place_of_supply: string; place_of_supply_name: string; interstate: boolean; rate: string; bills: number })[];
   nil: { supply: string; bills: number; value: number }[]; by_rate: (Omit<Figures, 'total'> & { rate: string; tax: number; value: number; bills: number })[];
-  hsn: { b2b: HsnRow[]; b2c: HsnRow[] }; docs: { from: string; to: string; total: number; cancelled: number; net: number }[]; docs_notes: string[];
+  hsn: { b2b: HsnRow[]; b2c: HsnRow[]; data?: HsnRow[] }; docs: { from: string; to: string; total: number; cancelled: number; net: number }[]; docs_notes: string[];
   cancelled: { bill: BillRef; kind: 'cancelled' | 'deleted'; total: number; reason: string; on: string | null }[]; amendments: { b2ba: number; b2cla: number; b2csa: number } };
 export type Gstr3b = { month: string; filed: boolean; as_filed_at: string | null; t31a: Figures & { bills: number }; t31c: { taxable: number };
   amendments: { months: string[]; output: Heads; credit: Heads } | null; t32: { place_of_supply: string; place_of_supply_name: string; bills: number; taxable: number; igst: number }[];
