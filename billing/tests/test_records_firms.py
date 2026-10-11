@@ -241,13 +241,27 @@ class FirmWriteTests(TestCase):
         draft = SaleDraft.objects.create(id=uuid.uuid4(), business=old, data={})
         response = self.client.delete(f"/api/firms/{old.pk}/")
         self.assertEqual((response.status_code, response.data["code"], response.data["uses"]["drafts"]), (409, "in_use", 1))
+        self.assertEqual(response.data["detail"], f"{old.name} has 1 sales draft, so it can't be deleted. "
+                         "Bills, drafts and purchase photos keep their firm.")
         draft.delete()
         capture = InwardCapture.objects.create(business=old, image="inward/test.png")
-        self.assertEqual(self.client.delete(f"/api/firms/{old.pk}/").status_code, 409)
+        response = self.client.delete(f"/api/firms/{old.pk}/")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["detail"], f"{old.name} has 1 purchase photo, so it can't be deleted. "
+                         "Bills, drafts and purchase photos keep their firm.")
         capture.status = "converted"
         capture.save()
         self.assertEqual(self.client.delete(f"/api/firms/{old.pk}/").status_code, 409)
         capture.delete()
+        from billing.services.firms import assert_firm_unused, firm_uses
+        from billing.refusals import Refusal
+        for uses, words in (({"bin": 1}, "1 bill in the bin"), ({"sales": 2, "cancelled": 1, "purchases": 1},
+                            "2 sales bills, 1 cancelled bill and 1 purchase bill"), ({"drafts": 2, "captures": 3},
+                            "2 sales drafts and 3 purchase photos")):
+            with self.subTest(uses=uses), self.assertRaises(Refusal) as caught:
+                assert_firm_unused(old, {**firm_uses(old), **uses})
+            self.assertEqual(caught.exception.detail["detail"], f"{old.name} has {words}, so it can't be deleted. "
+                             "Bills, drafts and purchase photos keep their firm.")
         response = self.client.delete(f"/api/firms/{old.pk}/")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertFalse(Business.objects.filter(pk=old.pk).exists())

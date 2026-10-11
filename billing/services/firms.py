@@ -208,8 +208,14 @@ def assert_firm_unused(business, uses=None, history_only=False):
         raise Refusal(f"{business.name} has filing records or opening credit, so it can't be deleted. "
                       "Its GST history keeps its firm.", "in_use", uses=uses)
     if not history_only and any(uses.values()):
-        raise Refusal(f"{business.name} has {uses['sales'] + uses['cancelled']} sales bills and {uses['purchases']} purchase bills, "
-                      "so it can't be deleted. Bills keep their firm.", "in_use", uses=uses)
+        parts = [f"{count} {label if count == 1 else plural}" for key, label, plural in (
+            ("sales", "sales bill", "sales bills"), ("cancelled", "cancelled bill", "cancelled bills"),
+            ("purchases", "purchase bill", "purchase bills"), ("bin", "bill in the bin", "bills in the bin"),
+            ("drafts", "sales draft", "sales drafts"), ("captures", "purchase photo", "purchase photos"))
+                 if (count := uses.get(key))]
+        words = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+        raise Refusal(f"{business.name} has {words}, so it can't be deleted. "
+                      "Bills, drafts and purchase photos keep their firm.", "in_use", uses=uses)
     return uses
 
 
