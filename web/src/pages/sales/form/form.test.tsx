@@ -459,7 +459,7 @@ test("editing keeps the bill's number unless it's renumbered or the bill moves; 
   fakeToday();
   const { calls } = formServer();
   const s = startEdit(toBillDetail(wireDetail()));
-  const { result } = renderHook(() => useBillForm(s), { wrapper: inRouter });
+  const { result, unmount } = renderHook(() => useBillForm(s), { wrapper: inRouter });
   await waitFor(() => expect(result.current.firms).toHaveLength(2));
   expect(result.current).toMatchObject({ keep: true, numberText: "KGH/2026-27/31", stored: "KGH/2026-27/31" });
   expect(result.current.checks[0].text).toBe("Keeps its number KGH/2026-27/31");
@@ -473,13 +473,16 @@ test("editing keeps the bill's number unless it's renumbered or the bill moves; 
   expect(calls.find((c) => c.method === "PUT")).toMatchObject({ url: "sales/412/", body: expect.objectContaining({ invoice_number: "KGH/2026-27/31", payment_mode: "bank" }) });
   expect(calls.find((c) => c.method === "PUT")?.body).not.toHaveProperty("draft_id");
   expect(result.current.savedTo).toBe("/sales/412?saved=edit");
-  act(() => { result.current.setNumber("35"); });
+  unmount();
+  const reopened = renderHook(() => useBillForm(s), { wrapper: inRouter });
+  await waitFor(() => expect(reopened.result.current.firms).toHaveLength(2));
+  act(() => { reopened.result.current.setNumber("35"); });
   await act(async () => { vi.advanceTimersByTime(400); });
   await waitFor(() => expect(calls.some((c) => c.url === "sales/check-number/" && c.params.exclude_id === 412)).toBe(true));
-  await waitFor(() => expect(result.current.checks[0]).toEqual({ key: "num", ok: true, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/35" }));
-  act(() => { result.current.setFirm(2); });
-  await waitFor(() => expect(result.current.moved).toBe(true));
-  expect(result.current.firmHint).toBe("Moves the bill to MEERA ORNAMENTS as 35. KGH/2026-27/31 is left unused.");
+  await waitFor(() => expect(reopened.result.current.checks[0]).toEqual({ key: "num", ok: true, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/35" }));
+  act(() => { reopened.result.current.setFirm(2); });
+  await waitFor(() => expect(reopened.result.current.moved).toBe(true));
+  expect(reopened.result.current.firmHint).toBe("Moves the bill to MEERA ORNAMENTS as 35. KGH/2026-27/31 is left unused.");
 });
 
 test("a registered buyer is placed by the GSTIN; a GSTIN whose state GST's table doesn't have is asked about, never taken as the firm's", async () => {
@@ -847,8 +850,8 @@ test("a new bill saved before it was ever kept, then hidden and closed before th
   act(() => { result.current.form.setPayment("cash"); });
   act(() => { expect(result.current.form.openReview()).toEqual({ ok: true }); });
   await act(async () => { await result.current.form.save(); });
-  // saved, with no draft of its own: the drafts layer has no id to refuse, so only away()'s guards stop a keep
-  expect(result.current.form).toMatchObject({ savedTo: "/sales/501?saved=new", draftId: null });
+  // Even a fast save owns a draft id; neither leaving nor its timer can keep the saved bill again.
+  expect(result.current.form).toMatchObject({ savedTo: "/sales/501?saved=new", draftId: expect.any(String) });
   hideAndClose();
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   expect(keptDrafts()).toEqual([]);
@@ -891,7 +894,7 @@ test("T9 leftovers: a paper date typed before the book answers stays typed", asy
   await user.type(date, "15 Sep 2026");
   await user.tab();
   expect(date).toHaveValue("15 Sep 2026");
-  await act(async () => { answer(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); answer(); });
   await waitFor(() => expect(screen.getByLabelText("Number on the paper bill")).toHaveValue("34"));
   expect(date).toHaveValue("15 Sep 2026");
   expect(screen.getByText(/KIRAN GOLD HOUSE · No./)).toHaveTextContent("15 Sep 2026");

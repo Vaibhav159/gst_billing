@@ -41,10 +41,10 @@ function searchFailed(p: ApiProblem): string {
  * The search for what's typed, once typing pauses (from 2 characters). rows: its answer for exactly what's typed, null
  * until that has come; note: what to say meanwhile, or that it didn't work (rows are then empty).
  */
-export function useTypedSearch(typed: string, size?: number): { t: string; rows: CustomerRow[] | null; note: string } {
+export function useTypedSearch(typed: string, size?: number, enabled = true): { t: string; rows: CustomerRow[] | null; note: string } {
   const t = typed.trim();
   const term = useDebounced(t);
-  const search = useCustomerSearch(term, { size });
+  const search = useCustomerSearch(term, { size, enabled });
   const offline = useNetwork() === "offline";
   if (!t) return { t, rows: null, note: "" };
   if (t.length < 2) return { t, rows: null, note: "Keep typing to search" };
@@ -112,18 +112,20 @@ export type CustomerPickerProps = {
   /** The box's id; its error and hint are `${id}-error` and `${id}-hint`. */
   id?: string;
   autoFocus?: boolean;
+  /** Pause reads while the bill saves, keeping the customers already shown. */
+  enabled?: boolean;
 };
 
 /** The bill form's Customer field, on a desktop (PROTO BillForm.jsx CustomerField). */
-export function CustomerPicker({ firmId, value, onPick, onNew, error, id = "bf-customer", autoFocus }: CustomerPickerProps) {
+export function CustomerPicker({ firmId, value, onPick, onNew, error, id = "bf-customer", autoFocus, enabled = true }: CustomerPickerProps) {
   const { firms } = useFirms();
   const [q, setQ] = useState(value ? value.name : "");
   const [editing, setEditing] = useState(false);
   useEffect(() => { if (!editing) setQ(value ? value.name : ""); }, [value, editing]);
   const typed = editing && q !== (value?.name ?? "") ? q : "";
-  const search = useTypedSearch(typed);
-  const walkin = useWalkin();
-  const recent = useRecentCustomers(firmId);
+  const search = useTypedSearch(typed, undefined, enabled);
+  const walkin = useWalkin(enabled);
+  const recent = useRecentCustomers(firmId, enabled);
   const options = useMemo(() => customerOptions({ typed, firmId, firms, walkin: walkin.data ?? null, recent: recent.data ?? NO_ROWS, matches: search.rows, note: search.note }),
     [typed, firmId, firms, walkin.data, recent.data, search.rows, search.note]);
   // picked by Enter: onPick runs inside the key press, so the bill form can move focus before the next key
@@ -144,17 +146,17 @@ export function CustomerPicker({ firmId, value, onPick, onNew, error, id = "bf-c
   );
 }
 
-export type CustomerSheetProps = { open: boolean; onClose: () => void; firmId: number | null; homeState: string; value: Customer | null; onPick: (c: Customer) => void };
+export type CustomerSheetProps = { open: boolean; onClose: () => void; firmId: number | null; homeState: string; value: Customer | null; onPick: (c: Customer) => void; enabled?: boolean };
 
 /** The phone's customer sheet: the list first (walk-in and recent), a search, and a new customer without leaving the bill. */
-export function CustomerSheet({ open, onClose, firmId, homeState, value, onPick }: CustomerSheetProps) {
+export function CustomerSheet({ open, onClose, firmId, homeState, value, onPick, enabled = true }: CustomerSheetProps) {
   const [mode, setMode] = useState<"list" | "new">("list");
   const [q, setQ] = useState("");
   const [typed, setTyped] = useState(false);
   useEffect(() => { if (open) { setMode("list"); setQ(""); setTyped(false); } }, [open]);
-  const search = useTypedSearch(q, 12);
-  const walkin = useWalkin();
-  const recent = useRecentCustomers(firmId);
+  const search = useTypedSearch(q, 12, enabled);
+  const walkin = useWalkin(enabled);
+  const recent = useRecentCustomers(firmId, enabled);
   const pick = (c: Customer) => { onPick(c); onClose(); };
   const t = search.t;
   const row = (c: Customer, last?: string) => (

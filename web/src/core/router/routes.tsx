@@ -39,7 +39,6 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 /** Every page in the prototype (PROTO/pages/<area>/index.js) that a later part builds, by area. Sign-in and More are already built (below). */
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
-  sales: [],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
     "/capture", "/import", "/suppliers", "/suppliers/:id",
@@ -57,7 +56,7 @@ const PAGES: Record<string, string[]> = {
 
 /** The prototype's `hideNav`: forms and print, where the phone's tabs make way. Task 16's PhoneShell reads `handle.hideNav`. */
 const HIDE_NAV = new Set([
-  "/sales/new", "/sales/:id/edit", "/sales/:id/print", "/purchases/new", "/purchases/:id/edit", "/purchases/inbox/:id",
+  "/sales/:id/print", "/purchases/new", "/purchases/:id/edit", "/purchases/inbox/:id",
   "/products/new", "/products/:id/edit", "/firms/new", "/firms/:id/edit", "/e/new", "/e/new/items", "/e/customers/new", "/e/customers/:id/edit",
 ]);
 

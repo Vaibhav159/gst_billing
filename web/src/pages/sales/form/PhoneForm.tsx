@@ -1,7 +1,7 @@
 // The bill form on a phone (PROTO pages/sales/BillForm.jsx:956-1126): one guided page of cards, a sheet for the firm,
 // number and date, the customer (1C's sheet: the list first, not the keyboard) and each item, and the total always in
 // reach in the action bar beside Check and save.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useNavigate } from "react-router";
 import { Check, ChevronRight, MoreHorizontal, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
@@ -10,15 +10,15 @@ import { date, plural, qty as qtyLabel } from "@/core/format";
 import { rateText } from "@/core/sales/words";
 import { Avatar, Button, Card, Dialog, Field, IconButton, Menu, Money, Page, Segmented, Textarea, type MenuItem } from "@/core/ui";
 import { CustomerFixSheet, CustomerSheet, customerLine, homeState, type FixField } from "@/pages/customers/forBills";
-import { checksWithFixes } from "./DesktopForm";
 import { DraftBanners, DraftStatus } from "./drafts";
 import { CheckList, focusNow, PayPicker } from "./fields";
 import { ItemSheet, type ItemSheetProps } from "./ItemSheet";
 import { slabOf, type FormLine } from "./model";
-import { billCloseTo, DateBlock, NumberField, Origins, PaperSwitch, PaymentNote, PlaceOfSupply, saveFromReview, SummaryFigures } from "./parts";
+import { billCloseTo, checksWithFixes, DateBlock, NumberField, Origins, PaperSwitch, PaymentNote, PlaceOfSupply, saveFromReview, SummaryFigures } from "./parts";
 import { useSaleProducts } from "./products";
 import { focusReview, Review } from "./Review";
 import { lineWarning, paymentNote, perWord } from "./rules";
+import { useFormShortcuts } from "./shortcuts";
 import type { BillFormApi } from "./useBillForm";
 import type { DraftKeeping } from "./useDraftKeeping";
 
@@ -54,16 +54,7 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
     focusNow(next ? `bfp-item-${next.key}` : "bfp-add");
   };
   const close = () => navigate(billCloseTo(F));
-  // A narrow desktop has a keyboard too. The review handles its own Save; sheets and menus keep the shortcut held.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s") return;
-      e.preventDefault();
-      if (!F.reviewOpen && !document.querySelector('[role="dialog"]:not([data-closing]), [role="menu"]:not([data-closing])')) tryReview();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  useFormShortcuts(F.reviewOpen, tryReview);
   const menu: MenuItem[] = [
     { label: "Firm, number and date", icon: Pencil, onSelect: () => setSheet({ kind: "info" }) },
     { divider: true },
@@ -140,7 +131,7 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
       </div>
 
       <InfoSheet F={F} open={sheet?.kind === "info"} numberFocus={sheet?.kind === "info" && sheet.numberFocus} dateFocus={sheet?.kind === "info" && sheet.dateFocus} onClose={() => setSheet(null)} />
-      <CustomerSheet open={sheet?.kind === "customer"} onClose={() => setSheet(null)} firmId={F.f.firmId} homeState={homeState(F.firms, F.f.firmId)} value={F.cust} onPick={F.setCustomer} />
+      <CustomerSheet open={sheet?.kind === "customer"} onClose={() => setSheet(null)} firmId={F.f.firmId} homeState={homeState(F.firms, F.f.firmId)} value={F.cust} onPick={F.setCustomer} enabled={!F.saving && !F.savedTo} />
       <ItemSheet F={F} open={sheet?.kind === "item"} lineKey={sheet?.kind === "item" ? sheet.key : null} again={sheet?.kind === "item" ? sheet.n : 0} products={products.data} productsError={products.isError}
         focusField={sheet?.kind === "item" ? sheet.focusField : undefined}
         onClose={() => setSheet(null)} onAgain={() => setSheet({ kind: "item", key: null, n: ++again.current })} onRemove={removeItem} />

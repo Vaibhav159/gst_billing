@@ -39,6 +39,31 @@ test("every product is asked for once, then searched here: every word typed, nam
   expect(quickProducts(all, 2).map((p) => p.id)).toEqual([7, 5]);
 });
 
+test("a paper run reuses products for 30 minutes; time alone never asks again", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
+  const shared = wrapper();
+  const { calls } = salesServer([["GET", "products/", () => ({ count: 1, results: [RING] })]]);
+  const first = renderHook(() => useSaleProducts(), { wrapper: shared });
+  try {
+    await waitFor(() => expect(first.result.current.data).toHaveLength(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(29 * 60_000); });
+    const second = renderHook(() => useSaleProducts(), { wrapper: shared });
+    expect(second.result.current.data).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    second.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(calls).toHaveLength(1);
+    const third = renderHook(() => useSaleProducts(), { wrapper: shared });
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await waitFor(() => expect(third.result.current.isFetching).toBe(false));
+    third.unmount();
+  } finally {
+    first.unmount();
+    vi.useRealTimers();
+  }
+});
+
 test("the owner keeps an item for the next bill: v2's products/ with the rate as a fraction", async () => {
   let listed: object[] = [RING];
   const { calls } = salesServer([

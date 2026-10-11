@@ -45,14 +45,14 @@ test("Add and next item keeps the first item and opens the common list with empt
   const sheet = await openItem(user);
   expect(within(sheet).getByRole("group", { name: "Common products" })).toBeInTheDocument();
   expect(within(sheet).getByLabelText("Search products")).not.toHaveFocus();
-  await user.click(within(sheet).getByRole("button", { name: "Gold Ring" }));
+  await user.click(within(sheet).getByRole("button", { name: "Gold Ring 22K" }));
   await user.keyboard("2{Enter}6500");
   await user.click(within(sheet).getByRole("button", { name: "Add and next item" }));
   const next = await screen.findByRole("dialog", { name: "Add item 2" });
   expect(within(next).getByRole("group", { name: "Common products" }).parentElement).toHaveFocus();
   expect(savedLines()).toMatchObject([{ name: "Gold Ring 22K", qty: 2, rate: "6500" }]);
   await pass();
-  await user.click(within(next).getByRole("button", { name: "Gold Necklace" }));
+  await user.click(within(next).getByRole("button", { name: "Gold Necklace 22K" }));
   expect(within(next).getByLabelText("Weight in grams")).toHaveValue("");
   expect(within(next).getByLabelText("Rate per gram")).toHaveValue("");
   await user.keyboard("3{Enter}6100{Enter}");
@@ -65,7 +65,7 @@ test("closing a typed item asks; Keep editing keeps its weight and Discard leave
   const user = fakeToday();
   formServer();
   const sheet = await openItem(user);
-  await user.click(within(sheet).getByRole("button", { name: "Gold Ring" }));
+  await user.click(within(sheet).getByRole("button", { name: "Gold Ring 22K" }));
   await user.keyboard("4.5{Escape}");
   expect(within(sheet).getByRole("alert")).toHaveTextContent("Discard this item?");
   await user.click(within(sheet).getByRole("button", { name: "Keep editing" }));
@@ -103,7 +103,7 @@ test("Change picks another product for the same saved line", async () => {
   const first = start.form.lines[0];
   const sheet = await openItem(user, start, true);
   await user.click(within(sheet).getByRole("button", { name: "Change" }));
-  await user.click(within(sheet).getByRole("button", { name: "Gold Necklace" }));
+  await user.click(within(sheet).getByRole("button", { name: "Gold Necklace 22K" }));
   await user.type(within(sheet).getByLabelText("Rate per gram"), "7000");
   await user.click(within(sheet).getByRole("button", { name: "Save item" }));
   await pass();
@@ -211,7 +211,7 @@ test("a save refusal shows each line field in its sheet, clearing each server er
   expect(within(sheet).queryByText("Shorten this item note.")).not.toBeInTheDocument();
   expect(within(sheet).getByText("Confirm this rate.")).toBeInTheDocument();
   await user.click(within(sheet).getByRole("button", { name: "Change" }));
-  await user.click(within(sheet).getByRole("button", { name: "Gold Necklace" }));
+  await user.click(within(sheet).getByRole("button", { name: "Gold Necklace 22K" }));
   expect(within(sheet).queryByText("Use the printed item name.")).not.toBeInTheDocument();
 });
 
@@ -225,7 +225,7 @@ test("reopening after Add to bill never focuses the previous weight and Close re
   await user.click(screen.getByRole("button", { name: "Add item" }));
   let sheet = await screen.findByRole("dialog", { name: "Add item 1" });
   await pass();
-  await user.click(within(sheet).getByRole("button", { name: "Gold Ring" }));
+  await user.click(within(sheet).getByRole("button", { name: "Gold Ring 22K" }));
   await user.keyboard("2{Enter}6500{Enter}");
   await pass();
   const opener = screen.getByRole("button", { name: "Add another item" });
@@ -277,7 +277,7 @@ test("Add and next item swallows a second tap on the new product list until its 
   const user = fakeToday();
   formServer();
   const sheet = await openItem(user);
-  await user.click(within(sheet).getByRole("button", { name: "Gold Ring" }));
+  await user.click(within(sheet).getByRole("button", { name: "Gold Ring 22K" }));
   await user.keyboard("2{Enter}6500");
   fireEvent.click(within(sheet).getByRole("button", { name: "Add and next item" }));
   const next = screen.getByRole("dialog", { name: "Add item 2" });

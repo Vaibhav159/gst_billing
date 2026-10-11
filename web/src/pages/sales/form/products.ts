@@ -1,13 +1,18 @@
-// Products for the bill form (v2's products/ endpoint, read as it is until part 4's Products screens): every product, asked
-// for once a visit and searched here as a person types, so a product picked by Enter straight after typing is never one
+// Products for the bill form (v2's products/ endpoint, read as it is until part 4's Products screens): every product, kept
+// for 30 minutes and searched here as a person types, so a product picked by Enter straight after typing is never one
 // the server hasn't answered for yet. Making charges are inside the rate (part 1 design §2), so a product brings its
 // name, HSN code, GST rate and unit; the rate is typed as written on the paper bill.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
-import { pct } from "@/core/format";
+import { pct, UNITS } from "@/core/format";
 
 /** gst_percent: v2 keeps a fraction ("0.0300"); this is the percent the bill takes ("3", "0.25"). */
 export type SaleProduct = { id: number; name: string; hsn_code: string; gst_percent: string | null; unit: string; description: string; usage: number };
+
+export const UNIT_OPTIONS = UNITS.map((u) => ({ value: u.value, label: u.value }));
+
+/** The picker subtitle; the phone uses its unit as the final detail, the desktop its description. */
+export const productSubtitle = (p: SaleProduct, detail = p.description) => `HSN ${p.hsn_code || "missing"} · GST ${p.gst_percent != null ? `${p.gst_percent}%` : "rate not set"}${detail ? ` · ${detail}` : ""}`;
 
 /** A fraction as v2 stores it ("0.0300", 0.0025) as the percent a bill line takes ("3", "0.25"): part 0's pct without its "%". Null when it isn't a number. */
 export function percentOf(fraction: string | number | null | undefined): string | null {
@@ -26,10 +31,10 @@ export function toSaleProduct(raw: unknown): SaleProduct {
 
 export const productKeys = { all: ["products"] as const, forSale: () => ["products", "for-sale"] as const };
 
-/** Every product, once a visit (a shop has tens, not thousands): one page of 1000, by name. */
+/** Every product, kept for 30 minutes: one page of 1000, by name. */
 export function useSaleProducts() {
   return useQuery({
-    queryKey: productKeys.forSale(), staleTime: 5 * 60_000,
+    queryKey: productKeys.forSale(), staleTime: 30 * 60_000,
     queryFn: async ({ signal }) => {
       const d = (await api.get("products/", { params: { page_size: 1000, ordering: "name" }, signal })).data as { results?: unknown[] } | unknown[] | null;
       return (Array.isArray(d) ? d : d?.results ?? []).map(toSaleProduct);

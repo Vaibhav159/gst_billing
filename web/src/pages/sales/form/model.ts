@@ -93,13 +93,15 @@ export function lineFromProduct(p: SaleProduct, prev: FormLine): FormLine {
  * as 1 × its value (PROTO useBillForm.js:39-46).
  */
 export function linesFromBill(lines: Line[]): FormLine[] {
-  return lines.map((l) => {
-    const base: FormLine = { key: newKey(), savedId: l.id, productId: null, name: l.product_name, hsn: l.hsn_code, gst: l.gst_percent || null, unit: l.unit || "gms", qty: Number(l.quantity) || null, rate: l.rate, note: l.note, custom: false };
-    if (!Number(l.quantity) && !Number(l.rate) && l.taxable > 0) {
-      return { ...base, qty: 1, unit: unitDecimals(l.unit) === 0 ? l.unit : "nos", rate: paiseToDecimal(l.taxable), amountOnly: true };
-    }
-    return base;
-  });
+  return lines.map((l) => ({ key: newKey(), savedId: l.id, productId: null, name: l.product_name, hsn: l.hsn_code, gst: l.gst_percent || null, ...lineValuesFromBill(l), note: l.note, custom: false }));
+}
+
+/** Opening values also anchor an edit's comparison: normalising an old amount-only line isn't a change. */
+export function lineValuesFromBill(l: Line): Pick<FormLine, "qty" | "unit" | "rate" | "amountOnly"> {
+  if (!Number(l.quantity) && !Number(l.rate) && l.taxable > 0) {
+    return { qty: 1, unit: unitDecimals(l.unit) === 0 ? l.unit : "nos", rate: paiseToDecimal(l.taxable), amountOnly: true };
+  }
+  return { qty: Number(l.quantity) || null, unit: l.unit || "gms", rate: l.rate };
 }
 
 /**

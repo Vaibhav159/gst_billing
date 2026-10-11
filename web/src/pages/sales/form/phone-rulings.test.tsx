@@ -41,7 +41,10 @@ test("a typed-number collision opens its phone sheet before moving focus to the 
   await user.click(within(info).getByRole("button", { name: "Done" }));
   await settle();
   const review = await reviewCopy(user);
-  await user.click(within(review).getByRole("button", { name: "Save bill" }));
+  await act(async () => {
+    fireEvent.click(within(review).getByRole("button", { name: "Save bill" }));
+    await vi.advanceTimersByTimeAsync(100);
+  });
   await user.click(await within(review).findByRole("button", { name: "Change the number" }));
   info = await screen.findByRole("dialog", { name: "Firm, number and date" });
   expect(within(info).getByLabelText("Bill number")).toHaveFocus();

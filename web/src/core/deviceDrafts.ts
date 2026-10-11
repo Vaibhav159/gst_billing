@@ -3,7 +3,7 @@
 // keeps them ("Unfinished bills stay on this phone"): drafts are the shop's, not one person's, so whoever signs in next
 // on this device can finish them. A browser that refuses storage keeps them for the visit.
 import { useSyncExternalStore } from "react";
-import { toDraftData, type DraftData } from "@/core/api/drafts";
+import { toDraftData, type DraftData } from "@/core/draftData";
 import type { Person } from "@/core/sales/types";
 
 /**

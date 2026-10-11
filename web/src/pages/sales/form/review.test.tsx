@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { AxiosError } from "axios";
 import { __resetDrafts } from "@/core/api/drafts";
 import { __setNetState } from "@/core/api/network";
+import { salesKeys } from "@/core/api/sales";
 import { __resetDeviceDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail, wireFacets, wirePage, type Route } from "@/core/sales/fixtures";
 import { takeFresh } from "@/core/sales/fresh";
@@ -43,7 +44,7 @@ test("Check and save shows exactly what will be saved; How was it paid? comes fi
   await user.keyboard("{Enter}");
   await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
-    business: 3, customer: 7, invoice_number: "34", invoice_date: "2026-10-08", payment_mode: "cash", place_of_supply: "08", notes: "", paper: false, replaces: null, draft_id: null,
+    business: 3, customer: 7, invoice_number: "34", invoice_date: "2026-10-08", payment_mode: "cash", place_of_supply: "08", notes: "", paper: false, replaces: null, draft_id: expect.any(String),
   });
   // the leave-guard let go first: no "Leave without saving?" on the way
   expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
@@ -473,4 +474,124 @@ test("a month closed during save refreshes the date and removes the unfiled assu
   expect(screen.getByLabelText("Date")).toHaveAccessibleDescription(/is filed and locked/);
   expect(screen.getByRole("complementary", { name: "Bill summary" })).not.toHaveTextContent("isn't filed yet");
   expect(calls.filter((c) => c.url === "sales/" && c.params.facets)).toHaveLength(2);
+});
+
+test.each([false, true])("a filed month refusal stays on an edit's unchanged date when its refresh fails: %s", async (fails) => {
+  const user = fakeToday();
+  let closed = false;
+  const words = "October 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be changed. Have the owner unlock October 2026 in GST returns first.";
+  formServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/", ({ params }) => {
+      if (params.facets && closed && fails) return refuse(503, {});
+      return { ...wirePage([]), ...(params.facets ? { facets: { ...wireFacets(), months: [{ month: "2026-10", bills: 1, locked: closed }] } } : {}) };
+    }],
+    ["PUT", "sales/412/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", locked_period: { business: 3, year: 2026, month: 10 } }); }],
+  ]);
+  const { client } = mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { name: "Edit KGH/2026-27/31" });
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  await user.click(screen.getByRole("button", { name: "Check and save changes" }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(words);
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await settle();
+  const day = screen.getByLabelText("Date");
+  expect(day).toHaveAttribute("aria-invalid", "true");
+  expect(day).toHaveAccessibleDescription(words);
+  expect(screen.getByRole("complementary", { name: "Bill summary" })).not.toHaveTextContent("isn't filed yet");
+  // Changing payment cannot correct a closed month; a fresh answer that the owner unlocked it can.
+  await user.click(screen.getByRole("radio", { name: "Cash" }));
+  expect(day).toHaveAccessibleDescription(words);
+  closed = false;
+  await act(async () => { await client.invalidateQueries({ queryKey: ["sales", "months"] }); });
+  await settle();
+  expect(day).not.toHaveAttribute("aria-invalid", "true");
+});
+
+test("a new bill keeps the filed month refusal when its refresh fails, until the date moves to an open month", async () => {
+  const user = fakeToday();
+  let closed = false;
+  const words = "October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.";
+  const { dialog } = await review(user, [
+    ["GET", "sales/", ({ params }) => {
+      if (params.facets && closed) return refuse(503, {});
+      return { ...wirePage([]), ...(params.facets ? { facets: { ...wireFacets(), months: [{ month: "2026-10", bills: 1, locked: false }, { month: "2026-09", bills: 1, locked: false }] } } : {}) };
+    }],
+    ["POST", "sales/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", locked_period: { business: 3, year: 2026, month: 10 } }); }],
+  ]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(words);
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await settle();
+  const day = screen.getByLabelText("Date");
+  expect(day).toHaveAccessibleDescription(words);
+  expect(screen.getByRole("complementary", { name: "Bill summary" })).not.toHaveTextContent("isn't filed yet");
+  await user.clear(day);
+  await user.type(day, "30/09/2026");
+  await settle();
+  expect(day).not.toHaveAttribute("aria-invalid", "true");
+});
+
+test.each(["number_taken", "number_deleted"])("a typed number keeps the %s refusal when its check refresh fails", async (code) => {
+  const user = fakeToday();
+  let refused = false;
+  const words = "KGH/2026-27/36 can't be used. Choose another number.";
+  const { calls } = formServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/check-number/", ({ params }) => {
+      if (refused) return refuse(503, {});
+      return { invoice_number: `KGH/2026-27/${params.invoice_number}`, counter: Number(params.invoice_number), code: "", problem: "", next: { counter: 37, invoice_number: "KGH/2026-27/37" } };
+    }],
+    ["POST", "sales/", () => { refused = true; return refuse(409, { detail: words, code, next: { counter: 37, invoice_number: "KGH/2026-27/37" } }); }],
+  ]);
+  const { client } = mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await user.clear(screen.getByLabelText("Bill number"));
+  await user.type(screen.getByLabelText("Bill number"), "36");
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await within(dialog).findByRole("alert");
+  await user.click(within(dialog).getByRole("button", { name: "Change the number" }));
+  await settle();
+  const number = screen.getByLabelText("Bill number");
+  expect(calls.filter((c) => c.url === "sales/check-number/")).toHaveLength(2);
+  expect(number).toHaveAccessibleDescription(words);
+  expect(number).toHaveAttribute("aria-invalid", "true");
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  expect(number).toHaveAccessibleDescription(words);
+  // The fresh free answer supersedes the refusal without needing an unrelated edit.
+  refused = false;
+  await act(async () => { await client.invalidateQueries({ queryKey: ["sales", "check-number"] }); });
+  await settle();
+  expect(number).not.toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByRole("complementary", { name: "Bill summary" })).toHaveTextContent("is free");
+});
+
+test("a refused suggestion can save the server's offered number when the next-number refresh fails", async () => {
+  const user = fakeToday();
+  let taken = false;
+  const { calls, router, client, dialog } = await review(user, [
+    ["GET", "sales/next-number/", ({ params }) => taken ? refuse(503, {}) : wireNext(Number(params.business_id), String(params.invoice_date))],
+    ["POST", "sales/", () => {
+      if (!taken) { taken = true; return refuse(409, { code: "number_taken", detail: "KGH/2026-27/34 is already used.", next: { counter: 35, invoice_number: "KGH/2026-27/35" } }); }
+      return wireDetail({ id: 502, invoice_number: "KGH/2026-27/35" });
+    }],
+  ]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await within(dialog).findByRole("alert");
+  await waitFor(() => expect(client.getQueryState(salesKeys.nextNumber(3, "2026-10-08"))?.status).toBe("error"));
+  const retry = within(dialog).getByRole("button", { name: "Save as KGH/2026-27/35" });
+  expect(retry).toBeEnabled();
+  await user.click(retry);
+  await waitFor(() => expect(where(router)).toBe("/sales/502?saved=new"));
+  expect(posts(calls)).toEqual(["34", "KGH/2026-27/35"]);
 });

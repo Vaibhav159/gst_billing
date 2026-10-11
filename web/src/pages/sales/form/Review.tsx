@@ -18,6 +18,7 @@ import { ItemsTable, type ItemLine } from "@/pages/sales/bill/ItemsTable";
 import { Changes } from "./Changes";
 import { CheckList, focusSoon, PayPicker, type CheckRow } from "./fields";
 import { toBillInput } from "./model";
+import { isSaveKey, openFormOverlays } from "./shortcuts";
 import type { BillFormApi } from "./useBillForm";
 import { SAVE_WAITS, VISIT_ONLY } from "./useDraftKeeping";
 
@@ -69,18 +70,20 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
   useEffect(() => { if ((failed || held) && body.current) body.current.closest("[role=dialog]")?.querySelector(".overflow-y-auto")?.scrollTo({ top: 0 }); }, [failed, err, held]);
   // Save goes with such a refusal, and the cursor with it: it goes to the way on, else to Go back and edit
   useEffect(() => { if (final) (wayRef.current ?? backRef.current)?.focus(); }, [final]);
+  // A refused Save takes the cursor back to the missing choice, including another press without choosing.
+  useEffect(() => { if (err?.kind === "payment") body.current?.querySelector<HTMLElement>('#rv-pay [role="radio"][tabindex="0"]')?.focus(); }, [err]);
   // Ctrl S presses Save (as a click would: not while it's off, nor in the dialog's first moments), from the review itself
   // only: the one dialog open, or the one the cursor is in. A sheet opened over it (a PAN added from its checks) and a
   // menu keep their keys, and a key held down doesn't save the review it opened. The browser's Save page never opens
   useEffect(() => {
     if (!F.reviewOpen) return undefined;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s") return;
+      if (!isSaveKey(e)) return;
       e.preventDefault();
       if (e.repeat) return;
       const mine = body.current?.closest('[role="dialog"]');
-      const open = document.querySelectorAll('[role="dialog"]:not([data-closing])');
-      if (!mine || document.querySelector('[role="menu"]:not([data-closing])')) return;
+      const open = openFormOverlays();
+      if (!mine || open.some((el) => el.getAttribute("role") === "menu")) return;
       if ((open.length === 1 && open[0] === mine) || mine.contains(document.activeElement)) saveRef.current?.click();
     };
     window.addEventListener("keydown", onKey);
@@ -140,8 +143,8 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
         {askPay || err?.kind === "payment" ? (
           <div className={cn("rounded-ctl border px-4 py-3 flex flex-col gap-2 anim-rise", err?.kind === "payment" ? "border-neg-line bg-neg-tint" : "border-brand-line bg-brand-tint")}>
             <p id="rv-pay-label" className="font-semibold">How was it paid?</p>
-            <PayPicker labelledBy="rv-pay-label" value={F.f.payment} autoFocus onChange={(v) => { F.setPayment(v); focusSave(); }} invalid={err?.kind === "payment"} />
-            <p className={cn("text-sm", err?.kind === "payment" ? "text-neg" : "text-fg2")}>{err?.kind === "payment" ? "Pick one to save. It goes on the bill and in your cash and bank split." : "Nothing is picked for you. One tap, then Save."}</p>
+            <PayPicker id="rv-pay" labelledBy="rv-pay-label" describedBy="rv-pay-note" value={F.f.payment} autoFocus onChange={(v) => { F.setPayment(v); focusSave(); }} invalid={err?.kind === "payment"} />
+            <p id="rv-pay-note" role={err?.kind === "payment" ? "alert" : undefined} className={cn("text-sm", err?.kind === "payment" ? "text-neg" : "text-fg2")}>{err?.kind === "payment" ? "Pick one to save. It goes on the bill and in your cash and bank split." : "Nothing is picked for you. One tap, then Save."}</p>
           </div>
         ) : null}
         {F.cashOver ? (

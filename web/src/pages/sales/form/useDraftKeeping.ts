@@ -55,8 +55,8 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   const { show } = useToast();
   const keep = useKeepDraft();
   const discardDraft = useDiscardDraft();
-  useDraftSync();
   const isNew = !F.edit;
+  useDraftSync(isNew);
   const data = toDraftData(F.f, F.start.replaces);
   const sig = JSON.stringify(data);
   const hasAny = Boolean(F.f.customer || F.f.lines.some(hasContent) || F.f.notes.trim());

@@ -76,7 +76,8 @@ test("the server out of reach: it stays on this device, and when the network is 
   const { wrapper } = setup();
   // the form opens: one sync, with nothing to send yet
   renderHook(() => useDraftSync(), { wrapper });
-  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(1));
+  await act(async () => { await Promise.resolve(); });
+  expect(methods(calls, "GET")).toHaveLength(0);
   // then the server drops out as the bill is kept
   up = false;
   const keep = renderHook(() => useKeepDraft(), { wrapper });
@@ -94,7 +95,7 @@ test("the server out of reach: it stays on this device, and when the network is 
   await waitFor(() => expect(keptDraft(ID)?.synced).toBe(true));
   expect(methods(calls, "PUT")).toHaveLength(2);
   expect(keptDraft(ID)?.started_by).toEqual(RAKESH);
-  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(2));
+  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(1));
 });
 
 test("a copy of a bill finished on another device is let go; one sent since the list was read is kept", async () => {
@@ -112,6 +113,36 @@ test("a copy of a bill finished on another device is let go; one sent since the 
   await waitFor(() => expect(keptDraft("a")).toBeNull());
   expect(keptDraft("b")).not.toBeNull();
   expect(list.result.current.bills.map((b) => b.id)).toEqual(["b"]);
+});
+
+test("a sync asks again when the cached list is old, so a synced copy finished elsewhere is forgotten", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  keepOnDevice(copy({ synced: true, syncedAt: 1 }));
+  let finishedElsewhere = false;
+  let askedAgain!: () => void;
+  const secondAsk = new Promise<void>((resolve) => { askedAgain = resolve; });
+  const { calls } = salesServer([["GET", "drafts/", () => {
+    if (finishedElsewhere) askedAgain();
+    return { results: finishedElsewhere ? [] : [row()] };
+  }]]);
+  const { wrapper, qc } = setup();
+  const list = renderHook(() => useUnfinishedBills(), { wrapper });
+  await act(async () => {
+    await qc.getQueryCache().find({ queryKey: draftKeys.list() })?.promise;
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(list.result.current.bills.map((b) => b.id)).toEqual([ID]);
+  finishedElsewhere = true;
+  vi.setSystemTime(Date.now() + 11_000);
+  renderHook(() => useDraftSync(), { wrapper });
+  await act(async () => {
+    await secondAsk;
+    await qc.getQueryCache().find({ queryKey: draftKeys.list() })?.promise;
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(keptDraft(ID)).toBeNull();
+  expect(methods(calls, "GET")).toHaveLength(2);
+  expect(list.result.current.bills).toEqual([]);
 });
 
 test("a sync never sends an older version of a bill changed while it ran", async () => {
@@ -181,7 +212,7 @@ test("discarded with the server out of reach: gone from the list here, and delet
   renderHook(() => useDraftSync(), { wrapper });
   await waitFor(() => expect(keptDraft(ID)).toBeNull());
   expect(methods(calls, "DELETE")).toHaveLength(2);
-  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(2));
+  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(1));
   expect(list.result.current.bills).toEqual([]);
 });
 
@@ -202,7 +233,7 @@ test("one only the shop's list has, discarded offline: gone from the list here, 
   renderHook(() => useDraftSync(), { wrapper });
   await waitFor(() => expect(methods(calls, "DELETE")).toHaveLength(2));
   await waitFor(() => expect(keptDraft(ID)).toBeNull());
-  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(2));
+  await waitFor(() => expect(methods(calls, "GET")).toHaveLength(1));
 });
 
 test("a draft the server refuses stays on this device, with the server's own words", async () => {

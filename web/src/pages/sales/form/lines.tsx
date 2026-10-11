@@ -6,11 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, StickyNote, Trash2 } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { UNITS, unitDecimals } from "@/core/format";
+import { unitDecimals } from "@/core/format";
 import { Button, Combobox, IconButton, Input, Money, QtyInput, Select, type ComboItem, type ComboOption } from "@/core/ui";
 import { focusNow, focusSoon, RateInput } from "./fields";
 import { hasContent, lineFromProduct, SLAB_OPTIONS, slabOf, type FormLine } from "./model";
-import { matchProducts, type SaleProduct } from "./products";
+import { matchProducts, productSubtitle, UNIT_OPTIONS, type SaleProduct } from "./products";
 import { isWeight, lineProblems, lineWarning, perWord, unitWord } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 import { useRepairBoxes } from "./useRepairBoxes";
@@ -26,7 +26,7 @@ export function productOptions(list: SaleProduct[] | undefined, failed: boolean,
   if (!list && !failed) return [{ heading: "Loading products…" }];
   if (!list) return [{ heading: "Products couldn't load: add the item by hand" }, add];
   const hits = matchProducts(list, t).slice(0, 50).map((p): ComboOption<SaleProduct | null> => ({
-    key: String(p.id), value: p, title: p.name, sub: `HSN ${p.hsn_code || "missing"} · GST ${p.gst_percent != null ? `${p.gst_percent}%` : "rate not set"}${p.description ? ` · ${p.description}` : ""}`,
+    key: String(p.id), value: p, title: p.name, sub: productSubtitle(p),
   }));
   return [...hits, add];
 }
@@ -58,8 +58,6 @@ function ProductField({ F, l, i, products, productsFailed, onNewProduct }: LineP
   );
 }
 
-const UNIT_SHORT = UNITS.map((u) => ({ value: u.value, label: u.value }));
-
 /** Weight or quantity, with its unit as a small picker on the right; its unit's decimals. */
 function QtyUnit({ F, l, n, describedBy, onEnter }: { F: BillFormApi; l: FormLine; n: number; describedBy?: string; onEnter: () => void }) {
   return (
@@ -69,7 +67,7 @@ function QtyUnit({ F, l, n, describedBy, onEnter }: { F: BillFormApi; l: FormLin
         inputClassName="text-right tnum !pl-2.5 !pr-[60px]" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(); } }} />
       <select id={`bf-${l.key}-unit`} value={l.unit} aria-label={`Line ${n} unit`} onChange={(ev) => F.setLine(l.key, { unit: ev.target.value })}
         className="absolute right-1.5 top-1/2 -translate-y-1/2 h-8 w-[52px] rounded-md bg-raised border border-line text-sm text-fg2 px-1 cursor-pointer">
-        {UNIT_SHORT.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {UNIT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
   );

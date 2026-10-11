@@ -151,13 +151,35 @@ test("someone else's unfinished bill shows on a new bill with who started it, an
   await settle();
   const list = await screen.findByRole("list", { name: "Unfinished bills" });
   expect(list).toHaveTextContent("Lalit Jain's unfinished bill in Kiran · started 09:20 by Rakesh");
-  await arrive(server, () => user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill" })));
+  await arrive(server, () => user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill · started at 09:20" })));
   expect(screen.getByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
   expect(where(router)).toBe(`/sales/new?draft=${rakeshs.id}`);
   expect(screen.getByRole("combobox", { name: "Line 1 product" })).toHaveValue("Gold Necklace 22K");
   expect(screen.getByLabelText("Note on the bill")).toHaveValue("Waiting for the bangles to be weighed");
   // the one being finished isn't offered again
   expect(screen.queryByRole("list", { name: "Unfinished bills" })).not.toBeInTheDocument();
+});
+
+test("unfinished bills for one customer have distinct Open names with their start times", async () => {
+  fakeToday();
+  const second = { ...rakeshs, id: "5d1c2a8e-0b7f-4a8e-9c3a-1f2e3d4c5b6b", created_at: "2026-10-08T09:30:00+05:30", updated_at: "2026-10-08T09:30:00+05:30" };
+  formServer(draftsOnServer([rakeshs, second]).routes);
+  mountForm("/sales/new");
+  await settle();
+  const list = screen.getByRole("list", { name: "Unfinished bills" });
+  expect(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill · started at 09:20" })).toBeInTheDocument();
+  expect(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill · started at 09:30" })).toBeInTheDocument();
+});
+
+test("unfinished bills made for one customer in the same minute still have distinct Open names", async () => {
+  fakeToday();
+  formServer(draftsOnServer([rakeshs, { ...rakeshs, id: "5d1c2a8e-0b7f-4a8e-9c3a-1f2e3d4c5b6b" }]).routes);
+  mountForm("/sales/new");
+  await settle();
+  const list = screen.getByRole("list", { name: "Unfinished bills" });
+  const names = within(list).getAllByRole("button", { name: /^Open Lalit Jain's unfinished bill/ }).map((b) => b.getAttribute("aria-label"));
+  expect(names).toHaveLength(2);
+  expect(new Set(names).size).toBe(2);
 });
 
 test("a new bill lists three of the shop's other unfinished bills, newest first, then Show all", async () => {
@@ -169,7 +191,7 @@ test("a new bill lists three of the shop's other unfinished bills, newest first,
   await settle();
   const list = await screen.findByRole("list", { name: "Unfinished bills" });
   expect(within(list).getAllByRole("button", { name: /^Open / }).map((b) => b.getAttribute("aria-label"))).toEqual([
-    "Open Customer 8's unfinished bill", "Open Customer 7's unfinished bill", "Open Customer 6's unfinished bill",
+    "Open Customer 8's unfinished bill · started at 08:00", "Open Customer 7's unfinished bill · started at 07:00", "Open Customer 6's unfinished bill · started at 06:00",
   ]);
   await user.click(within(list).getByRole("button", { name: "Show all 4 unfinished bills" }));
   expect(within(list).getAllByRole("button", { name: /^Open / })).toHaveLength(4);
@@ -223,15 +245,13 @@ test("saving from an unfinished bill sends its draft_id and takes the draft with
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   expect(puts(calls)).toEqual([]);
   expect(keptDraft(rakeshs.id)).toBeNull();
-  // the next new bill: its list comes from the cache before the shop answers, and the saved draft isn't on it
-  server.hold("GET");
+  // the next new bill uses the updated cache: the saved draft is gone, and there's no copy left to reconcile
   await act(async () => { await router.navigate("/sales/new"); });
   expect(await screen.findByText("Kept as a draft once you start")).toBeInTheDocument();
   await settle();
   expect(screen.queryByText(/Lalit Jain's unfinished bill/)).not.toBeInTheDocument();
   expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
-  await act(async () => { server.release("GET"); await vi.advanceTimersByTimeAsync(50); });
-  expect(calls.filter((c) => c.method === "GET" && c.url === "drafts/").length).toBeGreaterThan(1);
+  expect(calls.filter((c) => c.method === "GET" && c.url === "drafts/")).toHaveLength(1);
   expect(screen.queryByText(/Lalit Jain's unfinished bill/)).not.toBeInTheDocument();
 });
 
@@ -567,12 +587,12 @@ test("a move within /sales/new keeps the last change at once without asking: Alt
   await settle();
   const anils = keptDrafts().find((d) => d.data.customer?.id === 7);
   expect(anils).toBeDefined();
-  expect(await screen.findByRole("button", { name: "Open Anil Gupta's unfinished bill" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Open Anil Gupta's unfinished bill · started at 10:00" })).toBeInTheDocument();
   // a note typed on the new bill, then Lalit's unfinished bill opened from the list before it's kept
   await user.click(screen.getByLabelText("Note on the bill"));
   await user.keyboard("Ring for Meena");
   expect(keptDrafts().some((d) => d.data.notes === "Ring for Meena")).toBe(false);
-  await arrive(server, () => user.click(screen.getByRole("button", { name: "Open Lalit Jain's unfinished bill" })));
+  await arrive(server, () => user.click(screen.getByRole("button", { name: "Open Lalit Jain's unfinished bill · started at 09:20" })));
   expect(screen.getByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
   expect(keptDrafts().find((d) => d.data.notes === "Ring for Meena")).toBeDefined();
@@ -759,7 +779,7 @@ test("an unfinished bill picked up opens at its newest version: the form waits f
   // Rakesh adds a ring on his counter meanwhile
   const ring = { ...RAKESHS.lines[0], productId: 5, name: "Gold Ring 22K", qty: 4.5 };
   server.rows.set(rakeshs.id, { ...rakeshs, data: { ...RAKESHS, lines: [...RAKESHS.lines, ring] }, updated_at: "2026-10-08T09:59:00+05:30" });
-  await arrive(server, () => user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill" })));
+  await arrive(server, () => user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill · started at 09:20" })));
   expect(screen.getByText("Finishing an unfinished bill")).toBeInTheDocument();
   expect(screen.getByRole("combobox", { name: "Line 2 product" })).toHaveValue("Gold Ring 22K");
 });

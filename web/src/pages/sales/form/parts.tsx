@@ -7,12 +7,18 @@ import { amountInWords, date, fyOf, monthLabel, monthOf, possessive, weekday } f
 import { posOptions, stateNameOf } from "@/core/sales/pos";
 import { taxLines } from "@/core/sales/words";
 import { Badge, Banner, Button, ButtonLink, DL, Field, Input, Money, Select, Switch } from "@/core/ui";
-import { DateField, focusSoon, LabelSpacer } from "./fields";
+import type { FixField } from "@/pages/customers/forBills";
+import { DateField, focusSoon, LabelSpacer, type CheckRow } from "./fields";
 import { slabOf, stateOf } from "./model";
 import { paymentNote, shiftDate } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 
 type P = { F: BillFormApi; id: string };
+
+/** The checks, with "Add PAN" or "Add the address" beside the ones a customer's record fixes. */
+export function checksWithFixes(F: BillFormApi, open: (f: FixField) => void): CheckRow[] {
+  return F.checks.map((c) => (c.fix && F.cust && F.cust.type !== "walkin" ? { ...c, action: { label: c.fix === "pan" ? "Add PAN" : "Add the address", onClick: () => open(c.fix as FixField) } } : c));
+}
 
 /** A firm's month in the paper book (/sales/paper keeps its firm and month in the address). */
 export const paperBookTo = (firmId: number, ym: string) => `/sales/paper?firm=${firmId}&month=${ym}`;

@@ -231,10 +231,10 @@ export function useCustomerCount(enabled = true) {
 // a refetch() or QueryView's Try again can't make it ask either, so it never asks for every firm or for customers/null/.
 
 /** One customer. A row already on screen stands in while it loads, so the page names them at once. */
-export function useCustomer(id: number | null) {
+export function useCustomer(id: number | null, enabled = true) {
   const qc = useQueryClient();
   return useQuery<Customer>({
-    queryKey: customerKeys.one(id ?? 0),
+    queryKey: customerKeys.one(id ?? 0), enabled,
     queryFn: id === null ? skipToken : async ({ signal }) => toCustomer((await api.get(`customers/${id}/`, { signal })).data),
     placeholderData: () => (id === null ? undefined : cachedCustomer(qc, id)),
   });
@@ -263,9 +263,9 @@ export function useCustomerSearch(term: string, { size = 8, enabled = true, figu
   });
 }
 /** The five customers a firm billed last (never the walk-in record). Waits for the firm. */
-export function useRecentCustomers(firmId: FirmId | null) {
+export function useRecentCustomers(firmId: FirmId | null, enabled = true) {
   return useQuery({
-    queryKey: customerKeys.recent(firmId), staleTime: 30_000,
+    queryKey: customerKeys.recent(firmId), enabled, staleTime: 30_000,
     queryFn: firmId === null ? skipToken : async ({ signal }) => {
       const params: Record<string, string | number> = { figures: 1, ordering: "-last_bill", page_size: 6 };
       if (typeof firmId === "number") params.figures_business_id = firmId;
@@ -274,9 +274,9 @@ export function useRecentCustomers(firmId: FirmId | null) {
   });
 }
 /** The walk-in record (customer_type walkin), or null while none is marked. A server that doesn't know the type filter answers with another customer, so the row's type decides. */
-export function useWalkin() {
+export function useWalkin(enabled = true) {
   return useQuery({
-    queryKey: customerKeys.walkin(), staleTime: 5 * 60_000,
+    queryKey: customerKeys.walkin(), enabled, staleTime: 5 * 60_000,
     queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { type: "walkin", page_size: 1 }, signal })).data).rows.find((r) => r.type === "walkin") ?? null,
   });
 }

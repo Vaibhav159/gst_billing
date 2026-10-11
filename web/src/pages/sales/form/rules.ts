@@ -9,7 +9,7 @@ import { numberShapeProblem } from "@/core/sales/numbers";
 import { stateNameOf } from "@/core/sales/pos";
 import type { BillDetail, ItaxFlag, NumberCheck } from "@/core/sales/types";
 import { PAY, rateText } from "@/core/sales/words";
-import { hasContent, slabOf, type FormLine, type FormState } from "./model";
+import { hasContent, lineValuesFromBill, slabOf, type FormLine, type FormState } from "./model";
 
 /* ── Units, in the server's words (billing/api/sales.py PER, WEIGHED) ── */
 const PER: Record<string, string> = { gms: "gram", g: "gram", kg: "kg", ct: "carat", oz: "ounce", tola: "tola", pcs: "piece", nos: "piece", unit: "unit", mtr: "metre", ltr: "litre", ml: "ml", box: "box", pair: "pair", set: "set", dozen: "dozen" };
@@ -272,8 +272,9 @@ export function changesOf(bill: BillDetail, f: FormState, now: { firmName: strin
     if (!a) { added.push(b); return; }
     kept.add(a.id);
     if (a.product_name !== b.name) { out.push([`Line ${i + 1}`, a.product_name, b.name]); return; }
-    if (Number(a.quantity) !== b.qty || a.unit !== b.unit) out.push([`${b.name} weight`, qtyLabel(Number(a.quantity), a.unit), qtyLabel(b.qty, b.unit)]);
-    if (Number(a.rate) !== Number(b.rate)) out.push([`${b.name} rate`, `${rateText(a.rate)}/${a.unit}`, `${rateText(b.rate)}/${b.unit}`]);
+    const opened = lineValuesFromBill(a);
+    if (opened.qty !== b.qty || opened.unit !== b.unit) out.push([`${b.name} weight`, qtyLabel(opened.qty, opened.unit), qtyLabel(b.qty, b.unit)]);
+    if (Number(opened.rate) !== Number(b.rate)) out.push([`${b.name} rate`, `${rateText(opened.rate)}/${opened.unit}`, `${rateText(b.rate)}/${b.unit}`]);
     if (Number(a.gst_percent) !== Number(b.gst)) out.push([`${b.name} GST rate`, `${a.gst_percent}%`, `${b.gst ?? "—"}%`]);
     if (a.hsn_code !== b.hsn) out.push([`${b.name} HSN`, a.hsn_code || "Missing", b.hsn]);
     if (a.note !== b.note.trim()) out.push([`${b.name} note`, a.note || "None", b.note.trim() || "None"]);

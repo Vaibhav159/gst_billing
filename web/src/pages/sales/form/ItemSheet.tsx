@@ -5,18 +5,17 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { Check, PackagePlus, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
-import { UNITS, unitDecimals } from "@/core/format";
+import { unitDecimals } from "@/core/format";
 import { lineFigures } from "@/core/sales/maths";
 import { Button, Chip, Dialog, DL, Field, Input, ListRow, Money, QtyInput, SearchInput, Select } from "@/core/ui";
 import { focusNow, RateInput } from "./fields";
 import { blankLine, hasContent, lineFromProduct, SLAB_OPTIONS, slabOf, type FormLine } from "./model";
 import { NewItemForm } from "./NewItemForm";
-import { matchProducts, quickProducts, type SaleProduct } from "./products";
+import { matchProducts, productSubtitle, quickProducts, UNIT_OPTIONS, type SaleProduct } from "./products";
 import { isWeight, lineProblems, perWord, unitWord, type LineField } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 import { useRepairBoxes } from "./useRepairBoxes";
 
-const UNIT_OPTIONS = UNITS.map((u) => ({ value: u.value, label: u.value }));
 const ORDER: LineField[] = ["hsn", "gst", "qty", "rate"];
 const SAME = ["productId", "name", "hsn", "gst", "unit", "qty", "rate", "note"] as const;
 
@@ -111,14 +110,14 @@ export function ItemSheet({ F, open, lineKey, products, productsError, focusFiel
         <div ref={productList} className="flex flex-col gap-3 outline-none" tabIndex={-1} data-autofocus="">
           {!t && products ? (
             <div className="flex flex-wrap gap-2" role="group" aria-label="Common products">
-              {quickProducts(products, 8).map((p) => <Chip key={p.id} onClick={() => pick(p)}>{p.name.replace(/ 22K$/, "")}</Chip>)}
+              {quickProducts(products, 8).map((p) => <Chip key={p.id} onClick={() => pick(p)}>{p.name}</Chip>)}
             </div>
           ) : null}
           {productsError && !products ? <p className="text-fg2">Products couldn't load: add the item by hand</p> : null}
           <SearchInput value={q} onChange={setQ} placeholder="Search products or HSN" label="Search products" enterKeyHint="search" />
           {t ? (
             <div className="-mx-5 flex flex-col">
-              {list.map((p) => <ListRow key={p.id} onClick={() => pick(p)} title={p.name} subtitle={`HSN ${p.hsn_code || "missing"} · GST ${p.gst_percent != null ? `${p.gst_percent}%` : "rate not set"} · per ${perWord(p.unit)}`} chevron={false} />)}
+              {list.map((p) => <ListRow key={p.id} onClick={() => pick(p)} title={p.name} subtitle={productSubtitle(p, `per ${perWord(p.unit)}`)} chevron={false} />)}
               {!list.length && (products || !productsError) ? <p className="px-5 py-3 text-fg2">{products ? `No product matches “${t}”.` : "Products are still loading."}</p> : null}
             </div>
           ) : null}

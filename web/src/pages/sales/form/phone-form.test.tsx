@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { wireDetail } from "@/core/sales/fixtures";
-import { formServer, fakeToday, mountForm } from "./testing";
+import { formServer, fakeToday, mountForm, RING } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -11,6 +11,18 @@ afterEach(() => { phone(false); vi.useRealTimers(); });
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
 /** Past a sheet's guard against the tap that opened it, and a search's debounce. */
 const settle = () => act(async () => { vi.advanceTimersByTime(400); });
+
+test("common product chips keep their full names when purity distinguishes products", async () => {
+  const user = fakeToday();
+  formServer([["GET", "products/", () => ({ results: [RING, { ...RING, id: 99, name: "Gold Ring" }] })]]);
+  mountForm("/sales/new");
+  await screen.findByRole("heading", { level: 1, name: "New bill" });
+  await settle();
+  await user.click(screen.getByRole("button", { name: "Add item" }));
+  const chips = within(screen.getByRole("dialog", { name: "Add item 1" })).getByRole("group", { name: "Common products" });
+  expect(within(chips).getByRole("button", { name: "Gold Ring 22K" })).toBeInTheDocument();
+  expect(within(chips).getByRole("button", { name: "Gold Ring" })).toBeInTheDocument();
+});
 
 test("on a phone a bill is made with sheets: the customer list first, an item from the common products, the total in the action bar", async () => {
   const user = fakeToday();
@@ -30,8 +42,8 @@ test("on a phone a bill is made with sheets: the customer list first, an item fr
   const item = await screen.findByRole("dialog", { name: "Add item 1" });
   await settle();
   const chips = within(item).getByRole("group", { name: "Common products" });
-  expect(within(chips).getAllByRole("button").map((b) => b.textContent)).toEqual(["Gold Ring", "Gold Necklace", "Cut Diamond"]);
-  await user.click(within(chips).getByRole("button", { name: "Gold Ring" }));
+  expect(within(chips).getAllByRole("button").map((b) => b.textContent)).toEqual(["Gold Ring 22K", "Gold Necklace 22K", "Cut Diamond"]);
+  await user.click(within(chips).getByRole("button", { name: "Gold Ring 22K" }));
   const weight = within(item).getByLabelText("Weight in grams");
   await waitFor(() => expect(weight).toHaveFocus());
   await user.keyboard("12.345{Enter}");
@@ -68,7 +80,7 @@ test("Check and save takes you to what's missing: the customer's sheet, then an 
   await user.click(screen.getByRole("button", { name: "Add item" }));
   const item = await screen.findByRole("dialog", { name: "Add item 1" });
   await settle();
-  await user.click(within(item).getByRole("button", { name: "Gold Necklace" }));
+  await user.click(within(item).getByRole("button", { name: "Gold Necklace 22K" }));
   await user.keyboard("18.2");
   await user.click(within(item).getByRole("button", { name: "Add to bill" }));
   expect(within(item).getByText("Type the rate per gram.")).toBeInTheDocument();

@@ -101,9 +101,9 @@ export function useSalesFacets(firmId: FirmId | null, fy: string) {
 }
 
 /** The form's closed months, kept apart from the list's complete facets and view counts. */
-export function useSalesMonths(firmId: FirmId | null, fy: string) {
+export function useSalesMonths(firmId: FirmId | null, fy: string, enabled = true) {
   return useQuery({
-    queryKey: salesKeys.months(firmId, fy),
+    queryKey: salesKeys.months(firmId, fy), enabled,
     staleTime: 5 * 60_000,
     queryFn: firmId === null ? skipToken : async ({ signal }) => toFacets((await api.get("sales/", { params: salesParams(firmId, { fy, facets: "months", summary: 0 }, 1, 1), signal })).data?.facets).months,
   });
@@ -159,20 +159,20 @@ export function useBin(query: BinQuery, enabled = true) {
 }
 
 /** The next paper number in a firm's series for a date (contract §2.11). */
-export function useNextNumber(business: number | null, invoiceDate: string) {
+export function useNextNumber(business: number | null, invoiceDate: string, enabled = true) {
   return useQuery({
     queryKey: salesKeys.nextNumber(business, invoiceDate),
-    enabled: business !== null && invoiceDate !== "",
+    enabled: enabled && business !== null && invoiceDate !== "",
     queryFn: async ({ signal }) => toNextNumber((await api.get("sales/next-number/", { params: { business_id: business, invoice_date: invoiceDate }, signal })).data),
   });
 }
 
 /** Whether a typed number is free, and a soft note (contract §2.12). The caller debounces what it passes; an empty number isn't asked about. */
 export type NumberCheckArgs = { business: number; invoice_date: string; invoice_number: string; exclude_id?: number };
-export function useCheckNumber(args: NumberCheckArgs | null) {
+export function useCheckNumber(args: NumberCheckArgs | null, enabled = true) {
   return useQuery({
     queryKey: salesKeys.checkNumber(args),
-    enabled: args !== null && args.invoice_number.trim() !== "",
+    enabled: enabled && args !== null && args.invoice_number.trim() !== "",
     retry: false, staleTime: 10_000,
     queryFn: async ({ signal }) => {
       const a = args as NumberCheckArgs;
@@ -183,10 +183,10 @@ export function useCheckNumber(args: NumberCheckArgs | null) {
 }
 
 /** A firm's month as the paper book sees it (contract §2.13): the saved panel's next number, and 1D's paper book. */
-export function usePaperBook(business: number | null, month: string | null) {
+export function usePaperBook(business: number | null, month: string | null, enabled = true) {
   return useQuery({
     queryKey: salesKeys.paperBook(business, month),
-    enabled: business !== null && Boolean(month),
+    enabled: enabled && business !== null && Boolean(month),
     queryFn: async ({ signal }) => toPaperBook((await api.get("sales/paper-book/", { params: { business_id: business, month }, signal })).data),
   });
 }

@@ -219,6 +219,19 @@ test("the tax and the total follow from what was changed: listed beside a change
   ]);
 });
 
+test.each(["gms", "pcs"])("an amount-only %s line compares against how it opened, and still names a real change", (unit) => {
+  const b = toBillDetail(wireDetail({ lines: [{ ...WIRE_LINES[0], product_name: "Old import", quantity: "0.000", rate: "0.000", unit, taxable: "1000.00" }] }));
+  const { form } = startEdit(b);
+  const opened = form.lines[0];
+  expect(changesOf(b, form, same(b))).toEqual([]);
+  expect(changesOf(b, { ...form, lines: [{ ...opened, rate: "1200" }] }, same(b))).toEqual([
+    ["Old import rate", `₹1,000.00/${opened.unit}`, `₹1,200.00/${opened.unit}`],
+  ]);
+  expect(changesOf(b, { ...form, lines: [{ ...opened, qty: 2 }] }, same(b))).toEqual([
+    ["Old import weight", `1 ${opened.unit}`, `2 ${opened.unit}`],
+  ]);
+});
+
 test("the hint under Firm says where the firm came from, or where an edit moves the bill", () => {
   expect(firmHint({ mode: "new", source: "scope", paper: false, moving: "", canMove: true })).toBe("Follows the firm picked in the top bar");
   expect(firmHint({ mode: "new", source: "first", paper: false, moving: "", canMove: true })).toBe("Pick the firm whose bill book this is");

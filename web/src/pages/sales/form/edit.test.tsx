@@ -212,7 +212,7 @@ const CANCELLED = "Cancelled bills can't be changed. Make it again from the bill
 const FILED_OCT = "October 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be changed. Have the owner unlock October 2026 in GST returns first.";
 const OCTOBER = { id: 7, business: 3, year: 2026, month: 10 };
 /** A change saved after the bill was deleted (a PUT's 404 names nothing): the form names the bill, and says what happened. */
-const GONE = "KGH/2026-27/31 isn't in Sales any more. It was deleted while you were changing it, so nothing was saved.";
+const GONE = "KGH/2026-27/31 isn't in Sales any more. Someone deleted it while you were changing it, so nothing was saved.";
 test.each([
   ["cancelled", () => ({ kind: "bill", bill: toBillDetail(wireDetail({ status: "cancelled", cancel_reason: "Customer returned the piece" })) }), () => refuse(409, { detail: CANCELLED, code: "cancelled" }), "Not saved", CANCELLED, true],
   ["deleted", () => ({ kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) }), () => refuse(404, { detail: "No Invoice matches the given query." }), "Not saved", GONE, true],
@@ -232,7 +232,10 @@ test.each([
   await user.keyboard("{Control>}s{/Control}");
   const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
   act(() => { vi.advanceTimersByTime(400); });
-  await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+  await act(async () => {
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await vi.advanceTimersByTimeAsync(100);
+  });
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(`${title}${words}`);
   expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
   if (final) {
@@ -245,6 +248,7 @@ test.each([
     // the owner may unlock the month and try again
     expect(within(dialog).getByRole("button", { name: "Try again" })).toBeEnabled();
   }
+  await settle(); // the refreshed months may clear the save's retained date refusal
 });
 
 test.each([
@@ -263,8 +267,12 @@ test.each([
   const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
   act(() => { vi.advanceTimersByTime(400); });
   expect(within(dialog).getByRole("list", { name: "What changes" })).toHaveTextContent("Date: 08 Oct 2026 →becomes 30 Sep 2026");
-  await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+  await act(async () => {
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await vi.advanceTimersByTimeAsync(100);
+  });
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(`${month} was just filed${words}`);
+  await settle();
 });
 
 /* ── Review fix 1 ── */
@@ -331,6 +339,24 @@ test("leaving an unchanged edit asks nothing, in the app or as the tab closes", 
   const { router } = await openEdit();
   await settle();
   expect(asksOnClose()).toBe(false);
+  await user.click(screen.getByRole("link", { name: "Cancel" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/412"));
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
+});
+
+test("an untouched v2 amount-only bill has no changes, nothing to save and no leave prompt", async () => {
+  const user = fakeToday();
+  const line = { id: 77, product_name: "Old import", hsn_code: "711319", quantity: "0.000", unit: "gms", rate: "0.000", gst_percent: "3", taxable: "1000.00", cgst: "15.00", sgst: "15.00", igst: "0.00", tax: "30.00", amount: "1030.00", note: "" };
+  const bill = wireDetail({ lines: [line], taxable: "1000.00", cgst: "15.00", sgst: "15.00", tax: "30.00", total_amount: "1030.00" });
+  const { router } = await openEdit(bill);
+  await settle();
+  expect(screen.getByText("No changes yet")).toBeInTheDocument();
+  expect(asksOnClose()).toBe(false);
+  const { dialog } = await reviewChanges(user);
+  expect(dialog).toHaveTextContent("Nothing has changed yet");
+  expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await settle();
   await user.click(screen.getByRole("link", { name: "Cancel" }));
   await waitFor(() => expect(where(router)).toBe("/sales/412"));
   expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();

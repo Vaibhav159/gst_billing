@@ -1,7 +1,7 @@
 // The bill form on a desktop (PROTO pages/sales/BillForm.jsx:446-552): one keyboard-fast page. The Bill card (paper
 // switch, firm, number, date, customer, place of supply), the items, payment and a note, and beside them the Bill summary
 // with the checks and Check and save. Ctrl S checks and saves; Ctrl Enter adds a line.
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { AlertTriangle, BookOpenText, FilePlus2, Plus, SquarePen } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
@@ -11,14 +11,15 @@ import { Button, ButtonLink, Card, Field, Kbd, Page, Select, Sheet, Textarea } f
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { CustomerFixSheet, CustomerPicker, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
 import { DraftBanners, DraftStatus } from "./drafts";
-import { CheckList, focusNow, LabelSpacer, PayPicker, type CheckRow } from "./fields";
+import { CheckList, focusNow, LabelSpacer, PayPicker } from "./fields";
 import { LineRow, ONE_ROW, LINE_COLS } from "./lines";
 import { hasContent } from "./model";
 import { NewItemForm, type NewItem } from "./NewItemForm";
-import { billCloseTo, DateBlock, NumberField, Origins, PaperSwitch, PaymentNote, PlaceOfSupply, saveFromReview, SummaryFigures } from "./parts";
+import { billCloseTo, checksWithFixes, DateBlock, NumberField, Origins, PaperSwitch, PaymentNote, PlaceOfSupply, saveFromReview, SummaryFigures } from "./parts";
 import { useSaleProducts } from "./products";
 import { focusReview, Review } from "./Review";
 import { paymentNote } from "./rules";
+import { useFormShortcuts } from "./shortcuts";
 import type { BillFormApi } from "./useBillForm";
 import type { DraftKeeping } from "./useDraftKeeping";
 
@@ -35,11 +36,6 @@ export function focusProblem(F: BillFormApi, k: string) {
   const el = document.getElementById(id) ?? document.getElementById(`bf-${k.slice(0, k.lastIndexOf("-"))}-product`);
   if (el) { el.scrollIntoView({ block: "center" }); el.focus(); }
 }
-/** The checks, with "Add PAN" or "Add the address" beside the ones a customer's record fixes. */
-export function checksWithFixes(F: BillFormApi, open: (f: FixField) => void): CheckRow[] {
-  return F.checks.map((c) => (c.fix && F.cust && F.cust.type !== "walkin" ? { ...c, action: { label: c.fix === "pan" ? "Add PAN" : "Add the address", onClick: () => open(c.fix as FixField) } } : c));
-}
-
 export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: DraftKeeping; children?: ReactNode }) {
   const { can } = useAuth();
   const navigate = useNavigate();
@@ -62,20 +58,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
   const onTryReview = () => { const r = F.openReview(); if (!r.ok) focusProblem(F, r.first); };
   /** Saves from the review; a field the server refused is focused once the review has closed. */
   const saveNow = (numberOverride?: string) => saveFromReview(F, (key) => focusProblem(F, key), numberOverride);
-  // Ctrl S: check and save (the review presses its own Save: Review). Ctrl Enter: add a line, focus moving at once.
-  // Neither acts on the bill from behind an open dialog (the review, a new customer, an item, a PAN, search) or a menu
-  // (the top bar's, as the app's shortcuts read it): Ctrl S there would mark the form and pull the cursor out from under
-  // it. Ctrl S is still taken from the browser, so its Save page never opens instead.
-  useEffect(() => {
-    const held = () => Boolean(document.querySelector('[role="dialog"]:not([data-closing]), [role="menu"]:not([data-closing])'));
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() === "s") { e.preventDefault(); if (!F.reviewOpen && !held()) onTryReview(); }
-      else if (e.key === "Enter") { if (held()) return; e.preventDefault(); F.addLine(true); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  useFormShortcuts(F.reviewOpen, onTryReview, () => F.addLine(true));
   const close = () => navigate(billCloseTo(F));
   const onNewItem = (key: string) => (r: NewItem) => {
     F.setLine(key, (prev) => ({ productId: r.productId, name: r.line.name, hsn: r.line.hsn, gst: r.line.gst, unit: r.line.unit, rate: r.line.rate || prev.rate, note: r.line.description || prev.note, custom: r.productId === null }));
@@ -104,7 +87,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
                 <NumberField F={F} id="bf-number" />
                 <DateBlock F={F} id="bf-date" />
               </div>
-              <CustomerPicker firmId={F.f.firmId} value={F.cust} error={F.showErr("customer")} autoFocus={!F.cust && !edit}
+              <CustomerPicker firmId={F.f.firmId} value={F.cust} error={F.showErr("customer")} autoFocus={!F.cust && !edit} enabled={!F.saving && !F.savedTo}
                 onPick={(c) => { F.setCustomer(c); focusNow(`bf-${firstOpenLine()}-product`); }} onNew={(name) => setNc({ name })} />
               {F.cust ? <PlaceOfSupply F={F} id="bf-pos" /> : null}
             </div>

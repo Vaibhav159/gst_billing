@@ -67,18 +67,19 @@ export function DraftBanners({ F, drafts, onTryReview }: { F: BillFormApi; draft
     // a change the shop hasn't got yet: on this device, or, where the browser refuses storage, only in this page
     const unsent = keepsOnDevice() ? " · on this device" : " · not sent yet";
     const others = list.bills.filter((d) => d.id !== F.draftId);
+    const names = others.map((d) => `Open ${d.data.customer ? possessive(d.data.customer.name) : "the"} unfinished bill · ${d.data.number ? `${d.data.number} · ` : ""}started ${sentWhen({ at: d.created_at })}`);
     const shown = all ? others : others.slice(0, 3);
     if (shown.length) {
       out.push(
         <ul key="o" aria-label="Unfinished bills" className="flex flex-col gap-1 -mt-1">
-          {shown.map((d) => {
+          {shown.map((d, i) => {
             const c = d.data.customer;
             const firm = F.firms.length > 1 ? F.firms.find((x) => x.id === d.business)?.short : "";
             return (
               <li key={d.id} className="text-sm text-fg2 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <StickyNote size={15} className="text-muted shrink-0" aria-hidden="true" />
                 <span>{c ? possessive(c.name) : "An"} unfinished bill{firm ? ` in ${firm}` : ""} · {isPhone ? timeOf(d.created_at) : `started ${sentWhen({ at: d.created_at }).replace(/^at /, "")} by ${d.started_by ? firstName(d.started_by.name) : "someone"}`}{d.onDevice ? unsent : ""}</span>
-                <Button size="sm" variant="link" className="min-w-[44px]" aria-label={`Open ${c ? possessive(c.name) : "the"} unfinished bill`} onClick={() => navigate(`/sales/new?draft=${d.id}`, { replace: true })}>Open</Button>
+                <Button size="sm" variant="link" className="min-w-[44px]" aria-label={`${names[i]}${names.indexOf(names[i]) !== names.lastIndexOf(names[i]) ? ` · ${i + 1} of ${others.length}` : ""}`} onClick={() => navigate(`/sales/new?draft=${d.id}`, { replace: true })}>Open</Button>
               </li>
             );
           })}

@@ -88,6 +88,9 @@ export function useBillForm(start: Start, formKey?: string) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saveError, setSaveError] = useState<SaveError | null>(null);
   const [serverProblem, setServerProblem] = useState<ApiProblem | null>(null);
+  // A failed refresh cannot overrule a save's refusal. Keep it with the number or month it names.
+  const [numberRefusal, setNumberRefusal] = useState<{ business: number | null; fy: string; number: string; message: string } | null>(null);
+  const [monthRefusal, setMonthRefusal] = useState<{ business: number | null; month: string; message: string } | null>(null);
   const [cashAnyway, setCashAnyway] = useState(false);
   const [newKeys, setNewKeys] = useState<Set<string>>(() => new Set());
   const [draftId, setDraftId] = useState<string | null>(start.draftId);
@@ -95,6 +98,7 @@ export function useBillForm(start: Start, formKey?: string) {
   const [saving, setSaving] = useState(false);
   /** Where to go once saved; the form lets its leave-guard go first (useFormExit). */
   const [savedTo, setSavedTo] = useState<string | null>(null);
+  const reading = !saving && !savedTo;
   /** The save on its way, as it will end: told to a form that was left before the answer came. */
   const saveEnd = useRef<Promise<SaveEnd> | null>(null);
   const mounted = useRef(true);
@@ -150,7 +154,7 @@ export function useBillForm(start: Start, formKey?: string) {
   const firmName = firm?.name ?? (bill && f.firmId === bill.business ? bill.business_name : "");
   const firmState = (firm && stateOf(firm.gstin, firm.state)) || (bill && f.firmId === bill.business ? bill.firm.state_code : "");
   // the customer as saved now (a PAN or address added from the bill shows at once), else as picked
-  const live = useCustomer(f.customer?.id ?? null);
+  const live = useCustomer(f.customer?.id ?? null, reading);
   const cust: Customer | null = live.data && live.data.id === f.customer?.id ? live.data : f.customer;
   const pc = posCustomer(cust);
   // a place GST's table doesn't have (a GSTIN starting "28" or "00") is asked for, never quietly the firm's
@@ -176,32 +180,40 @@ export function useBillForm(start: Start, formKey?: string) {
   /* ── the number: the paper bill's, typed, or the next one confirmed ── */
   const moved = Boolean(edit && bill && (f.firmId !== bill.business || fyOf(f.date || bill.invoice_date) !== bill.fy));
   const keep = Boolean(edit && bill && !moved && !f.numberTyped);
-  const nextFor = [keep ? null : f.firmId, keep ? "" : f.date] as const;
-  const next = useNextNumber(...nextFor);
-  const bookFor = [f.paper && !edit ? f.firmId : null, f.paper && !edit ? monthOf(f.date || today) : null] as const;
-  const book = usePaperBook(...bookFor);
+  const fyNow = fyOf(today);
+  // A partially typed year (28/09/20) isn't a bill date this form can save. A cleared date asks for no book.
+  const settledDate = useDebounced(f.date, 300);
+  const queryDate = settledDate && settledDate <= today && [fyNow, prevFy(fyNow)].includes(fyOf(settledDate)) ? settledDate : "";
+  const dateReady = Boolean(queryDate) && queryDate === f.date;
+  const nextFor = [keep ? null : f.firmId, keep ? "" : queryDate] as const;
+  const next = useNextNumber(...nextFor, reading && dateReady);
+  const bookFor = [f.paper && !edit ? f.firmId : null, f.paper && !edit && queryDate ? monthOf(queryDate) : null] as const;
+  const book = usePaperBook(...bookFor, reading && dateReady);
   // An answer a write has marked since it came (invalidateSales; a refresh that fails leaves it so) may be older than a
   // bill just saved: its next number may be that bill's, and a check may call that number free. It's no answer until a
   // fresh one comes, as the paper book's Enter bill waits (T7 re-review). A customer saved from the form marks every bill
   // query too: the number then waits for its fresh answer, and the review holds Save till it comes (Ruling 1D-15)
   const current = (key: QueryKey) => !qc.getQueryState(key)?.isInvalidated;
-  const nextNow = next.data && current(salesKeys.nextNumber(...nextFor)) ? next.data : undefined;
-  const bookNow = book.data && current(salesKeys.paperBook(...bookFor)) ? book.data : undefined;
+  const nextNow = dateReady && next.data && current(salesKeys.nextNumber(...nextFor)) ? next.data : undefined;
+  const bookNow = f.date && monthOf(f.date) === monthOf(queryDate) && book.data && current(salesKeys.paperBook(...bookFor)) ? book.data : undefined;
   const suggestion = f.paper && !edit ? (bookNow && !bookNow.locked ? String(bookNow.next.counter) : "") : nextNow ? String(nextNow.counter) : "";
   const numberText = keep && bill ? bill.invoice_number : f.numberTyped ? f.number : suggestion;
   // (a firm's format doesn't change with a save: an older answer gives it as well as a fresh one)
   const stored = keep && bill ? bill.invoice_number : storedFor(next.data, numberText);
   const typedNow = useDebounced(f.numberTyped && !keep ? f.number.trim() : "", 300);
-  const checkFor = typedNow && f.firmId !== null && f.date ? { business: f.firmId, invoice_date: f.date, invoice_number: typedNow, ...(edit && bill ? { exclude_id: bill.id } : {}) } : null;
-  const check = useCheckNumber(checkFor);
+  const checkFor = typedNow && f.firmId !== null && queryDate ? { business: f.firmId, invoice_date: queryDate, invoice_number: typedNow, ...(edit && bill ? { exclude_id: bill.id } : {}) } : null;
+  const check = useCheckNumber(checkFor, reading && dateReady);
   // the server's answer for what's typed now; one that checked nothing is no answer either way (contract §2.12), nor is
   // one from before a save
-  const answer = f.numberTyped && typedNow === f.number.trim() && current(salesKeys.checkNumber(checkFor)) ? check.data ?? null : null;
+  const answer = dateReady && f.numberTyped && typedNow === f.number.trim() && current(salesKeys.checkNumber(checkFor)) ? check.data ?? null : null;
   const known = checkedNumber(answer);
+  const refusedNumber = numberRefusal?.business === f.firmId && numberRefusal.fy === fyOf(f.date) ? numberRefusal : null;
+  useEffect(() => { if (known?.code === "" && refusedNumber?.number === stored) setNumberRefusal(null); }, [known, refusedNumber, stored]);
   // no number yet, with the next one being asked for: the first answer, or a fresh one in place of one a write marked.
   // Nothing is wrong with it meanwhile: it's coming (Ruling 1D-15)
   const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline" && (f.paper && !edit ? book.isFetching && !bookNow : next.isFetching && !nextNow);
-  const numberError = keep || waitingForNext ? "" : numberProblem(numberText, nextNow?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
+  const numberError = (!known && refusedNumber?.number === stored ? refusedNumber.message : "")
+    || (keep || waitingForNext ? "" : numberProblem(numberText, nextNow?.invoice_number ?? "", stored) || (known?.code ? known.problem : ""));
   const numberNote = !numberError && known?.note ? known.note : "";
   // "checking" only while a check is coming: typing hasn't paused yet, the server hasn't answered, or a fresh answer is on
   // its way in place of one from before a save. One that failed (a 500, the network) or can't be sent (no firm, or no
@@ -214,14 +226,22 @@ export function useBillForm(start: Start, formKey?: string) {
   const takeSuggestion = useCallback(() => set({ number: "", numberTyped: false }), [set]);
 
   /* ── the date: the firm's closed months (contract: the facets' `locked`) ── */
-  const fyNow = fyOf(today);
-  const facetsNow = useSalesMonths(f.firmId, fyNow);
-  const lastFyAsked = Boolean(f.date) && fyOf(f.date) !== fyNow;
-  const facetsLast = useSalesMonths(lastFyAsked ? f.firmId : null, prevFy(fyNow));
+  const facetsNow = useSalesMonths(f.firmId, fyNow, reading);
+  const lastFyAsked = Boolean(queryDate) && fyOf(queryDate) === prevFy(fyNow);
+  const facetsLast = useSalesMonths(lastFyAsked ? f.firmId : null, prevFy(fyNow), reading);
+  // An edit may be refused for its old firm's month. Usually this shares the current months query; otherwise it asks for that month’s FY.
+  const refusedFy = monthRefusal ? fyOf(`${monthRefusal.month}-01`) : fyNow;
+  const refusedMonths = useSalesMonths(monthRefusal?.business ?? null, refusedFy, reading);
+  const monthOpened = Boolean(monthRefusal && current(salesKeys.months(monthRefusal.business, refusedFy))
+    && refusedMonths.data?.some((m) => m.month === monthRefusal.month && !m.locked));
+  useEffect(() => { if (monthOpened) setMonthRefusal(null); }, [monthOpened]);
   const months = useMemo(() => [...(facetsNow.data ?? []), ...(facetsLast.data ?? [])], [facetsNow.data, facetsLast.data]);
-  const locked: Locked = useCallback((ym) => months.some((m) => m.month === ym && m.locked), [months]);
+  const locked: Locked = useCallback((ym) => months.some((m) => m.month === ym && m.locked)
+    || Boolean(!monthOpened && monthRefusal?.business === f.firmId && monthRefusal.month === ym), [months, monthOpened, monthRefusal, f.firmId]);
   const lockKnown = useCallback((ym: string) => months.some((m) => m.month === ym), [months]);
-  const dateError = edit && bill && f.date === bill.invoice_date ? "" : dateProblem({ iso: f.date, today, firmName, locked, known: lockKnown, paper: f.paper && !edit });
+  const refusedDate = !monthOpened && monthRefusal && ((monthRefusal.business === f.firmId && monthRefusal.month === monthOf(f.date))
+    || (edit && bill && monthRefusal.business === bill.business && monthRefusal.month === monthOf(bill.invoice_date))) ? monthRefusal.message : "";
+  const dateError = refusedDate || (edit && bill && f.date === bill.invoice_date ? "" : dateProblem({ iso: f.date, today, firmName, locked, known: lockKnown, paper: f.paper && !edit }));
   const dateWarn = dateError ? "" : dateWarning(f.date, today, nextNow?.invoice_number ?? "");
   /** A day the calendar can't take, and why (PROTO parts.jsx:851-856). */
   const offReason = useCallback((iso: string) => {
@@ -280,7 +300,7 @@ export function useBillForm(start: Start, formKey?: string) {
   const cashOver = itax.some((x) => x.kind === "cash_limit");
   const cashBlock = cashOver && !cashAnyway;
   const twinAsked = !edit && Boolean(cust) && cust?.type !== "walkin" && figs.total > 0 && Boolean(f.date) && !dateError;
-  const sameDay = useSalesPage(f.firmId, { customer_id: cust?.id, start_date: f.date, end_date: f.date, summary: 0 }, 10, twinAsked);
+  const sameDay = useSalesPage(f.firmId, { customer_id: cust?.id, start_date: f.date, end_date: f.date, summary: 0 }, 10, twinAsked && reading);
   const twinRow = twinAsked ? (sameDay.data?.results ?? []).find((b) => b.status !== "cancelled" && b.total_amount === figs.total) : undefined;
   const twin = twinRow ? { invoice_number: twinRow.invoice_number, total: twinRow.total_amount } : null;
   const checks = checksOf({
@@ -292,9 +312,8 @@ export function useBillForm(start: Start, formKey?: string) {
   const hint = firmHint({ mode: start.mode, source: start.firmSource, paper: f.paper && !edit, canMove, moving: moved && bill && f.firmId !== bill.business ? `Moves the bill to ${firmName} as ${stored || "its new number"}. ${bill.invoice_number} is left unused.` : "" });
 
   /* ── editing: what changes, and whether anything has ── */
-  const startSig = useRef(JSON.stringify(start.form, (k, v) => (k === "key" ? undefined : v)));
   const changes = edit && bill ? changesOf(bill, f, { firmName, number: waitingForNext ? "Getting the next number" : stored || "—", pos, inter: tt.inter, total: figs.total, customerName: cust?.name ?? "" }) : [];
-  const dirty = edit ? changes.length > 0 : JSON.stringify(f, (k, v) => (k === "key" ? undefined : v)) !== startSig.current;
+  const dirty = changes.length > 0;
   // the customer has the bill already, and a change changes its total: the saved page offers to send the corrected one.
   // Never for a bill nothing was changed on, whose stored total v3's maths puts a paisa off (Ruling 1D-16)
   const sentNote = edit && bill?.sent && changes.length > 0 && bill.total_amount !== figs.total ? bill : null;
@@ -316,7 +335,12 @@ export function useBillForm(start: Start, formKey?: string) {
   const save = async ({ numberOverride }: { numberOverride?: string } = {}): Promise<{ refused: string | null }> => {
     const none = { refused: null };
     if (saving || !reviewOpen || waitingForNext) return none;
-    if (firstError) { setReviewOpen(false); return { refused: firstError }; }
+    // The offered next number replaces only the old number's error. A deliberate retry can ask whether the owner unlocked a refused month.
+    const override = numberOverride === undefined ? null : storedFor(next.data, numberOverride);
+    const first = errorOrder(f.lines).find((k) => k === "number" && override !== null
+      ? numberProblem(numberOverride!, nextNow?.invoice_number ?? "", override) || (refusedNumber?.number === override ? refusedNumber.message : "")
+      : k === "date" && refusedDate && saveError ? false : errors[k]);
+    if (first) { setReviewOpen(false); return { refused: first }; }
     if (f.payment == null) { setSaveError({ kind: "payment", title: "How was it paid?", body: "Pick one above: it goes on the bill and in your cash and bank split." }); return none; }
     if (cashBlock) { setSaveError({ kind: "cash", title: "Cash of ₹2,00,000 or more", body: "Switch to Part cash, part UPI, or tick that you're saving it as all cash anyway." }); return none; }
     // only an edit gets here offline: a new bill's review turns Save off and says where the bill is kept (offlineNew)
@@ -372,18 +396,21 @@ export function useBillForm(start: Start, formKey?: string) {
         const shown = numberOverride ? storedFor(next.data, numberOverride) : stored;
         // the paper bill's own number never changes by itself: only a suggested number is offered the next free one
         const offer = !f.numberTyped && !(f.paper && !edit) && !keep ? n : "";
+        setNumberRefusal({ business: f.firmId, fy: fyOf(f.date), number: shown, message: p.message });
         setSaveError({ kind: "clash", title: p.code === "number_taken" ? `${shown} was just used` : `${shown} belonged to a deleted bill`, body: `${p.message} Check the number on the paper bill.`, next: offer || undefined });
         void qc.invalidateQueries({ queryKey: salesKeys.checkNumber(checkFor) });
         void qc.invalidateQueries({ queryKey: salesKeys.nextNumber(...nextFor) });
       } else if (p.code === "month_closed") {
         // the month the server names: a change is refused for the bill's old month or its new one, whichever is filed
         // (contract §2.3), so the date's month alone could name the wrong one
-        const at = (p.body as { locked_period?: { year?: unknown; month?: unknown } } | undefined)?.locked_period;
+        const at = (p.body as { locked_period?: { business?: unknown; year?: unknown; month?: unknown } } | undefined)?.locked_period;
         const y = Number(at?.year);
         const m = Number(at?.month);
         const filed = y > 0 && m >= 1 && m <= 12 ? monthLabel(`${y}-${String(m).padStart(2, "0")}`, { long: true }) : month;
+        const business = Number(at?.business) || f.firmId;
+        setMonthRefusal({ business, month: y > 0 && m >= 1 && m <= 12 ? `${y}-${String(m).padStart(2, "0")}` : monthOf(f.date), message: p.message });
         setSaveError({ kind: "filed", title: `${filed} was just filed`, body: p.message });
-        void qc.invalidateQueries({ queryKey: ["sales", "months", f.firmId] });
+        void qc.invalidateQueries({ queryKey: ["sales", "months", business] });
       } else if (p.code === "cancelled" && bill) {
         // cancelled while it was being changed (a PUT): the bill itself is the way on, where it can be made again
         setSaveError({ kind: "cancelled", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
@@ -391,7 +418,7 @@ export function useBillForm(start: Start, formKey?: string) {
         // deleted while it was being changed (the PUT's 404, whose own words name nothing): said by name, in the server's
         // words when it sends its own. The bill's page says where it is, and is where the owner restores it
         const said = p.code === "deleted" ? (p.body as { detail?: unknown } | undefined)?.detail : undefined;
-        const body = typeof said === "string" && said ? said : `${bill.invoice_number} isn't in Sales any more. It was deleted while you were changing it, so nothing was saved.`;
+        const body = typeof said === "string" && said ? said : `${bill.invoice_number} isn't in Sales any more. Someone deleted it while you were changing it, so nothing was saved.`;
         setSaveError({ kind: "gone", title: "Not saved", body, link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
       } else {
         // what the server refused under a field the form has goes there, and the review closes for it; a refusal of
