@@ -2,7 +2,8 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, F, OuterRef
+from django.db.models import Count, Exists, F, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from rest_framework.exceptions import NotFound, ValidationError
 
 from billing.api.mixins import drop_settled_party_rows, mark_undone, snapshot_of
@@ -132,7 +133,7 @@ def record_for(entry, lock=False):
         return None
     fields = {"id"} | set((entry.changes or {}).keys())
     if entry.entity == "invoice":
-        fields |= {"type_of_invoice", "business_id", "invoice_date", "status", "total_amount", "invoice_number"}
+        fields |= {"type_of_invoice", "business_id", "invoice_date", "status", "total_amount", "invoice_number", "itc_month"}
     else:
         fields.add("name")
     real = {field.name for field in model._meta.concrete_fields} | {field.attname for field in model._meta.concrete_fields}
@@ -232,7 +233,147 @@ def uses_for(obj):
     return {}
 
 
-def available(entry, obj=None, binned=None):
+def use_counts(entity):
+    """Correlated grouped counts stay in the page's one record query per model."""
+    from billing.models import FiledPeriod, ITCReclaimLedger, SaleDraft, SavedDraft
+    from billing.services.firms import optional_filing_model
+
+    key = "business_id" if entity == "business" else "customer_id"
+
+    def count(rows):
+        grouped = rows.filter(**{key: OuterRef("pk")}).order_by().values(key).annotate(n=Count("pk")).values("n")
+        return Coalesce(Subquery(grouped), 0)
+
+    bills = uncached(Invoice)
+    counts = {
+        "sales": count(bills.filter(type_of_invoice="outward", status="active")),
+        "cancelled": count(bills.filter(type_of_invoice="outward", status="cancelled")),
+        "purchases": count(bills.filter(type_of_invoice="inward")),
+        "bin": count(BinnedInvoice.objects.live()),
+    }
+    if entity == "customer":
+        counts["lines"] = count(uncached(LineItem).exclude(invoice__customer_id=OuterRef("pk")))
+    else:
+        counts.update(drafts=count(uncached(SaleDraft).exclude(pk__in=SavedDraft.objects.values("pk"))),
+                      captures=count(uncached(InwardCapture)), filed_periods=count(uncached(FiledPeriod)),
+                      opening_credits=count(uncached(ITCReclaimLedger)))
+        from django.db.models import Value
+        for name, model_name in (("filing_records", "FilingRecord"), ("filing_months", "FilingMonth"),
+                                 ("opening_credits", "OpeningCredit"), ("filing_records", "ReturnDownload")):
+            model = optional_filing_model(model_name)
+            counts[name] = counts.get(name, Value(0)) + (count(uncached(model)) if model else Value(0))
+    return {"use_" + name: expression for name, expression in counts.items()}
+
+
+class AuditPage:
+    """Request-local records, counts and month checks; never cache write decisions."""
+    def __init__(self, entries):
+        self.records, self.bins, self.uses, self.statuses, self.refusals = {}, {}, {}, {}, {}
+        for entity, model in MODEL_MAP.items():
+            selected = [entry for entry in entries if entry.entity == entity]
+            if not selected:
+                continue
+            fields = {"id", "name"} if entity != "invoice" else {
+                "id", "type_of_invoice", "business_id", "invoice_date", "status", "total_amount", "invoice_number", "itc_month"}
+            for entry in selected:
+                fields.update((entry.changes or {}).keys())
+            real = {f.name for f in model._meta.concrete_fields} | {f.attname for f in model._meta.concrete_fields}
+            rows = uncached(model).filter(pk__in={e.entity_id for e in selected}).only(*(fields & real))
+            counts = use_counts(entity) if entity in {"customer", "business"} and any(e.action in {"created", "imported"} for e in selected) else {}
+            for obj in rows.annotate(**counts):
+                self.records[entity, obj.pk] = obj
+                if counts:
+                    self.uses[entity, obj.pk] = {key.removeprefix("use_"): getattr(obj, key) for key in counts}
+        products = [obj for (entity, pk), obj in self.records.items() if entity == "product" and
+                    any(e.entity == entity and e.entity_id == pk and e.action in {"created", "imported"} for e in entries)]
+        if products:
+            from billing.services.catalog import product_uses_many
+            self.uses.update({("product", pk): counts for pk, counts in product_uses_many(products).items()})
+        missing = [e.pk for e in entries if e.entity == "invoice" and (e.entity, e.entity_id) not in self.records]
+        if missing:
+            rows = BinnedInvoice.objects.live().filter(audit_log_id__in=missing).only(
+                "id", "audit_log_id", "type_of_invoice", "business_id", "invoice_date", "total_amount").annotate(
+                restore_lines=F("data__lines"), restored_business_name=F("data__business_name"),
+                restore_credit_month=F("data__invoice__itc_month"))
+            self.bins = {row.audit_log_id: row for row in rows}
+        captures = [e.entity_id for e in entries if e.entity == "capture"]
+        rows = uncached(InwardCapture).filter(pk__in=captures)
+        self.capture_has_discarded = any(f.name == "discarded_at" for f in InwardCapture._meta.concrete_fields)
+        if self.capture_has_discarded:
+            rows = rows.filter(discarded_at__isnull=True)
+        self.captures = set(rows.values_list("pk", flat=True)) if captures else set()
+        from billing import period_lock
+        business_ids = {obj.business_id for (entity, _pk), obj in self.records.items() if entity == "invoice"}
+        business_ids.update(row.business_id for row in self.bins.values())
+        self.legacy_periods = None
+        self.firm_names = {pk: obj.name for (entity, pk), obj in self.records.items() if entity == "business"}
+        if getattr(period_lock, "month_status", None):
+            missing_firms = business_ids - self.firm_names.keys()
+            if missing_firms:
+                self.firm_names.update(uncached(Business).filter(pk__in=missing_firms).values_list("pk", "name"))
+        else:
+            from billing.models import FiledPeriod
+            self.legacy_periods = {(pk, year, month): name for pk, year, month, name in
+                                   uncached(FiledPeriod).filter(business_id__in=business_ids)
+                                   .values_list("business_id", "year", "month", "business__name")}
+
+    def status(self, business_id, day):
+        from billing import period_lock
+        key = (business_id, day.year, day.month)
+        if key not in self.statuses:
+            reader = getattr(period_lock, "month_status", None)
+            self.statuses[key] = reader(*key, include_checks=False) if reader else None
+        return self.statuses[key]
+
+    def refusal(self, business_id, day, action, purchase=False):
+        from billing.period_lock import assert_sales_open
+        if day is None:
+            return ""
+        key = (business_id, day.year, day.month, action, purchase)
+        if key not in self.refusals:
+            self.refusals[key] = ""
+            if self.legacy_periods is not None and not purchase:
+                name = self.legacy_periods.get((business_id, day.year, day.month))
+                if name is not None:
+                    from billing.period_lock import CLOSED_WORDS
+                    month = day.strftime("%B %Y")
+                    self.refusals[key] = (
+                        f"{month} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
+                        f"Have the owner unlock {month} in GST returns first.")
+                return self.refusals[key]
+            state = self.status(business_id, day)
+            if state is not None and not purchase:
+                if getattr(state, "sales_closed", False):
+                    from billing.period_lock import CLOSED_WORDS
+                    month, name = day.strftime("%B %Y"), self.firm_names.get(business_id, "")
+                    # The shared guard's published words, using the state already read above.
+                    if state.stage == "gstr1":
+                        self.refusals[key] = (
+                            f"{month}'s GSTR-1 is filed for {name}, so {CLOSED_WORDS[action]}. "
+                            f"Have the owner unlock {month}'s sales bills in GST returns first.")
+                    else:
+                        self.refusals[key] = (
+                            f"{month} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
+                            f"Have the owner unlock {month} in GST returns first.")
+                return self.refusals[key]
+            if state is None or getattr(state, "credit_closed" if purchase else "sales_closed", True):
+                try:
+                    if purchase:
+                        from billing.period_lock import assert_purchase_open
+                        assert_purchase_open(business_id, day, action)
+                    else:
+                        assert_sales_open(business_id, day, action)
+                except Refusal as refused:
+                    self.refusals[key] = refused.detail["detail"]
+        return self.refusals[key]
+
+
+def entry_rows(entries):
+    page = AuditPage(entries)
+    return [entry_row(entry, page=page) for entry in entries]
+
+
+def available(entry, obj=None, binned=None, page=None):
     if entry.used:
         return None
     kind = None
@@ -242,15 +383,23 @@ def available(entry, obj=None, binned=None):
         kind = "revert"
     elif entry.action == "deleted" and (binned is not None or (entry.entity in {"customer", "product", "business"} and obj is None)):
         kind = "restore"
-    if kind is None or (entry.entity == "invoice" and kind_for(entry, obj, binned) == "purchases"):
+    if kind is None:
         return None
+    purchase = entry.entity == "invoice" and kind_for(entry, obj, binned) == "purchases"
+    if purchase:
+        try:
+            from billing.credit import credit_month_of
+            from billing.period_lock import assert_purchase_open
+        except ImportError:
+            # X-40: the real purchase actions activate only after predecessor 2A lands.
+            return None
     disabled, effect = "", ""
     if kind == "revert":
         bad = changed_fields(entry, obj)
         if bad:
             disabled = f"{', '.join(bad)} changed again since. Revert the later change first."
     if kind == "undo" and entry.entity != "invoice":
-        uses = uses_for(obj)
+        uses = page.uses.get((entry.entity, obj.pk), {}) if page else uses_for(obj)
         if isinstance(obj, Business):
             from billing.services.firms import assert_firm_unused
             try:
@@ -262,11 +411,24 @@ def available(entry, obj=None, binned=None):
     if entry.entity == "invoice":
         from billing.period_lock import assert_sales_open
         record = binned if kind == "restore" else obj
-        try:
-            assert_sales_open(record.business_id, record.invoice_date, "restore" if kind == "restore" else "delete")
-        except Refusal as refused:
-            disabled = refused.detail["detail"]
-        if kind == "restore":
+        day = record.invoice_date
+        if purchase:
+            from datetime import date
+            from types import SimpleNamespace
+            raw = (binned.restore_credit_month if hasattr(binned, "restore_credit_month") else binned.data.get("invoice", {}).get("itc_month")) if kind == "restore" else getattr(obj, "itc_month", None)
+            month = date.fromisoformat(raw) if isinstance(raw, str) else raw
+            day = credit_month_of(SimpleNamespace(invoice_date=record.invoice_date, itc_month=month))
+        action = "restore" if kind == "restore" else "delete"
+        if page:
+            disabled = page.refusal(record.business_id, day, action, purchase)
+        else:
+            try:
+                (assert_purchase_open if purchase else assert_sales_open)(record.business_id, day, action)
+            except Refusal as refused:
+                disabled = refused.detail["detail"]
+        if kind == "restore" and purchase:
+            effect = "Back in Purchases under its original bill number."
+        elif kind == "restore":
             from types import SimpleNamespace
 
             from billing.services.bill_reads import sums
@@ -277,25 +439,27 @@ def available(entry, obj=None, binned=None):
             effect = f"{firm_name}'s {binned.invoice_date.strftime('%B')} sales go up by {inr(binned.total_amount)} and its tax by {inr(tax)}."
             from billing import period_lock
             status_reader = getattr(period_lock, "month_status", None)
-            if status_reader and status_reader(binned.business_id, binned.invoice_date.year, binned.invoice_date.month).unlocked:
+            state = page.status(binned.business_id, binned.invoice_date) if page else (
+                status_reader(binned.business_id, binned.invoice_date.year, binned.invoice_date.month, include_checks=False) if status_reader else None)
+            if state and state.unlocked:
                 effect += f" {binned.invoice_date.strftime('%B %Y')} was filed before and is open for a correction, so this change needs an amendment in the next return."
     label = {"undo": "Undo…", "revert": "Revert…", "restore": "Restore…"}[kind]
     hint = {"undo": "Shows what is removed before anything changes", "revert": "Shows what goes back before anything changes", "restore": "Shows what comes back before anything changes"}[kind]
     return {"kind": kind, "label": label, "disabled": disabled, "hint": hint, "effect": effect}
 
 
-def entry_row(entry, actions=True):
-    obj = record_for(entry) if actions else None
-    binned = binned_for(entry) if actions and entry.entity == "invoice" and obj is None else None
+def entry_row(entry, actions=True, page=None):
+    obj = (page.records.get((entry.entity, entry.entity_id)) if page else record_for(entry)) if actions else None
+    binned = (page.bins.get(entry.pk) if page else binned_for(entry)) if actions and entry.entity == "invoice" and obj is None else None
     kind = kind_for(entry, obj, binned)
-    present = capture_present(entry) if actions and entry.entity == "capture" else obj is not None
+    present = (entry.entity_id in page.captures and (page.capture_has_discarded or entry.action != "discarded") if page else capture_present(entry)) if actions and entry.entity == "capture" else obj is not None
     words, link = event_words(entry, kind, present)
     result = ("restored" if entry.action == "deleted" else "reverted" if entry.action in {"updated", "reverted"} else "undone") if entry.used else None
     return {"id": entry.pk, "at": stamp(entry.timestamp), "by": person(entry.user), "action": entry.action, "entity": entry.entity,
             "entity_id": entry.entity_id, "kind": kind, "group": GROUPS.get(entry.action, "change"),
             "words": words, "link": link, "note": "In the bin" if binned else "",
             "details": entry.details, "changes": change_rows(MODEL_MAP.get(entry.entity), entry.changes), "result": result,
-            "can": available(entry, obj, binned) if actions else None}
+            "can": available(entry, obj, binned, page) if actions else None}
 
 
 def name_available(model, name, pk):
@@ -364,12 +528,21 @@ def act(entry_id, action, user):
             raise ValidationError({"detail": "This entry can't be undone."})
         if entry.entity == "invoice":
             from billing.services.bin import bin_bill, restore_from_bin
+            purchase = kind_for(entry, obj, binned) == "purchases"
             if action == "undo":
-                binned, new = bin_bill(obj, user, reason="Undone from the Audit log")
+                if purchase:
+                    from billing.services.purchase_bin import bin_purchase
+                    binned = bin_purchase(obj, user, reason="Undone from the Audit log")
+                else:
+                    binned, new = bin_bill(obj, user, reason="Undone from the Audit log")
                 new = AuditLog.objects.get(pk=binned.audit_log_id)
                 mark_undone(entry, user, new)
             else:
-                obj = restore_from_bin(binned, user, via="audit_log")
+                if purchase:
+                    from billing.services.purchase_bin import restore_purchase
+                    obj = restore_purchase(binned, user, via="audit_log")
+                else:
+                    obj = restore_from_bin(binned, user, via="audit_log")
                 entry.refresh_from_db()
                 new = AuditLog.objects.get(pk=entry.snapshot["_undo"]["log"])
         else:
@@ -426,5 +599,6 @@ def act(entry_id, action, user):
             mark_undone(entry, user, new)
     answer = {"entry": entry_row(read_entries().get(pk=entry.pk)), "new_entry": entry_row(read_entries().get(pk=new.pk))}
     if action in {"restore", "revert"}:
-        answer["link"] = f"/{PATHS[entry.entity]}/{obj.pk}"
+        route = "purchases" if entry.entity == "invoice" and obj.type_of_invoice == "inward" else PATHS[entry.entity]
+        answer["link"] = f"/{route}/{obj.pk}"
     return answer

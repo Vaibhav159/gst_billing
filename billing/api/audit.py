@@ -2,7 +2,7 @@
 import csv
 from io import StringIO
 
-from django.db.models import CharField, Exists, OuterRef, Q
+from django.db.models import CharField, Count, Exists, OuterRef, Q
 from django.db.models.functions import Cast
 from django.http import StreamingHttpResponse
 from django.utils import timezone
@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from billing.cache import uncached
 from billing.models import AuditLog, BinnedInvoice, Invoice
 from billing.params import date_param, id_param, text_param
-from billing.services.audit import GROUPS, KIND_ENTITIES, act, entry_row, read_entries
+from billing.services.audit import GROUPS, KIND_ENTITIES, act, entry_row, entry_rows, read_entries
 from billing.text import person
 
 from .permissions import V3Permission
@@ -87,11 +87,11 @@ class AuditView(APIView):
         rows = filtered(request.query_params)
         pages = AuditPages()
         page = pages.paginate_queryset(rows, request, view=self)
-        response = pages.get_paginated_response([entry_row(entry) for entry in page])
+        response = pages.get_paginated_response(entry_rows(page))
         response.data["total"] = AuditLog.objects.count()
         if request.query_params.get("counts") == "1":
             scope = filtered(request.query_params, with_kind=False)
-            response.data["counts"] = {"all": scope.count(), **{kind: scope.filter(kind_filter(kind)).count() for kind in KINDS}}
+            response.data["counts"] = scope.aggregate(all=Count("pk"), **{kind: Count("pk", filter=kind_filter(kind)) for kind in KINDS})
             people = AuditLog.objects.order_by().values("user_id", "user__first_name", "user__last_name", "user__username").distinct()
             response.data["people"] = [{"id": row["user_id"], "name": (" ".join(filter(None, [row["user__first_name"], row["user__last_name"]])) or row["user__username"]) if row["user_id"] else "Someone no longer here"} for row in people]
         return response
