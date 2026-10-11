@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router";
 import { salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow } from "@/core/sales/fixtures";
+// Resolve the PDF stand-in before the fake clock; production loads the maker on the first send.
+import "@/core/print/make";
 import { ScopeProvider } from "@/core/scope";
 import { renderApp } from "@/test/render";
 import SalesList from "../SalesList";
