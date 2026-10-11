@@ -14,6 +14,7 @@ from billing.api.mixins import snapshot_of
 from billing.cache import invalidate, uncached
 from billing.constants import BILL_CANCELLED, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem, SaleDraft
+from billing.numbering import REF_FIELDS as BILL_REF_FIELDS
 from billing.numbering import bill_ref
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
@@ -193,6 +194,23 @@ def _sent_refusal(change, source, target):
             f"The copy the customer has wouldn't match your return. Cancel and remake {number} first, then merge.")
 
 
+def _walkin(customer):
+    # Legacy walk-in rows may carry only the name the first firm's setup gave them (firms.py).
+    return customer.kind == "walkin" or (customer.name or "").strip().lower() == "walk-in customer"
+
+
+def _duplicate_purchase(purchases, target):
+    """X-7: a merge must not leave two purchases with one firm + supplier + number + FY identity."""
+    from billing.api.inward_bills_service import fy_start, inward_number_key
+
+    def key(bill):
+        return bill.business_id, inward_number_key(bill.invoice_number), fy_start(bill.invoice_date)
+    theirs = {key(bill): bill for bill in uncached(Invoice).filter(
+        customer=target, type_of_invoice=INVOICE_TYPE_INWARD, business_id__in={bill.business_id for bill in purchases}).select_related(
+        "business", "customer").only(*BILL_REF_FIELDS, "business__name").order_by("pk")}
+    return next(((bill, theirs[key(bill)]) for bill in purchases if key(bill)[1] and key(bill) in theirs), None)
+
+
 def _preview(source, target, bills, bins, drafts):
     sales = [bill for bill in bills if bill.type_of_invoice == INVOICE_TYPE_OUTWARD]
     purchases = [bill for bill in bills if bill.type_of_invoice == INVOICE_TYPE_INWARD]
@@ -201,7 +219,8 @@ def _preview(source, target, bills, bins, drafts):
     closed = _closed_bills(bills)
     months = sorted({month.isoformat()[:7] for month, _ in closed})
     refusal = None
-    if source.kind == "walkin" or target.kind == "walkin":
+    duplicate = _duplicate_purchase(purchases, target) if purchases else None
+    if _walkin(source) or _walkin(target):
         refusal = {"code": "walkin", "detail": WALKIN_WORDS, "months": [], "bills": []}
     elif purchases and clean_gstin(source.gst_number) != clean_gstin(target.gst_number):
         numbers = _join_words([bill.invoice_number for bill in purchases])
@@ -216,6 +235,13 @@ def _preview(source, target, bills, bins, drafts):
                              "heads": None, "segment": None, "gstin_changes": True,
                              "words": "Supplier GSTIN changes"} for bill in purchases]
         refusal = {"code": "sent_changes", "detail": words, "months": [], "bills": purchase_changes}
+    elif duplicate:
+        mine, theirs = duplicate
+        start = mine.invoice_date.year if mine.invoice_date.month >= 4 else mine.invoice_date.year - 1
+        same = "" if mine.invoice_number == theirs.invoice_number else f" as {theirs.invoice_number}"
+        words = (f"Can't merge: purchase bill {mine.invoice_number} from {source.name} is already entered under {target.name}"
+                 f"{same} for {mine.business.name} in {start}-{str(start + 1)[2:]}. Delete one copy first, or keep both customers.")
+        refusal = {"code": "duplicate_purchase", "detail": words, "months": [], "bills": [bill_ref(mine), bill_ref(theirs)]}
     elif closed:
         names = _join_words([date.fromisoformat(month + "-01").strftime("%B %Y") for month in months])
         many = len(closed) != 1
@@ -274,6 +300,11 @@ def merge_customers(source_id, into, user):
             for item in data.get("lines", []):
                 if isinstance(item, dict) and "customer_id" in item:
                     item["customer_id"] = str(target.pk)
+            if isinstance(data.get("supplier"), dict):
+                # 2A's binned purchase keeps its supplier card; it must name the customer that still exists.
+                data["supplier"] = {**data["supplier"], "id": target.pk, "name": target.name,
+                                    "gst_number": clean_gstin(target.gst_number), "state_code": state_code(target),
+                                    "state_name": target.state_name or "", "city": target.city or ""}
             row.customer_id, row.data = target.pk, data
         if bins:
             BinnedInvoice.objects.bulk_update(bins, ["customer_id", "data"])

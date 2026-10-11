@@ -130,3 +130,51 @@ class MergeSupplierIdentityTests(TestCase):
         self.assertEqual(response.data["detail"], refusal["detail"])
         self.assertEqual(response.data["bills"], refusal["bills"])
         self.assertEqual(self.stored_rows(), before)
+
+
+class MergeReviewTests(TestCase):
+    def setUp(self):
+        self.owner = person("merge-review-owner", "admin")
+        self.client = client_for(self.owner)
+        self.business = firm()
+
+    def preview(self, source, target):
+        return self.client.get(f"/api/customers/{source.pk}/merge-preview/", {"into": target.pk})
+
+    def merge(self, source, target):
+        return self.client.post(f"/api/customers/{source.pk}/merge-into/", {"into": target.pk}, format="json")
+
+    def test_a_legacy_walkin_by_name_is_never_merged(self):
+        walkin, other = buyer("Walk-in Customer"), buyer("Ramesh")
+        for source, target in ((walkin, other), (other, walkin)):
+            with self.subTest(source=source.name):
+                response = self.preview(source, target)
+                self.assertEqual((response.data["can_merge"], response.data["refusal"]["code"]), (False, "walkin"))
+                self.assertEqual(self.merge(source, target).status_code, 409)
+        self.assertEqual(Customer.objects.count(), 2)
+
+    def test_the_same_purchase_under_both_suppliers_refuses_a_duplicate(self):
+        source, target = buyer("Sharma Traders"), buyer("Sharma Traders Jaipur")
+        sale(self.business, source, "SJ/101", "2026-05-02", kind="inward")
+        sale(self.business, target, "SJ-101", "2026-09-12", kind="inward")
+        response = self.preview(source, target)
+        self.assertEqual((response.data["can_merge"], response.data["refusal"]["code"]), (False, "duplicate_purchase"))
+        self.assertEqual(response.data["refusal"]["detail"],
+                         "Can't merge: purchase bill SJ/101 from Sharma Traders is already entered under Sharma Traders Jaipur "
+                         "as SJ-101 for KIRAN GOLD HOUSE in 2026-27. Delete one copy first, or keep both customers.")
+        self.assertEqual(self.merge(source, target).status_code, 409)
+        self.assertEqual(Invoice.objects.filter(customer=source).count(), 1)
+        Invoice.objects.filter(customer=target).update(invoice_date="2027-04-02")
+        self.assertTrue(self.preview(source, target).data["can_merge"])
+
+    def test_a_binned_purchase_names_the_kept_supplier(self):
+        source, target = buyer("Old Supplier"), buyer("Kept Supplier")
+        binned, _entry = bin_bill(sale(self.business, source, "PUR-9", "2026-09-12", kind="inward"), self.owner,
+                                  check_month=False)
+        binned.data["supplier"] = {"id": source.pk, "name": source.name, "gst_number": "", "state_code": "08",
+                                   "state_name": "RAJASTHAN", "city": ""}
+        binned.save(update_fields=["data"])
+        self.assertEqual(self.merge(source, target).status_code, 200)
+        binned.refresh_from_db()
+        self.assertEqual((binned.customer_id, binned.data["supplier"]["id"], binned.data["supplier"]["name"]),
+                         (target.pk, target.pk, "Kept Supplier"))
