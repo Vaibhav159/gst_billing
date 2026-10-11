@@ -3,7 +3,7 @@ import { Navigate, useLocation, useParams, type RouteObject } from "react-router
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { paletteCode } from "@/core/shell/Palette";
-import { AppFailed } from "@/core/shell/ScreenBoundary";
+import { AppFailed, ScreenBoundary } from "@/core/shell/ScreenBoundary";
 import { ListSkeleton } from "@/core/ui";
 import Login from "@/pages/core/Login";
 import NotFound from "@/pages/core/NotFound";
@@ -112,7 +112,8 @@ export const appRoutes: RouteObject[] = [{
   errorElement: <AppFailed />,
   children: [
     { path: "/login", element: <Login /> },
-    { path: "/password", element: <RequireAuth><Suspense fallback={<div className="p-6"><ListSkeleton what="your password page" /></div>}><ChoosePassword /></Suspense></RequireAuth> },
+    // its own boundary: a page file that fails to load (offline, a stale tab) offers Reload, not the whole-app failure
+    { path: "/password", element: <RequireAuth><ScreenBoundary><Suspense fallback={<div className="p-6"><ListSkeleton what="your password page" /></div>}><ChoosePassword /></Suspense></ScreenBoundary></RequireAuth> },
     // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
     ...V2_REDIRECTS.map(([path, to]): RouteObject => ({ path, element: <V2Redirect to={to} /> })),
     {

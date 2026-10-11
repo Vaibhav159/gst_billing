@@ -1,17 +1,36 @@
 // Sign in. No marketing badges: the page says what it is and how to get help,
 // shows progress, explains each failure in plain words next to the field that
 // caused it, and after a session runs out takes the person back to their page.
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Eye, EyeOff, LogIn, WifiOff, CloudOff, KeyRound, Clock, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import type { ApiProblem } from "@/core/api/errors";
 import { cn } from "@/core/cn";
 import { useView } from "@/core/view";
-import { AppMark, Button, Field, Input, Banner, Checkbox, useDocTitle } from "@/core/ui";
+import { AppMark, Button, Field, Input, Banner, Checkbox, Dialog, useDocTitle } from "@/core/ui";
 import { version as APP_VERSION } from "../../../package.json";
 
-const ForgotPassword = lazy(() => import("@/pages/people/ForgotPassword"));
+const loadForgot = () => import("@/pages/people/ForgotPassword");
+const ForgotPassword = lazy(loadForgot);
+
+/**
+ * Password help's code didn't load (offline, or a stale tab after a release). The sign-in page stays, and today's way
+ * is still told: the owner sets a new password. Try again loads it afresh.
+ */
+function ForgotUnavailable({ onClose, onRetry }: { onClose: () => void; onRetry: () => void }) {
+  return (
+    <Dialog open onClose={onClose} title="Forgot your password?" size="sm" footer={<><Button onClick={onRetry}>Try again</Button><Button onClick={onClose}>Close</Button></>}>
+      <p className="text-fg2">The owner sets a new password for you in Users and roles. Ask them; it takes a minute. If you're the owner, ask the person who looks after the app to reset it.</p>
+      <p className="text-sm text-muted mt-2">Password help couldn't load. Check the connection, then try again.</p>
+    </Dialog>
+  );
+}
+class ForgotBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
 
 /** What's wrong: a missing field says so under it; a sign-in that didn't go through has a title and an icon, above the fields. */
 type Problem = { field?: "user" | "pw"; icon?: LucideIcon; title?: string; text: string };
@@ -54,6 +73,9 @@ export default function Login() {
   const [err, setErr] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(query.get("forgot") === "1");
+  // a fresh lazy page on Try again: React keeps a failed load as failed
+  const [ForgotPage, setForgotPage] = useState(() => ForgotPassword);
+  const [forgotTry, setForgotTry] = useState(0);
   const userRef = useRef<HTMLInputElement>(null);
   const pwRef = useRef<HTMLInputElement>(null);
   /** Set once the page has sent the person on: a later signal (this tab's own sign-in coming back late) mustn't move them again. */
@@ -135,7 +157,11 @@ export default function Login() {
           <span className="tnum shrink-0">Version {APP_VERSION}</span>
         </div>
       </form>
-      {forgot ? <Suspense fallback={<p role="status">Loading password help…</p>}><ForgotPassword open onClose={() => setForgot(false)} /></Suspense> : null}
+      {forgot ? (
+        <ForgotBoundary key={forgotTry} fallback={<ForgotUnavailable onClose={() => setForgot(false)} onRetry={() => { setForgotTry((n) => n + 1); setForgotPage(() => lazy(loadForgot)); }} />}>
+          <Suspense fallback={<p role="status">Loading password help…</p>}><ForgotPage open onClose={() => setForgot(false)} /></Suspense>
+        </ForgotBoundary>
+      ) : null}
     </div>
   );
 }
