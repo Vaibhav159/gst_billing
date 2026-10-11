@@ -11,7 +11,7 @@ export function fromPurchase(p: PurchaseDetail): PurchaseValues {
     lines: p.lines.map(l => ({ product_name: l.product_name, hsn_code: l.hsn_code, quantity: l.quantity, unit: l.unit, rate: l.rate, gst_percent: l.gst_percent, note: l.note, ...(l.note === 'Amount only' ? { amount_only: true, taxable: paiseToDecimal(l.taxable) } : {}) })) };
 }
 export function copyPurchase(p: PurchaseDetail, next: string | null, today = todayIST()): PurchaseValues {
-  return { ...fromPurchase(p), invoice_number: next || '', invoice_date: today, payment_mode: 'bank', itc_eligible: true, buyer_gstin: '', buyer_ack: false };
+  return { ...fromPurchase(p), invoice_number: next || '', invoice_date: today, itc_eligible: true, buyer_gstin: '', buyer_ack: false };
 }
 export function fromRead(r: PurchaseRead, business = 0): PurchaseValues {
   return { ...blankPurchase(business), supplier: r.supplier.id ?? 0, invoice_number: r.invoice_number, invoice_date: r.invoice_date, payment_mode: r.payment_mode, buyer_gstin: r.buyer.gst_number,
@@ -19,7 +19,7 @@ export function fromRead(r: PurchaseRead, business = 0): PurchaseValues {
 }
 export const emptyLine = (l: FormLine) => !l.product_name.trim() && !l.quantity && !l.rate && !l.taxable;
 export function fillEmpty(v: PurchaseValues, read: PurchaseValues): PurchaseValues {
-  return { ...v, supplier: v.supplier || read.supplier, invoice_number: v.invoice_number || read.invoice_number, invoice_date: v.invoice_date || read.invoice_date, buyer_gstin: v.buyer_gstin || read.buyer_gstin,
+  return { ...v, supplier: v.supplier || read.supplier, invoice_number: v.invoice_number || read.invoice_number, invoice_date: v.invoice_date || read.invoice_date, payment_mode: v.payment_mode || read.payment_mode, buyer_gstin: v.buyer_gstin || read.buyer_gstin,
     lines: v.lines.length === 1 && emptyLine(v.lines[0]) ? read.lines : v.lines };
 }
 const positive = (v: string, decimals = 3) => new RegExp(`^\\d+(?:\\.\\d{1,${decimals}})?$`).test(v) && Number(v) > 0;

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -165,4 +166,45 @@ test('a bill before the ledger starts offers no credit month and sends null, kee
   await tick(400); fireEvent.click(screen.getByRole('button', { name: 'Save purchase' }));
   await waitFor(() => expect(calls.some(c => c.method === 'POST')).toBe(true));
   expect(calls.find(c => c.method === 'POST')!.data).toMatchObject({ itc_month: null, itc_eligible: true });
+});
+test('after a filed-month refusal the months are asked again and picking another clears the error', async () => {
+  const detail = "September 2026's GSTR-3B is filed for KIRAN GOLD HOUSE, with this bill's credit in it, so it can't be changed. Have the owner unlock September 2026 in GST returns first.";
+  let filed = false;
+  const calls = server({
+    'GET purchases/credit-months/': () => ({ status: 200, data: { bill_month: '2026-08', bill_month_closed: true, default: filed ? '2026-10' : '2026-09', options: [...(filed ? [] : [{ month: '2026-09', due: '2026-10-20', running: false, in_time: true }]), { month: '2026-10', due: '2026-11-20', running: true, in_time: true }], deadline: '2027-11-30', lapsed: false } }),
+    'POST purchases/': () => { filed = true; return { status: 409, data: { code: 'month_closed', detail, locked_period: { id: null, business: 3, year: 2026, month: 9 } } }; },
+  });
+  mount();
+  const credit = await screen.findByLabelText('Claim the credit in');
+  await tick(400);
+  fireEvent.change(credit, { target: { value: '2026-09' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save purchase' }));
+  await waitFor(() => expect(credit).toHaveAttribute('aria-invalid', 'true'));
+  await waitFor(() => expect(calls.filter(c => c.url === 'purchases/credit-months/')).toHaveLength(2));
+  await waitFor(() => expect(within(credit).getByRole('option', { name: /September 2026/ })).toHaveTextContent('September 2026 (not open now)'));
+  fireEvent.change(credit, { target: { value: '2026-10' } });
+  expect(credit).not.toHaveAttribute('aria-invalid', 'true');
+});
+test('an unchanged edit whose saved credit month is no longer offered still shows that month', async () => {
+  server();
+  const original = toPurchaseDetail(purchaseDetailWire());
+  mount({ ...valid(), invoice_date: original.invoice_date }, { original });
+  const credit = await screen.findByLabelText('Claim the credit in');
+  expect(credit).toHaveValue('2026-10');
+  expect(within(credit).getByRole('option', { selected: true })).toHaveTextContent(/October 2026/);
+});
+test('Ctrl+Enter confirms the amounts through the latest confirmation handler', async () => {
+  server();
+  const seen: number[] = [];
+  function Host() {
+    const [n, setN] = useState(0);
+    return <><button type="button" onClick={() => setN(x => x + 1)}>Next handler</button><PurchaseEditor initial={valid()} onSaved={() => {}} confirmed={{}} onConfirm={g => { if (g === 'amounts') seen.push(n); }} /></>;
+  }
+  const auth = stubAuth();
+  const router = createMemoryRouter([{ path: '/', element: <Host /> }]);
+  render(<QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={auth}><RoleContext.Provider value={auth.me?.role ?? null}><RouterProvider router={router} /></RoleContext.Provider></AuthContext.Provider></QueryClientProvider>);
+  await screen.findByLabelText('Claim the credit in');
+  fireEvent.click(screen.getByRole('button', { name: 'Next handler' }));
+  fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+  expect(seen).toEqual([1]);
 });

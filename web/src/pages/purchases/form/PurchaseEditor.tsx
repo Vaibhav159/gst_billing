@@ -5,7 +5,7 @@ import { useAuth } from '@/core/auth/AuthProvider';
 import { useCreatePurchase, useUpdatePurchase, usePurchaseFiles, useReadPurchase, useCreditMonths, useCheckDuplicate, useUsualRate } from '@/core/api/purchases';
 import { useSupplier, useSupplierMemory } from '@/core/api/suppliers';
 import { problemOf, saveFailure, type ApiProblem } from '@/core/api/errors';
-import { bytesOf } from '@/pages/sales/print/zip';
+import { bytesOf } from '@/core/files/zip';
 import { billFigures } from '@/core/sales/maths';
 import { isInterState } from '@/core/sales/pos';
 import { stateCodeOf, hasGstin, checkGstin } from '@/core/ids';
@@ -79,7 +79,7 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
   const claim = v.itc_eligible && !noGstin && !lapsed && !beforeLedger;
   const buyer = v.buyer_gstin.trim().toUpperCase(); const mismatch = Boolean(buyer && firm && buyer !== firm.gstin);
   const words = beforeLedger ? beforeLedgerWords : creditWords({ eligible: v.itc_eligible, supplier: supplier?.name, noGstin, lapsed, month: chosenMonth || undefined, firm: firm?.short, option: option?.month !== v.invoice_date.slice(0, 7) ? option : undefined });
-  const set = (patch: Partial<PurchaseValues>) => { setTouched(true); setV(old => ({ ...old, ...patch })); setProblem(null); };
+  const set = (patch: Partial<PurchaseValues>) => { setTouched(true); setV(old => ({ ...old, ...patch })); setProblem(null); if ('itc_month' in patch) setErrors(old => old.itc_month ? { ...old, itc_month: '' } : old); };
   const confirm = (key: ReadGroup) => { if (disabled) return; setTouched(true); if (onConfirm) onConfirm(key); else setConfirmed(old => ({ ...old, [key]: true })); };
   const setLine = (i: number, patch: Partial<FormLine>) => { confirm('amounts'); setV(old => ({ ...old, lines: old.lines.map((l, j) => j === i ? { ...l, ...patch } : l) })); };
   useEffect(() => {
@@ -111,17 +111,20 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
       const p = original ? await update.mutateAsync({ id: original.id, body }) : await create.mutateAsync(body);
       setSaved(p); await attachSaved(p);
     } catch (error) { const p = problemOf(error); setProblem(p); setErrors(p.code === 'month_closed' ? { itc_month: p.message } : p.fields ?? {});
+      // the refused month is filed now: ask again, so it is no longer offered as open
+      if (p.code === 'month_closed') void credit.refetch();
       if (p.code === 'duplicate') { const body = p.body as { purchase?: Record<string, unknown> }; if (body.purchase) setRefusedDuplicate({ key: duplicateKey, purchase: toPurchaseRef(body.purchase) }); }
     }
     finally { busyRef.current = false; }
   };
   const submitRef = useRef(submit); submitRef.current = submit;
+  const confirmRef = useRef(confirm); confirmRef.current = confirm;
   useEffect(() => {
     if (disabled || isPhone) return;
     const key = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void submitRef.current(); }
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); confirm('amounts'); setV(old => old.lines.length < 200 ? { ...old, lines: [...old.lines, newLine()] } : old); }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); confirmRef.current('amounts'); setV(old => old.lines.length < 200 ? { ...old, lines: [...old.lines, newLine()] } : old); }
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [disabled, isPhone]);
@@ -181,7 +184,11 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
               {credit.data?.bill_month_closed && option && <p className="text-sm text-file">{lateNote(credit.data.bill_month, option, todayIST())}</p>}
               {credit.isFetching && <p role="status" className="text-sm text-muted">Checking open credit months…</p>}
               {credit.isError && <Banner tone="neg" title="Credit months could not be loaded" actions={<Button onClick={() => void credit.refetch()}>Try again</Button>}>{problemOf(credit.error).message}</Banner>}
-              {credit.data && !original?.locked && <Field label="Claim the credit in" htmlFor="pf-credit" hint={earliestCreditWords} error={errors.itc_month}><Select id="pf-credit" value={chosenMonth ?? ''} disabled={disabled || credit.data.lapsed} options={credit.data.options.map(o => ({ value: o.month, label: claimLabel(o, todayIST()), disabled: !o.in_time }))} onChange={e => set({ itc_month: e.target.value })} /></Field>}
+              {credit.data && !original?.locked && <Field label="Claim the credit in" htmlFor="pf-credit" hint={earliestCreditWords} error={errors.itc_month}><Select id="pf-credit" value={chosenMonth ?? ''} disabled={disabled || credit.data.lapsed} options={[
+                // a month no longer offered (the saved one an unchanged edit keeps, or one just refused as filed) is still what
+                // will be sent, so the box shows it rather than the first open month
+                ...(chosenMonth && !credit.data.options.some(o => o.month === chosenMonth) ? [{ value: chosenMonth, label: `${monthLabel(chosenMonth, { long: true })} (not open now)` }] : []),
+                ...credit.data.options.map(o => ({ value: o.month, label: claimLabel(o, todayIST()), disabled: !o.in_time }))]} onChange={e => set({ itc_month: e.target.value })} /></Field>}
               {credit.data && v.invoice_date && fyOf(v.invoice_date) < fyOf(todayIST()) && <p className="text-sm text-muted">{deadlineNote(v.invoice_date, credit.data.deadline)}</p>}
               {dup && <Banner tone="neg" title="Already entered"><p>{dup.invoice_number} from {dup.supplier_name}, {date(dup.invoice_date)}, {inr(dup.total_amount)}. <Link className="link" to={`/purchases/${dup.id}`}>Open it</Link></p>{!duplicate.data?.same_spelling && <p>“{v.invoice_number}” and “{dup.invoice_number}” are the same number written differently.</p>}<Checkbox label="It's a different bill with the same number" checked={Boolean(v.duplicate_ok)} disabled={disabled} onChange={value => set({ duplicate_ok: value })} /></Banner>}
               <Field label="Billed to (GSTIN on the bill)" htmlFor="pf-buyer" hint="Optional. Printed under “Billed to”; checked against the firm's GSTIN." error={errors.buyer_gstin}><Input id="pf-buyer" maxLength={15} value={v.buyer_gstin} disabled={disabled} onChange={e => set({ buyer_gstin: e.target.value.toUpperCase(), buyer_ack: false })} /></Field>

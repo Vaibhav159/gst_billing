@@ -33,3 +33,14 @@ test('Add another clears the read, attachments, date, billed-to and chosen credi
   expect(v).toMatchObject({ invoice_number: 'B/13', invoice_date: '2026-10-08', buyer_gstin: '', buyer_ack: false, itc_eligible: true, capture: null, source: 'typed' });
   expect(v).not.toHaveProperty('itc_month');
 });
+test('Add another keeps how the source bill was paid, including not recorded', () => {
+  for (const payment_mode of ['cash', ''] as const) {
+    const source = { ...valid(), id: 905, payment_mode, credit: { eligible: true }, lines: valid().lines } as unknown as PurchaseDetail;
+    expect(copyPurchase(source, null, '2026-10-08').payment_mode).toBe(payment_mode);
+  }
+});
+test('a read fills an empty payment mode and never replaces a chosen one', () => {
+  const read = { supplier: { id: 21 }, invoice_number: 'Read/12', invoice_date: '2026-10-07', payment_mode: 'cash', buyer: { gst_number: '' }, lines: [] } as unknown as PurchaseRead;
+  expect(fillEmpty(blankPurchase(3), fromRead(read, 3)).payment_mode).toBe('cash');
+  expect(fillEmpty({ ...blankPurchase(3), payment_mode: 'bank' }, fromRead(read, 3)).payment_mode).toBe('bank');
+});
