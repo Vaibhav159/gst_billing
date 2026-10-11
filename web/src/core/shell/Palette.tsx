@@ -38,8 +38,10 @@ type Quick = {
 /**
  * The server's records as rows: customers; sales bills by number or by a customer found, each once, the exact number
  * first then the newest (rankBills); deleted bills (the owner's), each opening its page to restore; products. A bill
- * whose number is exactly what's typed puts the bills ahead of the customers: a plain number ("34", a paper bill's) is
- * also in customers' phone numbers, and Enter opens the first row.
+ * whose number is exactly what's typed puts its kind's rows ahead of the customers: a plain number ("34", a paper bill's)
+ * is also in customers' phone numbers, and Enter opens the first row. A live bill comes before a deleted one with the
+ * same number, and a deleted one before the customers (Ruling 1B-24), so Enter on a deleted paper number opens its page
+ * to restore it. Each kind keeps its rows together, under one heading.
  */
 function recordRows(d: Quick, term: string, deleted: BinRow[]): Result[] {
   const customers: Result[] = d.customers.map((c) => ({ group: "Customers", label: c.name, icon: UserRound, hint: mobileText(c.mobile_number) || c.gst_number || "Customer", to: `/customers/${c.id}` }));
@@ -49,9 +51,15 @@ function recordRows(d: Quick, term: string, deleted: BinRow[]): Result[] {
   for (const c of d.customers) for (const b of c.recent_invoices) if (b.type_of_invoice === "outward" && !bills.has(b.id)) bills.set(b.id, { ...b, customer_name: c.name });
   const ranked = rankBills([...bills.values()], term).slice(0, 5);
   const sales: Result[] = ranked.map((b) => ({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}${cancelledMark(b.status)}`, to: `/sales/${b.id}` }));
-  const rows = ranked.some((b) => sameNumber(b.invoice_number, term)) ? [...sales, ...customers] : [...customers, ...sales];
-  // deleted bills can still be found: their page offers Restore (PROTO core/shell.jsx:493-496)
-  for (const s of deleted) rows.push({ group: "Deleted bills", label: s.invoice_number, icon: FileX, hint: `deleted ${dateShort(dayOf(s.deleted_at))} · ${s.customer.name} · open it to restore`, to: `/sales/${s.original_id}` });
+  // deleted bills can still be found: their page offers Restore (PROTO core/shell.jsx:493-496). The one numbered as
+  // typed first, the rest newest deleted first, as the bin lists them
+  const exactGone = deleted.filter((s) => sameNumber(s.invoice_number, term));
+  const gone: Result[] = [...exactGone, ...deleted.filter((s) => !exactGone.includes(s))].map((s) => ({
+    group: "Deleted bills", label: s.invoice_number, icon: FileX, hint: `deleted ${dateShort(dayOf(s.deleted_at))} · ${s.customer.name} · open it to restore`, to: `/sales/${s.original_id}`,
+  }));
+  const exact = ranked.some((b) => sameNumber(b.invoice_number, term));
+  const rows = exact ? (exactGone.length ? [...sales, ...gone, ...customers] : [...sales, ...customers, ...gone])
+    : exactGone.length ? [...gone, ...customers, ...sales] : [...customers, ...sales, ...gone];
   for (const p of d.products.slice(0, 3)) rows.push({ group: "Products", label: p.name, icon: Package, hint: `HSN ${p.hsn_code}${p.gst_tax_rate == null ? "" : ` · GST ${pct(Number(p.gst_tax_rate))}`}`, to: `/products/${p.id}` });
   return rows;
 }

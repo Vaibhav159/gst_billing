@@ -698,3 +698,17 @@ test("an edited bill whose corrected copy went before the panel came up (a reloa
   expect(owed).toHaveTextContent("Written to the audit log, with what changed. Anil Gupta has the old bill; send the corrected one.");
   expect(within(owed).getByRole("button", { name: "Send the corrected bill" })).toBeInTheDocument();
 });
+
+/* ── 1B Task 12, commit A: one word for "cancelled" ── */
+
+test("among the customer's other bills, a cancelled one says so at the end of its line, as search's rows do, and its amount is struck through", async () => {
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/", () => wirePage([wireRow(), wireRow({ id: 300, invoice_number: "KGH/2026-27/12", invoice_date: "2026-08-14", total_amount: "45210.00", payment_mode: "bank", status: "cancelled" })])],
+  ]);
+  mount("/sales/412");
+  const card = await screen.findByRole("region", { name: "Other bills for Anil Gupta" });
+  const row = await within(card).findByRole("link", { name: /^KGH\/2026-27\/12/ });
+  expect(row).toHaveTextContent(/^KGH\/2026-27\/1214 Aug 2026 · UPI \/ bank · cancelled₹45,210\.00$/);
+  expect(within(row).getByText("₹45,210.00")).toHaveClass("line-through");
+});

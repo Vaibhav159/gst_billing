@@ -440,10 +440,15 @@ test("the page frame notes a record stayed on, under its page's title; not a lis
 
 test("the page the app opens on counts as a visit", async () => {
   serve();
+  // the clock moves only when the test says, from before the app opens: the page's 400 ms starts as it does
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   shell([{ path: "/customers/:id", element: <Page title="Meena Jain">the customer</Page> }], "/customers/7");
-  await screen.findByRole("heading", { level: 1, name: "Meena Jain" });
-  // (its timer started with the page, so only "it comes" is asked here: the stay test above pins the 400 ms)
-  await waitFor(() => expect(recentVisits(1)).toEqual([{ to: "/customers/7", label: "Meena Jain" }]));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByRole("heading", { level: 1, name: "Meena Jain" })).toBeInTheDocument();
+  act(() => { vi.advanceTimersByTime(399); });
+  expect(recentVisits(1)).toEqual([]);
+  act(() => { vi.advanceTimersByTime(1); });
+  expect(recentVisits(1)).toEqual([{ to: "/customers/7", label: "Meena Jain" }]);
 });
 
 test("on a desktop, the header's Search and Ctrl K open search; choosing a page closes it, opens the page and focuses its title", async () => {

@@ -97,17 +97,19 @@ export function BillByNumber({ number, firmSlug = "", fy = "" }: { number: strin
     ? <StaleNote problem={problemOf(q.error)} what="the bills with this number" retry={again(key)} busy={q.isFetching} /> : null);
   // the purchases can't be known (their lookup failed, or over 1000 have numbers like it): the one sale with the number
   // opens, several are offered with a line saying the purchases aren't among them, and with none the page says it
-  // couldn't tell (Rulings 1B-20, 1B-22). A lookup that failed is still unknown while Try again asks again: TanStack puts
-  // a failed query with nothing loaded back to pending, error gone, so its failures are counted instead
-  const failed = !inward.data && (inward.isError || inward.errorUpdateCount > 0);
-  if (inward.data?.tooMany || failed) {
-    if (sales.length === 1) return <Navigate to={sales[0].to} replace />;
-    if (sales.length > 1) {
-      return <PickBill number={number} choices={sales} note={<>{stale(page, pageKey)}<Unchecked failed={!inward.data} retry={again(inKey)} busy={inward.isFetching} number={number} firm={firm} fy={fy} /></>} />;
-    }
-    return inward.data ? <TooMany number={number} firm={firm} fy={fy} /> : <Asking title={title} q={inward} retry={again(inKey)} />;
+  // couldn't tell (Rulings 1B-20, 1B-22). A failed lookup asked again (Try again, or a later visit while the failure is
+  // still kept) is pending once more, error gone (TanStack's way with a failed query that has nothing loaded), so only
+  // its failures counted say it failed before: several sales stay on offer through it, but the one sale waits for the
+  // answer, since a purchase found then is offered beside it
+  const tooMany = inward.data?.tooMany === true;
+  const failed = !inward.data && inward.isError;
+  const failedBefore = !inward.data && inward.errorUpdateCount > 0;
+  if (sales.length === 1 && (tooMany || failed)) return <Navigate to={sales[0].to} replace />;
+  if (sales.length > 1 && (tooMany || failedBefore)) {
+    return <PickBill number={number} choices={sales} note={<>{stale(page, pageKey)}<Unchecked failed={!inward.data} retry={again(inKey)} busy={inward.isFetching} number={number} firm={firm} fy={fy} /></>} />;
   }
   if (!inward.data) return <Asking title={title} q={inward} retry={again(inKey)} />;
+  if (inward.data.tooMany) return <TooMany number={number} firm={firm} fy={fy} />;
   // the link's firm and year, which v2 matched on its side (its list filters by a firm's id and dates only)
   const purchases = inward.data.rows.filter((r) => named(r) && (!fy || (r.invoice_date !== "" && fyOf(r.invoice_date) === fy)));
   const choices: Choice[] = [

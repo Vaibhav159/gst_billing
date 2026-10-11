@@ -251,3 +251,39 @@ test("a plain number that is a bill's own number puts that bill before customers
   await pass(0);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
 });
+
+/* ── 1B Task 12, commit A: a deleted bill numbered as typed (Ruling 1B-24) ── */
+
+test("for the owner, a deleted bill whose number is exactly what's typed comes after the live bills with it and before the customers, so Enter on a deleted paper number opens its page to restore", async () => {
+  const bharat = { id: 5, name: "Bharat Soni", mobile_number: "9831012345", gst_number: "", state_name: "RAJASTHAN", recent_invoices: [] };
+  const LIVE: Record<string, unknown[]> = { "36": [quick(1, "KGH/2026-27/136", "2026-10-07")], "31": [quick(99, "31", "2026-09-02", { paper: true }), quick(1, "KGH/2026-27/131", "2026-10-07")] };
+  const GONE: Record<string, unknown[]> = {
+    // the bin lists the newest deletion first: here a bill whose number only holds the digits
+    "36": [wireBin({ id: 7, original_id: 301, invoice_number: "KGH/2026-27/360", deleted_at: "2026-10-06T11:00:00+05:30" }), wireBin({ id: 6, original_id: 206, invoice_number: "36", invoice_date: "2026-09-02", deleted_at: "2026-10-04T10:00:00+05:30" })],
+    "31": [wireBin({ id: 8, original_id: 207, invoice_number: "31", business: 2, business_name: "MEERA ORNAMENTS", deleted_at: "2026-10-04T10:00:00+05:30" })],
+  };
+  serve({
+    search: (config) => answer(config, { customers: [bharat], invoices: LIVE[(config.params as { q: string }).q] ?? [], products: [] }),
+    bin: (config) => { const results = GONE[(config.params as { q: string }).q] ?? []; return answer(config, { count: results.length, next: null, previous: null, results }); },
+  });
+  mount();
+  await pass(0);
+  const rows = () => screen.getAllByRole("option").map((o) => o.textContent);
+  // no live bill is numbered 36, a deleted one is: the deleted bills go ahead of the customers, that one first
+  await type("36");
+  expect(headings()).toEqual(["Deleted bills", "Customers", "Sales bills"]);
+  expect(rows()).toEqual([
+    "36deleted 04 Oct · Walk-in Customer · open it to restore", "KGH/2026-27/360deleted 06 Oct · Walk-in Customer · open it to restore",
+    "Bharat Soni98310 12345", "KGH/2026-27/136Meena Jain · 07 Oct 2026 · ₹1,000.00",
+  ]);
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/206");
+  // a live bill and a deleted one are both numbered 31: the live one first, the deleted one after it, then the customers
+  await type("31");
+  expect(headings()).toEqual(["Sales bills", "Deleted bills", "Customers"]);
+  expect(rows()[2]).toBe("31deleted 04 Oct · Walk-in Customer · open it to restore");
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
+}, 15_000); // two searches and many role queries: past 5 s on a busy 2-CPU machine

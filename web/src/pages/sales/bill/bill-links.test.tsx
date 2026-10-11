@@ -109,7 +109,9 @@ test("a number link that can't be looked up says so, and Try again asks again; o
   down = false;
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/sales/512"));
-  expect(calls.filter((c) => c.url === "sales/")).toHaveLength(2);
+  // the number was looked up twice: the failure, then Try again. The bill page that opened asks sales/ for the customer's
+  // other bills on its own, at a time a busy machine decides (before or after this line), so only lookups by number count
+  expect(calls.filter((c) => c.url === "sales/" && c.params.number === "KGH-31")).toHaveLength(2);
   view.unmount();
   act(() => { __setNetState("offline"); onlineManager.setOnline(false); });
   mount("/billing/invoice/3/2026-27/KGH-31");
@@ -375,4 +377,37 @@ test("several sales and the purchases unknown: a failed refresh of the sales say
   const line = screen.getByText("The app couldn't check purchases just now, so this list has only the sales with this number.");
   expect(stale.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(screen.getByRole("list", { name: "Bills with this number" })).getAllByRole("link")).toHaveLength(2);
+});
+
+/* ── 1B Task 12, commit A: a failed purchase lookup still in the cache ── */
+
+test("a purchase lookup that failed on an earlier visit is asked again before the one sale with the number opens, and a purchase found then is offered beside it", async () => {
+  let n = 0;
+  let answerNow = () => {};
+  const { calls } = salesServer([
+    ["GET", "sales/", () => wirePage([wireRow({ id: 512, invoice_number: "KGH-31", ...KIRAN })])],
+    ["GET", "sales/512/", () => wireDetail({ id: 512, invoice_number: "KGH-31" })],
+    // the first lookup fails; the next finds a purchase with the number too, once the test lets it answer
+    ["GET", "invoices/", () => (++n === 1 ? refuse(500, {}) : new Promise((resolve) => { answerNow = () => resolve(page([INWARD(77, { invoice_number: "KGH-31" })])); }))],
+  ]);
+  const router = createMemoryRouter([
+    { path: "/sales/:id", element: <BillPage /> },
+    { path: "/purchases/:id", element: <p>A purchase</p> },
+  ], { initialEntries: ["/sales/KGH-31"] });
+  render(
+    <QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={stubAuth()}><RoleContext.Provider value="owner">
+      <ToastProvider><RouterProvider router={router} /></ToastProvider>
+    </RoleContext.Provider></AuthContext.Provider></QueryClientProvider>,
+  );
+  // the first visit: the purchases can't be checked, so the one sale with the number opens
+  await waitFor(() => expect(router.state.location.pathname).toBe("/sales/512"));
+  // the link is followed again while the failed lookup is still kept: the purchases are asked again before anything opens
+  await act(async () => { await router.navigate("/sales/KGH-31"); });
+  await waitFor(() => expect(calls.filter((c) => c.url === "invoices/")).toHaveLength(2));
+  expect(router.state.location.pathname).toBe("/sales/KGH-31");
+  await act(async () => { answerNow(); });
+  // a purchase has the number too: both are offered, each row saying which it is
+  const list = await screen.findByRole("list", { name: "Bills with this number" });
+  expect(within(list).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/sales/512", "/purchases/77"]);
+  expect(router.state.location.pathname).toBe("/sales/KGH-31");
 });

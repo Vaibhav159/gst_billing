@@ -17,7 +17,7 @@ import { billPdfName } from "@/core/sales/files";
 import { taxSlips } from "@/core/sales/maths";
 import { gstinNote, SEGMENTS, stateNameOf } from "@/core/sales/pos";
 import type { Activity as ActivityRow, AuditAction, BillDetail } from "@/core/sales/types";
-import { LOCKED_REASON, PAY, dayOf, ewayNumberText, failText, realReason, sentLine, taxLines, timeOf, type FailText } from "@/core/sales/words";
+import { LOCKED_REASON, PAY, cancelledMark, dayOf, ewayNumberText, failText, realReason, sentLine, taxLines, timeOf, type FailText } from "@/core/sales/words";
 import { Banner, Button, ButtonLink, Card, DL, FailNote, ListRow, Money, Skeleton, useToast } from "@/core/ui";
 import type { Detail } from "./useDetail";
 
@@ -177,7 +177,7 @@ export function OtherBills({ b, phone = false }: { b: BillDetail; phone?: boolea
     <Card title={title} subtitle={`${plural(bills, "bill")} in all years · ${inr(total)}${x ? ` · ${x} cancelled` : ""}`} pad={false}>
       <div className="mt-1">
         {others.map((o) => (
-          <ListRow key={o.id} to={`/sales/${o.id}`} title={<span className="tnum">{o.invoice_number}</span>} subtitle={`${date(o.invoice_date)} · ${o.payment_mode ? PAY[o.payment_mode] : "Not recorded"}${o.status === "cancelled" ? " · cancelled" : ""}`}
+          <ListRow key={o.id} to={`/sales/${o.id}`} title={<span className="tnum">{o.invoice_number}</span>} subtitle={`${date(o.invoice_date)} · ${o.payment_mode ? PAY[o.payment_mode] : "Not recorded"}${cancelledMark(o.status)}`}
             right={<Money value={o.total_amount} className={o.status === "cancelled" ? "line-through text-muted" : ""} />} className={phone ? "" : "min-h-12 py-2"} />
         ))}
       </div>

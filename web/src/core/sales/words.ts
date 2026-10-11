@@ -139,7 +139,7 @@ export function andList(items: string[]): string {
   return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 }
 
-/** " · cancelled" after a cancelled bill's details in a row (search, today's bills, a number's bills), else "". */
+/** " · cancelled" after a cancelled bill's details in a row (search, today's bills, a number's bills, a customer's other bills), else "". */
 export function cancelledMark(status: string | null | undefined): string {
   return status === "cancelled" ? " · cancelled" : "";
 }
