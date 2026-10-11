@@ -7,11 +7,12 @@
 // Merge waits for part 4; sending a bill again happens on the bill (part 1B).
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Ban, Banknote, ChevronDown, FileText, GitMerge, IdCard, Info, MapPin, MessageCircle, MoreHorizontal, MoreVertical, NotebookPen, Pencil, Plus, ReceiptText, RotateCw, Store,
   Trash2, UserPlus, UserRound, WifiOff,
 } from "lucide-react";
-import { deleteRefusal, useDeleteCustomer, useItaxBills, useStatement, useWalkinFigures, type Customer, type ItaxBill, type ItaxKind, type LastBill, type StatementBill } from "@/core/api/customers";
+import { customerDeletionEntry, deleteRefusal, useDeleteCustomer, useItaxBills, useStatement, useWalkinFigures, type Customer, type ItaxBill, type ItaxKind, type LastBill, type StatementBill } from "@/core/api/customers";
 import { useNetwork } from "@/core/api/network";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -307,6 +308,7 @@ function useMoreItems(c: Customer, d: D, openDelete: () => void): MenuItem[] {
 /** bills: the Bills row ("None", or "None in KIRAN GOLD HOUSE" when one firm's bills were looked at). */
 function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: string; open: boolean; onClose: () => void }) {
   const del = useDeleteCustomer();
+  const qc = useQueryClient();
   const restore = useAuditAction();
   const navigate = useNavigate();
   const { show } = useToast();
@@ -314,13 +316,16 @@ function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: strin
   const go = () => {
     setError(null);
     del.mutate(c.id, {
-      onSuccess: (auditId) => {
-        show({ title: `${c.name} deleted`, body: "It's also in the Audit log, to restore later.", ...(auditId ? { action: { label: "Undo", onClick: () => {
+      onSuccess: () => {
+        const deleted = { title: `${c.name} deleted`, body: "It's also in the Audit log, to restore later." };
+        show(deleted); onClose(); navigate("/customers", { replace: true });
+        // The same title replaces the toast once the audit row is known, adding its Undo.
+        void customerDeletionEntry(qc, c.id).then((auditId) => { if (auditId) show({ ...deleted, action: { label: "Undo", onClick: () => {
           void restore.mutateAsync({ id: auditId, kind: "restore" }).then(
-            () => { show({ title: `${c.name} restored` }); navigate(`/customers/${c.id}`); },
+            () => show({ title: `${c.name} restored`, action: { label: "Open", onClick: () => navigate(`/customers/${c.id}`) } }),
             e => show({ tone: "neg", title: "Not restored", body: problemOf(e).message }),
           );
-        } } } : {}) }); onClose(); navigate("/customers", { replace: true });
+        } } }); });
       },
       onError: (e) => setError(deleteRefusal(e)),
     });

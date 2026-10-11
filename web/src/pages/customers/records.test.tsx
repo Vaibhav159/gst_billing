@@ -85,7 +85,21 @@ test("a 204 delete resolves its exact audit entry and offers Undo after navigati
   fireEvent.click(screen.getByRole("button", { name: /^Undo/ })); await pass();
   expect(calls.find(c => c.url === "audit/")?.params).toMatchObject({ entity: "customer", entity_id: 7, group: "delete", page_size: 1 });
   expect(calls.filter(c => c.method === "POST")).toMatchObject([{ url: "audit/9140/restore/" }]);
+  // A finished Undo never pulls the person away from where they went since; the toast offers the way back.
+  expect(router.state.location.pathname).toBe("/customers");
+  fireEvent.click(screen.getByRole("button", { name: /^Open/ })); await pass();
   expect(router.state.location.pathname).toBe("/customers/7");
+});
+
+test("a slow audit lookup never holds the dialog on Deleting after the delete has succeeded", async () => {
+  serve({ ...base, "DELETE customers/7/": () => ({ status: 204 }), "GET audit/": () => new Promise(() => {}) });
+  mount(routes, ["/customers/7"]); await pass(400);
+  fireEvent.click(screen.getByRole("button", { name: "More" })); await pass(400);
+  fireEvent.click(screen.getByText("Delete customer…")); await pass(); await pass(400);
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete customer" })); await pass();
+  expect(screen.getByText("Customers list")).toBeInTheDocument();
+  expect(screen.getByText("Anil Gupta deleted")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Undo/ })).not.toBeInTheDocument();
 });
 
 test("a failed audit lookup cannot turn a completed delete into a retryable delete", async () => {

@@ -232,7 +232,7 @@ test("a delete refreshes the lists and search; the customer's own entries are ma
   const { result } = renderHook(() => useDeleteCustomer(), { wrapper: w });
   // the delete, and every refresh it starts
   await act(async () => { await result.current.mutateAsync(7); await Promise.all(spy.mock.results.map((r) => r.value)); });
-  expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET customers/7/", "DELETE customers/7/", "GET audit/"]);
+  expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET customers/7/", "DELETE customers/7/"]);
   const keys = [customerKeys.search("anil", 8), customerKeys.count(), ["search", "anil"], customerKeys.one(7), customerKeys.statement(7, {}), customerKeys.one(8), ["customers", "duplicates"], ["audit", "list", {}]];
   expect(keys.map((k) => qc.getQueryState(k)?.isInvalidated)).toEqual([true, true, true, true, true, false, true, true]);
 });

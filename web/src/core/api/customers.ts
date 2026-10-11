@@ -308,20 +308,20 @@ export function useSaveCustomer() {
 const LISTS = ["list", "count", "search", "recent", "walkin", "duplicates"];
 const OWN = ["one", "statement", "itax"];
 /** Deletes a customer with no bills (owner: customer.merge). The server refuses one with bills (409). */
+/** v2's DELETE stays 204. Resolve the new audit row once, after the delete has settled; a failed lookup only means no Undo. */
+export async function customerDeletionEntry(qc: QueryClient, id: number): Promise<number | null> {
+  try {
+    const page = await qc.fetchQuery({ queryKey: ["audit", "customer-deletion", id], staleTime: 0, retry: false,
+      queryFn: async ({ signal }) => (await api.get<{ results: { id: number; can: { kind: string } | null }[] }>("audit/", {
+        signal, params: { entity: "customer", entity_id: id, group: "delete", page_size: 1 },
+      })).data });
+    return page.results[0]?.can?.kind === "restore" ? page.results[0].id : null;
+  } catch { return null; }
+}
 export function useDeleteCustomer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: number): Promise<number | null> => {
-      await api.delete(`customers/${id}/`);
-      // v2's DELETE stays 204. Resolve the new audit row once; lookup failure cannot undo a successful delete.
-      try {
-        const page = await qc.fetchQuery({ queryKey: ["audit", "customer-deletion", id], staleTime: 0, retry: false,
-          queryFn: async ({ signal }) => (await api.get<{ results: { id: number; can: { kind: string } | null }[] }>("audit/", {
-            signal, params: { entity: "customer", entity_id: id, group: "delete", page_size: 1 },
-          })).data });
-        return page.results[0]?.can?.kind === "restore" ? page.results[0].id : null;
-      } catch { return null; }
-    },
+    mutationFn: async (id: number): Promise<void> => { await api.delete(`customers/${id}/`); },
     onSuccess: (_, id) => {
       void qc.invalidateQueries({ predicate: (q) => ["setup", "search", "audit"].includes(String(q.queryKey[0])) || (q.queryKey[0] === "customers" && LISTS.includes(String(q.queryKey[1]))) });
       // the page being left still holds this customer until it has gone: its own entries are marked stale, not asked for again
