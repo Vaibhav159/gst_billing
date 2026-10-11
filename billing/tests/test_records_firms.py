@@ -119,3 +119,137 @@ class FirmReadTests(TestCase):
         self.assertIn("GROUP BY", sql)
         for column in ('"firm_snapshot"', '"source_file"', '"notes"', '"product_name"'):
             self.assertNotIn(column, sql)
+
+class FirmWriteTests(TestCase):
+    def setUp(self):
+        self.owner = person("firm-writer", "admin")
+        self.client = client_for(self.owner)
+        self.payload = {"name": "KIRAN GOLD HOUSE", "gst_number": "08AAGPL3375F1ZO", "address": "12 Bapu Bazar",
+                        "mobile_number": "91 94141 22018", "invoice_prefix": "KGH"}
+
+    def create(self, **more):
+        return self.client.post("/api/firms/", {**self.payload, **more}, format="json")
+
+    def test_first_firm_creates_walkin_and_derives_pan_and_state(self):
+        from billing.models import AuditLog, Customer
+        response = self.create()
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["mobile_number"], "9414122018")
+        self.assertEqual(response.data["pan_number"], "AAGPL3375F")
+        self.assertEqual(response.data["state_name"], "RAJASTHAN")
+        self.assertEqual(Customer.objects.get(customer_type="walkin").name, "Walk-in Customer")
+        self.assertIn("GSTIN 08AAGPL3375F1ZO", AuditLog.objects.get(entity="business").details)
+
+    def test_first_firm_keeps_existing_legacy_walkin(self):
+        from billing.models import Customer
+        existing = Customer.objects.create(name="Walk-in Customer")
+        response = self.create()
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(list(Customer.objects.values_list("pk", flat=True)), [existing.pk])
+
+    def test_exact_validation_words_and_odd_json(self):
+        values = {"name": ("", "Enter the firm's legal name, as on its GST certificate."),
+                  "gst_number": ("", "Enter the firm's GSTIN. It prints at the top of every bill."),
+                  "address": ("", "Enter the address printed on bills."),
+                  "short_name": ("a" * 21, "Keep the short name to 20 characters."),
+                  "pin_code": ("123", "A PIN code has 6 digits; this has 3."),
+                  "mobile_number": ("123", "A mobile number has 10 digits; this has 3."),
+                  "email": ("bad", "That email looks incomplete. It should look like accounts@example.in."),
+                  "bank_account_number": ("123", "Account numbers have 9 to 18 digits; this has 3."),
+                  "bank_ifsc_code": ("bad", "An IFSC has 11 characters: 4 letters, a zero, then 6 letters or digits (like SBIN0UDR014)."),
+                  "invoice_prefix": ("KGH2", "Use 1 to 4 capital letters, like KGH. A GST bill number can have at most 16 characters."),
+                  "paper_full_number_from": ([], "Type the date like 2027-04-01."),
+                  "jurisdiction": ("x" * 101, "Keep the jurisdiction to 100 characters."),
+                  "declaration": ("x" * 501, "Keep the declaration to 500 characters.")}
+        for key, (value, words) in values.items():
+            with self.subTest(key=key):
+                response = self.create(**{key: value})
+                self.assertEqual(response.status_code, 400, response.data)
+                self.assertEqual(response.data[key], [words])
+        for data in ([], {"name": {}}, {"name": "\x00"}, {"signature_on_bills": "false"}):
+            self.assertEqual(self.client.post("/api/firms/", data, format="json").status_code, 400)
+
+    def test_legacy_unchanged_values_are_kept_and_noop_writes_nothing(self):
+        old = firm(gstin="broken", invoice_prefix="LONGPREFIX")
+        old.mobile_number = "short"
+        old.save()
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.put(f"/api/firms/{old.pk}/", {"name": old.name, "gst_number": "broken", "mobile_number": "short",
+                "invoice_prefix": "LONGPREFIX", "address": old.address}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["changes"], [])
+        self.assertEqual(response.data["frozen_bills"], 0)
+        self.assertFalse(any(q["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for q in queries))
+
+    def test_identity_freezes_once_but_bank_city_signature_print_live(self):
+        from billing.models import Invoice
+        from billing.services.bill_reads import firm_block
+        from billing.services.sales import firm_snapshot
+        old = firm(bank_account_number="123456789", city="Udaipur")
+        customer = buyer()
+        a = sale(old, customer, "1", "2026-09-01")
+        b = sale(old, customer, "2", "2026-09-02", status="cancelled", firm_snapshot=firm_snapshot(old))
+        purchase = sale(old, customer, "3", "2026-09-03", kind="inward")
+        response = self.client.put(f"/api/firms/{old.pk}/", {"name": "KIRAN NEW", "bank_account_number": "987654321", "city": "Jaipur"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["frozen_bills"], 1)
+        for bill in (a, b):
+            bill = Invoice.objects.select_related("business").get(pk=bill.pk)
+            shown = firm_block(bill)
+            self.assertEqual(shown["name"], old.name)
+            self.assertEqual(shown["bank_account_number"], "987654321")
+            self.assertEqual(shown["city"], "Jaipur")
+        purchase.refresh_from_db()
+        self.assertIsNone(purchase.firm_snapshot)
+        response = self.client.put(f"/api/firms/{old.pk}/", {"name": "KIRAN THIRD"}, format="json")
+        self.assertEqual(response.data["frozen_bills"], 0)
+
+    def test_v2_business_update_freezes_older_sales(self):
+        old = firm()
+        bill = sale(old, buyer(), "1", "2026-09-01")
+        response = self.client.patch(f"/api/businesses/{old.pk}/", {"address": "A new address"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        bill.refresh_from_db()
+        self.assertEqual(bill.firm_snapshot["address"], old.address)
+
+    def test_bank_only_save_keeps_older_bills_unfrozen(self):
+        old = firm()
+        bill = sale(old, buyer(), "1", "2026-09-01")
+        response = self.client.put(f"/api/firms/{old.pk}/", {"bank_account_number": "123456789", "city": "Jaipur"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["frozen_bills"], 0)
+        bill.refresh_from_db()
+        self.assertIsNone(bill.firm_snapshot)
+
+    def test_casefold_name_short_gstin_prefix_clashes(self):
+        old = firm(short_name="Sunny", invoice_prefix="KGH", gstin=self.payload["gst_number"])
+        for key, value in (("name", old.name.lower()), ("short_name", "sunny"), ("gst_number", old.gst_number), ("invoice_prefix", "KGH")):
+            data = {"name": "MEERA", "gst_number": "27AAPFU0939F1ZV", "invoice_prefix": "MO", key: value}
+            response = self.create(**data)
+            self.assertEqual(response.status_code, 400, response.data)
+            self.assertIn(key, response.data)
+        response = self.create(name="Sunny GOLD", gst_number="27AAPFU0939F1ZV", invoice_prefix="MO")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("short_name", response.data)
+
+    def test_delete_refuses_drafts_captures_and_bills_keeps_snapshot(self):
+        import uuid
+
+        from billing.models import AuditLog, Business, InwardCapture, SaleDraft, ShopSetting
+        old = firm()
+        ShopSetting.objects.create(pk=1, default_business=old)
+        draft = SaleDraft.objects.create(id=uuid.uuid4(), business=old, data={})
+        response = self.client.delete(f"/api/firms/{old.pk}/")
+        self.assertEqual((response.status_code, response.data["code"], response.data["uses"]["drafts"]), (409, "in_use", 1))
+        draft.delete()
+        capture = InwardCapture.objects.create(business=old, image="inward/test.png")
+        self.assertEqual(self.client.delete(f"/api/firms/{old.pk}/").status_code, 409)
+        capture.status = "converted"
+        capture.save()
+        self.assertEqual(self.client.delete(f"/api/firms/{old.pk}/").status_code, 409)
+        capture.delete()
+        response = self.client.delete(f"/api/firms/{old.pk}/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(Business.objects.filter(pk=old.pk).exists())
+        self.assertIsNone(ShopSetting.objects.get(pk=1).default_business_id)
+        self.assertEqual(AuditLog.objects.get(pk=response.data["audit_id"]).snapshot["name"], old.name)

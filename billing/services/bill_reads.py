@@ -279,6 +279,8 @@ def firm_block(invoice):
     data["state_code"] = state_code(SimpleNamespace(**data))
     data["signature_url"] = sign_media_path(signature) if signature else None
     data["frozen"] = bool(frozen)
+    from billing.services.firms import live_print_fields
+    data.update(live_print_fields(invoice.business))
     return data
 
 

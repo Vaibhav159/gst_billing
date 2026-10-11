@@ -500,7 +500,9 @@ class SalesDetailTest(TestCase):
             "name": "KIRAN GOLD HOUSE", "address": "12 Sandbox Bazaar", "gst_number": "08ABCDE1234A1Z5",
             "state_name": "RAJASTHAN", "state_code": "08", "pan_number": "ABCDE1234F", "mobile_number": "9000000003",
             "email": "", "bank_name": "Sandbox Bank", "bank_account_number": "", "bank_ifsc_code": "",
-            "bank_branch_name": "", "invoice_prefix": "KGH", "signature_url": None, "frozen": False})
+            "bank_branch_name": "", "invoice_prefix": "KGH", "signature_url": None, "frozen": False,
+            "signature_on_bills": True, "city": "", "pin_code": "", "jurisdiction_printed": "Udaipur", "short": "Kiran",
+            "declaration_printed": "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."})
         self.assertEqual(data["customer"], {
             "id": self.anil.pk, "name": "Anil Gupta", "type": "person", "address": "15 Demo Road", "city": "Udaipur",
             "state_name": "RAJASTHAN", "state_code": "08", "gst_number": "", "gstin_valid": None, "pan_number": "",
@@ -518,7 +520,7 @@ class SalesDetailTest(TestCase):
         firm_block = self.get().data["firm"]
         self.assertEqual((firm_block["name"], firm_block["address"], firm_block["state_code"], firm_block["frozen"]),
                          ("KIRAN GOLD HOUSE (OLD)", "", "", True))
-        self.assertEqual(len(firm_block), 15)
+        self.assertEqual(len(firm_block), 21)
 
     def test_the_customers_pan_and_gstin(self):
         # Ruling 1A-20: the PAN to print is a PAN-shaped typed one, else a valid GSTIN's, else none.

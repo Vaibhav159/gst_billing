@@ -138,6 +138,27 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     v3_actions = {"create": "firm.edit", "update": "firm.edit", "partial_update": "firm.edit", "destroy": "firm.edit"}
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        from billing.cache import uncached
+        list(uncached(Business).order_by("pk").select_for_update(no_key=True).values_list("pk", flat=True))
+        return super().update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        from billing.services.firms import freeze_older_bills
+        changed = [key for key, value in serializer.validated_data.items() if getattr(serializer.instance, key) != value]
+        freeze_older_bills(serializer.instance, changed)
+        super().perform_update(serializer)
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        from billing.models import ShopSetting
+        from billing.services.firms import assert_firm_unused
+        ShopSetting.objects.select_for_update().get_or_create(pk=1)
+        instance = uncached(Business).select_for_update().get(pk=instance.pk)
+        assert_firm_unused(instance, history_only=True)
+        super().perform_destroy(instance)
+
     def get_entity_name(self, instance):
         return instance.name
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -2966,6 +2987,14 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         {"error": "already_undone", "detail": "This delete was already undone."},
                         status=status.HTTP_409_CONFLICT,
                     )
+                if model is Business and entry.action == "created":
+                    from billing.models import ShopSetting
+                    from billing.services.firms import assert_firm_unused
+                    ShopSetting.objects.select_for_update().get_or_create(pk=1)
+                    held = uncached(Business).select_for_update().filter(pk=entry.entity_id).first()
+                    if held is None:
+                        return Response({"error": "Record already deleted"}, status=404)
+                    assert_firm_unused(held, history_only=True)
                 binned = (BinnedInvoice.objects.filter(audit_log_id=entry.pk, restored_at__isnull=True).first()
                           if entry.action == "deleted" and entry.entity == "invoice" else None)
                 if binned is not None:

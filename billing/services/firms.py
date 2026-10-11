@@ -13,6 +13,7 @@ from billing.gstin import validate
 from billing.media import sign_media_path
 from billing.models import (
     BinnedInvoice,
+    Business,
     FiledPeriod,
     Invoice,
     InwardCapture,
@@ -230,3 +231,194 @@ def firm_detail(business, fy=None):
             "plain_after_full_date": Invoice.objects.sales().filter(business=business, invoice_date__gte=business.paper_full_number_from,
                 invoice_number__regex=r"^[0-9]+$").count() if business.paper_full_number_from else 0,
             "updated_at": stamp(business.updated_at)}
+
+
+# Writes are kept beside the read shapes so both API and Audit log share the rules.
+IDENTITY_FIELDS = {"name", "gst_number", "state_name", "pan_number", "address", "mobile_number", "email"}
+TEXT_LIMITS = {"name": 255, "short_name": 20, "gst_number": 15, "address": 255, "city": 100, "pin_code": 6,
+               "mobile_number": 255, "email": 255, "bank_name": 255, "bank_account_number": 18, "bank_ifsc_code": 11,
+               "bank_branch_name": 255, "invoice_prefix": 4, "jurisdiction": 100, "declaration": 500}
+REQUIRED_WORDS = {"name": "Enter the firm's legal name, as on its GST certificate.",
+                  "gst_number": "Enter the firm's GSTIN. It prints at the top of every bill.",
+                  "address": "Enter the address printed on bills.", "mobile_number": "Enter a phone number for bills."}
+
+
+def validate_firm(data, business=None):
+    import re
+
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from django.core.validators import validate_email
+    from rest_framework.exceptions import ValidationError
+
+    from billing.api.body import UNSTORABLE
+    from billing.gstin import derive
+
+    if not isinstance(data, dict):
+        raise ValidationError({key: [words] for key, words in REQUIRED_WORDS.items()})
+    result, errors = {}, {}
+    for key, limit in TEXT_LIMITS.items():
+        if key not in data and business is not None:
+            continue
+        raw = data.get(key, "")
+        # An older odd value is never refused when sent back unchanged (Ruling 1C-18).
+        if business is not None and raw == getattr(business, key):
+            result[key] = raw
+            continue
+        if not isinstance(raw, str) or UNSTORABLE.search(raw):
+            errors[key] = [REQUIRED_WORDS.get(key, f"Enter the {key.replace('_', ' ')} as text.")]
+            continue
+        value = raw.strip()
+        if key in ("gst_number", "bank_ifsc_code"):
+            value = value.upper()
+        if key == "mobile_number":
+            value = re.sub(r"\s+", "", value).removeprefix("+")
+            if value.startswith("91") and len(value) == 12:
+                value = value[2:]
+            elif value.startswith("0") and len(value) == 11:
+                value = value[1:]
+        problem = ""
+        if not value and key in REQUIRED_WORDS:
+            problem = REQUIRED_WORDS[key]
+        elif key == "gst_number":
+            problem = validate(value)[1]
+        elif key == "pin_code" and value and not re.fullmatch(r"[0-9]{6}", value):
+            problem = f"A PIN code has 6 digits; this has {sum(c in '0123456789' for c in value)}."
+        elif key == "mobile_number" and not re.fullmatch(r"[0-9]{10}", value):
+            problem = f"A mobile number has 10 digits; this has {sum(c in '0123456789' for c in value)}."
+        elif key == "bank_account_number" and value and not re.fullmatch(r"[0-9]{9,18}", value):
+            problem = f"Account numbers have 9 to 18 digits; this has {sum(c in '0123456789' for c in value)}."
+        elif key == "bank_ifsc_code" and value and not re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}", value):
+            problem = "An IFSC has 11 characters: 4 letters, a zero, then 6 letters or digits (like SBIN0UDR014)."
+        elif key == "invoice_prefix" and value and not re.fullmatch(r"[A-Z]{1,4}", value):
+            problem = "Use 1 to 4 capital letters, like KGH. A GST bill number can have at most 16 characters."
+        elif key == "email" and value:
+            try:
+                validate_email(value)
+            except DjangoValidationError:
+                problem = "That email looks incomplete. It should look like accounts@example.in."
+        if not problem and len(value) > limit:
+            label = "short name" if key == "short_name" else key.replace("_", " ")
+            problem = f"Keep the {label} to {limit} characters."
+        if problem:
+            errors[key] = [problem]
+        else:
+            result[key] = value
+    if "paper_full_number_from" in data:
+        value = data["paper_full_number_from"]
+        try:
+            day = date.fromisoformat(value) if isinstance(value, str) and len(value) == 10 else None
+            if value is not None and day is None:
+                raise ValueError
+            if day is not None and not 2000 <= day.year <= 2099:
+                errors["paper_full_number_from"] = ["Pick a date from 2000 to 2099."]
+            else:
+                result["paper_full_number_from"] = day
+        except ValueError:
+            errors["paper_full_number_from"] = ["Type the date like 2027-04-01."]
+    if "signature_on_bills" in data:
+        if type(data["signature_on_bills"]) is not bool:
+            errors["signature_on_bills"] = ["Choose whether bills show the signature."]
+        else:
+            result["signature_on_bills"] = data["signature_on_bills"]
+    if errors:
+        raise ValidationError(errors)
+    check_firm_unique(result, business)
+    if "gst_number" in result and (business is None or result["gst_number"] != business.gst_number):
+        derived = derive(result["gst_number"])
+        result.update(state_name=derived["state_name"], pan_number=derived["pan"])
+    return result
+
+
+def check_firm_unique(values, business=None):
+    """Identity/name collisions only; audit restores keep legacy field formats unchanged."""
+    from rest_framework.exceptions import ValidationError
+
+    errors = {}
+    def effective(key):
+        return values.get(key, getattr(business, key, "")) or ""
+    name, short = effective("name"), effective("short_name")
+    short = short or (name.split()[0].title() if name.split() else "")
+    for other in uncached(Business).exclude(pk=getattr(business, "pk", None)).only("name", "short_name", "gst_number", "invoice_prefix"):
+        for key, value, theirs, words in (
+            ("name", name, other.name, f"There's already a firm called {other.name}. Firm names have to be different."),
+            ("short_name", short, short_name(other), f"{other.name} already goes by {short_name(other)}. Pick another short name."),
+            ("gst_number", effective("gst_number"), other.gst_number, f"{other.name} has this GSTIN. Each firm has its own registration."),
+            ("invoice_prefix", effective("invoice_prefix"), other.invoice_prefix,
+             f"{other.name} already uses {other.invoice_prefix}. Each firm needs its own prefix, or bill numbers would clash."),
+        ):
+            changed = business is None or (key in values and values[key] != getattr(business, key))
+            if key == "short_name":
+                changed = business is None or short.casefold() != short_name(business).casefold()
+            if changed and value and value.casefold() == (theirs or "").casefold():
+                errors[key] = [words]
+    if errors:
+        raise ValidationError(errors)
+
+
+def freeze_older_bills(business, changed_fields):
+    from billing.cache import invalidate
+    from billing.services.sales import firm_snapshot
+    if not IDENTITY_FIELDS.intersection(changed_fields):
+        return 0
+    total = Invoice.objects.sales().filter(business=business, firm_snapshot__isnull=True).update(firm_snapshot=firm_snapshot(business))
+    if total:
+        invalidate(Invoice)
+    return total
+
+
+def save_firm(data, user, business=None):
+    from django.db import transaction
+
+    from billing.api.mixins import snapshot_of
+    from billing.models import AuditLog, Customer, ShopSetting
+    with transaction.atomic():
+        if business is None:
+            # Also serializes creation into an empty shop, where no firm row exists to lock.
+            ShopSetting.objects.select_for_update().get_or_create(pk=1)
+        list(uncached(Business).select_for_update(no_key=True).order_by("pk").values_list("pk", flat=True))
+        if business is not None:
+            business = uncached(Business).get(pk=business.pk)
+        validated = validate_firm(data, business)
+        if business is None:
+            first = not uncached(Business).exists()
+            business = Business.objects.create(**validated)
+            if first and not uncached(Customer).filter(Q(customer_type="walkin") | Q(name__iexact="Walk-in Customer")).exists():
+                Customer.objects.create(name="Walk-in Customer", customer_type="walkin")
+            AuditLog.objects.create(action="created", entity="business", entity_id=business.pk, entity_name=business.name,
+                user=user, snapshot=snapshot_of(business), details=f"GSTIN {business.gst_number} · bills "
+                f"{business.invoice_prefix + '/' + fy_label(fy_of(timezone.localdate())) + '/' if business.invoice_prefix else ''}1 onwards")
+            return business, {}, 0
+        before = snapshot_of(business)
+        changed = {key: value for key, value in validated.items() if getattr(business, key) != value}
+        if not changed:
+            return business, {}, 0
+        frozen = freeze_older_bills(business, changed)
+        for key, value in changed.items():
+            setattr(business, key, value)
+        business.save(update_fields=[*changed, "updated_at"])
+        after = snapshot_of(business)
+        changes = {key: {"old": before[key], "new": after[key]} for key in changed}
+        from billing.services.audit import change_rows
+        shown = change_rows(Business, changes)
+        detailed = {"gst_number", "invoice_prefix", "bank_account_number", "bank_ifsc_code"}
+        details = " · ".join(f"{row['field']}: {row['from']} → {row['to']}" if row["key"] in detailed else row["field"] for row in shown)
+        AuditLog.objects.create(action="updated", entity="business", entity_id=business.pk, entity_name=business.name,
+                                user=user, changes=changes, snapshot=before, details=details)
+        return business, changes, frozen
+
+
+def delete_firm(business, user):
+    from django.db import transaction
+
+    from billing.api.mixins import drop_settled_party_rows, snapshot_of
+    from billing.models import AuditLog, ShopSetting
+    with transaction.atomic():
+        # Deleting the default firm clears its ShopSetting FK: use the create/audit lock order.
+        ShopSetting.objects.select_for_update().get_or_create(pk=1)
+        business = uncached(Business).select_for_update().get(pk=business.pk)
+        assert_firm_unused(business)
+        entry = AuditLog.objects.create(action="deleted", entity="business", entity_id=business.pk, entity_name=business.name,
+                                        user=user, snapshot=snapshot_of(business))
+        drop_settled_party_rows(business)
+        business.delete()
+        return entry

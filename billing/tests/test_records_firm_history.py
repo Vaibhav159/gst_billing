@@ -1,15 +1,47 @@
-"""X-8 grouped stage reads and X-40's real predecessor check."""
+"""X-8 shared filing stages and X-29 retained firm history across every deletion door."""
 from datetime import date
 from importlib import import_module
 from types import ModuleType
+from unittest import SkipTest
 from unittest.mock import Mock, patch
 
+from django.apps import apps
 from django.test import TestCase
 from django.utils import timezone
 
+from billing.api.mixins import snapshot_of
 from billing.cache import uncached
-from billing.models import FiledPeriod, ITCReclaimLedger
+from billing.models import AuditLog, Business, FiledPeriod, ITCReclaimLedger
 from billing.tests.v3_helpers import client_for, firm, person
+
+
+def part3_history_rows(business, owner):
+    """Real fixtures from part-3 design §4.1; run once 3A Task 1's retained models land."""
+    names = ("FilingRecord", "FilingMonth", "OpeningCredit", "ReturnDownload")
+    try:
+        models = {name: apps.get_model("billing", name) for name in names}
+    except LookupError:
+        raise SkipTest("Requires 3A Task 1 retained filing models; confirm fields against its published plan (X-40).") from None
+    now = timezone.now()
+    fields = {
+        "FilingRecord": {"year": 2025, "month": 4, "kind": "gstr1", "filed_on": date(2025, 5, 10), "arn": "",
+                         "figures": {}, "bills": [], "file": {}, "marked_by": owner, "marked_at": now,
+                         "updated_by": owner, "updated_at": now},
+        "FilingMonth": {"year": 2025, "month": 4, "unlocked_at": now, "unlocked_by": owner,
+                        "unlock_reason": "Correct a bill", "relocked_at": None, "relocked_by": None, "legacy_frozen_at": None},
+        "OpeningCredit": {"as_of": date(2025, 4, 1), "igst": 0, "cgst": 0, "sgst": 0,
+                          "updated_by": owner, "updated_at": now},
+        "ReturnDownload": {"year": 2025, "month": 4, "kind": "gstr1", "by": owner, "at": now,
+                           "via": "download", "fingerprint": "0" * 64},
+    }
+    keys = {"FilingRecord": "filing_records", "FilingMonth": "filing_months", "OpeningCredit": "opening_credits",
+            "ReturnDownload": "filing_records"}
+    for name in names:
+        row = models[name].objects.create(business=business, **fields[name])
+        try:
+            yield keys[name], row
+        finally:
+            row.delete()
 
 
 class FirmFilingReadTests(TestCase):
@@ -109,3 +141,56 @@ class FirmFilingReadTests(TestCase):
         figures = response.data["results"][0]["figures"]
         self.assertEqual(figures["previous_month"], {"month": label, "state": "filed", "blocker": ""})
         self.assertEqual(figures["last_filed"], {"month": label, "gstr1_filed_on": None, "gstr3b_filed_on": None})
+
+
+class FirmHistoryProtectionTests(TestCase):
+    def setUp(self):
+        self.owner = person("history-owner", "admin")
+        self.client = client_for(self.owner)
+        self.business = firm()
+        self.entry = AuditLog.objects.create(user=self.owner, action="created", entity="business", entity_id=self.business.pk,
+                                             entity_name=self.business.name, snapshot=snapshot_of(self.business))
+
+    def test_v3_v2_and_legacy_audit_keep_filing_or_zero_opening_credit(self):
+        cases = [("filed_periods", lambda: FiledPeriod.objects.create(business=self.business, year=2025, month=4)),
+                 ("opening_credits", lambda: ITCReclaimLedger.objects.create(business=self.business))]
+        for key, create in cases:
+            row = create()
+            for method, url in (("delete", f"/api/firms/{self.business.pk}/"), ("delete", f"/api/businesses/{self.business.pk}/"),
+                                ("post", f"/api/audit-logs/{self.entry.pk}/undo/")):
+                with self.subTest(kind=key, url=url):
+                    response = getattr(self.client, method)(url)
+                    self.assertEqual(response.status_code, 409, response.data)
+                    self.assertEqual(response.data["code"], "in_use")
+                    self.assertEqual(response.data["detail"], "KIRAN GOLD HOUSE has filing records or opening credit, so it can't be deleted. Its GST history keeps its firm.")
+                    self.assertEqual(response.data["uses"][key], 1)
+                    self.assertTrue(Business.objects.filter(pk=self.business.pk).exists())
+                    self.assertTrue(type(row).objects.filter(pk=row.pk).exists())
+                    self.entry.refresh_from_db()
+                    self.assertNotIn("_undo", self.entry.snapshot)
+            row.delete()
+
+    def test_guard_refuses_retained_future_records_and_months(self):
+        from billing.refusals import Refusal
+        from billing.services.firms import assert_firm_unused, firm_uses
+        uses = firm_uses(self.business)
+        for key in ("filing_records", "filing_months", "opening_credits"):
+            with self.subTest(key=key), self.assertRaises(Refusal) as refused:
+                assert_firm_unused(self.business, {**uses, key: 1})
+            self.assertEqual(refused.exception.detail["code"], "in_use")
+            self.assertIn("Its GST history keeps its firm.", refused.exception.detail["detail"])
+
+    def test_real_part3_history_blocks_v3_v2_and_legacy_undo(self):
+        for key, row in part3_history_rows(self.business, self.owner):
+            for method, url in (("delete", f"/api/firms/{self.business.pk}/"), ("delete", f"/api/businesses/{self.business.pk}/"),
+                                ("post", f"/api/audit-logs/{self.entry.pk}/undo/")):
+                with self.subTest(model=type(row).__name__, url=url):
+                    response = getattr(self.client, method)(url)
+                    self.assertEqual(response.status_code, 409, response.data)
+                    self.assertEqual(response.data["code"], "in_use")
+                    self.assertEqual(response.data["detail"], "KIRAN GOLD HOUSE has filing records or opening credit, so it can't be deleted. Its GST history keeps its firm.")
+                    self.assertEqual(response.data["uses"][key], 1)
+                    self.assertTrue(type(row).objects.filter(pk=row.pk).exists())
+                    self.assertTrue(Business.objects.filter(pk=self.business.pk).exists())
+                    self.entry.refresh_from_db()
+                    self.assertNotIn("_undo", self.entry.snapshot)
