@@ -1,12 +1,16 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { onlineManager, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Route, Routes, useLocation } from "react-router";
+import { onlineManager, QueryClientProvider, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { createMemoryRouter, Route, RouterProvider, Routes, useLocation } from "react-router";
 import { __setNetState } from "@/core/api/network";
-import { refuse, salesServer, wirePage, wireRow } from "@/core/sales/fixtures";
-import { renderApp } from "@/test/render";
+import { AuthContext } from "@/core/auth/AuthProvider";
+import { RoleContext } from "@/core/auth/role";
+import { refuse, salesServer, wireDetail, wirePage, wireRow } from "@/core/sales/fixtures";
+import { ToastProvider } from "@/core/ui";
+import { renderApp, stubAuth, testQueryClient } from "@/test/render";
 import BillPage from "../BillPage";
 import V2NumberLink from "../V2NumberLink";
+import { businessSlug } from "./BillByNumber";
 
 function Where() { const l = useLocation(); return <p data-testid="where">{l.pathname}</p>; }
 const mount = (path: string) => renderApp(
@@ -55,7 +59,8 @@ test("a number that's only on a purchase opens the purchase; a number on nothing
   ]);
   const view = mount("/billing/invoice/3/2026-27/UBS-0850");
   await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/purchases/77"));
-  expect(calls.find((c) => c.url === "invoices/")?.params).toEqual({ invoice_number: "UBS-0850", type_of_invoice: "inward", business_id: 3, page_size: 20 });
+  // the link's year as v2's date filter (Ruling 1B-19)
+  expect(calls.find((c) => c.url === "invoices/")?.params).toEqual({ invoice_number: "UBS-0850", type_of_invoice: "inward", business_id: 3, start_date: "2026-04-01", end_date: "2027-03-31", page_size: 20 });
   view.unmount();
   mount("/billing/invoice/3/2026-27/ZZ-1");
   expect(await screen.findByText("No bill has this number")).toBeInTheDocument();
@@ -177,4 +182,141 @@ test("an id v2 couldn't say anything about says so, with Try again, rather than 
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/purchases/77"));
   expect(calls.filter((c) => c.url === "invoices/77/")).toHaveLength(2);
+});
+
+/* ── Review fix 1: purchases beside sales, past v2's first rows (Rulings 1B-19, 1B-20); history; the firm slug ── */
+
+test("a link's number is looked up among sales and purchases at once: one bill of either kind opens; a sale and a purchase are both offered; a purchase lookup that fails beside one sale opens the sale", async () => {
+  let sales: Record<string, unknown>[] = [];
+  let purchases: unknown[] = [];
+  let down = false;
+  const { calls } = salesServer([
+    ["GET", "sales/", () => wirePage(sales)],
+    ["GET", "invoices/", () => (down ? refuse(500, {}) : page(purchases))],
+    ["GET", "sales/512/", () => ({})],
+  ]);
+  const SALE = wireRow({ id: 512, invoice_number: "245", invoice_date: "2025-09-12", fy: "2025-26", ...KIRAN });
+  const BUY = INWARD(77, { invoice_number: "245", invoice_date: "2025-08-30" });
+  // one sale only
+  sales = [SALE];
+  let view = mount("/billing/invoice/3/2025-26/245");
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/sales/512"));
+  expect(calls.filter((c) => c.url === "invoices/")).toHaveLength(1);
+  view.unmount();
+  // one purchase only
+  sales = [];
+  purchases = [BUY];
+  view = mount("/billing/invoice/3/2025-26/245");
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/purchases/77"));
+  view.unmount();
+  // a sale and a purchase of the firm and year: one list, each row saying which it is
+  sales = [SALE];
+  view = mount("/billing/invoice/3/2025-26/245");
+  const list = await screen.findByRole("list", { name: "Bills with this number" });
+  expect(screen.getByText("2 bills have this number")).toBeInTheDocument();
+  expect(screen.getByText("Pick the one you want: sales and purchases can share a number.")).toBeInTheDocument();
+  expect(within(list).getByRole("link", { name: /^245 Sale KIRAN GOLD HOUSE \(SANDBOX\) · 12 Sep 2025 · Anil Gupta/ })).toHaveAttribute("href", "/sales/512");
+  expect(within(list).getByRole("link", { name: /^245 Purchase KIRAN GOLD HOUSE \(SANDBOX\) · 30 Aug 2025 · Shree Bullion/ })).toHaveAttribute("href", "/purchases/77");
+  view.unmount();
+  // the purchase lookup fails beside one sale: the sale opens
+  down = true;
+  mount("/billing/invoice/3/2025-26/245");
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/sales/512"));
+});
+
+test("a short number's purchase past v2's first rows is still found: when v2 has more, the rest are asked for once", async () => {
+  // v2 matches "12" anywhere in a number, newest first: 24 newer bills (112, 212…) come before the purchase "12"
+  const all = [...Array.from({ length: 24 }, (_, i) => INWARD(100 + i, { invoice_number: `${i + 1}12` })), INWARD(77, { invoice_number: "12" })];
+  const { calls } = salesServer([
+    ["GET", "sales/", () => wirePage([])],
+    ["GET", "invoices/", (c) => ({ count: all.length, next: null, previous: null, results: all.slice(0, Number(c.params.page_size)) })],
+  ]);
+  mount("/billing/invoice/3/2026-27/12");
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/purchases/77"));
+  expect(calls.filter((c) => c.url === "invoices/").map((c) => c.params.page_size)).toEqual([20, 25]);
+});
+
+test("over 1,000 purchases with numbers like the link's: the page says it can't tell, never that no bill has the number", async () => {
+  const { calls } = salesServer([
+    ["GET", "sales/", () => wirePage([])],
+    ["GET", "invoices/", () => ({ count: 1500, next: "page 2", previous: null, results: Array.from({ length: 20 }, (_, i) => INWARD(100 + i, { invoice_number: `${i}1${i}` })) })],
+  ]);
+  mount("/billing/invoice/3/2026-27/1");
+  expect(await screen.findByText("Too many bills to check")).toBeInTheDocument();
+  expect(screen.getByText("Over 1,000 purchases of KIRAN GOLD HOUSE in FY 2026-27 have numbers like “1”, too many to check here, so this page can't tell which bill the link means. Search for it, or look in the Audit log.")).toBeInTheDocument();
+  expect(screen.queryByText("No bill has this number")).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "invoices/")).toHaveLength(1);
+});
+
+test("v2's purchases are asked for the link's firm, found by its name in the firm list, and the link's year", async () => {
+  const { calls } = salesServer([["GET", "sales/", () => wirePage([])], ["GET", "invoices/", () => page([INWARD(77, { business_name: "KIRAN GOLD HOUSE" })])]]);
+  mount("/billing/invoice/kiran-gold-house/2026-27/UBS-0850");
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/purchases/77"));
+  expect(calls.find((c) => c.url === "invoices/")?.params).toEqual({ invoice_number: "UBS-0850", type_of_invoice: "inward", business_id: 3, start_date: "2026-04-01", end_date: "2027-03-31", page_size: 20 });
+});
+
+test("v2's ?b= names the firm by its id, as v2 read it: a number two firms share opens that firm's bill", async () => {
+  const { calls } = salesServer([
+    ["GET", "sales/", (c) => wirePage(c.params.business_id === 3 ? [wireRow({ id: 512, invoice_number: "KGH-31", ...KIRAN })]
+      : [wireRow({ id: 512, invoice_number: "KGH-31", ...KIRAN }), wireRow({ id: 613, invoice_number: "KGH-31", ...MEERA })])],
+    ["GET", "sales/512/", () => ({})],
+  ]);
+  mount("/sales/KGH-31?b=3");
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/sales/512"));
+  expect(calls.find((c) => c.url === "sales/")?.params).toMatchObject({ business_id: 3, number: "KGH-31" });
+  expect(calls.find((c) => c.url === "invoices/")?.params).toMatchObject({ business_id: 3, invoice_number: "KGH-31" });
+});
+
+test("an old link that settles on a bill or a purchase takes its own place in history, so Back goes where the person was", async () => {
+  const SALES: Record<string, Record<string, unknown>[]> = { "KGH-31": [wireRow({ id: 512, invoice_number: "KGH-31", ...KIRAN })], "MOK-7": [wireRow({ id: 700, invoice_number: "MOK-7", ...MEERA })] };
+  salesServer([
+    ["GET", "sales/", (c) => wirePage(SALES[String(c.params.number)] ?? [])],
+    // MOK-7's purchases can't be looked up: its one sale opens
+    ["GET", "invoices/", (c) => (c.params.invoice_number === "MOK-7" ? refuse(500, {}) : page(c.params.invoice_number === "UBS-0850" ? [INWARD(77)] : []))],
+    ["GET", "sales/512/", () => wireDetail({ id: 512, invoice_number: "KGH-31" })],
+    ["GET", "sales/700/", () => wireDetail({ id: 700, invoice_number: "MOK-7" })],
+    ["GET", "sales/77/", () => refuse(404, { detail: "No Invoice matches the given query." })],
+    ["GET", "invoices/77/", () => ({ id: 77, invoice_number: "UBS-0850", type_of_invoice: "inward" })],
+  ]);
+  for (const [link, lands] of [
+    ["/billing/invoice/3/2026-27/KGH-31", "/sales/512"], ["/sales/UBS-0850", "/purchases/77"], ["/sales/77", "/purchases/77"], ["/billing/invoice/2/2026-27/MOK-7", "/sales/700"],
+  ]) {
+    const router = createMemoryRouter([
+      { path: "/sales", element: <p>Bills</p> },
+      { path: "/sales/:id", element: <BillPage /> },
+      { path: "/billing/invoice/:bizSlug/:fy/:slug", element: <V2NumberLink /> },
+      { path: "/purchases/:id", element: <p>A purchase</p> },
+    ], { initialEntries: ["/sales", link], initialIndex: 1 });
+    const view = render(
+      <QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={stubAuth()}><RoleContext.Provider value="owner">
+        <ToastProvider><RouterProvider router={router} /></ToastProvider>
+      </RoleContext.Provider></AuthContext.Provider></QueryClientProvider>,
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe(lands));
+    await act(async () => { await router.navigate(-1); });
+    expect(router.state.location.pathname).toBe("/sales");
+    view.unmount();
+  }
+});
+
+test("an id v2 knows as a sale, which the bill page couldn't find, isn't here", async () => {
+  salesServer([
+    ["GET", "sales/88/", () => refuse(404, { detail: "No Invoice matches the given query." })],
+    ["GET", "invoices/88/", () => ({ id: 88, invoice_number: "KGH-88", type_of_invoice: "outward" })],
+  ]);
+  mount("/sales/88");
+  expect(await screen.findByText("This bill isn't here")).toBeInTheDocument();
+  expect(screen.getByText("No sales bill has the id “88”. It may have been deleted; deleted bills can be restored from the Audit log.")).toBeInTheDocument();
+});
+
+test.each([
+  ["KIRAN GOLD HOUSE (SANDBOX)", "kiran-gold-house-sandbox"], // brackets
+  ["S.K. Jewellers", "s-k-jewellers"], // dots
+  ["Mehta & Sons", "mehta-sons"], // an ampersand
+  ["SHREE   GANESH  JEWELLERS", "shree-ganesh-jewellers"], // repeated spaces
+  ["...Pyarchand Ratanlal!!", "pyarchand-ratanlal"], // punctuation at either end
+  ["22K Gold Mart", "22k-gold-mart"], // digits stay
+  ["श्री गणेश ज्वेलर्स", ""], // no Latin letters or digits at all: v2 then wrote the firm's id
+])("v2's firm slug of %j is %j", (name, slug) => {
+  expect(businessSlug(name)).toBe(slug);
 });

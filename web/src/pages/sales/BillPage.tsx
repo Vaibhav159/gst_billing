@@ -1,4 +1,4 @@
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReceiptText } from "lucide-react";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
@@ -34,13 +34,16 @@ export function DetailLoading({ title, problem, retry }: { title: string; proble
 /** /sales/:id: the bill, its deleted state, or that it isn't here; v2's links by number, and a purchase's id from v2, go on to theirs. */
 export default function BillPage() {
   const { id: raw = "" } = useParams();
+  const [search] = useSearchParams();
   const qc = useQueryClient();
   const net = useNetwork();
   const { isPhone } = useView();
   const id = /^\d+$/.test(raw) ? Number(raw) : null;
   const q = useBill(id);
-  // v2's /billing/invoice/KGH-31 arrives here as /sales/KGH-31 (part 0's redirect): a bill number, not an id
-  if (id === null) return <BillByNumber number={raw} />;
+  // v2's /billing/invoice/KGH-31 arrives here as /sales/KGH-31 (part 0's redirect): a bill number, not an id. Its ?b=
+  // named the firm by its id, as v2 read it
+  const b = search.get("b") ?? "";
+  if (id === null) return <BillByNumber number={raw} firmSlug={/^\d+$/.test(b) ? b : ""} />;
   const early = cachedBillNumber(qc, id) ?? "Sales bill";
   // Try again asks again through the client, as every page's does (Ruling 1B-11)
   const retry = () => { void qc.refetchQueries({ queryKey: billQuery(id).queryKey }); };

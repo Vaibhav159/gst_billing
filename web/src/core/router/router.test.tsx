@@ -478,6 +478,17 @@ test("every v2 address lands on its own new address; v2's number link opens its 
     : answer(config))) as AxiosAdapter;
   const router = mount("/billing/invoice/kiran-gold-house-sandbox/2026-27/31");
   await waitFor(() => expect(router.state.location.pathname).toBe("/sales/412"));
+}, 15_000); // every v2 address mounts the app: past 5 s on a busy 2-CPU machine
+
+test("a v2 address keeps its query string: a list's filter, and v2's ?b= firm hint on a bill number", async () => {
+  let router = mount("/billing/invoice/list?dups=1");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/sales"));
+  expect(router.state.location.search).toBe("?dups=1");
+  cleanup();
+  router = mount("/billing/invoice/KGH-31?b=3");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/sales/KGH-31"));
+  expect(router.state.location.search).toBe("?b=3");
+  expect(await screen.findByText("No bill has this number")).toBeInTheDocument();
 });
 
 test("a sheet on its way out as the page changes doesn't keep focus from the new page's title", async () => {

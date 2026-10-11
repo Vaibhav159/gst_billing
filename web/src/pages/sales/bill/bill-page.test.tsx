@@ -548,7 +548,7 @@ test("a paper book that can't be asked again says so in a line with Try again; o
   expect(calls.filter((c) => c.url === "sales/paper-book/")).toHaveLength(2);
 });
 
-test("focus waits for the paper book's answer, then lands once, on the next paper bill; asking again later leaves it where it is, and gives it back to Next when Next had it", async () => {
+test("focus waits for the paper book's answer, then lands once, on the next paper bill; asking again later leaves focus where it is, and Next in its place", async () => {
   let asked = 0;
   let answer: (w: unknown) => void = () => {};
   salesServer([
@@ -567,29 +567,73 @@ test("focus waits for the paper book's answer, then lands once, on the next pape
   await act(async () => { answer(paperBook(35)); });
   const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
   await waitFor(() => expect(next).toHaveFocus());
-  // the person moves to the way back; asking again later (a reconnect, another write on this device) leaves focus there
+  // asked again (a reconnect): Next stays where it is, with its focus, and takes the new number when it comes (Ruling 1B-21)
+  act(() => { void qc.refetchQueries({ queryKey: BOOK_KEY }); });
+  await waitFor(() => expect(asked).toBe(2));
+  expect(next).toBeInTheDocument();
+  expect(next).toHaveFocus();
+  await act(async () => { answer(paperBook(36)); });
+  await waitFor(() => expect(next).toHaveAccessibleName("Next paper bill · 36"));
+  expect(next).toHaveFocus();
+  // the person moves to the way back; asked again after another write on this device, focus stays there
   await userEvent.tab();
   expect(back).toHaveFocus();
   act(() => { void qc.invalidateQueries({ queryKey: BOOK_KEY }); });
-  await waitFor(() => expect(asked).toBe(2));
-  await act(async () => { answer(paperBook(35)); });
-  expect(await within(panel).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  await waitFor(() => expect(asked).toBe(3));
+  await act(async () => { answer(paperBook(36)); });
+  expect(await within(panel).findByRole("link", { name: "Next paper bill · 36" })).toBeInTheDocument();
   expect(back).toHaveFocus();
   // on the page's title (where a closing dialog leaves it when its opener has gone), it stays there too
   const title = screen.getByRole("heading", { level: 1 });
   act(() => { title.focus(); });
   act(() => { void qc.invalidateQueries({ queryKey: BOOK_KEY }); });
-  await waitFor(() => expect(asked).toBe(3));
-  await act(async () => { answer(paperBook(35)); });
-  expect(await within(panel).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
-  expect(title).toHaveFocus();
-  // on Next, asking again hides it for a moment: focus would be left nowhere, so Next has it again when it comes back
-  act(() => { within(panel).getByRole("link", { name: "Next paper bill · 35" }).focus(); });
-  act(() => { void qc.invalidateQueries({ queryKey: BOOK_KEY }); });
-  await waitFor(() => expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument());
+  await waitFor(() => expect(asked).toBe(4));
   await act(async () => { answer(paperBook(36)); });
-  const later = await within(panel).findByRole("link", { name: "Next paper bill · 36" });
-  await waitFor(() => expect(later).toHaveFocus());
+  expect(await within(panel).findByRole("link", { name: "Next paper bill · 36" })).toBeInTheDocument();
+  expect(title).toHaveFocus();
+});
+
+test("once the paper book has answered since the save, Next stays put while it's asked again, held offline, or when asking again fails, which the panel says", async () => {
+  let down = false;
+  salesServer([["GET", "sales/413/", () => wireDetail(PAPER_34)], ["GET", "sales/paper-book/", () => (down ? refuse(500, {}) : paperBook(35))]]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
+  // asked again while the device is offline: held until it's back, and Next with it
+  onlineManager.setOnline(false);
+  act(() => { void qc.refetchQueries({ queryKey: BOOK_KEY }); });
+  await waitFor(() => expect(qc.getQueryState(BOOK_KEY)?.fetchStatus).toBe("paused"));
+  expect(next).toBeInTheDocument();
+  act(() => { onlineManager.setOnline(true); });
+  await waitFor(() => expect(qc.getQueryState(BOOK_KEY)?.fetchStatus).toBe("idle"));
+  // asking again fails: Next keeps the number the book last gave, and the panel says so, with Try again
+  down = true;
+  act(() => { void qc.refetchQueries({ queryKey: BOOK_KEY }); });
+  expect(await within(panel).findByText("Couldn't refresh the paper book, so the next number is the one it last gave.")).toBeInTheDocument();
+  expect(next).toBeInTheDocument();
+  expect(within(panel).queryByText("Couldn't load the paper book's next number.")).not.toBeInTheDocument();
+  down = false;
+  await userEvent.click(within(panel).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(within(panel).queryByText(/^Couldn't refresh the paper book/)).not.toBeInTheDocument());
+  expect(next).toBeInTheDocument();
+});
+
+test("a switch of layout mounts the panel again: Next comes back at once, from the paper book's answer since the save", async () => {
+  const { calls } = salesServer([["GET", "sales/413/", () => wireDetail(PAPER_34)], ["GET", "sales/paper-book/", () => paperBook(35)]]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  const view = mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  expect(await within(status("Saved KGH/2026-27/34")).findByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  view.unmount();
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  expect(within(status("Saved KGH/2026-27/34")).getByRole("link", { name: "Next paper bill · 35" })).toBeInTheDocument();
+  expect(calls.filter((c) => c.url === "sales/paper-book/")).toHaveLength(1);
 });
 
 test("a person who moves to the way back while the paper book is asked stays there when it answers", async () => {

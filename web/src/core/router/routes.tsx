@@ -1,4 +1,4 @@
-import { Navigate, useParams, type RouteObject } from "react-router";
+import { Navigate, useLocation, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { AppFailed } from "@/core/shell/ScreenBoundary";
@@ -72,7 +72,8 @@ export const V2_REDIRECTS: [string, (p: Record<string, string>) => string][] = [
 
 function V2Redirect({ to }: { to: (p: Record<string, string>) => string }) {
   const params = useParams() as Record<string, string>;
-  return <Navigate to={to(params)} replace />;
+  const { search } = useLocation(); // the query string goes too: a list's filter, or v2's ?b= firm hint on a bill number
+  return <Navigate to={`${to(params)}${search}`} replace />;
 }
 
 export const appRoutes: RouteObject[] = [{
