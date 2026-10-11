@@ -29,7 +29,7 @@ test("when another tab signs in as someone else, the app says who is signed in n
     data: config.url?.startsWith("preferences/") ? { data: {} } : config.url?.startsWith("businesses/") ? { results: [] }
       : people[String(config.headers.Authorization).replace(/^Bearer /, "")] })) as AxiosAdapter;
   setTokens(jwt(1), "r1");
-  render(<AppRoutes router={createMemoryRouter(appRoutes, { initialEntries: ["/products"] })} />);
+  render(<AppRoutes router={createMemoryRouter(appRoutes, { initialEntries: ["/users"] })} />);
   await screen.findByRole("heading", { level: 1, name: "Records and admin" });
   expect(screen.queryByText(/^Signed in as/)).not.toBeInTheDocument(); // this tab's own start isn't news
 
