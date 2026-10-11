@@ -3,11 +3,13 @@ import type { DueItem } from "@/core/api/dashboard";
 type Badge = { count?: number; dot?: boolean; words: string };
 /** The API already applies permissions and the urgent-return rule. Never recount loaded bill rows. */
 export function tabBadges(items: readonly DueItem[] = []): Record<string, Badge | undefined> {
-  const captures = items.find(a => a.kind === "captures")?.count ?? 0;
-  const unsent = items.find(a => a.kind === "unsent")?.count ?? 0;
+  const countBadge = (kind: DueItem["kind"], words: string) => {
+    const count = items.find(a => a.kind === kind)?.count ?? 0;
+    return count > 0 ? { count, words: `${count} ${words}` } : undefined;
+  };
   return {
-    capture: captures > 0 ? { count: captures, words: `${captures} waiting` } : undefined,
-    bills: unsent > 0 ? { count: unsent, words: `${unsent} not sent` } : undefined,
-    home: items.some(a => a.kind === "blocker" && a.badge === "home_dot") ? { dot: true, words: "a return due soon is blocked" } : undefined,
+    capture: countBadge("captures", "waiting"),
+    bills: countBadge("unsent", "not sent"),
+    home: items.some(a => a.badge === "home_dot") ? { dot: true, words: "a return due soon is blocked" } : undefined,
   };
 }
