@@ -54,14 +54,26 @@ export function QrSvg({ text, size = 78, label }: { text: string; size?: number;
 }
 
 /**
+ * A quantity the plan sets on one line (PAGE_FIT.qtyChars) stays on one line, as in the PDF: a phone's serif can be wider
+ * than Times (Android's Noto Serif sets "1,000.000 gms" 80 px wide, in the column's 73.66), and wrapped, it would stand its
+ * row a line taller than the plan's, so Ctrl P would add sheets. One the plan wraps (10 kg and more) wraps as in the PDF.
+ */
+// ponytail: on such a serif the text runs past its column's rule on the right (the "s" of "gms", 2.3 px; 7.3 px for a bold
+// Total of 1 to 9.999 kg); the figures keep clear of it, and Times, the PDF and the sheets are as planned. Upgrade: draw the
+// paper in a Times-metric font of its own.
+const oneLineQty = (c: ReactNode) => typeof c === "string" && c.length <= PAGE_FIT.qtyChars;
+
+/**
  * A row of the goods table, at least as tall as the PDF's (PAGE_FIT.row; a Total row passes its `closing`) and its cells
- * padded 3 pt, as the PDF's are. head: its column headings; filler: the empty row that stretches the table down the sheet.
+ * padded 3 pt, as the PDF's are. head: its column headings; filler: the empty row that stretches the table down the sheet,
+ * its cells unpadded as the PDF's fill, so on a page planned exactly full it shrinks to nothing.
  */
 function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode[]; className?: string; style?: CSSProperties; bold?: boolean; head?: boolean; filler?: boolean }) {
   return (
     <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...(filler ? {} : { minHeight: pt(PAGE_FIT.row) }), ...style }}>
       {cells.map((c, i) => (
-        <div key={i} role={head ? "columnheader" : "cell"} className={cn("min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold")} style={{ padding: pt(3) }}>{c}</div>
+        <div key={i} role={head ? "columnheader" : "cell"} style={{ padding: filler ? 0 : pt(3) }}
+          className={cn("min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold", i === 3 && oneLineQty(c) && "whitespace-nowrap")}>{c}</div>
       ))}
     </div>
   );

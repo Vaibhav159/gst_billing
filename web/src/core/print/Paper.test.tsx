@@ -55,6 +55,28 @@ test("the paper's columns are the PDF's, at 96 px an inch, so a name that fits a
   expect(points(box.style.padding)).toEqual([3]);
 });
 
+test("a quantity the plan sets on one line (PAGE_FIT.qtyChars) stays on one line on the paper whatever the phone's serif, as it does in the PDF; one the plan wraps may wrap", () => {
+  // Android's serif (Noto Serif) sets "1,000.000 gms" 80 px wide, past the column's 73.66: wrapped, every line of 1 kg or
+  // more would stand a line taller than the PDF's, and Ctrl P would add sheets
+  const p = bill({ lines: [{ ...WIRE_LINES[0], quantity: "1000.000" }, { ...WIRE_LINES[0], id: 2, quantity: "12345.678" }] });
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const goods = within(screen.getByRole("document")).getByRole("table", { name: "Goods" });
+  const qty = (text: string) => within(goods).getByText(text, { selector: '[role="cell"]' });
+  expect(qty("1,000.000 gms")).toHaveClass("whitespace-nowrap");
+  expect(qty("12,345.678 gms")).not.toHaveClass("whitespace-nowrap"); // 14 characters: the PDF wraps it, and the plan counts two lines
+  expect(qty("13,345.678 gms")).not.toHaveClass("whitespace-nowrap"); // the Total row's, by the same count
+  const q = bill({ lines: [{ ...WIRE_LINES[0], quantity: "1000.000" }, { ...WIRE_LINES[0], id: 2, quantity: "8000.000" }] });
+  render(<Paper b={q} copy={COPY_MARKS[1]} page={q.pages[0]} />);
+  expect(within(screen.getByRole("document", { name: /duplicate copy$/ })).getByText("9,000.000 gms", { selector: '[role="cell"]' })).toHaveClass("whitespace-nowrap");
+});
+
+test("the filler row's cells have no padding, as the PDF's fill: on a page planned exactly full it shrinks to nothing, so the paper keeps the PDF's room", () => {
+  const p = bill();
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const filler = within(screen.getByRole("document")).getByRole("table", { name: "Goods" }).querySelector<HTMLElement>('[role="row"][aria-hidden="true"]')!;
+  expect([...filler.children].map((c) => points((c as HTMLElement).style.padding))).toEqual(Array.from({ length: 7 }, () => [0]));
+});
+
 test("a page that goes on stands its \"continued on page n\" row 20 pt, as the Total row, and the bill's note sets its lines in its own size, as the PDF does (Ruling 1E-14)", () => {
   const p = bill({ lines: Array.from({ length: 60 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })), notes: "Hallmarked by BIS\nSize 14" });
   const { unmount } = render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);

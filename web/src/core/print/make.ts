@@ -72,9 +72,11 @@ export async function makeBillPdf(bills: PrintBill[], copies: Copies, meta: { ti
 const made = new WeakMap<BillDetail, Map<string, Promise<PdfFile>>>();
 /**
  * One bill's PDF, named by its number (billPdfName). Made once per answer from the server and choice. A failure isn't
- * kept, and nor is a file made while the firm's signature got no answer: it goes out without it, and the next ask tries
- * again, as the paper on screen shows the signature. A signature that's gone (404) or won't decode can't come next time
- * either, so that file is kept, and Download, Print and Share hand it out at once.
+ * kept, and nor is a file made without a signature that may come next time (Signature's `again`): one that got no reply
+ * from the app (none at all, or only the proxy's 502, 503 or 504) or the app's own error (500). That file goes out
+ * without it, and the next ask tries again, as the paper on screen shows the signature. A refusal (a 403, or a file
+ * that's gone, 404) or an image that won't decode won't come next time, so that file is kept, and Download, Print and
+ * Share hand it out at once.
  */
 export function billFile(d: BillDetail, opts: PdfOptions): Promise<PdfFile> {
   const key = `${opts.copies}|${opts.showBank}`;
