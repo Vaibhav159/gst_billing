@@ -200,7 +200,9 @@ export function usePaperBook(business: number | null, month: string | null, enab
  */
 export function invalidateSales(qc: QueryClient, keep?: number): void {
   void qc.invalidateQueries({ queryKey: salesKeys.all, predicate: (q) => !(keep !== undefined && q.queryKey[1] === "bill" && q.queryKey[2] === keep) });
-  for (const queryKey of [["bin"], ["customers"], ["search"], ["gst"], ["reports"], ["catalog"], ["firms"], ["setup"]]) void qc.invalidateQueries({ queryKey });
+  for (const queryKey of [["bin"], ["customers"], ["search"], ["gst"], ["reports"], ["catalog"], ["setup"]]) void qc.invalidateQueries({ queryKey });
+  // firm numbers and figures change with a bill; the shell's slim list (no params) carries neither, so it isn't fetched again
+  void qc.invalidateQueries({ queryKey: ["firms"], predicate: (q) => !(q.queryKey[1] === "list" && Object.keys((q.queryKey[2] as object | undefined) ?? {}).length === 0) });
 }
 
 /** A write that answers with the bill: its page shows that answer at once, and everything else asks again. */

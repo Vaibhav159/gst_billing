@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow } from "@/core/sales/fixtures";
 import { testQueryClient } from "@/test/render";
 import { invalidateSales, salesKeys, useBill, useDeleteBill, useSalesFacets, useSalesList, type SalesQuery } from "./sales";
+import { firmKeys } from "./firmList";
 
 beforeEach(() => handClock(new Date("2026-10-08T23:58:00+05:30")));
 afterEach(() => vi.useRealTimers());
@@ -85,4 +86,13 @@ test("delete keeps its bin answer in the bill cache without reading the departin
   expect(bill.result.current.data).toMatchObject({ kind: "deleted", binned: { original_id: 412 } });
   expect(qc.getQueryState(salesKeys.one(412))?.isInvalidated).toBe(false);
   expect(calls.map((c) => c.method)).toEqual(["GET", "DELETE"]);
+});
+test("a bill write refreshes firm numbers and figures but never the slim firm list, which carries neither", () => {
+  const qc = testQueryClient();
+  const slim = firmKeys.list({}), numbers = firmKeys.list({ numbers: 1 }), one = firmKeys.one(3, "2026-27");
+  for (const key of [slim, numbers, one]) qc.setQueryData(key, []);
+  invalidateSales(qc);
+  expect(qc.getQueryState(slim)?.isInvalidated).toBe(false);
+  expect(qc.getQueryState(numbers)?.isInvalidated).toBe(true);
+  expect(qc.getQueryState(one)?.isInvalidated).toBe(true);
 });
