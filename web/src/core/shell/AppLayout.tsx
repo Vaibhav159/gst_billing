@@ -13,7 +13,7 @@ import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
 import { OfflineBanner } from "./OfflineBanner";
 import { PhoneShell } from "./PhoneShell";
-import { AttentionPalette } from "./AttentionPalette";
+import { Palette } from "./Palette";
 import { ScreenBoundary } from "./ScreenBoundary";
 
 const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(module => ({ default: module.CaptureUploadHost })));
@@ -25,6 +25,10 @@ const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(m
  * greeted like a move: set while the sign-in page shows, and spent by the page frame that greets that page (Ruling
  * 1E-11), never by the skeleton shown while the page's code loads.
  */
+/** The scoped Needs attention reader loads after the shell; until then Ctrl K opens the same palette without it (Ruling P5-8). */
+export const attentionPaletteCode = { load: () => import("./AttentionPalette") };
+const AttentionPalette = lazy(() => attentionPaletteCode.load().then(m => ({ default: m.AttentionPalette })));
+
 export function RootLayout() {
   const { view } = useView();
   const { pathname } = useLocation();
@@ -88,7 +92,7 @@ export function AppLayout({ onShown }: { onShown?: () => void }) {
     <ScopeProvider>
       <div data-view={view} className="h-full flex flex-col bg-ground text-fg">
         {isDesktop ? <DesktopShell openPalette={openPalette}><OfflineBanner />{main}</DesktopShell> : <PhoneShell easy={view === "easy"} openPalette={openPalette}>{main}</PhoneShell>}
-        <AttentionPalette open={palette} onClose={() => setPalette(false)} />
+        <Suspense fallback={<Palette open={palette} onClose={() => setPalette(false)} />}><AttentionPalette open={palette} onClose={() => setPalette(false)} /></Suspense>
         <ShareHost />
         <div id="route-announcer" aria-live="polite" aria-atomic="true" className="sr-only" />
       </div>

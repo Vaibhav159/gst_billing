@@ -7,7 +7,7 @@ import { dueNextKeys, type DueItem, type DueNext } from "@/core/api/dashboard";
 import { testQueryClient, stubAuth } from "@/test/render";
 import { serve } from "@/test/server";
 import { handClock, pass } from "@/test/clock";
-import { PhoneShell } from "./PhoneShell";
+import { badgeCode, PhoneShell } from "./PhoneShell";
 import { AttentionPalette } from "./AttentionPalette";
 import { paletteCode } from "./Palette";
 
@@ -29,7 +29,7 @@ function setup(easy: boolean, palette = false, data: DueNext | undefined = answe
   render(<QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><RouterProvider router={router} /></AuthContext.Provider></QueryClientProvider>);
   return { qc, calls, close, router };
 }
-beforeAll(async () => { await paletteCode.load(); });
+beforeAll(async () => { await Promise.all([paletteCode.load(), badgeCode.load()]); });
 beforeEach(() => { handClock(new Date("2026-10-08T11:00:00+05:30")); localStorage.clear(); sessionStorage.clear(); localStorage.setItem("gst3.scope.1", "3"); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 

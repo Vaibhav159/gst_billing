@@ -1,6 +1,6 @@
 import type { DueItem } from "@/core/api/dashboard";
 
-type Badge = { count?: number; dot?: boolean; words: string };
+export type Badge = { count?: number; dot?: boolean; words: string };
 /** The API already applies permissions and the urgent-return rule. Never recount loaded bill rows. */
 export function tabBadges(items: readonly DueItem[] = []): Record<string, Badge | undefined> {
   const countBadge = (kind: DueItem["kind"], words: string) => {
