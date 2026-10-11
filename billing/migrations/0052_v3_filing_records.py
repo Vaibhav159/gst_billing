@@ -3,6 +3,7 @@
 import datetime
 from decimal import Decimal
 
+import django.core.validators
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
@@ -34,7 +35,7 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("year", models.IntegerField()),
-                ("month", models.IntegerField()),
+                ("month", models.IntegerField(validators=[django.core.validators.MinValueValidator(1, "Pick a month from 1 to 12."), django.core.validators.MaxValueValidator(12, "Pick a month from 1 to 12.")])),
                 ("kind", models.CharField(choices=[("gstr1", "gstr1"), ("gstr1_filed", "gstr1_filed"), ("gstr1a", "gstr1a"), ("amend", "amend"), ("gstr3b", "gstr3b"), ("bundle", "bundle")], max_length=11)),
                 ("at", models.DateTimeField(auto_now_add=True)),
                 ("via", models.CharField(choices=[("download", "download"), ("share", "share")], default="download", max_length=8)),
@@ -42,13 +43,16 @@ class Migration(migrations.Migration):
                 ("business", models.ForeignKey(db_constraint=False, on_delete=django.db.models.deletion.DO_NOTHING, to="billing.business")),
                 ("by", models.ForeignKey(db_constraint=False, null=True, on_delete=django.db.models.deletion.DO_NOTHING, related_name="+", to=settings.AUTH_USER_MODEL)),
             ],
+            options={
+                "constraints": [models.CheckConstraint(condition=models.Q(("month__gte", 1), ("month__lte", 12)), name="return_download_month_1_12")],
+            },
         ),
         migrations.CreateModel(
             name="FilingMonth",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("year", models.IntegerField()),
-                ("month", models.IntegerField()),
+                ("month", models.IntegerField(validators=[django.core.validators.MinValueValidator(1, "Pick a month from 1 to 12."), django.core.validators.MaxValueValidator(12, "Pick a month from 1 to 12.")])),
                 ("unlocked_at", models.DateTimeField(null=True)),
                 ("unlock_reason", models.CharField(blank=True, default="", max_length=255)),
                 ("relocked_at", models.DateTimeField(null=True)),
@@ -59,7 +63,7 @@ class Migration(migrations.Migration):
                 ("unlocked_by", models.ForeignKey(db_constraint=False, null=True, on_delete=django.db.models.deletion.DO_NOTHING, related_name="+", to=settings.AUTH_USER_MODEL)),
             ],
             options={
-                "constraints": [models.UniqueConstraint(fields=("business", "year", "month"), name="uniq_filing_month")],
+                "constraints": [models.UniqueConstraint(fields=("business", "year", "month"), name="uniq_filing_month"), models.CheckConstraint(condition=models.Q(("month__gte", 1), ("month__lte", 12)), name="filing_month_month_1_12")],
             },
         ),
         migrations.CreateModel(
@@ -67,7 +71,7 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("year", models.IntegerField()),
-                ("month", models.IntegerField()),
+                ("month", models.IntegerField(validators=[django.core.validators.MinValueValidator(1, "Pick a month from 1 to 12."), django.core.validators.MaxValueValidator(12, "Pick a month from 1 to 12.")])),
                 ("kind", models.CharField(choices=[("gstr1", "GSTR-1"), ("gstr1a", "GSTR-1A"), ("gstr3b", "GSTR-3B")], max_length=6)),
                 ("filed_on", models.DateField()),
                 ("arn", models.CharField(blank=True, default="", max_length=15)),
@@ -90,7 +94,7 @@ class Migration(migrations.Migration):
                 ("updated_by", models.ForeignKey(db_constraint=False, null=True, on_delete=django.db.models.deletion.DO_NOTHING, related_name="+", to=settings.AUTH_USER_MODEL)),
             ],
             options={
-                "constraints": [models.UniqueConstraint(fields=("business", "year", "month", "kind"), name="uniq_filing_record")],
+                "constraints": [models.UniqueConstraint(fields=("business", "year", "month", "kind"), name="uniq_filing_record"), models.CheckConstraint(condition=models.Q(("month__gte", 1), ("month__lte", 12)), name="filing_record_month_1_12")],
             },
         ),
     ]

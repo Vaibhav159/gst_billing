@@ -317,7 +317,7 @@ def test_attach_amendments_combines_current_hsn_nil_and_reuses_source_build():
     changes = [{"month": "2026-09", "before": before, "after": source["bills"][str(inv.pk)]}]
     preserved = deepcopy(base)
     with CaptureQueriesContext(connection) as captured:
-        assert build_gstr1(b, 2026, 9, amendments=False, month_builds=cache) is source
+        assert build_gstr1(b, 2026, 9, amendments=False, month_builds=cache) == source
         amended = attach_amendments(base, b, 2026, 10, changes, month_builds=cache, strict=True)
     assert not captured
     rows = {row["rt"]: row for row in amended["file"]["hsn"]["hsn_b2c"]}
@@ -486,3 +486,27 @@ def test_legacy_ambiguous_amounts_cannot_be_declared_unchanged(redistributed):
     with pytest.raises(ValidationError) as caught:
         build_amendments(b, 2026, 10, changes, today=date(2026, 10, 10))
     assert "AMBIG-BASELINE" in str(caught.value.detail) and "CA" in str(caught.value.detail)
+
+
+def test_cached_month_build_is_handed_out_as_a_copy():
+    # R3A-8: a caller changing its copy must not change the request's cache.
+    from types import SimpleNamespace
+
+    from billing.services.gstr1_file import build_gstr1
+
+    cache = {(2026, 9): {"file": {"b2b": [1]}}}
+    built = build_gstr1(SimpleNamespace(pk=1), 2026, 9, amendments=False, month_builds=cache)
+    built["file"]["b2b"].append(2)
+    assert cache[(2026, 9)]["file"]["b2b"] == [1]
+
+
+
+@pytest.mark.django_db
+def test_first_month_build_is_handed_out_as_a_copy_too():
+    from billing.services.gstr1_file import build_gstr1
+    from billing.tests.v3_helpers import firm
+
+    cache = {}
+    built = build_gstr1(firm(), 2026, 9, amendments=False, month_builds=cache)
+    built["file"]["changed"] = True
+    assert "changed" not in cache[(2026, 9)]["file"]

@@ -88,3 +88,19 @@ def test_next_credit_month_never_precedes_ledger_start():
     assert len(queries) == 1
     FiledPeriod.objects.create(business=firm, year=2025, month=4)
     assert next_open_credit_month(firm.pk, date(2022, 3, 1), date(2026, 10, 11)) == date(2025, 5, 1)
+
+
+def test_one_sales_month_check_reads_only_that_month():
+    # R3A-8: a sales write must not read the firm's whole closed history.
+    from billing.period_lock import sales_month_closed
+
+    firm = Business.objects.create(name="KIRAN GOLD HOUSE")
+    FiledPeriod.objects.create(business=firm, year=2026, month=8)
+    FilingRecord.objects.create(business=firm, year=2026, month=9, kind="gstr1", filed_on=date(2026, 10, 1))
+    assert closed_months([firm.pk], month=(2026, 9)) == {(firm.pk, 2026, 9)}
+    assert closed_months([firm.pk], month=(2026, 8)) == {(firm.pk, 2026, 8)}
+    with CaptureQueriesContext(connection) as queries:
+        assert sales_month_closed(firm.pk, date(2026, 9, 5))
+        assert not sales_month_closed(firm.pk, date(2026, 10, 5))
+    assert len(queries) == 2
+    assert all('"month" = ' in query["sql"] or '"month" = %s' in query["sql"] for query in queries)

@@ -43,8 +43,14 @@ def parse_fy(text):
     return int(m.group(1))
 
 
+MONTH_WORDS = "Pick a month from 1 to 12."
+
+
 def due_dates(year, month):
     """The shop files monthly: both dates are in the following calendar month."""
-    date(year, month, 1)
+    if not 1 <= month <= 12:
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError({"month": [MONTH_WORDS]})
     year, month = (year + 1, 1) if month == 12 else (year, month + 1)
     return {"gstr1": date(year, month, 11), "gstr3b": date(year, month, 20)}

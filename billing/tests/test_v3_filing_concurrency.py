@@ -1,7 +1,7 @@
 """Postgres proves the firm mutex protects filing reads, captures and inserts."""
 
 import threading
-from datetime import date
+from datetime import date, timedelta
 from queue import Queue
 from unittest import skipUnless
 from unittest.mock import patch
@@ -91,7 +91,7 @@ class FilingConcurrencyTest(TransactionTestCase):
         start_cancel = threading.Barrier(2)
         answers = Queue()
 
-        def snapshot(_business, _month, _kind):
+        def snapshot(_business, _month, _kind, **kwargs):
             captured.set()
             if not release.wait(5):
                 raise AssertionError("The filing snapshot was not released.")
@@ -142,3 +142,70 @@ class FilingConcurrencyTest(TransactionTestCase):
         self.assertEqual(bill.status, "active")
         self.assertEqual(FilingRecord.objects.get().bills[str(bill.pk)]["total"], "1030.00")
         self.assertFalse(AuditLog.objects.filter(entity="invoice", action="cancelled").exists())
+
+    def test_v2_lock_waits_for_the_firm_then_a_v3_sale_in_that_month_is_refused(self):
+        # R3A-8: v2's FiledPeriod POST takes the firm lock like every v3 writer.
+        from django.urls import reverse
+        from django.utils import timezone
+
+        from billing import numbering
+        from billing.models import Invoice
+        from billing.tests.test_v3_drafts import LINE
+        from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, person
+
+        owner = person("v2-owner", *ROLE_GROUPS["owner"])
+        business, customer = firm(), buyer()
+        day = timezone.localdate().replace(day=1) - timedelta(days=20)
+        locked, release, saved = threading.Event(), threading.Event(), threading.Event()
+        start_sale = threading.Barrier(2)
+        answers, real_lock = Queue(), numbering.lock_firms
+
+        def lock_firms(*ids):
+            real_lock(*ids)
+            if threading.current_thread().name == "v2-lock":
+                locked.set()
+                if not release.wait(5):
+                    raise AssertionError("The v2 lock was not released.")
+
+        def request(kind):
+            connections.close_all()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '3s'")
+                    cursor.execute("SET statement_timeout = '5s'")
+                client = client_for(owner)
+                if kind == "lock":
+                    response = client.post("/api/filed-periods/", {"business": business.pk, "year": day.year,
+                                                                   "month": day.month, "note": ""}, format="json")
+                else:
+                    start_sale.wait(timeout=5)
+                    response = client.post(reverse("sale-list"), {
+                        "business": business.pk, "customer": customer.pk, "invoice_number": "RACE-V2",
+                        "invoice_date": str(day), "payment_mode": "cash", "lines": [LINE]}, format="json")
+                answers.put((kind, response.status_code))
+            except BaseException as exc:
+                answers.put((kind, repr(exc)))
+            finally:
+                if kind == "sale":
+                    saved.set()
+                connections.close_all()
+
+        first = threading.Thread(name="v2-lock", target=request, args=("lock",), daemon=True)
+        second = threading.Thread(name="v3-sale", target=request, args=("sale",), daemon=True)
+        with patch.object(numbering, "lock_firms", side_effect=lock_firms):
+            first.start()
+            try:
+                self.assertTrue(locked.wait(5), "The v2 lock did not take the firm.")
+                second.start()
+                start_sale.wait(timeout=5)
+                self.assertFalse(saved.wait(0.25), "The v3 sale passed the firm lock before the v2 lock committed.")
+            finally:
+                release.set()
+                first.join(timeout=5)
+                if second.ident is not None:
+                    second.join(timeout=5)
+            self.assertFalse(first.is_alive() or second.is_alive(), "The requests did not finish.")
+        results = sorted([answers.get_nowait(), answers.get_nowait()])
+        self.assertEqual(results, [("lock", 201), ("sale", 409)])
+        self.assertTrue(FiledPeriod.objects.filter(business=business, year=day.year, month=day.month).exists())
+        self.assertFalse(Invoice.objects.filter(business=business, invoice_number="RACE-V2").exists())

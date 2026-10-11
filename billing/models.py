@@ -1281,11 +1281,15 @@ class AiRead(models.Model):
                                 db_constraint=False, related_name="+")
 
 
+MONTH_VALIDATORS = [MinValueValidator(1, "Pick a month from 1 to 12."), MaxValueValidator(12, "Pick a month from 1 to 12.")]
+MONTH_RANGE = models.Q(month__gte=1, month__lte=12)
+
+
 class FilingRecord(models.Model):
     """Immutable return snapshot; only portal filing details can be corrected."""
     business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
     year = models.IntegerField()
-    month = models.IntegerField()
+    month = models.IntegerField(validators=MONTH_VALIDATORS)
     kind = models.CharField(max_length=6, choices=[("gstr1", "GSTR-1"), ("gstr1a", "GSTR-1A"), ("gstr3b", "GSTR-3B")])
     filed_on = models.DateField()
     arn = models.CharField(max_length=15, blank=True, default="")
@@ -1307,13 +1311,13 @@ class FilingRecord(models.Model):
     updated_at = models.DateTimeField(null=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["business", "year", "month", "kind"], name="uniq_filing_record")]
+        constraints = [models.UniqueConstraint(fields=["business", "year", "month", "kind"], name="uniq_filing_record"), models.CheckConstraint(condition=MONTH_RANGE, name="filing_record_month_1_12")]
 
 
 class FilingMonth(models.Model):
     business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
     year = models.IntegerField()
-    month = models.IntegerField()
+    month = models.IntegerField(validators=MONTH_VALIDATORS)
     unlocked_at = models.DateTimeField(null=True)
     unlocked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
     unlock_reason = models.CharField(max_length=255, default="", blank=True)
@@ -1323,7 +1327,7 @@ class FilingMonth(models.Model):
     legacy_snapshot = models.JSONField(null=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["business", "year", "month"], name="uniq_filing_month")]
+        constraints = [models.UniqueConstraint(fields=["business", "year", "month"], name="uniq_filing_month"), models.CheckConstraint(condition=MONTH_RANGE, name="filing_month_month_1_12")]
 
 
 class OpeningCredit(models.Model):
@@ -1339,9 +1343,13 @@ class OpeningCredit(models.Model):
 class ReturnDownload(models.Model):
     business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
     year = models.IntegerField()
-    month = models.IntegerField()
+    month = models.IntegerField(validators=MONTH_VALIDATORS)
     kind = models.CharField(max_length=11, choices=[(key, key) for key in ("gstr1", "gstr1_filed", "gstr1a", "amend", "gstr3b", "bundle")])
     by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
     at = models.DateTimeField(auto_now_add=True)
     via = models.CharField(max_length=8, choices=[("download", "download"), ("share", "share")], default="download")
     fingerprint = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=MONTH_RANGE, name="return_download_month_1_12")]
+

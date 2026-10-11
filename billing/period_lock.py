@@ -118,8 +118,8 @@ def credit_month_closed(business_id, month):
     return uncached(FiledPeriod).filter(business_id=business_id, year=year, month=number).exists()
 
 
-def closed_months(business_ids):
-    """One SQL UNION: legacy/3B locks plus GSTR-1 without an open unlock."""
+def closed_months(business_ids, month=None):
+    """One SQL UNION: legacy/3B locks plus GSTR-1 without an open unlock; month=(year, month) reads one."""
     business_ids = list(business_ids)
     if not business_ids:
         return set()
@@ -131,6 +131,8 @@ def closed_months(business_ids):
                                             month=OuterRef("month"), unlocked_at__isnull=False)
     records = uncached(FilingRecord).filter(business_id__in=business_ids, kind="gstr1").exclude(Exists(unlocked))
     locks = uncached(FiledPeriod).filter(business_id__in=business_ids)
+    if month is not None:
+        records, locks = (rows.filter(year=month[0], month=month[1]) for rows in (records, locks))
     combined = locks.values_list("business_id", "year", "month").union(records.values_list("business_id", "year", "month"))
     # PostgreSQL parenthesizes UNION arms. Keep a plain outer SELECT for read-only
     # query instrumentation; the derived table contains only these three columns.
@@ -143,7 +145,7 @@ def closed_months(business_ids):
 
 
 def sales_month_closed(business_id, day):
-    return (business_id, *_month(day)) in closed_months([business_id])
+    return (business_id, *_month(day)) in closed_months([business_id], month=_month(day))
 
 
 def next_open_credit_month(business_id, from_month, today=None):

@@ -699,5 +699,6 @@ def gstr1_portal_json(view, request):
 
     from billing.services.gstr1_file import build_gstr1
 
-    built = build_gstr1(business, year, month)
+    # v2 never had correction tables; v3's own download is where corrections live (R3A-8).
+    built = build_gstr1(business, year, month, amendments=False)
     return Response({key: built[key] for key in ("file", "meta")})

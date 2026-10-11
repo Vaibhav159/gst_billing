@@ -139,7 +139,7 @@ def build_gstr1(business, year, month, *, amendments=True, month_builds=None, st
     if (year, month) in month_builds:
         built = month_builds[(year, month)]
         if not amendments:
-            return built
+            return deepcopy(built)
         from billing.services.filing import pending_amendments
 
         return attach_amendments(built, business, year, month,
@@ -319,7 +319,7 @@ def build_gstr1(business, year, month, *, amendments=True, month_builds=None, st
             "bills": snapshots, "gaps": gaps}
     month_builds[(year, month)] = built
     if not amendments:
-        return built
+        return deepcopy(built)
     from billing.services.filing import pending_amendments
 
     return attach_amendments(built, business, year, month,

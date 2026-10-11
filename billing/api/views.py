@@ -1929,7 +1929,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class LineItemViewSet(viewsets.ModelViewSet):
-    queryset = LineItem.objects.all().select_related("invoice")
+    # Ordered, so pages are stable (and DRF's UnorderedObjectListWarning stays quiet).
+    queryset = LineItem.objects.all().select_related("invoice").order_by("id")
     serializer_class = LineItemSerializer
     pagination_class = StandardResultsSetPagination
     permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
@@ -3383,7 +3384,14 @@ class FiledPeriodViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
+        from billing.cache import uncached
         from billing.models import FilingMonth
+        from billing.numbering import lock_firms
+        # The firm lock orders this after any sales save already in the month (R3A-8).
+        data = serializer.validated_data
+        lock_firms(data["business"].pk)
+        if uncached(FiledPeriod).filter(business=data["business"], year=data["year"], month=data["month"]).exists():
+            raise ValidationError({"month": ["That month is already locked."]})
         period = serializer.save(workspace_id=1)
         state = FilingMonth.objects.filter(business_id=period.business_id, year=period.year, month=period.month).first()
         if state and state.unlocked_at:
