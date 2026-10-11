@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { ChevronLeft, ChevronRight, Search, type LucideIcon } from "lucide-react";
 import { cn } from "@/core/cn";
@@ -42,7 +43,8 @@ export type PageProps = {
 /**
  * One page component for every view.
  * Desktop: banner, header (icon tile, breadcrumbs, title, context line, actions), content.
- * Phone: sticky header (back or logo, title, subtitle, actions), content, optional sticky action bar.
+ * Phone: sticky header (back or logo, title, subtitle, actions), content, optional action bar (the phone shell keeps it
+ * under the page's scroll: ActionBarSlot).
  */
 export function Page({ title, context, icon, breadcrumbs, actions, banner, children, phoneTitle, phoneSubtitle, back, phoneActions, phoneSearch, actionBar, narrow, logo, className }: PageProps) {
   const { isPhone } = useView();
@@ -59,7 +61,7 @@ export function Page({ title, context, icon, breadcrumbs, actions, banner, child
       </div>
     );
   }
-  // (the phone page is min-h-full with flex-1 content, so a short page still puts its bar at the bottom)
+  // (the phone page is min-h-full with flex-1 content, so a short page's content still fills the screen)
   return (
     <div className={cn("mx-auto w-full px-8 pt-6 pb-14 flex flex-col gap-6 min-w-0", narrow ? "max-w-[1040px]" : "max-w-[1400px]", className)}>
       {banner}
@@ -151,15 +153,25 @@ export const HideNavContext = createContext(false);
  */
 export const NotchClearedContext = createContext(false);
 
+/**
+ * Where the phone shell keeps the page's action bar: under <main>, between it and the tabs, so the page scrolls above
+ * the bar, never under it (a row left a sliver above the bar's button was too small to tap: WCAG 2.5.8). The phone
+ * shell provides it, null until that place is drawn. Outside the shell (a page drawn on its own, as in a test) there's
+ * none, and the bar stays in the page.
+ */
+export const ActionBarSlot = createContext<HTMLElement | null | undefined>(undefined);
+
 export type PhoneActionBarProps = { children: ReactNode; className?: string };
 
 /**
- * Sticky bar at the bottom of a phone page, above the tab bar (e.g. "New bill", "Save").
+ * The bar at the bottom of a phone page, above the tab bar (e.g. "New bill", "Save"), in the phone shell's
+ * ActionBarSlot. It is still the page's: its taps pass the page frame's double-tap guard, and Back finds its links.
  * When any button's words would be cut, the secondary buttons show only their icons (their names
  * stay for screen readers), so the main button always reads in full.
  */
 export function PhoneActionBar({ children, className }: PhoneActionBarProps) {
   const hideNav = useContext(HideNavContext);
+  const slot = useContext(ActionBarSlot);
   const bar = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = bar.current;
@@ -175,7 +187,8 @@ export function PhoneActionBar({ children, className }: PhoneActionBarProps) {
     ro.observe(el);
     return () => ro.disconnect();
   });
-  // above the tab bar the tabs already clear the home indicator; in flows without tabs the bar does
-  // rides above the phone's keyboard when it's open (--kb, measured by the app)
-  return <div ref={bar} data-actionbar="" style={{ bottom: "var(--kb, 0px)" }} className={cn("sticky z-nav border-t border-rule bg-bar px-4 pt-3 flex gap-2 [&>*]:flex-1 [&>*]:min-w-0", hideNav ? "pb-[calc(12px+env(safe-area-inset-bottom,0px))]" : "pb-3", className)}>{children}</div>;
+  // above the tab bar the tabs already clear the home indicator; in flows without tabs the bar does.
+  // It rides above the phone's keyboard when it's open (--kb, measured by the app), and the page's scroll ends above it there too
+  const el = <div ref={bar} data-actionbar="" style={{ marginBottom: "var(--kb, 0px)" }} className={cn("border-t border-rule bg-bar px-4 pt-3 flex gap-2 [&>*]:flex-1 [&>*]:min-w-0", hideNav ? "pb-[calc(12px+env(safe-area-inset-bottom,0px))]" : "pb-3", className)}>{children}</div>;
+  return slot === undefined ? el : slot ? createPortal(el, slot) : null;
 }

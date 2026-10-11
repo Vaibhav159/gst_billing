@@ -1,12 +1,12 @@
 // The phone shells. Expert: five bottom tabs. Easy: the same five slots with big labels.
-// The page's <main id="app-main"> comes in as children.
-import type { ReactNode } from "react";
+// The page's <main id="app-main"> comes in as children; the page's action bar goes under it, above the tabs.
+import { useState, type ReactNode } from "react";
 import { Link, useLocation, useMatches } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
 import { phoneModeOf, usePrefs } from "@/core/prefs";
-import { HideNavContext, NotchClearedContext, PhoneSearchContext } from "@/core/ui";
+import { ActionBarSlot, HideNavContext, NotchClearedContext, PhoneSearchContext } from "@/core/ui";
 import { EASY_TABS, EXPERT_TABS, tabOf } from "./nav";
 import { bannerShows, OfflineBanner } from "./OfflineBanner";
 
@@ -29,6 +29,8 @@ export function PhoneShell({ children, easy, openPalette }: { children: ReactNod
   const back = !easy && fromEasy;
   // search is Expert's, beside the tabs (on a page that asks: Today): Easy has its own big buttons, and a form or print, where the tabs make way, keeps its header
   const search = !easy && !hide && openPalette ? openPalette : null;
+  // the page's action bar (Page.tsx) is drawn here, under <main> rather than over it: the page scrolls above the bar
+  const [barSlot, setBarSlot] = useState<HTMLDivElement | null>(null);
   return (
     <div className={cn("h-full flex flex-col bg-ground text-fg", easy ? "text-[16px]" : "text-md", net === "offline" && "has-offline")}>
       <OfflineBanner />
@@ -39,8 +41,11 @@ export function PhoneShell({ children, easy, openPalette }: { children: ReactNod
         </Link>
       ) : null}
       <NotchClearedContext.Provider value={banner || back}>
-        <HideNavContext.Provider value={hide}><PhoneSearchContext.Provider value={search}>{children}</PhoneSearchContext.Provider></HideNavContext.Provider>
+        <HideNavContext.Provider value={hide}><PhoneSearchContext.Provider value={search}>
+          <ActionBarSlot.Provider value={barSlot}>{children}</ActionBarSlot.Provider>
+        </PhoneSearchContext.Provider></HideNavContext.Provider>
       </NotchClearedContext.Provider>
+      <div ref={setBarSlot} className="shrink-0" />
       {hide ? null : (
         <nav aria-label="Tabs" className="phone-tabs shrink-0 border-t border-rule bg-bar grid grid-cols-5 pb-[env(safe-area-inset-bottom,0px)]">
           {tabs.map((t) => {

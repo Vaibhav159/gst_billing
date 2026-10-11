@@ -61,9 +61,11 @@ export function focusAfterNavigation(opener?: Opener | null) {
   let target: HTMLElement | null = null;
   if (opener && main) {
     try {
+      const link = opener.href ? `a[href="${CSS.escape(opener.href)}"]` : null;
       target = (opener.id ? document.getElementById(opener.id) : null)
         || (opener.row ? focusableRow(main.querySelector<HTMLElement>(`[data-row="${CSS.escape(opener.row)}"]`)) : null)
-        || (opener.href ? main.querySelector<HTMLElement>(`a[href="${CSS.escape(opener.href)}"]`) : null);
+        // a phone page's action bar is the page's too, though the phone shell keeps it under <main> (Page.tsx)
+        || (link ? main.querySelector<HTMLElement>(link) ?? document.querySelector<HTMLElement>(`[data-actionbar] ${link}`) : null);
     } catch { target = null; }
   }
   if (!target && onTitle) return;

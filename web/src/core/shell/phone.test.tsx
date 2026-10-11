@@ -13,7 +13,7 @@ import { stubAuth } from "@/test/render";
 import type { ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, cleanup } from "@testing-library/react";
+import { act, cleanup, fireEvent } from "@testing-library/react";
 import { AxiosError } from "axios";
 import type { DataRouter } from "react-router";
 import { AppRoutes } from "@/App";
@@ -21,7 +21,7 @@ import { __setNetState } from "@/core/api/network";
 import { queryClient } from "@/core/api/query";
 import type { AuthValue } from "@/core/auth/AuthProvider";
 import { applyTextSize } from "@/core/device";
-import { Button, Page, useToast, type ToastApi } from "@/core/ui";
+import { Button, ButtonLink, Page, useToast, type ToastApi } from "@/core/ui";
 import { overlayLayer } from "@/core/ui/Overlay";
 import { AppLayout } from "./AppLayout";
 import { useKeyboardInset } from "./keyboard";
@@ -155,6 +155,47 @@ test("a form hides the tabs, and its action bar clears the home indicator itself
   cleanup();
   open("/sales");
   expect(await screen.findByRole("navigation", { name: /tabs/i })).toBeInTheDocument();
+});
+
+// Pinned over the page's scroll, the bar hid the row under it all but a sliver above its button: too small a target
+// (WCAG 2.5.8, axe's target-size on the sandbox's customers), and a row focused there sat behind the bar (2.4.11). jsdom
+// has no layout, so this pins where the bar is; the e2e WCAG checks measure the rest.
+test("the action bar sits under the page's scroll, between <main> and the tabs, not pinned over the page", async () => {
+  server({ prefs: { phoneMode: "expert" } });
+  renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
+    { path: "/customers", element: <Page title="Customers" actionBar={<Button>Add customer</Button>}>The list</Page> },
+  ] }], { initialEntries: ["/customers"] }));
+  const bar = (await screen.findByRole("button", { name: "Add customer" })).closest<HTMLElement>("[data-actionbar]")!;
+  const main = document.getElementById("app-main")!;
+  expect(main).not.toContainElement(bar);
+  // the shell's column: <main> (the page's scroll), the bar's place, then the tabs
+  expect(bar.parentElement!.parentElement).toBe(main.parentElement);
+  expect(main.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bar.compareDocumentPosition(screen.getByRole("navigation", { name: /tabs/i })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bar.className).not.toMatch(/\b(sticky|fixed|absolute)\b/);
+});
+
+test("the bar is still the page's: a tap within 300 ms of the page opening is dropped, and Back puts focus back on the bar's link", async () => {
+  server({ prefs: { phoneMode: "expert" } });
+  const router = renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
+    { path: "/sales", element: <Page title="Bills">The list</Page> },
+    { path: "/customers", element: <Page title="Customers" actionBar={<ButtonLink to="/customers/new">Add customer</ButtonLink>}>The list</Page> },
+    { path: "/customers/new", element: <Page title="New customer">The form</Page> },
+  ] }], { initialEntries: ["/sales"] }));
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  // the clock moves only when the test says, so a busy runner can't carry a tap past the 300 ms
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  await act(async () => { await router.navigate("/customers"); });
+  const add = screen.getByRole("link", { name: "Add customer" });
+  act(() => { vi.advanceTimersByTime(299); });
+  await act(async () => { fireEvent.click(add); });
+  expect(router.state.location.pathname).toBe("/customers");
+  act(() => { vi.advanceTimersByTime(1); });
+  await act(async () => { fireEvent.click(add); });
+  expect(router.state.location.pathname).toBe("/customers/new");
+  await act(async () => { await router.navigate(-1); });
+  act(() => { vi.advanceTimersByTime(100); }); // the page frame's 90 ms focus
+  expect(screen.getByRole("link", { name: "Add customer" })).toHaveFocus();
 });
 
 test("each page lights its own tab: Easy's by its pages, Expert's by section, and a supplier's bill being captured under Capture", async () => {
