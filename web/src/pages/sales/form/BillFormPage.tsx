@@ -77,17 +77,16 @@ function useFormExit(unsaved: boolean, message: string, goTo: string | null): Re
 }
 
 const EDIT_UNSAVED = "Your changes to this bill aren't saved. Leave and lose them?";
-/** A new bill asks only while its last change isn't in the draft yet (plan Call 7; the prototype's words). */
-const NOT_KEPT_YET = "Your last change isn't in the draft yet. Leave and lose it?";
 
 /**
  * The form itself, from where it starts. formKey: this form's place in the address, which a new bill keeps as it names
- * its unfinished bill there. A new bill keeps itself as a draft; a change to a saved bill asks before it's left.
+ * its unfinished bill there. Leaving a new bill never asks: it keeps itself as a draft, a change not kept yet included
+ * (Ruling 1D-10). A change to a saved bill asks before it's left.
  */
 export function BillForm({ start, formKey }: { start: Start; formKey: string }) {
   const F = useBillForm(start);
   const drafts = useDraftKeeping(F, formKey);
-  const exit = useFormExit(F.edit ? F.dirty : drafts.pending, F.edit ? EDIT_UNSAVED : NOT_KEPT_YET, F.savedTo ?? drafts.leaveTo);
+  const exit = useFormExit(F.edit && F.dirty, EDIT_UNSAVED, F.savedTo ?? drafts.leaveTo);
   return <DesktopForm F={F} drafts={drafts}>{exit}</DesktopForm>;
 }
 
@@ -101,8 +100,9 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
   const { firms, loading, error } = useFirms();
   // an unfinished bill named in the address: this device's copy when the server doesn't have its last change yet (kept
   // offline, or as a session ran out), and gone when it was discarded here. Otherwise the shop's list, asked again as the
-  // form opens, since a list cached before the draft was made doesn't have it; while that list can't be read, this
-  // device's copies stand in for it (Ruling 1D-4)
+  // form opens: a list cached before the draft was made doesn't have it, and one cached since may hold an older version
+  // (its starter may have added lines), so the form waits for that answer. Only while the list can't be read (the ask
+  // failed, or waits for the network) do the cache and this device's copies stand in for it (Ruling 1D-4)
   const draftId = params.get("draft");
   const local = deciding && draftId ? keptDraft(draftId) : null;
   const fresher = local && !local.synced && !local.gone ? local : null;
@@ -119,7 +119,7 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
   const paper = params.get("paper") === "1";
   const title = paper ? "Bill from the paper book" : "New sales bill";
   if (opened.current) return <BillForm start={opened.current} formKey={formKey} />;
-  if (loading || !ready || ((remakeId ?? fromId) !== null && source.isPending) || (customerId !== null && customer.isPending) || (lookUp && !listed && unfinished.loading)) return <FormLoading title={title} />;
+  if (loading || !ready || ((remakeId ?? fromId) !== null && source.isPending) || (customerId !== null && customer.isPending) || (lookUp && unfinished.loading)) return <FormLoading title={title} />;
   if (!firms.length) {
     return (
       <Page icon={FilePlus2} title={title} breadcrumbs={[{ label: "Sales", to: "/sales" }]} back="/sales">

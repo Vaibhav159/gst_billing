@@ -10,7 +10,7 @@ import { stubAuth } from "@/test/render";
 import { serve, serveWith } from "@/test/server";
 import { api, setTokens } from "./client";
 import {
-  __resetDrafts, draftKeys, draftSettled, forgetDraft, newDraftId, toDraftData, useDiscardDraft, useDraftSync, useKeepDraft, useUnfinishedBills, type DraftData, type DraftList,
+  __resetDrafts, draftKeys, draftSettled, forgetDraft, newDraftId, toDraftData, useDiscardDraft, useDraftBusy, useDraftSync, useKeepDraft, useUnfinishedBills, type DraftData, type DraftList,
 } from "./drafts";
 
 const RAKESH = { id: 2, name: "Rakesh Soni" };
@@ -487,6 +487,33 @@ test("a list that comes back full (the server sends at most 500) lets nothing go
   await drain();
   expect(keptDraft("a")).not.toBeNull();
   expect(list.result.current.bills).toHaveLength(501);
+});
+
+test("a draft's writes on their way show as busy, a sync's PUT included, until the last one lands (Task 6 review)", async () => {
+  keepOnDevice(copy({ updated_at: "2026-10-08T15:30:00+05:30" }));
+  const held: (() => void)[] = [];
+  salesServer([
+    ["PUT", `drafts/${ID}/`, (c) => new Promise((r) => { held.push(() => r(row({ data: sent(c) }))); })],
+    ["GET", "drafts/", () => ({ results: [] })],
+  ]);
+  const { wrapper } = setup();
+  const busy = renderHook(() => useDraftBusy(ID), { wrapper });
+  const other = renderHook(() => useDraftBusy("another-draft"), { wrapper });
+  expect(busy.result.current).toBe(false);
+  // the sync as a form opens sends this device's change
+  renderHook(() => useDraftSync(), { wrapper });
+  await waitFor(() => expect(held).toHaveLength(1));
+  expect(busy.result.current).toBe(true);
+  expect(other.result.current).toBe(false);
+  // a keep queued behind it: still busy once the first lands, until the second does
+  const keep = renderHook(() => useKeepDraft(), { wrapper });
+  let kept!: Promise<unknown>;
+  act(() => { kept = keep.result.current(ID, 3, { ...DATA, notes: "Two rings" }); });
+  await act(async () => { held[0](); });
+  await waitFor(() => expect(held).toHaveLength(2));
+  expect(busy.result.current).toBe(true);
+  await act(async () => { held[1](); await kept; });
+  await waitFor(() => expect(busy.result.current).toBe(false));
 });
 
 test("one draft's writes go in turn: a keep waits for the one on its way, and a discard for both, so the server ends as this device does", async () => {

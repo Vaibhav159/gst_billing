@@ -1,11 +1,12 @@
 // A new bill keeps itself as an unfinished bill as it's typed (PROTO pages/sales/useBillForm.js:332-383): 1.2 s after the
 // last change, once it has a customer, an item or a note, on this device at once and on the shop's list (contract §4).
 // The address then names it (?draft=), so a reload, a session that ran out or a sign-in on this tab comes back to it.
-// Leaving says where to find it, and keeps at once a change the 1.2 s hadn't kept yet; Discard draft has Undo. Nothing is
-// kept while the bill itself saves, nor ever again once a bill is made from it. Changing a saved bill keeps no draft.
+// Leaving never asks (Ruling 1D-10): it says where to find the bill, and keeps at once a change the 1.2 s hadn't kept yet,
+// also as the tab closes. Discard draft has Undo. Nothing is kept while the bill itself saves (a save that doesn't go
+// through lets it be), nor ever again once a bill is made from it. Changing a saved bill keeps no draft.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { newDraftId, useDiscardDraft, useDraftSync, useKeepDraft, type KeepResult } from "@/core/api/drafts";
+import { newDraftId, useDiscardDraft, useDraftBusy, useDraftSync, useKeepDraft, type KeepResult } from "@/core/api/drafts";
 import { keepsOnDevice, keptDraft, useKeptDrafts } from "@/core/deviceDrafts";
 import { timeOf } from "@/core/sales/words";
 import { useToast } from "@/core/ui";
@@ -13,11 +14,11 @@ import { hasContent, toDraftData } from "./model";
 import type { BillFormApi } from "./useBillForm";
 
 export type DraftKeeping = {
-  /** Something typed isn't in the draft yet (its 1.2 s haven't passed). Never while the bill saves: the save takes it. */
+  /** Something typed isn't in the draft yet (its 1.2 s haven't passed). Leaving keeps it at once; a save takes it with it. */
   pending: boolean;
-  /** A keep is on its way to the shop's list (it's on this device already). */
+  /** A write of the draft is on its way to the shop's list (this form's keep, or the sync's PUT of this device's change). */
   sending: boolean;
-  /** The bill's save waits for that keep to land before it goes, which can take up to a request's 100 s. */
+  /** The bill's save waits for that write to land before it goes, which can take up to a request's 100 s. */
   waiting: boolean;
   /**
    * Where it's kept: "server" (the shop's list), "device" (this device only, for now), "visit" (only until this page
@@ -60,9 +61,10 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   const keptSig = useRef(JSON.stringify(toDraftData(F.start.form, F.start.replaces)));
   // where it's kept follows this device's copy: a sync that sends it later says so here too
   const mine = useKeptDrafts().find((d) => d.id === F.draftId && !d.gone);
+  // a write of it on its way, whoever sent it: the save waits for exactly these (draftSettled)
+  const busy = useDraftBusy(F.draftId);
   const [state, setState] = useState<{ at: string | null; refusal: string }>(() => ({ at: keptDraft(F.start.draftId ?? "")?.updated_at ?? null, refusal: "" }));
   const [pending, setPending] = useState(false);
-  const [sending, setSending] = useState(0);
   const [leaveTo, setLeaveTo] = useState<string | null>(null);
   // a bill was made from it already (the server said so): there's no draft to keep any more
   const [billMade, setBillMade] = useState(false);
@@ -74,6 +76,8 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   latest.current = { data, business: F.f.firmId, hasAny };
   const save = useRef({ saving: F.saving, savedTo: F.savedTo });
   save.current = { saving: F.saving, savedTo: F.savedTo };
+  /** Something typed that no keep has taken yet. */
+  const unkept = () => latest.current.hasAny && JSON.stringify(latest.current.data) !== keptSig.current;
 
   /** What a keep answered: when, the server's words if it refused, and no more keeping once a bill was made from it (Ruling 1D-8). */
   const heard = useCallback((r: KeepResult) => {
@@ -101,8 +105,7 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
       F.setDraftId(draftId);
       navigate(`/sales/new?draft=${draftId}`, { replace: true, state: { formKey } });
     }
-    setSending((n) => n + 1);
-    void keep(draftId, business, d).then((r) => { setSending((n) => n - 1); heard(r); });
+    void keep(draftId, business, d).then(heard);
     return draftId;
   }, [keep, navigate, formKey, heard, F.setDraftId]);
 
@@ -120,28 +123,49 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
     if (F.saving || sig === keptSig.current || !hasAny) { setPending(false); return undefined; }
     setPending(true);
     const t = setTimeout(() => {
-      if (done.current) return;
       setPending(false);
-      keepNow(true);
+      // kept meanwhile, as the page was hidden: not twice
+      if (!done.current && unkept()) keepNow(true);
     }, 1200);
     return () => clearTimeout(t);
   }, [sig, hasAny, F.savedTo, F.saving]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // leaving a new bill keeps it as a draft and says where to find it (a bill still saving says so itself when it's saved).
-  // A change the 1.2 s hadn't kept yet is kept at once, on this device first: leaving by a link the guard asked about,
-  // and moving within /sales/new (Alt N, another unfinished bill opened), which the guard doesn't ask about (F18).
+  // the tab closing or reloading, or a phone switching to another app, runs no React cleanup: a change the 1.2 s haven't
+  // kept yet is kept then, on this device first (a localStorage write, which the page can still make as it goes). It's
+  // named in the address too, as the page may come back from the browser's back-forward cache (Ruling 1D-10).
+  useEffect(() => {
+    const away = () => {
+      if (!isNew || done.current || save.current.saving || save.current.savedTo || !unkept()) return;
+      setPending(false);
+      keepNow(true);
+    };
+    const hidden = () => { if (document.visibilityState === "hidden") away(); };
+    window.addEventListener("pagehide", away);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("pagehide", away); document.removeEventListener("visibilitychange", hidden); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // leaving a new bill never asks (Ruling 1D-10): a change the 1.2 s hadn't kept yet is kept at once, on this device first,
+  // and a toast says where to find the bill. That holds for every way out: a link, Back, and a move within /sales/new
+  // (Alt N, another unfinished bill opened), which unmounts the form too. Left while the bill saves, nothing is kept while
+  // that save is on its way (F6); what was typed is kept once it's known not to have gone through, and never once a bill
+  // was made from the draft (a saved bill says so itself).
   const alive = useRef(true);
+  const saveEnd = F.saveEnd;
   useEffect(() => {
     alive.current = true;
+    const left = () => {
+      const draftId = unkept() ? keepNow(false) : id.current;
+      if (!draftId) return;
+      show({ tone: "brand", title: "Bill kept as a draft", body: "New bill lists it until it's finished. Open it now?", action: { label: "Open", onClick: () => navigate(`/sales/new?draft=${draftId}`) } });
+    };
     return () => {
       alive.current = false;
       // StrictMode (in development) runs this cleanup and the effect again at once: only a form that stays gone has left
       queueMicrotask(() => {
-        if (alive.current || !isNew || done.current || save.current.saving || save.current.savedTo) return;
-        const { data: d, hasAny: filled } = latest.current;
-        const draftId = filled && JSON.stringify(d) !== keptSig.current ? keepNow(false) : id.current;
-        if (!draftId) return;
-        show({ tone: "brand", title: "Bill kept as a draft", body: "New bill lists it until it's finished. Open it now?", action: { label: "Open", onClick: () => navigate(`/sales/new?draft=${draftId}`) } });
+        if (alive.current || !isNew || done.current || save.current.savedTo) return;
+        if (save.current.saving) { void saveEnd.current?.then((how) => { if (how === "failed") left(); }); return; }
+        left();
       });
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -163,9 +187,9 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
     : mine ? (mine.synced ? "server" : visitOnly ? "visit" : "device")
     : F.start.draftId === F.draftId ? "server" : null;
   return {
-    pending: isNew && pending && !leaveTo && !F.saving,
-    sending: isNew && sending > 0,
-    waiting: isNew && F.saving && sending > 0,
+    pending: isNew && pending && !leaveTo,
+    sending: isNew && busy,
+    waiting: isNew && F.saving && busy,
     kept, at: state.at ?? mine?.updated_at ?? null, refusal: state.refusal, discard, leaveTo,
   };
 }

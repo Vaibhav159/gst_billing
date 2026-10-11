@@ -13,9 +13,10 @@ import { possessive } from "@/core/format";
 import { sentWhen, timeOf } from "@/core/sales/words";
 import { Banner, Button, Spinner } from "@/core/ui";
 import { useView } from "@/core/view";
-import { firstName } from "@/pages/customers/lib";
 import type { BillFormApi } from "./useBillForm";
 import { draftText, VISIT_ONLY, type DraftKeeping } from "./useDraftKeeping";
+
+const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
 export function DraftBanners({ F, drafts, onTryReview }: { F: BillFormApi; drafts: DraftKeeping; onTryReview: () => void }) {
   const net = useNetwork();
@@ -55,9 +56,16 @@ export function DraftBanners({ F, drafts, onTryReview }: { F: BillFormApi; draft
     </Banner>);
   }
   if (o?.kind === "missing-draft") out.push(<Banner key="m" tone="neg" title="That unfinished bill isn't here any more">It was saved as a bill or discarded. This is a new, empty bill.</Banner>);
-  // neither this device nor the shop's list could give it: the list didn't load, so it may well still be there (Ruling 1D-4)
-  if (o?.kind === "unread-draft") out.push(<Banner key="u" tone="neg" title="That unfinished bill didn't open">This device has no copy of it, and the shop&apos;s list didn&apos;t load. This is a new, empty bill; open that one again when the internet is back.</Banner>);
+  // neither this device nor the shop's list could give it: the list didn't load, so it may well still be there (Ruling 1D-4).
+  // Offline, the internet is what to wait for; online, the list failed (a 500, a refusal), so it's the list
+  if (o?.kind === "unread-draft") {
+    out.push(<Banner key="u" tone="neg" title="That unfinished bill didn't open">
+      This device has no copy of it, and the shop&apos;s list didn&apos;t load. This is a new, empty bill; open that one again {net === "offline" ? "when the internet is back" : "once the list loads"}.
+    </Banner>);
+  }
   if (!F.edit && o?.kind !== "draft") {
+    // a change the shop hasn't got yet: on this device, or, where the browser refuses storage, only in this page
+    const unsent = keepsOnDevice() ? " · on this device" : " · not sent yet";
     const others = list.bills.filter((d) => d.id !== F.draftId);
     const shown = all ? others : others.slice(0, 3);
     if (shown.length) {
@@ -69,7 +77,7 @@ export function DraftBanners({ F, drafts, onTryReview }: { F: BillFormApi; draft
             return (
               <li key={d.id} className="text-sm text-fg2 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <StickyNote size={15} className="text-muted shrink-0" aria-hidden="true" />
-                <span>{c ? possessive(c.name) : "An"} unfinished bill{firm ? ` in ${firm}` : ""} · {isPhone ? timeOf(d.created_at) : `started ${sentWhen({ at: d.created_at }).replace(/^at /, "")} by ${d.started_by ? firstName(d.started_by.name) : "someone"}`}{d.onDevice ? " · on this device" : ""}</span>
+                <span>{c ? possessive(c.name) : "An"} unfinished bill{firm ? ` in ${firm}` : ""} · {isPhone ? timeOf(d.created_at) : `started ${sentWhen({ at: d.created_at }).replace(/^at /, "")} by ${d.started_by ? firstName(d.started_by.name) : "someone"}`}{d.onDevice ? unsent : ""}</span>
                 <Button size="sm" variant="link" className="min-w-[44px]" aria-label={`Open ${c ? possessive(c.name) : "the"} unfinished bill`} onClick={() => navigate(`/sales/new?draft=${d.id}`, { replace: true })}>Open</Button>
               </li>
             );

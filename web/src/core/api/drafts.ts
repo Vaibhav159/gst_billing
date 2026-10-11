@@ -4,7 +4,7 @@
 // server couldn't be reached goes when a bill form opens or the network comes back (useDraftSync). One draft's writes
 // reach the server in turn, so none overtakes another still on its way. Easy (part 6) keeps its unfinished bills
 // through the same calls, in the same DraftData.
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { toCustomer, type Customer } from "@/core/api/customers";
@@ -133,12 +133,29 @@ function drop(qc: QueryClient, id: string) {
 
 /** Each draft's writes to the server, one after another: one that overtook another still on its way would be undone by it. */
 const writes = new Map<string, Promise<void>>();
+/** Told when a draft's first write sets off and when its last one lands (useDraftBusy). */
+const busyListeners = new Set<() => void>();
+const busyChanged = () => busyListeners.forEach((l) => l());
 function inTurn<T>(id: string, write: () => Promise<T>): Promise<T> {
+  const idle = !writes.has(id);
   const mine = (writes.get(id) ?? Promise.resolve()).then(write);
   const done = mine.then(() => {}, () => {});
   writes.set(id, done);
-  void done.then(() => { if (writes.get(id) === done) writes.delete(id); });
+  if (idle) busyChanged();
+  void done.then(() => { if (writes.get(id) === done) { writes.delete(id); busyChanged(); } });
   return mine;
+}
+function onBusy(cb: () => void) {
+  busyListeners.add(cb);
+  return () => { busyListeners.delete(cb); };
+}
+/**
+ * Whether a write of this draft is on its way to the server: a keep, a sync's PUT (this device's change, sent as a form
+ * opens or the network comes back) or a discard's DELETE. A bill saved from the draft waits for them first (draftSettled),
+ * up to a request's 100 s, so the form can say so.
+ */
+export function useDraftBusy(id: string | null): boolean {
+  return useSyncExternalStore(onBusy, () => id !== null && writes.has(id), () => false);
 }
 /** A count, not the clock: what happened after what. A save notes when it found its draft settled, and a PUT when it went out. */
 let tick = 0;
@@ -158,6 +175,7 @@ export function __resetDrafts(): void {
   finished.clear();
   savedAs.clear();
   writes.clear();
+  busyChanged();
   tick = 0;
   settledAt.clear();
   putAt.clear();

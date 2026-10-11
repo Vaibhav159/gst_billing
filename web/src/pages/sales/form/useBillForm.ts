@@ -43,6 +43,12 @@ export type SaveError = FailText & {
   link?: { label: string; to: string };
 };
 
+/**
+ * How a save that was on its way ended: saved; refused as a bill was made from its draft already (409 draft_saved); or
+ * failed otherwise. A form left meanwhile keeps what was typed as a draft only when it failed (Ruling 1D-10).
+ */
+export type SaveEnd = "saved" | "draft_saved" | "failed";
+
 /** The server's field names, as the form's keys for the problem under each field. */
 const FIELD_KEY: Record<string, string> = { business: "firm", invoice_number: "number", invoice_date: "date", customer: "customer", place_of_supply: "pos", notes: "notes" };
 const LINE_KEY: Record<string, string> = { product_name: "product", hsn_code: "hsn", gst_percent: "gst", quantity: "qty", unit: "qty", rate: "rate", note: "note" };
@@ -88,6 +94,8 @@ export function useBillForm(start: Start) {
   const [saving, setSaving] = useState(false);
   /** Where to go once saved; the form lets its leave-guard go first (useFormExit). */
   const [savedTo, setSavedTo] = useState<string | null>(null);
+  /** The save on its way, as it will end: told to a form that was left before the answer came. */
+  const saveEnd = useRef<Promise<SaveEnd> | null>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
@@ -300,12 +308,15 @@ export function useBillForm(start: Start) {
     const body = toBillInput(f, { mode: start.mode, pos, number, draftId: draft, replaces: start.replaces });
     setSaving(true);
     setSaveError(null);
+    let ended: (how: SaveEnd) => void = () => {};
+    saveEnd.current = new Promise<SaveEnd>((r) => { ended = r; });
     try {
       // a keep of the draft still on its way could make it again after the bill takes it: the POST goes once it has landed (Task 1)
       if (draft) await draftSettled(draft);
       const d = edit && bill ? await update.mutateAsync({ id: bill.id, body }) : await create.mutateAsync(body);
       // the bill is saved, whatever has happened to this page meanwhile: its draft leaves this device and the shop's list
       if (draft) forgetDraft(qc, draft);
+      ended("saved");
       if (!edit && f.paper) rememberPaperDate(f.firmId, f.date);
       markFresh(d.id);
       // React Router's navigate works after the form is gone (part 0 carry): only a form still showing moves on
@@ -321,6 +332,7 @@ export function useBillForm(start: Start) {
       // none now, and the draft is let go everywhere, whatever has happened to this page meanwhile. The form keeps its
       // draft_id, so trying again can never make a second bill (Ruling 1D-8)
       if (p.code === "draft_saved" && draft) forgetDraft(qc, draft);
+      ended(p.code === "draft_saved" ? "draft_saved" : "failed");
       if (!mounted.current) return none;
       const month = f.date ? monthLabel(monthOf(f.date), { long: true }) : "The month";
       if (p.code === "draft_saved") {
@@ -361,7 +373,7 @@ export function useBillForm(start: Start) {
     paper: f.paper && !edit, book, lastPaperDay, keep, moved, next, suggestion, numberText, stored, numberError, numberNote, numberState, waitingForNext,
     today, dateError, dateWarn, offReason, touched, setTouched, tried, errors, showErr, firstError,
     itax, cashOver, cashBlock, cashAnyway, setCashAnyway, twin, checks, canMove, whyNot, dirty, changes, sentNote,
-    reviewOpen, openReview, closeReview, save, saving, saveError, savedTo, draftId, setDraftId,
+    reviewOpen, openReview, closeReview, save, saving, saveError, savedTo, saveEnd, draftId, setDraftId,
   };
 }
 

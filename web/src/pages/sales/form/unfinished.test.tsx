@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { __resetDrafts, type DraftData, type UnfinishedBill } from "@/core/api/drafts";
@@ -6,6 +6,7 @@ import { __setNetState } from "@/core/api/network";
 import { __resetDeviceDrafts, keepOnDevice, keptDraft, keptDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
+import { BillForm } from "./BillFormPage";
 import { DesktopForm } from "./DesktopForm";
 import { startDraft, startEdit, type Start } from "./model";
 import { ANIL, formServer, fakeToday, mountForm } from "./testing";
@@ -16,7 +17,8 @@ import { useDraftKeeping } from "./useDraftKeeping";
 vi.setConfig({ testTimeout: 20_000 });
 
 beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); act(() => __setNetState("online")); });
+// the form goes first: with it still there, the network coming back would start a sync after the test
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); act(() => __setNetState("online")); });
 
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
 const LALIT = { ...ANIL, id: 11, name: "Lalit Jain" };
@@ -43,10 +45,16 @@ function draftsOnServer(start: typeof rakeshs[] = []) {
   const rows = new Map(start.map((d) => [d.id, d]));
   const saved = new Set<string>();
   let down = false;
+  let listFails = false;
   const gates: Record<string, { wait: Promise<void>; open: () => void } | undefined> = {};
   const gate = async (m: string) => { await gates[m]?.wait; };
   const routes: Route[] = [
-    ["GET", "drafts/", async () => { if (down) throw offline(); await gate("GET"); return { results: [...rows.values()] }; }],
+    ["GET", "drafts/", async () => {
+      if (down) throw offline();
+      if (listFails) refuse(500, { detail: "Server error" });
+      await gate("GET");
+      return { results: [...rows.values()] };
+    }],
     ["PUT", /^drafts\/[0-9a-f-]+\/$/, async ({ url, body }) => {
       if (down) throw offline();
       await gate("PUT");
@@ -69,6 +77,8 @@ function draftsOnServer(start: typeof rakeshs[] = []) {
   return {
     rows, routes,
     setDown: (v: boolean) => { down = v; },
+    /** The shop's list answers 500 while the internet is fine. */
+    failList: () => { listFails = true; },
     /** A counter saved this draft as a bill: it's off the list, and the server remembers. */
     savedAsBill: (id: string) => { rows.delete(id); saved.add(id); },
     hold: (m: string) => { let open = () => {}; const wait = new Promise<void>((r) => { open = r; }); gates[m] = { wait, open: () => { gates[m] = undefined; open(); } }; },
@@ -86,8 +96,23 @@ async function pickAnil(user: ReturnType<typeof fakeToday>) {
   await user.keyboard("{Enter}");
 }
 const puts = (calls: { method: string }[]) => calls.filter((c) => c.method === "PUT");
-/** Lets what's on its way land (answers, the cache telling the page, a dialog's focus): a little faked time, inside act. */
-const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(50); });
+/**
+ * Lets what's on its way land (answers, the cache telling the page, a dialog's focus): a little faked time, inside act,
+ * twice, since what one answer draws can ask for more.
+ */
+async function settle() {
+  for (let i = 0; i < 2; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+}
+/**
+ * Opens an unfinished bill (a click, or a link): the form waits for the shop's fresh answer before it's drawn, so that
+ * answer is held, then let land inside act, and the form isn't drawn between a test's steps.
+ */
+async function arrive(server: ReturnType<typeof draftsOnServer>, go: () => Promise<unknown>) {
+  server.hold("GET");
+  await go();
+  await act(async () => { server.release("GET"); await vi.advanceTimersByTimeAsync(50); });
+  await settle();
+}
 const status = () => within(screen.getByRole("complementary", { name: "Bill summary" }));
 
 test("a new bill keeps itself as a draft 1.2 s after the last change: on this device at once, on the shop's list, and the address names it", async () => {
@@ -123,9 +148,8 @@ test("leaving keeps it and says where to find it; Open brings it back as it was,
   expect(screen.getByTestId("where")).toHaveTextContent("Sales at /sales");
   expect(await screen.findByText("Bill kept as a draft")).toBeInTheDocument();
   expect(screen.getByText("New bill lists it until it's finished. Open it now?")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Open" }));
-  expect(await screen.findByText("Finishing an unfinished bill")).toBeInTheDocument();
-  await settle();
+  await arrive(server, () => user.click(screen.getByRole("button", { name: "Open" })));
+  expect(screen.getByText("Finishing an unfinished bill")).toBeInTheDocument();
   expect(screen.getByText("Started at 10:00 by Kailash Mehta. It keeps saving as you go.")).toBeInTheDocument();
   expect(screen.getByRole("combobox", { name: /Customer/ })).toHaveValue("Anil Gupta");
 });
@@ -138,9 +162,8 @@ test("someone else's unfinished bill shows on a new bill with who started it, an
   await settle();
   const list = await screen.findByRole("list", { name: "Unfinished bills" });
   expect(list).toHaveTextContent("Lalit Jain's unfinished bill in Kiran · started 09:20 by Rakesh");
-  await user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill" }));
-  expect(await screen.findByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
-  await settle();
+  await arrive(server, () => user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill" })));
+  expect(screen.getByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
   expect(where(router)).toBe(`/sales/new?draft=${rakeshs.id}`);
   expect(screen.getByRole("combobox", { name: "Line 1 product" })).toHaveValue("Gold Necklace 22K");
   expect(screen.getByLabelText("Note on the bill")).toHaveValue("Waiting for the bangles to be weighed");
@@ -334,9 +357,8 @@ test("a list cached before the unfinished bill was made can't say it's gone: the
   await waitFor(() => expect(calls.some((c) => c.method === "GET" && c.url === "drafts/")).toBe(true));
   // Rakesh starts one on another counter a moment later, and its link is opened here
   server.rows.set(rakeshs.id, rakeshs);
-  await act(async () => { await router.navigate(`/sales/new?draft=${rakeshs.id}`); });
-  expect(await screen.findByText("Finishing an unfinished bill")).toBeInTheDocument();
-  await settle();
+  await arrive(server, () => act(async () => { await router.navigate(`/sales/new?draft=${rakeshs.id}`); }));
+  expect(screen.getByText("Finishing an unfinished bill")).toBeInTheDocument();
   expect(screen.getByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
   expect(screen.queryByText("That unfinished bill isn't here any more")).not.toBeInTheDocument();
 });
@@ -345,9 +367,10 @@ test("a list cached before the unfinished bill was made can't say it's gone: the
  * The shop's list can't be read once a bill form has loaded (the firms and the list are in the cache): its request
  * fails, or the browser is offline and it waits for the network. Each gives back a way to undo it.
  */
-const UNREAD: [string, (server: ReturnType<typeof draftsOnServer>) => () => void][] = [
-  ["fails", (server) => { server.setDown(true); return () => {}; }],
-  ["waits for the network", () => { onlineManager.setOnline(false); return () => onlineManager.setOnline(true); }],
+const UNREAD: [string, (server: ReturnType<typeof draftsOnServer>) => () => void, string][] = [
+  // a 500 while the internet is fine: nothing says when, so it says what to wait for
+  ["fails", (server) => { server.failList(); return () => {}; }, "open that one again once the list loads."],
+  ["waits for the network", () => { act(() => __setNetState("offline")); onlineManager.setOnline(false); return () => onlineManager.setOnline(true); }, "open that one again when the internet is back."],
 ];
 /** A new bill, loaded; then the shop's list can't be read, and the link to an unfinished bill is opened. */
 async function openUnread(unread: (typeof UNREAD)[number][1], before: () => void = () => {}) {
@@ -376,12 +399,12 @@ test.each(UNREAD)("a synced unfinished bill reopened while the shop's list %s op
   }
 });
 
-test.each(UNREAD)("a draft neither on this device nor on a list it can read (the list %s) gets the form's own words, never \"isn't here any more\" (Ruling 1D-4)", async (_, unread) => {
+test.each(UNREAD)("a draft neither on this device nor on a list it can read (the list %s) gets the form's own words, never \"isn't here any more\" (Ruling 1D-4)", async (_, unread, when) => {
   fakeToday();
   const done = await openUnread(unread);
   try {
     expect(await screen.findByText("That unfinished bill didn't open")).toBeInTheDocument();
-    expect(screen.getByText("This device has no copy of it, and the shop's list didn't load. This is a new, empty bill; open that one again when the internet is back.")).toBeInTheDocument();
+    expect(screen.getByText(`This device has no copy of it, and the shop's list didn't load. This is a new, empty bill; ${when}`)).toBeInTheDocument();
     expect(screen.queryByText("That unfinished bill isn't here any more")).not.toBeInTheDocument();
   } finally {
     done();
@@ -451,7 +474,7 @@ test("a bill kept on this device before the session ran out comes back on its ow
   expect(keptDrafts().map((d) => d.id)).toEqual([rakeshs.id]);
 });
 
-test("leaving before the last change is kept asks first; Leave keeps it at once, on this device first, and says where to find it (F18)", async () => {
+test("leaving a new bill never asks: a change not kept yet is kept at once, on this device first, and the toast says where (Ruling 1D-10)", async () => {
   const user = fakeToday();
   const server = draftsOnServer();
   formServer(server.routes);
@@ -459,20 +482,67 @@ test("leaving before the last change is kept asks first; Leave keeps it at once,
   await settle();
   await pickAnil(user);
   expect(screen.getByText("Keeping the draft…")).toBeInTheDocument();
-  await act(async () => { await router.navigate("/sales"); });
-  await settle(); // the dialog takes the cursor
-  const ask = screen.getByRole("dialog", { name: "Leave without saving?" });
-  expect(ask).toHaveTextContent("Your last change isn't in the draft yet. Leave and lose it?");
-  // past the dialog's guard against a click meant for the page: the clock's date only, so the keep's 1.2 s don't run out
-  vi.setSystemTime(Date.now() + 400);
   expect(keptDrafts()).toEqual([]);
-  await act(async () => { fireEvent.click(within(ask).getByRole("button", { name: "Leave" })); await vi.advanceTimersByTimeAsync(50); });
+  // closing the tab now doesn't ask either
+  const unload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(false);
+  await act(async () => { await router.navigate("/sales"); });
+  await settle();
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
   expect(where(router)).toBe("/sales");
-  // on this device at once, then on the shop's list
   const [kept] = keptDrafts();
   expect(kept).toMatchObject({ data: { customer: { id: 7, name: "Anil Gupta" } } });
-  expect(await screen.findByText("Bill kept as a draft")).toBeInTheDocument();
+  expect(screen.getByText("Bill kept as a draft")).toBeInTheDocument();
   await waitFor(() => expect(server.rows.get(kept.id)?.data.customer?.id).toBe(7));
+});
+
+/** The page going away without React's cleanup: the tab closing or reloading, or a phone switching to another app. */
+const AWAY: [string, () => () => void][] = [
+  ["the tab closes or reloads", () => { window.dispatchEvent(new Event("pagehide")); return () => {}; }],
+  ["a phone switches to another app", () => {
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    return () => { delete (document as { visibilityState?: unknown }).visibilityState; };
+  }],
+];
+
+test.each(AWAY)("when %s, a change not kept yet is kept at once, on this device first, and named in the address should the page come back (Ruling 1D-10)", async (_, away) => {
+  const user = fakeToday();
+  const server = draftsOnServer();
+  const { calls } = formServer(server.routes);
+  const { router } = mountForm("/sales/new");
+  await settle();
+  await pickAnil(user);
+  expect(keptDrafts()).toEqual([]);
+  let back = () => {};
+  act(() => { back = away(); });
+  try {
+    const [kept] = keptDrafts();
+    expect(kept).toMatchObject({ data: { customer: { id: 7 } } });
+    await settle();
+    expect(where(router)).toBe(`/sales/new?draft=${kept.id}`);
+    expect(puts(calls)).toHaveLength(1);
+    // the 1.2 s then pass: it isn't kept twice
+    await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+    expect(puts(calls)).toHaveLength(1);
+  } finally {
+    back();
+  }
+});
+
+test("leaving a change to a saved bill still asks (Ruling 1D-10)", async () => {
+  const user = fakeToday();
+  formServer(draftsOnServer().routes);
+  const { router } = mountForm("/edit", { routes: [{ path: "/edit", element: <BillForm start={startEdit(toBillDetail(wireDetail()))} formKey="edit" /> }] });
+  await settle();
+  await user.type(screen.getByLabelText("Note on the bill"), "Weighed again");
+  const unload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+  await act(async () => { await router.navigate("/sales"); });
+  await settle();
+  expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toHaveTextContent("Your changes to this bill aren't saved. Leave and lose them?");
 });
 
 test("a move within /sales/new keeps the last change at once without asking: Alt N's new bill, and another unfinished bill opened from the list (F18)", async () => {
@@ -496,12 +566,93 @@ test("a move within /sales/new keeps the last change at once without asking: Alt
   await user.click(screen.getByLabelText("Note on the bill"));
   await user.keyboard("Ring for Meena");
   expect(keptDrafts().some((d) => d.data.notes === "Ring for Meena")).toBe(false);
-  await user.click(screen.getByRole("button", { name: "Open Lalit Jain's unfinished bill" }));
-  expect(await screen.findByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
-  await settle();
+  await arrive(server, () => user.click(screen.getByRole("button", { name: "Open Lalit Jain's unfinished bill" })));
+  expect(screen.getByText("Started at 09:20 by Rakesh Soni. It keeps saving as you go.")).toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
   expect(keptDrafts().find((d) => d.data.notes === "Ring for Meena")).toBeDefined();
   await waitFor(() => expect([...server.rows.values()].some((d) => d.data.notes === "Ring for Meena")).toBe(true));
+});
+
+test("a save held behind the sync's PUT of this draft (the network back, a change made offline) says it waits, and the status says the draft is on its way (Task 6 review)", async () => {
+  const user = fakeToday();
+  // this device changed Rakesh's bill while offline: the shop's list has the older version
+  const mine = { ...rakeshs, data: { ...RAKESHS, notes: "Changed offline" }, updated_at: "2026-10-08T09:30:00+05:30" };
+  keepOnDevice({ ...mine, synced: false });
+  const server = draftsOnServer([rakeshs]);
+  server.hold("PUT");
+  const { calls } = formServer(server.routes);
+  mountSaving(startDraft({ ...mine, onDevice: true } as UnfinishedBill));
+  await settle();
+  await screen.findByText("Finishing an unfinished bill");
+  // the sync as the form opens sends this device's change, and its PUT hangs
+  await waitFor(() => expect(puts(calls)).toHaveLength(1));
+  expect(status().getByText("Keeping the draft…")).toBeInTheDocument();
+  await save(user);
+  expect(status().getByText("Saving once the draft's last change reaches the shop's list…")).toBeInTheDocument();
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+  await act(async () => { server.release("PUT"); await vi.advanceTimersByTimeAsync(50); });
+  await waitFor(() => expect(screen.getByTestId("saving")).toHaveTextContent("Saved: /sales/501?saved=new"));
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ draft_id: rakeshs.id, notes: "Changed offline" });
+});
+
+test.each([
+  ["doesn't go through", () => refuse(500, { detail: "Server error" }), true],
+  ["finds a bill was made from it already (409 draft_saved)", () => refuse(409, SAVED_AS), false],
+] as const)("left while the bill saves, and the save %s: what was typed is kept then, and only then (Ruling 1D-10, F6)", async (_, answer, keeps) => {
+  const user = fakeToday();
+  const server = draftsOnServer([rakeshs]);
+  let land = () => {};
+  const { calls } = formServer([["POST", "sales/", () => new Promise<void>((r) => { land = r; }).then(answer)], ...server.routes]);
+  const { router } = mountSaving(fromRakeshs());
+  await settle();
+  await screen.findByText("Finishing an unfinished bill");
+  await user.type(screen.getByLabelText("Note on the bill"), " today");
+  await save(user);
+  expect(screen.getByTestId("saving")).toHaveTextContent("Saving;");
+  // the form is left before the save answers: nothing is kept while the save is on its way (F6)
+  await act(async () => { await router.navigate("/sales"); });
+  await settle();
+  expect(keptDrafts()).toEqual([]);
+  expect(puts(calls)).toEqual([]);
+  await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
+  if (keeps) {
+    expect(keptDraft(rakeshs.id)).toMatchObject({ data: { notes: "Waiting for the bangles to be weighed today" } });
+    expect(screen.getByText("Bill kept as a draft")).toBeInTheDocument();
+    await waitFor(() => expect(server.rows.get(rakeshs.id)?.data.notes).toBe("Waiting for the bangles to be weighed today"));
+  } else {
+    expect(keptDrafts()).toEqual([]);
+    expect(puts(calls)).toEqual([]);
+    expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
+  }
+});
+
+test("an unfinished bill picked up opens at its newest version: the form waits for the shop's fresh answer, not the list it had (Task 6 review)", async () => {
+  const user = fakeToday();
+  const server = draftsOnServer([rakeshs]);
+  formServer(server.routes);
+  mountForm("/sales/new");
+  await settle();
+  const list = await screen.findByRole("list", { name: "Unfinished bills" });
+  // Rakesh adds a ring on his counter meanwhile
+  const ring = { ...RAKESHS.lines[0], productId: 5, name: "Gold Ring 22K", qty: 4.5 };
+  server.rows.set(rakeshs.id, { ...rakeshs, data: { ...RAKESHS, lines: [...RAKESHS.lines, ring] }, updated_at: "2026-10-08T09:59:00+05:30" });
+  await arrive(server, () => user.click(within(list).getByRole("button", { name: "Open Lalit Jain's unfinished bill" })));
+  expect(screen.getByText("Finishing an unfinished bill")).toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "Line 2 product" })).toHaveValue("Gold Ring 22K");
+});
+
+test("where the browser refuses storage, a copy here the shop hasn't got yet is listed as not sent yet, never as on this device (Task 6 review)", async () => {
+  fakeToday();
+  vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, "setItem").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
+  keepOnDevice({ ...rakeshs, synced: false });
+  const server = draftsOnServer();
+  server.setDown(true);
+  formServer(server.routes);
+  mountForm("/sales/new");
+  await settle();
+  const list = await screen.findByRole("list", { name: "Unfinished bills" });
+  expect(list).toHaveTextContent("Lalit Jain's unfinished bill in Kiran · started 09:20 by Rakesh · not sent yet");
+  expect(list).not.toHaveTextContent("on this device");
 });
 
 test("a change to a saved bill keeps no draft: it says what isn't saved yet", async () => {
