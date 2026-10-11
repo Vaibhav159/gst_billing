@@ -527,21 +527,25 @@ class DraftThrottleTest(TestCase):
         return (override_settings(REST_FRAMEWORK={**prod.REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": changed}),
                 patch.object(SimpleRateThrottle, "THROTTLE_RATES", changed))
 
-    def test_keeps_dont_spend_the_users_daily_requests(self):
+    def test_keeps_and_discards_bypass_the_daily_allowance_but_the_list_spends_it(self):
         with production_throttling() as prod:
             rest, user_rates = self.rated(prod, user="2/day")  # the day's budget, shrunk to two requests
             with rest, user_rates:
-                for n in range(20):  # a bill typed with many pauses, and the list asked for as forms open
+                for n in range(20):  # a bill typed with many pauses never spends the user's daily requests
                     self.assertEqual(self.keep(n).status_code, 201 if n == 0 else 200)
-                    if n % 5 == 0:
-                        self.assertEqual(self.staff.get(reverse("draft-list")).status_code, 200)
+                self.assertEqual(self.staff.delete(reverse("draft-detail", args=[self.key])).status_code, 204)
+                self.assertEqual(self.keep(20).status_code, 201)
                 body = {"business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "1",
                         "invoice_date": str(timezone.localdate()), "lines": [LINE], "draft_id": self.key}
                 r = self.staff.post(reverse("sale-list"), body, format="json")
                 self.assertEqual(r.status_code, 201, r.data)  # the save still goes through: the day's first request
-                self.assertEqual(self.staff.get(reverse("sale-list")).status_code, 200)
+                self.assertEqual(self.staff.get(reverse("draft-list")).status_code, 200)  # Ruling 1A-44: the second
                 self.assertEqual(self.staff.get(reverse("sale-list")).status_code, 429)  # the tiny budget is real
-                self.assertEqual(self.staff.get(reverse("draft-list")).status_code, 200)  # keeps never needed it
+                self.assertEqual(self.staff.get(reverse("draft-list")).status_code, 429)
+                self.key = str(uuid.uuid4())
+                self.assertEqual(self.keep(21).status_code, 201)  # keeps and discards still work after the daily cap
+                self.assertEqual(self.keep(22).status_code, 200)
+                self.assertEqual(self.staff.delete(reverse("draft-detail", args=[self.key])).status_code, 204)
 
     def test_keeps_have_their_own_rate(self):
         self.assertEqual(load_production_settings().REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["drafts"], "120/min")

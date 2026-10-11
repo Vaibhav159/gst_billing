@@ -28,6 +28,7 @@ from billing.numbering import counter_of, holder, paper_book
 from billing.roles import ROLES as V3_ROLES
 from billing.roles import role_of
 from billing.services.bill_reads import itax_flags
+from billing.services.bin import restore_from_bin
 from billing.tax_rules import is_interstate
 
 
@@ -118,7 +119,6 @@ class SeedSandboxTest(TestCase):
         self.assertTrue(any(b["paper"] for b in book["bills"]))
         binned = BinnedInvoice.objects.get(reason="Entered twice by mistake")
         self.assertIsNotNone(holder(kiran.pk, fy_of(binned.invoice_date), binned.invoice_number))
-        self.assertEqual(binned.data["invoice"]["paper"], "True")
 
         paper = [b for b in book["bills"] if b["paper"]]
         run = sorted([(b["counter"], b["invoice_date"], b["id"]) for b in paper] + [
@@ -142,9 +142,13 @@ class SeedSandboxTest(TestCase):
         self.assertTrue(Invoice.objects.filter(customer=walkin, sent_to="9829041122", sent_count=2).exists())
         recent = Invoice.objects.sales().filter(invoice_date__gte=date(2026, 10, 1), paper=False).exclude(
             customer=walkin).order_by("id")
-        self.assertTrue(recent.filter(sent_at__isnull=False).exists())
-        for i, bill in enumerate(recent):
-            self.assertEqual(bill.sent_at is not None, i % 3 != 2)
+        self.assertGreaterEqual(len(recent), 3)
+        sent = [bill.sent_at is not None for bill in recent]
+        # Two sends, then one still to send; a partial final group starts with the sends.
+        for group_start in range(0, len(sent), 3):
+            group = sent[group_start:group_start + 3]
+            self.assertEqual(group, [True, True, False][:len(group)])
+        for bill in recent:
             if bill.sent_at:
                 self.assertEqual((bill.sent_via, bill.sent_count, bill.last_sent_at), ("whatsapp", 1, bill.sent_at))
         cash = Invoice.objects.select_related("customer").get(
@@ -157,14 +161,21 @@ class SeedSandboxTest(TestCase):
         self.assertEqual([f["kind"] for f in itax_flags(big)], ["pan"])
         kinds = {f["kind"] for inv in Invoice.objects.sales().select_related("customer") for f in itax_flags(inv)}
         self.assertLessEqual({"pan", "cash_limit"}, kinds)
+        restored = restore_from_bin(binned, None)
+        self.assertIs(restored.paper, True)
+        self.assertEqual(restored.pk, binned.original_id)
+        self.assertEqual(restored.invoice_date, date(2026, 9, 21))
+        self.assertTrue(restored.invoice_number.startswith("KGH/2026-27/"))
 
     def test_paper_run_stays_in_its_month_and_financial_year(self):
-        for today in (date(2026, 10, 1), date(2027, 3, 1), date(2027, 4, 1)):
+        for today in (date(2026, 10, 1), date(2027, 3, 1), date(2027, 4, 1),
+                      date(2026, 10, 15), date(2027, 3, 15), date(2027, 4, 15)):
             with self.subTest(today=today), mock.patch(
                     "billing.management.commands.seed_sandbox.timezone.localdate", return_value=today):
                 self._seed("--reset")
                 kiran = Business.objects.get(name="KIRAN GOLD HOUSE (SANDBOX)")
-                start = month_add(today, -1)
+                this_month = today.replace(day=1)
+                start = month_add(this_month, -1)
                 self.assertEqual(kiran.paper_full_number_from, start)
                 book = paper_book(kiran, start.year, start.month)
                 self.assertEqual(book["missing_count"], 2)
@@ -173,14 +184,17 @@ class SeedSandboxTest(TestCase):
                 binned = BinnedInvoice.objects.get(reason="Entered twice by mistake")
                 run = [*paper, binned]
                 self.assertEqual(len(run), 6)
-                self.assertTrue(all(start.replace(day=15) <= b.invoice_date < today for b in run))
+                self.assertTrue(all(start.replace(day=15) <= b.invoice_date < this_month for b in run))
                 self.assertFalse(Invoice.objects.sales().filter(
-                    business=kiran, paper=False, invoice_date__gte=start.replace(day=15), invoice_date__lt=today).exists())
-                current = list(Invoice.objects.sales().filter(business=kiran, invoice_date__gte=today))
+                    business=kiran, paper=False, invoice_date__gte=start.replace(day=15),
+                    invoice_date__lt=this_month).exists())
+                current = list(Invoice.objects.sales().filter(business=kiran, invoice_date__gte=this_month))
                 self.assertTrue(current)
                 self.assertGreater(min(b.pk for b in paper), max(b.pk for b in current))
                 lowest = min(counter_of(b.invoice_number) for b in current)
+                counters = [counter_of(b.invoice_number) for b in run]
+                self.assertEqual(max(counters) - min(counters) + 1, 8)
                 if fy_of(start) == fy_of(today):
-                    self.assertLess(max(counter_of(b.invoice_number) for b in run), lowest)
+                    self.assertLess(max(counters), lowest)
                 else:
                     self.assertEqual(lowest, 1)  # April starts a new series; March keeps its own reservation.

@@ -177,7 +177,7 @@ class FirmAndNotesTest(TestCase):
         snap = firm_snapshot(self.biz)
         self.assertEqual((snap["name"], snap["state_name"], snap["invoice_prefix"]), ("KIRAN GOLD HOUSE", "RAJASTHAN", "KGH"))
         self.assertEqual((snap["email"], snap["signature_image"]), ("", ""))
-        self.assertEqual(set(snap), {"name", "address", "gst_number", "state_name", "pan_number", "mobile_number",
+        self.assertEqual(set(snap), {"business_id", "name", "address", "gst_number", "state_name", "pan_number", "mobile_number",
                                      "email", "bank_name", "bank_account_number", "bank_ifsc_code",
                                      "bank_branch_name", "invoice_prefix", "signature_image"})
 

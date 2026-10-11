@@ -127,7 +127,7 @@ class V2PathsAndCancelTest(TestCase):
         Invoice.objects.filter(pk=self.bill.pk).update(status=BILL_CANCELLED)
         r = self.client.post(reverse("auditlog-undo", args=[edit.pk]))
         self.assertEqual(r.status_code, 409)
-        self.assertEqual(r.data, {"error": "cancelled",
+        self.assertEqual(r.data, {"error": "cancelled", "code": "cancelled",
                                   "detail": "Cancelled bills can't be changed. Make it again from the bill instead."})
         self.bill.refresh_from_db()
         self.assertEqual((self.bill.status, self.bill.payment_mode), (BILL_CANCELLED, "cash"))
