@@ -135,10 +135,11 @@ export function CustomerPicker({ firmId, value, onPick, onNew, error, id = "bf-c
   };
   return (
     <Field label="Customer" htmlFor={id} error={error} hint={value ? customerLine(value) : "Type a name, phone or GSTIN. Recent customers show first."}
-      // a press keeps the cursor in the box, so the name typed there goes with it
-      aside={<Button size="sm" variant="link" icon={UserPlus} onClick={() => onNew(typed.trim())} {...keepFocus}>New customer</Button>}>
-      <Combobox id={id} query={q} onQuery={(t) => { setQ(t); setEditing(true); }} options={options} onPick={pick} listLabel="Customers"
-        invalid={Boolean(error)} describedBy={error ? `${id}-error` : `${id}-hint`} autoFocus={autoFocus} onFocus={() => setEditing(true)} onBlur={() => setEditing(false)} />
+      // A press keeps the cursor in the box; tabbing to the link also keeps the name until it is used.
+      aside={<Button id={`${id}-new`} size="sm" variant="link" icon={UserPlus} onClick={() => { setEditing(false); onNew(typed.trim()); }} onBlur={() => setEditing(false)} {...keepFocus}>New customer</Button>}>
+      <Combobox id={id} query={q} onQuery={(t) => { setQ(t); setEditing(true); }} options={options} onPick={pick} listLabel="Customers" note={search.note}
+        invalid={Boolean(error)} describedBy={error ? `${id}-error` : `${id}-hint`} autoFocus={autoFocus} onFocus={() => setEditing(true)}
+        onBlur={(e) => { if (e.relatedTarget?.id !== `${id}-new`) setEditing(false); }} />
     </Field>
   );
 }
@@ -380,7 +381,15 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   // filled from the record each time it opens (or for another customer or field): the same customer asked for again
   // meanwhile, as after the connection comes back, keeps what's typed. Opening or closing drops words the echo has still
   // to say: a sheet on its way out says nothing
-  useEffect(() => { say(""); if (open && customer) { setVal(field === "pan" ? customer.pan_number : customer.address); setErr(""); setFail(null); } }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    say("");
+    if (open && customer) {
+      const badPan = field === "pan" && Boolean(panProblem(customer.pan_number));
+      setVal(field === "pan" ? badPan ? "" : customer.pan_number : customer.address);
+      setErr(badPan ? `“${customer.pan_number.trim()}” isn't a PAN. Clear it, or type the PAN.` : "");
+      setFail(null);
+    }
+  }, [open, cid, field]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!customer || !field) return null;
   const busy = save$.isPending;
   const id = `fix-${field}`;

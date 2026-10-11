@@ -83,6 +83,30 @@ test("the New customer link beside the box takes the name typed there", async ()
   expect(onNew).toHaveBeenCalledWith("Kamal Jain");
 });
 
+test("tabbing from the picker to New customer keeps the typed name for the sheet", async () => {
+  const user = typingClock();
+  serve({ "GET customers/": customers });
+  function PickerAndSheet() {
+    const [name, setName] = useState<string | null>(null);
+    return <><CustomerPicker firmId={3} value={null} onPick={() => {}} onNew={setName} />
+      <NewCustomerSheet open={name !== null} onClose={() => setName(null)} initialName={name ?? ""} homeState="RAJASTHAN" onSaved={() => {}} /></>;
+  }
+  mount([{ path: "/", element: <PickerAndSheet /> }], ["/"]);
+  const box = screen.getByRole("combobox", { name: "Customer" });
+  await user.type(box, "Kamal Jain");
+  await user.tab({ shift: true }); // the link is beside the label, before the input in reading order
+  expect(screen.getByRole("button", { name: "New customer" })).toHaveFocus();
+  expect(box).toHaveValue("Kamal Jain");
+  await user.tab();
+  expect(box).toHaveFocus();
+  expect(box).toHaveValue("Kamal Jain");
+  await user.tab({ shift: true });
+  await user.keyboard("{Enter}");
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  const sheet = screen.getByRole("dialog", { name: "New customer" });
+  expect(within(sheet).getByLabelText(/Name on the bill/)).toHaveValue("Kamal Jain");
+});
+
 test("a name typed and Enter pressed at once picks nothing until its search has answered, never + New customer; then Enter picks the first match (Ruling 1D-2)", async () => {
   const user = typingClock();
   const onNew = vi.fn();
@@ -94,10 +118,13 @@ test("a name typed and Enter pressed at once picks nothing until its search has 
   await user.click(box);
   // one letter is too few to search
   await user.keyboard("M{Enter}");
-  expect(list()).toHaveTextContent("Keep typing to search");
+  expect(screen.getByRole("status")).toHaveTextContent("Keep typing to search");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(box).toHaveAttribute("aria-expanded", "false");
   await user.keyboard("eena{Enter}");
-  expect(list()).toHaveTextContent("Searching…");
-  expect(within(list()).queryAllByRole("option")).toEqual([]);
+  expect(screen.getByRole("status")).toHaveTextContent("Searching…");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(box).toHaveAttribute("aria-expanded", "false");
   await move(250);
   await waitFor(() => expect(calls.some((c) => c.params.search === "Meena")).toBe(true));
   // asked but not answered: the arrows and Enter still have nothing to pick
@@ -135,8 +162,8 @@ test("offline, the list says the search waits for the internet, and it searches 
   act(() => __setNetState("offline"));
   await user.keyboard("Meena");
   await move(250);
-  expect(list()).toHaveTextContent("You're offline: the search runs when you're back online");
-  expect(within(list()).queryAllByRole("option")).toEqual([]);
+  expect(screen.getByRole("status")).toHaveTextContent("You're offline: the search runs when you're back online");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   onlineManager.setOnline(true);
   act(() => __setNetState("online"));
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
@@ -346,6 +373,22 @@ test("the fix sheet: the PAN is checked, saved to the customer alone, and the bi
   expect(calls.find((c) => c.method === "PATCH")!.data).toEqual({ pan_number: "ABCDE1234F" });
   expect(await screen.findByText("Added the PAN for Anil Gupta")).toBeInTheDocument();
   expect(screen.getByText("It's in Customers now; this bill shows it.")).toBeInTheDocument();
+});
+
+test.each(["N/A", "UNKNOWN", "0000000000"])("the fix sheet opens an unshaped PAN (%s) empty and explains the stored value", async (stored) => {
+  const user = typingClock();
+  const onSaved = vi.fn();
+  const calls = serve({ "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...ANIL, ...(c.data as object) } }) });
+  mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer({ ...ANIL, pan_number: stored })} field="pan" open onClose={() => {}} onSaved={onSaved} /> }], ["/"]);
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  const pan = within(sheet).getByLabelText("PAN");
+  expect(pan).toHaveValue("");
+  expect(pan).toHaveAccessibleDescription(`“${stored}” isn't a PAN. Clear it, or type the PAN.`);
+  await move(400);
+  await user.type(pan, "ABCDE1234F");
+  await user.click(within(sheet).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ pan_number: "ABCDE1234F" })));
+  expect(calls.find((c) => c.method === "PATCH")!.data).toEqual({ pan_number: "ABCDE1234F" });
 });
 
 /** The fix sheet for Anil's PAN, open, past its guard against a double tap's second tap, with `typed` in the box. */

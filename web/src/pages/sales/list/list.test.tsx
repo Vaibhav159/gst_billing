@@ -451,28 +451,34 @@ test("the customer box says it's searching until the answer for what's typed has
   await screen.findByText("All firms · FY 2026-27");
   handClock();
   const box = screen.getByRole("combobox", { name: "Show one customer's bills" });
-  const list = customerList;
+  const status = () => {
+    expect(box).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("sl-customer-list")).not.toBeInTheDocument();
+    const live = document.getElementById("sl-customer-status")!;
+    expect(live).toHaveAttribute("role", "status");
+    return live;
+  };
   fireEvent.change(box, { target: { value: "m" } });
-  expect(list()).toHaveTextContent("Keep typing to search");
+  expect(status()).toHaveTextContent("Keep typing to search");
   fireEvent.change(box, { target: { value: "meenaz" } });
   // typing hasn't paused: nothing is asked yet, and nothing is said of a search not made
-  expect(list()).toHaveTextContent("Searching…");
+  expect(status()).toHaveTextContent("Searching…");
   await pass(250);
   expect(calls.filter((c) => c.url === "customers/").map((c) => c.params.search)).toEqual(["meenaz"]);
   // asked, not answered yet
-  expect(list()).toHaveTextContent("Searching…");
-  expect(list()).not.toHaveTextContent(/No customer matches/);
+  expect(status()).toHaveTextContent("Searching…");
+  expect(status()).not.toHaveTextContent(/No customer matches/);
   await act(async () => { answer([]); });
   await pass(0);
-  expect(list()).toHaveTextContent("No customer matches “meenaz”");
+  expect(status()).toHaveTextContent("No customer matches “meenaz”");
   // a letter less: that answer was for "meenaz", so nothing is said of "meena" until it has been searched for
   fireEvent.change(box, { target: { value: "meena" } });
-  expect(list()).toHaveTextContent("Searching…");
-  expect(list()).not.toHaveTextContent(/No customer matches/);
+  expect(status()).toHaveTextContent("Searching…");
+  expect(status()).not.toHaveTextContent(/No customer matches/);
   await pass(250);
   await act(async () => { answer([{ ...MEENA, city: "Jaipur", state_name: "RAJASTHAN", figures: { bills: 6 } }]); });
   await pass(0);
-  fireEvent.click(within(list()).getByRole("option", { name: /^Meena Jain.*6 bills$/ }));
+  fireEvent.click(within(customerList()).getByRole("option", { name: /^Meena Jain.*6 bills$/ }));
   await pass(0);
   expect(screen.getByTestId("where")).toHaveTextContent("customer=8");
   expect(lists(calls).at(-1)?.params).toMatchObject({ customer_id: 8 });
@@ -484,16 +490,22 @@ test("the customer box says when its search failed, and when it waits for the in
   await screen.findByText("All firms · FY 2026-27");
   handClock();
   const box = screen.getByRole("combobox", { name: "Show one customer's bills" });
-  const list = customerList;
+  const status = () => {
+    expect(box).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("sl-customer-list")).not.toBeInTheDocument();
+    const live = document.getElementById("sl-customer-status")!;
+    expect(live).toHaveAttribute("role", "status");
+    return live;
+  };
   fireEvent.change(box, { target: { value: "kamal" } });
   await pass(250);
-  expect(list()).toHaveTextContent("Couldn't search: the app couldn't get through");
-  expect(list()).not.toHaveTextContent(/No customer matches/);
+  expect(status()).toHaveTextContent("Couldn't search: the app couldn't get through");
+  expect(status()).not.toHaveTextContent(/No customer matches/);
   act(() => { onlineManager.setOnline(false); __setNetState("offline"); });
   fireEvent.change(box, { target: { value: "rekha" } });
   await pass(250);
-  expect(list()).toHaveTextContent("You're offline: the search runs when you're back online");
-  expect(list()).not.toHaveTextContent(/No customer matches/);
+  expect(status()).toHaveTextContent("You're offline: the search runs when you're back online");
+  expect(status()).not.toHaveTextContent(/No customer matches/);
 });
 
 test("v2's GST drill links name the firm as business_id: the list opens on that firm, with the link's rate or segment and dates", async () => {

@@ -1,10 +1,44 @@
 import { useState } from "react";
-import { act, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/test/render";
 import { Combobox, Dialog, type ComboItem, type ComboOption } from "./index";
 
 const PEOPLE = ["Anil Gupta", "Meena Jain", "Mahesh Soni"];
+
+test.each(["Keep typing to search", "Searching…", "Couldn't search: the app couldn't get through", "No customer matches “Kamal”"])("a note without choices is announced without an empty listbox: %s", (note) => {
+  vi.useFakeTimers();
+  try {
+    renderApp(<Combobox id="cb" ariaLabel="Customer" query="Kamal" onQuery={() => {}} options={[{ heading: note }]} onPick={() => {}} />);
+    const box = screen.getByRole("combobox", { name: "Customer" });
+    fireEvent.focus(box);
+    expect(box).toHaveAttribute("aria-expanded", "false");
+    expect(box).not.toHaveAttribute("aria-activedescendant");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    const status = screen.getByRole("status");
+    expect(status).toHaveClass("sr-only");
+    expect(status).toHaveTextContent(note);
+    // Sighted users still get the note while the search has nothing to pick.
+    expect(screen.getAllByText(note).some((node) => !node.closest(".sr-only"))).toBe(true);
+  } finally { vi.useRealTimers(); }
+});
+
+test("matches are announced as a count, and a search note takes precedence when an action remains available", () => {
+  vi.useFakeTimers();
+  try {
+    const props = { id: "cb", ariaLabel: "Customer", query: "a", onQuery: () => {}, onPick: () => {} };
+    const { rerender } = renderApp(<Combobox {...props} options={[{ heading: "Customers" }, ...PEOPLE.map((title, value) => ({ key: title, title, value }))]} />);
+    const box = screen.getByRole("combobox", { name: "Customer" });
+    fireEvent.focus(box);
+    expect(box).toHaveAttribute("aria-expanded", "true");
+    expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(3);
+    expect(screen.getByRole("status")).toHaveTextContent("3 matches");
+    const note = "Couldn't search: you're offline";
+    rerender(<Combobox {...props} note={note} options={[{ heading: note }, { key: "new", title: "+ New customer…", value: 0 }]} />);
+    fireEvent.focus(screen.getByRole("combobox", { name: "Customer" }));
+    expect(screen.getByRole("status")).toHaveTextContent(note);
+  } finally { vi.useRealTimers(); }
+});
 /**
  * A customer box as a page holds one: what's typed, the matches under a heading, and the pick shown in the box. min: the
  * characters typed before it lists anything (a search box's minimum).
