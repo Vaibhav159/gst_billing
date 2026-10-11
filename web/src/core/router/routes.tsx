@@ -6,6 +6,7 @@ import Login from "@/pages/core/Login";
 import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
+import BillPage from "@/pages/sales/BillPage";
 import SalesList from "@/pages/sales/SalesList";
 import { customerRoutes } from "@/pages/customers/routes";
 import NewBillPage from "@/pages/sales/form/BillFormPage";
@@ -25,7 +26,7 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
   sales: [
-    "/sales/paper", "/sales/batch", "/sales/export", "/sales/:id", "/sales/:id/edit", "/sales/:id/print",
+    "/sales/paper", "/sales/batch", "/sales/export", "/sales/:id/edit", "/sales/:id/print",
     "/billing/invoice/:bizSlug/:fy/:slug", // v2's links by bill number
   ],
   purchases: [
@@ -91,8 +92,9 @@ export const appRoutes: RouteObject[] = [{
         ...customerRoutes,
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
-        // part 1B: the bills list
+        // part 1B: the bills list and a bill's own page
         { path: "/sales", element: <SalesList /> },
+        { path: "/sales/:id", element: <BillPage /> },
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
