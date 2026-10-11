@@ -143,11 +143,13 @@ def _deleted_words(found, following):
             f"so it can't be used again. The next free number is {following['invoice_number']}.")
 
 
-def refuse_taken(business, day, number, exclude_invoice=None, exclude_bin=None, bins=True):
+def refuse_taken(business, day, number, exclude_invoice=None, exclude_bin=None, bins=True, *, found=...):
     """409 number_taken or number_deleted when `number` is in use in the firm's series for `day`
-    (number_taken only, with bins=False: see holder)."""
+    (number_taken only, with bins=False: see holder). `found` accepts a preloaded holder, or None,
+    when a bulk writer has already made the same lookup under the firm's lock."""
     fy = fy_of(day)
-    found = holder(business.pk, fy, number, exclude_invoice, exclude_bin, bins)
+    if found is ...:
+        found = holder(business.pk, fy, number, exclude_invoice, exclude_bin, bins)
     if found is None:
         return
     following = next_number(business, day)

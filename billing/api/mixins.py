@@ -42,18 +42,20 @@ def links_of(instance) -> dict:
     return {"_links": links} if links else {}
 
 
-def mark_undone(entry, user, log, via=None):
+def mark_undone(entry, user, log, via=None, *, save=True):
     """Spend an audit entry's Undo: v2's undo and v3's restore each mark it, so neither runs twice (H7).
 
     The marker lives in the snapshot, which the browser never sees, under a key no model field has,
     so the restore loops skip it; `log` is the row the undo wrote. v3's restore adds `via` ("bin" or
     "audit_log"), so a later refusal can say what brought the bill back; v2's marker has no such key.
+    `save=False` lets a bulk restore persist the same markers together.
     """
     marker = {"at": timezone.localtime().isoformat(), "by": getattr(user, "pk", None), "log": log.pk}
     if via:
         marker["via"] = via
     entry.snapshot = {**(entry.snapshot or {}), "_undo": marker}
-    entry.save(update_fields=["snapshot"])
+    if save:
+        entry.save(update_fields=["snapshot"])
 
 
 class AuditLogMixin:
