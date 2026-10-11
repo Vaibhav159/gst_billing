@@ -116,9 +116,11 @@ def catalog_figures(products, aliases, period):
     """SQL groups by matched name; a second narrow group keeps historical units separate."""
     if not products:
         return {}
-    clauses = [When(product_key__in=[n.lower() for n in aliases[p.pk]], then=Value(p.name.lower())) for p in products]
+    # Only renamed products need a WHEN; every other line already carries its product's lowercased name.
+    clauses = [When(product_key__in=[n.lower() for n in aliases[p.pk]], then=Value(p.name.lower()))
+               for p in products if {n.lower() for n in aliases[p.pk]} != {p.name.lower()}]
     lines = scoped_lines([name for values in aliases.values() for name in values], period).annotate(
-        canonical=Case(*clauses, output_field=CharField()))
+        canonical=Case(*clauses, default=F("product_key"), output_field=CharField()))
     active = ~Q(invoice__status=BILL_CANCELLED)
     groups = {r["canonical"]: r for r in lines.values("canonical").annotate(
         **_aggregates(active), cancelled=Count("invoice_id", distinct=True, filter=~active)).order_by()}

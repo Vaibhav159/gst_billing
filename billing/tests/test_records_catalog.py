@@ -119,6 +119,20 @@ class CatalogReadTests(CatalogCase):
         self.assertFalse(any('"snapshot"' in query.split(" FROM ")[0] for query in selects))
 
 
+    def test_figures_case_names_only_renamed_products(self):
+        for index in range(30):
+            Product.objects.create(name=f"Plain {index}", hsn_code="7113")
+        AuditLog.objects.create(action="updated", entity="product", entity_id=self.product.pk, entity_name="Silver",
+                                changes={"name": {"old": "Old Silver", "new": "Silver"}})
+        sale(self.firm, self.customer, "4", "2026-10-04", line(name="OLD SILVER", rate="300"), line(name="Plain 3", rate="7"))
+        with CaptureQueriesContext(connection) as queries:
+            rows = self.ask(params={"figures": "1", "fy": "2026-27", "ordering": "-sold"}).data["results"]
+        grouped = [q["sql"] for q in queries if "GROUP BY" in q["sql"]]
+        self.assertTrue(grouped)
+        self.assertTrue(all(query.count(" WHEN ") <= 2 for query in grouped), grouped)
+        sold = {row["name"]: row["sold"]["taxable"] for row in rows}
+        self.assertEqual([*sold.items()][:3], [("Silver", "800.00"), ("Plain 3", "7.00"), ("Plain 0", "0.00")])
+
     def test_only_the_page_fetches_product_description_and_rate(self):
         shown = Product.objects.create(name="A shown", hsn_code="7113", description="needle on page", usual_rate="123.456")
         Product.objects.bulk_create([Product(name=f"Off page {n:03d}", hsn_code="7113", description="x" * 1000)
@@ -275,12 +289,24 @@ class CatalogWriteTests(CatalogCase):
             ({"usual_rate": "100000000"}, "usual_rate", "Type the rate per g, like 6470.00, or leave it empty."),
             ({"usual_rate": "1.0001"}, "usual_rate", "Type the rate per g, like 6470.00, or leave it empty."),
             ({"purity": "x" * 21}, "purity", "Keep the purity short, like 22K or 925 (20 characters at most)."),
+            ({"purity": []}, "purity", "Type the purity as text, like 22K or 925."),
+            ({"description": 5}, "description", "Type the description as text."),
+            ({"description": "a\x00b"}, "description", "Type the description as text."),
         ]
         for values, key, words in cases:
             with self.subTest(values=values):
                 response = self.ask(method="post", data=self.payload(**values))
                 self.assertEqual((response.status_code, str(response.data[key][0])), (400, words))
         self.assertEqual(Product.objects.count(), 1)
+
+    def test_a_clash_found_only_by_the_database_gives_clash_words(self):
+        from unittest.mock import patch
+
+        from django.db import IntegrityError
+        with patch.object(Product, "save", side_effect=IntegrityError("unique")):
+            response = self.ask(method="post", data=self.payload(name="Silver anklet"))
+        self.assertEqual((response.status_code, str(response.data["name"][0])),
+                         (400, "Someone saved a product with this name just now. Check the catalog, then save again."))
 
     def test_twins_can_edit_and_off_slab_must_be_unchanged(self):
         Product.objects.create(name="SILVER", hsn_code="7113")

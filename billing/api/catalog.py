@@ -127,6 +127,7 @@ def validate_product(data, instance=None):
         raise ValidationError({"detail": "Send a product as an object."})
     errors = {}
     values = {}
+    TEXT_WORDS = {"purity": "Type the purity as text, like 22K or 925.", "description": "Type the description as text."}
     for key, maximum, missing, length in (
         ("name", 255, "Enter the product's name, as it should print on bills.", "Keep the name to 255 characters."),
         ("hsn_code", 8, "Enter the HSN code. Every bill line needs one for GSTR-1.", ""),
@@ -135,7 +136,7 @@ def validate_product(data, instance=None):
     ):
         value = data.get(key, "")
         if not isinstance(value, str) or "\x00" in value:
-            errors[key] = [missing]
+            errors[key] = [TEXT_WORDS.get(key, missing)]
             continue
         value = " ".join(value.split()) if key == "name" else value.strip()
         values[key] = value
@@ -236,7 +237,7 @@ def write_product(request, pk=None):
     except IntegrityError:
         # A v2 writer does not share the catalog lock; exact-name uniqueness still gives words.
         validate_product(request.data)
-        raise ValidationError({"name": ["Enter the product's name, as it should print on bills."]}) from None
+        raise ValidationError({"name": ["Someone saved a product with this name just now. Check the catalog, then save again."]}) from None
 
 
 def delete_product(request, pk):
