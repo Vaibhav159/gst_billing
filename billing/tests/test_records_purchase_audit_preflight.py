@@ -53,6 +53,20 @@ class PurchaseAuditDispatchTest(TestCase):
             self.assertTrue(guard.called)
             self.assertEqual(self.client.post(f"/api/audit/{deleted}/restore/").data["code"], "already_undone")
 
+    def test_restore_enforces_the_credit_guard_it_offered(self):
+        from billing.refusals import Refusal
+        with purchase_contract() as (service, guard):
+            deleted = self.client.post(f"/api/audit/{self.entry.pk}/undo/").data["new_entry"]["id"]
+            guard.reset_mock()
+            guard.side_effect = lambda business, day, action: (_ for _ in ()).throw(
+                Refusal("September 2026's GSTR-3B is filed, so a deleted purchase can't go back into it.", "period_locked",
+                        stage="gstr3b", locked_period="2026-09")) if action == "restore" else None
+            response = self.client.post(f"/api/audit/{deleted}/restore/")
+            self.assertEqual((response.status_code, response.data["code"], response.data["stage"]), (409, "period_locked", "gstr3b"))
+            service.restore_purchase.assert_not_called()
+            self.assertEqual(guard.call_args.args, (self.business.pk, date(2026, 9, 1), "restore"))
+            self.assertFalse(Invoice.objects.filter(pk=self.bill.pk).exists())
+
     def test_list_offers_purchase_undo_and_uses_its_credit_guard(self):
         with purchase_contract() as (_service, guard):
             response = self.client.get("/api/audit/")

@@ -373,6 +373,28 @@ def entry_rows(entries):
     return [entry_row(entry, page=page) for entry in entries]
 
 
+def invoice_guard(kind, obj, binned, purchase):
+    """The firm, guarded day and action one bill door checks; purchases use their credit month."""
+    record = binned if kind == "restore" else obj
+    day = record.invoice_date
+    if purchase:
+        from datetime import date
+        from types import SimpleNamespace
+
+        from billing.credit import credit_month_of
+        raw = (binned.restore_credit_month if hasattr(binned, "restore_credit_month") else binned.data.get("invoice", {}).get("itc_month")) if kind == "restore" else getattr(obj, "itc_month", None)
+        month = date.fromisoformat(raw) if isinstance(raw, str) else raw
+        day = credit_month_of(SimpleNamespace(invoice_date=record.invoice_date, itc_month=month))
+    return record, day, "restore" if kind == "restore" else "delete"
+
+
+def assert_invoice_open(kind, obj, binned, purchase):
+    # The same guard the list offers is enforced by the action, whatever the door's own service checks.
+    from billing import period_lock
+    record, day, action = invoice_guard(kind, obj, binned, purchase)
+    (period_lock.assert_purchase_open if purchase else period_lock.assert_sales_open)(record.business_id, day, action)
+
+
 def available(entry, obj=None, binned=None, page=None):
     if entry.used:
         return None
@@ -388,8 +410,8 @@ def available(entry, obj=None, binned=None, page=None):
     purchase = entry.entity == "invoice" and kind_for(entry, obj, binned) == "purchases"
     if purchase:
         try:
-            from billing.credit import credit_month_of
-            from billing.period_lock import assert_purchase_open
+            from billing.credit import credit_month_of  # noqa: F401
+            from billing.period_lock import assert_purchase_open  # noqa: F401
         except ImportError:
             # X-40: the real purchase actions activate only after predecessor 2A lands.
             return None
@@ -409,21 +431,12 @@ def available(entry, obj=None, binned=None, page=None):
         elif any(uses.values()):
             disabled = f"{entry.entity_name} is in use, so it can’t be deleted."
     if entry.entity == "invoice":
-        from billing.period_lock import assert_sales_open
-        record = binned if kind == "restore" else obj
-        day = record.invoice_date
-        if purchase:
-            from datetime import date
-            from types import SimpleNamespace
-            raw = (binned.restore_credit_month if hasattr(binned, "restore_credit_month") else binned.data.get("invoice", {}).get("itc_month")) if kind == "restore" else getattr(obj, "itc_month", None)
-            month = date.fromisoformat(raw) if isinstance(raw, str) else raw
-            day = credit_month_of(SimpleNamespace(invoice_date=record.invoice_date, itc_month=month))
-        action = "restore" if kind == "restore" else "delete"
+        record, day, action = invoice_guard(kind, obj, binned, purchase)
         if page:
             disabled = page.refusal(record.business_id, day, action, purchase)
         else:
             try:
-                (assert_purchase_open if purchase else assert_sales_open)(record.business_id, day, action)
+                assert_invoice_open(kind, obj, binned, purchase)
             except Refusal as refused:
                 disabled = refused.detail["detail"]
         if kind == "restore" and purchase:
@@ -529,6 +542,7 @@ def act(entry_id, action, user):
         if entry.entity == "invoice":
             from billing.services.bin import bin_bill, restore_from_bin
             purchase = kind_for(entry, obj, binned) == "purchases"
+            assert_invoice_open(offered["kind"], obj, binned, purchase)
             if action == "undo":
                 if purchase:
                     from billing.services.purchase_bin import bin_purchase
