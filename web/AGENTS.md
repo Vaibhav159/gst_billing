@@ -49,7 +49,10 @@ stop only processes you started, by PID.
   on them, never repeat them.
 - `src/pages/sales/` — the bills list (`list/`), the bill page (`bill/`), and a
   bill's status, sending, menu and dialogs (`actions/`), which plans 1C–1E reuse;
-  beside them the bill form (`form/`), the paper book (`paper/`) and printing (`print/`).
+  beside them the bill form (`form/`: `useBillForm`, the desktop and phone views,
+  the review, unfinished bills), the paper book (`paper/`) and printing (`print/`).
+  Unfinished bills on this device and on the shop's list are `src/core/deviceDrafts.ts`
+  and `src/core/api/drafts.ts` (Easy reuses them).
 - `src/core/print/` — printing, which Easy reuses: what a Tally A4 bill says and where its pages
   break (`model.ts`), the PDF (`BillDocument.tsx`, react-pdf, which `make.ts` loads on demand), the
   paper on screen (`Paper.tsx`), the QR drawing (`qrPath.ts`; `qr.ts` holds the payload and `parseQr`), handing a file out (`files.ts`, the app's

@@ -73,6 +73,11 @@ async function newBill(api, { firm, customer, rate = "6500.000", lines, paper = 
   return b;
 }
 
+/** A bill made another way (saved in the bill form), noted as newBill notes its own: makesBills sends it to the bin. */
+function noteBill(id, number) {
+  made.push({ id, number });
+}
+
 /** To the bin, as every spec leaves the bills it made (the number stays used, so no gap opens); a bill gone already is fine. */
 async function removeBill(api, id) {
   await api.del(`sales/${id}/`, { reason: "Test bill" }, { check: false });
@@ -117,4 +122,4 @@ async function afterDialog(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { today, esc, client, firstFirm, someCustomer, walkIn, newBill, removeBill, makesBills, afterDialog };
+module.exports = { today, esc, client, firstFirm, someCustomer, walkIn, newBill, noteBill, removeBill, makesBills, afterDialog };

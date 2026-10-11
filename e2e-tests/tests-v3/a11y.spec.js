@@ -1,5 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
+const { measure } = require("./axe");
+const { cleanDrafts, draftWrites, leaveForm, monthBefore } = require("./bill-form-data");
 const { SIGNED_OUT, opened } = require("./session");
 const { afterDialog, client, esc, makesBills, newBill, today } = require("./sales-data");
 
@@ -164,6 +166,132 @@ for (const theme of ["obsidian", "pearl"]) {
           expect(await problems(page), step.name).toEqual([]);
         });
       }
+    });
+  }
+}
+
+// The bill form (part 1D), in both themes: a new bill; the paper book (last month's, of the firm that has numbers in it
+// missing or explained, the most it can show: the sandbox's KIRAN, else the first firm); Check and save on a copy of a
+// bill made for it; the date's calendar (F14); the customer box while it searches and with no match (Ruling 1C-20a: web
+// has no axe of its own); and the review once how it was paid is picked, with nothing left in its body to focus, so the
+// body itself takes the keyboard (Ruling 1D-18), measured where it scrolls: a 1280×720 desktop and a phone. A copy keeps
+// no unfinished bill until something on it changes; picking how it was paid does, so that one is deleted after the test.
+let draftsSince = null;
+let drafted = null;
+test.afterEach(async ({ page, request }) => {
+  const since = draftsSince;
+  draftsSince = null;
+  if (!since) return;
+  await leaveForm(page, drafted);
+  await cleanDrafts(client(request), since);
+});
+/** The form itself, not its placeholders: the desktop's customer box has the cursor; a phone's offers to choose one. */
+async function formDrawn(page, project) {
+  if (project === "phone") await expect(page.getByRole("button", { name: /^Choose customer/ })).toBeVisible();
+  else await expect(page.getByRole("combobox", { name: /^Customer/ })).toBeFocused();
+}
+/** Check and save (Ctrl S on a desktop, the action bar's button on a phone): the review, past its guard. */
+async function openReview(page, project) {
+  const title = project === "phone" ? "Check the bill" : "Check the bill before saving";
+  await opened(page);
+  if (project === "phone") await page.getByRole("button", { name: "Check and save" }).click();
+  else await page.keyboard.press("Control+s");
+  const dialog = page.getByRole("dialog", { name: title });
+  await expect(dialog).toBeVisible();
+  await afterDialog(page);
+  return { dialog, title };
+}
+let book = null;
+/** Last month's paper book with the most in it: the first firm's that has numbers missing or explained, else the first firm's. */
+async function bookToMeasure(api) {
+  if (book) return book;
+  const month = monthBefore(today());
+  const { results: firms } = await api.get("businesses/", { page_size: 100 });
+  for (const f of firms) {
+    const pb = await api.get("sales/paper-book/", { business_id: f.id, month });
+    if (pb.missing.length || pb.explained.length) return (book = { firm: f.id, month });
+  }
+  return (book = { firm: firms[0].id, month });
+}
+const FORM_STATES = [
+  {
+    name: "a new bill's form", on: ["desktop", "phone"], path: () => "/sales/new",
+    async show(page, c, project) { await formDrawn(page, project); },
+  },
+  {
+    name: "the paper book", on: ["desktop", "phone"], prepare: bookToMeasure, path: (c) => `/sales/paper?firm=${c.firm}&month=${c.month}`, landing: "/sales/paper",
+    async show(page) { await expect(page.getByRole("button", { name: /^Enter bill \d+$/ })).toBeVisible(); },
+  },
+  {
+    name: "the bill form's review", on: ["desktop"], prepare: (api) => newBill(api), path: (b) => `/sales/new?from=${b.id}`, landing: "/sales/new",
+    async show(page, b, project) {
+      await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
+      await openReview(page, project);
+    },
+  },
+  {
+    // on a phone the date is in the sheet with the firm and number, and its calendar is a dialog of its own
+    name: "the date's calendar open", on: ["desktop", "phone"], path: () => "/sales/new",
+    async show(page, c, project) {
+      await formDrawn(page, project);
+      await opened(page);
+      if (project === "phone") {
+        await page.locator("#bfp-info").click();
+        await expect(page.getByRole("dialog", { name: "Firm, number and date" })).toBeVisible();
+        await afterDialog(page);
+      }
+      await page.getByRole("button", { name: "Date: open the calendar" }).click();
+      await expect(page.getByRole("grid")).toBeVisible();
+      if (project === "phone") await afterDialog(page);
+    },
+  },
+  {
+    // one letter (keep typing), then the server's search held while it's measured (searching), then its answer: nobody.
+    // A note is said in the box's own panel, and announced, until there are rows to pick: then the list has them
+    name: "the customer box searching, then with no match", on: ["desktop"], path: () => "/sales/new",
+    async show(page) {
+      await formDrawn(page, "desktop");
+      await opened(page);
+      await page.keyboard.type("Q");
+      await expect(page.getByText("Keep typing to search", { exact: true }).first()).toBeVisible();
+      expect(await measure(page), "keep typing").toEqual([]);
+      let answer;
+      const held = new Promise((done) => { answer = done; });
+      await page.route((url) => url.pathname === "/api/customers/" && url.searchParams.has("search"), async (route) => { await held; await route.continue(); });
+      await page.keyboard.type("xzq");
+      await expect(page.getByText("Searching…", { exact: true }).first()).toBeVisible();
+      expect(await measure(page), "searching").toEqual([]);
+      answer();
+      await expect(page.getByRole("listbox", { name: "Customers" }).getByRole("option", { name: /No customer matches/ })).toBeVisible();
+    },
+  },
+  {
+    name: "the review once paid", on: ["desktop", "phone"], desktopSize: { width: 1280, height: 720 }, prepare: (api) => newBill(api), keepsDraft: true,
+    path: (b) => `/sales/new?from=${b.id}`, landing: "/sales/new",
+    async show(page, b, project) {
+      await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
+      const { dialog, title } = await openReview(page, project);
+      await dialog.getByRole("radio", { name: "Cash", exact: true }).click();
+      // nothing left in its body to focus: at this size it scrolls, so the body itself is a region Tab reaches
+      await expect(dialog.getByRole("region", { name: title })).toBeVisible();
+      // the payment is a change, so the copy keeps itself as an unfinished bill (deleted after the test): measured once
+      // that has landed, so nothing changes under axe and the cleanup finds it
+      await expect(page.getByText(/^Kept as a draft at \d\d:\d\d$/)).toBeVisible({ timeout: 15_000 });
+    },
+  },
+];
+for (const theme of ["obsidian", "pearl"]) {
+  for (const { name, on, prepare, path, landing, desktopSize, keepsDraft, show } of FORM_STATES) {
+    test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
+      test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
+      test.slow(); // the form's data, then axe, once or more
+      const c = prepare ? await prepare(client(request)) : null;
+      if (desktopSize && info.project.name === "desktop") await page.setViewportSize(desktopSize);
+      if (keepsDraft) { draftsSince = new Date(); drafted = draftWrites(page); }
+      const at = path(c);
+      await openIn(page, theme, at, landing ?? at);
+      await show(page, c, info.project.name);
+      expect(await measure(page)).toEqual([]);
     });
   }
 }

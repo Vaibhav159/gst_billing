@@ -48,7 +48,9 @@ preferences; `desktop` (1440×900) and `phone` (390×844, touch) start signed in
 API calls the specs make beside the app's. `tests-v3/sales-data.js` makes and
 removes the bills a spec needs through the API, as the signed-in user:
 `client(request)`, `newBill(api, { firm?, customer?, rate?, lines?, paper? })`,
-`removeBill(api, id)`, `makesBills(test)`. Also `workers: 1`,
+`noteBill(id, number)` (a bill saved another way), `removeBill(api, id)`,
+`makesBills(test)`. `tests-v3/bill-form-data.js` has what the bill form's specs
+share, and `tests-v3/axe.js` the WCAG 2.2 AA pass, `measure(page)`. Also `workers: 1`,
 `retries: 0`: one user for every spec, and the phone spec saves Easy or Expert on
 the server. CI runs it as the `web-e2e` job.
 
@@ -56,6 +58,9 @@ the server. CI runs it as the `web-e2e` job.
 - `E2E_USER` + `E2E_PASS`: who signs in (CI: `testuser`). Without them,
   `LOGINS_FILE` (role, username, password, tab-separated) and `E2E_ROLE` (default
   `owner`); the specs never print the password.
+- `E2E_OTHER_ROLE`: who finishes the bill form's unfinished bill on a second
+  device, a LOGINS_FILE role (default `staff`). Without LOGINS_FILE (CI) it's the
+  suite's own user.
 - `E2E_SEARCH` + `E2E_SEARCH_HIT`: a word to type in Ctrl K, and a row only the
   server's search returns for it (CI `TEST` and `TEST CUSTOMER`, the sandbox
   `Sharma` and `Priya Sharma`). The app lists its own pages, actions and firms,
@@ -92,6 +97,23 @@ Pitfalls:
   `await opened(page)` from `session.js` before the first click inside it,
   however the page opened: a link, a tab, Back or `page.goto`. Clicks in the
   shell around the page (the top bar, the phone's tabs) aren't held back.
+- The bill form keeps an unfinished bill on the shop's list 1.2 s after the
+  last change, and saving the bill deletes it. A spec that types in the form and
+  stops half-way leaves one, so a file whose tests type in the form calls
+  `startsDrafts(test)` (`tests-v3/bill-form-data.js`): after each test, the
+  unfinished bills its user started during it are deleted, in a
+  `test.afterEach` as `makesBills` is. The cleanup leaves the page first and
+  waits for its last writes (`leaveForm`): a keep the form still had waiting
+  would otherwise land after it. A bill the form saves isn't `newBill`'s:
+  `notesSavedBills(page)` notes each one as the server answers (`noteBill`), so
+  `makesBills` sends it to the bin too, even after a failure. A second person
+  signs in with `signIn(page, role)`: LOGINS_FILE's line for `E2E_OTHER_ROLE`
+  on the sandbox. CI has one user, so `hasLogin(role)` is false there and the
+  handover runs as the same person on a second device.
+- A new WCAG check measures with `measure(page)` (`tests-v3/axe.js`) rather than
+  after a fixed wait: it waits for the heading and for nothing `aria-busy`, then
+  fails if the page reloaded while axe ran (the sandbox's Vite reloads it when v3
+  moves).
 - A spec that needs a bill makes it: `tests-v3/sales-data.js` reads the firms,
   customers and next number at runtime and makes the bill through the API with
   the saved session (`client(request)`, `newBill`, `walkIn`). CI's database has
@@ -106,10 +128,11 @@ Pitfalls:
   stand-in that returns an object, since the app takes `null` for a tab the
   browser stopped and records nothing.
 - What the specs leave behind, on the sandbox as on CI: the bills they make stay
-  in the bin, which nothing empties. A full run uses about 16 of the first
-  firm's numbers (a fresh database up to 9 more, so that search has a number of
-  two digits to find), and they show in that firm's bin and in its paper book as
-  deleted test bills. `walkIn` makes "Walk-in Customer (e2e)" where there's no
+  in the bin, which nothing empties. A full run uses about 27 of the first
+  firm's numbers, 3 of them on last month's paper bills (on a fresh database the
+  earlier specs use up its one-digit numbers before search needs a number of two
+  digits), and they show in that firm's bin and in its paper book as deleted test
+  bills. `walkIn` makes "Walk-in Customer (e2e)" where there's no
   walk-in record (the sandbox had none) and keeps it for every later run: don't
   delete it. Its bills in the bin protect it anyway, and each run would make a
   new one.

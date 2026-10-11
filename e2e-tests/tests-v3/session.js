@@ -10,13 +10,24 @@ const AUTH = path.join(__dirname, "..", ".auth-v3.json");
 /** A signed-out browser: no cookies, nothing stored. */
 const SIGNED_OUT = { cookies: [], origins: [] };
 
-function credentials() {
-  if (process.env.E2E_USER && process.env.E2E_PASS) return { user: process.env.E2E_USER, pass: process.env.E2E_PASS };
-  const role = process.env.E2E_ROLE || "owner";
-  const line = fs.readFileSync(process.env.LOGINS_FILE, "utf8").split("\n").find((l) => l.split("\t")[0] === role);
-  if (!line) throw new Error(`No ${role} line in LOGINS_FILE`);
+/** Who signs in: E2E_USER and E2E_PASS, else LOGINS_FILE's line for E2E_ROLE (owner); with a role, that role's line. */
+function credentials(role) {
+  if (!role && process.env.E2E_USER && process.env.E2E_PASS) return { user: process.env.E2E_USER, pass: process.env.E2E_PASS };
+  const want = role || process.env.E2E_ROLE || "owner";
+  const line = fs.readFileSync(process.env.LOGINS_FILE, "utf8").split("\n").find((l) => l.split("\t")[0] === want);
+  if (!line) throw new Error(`No ${want} line in LOGINS_FILE`);
   const [, user, pass] = line.split("\t");
   return { user, pass: pass.trim() };
+}
+
+/** Whether LOGINS_FILE has a line for this role (CI has no LOGINS_FILE: one user). Reads no password out. */
+function hasLogin(role) {
+  if (!process.env.LOGINS_FILE) return false;
+  try {
+    return fs.readFileSync(process.env.LOGINS_FILE, "utf8").split("\n").some((l) => l.split("\t")[0] === role);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -33,9 +44,9 @@ function typesPassword(test) {
   });
 }
 
-/** Signs in on the sign-in page showing. Its file calls typesPassword(test). */
-async function signIn(page) {
-  const { user, pass } = credentials();
+/** Signs in on the sign-in page showing, as the suite's user or as `role` (LOGINS_FILE). Its file calls typesPassword(test). */
+async function signIn(page, role) {
+  const { user, pass } = credentials(role);
   await page.getByLabel("Username").fill(user);
   // exact: the show-password toggle's name ("Show password") also has "Password" in it. A fill that fails logs
   // fill("<the value>") in its error, which goes to the terminal and error-context.md: it goes on without the value
@@ -71,4 +82,4 @@ async function easyIfExpertSaved(request, token) {
   expect(put.ok()).toBe(true);
 }
 
-module.exports = { AUTH, SIGNED_OUT, typesPassword, signIn, opened, savedToken, easyIfExpertSaved };
+module.exports = { AUTH, SIGNED_OUT, typesPassword, signIn, hasLogin, opened, savedToken, easyIfExpertSaved };
