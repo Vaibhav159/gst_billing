@@ -15,6 +15,7 @@ import { Button, ButtonLink, Checkbox, Dialog, DL, FailNote, Money, Spinner } fr
 import { useView } from "@/core/view";
 import { customerLine } from "@/pages/customers/forBills";
 import { ItemsTable, type ItemLine } from "@/pages/sales/bill/ItemsTable";
+import { Changes } from "./Changes";
 import { CheckList, focusSoon, PayPicker, type CheckRow } from "./fields";
 import { toBillInput } from "./model";
 import type { BillFormApi } from "./useBillForm";
@@ -47,9 +48,9 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
   const err = F.saveError;
   const failed = Boolean(err && err.kind !== "payment" && err.kind !== "cash");
   const clash = err?.kind === "clash";
-  // a refusal saving again can't change (Ruling 1D-12): the bill a draft became, a bill cancelled meanwhile, or a remake
-  // refused. No Try again: the way on is that bill (its link), else only back to the form
-  const final = err?.kind === "draft_saved" || err?.kind === "cancelled" || err?.kind === "replaces";
+  // a refusal saving again can't change (Ruling 1D-12): the bill a draft became, a bill cancelled or deleted meanwhile, or
+  // a remake refused. No Try again: the way on is that bill (its link), else only back to the form
+  const final = err?.kind === "draft_saved" || err?.kind === "cancelled" || err?.kind === "gone" || err?.kind === "replaces";
   const way = final ? err?.link : undefined;
   const offlineNew = offline && !edit;
   const askPay = F.f.payment == null;
@@ -104,7 +105,8 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
       {isPhone ? null : total}
       <Button ref={backRef} onClick={F.closeReview} disabled={F.saving}>Go back and edit</Button>
       {final ? (way ? <ButtonLink ref={wayRef} to={way.to} variant="primary">{way.label}</ButtonLink> : null)
-        : <Button ref={saveRef} variant="primary" icon={offer ? Check : undefined} onClick={primary} disabled={blocked} loading={F.saving} title={offlineNew ? "Saving needs the internet" : undefined}>{primaryLabel}</Button>}
+        : <Button ref={saveRef} variant="primary" icon={offer ? Check : undefined} onClick={primary} disabled={blocked} loading={F.saving}
+            title={noChange ? "Nothing has changed yet" : offlineNew ? "Saving needs the internet" : undefined}>{primaryLabel}</Button>}
       {isPhone ? total : null}
     </>
   );
@@ -147,6 +149,7 @@ export function Review({ F, checks, numberId, onSave, waiting = false }: { F: Bi
             </div>
           </div>
         ) : null}
+        <Changes F={F} />
         {isPhone ? (
           <DL rows={[
             ["Bill no.", <span key="n" className="tnum">{sending}</span>], ["Date", date(F.f.date)], ["Firm", F.firmName], ["Customer", c.name],

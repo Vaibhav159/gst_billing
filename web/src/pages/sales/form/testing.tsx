@@ -13,6 +13,7 @@ import { ScopeProvider } from "@/core/scope";
 import { ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import NewBillPage from "./BillFormPage";
+import EditBillPage from "./EditBillPage";
 
 export const TODAY = "2026-10-08";
 /**
@@ -117,7 +118,10 @@ function Where({ name }: { name: string }) {
   return <p data-testid="where">{`${name} at ${l.pathname}${l.search}`}</p>;
 }
 
-/** The bill form's routes in a data router (its leave-guard needs one), with the bill page, the paper book and Sales stood in. */
+/**
+ * The bill form's routes in a data router (its leave-guard needs one), with the bill page, the paper book and Sales stood
+ * in. client: the cache, for a test to change an answer while a page is open.
+ */
 export function mountForm(path: string, { me, routes = [] }: { me?: Partial<Me>; routes?: RouteObject[] } = {}) {
   const auth = stubAuth(me);
   const router = createMemoryRouter([{
@@ -125,6 +129,7 @@ export function mountForm(path: string, { me, routes = [] }: { me?: Partial<Me>;
     children: [
       // the form's own routes, as the app has them (core/router/routes.tsx)
       { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
+      { path: "/sales/:id/edit", element: <EditBillPage />, handle: { hideNav: true } },
       ...routes,
       { path: "/sales/:id", element: <Where name="bill page" /> },
       { path: "/sales/paper", element: <Where name="paper book" /> },
@@ -132,12 +137,13 @@ export function mountForm(path: string, { me, routes = [] }: { me?: Partial<Me>;
     ],
   }], { initialEntries: [path] });
   // the app's own query defaults (part 0's testQueryClient): no retries, and a save fails at once offline
+  const client = testQueryClient();
   const view = render(
-    <QueryClientProvider client={testQueryClient()}>
+    <QueryClientProvider client={client}>
       <AuthContext.Provider value={auth}><RoleContext.Provider value={auth.me?.role ?? null}><RouterProvider router={router} /></RoleContext.Provider></AuthContext.Provider>
     </QueryClientProvider>,
   );
-  return { router, ...view };
+  return { router, client, ...view };
 }
 export const STAFF: Partial<Me> = { role: "staff", roleLabel: "Counter staff", permissions: ["view", "bill.create", "bill.send", "customer.edit"] };
 export const ACCOUNTANT: Partial<Me> = { role: "accountant", roleLabel: "Accountant", permissions: ["view", "reports.export", "customer.edit"] };

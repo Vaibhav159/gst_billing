@@ -5,9 +5,8 @@ import { __resetDrafts, type DraftData, type UnfinishedBill } from "@/core/api/d
 import { __setNetState } from "@/core/api/network";
 import { __resetDeviceDrafts, keepOnDevice, keptDraft, keptDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
-import { toBillDetail } from "@/core/sales/wire";
 import { BillForm } from "./BillFormPage";
-import { startDraft, startEdit, type Start } from "./model";
+import { startDraft, type Start } from "./model";
 import { ANIL, asksOnClose, formServer, fakeToday, mountForm, settle } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
@@ -539,8 +538,9 @@ test.each(AWAY)("when %s, a change not kept yet is kept at once, on this device 
 
 test("leaving a change to a saved bill still asks (Ruling 1D-10)", async () => {
   const user = fakeToday();
-  formServer(draftsOnServer().routes);
-  const { router } = mountForm("/edit", { routes: [{ path: "/edit", element: <BillForm start={startEdit(toBillDetail(wireDetail()))} formKey="edit" /> }] });
+  formServer([["GET", "sales/412/", () => wireDetail()], ...draftsOnServer().routes]);
+  const { router } = mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
   await settle();
   await user.type(screen.getByLabelText("Note on the bill"), "Weighed again");
   const unload = new Event("beforeunload", { cancelable: true });
@@ -781,8 +781,9 @@ test("where the browser refuses storage, a copy here the shop hasn't got yet is 
 test("a change to a saved bill keeps no draft: it says what isn't saved yet", async () => {
   const user = fakeToday();
   const server = draftsOnServer();
-  const { calls } = formServer(server.routes);
-  mountSaving(startEdit(toBillDetail(wireDetail())));
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail()], ...server.routes]);
+  mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
   await settle();
   expect(status().getByText("No changes yet")).toBeInTheDocument();
   await user.type(screen.getByLabelText("Note on the bill"), "Weighed again");

@@ -34,11 +34,12 @@ import { changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrde
 /**
  * Why a save didn't happen, said once at the top of the review. next: a number to save as instead (a clash). link: the
  * way on, a bill: the one this unfinished bill became already (draft_saved: the server made none this time), or the
- * bill being changed, cancelled meanwhile (cancelled). draft_saved, cancelled and replaces (the server refused the
- * cancelled bill this one makes again) can't change by saving again: the review offers no Try again (Ruling 1D-12).
+ * bill being changed, cancelled (cancelled) or deleted (gone: the PUT's 404) meanwhile. draft_saved, cancelled, gone and
+ * replaces (the server refused the cancelled bill this one makes again) can't change by saving again: the review offers
+ * no Try again (Ruling 1D-12).
  */
 export type SaveError = FailText & {
-  kind: "payment" | "cash" | "clash" | "filed" | "offline" | "failed" | "draft_saved" | "cancelled" | "replaces";
+  kind: "payment" | "cash" | "clash" | "filed" | "offline" | "failed" | "draft_saved" | "cancelled" | "gone" | "replaces";
   next?: string;
   link?: { label: string; to: string };
 };
@@ -369,10 +370,19 @@ export function useBillForm(start: Start) {
         setSaveError({ kind: "clash", title: p.code === "number_taken" ? `${shown} was just used` : `${shown} belonged to a deleted bill`, body: `${p.message} Check the number on the paper bill.`, next: offer || undefined });
         void next.refetch();
       } else if (p.code === "month_closed") {
-        setSaveError({ kind: "filed", title: `${month} was just filed`, body: p.message });
+        // the month the server names: a change is refused for the bill's old month or its new one, whichever is filed
+        // (contract §2.3), so the date's month alone could name the wrong one
+        const at = (p.body as { locked_period?: { year?: unknown; month?: unknown } } | undefined)?.locked_period;
+        const y = Number(at?.year);
+        const m = Number(at?.month);
+        const filed = y > 0 && m >= 1 && m <= 12 ? monthLabel(`${y}-${String(m).padStart(2, "0")}`, { long: true }) : month;
+        setSaveError({ kind: "filed", title: `${filed} was just filed`, body: p.message });
       } else if (p.code === "cancelled" && bill) {
         // cancelled while it was being changed (a PUT): the bill itself is the way on, where it can be made again
         setSaveError({ kind: "cancelled", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
+      } else if (p.kind === "notfound" && edit && bill) {
+        // deleted while it was being changed (the PUT's 404): the bill's page says so, and is where it's restored from
+        setSaveError({ kind: "gone", ...failText(p), link: { label: `Open ${bill.invoice_number}`, to: `/sales/${bill.id}` } });
       } else {
         // what the server refused under a field the form has goes there, and the review closes for it; a refusal of
         // something the form has no field for (replaces, draft_id, payment_mode) stays in the review, in its words

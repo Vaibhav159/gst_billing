@@ -5,9 +5,6 @@ import { __setNetState } from "@/core/api/network";
 import { __resetDeviceDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
 import { takeFresh } from "@/core/sales/fresh";
-import { toBillDetail } from "@/core/sales/wire";
-import { BillForm } from "./BillFormPage";
-import { startEdit } from "./model";
 import { ANIL, formServer, fakeToday, mountForm, settle, wireNext } from "./testing";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
@@ -166,9 +163,9 @@ test("a PAN added from the review's own checks: the check and its Add PAN go, an
 
 test("a change to a saved bill with nothing changed yet: Save changes is off, and Ctrl S doesn't send it either", async () => {
   const user = fakeToday();
-  const { calls } = formServer();
-  // the form as /sales/412/edit puts it together (Task 8 adds the route)
-  mountForm("/edit", { routes: [{ path: "/edit", element: <BillForm start={startEdit(toBillDetail(wireDetail()))} formKey="edit" /> }] });
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail()]]);
+  mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
   await settle();
   await user.keyboard("{Control>}s{/Control}");
   const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
@@ -336,9 +333,9 @@ test("a closed month, then a lost connection: each said first in the review, wit
 test("a bill cancelled while it was being changed: the review says so in the server's words (contract §2.3's 409 cancelled)", async () => {
   const user = fakeToday();
   const words = "Cancelled bills can't be changed. Make it again from the bill instead.";
-  const { calls } = formServer([["PUT", "sales/412/", () => refuse(409, { detail: words, code: "cancelled" })]]);
-  // the form as /sales/412/edit puts it together (Task 8 adds the route)
-  mountForm("/edit", { routes: [{ path: "/edit", element: <BillForm start={startEdit(toBillDetail(wireDetail()))} formKey="edit" /> }] });
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail()], ["PUT", "sales/412/", () => refuse(409, { detail: words, code: "cancelled" })]]);
+  mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
   await settle();
   const note = screen.getByLabelText("Note on the bill");
   await user.type(note, "Weighed again");

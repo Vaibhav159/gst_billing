@@ -11,6 +11,7 @@ import V2NumberLink from "@/pages/sales/V2NumberLink";
 import SalesList from "@/pages/sales/SalesList";
 import { customerRoutes } from "@/pages/customers/routes";
 import NewBillPage from "@/pages/sales/form/BillFormPage";
+import EditBillPage from "@/pages/sales/form/EditBillPage";
 import PaperBookPage from "@/pages/sales/paper/PaperBook";
 import { lazyPage } from "./lazyPage";
 
@@ -33,7 +34,7 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 /** Every page in the prototype (PROTO/pages/<area>/index.js) that a later part builds, by area. Sign-in and More are already built (below). */
 const PAGES: Record<string, string[]> = {
   dashboard: ["/"],
-  sales: ["/sales/export", "/sales/:id/edit"],
+  sales: ["/sales/export"],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
     "/capture", "/import", "/suppliers", "/suppliers/:id",
@@ -99,6 +100,7 @@ export const appRoutes: RouteObject[] = [{
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         { path: "/sales/paper", element: <PaperBookPage /> },
+        { path: "/sales/:id/edit", element: <EditBillPage />, handle: { hideNav: true } },
         // part 1B: the bills list and a bill's own page
         { path: "/sales", element: <SalesList /> },
         { path: "/sales/:id", element: <BillPage /> },
