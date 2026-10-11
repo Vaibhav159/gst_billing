@@ -7,6 +7,7 @@ import { useView } from "@/core/view";
 import { ScopeProvider } from "@/core/scope";
 import { ListSkeleton, ToastHost } from "@/core/ui";
 import { ShareHost } from "@/core/print/ShareHost";
+import { NewShopGate } from "@/core/router/NewShopGate";
 import { PageFrame, SignInShown } from "@/core/router/PageFrame";
 import { DesktopShell } from "./DesktopShell";
 import { useKeyboardInset } from "./keyboard";
@@ -71,7 +72,7 @@ export function AppLayout({ onShown }: { onShown?: () => void }) {
   // the offline or server-trouble banner is one per screen: above the page here, the phone shell's own (its topmost
   // strip), or under the desktop's top bar, as in the prototype
   if (unsure) return <><OfflineBanner /><div className="p-6"><ListSkeleton what="the app" /></div></>;
-  const page = to ? <Navigate to={to} replace /> : <Outlet />;
+  const page = <NewShopGate>{to ? <Navigate to={to} replace /> : <Outlet />}</NewShopGate>;
   // on a desktop the skip link focuses the page, so <main> takes focus there; a page that fails to draw shows a way home instead
   // a page's code loads on demand (routes.tsx): the skeleton shows only when nothing is on screen yet. Moving between pages
   // is a transition, so the page you're on stays until the next one's code is in. A page whose code can't load (a new

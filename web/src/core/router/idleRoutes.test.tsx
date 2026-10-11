@@ -57,6 +57,7 @@ test("the real routes warm every other lazy screen (GST returns and reports incl
     expect(requestIdle).not.toHaveBeenCalled();
     const tree = () => <QueryClientProvider client={client}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
     view = render(tree());
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
     expect(requestIdle).toHaveBeenCalledTimes(1);
     for (const load of loads) expect(load).not.toHaveBeenCalled();

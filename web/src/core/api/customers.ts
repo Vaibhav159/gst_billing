@@ -292,7 +292,7 @@ export function useWalkinFigures(customer: Customer | null, firm: FirmId | null)
 
 /* ── Writing ───────────────────────────────────────────── */
 const refreshedBySave = (keep?: number) => (q: Query) =>
-  ["gst", "sales", "search", "suppliers", "purchases"].includes(String(q.queryKey[0])) || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
+  ["setup", "gst", "sales", "search", "suppliers", "purchases"].includes(String(q.queryKey[0])) || (q.queryKey[0] === "customers" && !(q.queryKey[1] === "one" && q.queryKey[2] === keep));
 /** Adds a customer (no id) or changes one (PATCH, any fields). Answers the saved customer. */
 export function useSaveCustomer() {
   const qc = useQueryClient();
@@ -313,7 +313,7 @@ export function useDeleteCustomer() {
   return useMutation({
     mutationFn: async (id: number) => { await api.delete(`customers/${id}/`); },
     onSuccess: (_, id) => {
-      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "search" || (q.queryKey[0] === "customers" && LISTS.includes(String(q.queryKey[1]))) });
+      void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "setup" || q.queryKey[0] === "search" || (q.queryKey[0] === "customers" && LISTS.includes(String(q.queryKey[1]))) });
       // the page being left still holds this customer until it has gone: its own entries are marked stale, not asked for again
       void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "customers" && OWN.includes(String(q.queryKey[1])) && q.queryKey[2] === id, refetchType: "none" });
     },

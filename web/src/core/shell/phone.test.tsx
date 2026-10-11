@@ -32,7 +32,7 @@ const auth = stubAuth();
 
 function mount(path: string, prefs: Record<string, unknown> = {}) {
   api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("firms/") ? { results: [] } : {} })) as AxiosAdapter;
+    data: config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {} })) as AxiosAdapter;
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={auth}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
@@ -81,7 +81,7 @@ const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__
 
 type Call = { method?: string; url?: string; body?: unknown };
 /**
- * The server: this person's preferences (a PATCH merges into them and answers with the whole set) and no firms.
+ * The server: this person's preferences (a PATCH merges into them and answers with the whole set) and an established firm.
  * prefsFail: the preferences can't be reached; patchFail: a change can't be saved; hold: each preferences GET, or each PATCH, waits for release().
  */
 function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { prefs?: Record<string, unknown>; prefsFail?: boolean; patchFail?: boolean; hold?: "get" | "patch" } = {}) {
@@ -93,7 +93,7 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
     calls.push({ method: config.method, url: config.url, body });
     const answer = (data: unknown) => ({ status: 200, statusText: "", headers: {}, config, data });
     const down = () => Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config));
-    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [] } : {}));
+    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {}));
     if (config.method === "patch") {
       if (patchFail) return down();
       const save = () => { stored = { ...stored, ...body }; return answer({ data: stored }); };
@@ -694,13 +694,14 @@ test("while a phone waits for its setting, the banner still says what's wrong, a
   expect(isBefore(banner, loading)).toBe(true);
   expect(banner.parentElement!.firstElementChild).toBe(banner); // nothing above it
   expect(banner).toHaveClass("pt-[calc(8px+env(safe-area-inset-top,0px))]"); // so it clears the notch
-  // offline the setting can't come, so the Expert home stands in: still one banner, now the shell's, and one page
+  // Offline shows the Expert shell; the unread firm list cannot yet establish which home is safe.
   const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
   try {
     act(() => { window.dispatchEvent(new Event("offline")); });
-    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    await screen.findByRole("navigation", { name: /tabs/i });
+    expect(screen.queryByRole("heading", { level: 1, name: "Dashboard" })).not.toBeInTheDocument();
     expect(document.querySelectorAll("[role=status][data-offline]")).toHaveLength(1);
-    expect(screen.getByText(/You're offline/).closest("[data-offline]")!.parentElement).toContainElement(screen.getByRole("navigation", { name: /tabs/i }));
+    expect(document.querySelector("[data-offline]")!.parentElement).toContainElement(screen.getByRole("navigation", { name: /tabs/i }));
     expect(document.querySelectorAll("#app-main")).toHaveLength(1);
   } finally {
     onLine.mockRestore();
