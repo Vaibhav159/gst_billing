@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenVerifyView
 
 from .account_sessions import PasswordView, SessionEndView, SessionsView, SignOutView
 from .audit import AuditActionView, AuditExportView, AuditView
-from .backups import BackupFullView, BackupSummaryView
+from .backups import BackupFullView, BackupSummaryView, RecordExportView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .catalog import CatalogDetail, CatalogList
@@ -154,6 +154,7 @@ urlpatterns = [
     path("auth/reset/finish/", ResetView.as_view(), {"step": "finish"}),
     path("backup/summary/", BackupSummaryView.as_view(), name="backup-summary"),
     path("backup/full/", BackupFullView.as_view(), name="backup-full"),
+    path("exports/<str:kind>/", RecordExportView.as_view(), name="record-export"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",
