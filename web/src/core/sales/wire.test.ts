@@ -91,7 +91,7 @@ test("the paper book's month reads as the contract sends it, its money in paise"
   const book = toPaperBook({
     business: 3, month: "2026-09", fy: "2026-27",
     bills: [{ id: 388, invoice_number: "KGH/2026-27/17", counter: 17, invoice_date: "2026-09-02", customer_name: "Hemant Dave", total_amount: "45210.00", status: "active", paper: true, sent: false }],
-    entered: 14, runs: [[17, 29], [34, 36]], missing: [31, 32],
+    entered: 14, runs: [[17, 29], [34, 36]], missing: [31, 32], missing_count: 2,
     explained: [
       { counter: 19, kind: "cancelled", id: 205, invoice_number: "KGH/2026-27/19", reason: "Customer returned the piece the same day" },
       { counter: 27, kind: "deleted", bin_id: 4, invoice_number: "KGH/2026-27/27", reason: "Entered twice by mistake", deleted_at: "2026-10-03T18:40:00+05:30" },
@@ -102,7 +102,7 @@ test("the paper book's month reads as the contract sends it, its money in paise"
   expect(book).toEqual({
     business: 3, month: "2026-09", fy: "2026-27",
     bills: [{ id: 388, invoice_number: "KGH/2026-27/17", counter: 17, invoice_date: "2026-09-02", customer_name: "Hemant Dave", total_amount: 4521000, status: "active", paper: true, sent: false }],
-    entered: 14, runs: [[17, 29], [34, 36]], missing: [31, 32],
+    entered: 14, runs: [[17, 29], [34, 36]], missing: [31, 32], missing_count: 2,
     explained: [
       { counter: 19, kind: "cancelled", id: 205, invoice_number: "KGH/2026-27/19", reason: "Customer returned the piece the same day" },
       { counter: 27, kind: "deleted", bin_id: 4, invoice_number: "KGH/2026-27/27", reason: "Entered twice by mistake", deleted_at: "2026-10-03T18:40:00+05:30" },
@@ -110,4 +110,7 @@ test("the paper book's month reads as the contract sends it, its money in paise"
     twice: [22], after: [30, 31, 32, 33], after_months: ["2026-10"],
     next: { counter: 34, invoice_number: "KGH/2026-27/34", invoice_date: "2026-09-30" }, locked: false, gstr1_due: "2026-10-11",
   });
+  // missing lists at most the first 500, and missing_count counts them all (Ruling 1D-3); an answer without the count listed every one
+  expect(toPaperBook({ missing: [31, 32], missing_count: 1234 }).missing_count).toBe(1234);
+  expect(toPaperBook({ missing: [31, 32] }).missing_count).toBe(2);
 });

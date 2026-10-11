@@ -48,7 +48,7 @@ export function wireBook(over: Record<string, unknown> = {}) {
   return {
     business: 3, month: "2026-09", fy: "2026-27",
     bills: [{ id: 388, invoice_number: "KGH/2026-27/29", counter: 29, invoice_date: "2026-09-29", customer_name: "Hemant Dave", total_amount: "45210.00", status: "active", paper: true, sent: false }],
-    entered: 13, runs: [[17, 29]], missing: [], explained: [], twice: [], after: [30, 31, 32, 33], after_months: ["2026-10"],
+    entered: 13, runs: [[17, 29]], missing: [], missing_count: 0, explained: [], twice: [], after: [30, 31, 32, 33], after_months: ["2026-10"],
     next: { counter: 34, invoice_number: "KGH/2026-27/34", invoice_date: "2026-09-29" }, locked: false, gstr1_due: "2026-10-11", ...over,
   };
 }

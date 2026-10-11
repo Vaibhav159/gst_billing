@@ -98,8 +98,9 @@ export type PaperBookBill = { id: number; invoice_number: string; counter: numbe
 export type PaperBookExplained =
   | { counter: number; kind: "cancelled"; id: number; invoice_number: string; reason: string }
   | { counter: number; kind: "deleted"; bin_id: number; invoice_number: string; reason: string; deleted_at: string };
+/** missing lists at most the first 500 numbers not entered yet; missing_count counts them all (Ruling 1D-3). */
 export type PaperBook = {
-  business: number; month: string; fy: string; bills: PaperBookBill[]; entered: number; runs: [number, number][]; missing: number[];
+  business: number; month: string; fy: string; bills: PaperBookBill[]; entered: number; runs: [number, number][]; missing: number[]; missing_count: number;
   explained: PaperBookExplained[]; twice: number[]; after: number[]; after_months: string[];
   next: { counter: number; invoice_number: string; invoice_date: string }; locked: boolean; gstr1_due: string;
 };

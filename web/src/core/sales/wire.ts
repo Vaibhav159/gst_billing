@@ -139,12 +139,14 @@ export function toNumberCheck(w: W): NumberCheck {
   };
 }
 export function toPaperBook(w: W): PaperBook {
+  const missing = list(w?.missing).map(whole);
   return {
     business: whole(w?.business), month: text(w?.month), fy: text(w?.fy),
     bills: list(w?.bills).map((b: W) => ({ id: whole(b?.id), invoice_number: text(b?.invoice_number), counter: b?.counter == null ? null : whole(b.counter), invoice_date: text(b?.invoice_date),
       customer_name: text(b?.customer_name), total_amount: money(b?.total_amount), status: status(b?.status), paper: Boolean(b?.paper), sent: Boolean(b?.sent) })),
     entered: whole(w?.entered), runs: list(w?.runs).map((r: W) => [whole(r?.[0]), whole(r?.[1])] as [number, number]),
-    missing: list(w?.missing).map(whole),
+    // an answer without the count (a server before Ruling 1D-3) listed every one
+    missing, missing_count: w?.missing_count == null ? missing.length : whole(w.missing_count),
     explained: list(w?.explained).map((x: W) => (x?.kind === "deleted"
       ? { counter: whole(x.counter), kind: "deleted" as const, bin_id: whole(x.bin_id), invoice_number: text(x.invoice_number), reason: text(x.reason), deleted_at: text(x.deleted_at) }
       : { counter: whole(x?.counter), kind: "cancelled" as const, id: whole(x?.id), invoice_number: text(x?.invoice_number), reason: text(x?.reason) })),
