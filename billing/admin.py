@@ -10,7 +10,7 @@ from simple_history.admin import SimpleHistoryAdmin
 
 from billing.api.mixins import drop_settled_party_rows, settled_party_rows
 from billing.constants import INVOICE_TYPE_OUTWARD
-from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
+from billing.period_lock import assert_inward_unlocked, assert_period_unlocked, lock_legacy_invoice
 from billing.services.bin import bin_bill
 
 
@@ -26,12 +26,18 @@ class PeriodLockAdminMixin:
         if inv is None:
             return
         try:
+            stored = lock_legacy_invoice(inv, inv.business_id, inward=inv.type_of_invoice == "inward")
+            if stored.pk and stored.type_of_invoice == "inward":
+                assert_inward_unlocked(stored)
+            if obj is not inv:
+                obj.invoice = inv = stored
             assert_period_unlocked(inv.business_id, inv.invoice_date, action)
             if inv.type_of_invoice == "inward":
                 assert_inward_unlocked(inv)
         except APIException as e:
             raise PermissionDenied(str(e.detail)) from e
 
+    @transaction.atomic
     def save_model(self, request, obj, form, change):
         self._assert(obj, "edit" if change else "create")
         if change and isinstance(obj, Invoice):
@@ -43,6 +49,7 @@ class PeriodLockAdminMixin:
             return
         super().save_model(request, obj, form, change)
 
+    @transaction.atomic
     def delete_model(self, request, obj):
         self._assert(obj, "delete")
         if isinstance(obj, Invoice) and obj.type_of_invoice == INVOICE_TYPE_OUTWARD:
@@ -52,9 +59,17 @@ class PeriodLockAdminMixin:
             return
         super().delete_model(request, obj)
 
+    @transaction.atomic
     def delete_queryset(self, request, queryset):
-        # "Delete selected" went straight to queryset.delete(): no month lock, and no bin for a sale.
-        for obj in queryset:
+        from billing.numbering import lock_firms
+
+        # Lock every affected bill before any firm: a batch cannot hold a firm while
+        # waiting for another bill whose editor is waiting for that same firm.
+        objects = list(queryset.nocache())
+        ids = {self._invoice_of(obj).pk for obj in objects if self._invoice_of(obj) is not None}
+        invoices = list(Invoice.objects.nocache().select_for_update().filter(pk__in=ids).order_by("pk"))
+        lock_firms(*(invoice.business_id for invoice in invoices if invoice.type_of_invoice == "inward"))
+        for obj in objects:
             self.delete_model(request, obj)
 
     def response_action(self, request, queryset):
@@ -62,6 +77,7 @@ class PeriodLockAdminMixin:
         with transaction.atomic():
             return super().response_action(request, queryset)
 
+    @transaction.atomic
     def save_formset(self, request, form, formset, change):
         self._assert(form.instance, "edit")
         super().save_formset(request, form, formset, change)

@@ -153,3 +153,19 @@ def assert_inward_unlocked(invoice, new_date=None):
         assert_period_unlocked(invoice.business_id, invoice.itc_month, "edit")
     if new_date:
         assert_period_unlocked(invoice.business_id, new_date, "edit")
+
+
+def lock_legacy_invoice(invoice, *target_business_ids, inward=False):
+    """Inside the caller's transaction, lock the stored bill before its purchase firms.
+
+    Return the fresh row so a v3 move completed before this lock cannot leave a legacy
+    write checking the old firm/month. New invoices have no row to lock yet.
+    """
+    from billing.cache import uncached
+    from billing.models import Invoice
+    from billing.numbering import lock_firms
+
+    stored = uncached(Invoice).select_for_update().get(pk=invoice.pk) if invoice.pk else invoice
+    if stored.type_of_invoice == "inward" or inward:
+        lock_firms(stored.business_id, *target_business_ids)
+    return stored

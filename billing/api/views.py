@@ -47,7 +47,7 @@ from billing.constants import (
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, FiledPeriod, Invoice, LineItem, Product
 from billing.numbering import lock_firms
 from billing.params import PICK_A_FIRM, date_param, id_param, text_param
-from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
+from billing.period_lock import assert_inward_unlocked, assert_period_unlocked, lock_legacy_invoice
 from billing.services import gstr1
 from billing.services.ai_import import create_from_ai
 from billing.services.bin import bin_bill, restore_from_bin, v2_snapshot
@@ -543,6 +543,7 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         return response
 
     @action(detail=False, methods=["post"], permission_classes=[AdminOnlyPermission])
+    @transaction.atomic
     def merge(self, request):
         """Merge source customer into target customer.
         Transfers all invoices and line items from source to target, then deletes source.
@@ -575,17 +576,15 @@ class CustomerViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
         # delete, and a failure midway left invoices on a customer whose lines
         # had moved. It also never asked whether any of those invoices sat in
         # a filed month.
-        for biz_id, inv_date in (
-            Invoice.objects.filter(customer=source)
-            .values_list("business_id", "invoice_date").distinct()
-        ):
-            assert_period_unlocked(biz_id, inv_date, "edit")
+        moving = list(Invoice.objects.nocache().select_related("business").select_for_update(of=("self",)).filter(customer=source).order_by("pk"))
+        lock_firms(*(invoice.business_id for invoice in moving if invoice.type_of_invoice == INVOICE_TYPE_INWARD))
+        for invoice in moving:
+            assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
+            if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
+                assert_inward_unlocked(invoice)
 
         with transaction.atomic():
-            # Through save(), so each invoice's lines follow it and are re-filed
-            # for the target's state (M14). A queryset update skipped that: a
-            # local sale merged into an out-of-state record kept CGST + SGST.
-            moving = list(Invoice.objects.filter(customer=source).select_related("business"))
+            # Each invoice's lines follow its supplier and tax direction.
             for invoice in moving:
                 invoice.customer = target
                 # The customer only: a full save would undo a cancel that landed since the read (Ruling 1A-16).
@@ -1061,7 +1060,6 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # the serializer doesn't know about them, and DRF would 400 on extras
         # if we ever turn on strict validation.
         payload = {k: v for k, v in request.data.items() if k != "line_items"}
-        assert_period_unlocked(payload.get("business"), payload.get("invoice_date"), "create")
         serializer = self.get_serializer(data=payload)
         serializer.is_valid(raise_exception=True)
         # C1b: a purchase from a supplier with no GSTIN carries no input tax.
@@ -1073,6 +1071,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
         try:
             with transaction.atomic():
+                data = serializer.validated_data
+                if data.get("type_of_invoice") == INVOICE_TYPE_INWARD:
+                    lock_firms(data["business"].pk)
+                assert_period_unlocked(data["business"].pk, data["invoice_date"], "create")
                 self.perform_create(serializer)  # saves invoice + writes audit log
                 invoice = serializer.instance
 
@@ -1115,13 +1117,16 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         with transaction.atomic():
             pk = str(kwargs.get(self.lookup_url_kwarg or self.lookup_field, ""))
             if pk.isascii() and pk.isdigit():  # anything else is DRF's 404, from its read
-                list(Invoice.objects.select_for_update().filter(pk=pk).values_list("pk", flat=True))
+                list(Invoice.objects.select_for_update().nocache().filter(pk=pk).values_list("pk", flat=True))
             return super().update(request, *args, **kwargs)
 
     def perform_update(self, serializer):
-        inst = serializer.instance
-        assert_period_unlocked(inst.business_id, inst.invoice_date, "edit")
         vd = serializer.validated_data
+        inst = serializer.instance
+        target = getattr(vd.get("business"), "pk", inst.business_id)
+        inst = serializer.instance = lock_legacy_invoice(inst, target,
+            inward=vd.get("type_of_invoice") == INVOICE_TYPE_INWARD)
+        assert_period_unlocked(inst.business_id, inst.invoice_date, "edit")
         assert_period_unlocked(
             getattr(vd.get("business"), "id", None) or inst.business_id,
             vd.get("invoice_date") or inst.invoice_date,
@@ -1142,7 +1147,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 raise ValidationError({"error": problem})
         super().perform_update(serializer)
 
+    @transaction.atomic
     def perform_destroy(self, instance):
+        instance = lock_legacy_invoice(instance)
         assert_period_unlocked(instance.business_id, instance.invoice_date, "delete")
         if instance.type_of_invoice == INVOICE_TYPE_INWARD:
             assert_inward_unlocked(instance)
@@ -1163,6 +1170,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         return v2_snapshot(instance)
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def update_line_items(self, request, pk=None):
         """
         Replace all line items for an invoice in ONE round trip.
@@ -1175,9 +1183,6 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         audit-log entry.
         """
         invoice = self.get_object()
-        assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
-        if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
-            assert_inward_unlocked(invoice)
         _incoming = request.data.get("invoice") or {}
         # The SPA sends the parties as strings. Assigned raw, "5" never equalled
         # the 5 the invoice was loaded with, so every edit looked like a move
@@ -1187,6 +1192,12 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             for field, model in (("customer", Customer), ("business", Business))
             if _incoming.get(field)
         }
+        invoice = lock_legacy_invoice(invoice,
+            parties["business"].pk if "business" in parties else invoice.business_id,
+            inward=_incoming.get("type_of_invoice") == INVOICE_TYPE_INWARD)
+        assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
+        if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
+            assert_inward_unlocked(invoice)
         assert_period_unlocked(
             parties["business"].pk if "business" in parties else invoice.business_id,
             _incoming.get("invoice_date") or invoice.invoice_date,
@@ -1202,7 +1213,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         with transaction.atomic():
             # Two concurrent replaces persisted BOTH line sets under one total;
             # the row lock serialises them.
-            invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
+            invoice = Invoice.objects.nocache().select_for_update().get(pk=invoice.pk)
             # 1. Patch invoice-level fields if provided (in-memory only)
             if invoice_data:
                 if "customer" in parties:
@@ -1355,6 +1366,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
         return Response(data)
 
     @action(detail=True, methods=["get", "post"])
+    @transaction.atomic
     def eway_bill(self, request, pk=None):
         """Get or update e-way bill details for an invoice."""
         invoice = self.get_object()
@@ -1375,6 +1387,9 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
             })
 
         # POST — save e-way bill details
+        invoice = lock_legacy_invoice(invoice)
+        if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
+            assert_inward_unlocked(invoice)
         assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
         fields = ["eway_bill_number", "transporter_name", "transporter_gstin",
                    "vehicle_number", "vehicle_type", "transport_mode", "distance_km"]
@@ -1944,32 +1959,42 @@ class LineItemViewSet(viewsets.ModelViewSet):
         (line,), _ = build_line_items(invoice, [item], source="form")
         return {f: getattr(line, f) for f in LineItemViewSet._BUILT_FIELDS}
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        invoice = serializer.validated_data["invoice"]
+        invoice = lock_legacy_invoice(serializer.validated_data["invoice"])
+        serializer.validated_data["invoice"] = invoice
         if invoice.type_of_invoice == INVOICE_TYPE_INWARD:
             assert_inward_unlocked(invoice)
         serializer.save(customer=invoice.customer, **self._built(invoice, serializer.validated_data))
 
+    @transaction.atomic
     def perform_update(self, serializer):
-        inv = serializer.instance.invoice
+        inv = lock_legacy_invoice(serializer.instance.invoice)
+        serializer.instance.invoice = inv
+        if "invoice" in serializer.validated_data:
+            serializer.validated_data["invoice"] = inv
         assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
         if inv.type_of_invoice == INVOICE_TYPE_INWARD:
             assert_inward_unlocked(inv)
         serializer.save(customer=inv.customer, **self._built(inv, serializer.validated_data, serializer.instance))
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        inv = instance.invoice
+        inv = lock_legacy_invoice(instance.invoice)
+        instance.invoice = inv
         assert_period_unlocked(inv.business_id, inv.invoice_date, "edit")
         if inv.type_of_invoice == INVOICE_TYPE_INWARD:
             assert_inward_unlocked(inv)
         super().perform_destroy(instance)
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         # Get invoice_id from URL path if available
         invoice_id = self.kwargs.get("invoice_id")
         if invoice_id:
             _inv = Invoice.objects.filter(id=invoice_id).only("business_id", "invoice_date", "type_of_invoice", "itc_month").first()
             if _inv:
+                _inv = lock_legacy_invoice(_inv)
                 assert_period_unlocked(_inv.business_id, _inv.invoice_date, "edit")
                 if _inv.type_of_invoice == INVOICE_TYPE_INWARD:
                     assert_inward_unlocked(_inv)
@@ -2013,12 +2038,14 @@ class LineItemViewSet(viewsets.ModelViewSet):
             _inv = Invoice.objects.filter(id=body_invoice_id).only("business_id", "invoice_date", "type_of_invoice", "itc_month").first()
             if _inv is None:
                 return Response({"error": f"Invoice with ID {body_invoice_id} does not exist"}, status=status.HTTP_404_NOT_FOUND)
+            _inv = lock_legacy_invoice(_inv)
             assert_period_unlocked(_inv.business_id, _inv.invoice_date, "edit")
             if _inv.type_of_invoice == INVOICE_TYPE_INWARD:
                 assert_inward_unlocked(_inv)
         return super().create(request, *args, **kwargs)
 
     @action(detail=False, methods=["post"])
+    @transaction.atomic
     def create_for_invoice(self, request):
         """Create a line item for an invoice"""
         invoice_id = request.data.get("invoice_id")
@@ -2035,6 +2062,7 @@ class LineItemViewSet(viewsets.ModelViewSet):
         target = Invoice.objects.filter(id=invoice_id).only("business_id", "invoice_date", "type_of_invoice", "itc_month").first()
         if target is None:
             return Response({"error": f"Invoice with ID {invoice_id} does not exist"}, status=status.HTTP_404_NOT_FOUND)
+        target = lock_legacy_invoice(target)
         assert_period_unlocked(target.business_id, target.invoice_date, "edit")
         if target.type_of_invoice == INVOICE_TYPE_INWARD:
             assert_inward_unlocked(target)
@@ -3024,7 +3052,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     # Revert to the snapshot state. Row-locked, so a cancel can't land between the
                     # check below and the save (Ruling 1A-16).
                     try:
-                        obj = model.objects.select_for_update().get(pk=entry.entity_id)
+                        obj = model.objects.nocache().select_for_update().get(pk=entry.entity_id)
                     except model.DoesNotExist:
                         return Response({"error": "Record no longer exists"}, status=404)
 
@@ -3033,7 +3061,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         if obj.status == BILL_CANCELLED:
                             return Response({"error": "cancelled", "code": "cancelled", "detail": CANCELLED_WORDS},
                                             status=status.HTTP_409_CONFLICT)
-                        if obj.type_of_invoice == INVOICE_TYPE_INWARD:
+                        if INVOICE_TYPE_INWARD in (obj.type_of_invoice, snap.get("type_of_invoice")):
                             target = _resolve_fk(Invoice._meta.get_field("business"), snap.get("business"))
                             lock_firms(obj.business_id, target or obj.business_id)
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
@@ -3077,7 +3105,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                 elif entry.action == "created":
                     # Delete the created object
                     try:
-                        obj = model.objects.select_for_update().get(pk=entry.entity_id)
+                        obj = model.objects.nocache().select_for_update().get(pk=entry.entity_id)
                         if model is Invoice:
                             if obj.type_of_invoice == INVOICE_TYPE_INWARD:
                                 lock_firms(obj.business_id)

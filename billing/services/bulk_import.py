@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from billing.api.inward_bills_service import fy_start, gstin_conflict, inward_number_key, supplier_key
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
+from billing.numbering import lock_firms
 from billing.period_lock import locked_period_or_none
 from billing.tax_rules import (
     LINE_MONEY_TOLERANCE,
@@ -397,6 +398,19 @@ def run_bulk_import(request):
             })
         return lines, problems
 
+    def business_for(inv_data):
+        firm_name = (inv_data.get("firmName") or "").strip()
+        firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
+        business = forced_business
+        if not business and firm_gstin:
+            business = biz_by_gstin.get(firm_gstin.lower())
+        if not business and firm_name:
+            business = biz_by_name.get(firm_name.lower())
+            if not business:
+                business = next((b for nm, b in biz_by_name.items()
+                                 if firm_name.lower() in nm or nm in firm_name.lower()), None)
+        return business
+
     # ---------- PHASE 2: process invoices in a single transaction ----------
     invoices_to_create = []  # [(Invoice instance, source dict for line items)]
     line_items_to_create = []
@@ -408,6 +422,8 @@ def run_bulk_import(request):
     new_customers_added_to_biz = []  # (customer, business) pairs
 
     with transaction.atomic():
+        lock_firms(*(business.pk for row in invoices_data if row.get("type") == "INWARD"
+                     if (business := business_for(row)) is not None))
         for inv_data in invoices_data:
             try:
                 # Savepoint per row: on Postgres a failed statement aborts the whole
@@ -416,19 +432,7 @@ def run_bulk_import(request):
                 with transaction.atomic():
                     firm_name = (inv_data.get("firmName") or "").strip()
                     firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
-
-                    # Resolve business from cache
-                    business = forced_business
-                    if not business and firm_gstin:
-                        business = biz_by_gstin.get(firm_gstin.lower())
-                    if not business and firm_name:
-                        # icontains substitute: try exact, then any name containing
-                        business = biz_by_name.get(firm_name.lower())
-                        if not business:
-                            for nm, b in biz_by_name.items():
-                                if firm_name.lower() in nm or nm in firm_name.lower():
-                                    business = b
-                                    break
+                    business = business_for(inv_data)
 
                     if not business:
                         errors.append(

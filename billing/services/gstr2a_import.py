@@ -55,6 +55,7 @@ from django.db import transaction
 from billing.api.inward_bills_service import find_duplicate
 from billing.constants import INVOICE_TYPE_INWARD
 from billing.models import Business, Customer, Invoice, LineItem
+from billing.numbering import lock_firms
 from billing.period_lock import locked_period_or_none
 
 logger = logging.getLogger(__name__)
@@ -496,6 +497,7 @@ def import_file(
 
     try:
       with transaction.atomic():
+        lock_firms(business_id)
         for row in preview.parsed_rows:
             # Skip rows that a credit note fully cancelled. This is the
             # main behaviour change from v1 — previously these slipped

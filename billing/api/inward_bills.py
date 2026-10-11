@@ -23,6 +23,7 @@ from rest_framework.views import APIView
 from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
 from billing.models import Business, CapturePage, Customer, Invoice, InwardCapture, LineItem
+from billing.numbering import lock_firms
 from billing.period_lock import assert_period_unlocked
 from billing.tax_rules import GST_SLABS, gstin_problem, has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
@@ -221,6 +222,7 @@ class InwardBillListCreateView(APIView):
         bill_total = Decimal(str(bill_total)) if bill_total not in (None, "") else None
         computed, total = compute_lines(service_lines, intra=intra, bill_total=bill_total)
 
+        lock_firms(business.id)
         assert_period_unlocked(business.id, invoice_date, "create")
         invoice = Invoice.objects.create(
             workspace_id=WORKSPACE_ID, business=business, customer=supplier,
