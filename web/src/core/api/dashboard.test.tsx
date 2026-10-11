@@ -7,12 +7,18 @@ import { salesServer } from "@/core/sales/fixtures";
 import type { FirmId } from "@/core/scope";
 import { testQueryClient } from "@/test/render";
 import { pass } from "@/test/clock";
+import { dueNextKeys as pureDueNextKeys } from "@/core/due/keys";
 import { dashboardKeys, dueNextKeys, ratesKeys, useDashboard, useDueNext, useRates,  } from "./dashboard";
 function setup() {
   const qc = testQueryClient();
   return { qc, wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> };
 }
 afterEach(() => { focusManager.setFocused(undefined); vi.useRealTimers(); });
+test("Due next keys have one pure definition in core/due/keys, re-exported unchanged", () => {
+  expect(dueNextKeys).toBe(pureDueNextKeys);
+  expect(pureDueNextKeys.one(3, true)).toEqual(["due-next", 3, true]);
+});
+
 test("dashboard maps all monetary fields to paise and 4E words through one adapter", () => {
   const w = wireDashboard();
   w.returns_year = [{ firm: { id: 3, name: "Kiran", gst_number: "", state_name: "" }, months_filed: 12, last_gstr3b_filed_on: null, cash_paid: "412880.13" }];
