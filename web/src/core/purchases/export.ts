@@ -90,7 +90,7 @@ export async function purchaseExport(kind: 'csv' | 'xlsx' | 'ca', params: Record
               check(signal);
               // A signed original on this app only: never send the app's authorization to an external host.
               if (!file.url.startsWith('/api/media/')) throw new Error('A bill file could not be read. Open the purchase and try again.');
-              const original = (await api.get<Blob>(file.url, { responseType: 'blob', signal })).data;
+              const original = (await api.get<Blob>(file.url.replace(/^\/api\//, ''), { responseType: 'blob', signal })).data;
               yield { name: `${safeName(bill.supplier.name)}_${safeName(bill.invoice_number)}_${bill.id}_${n + 1}_${safeName(file.name)}`, blob: original };
             }
           }

@@ -3,6 +3,8 @@ import { purchaseExport } from './export';
 import { excelBlob } from '@/core/excel/writer';
 import { saveFile } from '@/core/print/files';
 import { bytesOf } from '@/core/files/zip';
+import type { AxiosAdapter } from 'axios';
+import { api } from '@/core/api/client';
 import { serve, type Call } from '@/test/server';
 vi.mock('@/core/excel/writer', () => ({ excelBlob: vi.fn(async () => new Blob(['3D-owned Excel codec test double'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })) }));
 vi.mock('@/core/print/files', () => ({ saveFile: vi.fn() }));
@@ -66,7 +68,7 @@ test('CA zip fetches originals once, names colliding unsafe filenames uniquely a
   const calls = serve({ 'GET purchases/': page([row(1, { has_files: true }), row(2, { has_files: true })]),
     'GET purchases/1/': { files: [{ id: 'src', name: '../original.pdf', url: '/api/media/one?s=signed', preview_url: '/api/media/preview' }] },
     'GET purchases/2/': { files: [{ id: 'src', name: '../original.pdf', url: '/api/media/two?s=signed', preview_url: '/api/media/preview' }] },
-    'GET /api/media/one?s=signed': new Blob(['original one']), 'GET /api/media/two?s=signed': new Blob(['original two']),
+    'GET media/one?s=signed': new Blob(['original one']), 'GET media/two?s=signed': new Blob(['original two']),
   });
   const onProgress = vi.fn(); await purchaseExport('ca', {}, undefined, { onProgress });
   const zip = await entries(vi.mocked(saveFile).mock.calls[0][0]); const names = [...zip.keys()];
@@ -151,4 +153,14 @@ test('a download that throws produces no exported audit row', async () => {
   vi.mocked(saveFile).mockImplementationOnce(() => { throw new Error('Download failed.'); });
   await expect(purchaseExport('csv', {})).rejects.toThrow('Download failed.');
   expect(calls.some(c => c.url === 'audit-logs/log/')).toBe(false);
+});
+test('CA zip fetches originals at their own /api/media/ address, not under the API base twice', async () => {
+  serve({ 'GET purchases/': page([row(1, { has_files: true })]),
+    'GET purchases/1/': { files: [{ id: 'src', name: 'bill.pdf', url: '/api/media/one?s=signed', preview_url: '/api/media/preview' }] },
+    'GET media/one?s=signed': new Blob(['original one']) });
+  const inner = api.defaults.adapter as AxiosAdapter, uris: string[] = [];
+  api.defaults.adapter = (config) => { uris.push(api.getUri(config)); return inner(config); };
+  await purchaseExport('ca', {});
+  expect(uris.filter(u => u.includes('media'))).toEqual(['/api/media/one?s=signed']);
+  expect(uris).toContain('/api/purchases/1/');
 });

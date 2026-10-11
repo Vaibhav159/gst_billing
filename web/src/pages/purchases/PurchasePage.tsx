@@ -71,7 +71,9 @@ function Purchase({ p }: { p: PurchaseDetail }) {
   const hasSource = p.files.some((file) => file.id === "src");
   const exportFile = async (file: PurchaseFile) => {
     setError("");
-    try { const { data } = await api.get<Blob>(file.url, { responseType: "blob" }); saveFile(data, file.name); }
+    // a signed original on this app only (never the app's authorization to another host), under the client's /api/ base once
+    if (!file.url.startsWith("/api/media/")) { setError("The original wasn't downloaded. Open the purchase again and retry."); return; }
+    try { const { data } = await api.get<Blob>(file.url.replace(/^\/api\//, ""), { responseType: "blob" }); saveFile(data, file.name); }
     catch (e) { setError(`The original wasn't downloaded. ${problemOf(e).message}`); }
   };
   const menu: MenuItem[] = [
