@@ -14,7 +14,7 @@ export type Read = PurchaseRead;
 export async function batchRequest(kind: ImportKind, body: ImportBody): Promise<ImportResult> {
   if (!body.bills.length) throw new Error('There are no bills to import.');
   if (body.bills.length > 300) throw new Error('An import can hold at most 300 bills. Split the file.');
-  if ((body.suppliers?.length ?? body.customers?.length ?? 0) > 100) throw new Error('An import can add at most 100 new parties. Split the file.');
+  if (Math.max(body.suppliers?.length ?? 0, body.customers?.length ?? 0) > 100) throw new Error('An import can add at most 100 new parties. Split the file.');
   return (await api.post<ImportResult>(`${kind}/import/`, body)).data;
 }
 export function useBatchImport(kind: ImportKind) {

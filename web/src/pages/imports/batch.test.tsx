@@ -29,6 +29,7 @@ describe('batch imports', () => {
     const calls = serve({});
     await expect(batchRequest('purchases', { ...body, bills: [] })).rejects.toThrow('There are no bills to import.');
     await expect(batchRequest('purchases', { ...body, suppliers: Array.from({ length: 101 }, (_, n) => ({ ref: String(n), name: String(n), gst_number: '', state_name: '', city: '', address: '' })) })).rejects.toThrow('100');
+    await expect(batchRequest('sales', { ...body, suppliers: [], customers: Array.from({ length: 101 }, (_, n) => ({ ref: String(n), name: String(n), gst_number: '', state_name: '', city: '', address: '' })) })).rejects.toThrow('100');
     expect(calls).toHaveLength(0);
   });
   it('invalidates figures only after an actual successful import', async () => {
