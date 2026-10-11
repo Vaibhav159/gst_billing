@@ -25,7 +25,7 @@ test("staff and viewer cannot prepare a bundle; a running month also waits", () 
   const view = renderApp(<CaBundleButton input={input} />, { me: { role: "viewer", permissions: ["view", "reports.export"] } });
   expect(screen.getByRole("button", { name: "CA bundle" })).toBeDisabled();
   view.unmount();
-  const staff = renderApp(<CaBundleButton input={input} />, { me: { role: "staff", permissions: ["view", "sale.create", "purchase.create", "reports.export"] } });
+  const staff = renderApp(<CaBundleButton input={input} />, { me: { role: "staff", permissions: ["view", "bill.create", "purchase.create", "reports.export"] } });
   expect(screen.getByRole("button", { name: "CA bundle" })).toBeDisabled();
   staff.unmount(); renderApp(<CaBundleButton input={{ ...input, month: "2026-10" }} />);
   expect(screen.getByRole("button", { name: "CA bundle" })).toBeDisabled();

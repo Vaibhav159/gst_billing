@@ -118,7 +118,7 @@ it("keeps historical purchases with no credit month readable and exportable", as
 });
 
 it("puts only the main sheet's header and bills in the CSV, without the title, total or payment split", async () => {
-  renderApp(<SalesView ctx={{ ...ctx, split: true }} data={{ ...sales, split: [{ mode: "cash", bills: 1, value: 10300 }] }} />);
+  renderApp(<SalesView ctx={{ ...ctx, split: true }} data={{ ...sales, split: [{ mode: "cash", bills: 1, value: 10300, taxable: 10000, igst: 0, cgst: 150, sgst: 150, share: "100.00" }] }} />);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /CSV/ })); });
   const csv = new TextDecoder().decode(await bytesOf((saveFile.mock.calls[0] as [Blob])[0]));
   const lines = csv.replace(/^\ufeff/, "").trim().split("\r\n");
