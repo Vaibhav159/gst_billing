@@ -52,11 +52,16 @@ test('same earlier-day quotes can establish today; success copy does not promise
 });
 test('more than a fifth asks once, an edit resets it, repeated save posts once', async () => {
   const { calls } = await sheet(); type('80000'); fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass();
-  expect(screen.getByText('1 rates moved more than a fifth since 12 Oct. Check them, then save again.')).toBeInTheDocument(); expect(posts(calls)).toHaveLength(0);
+  expect(screen.getByText('1 rate moved more than a fifth since 12 Oct. Check them, then save again.')).toBeInTheDocument(); expect(posts(calls)).toHaveLength(0);
   type('81000'); expect(screen.queryByRole('button', { name: 'Yes, save these rates' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass();
   const confirm = screen.getByRole('button', { name: 'Yes, save these rates' }); fireEvent.click(confirm); fireEvent.click(confirm); await pass();
   expect(posts(calls)).toHaveLength(1); expect(posts(calls)[0].data).toMatchObject({ quoted: { 'gold-22K': '81000.00' } });
+});
+test('two moved rates read in the plural', async () => {
+  const { calls } = await sheet(); type('80000'); fireEvent.change(field('Gold 24K (999) per 10 g'), { target: { value: '200000' } });
+  fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass();
+  expect(screen.getByText('2 rates moved more than a fifth since 12 Oct. Check them, then save again.')).toBeInTheDocument(); expect(posts(calls)).toHaveLength(0);
 });
 test('blank, invalid precision and maximum errors remain attached to the field', async () => {
   const { calls } = await sheet();

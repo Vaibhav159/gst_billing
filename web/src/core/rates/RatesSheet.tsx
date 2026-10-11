@@ -44,7 +44,7 @@ function Editor({ initial, query, onClose }: { initial: Rates; query: UseQueryRe
     const invalid = { ...quotedErrors(values), ...Object.fromEntries(RATE_ROWS.filter(r => invalidRaw[r.key]).map(r => [r.key, "That's not an amount."])) };
     if (Object.keys(invalid).length) { setErrors(invalid); setMessage(Object.values(invalid)[0]!); return; }
     if (differences.length && !asked) {
-      setAsked(true); setMessage(`${differences.length} rates moved more than a fifth since ${dateShort(initial.latest!.on)}. Check them, then save again.`); return;
+      setAsked(true); setMessage(`${differences.length} ${differences.length === 1 ? 'rate' : 'rates'} moved more than a fifth since ${dateShort(initial.latest!.on)}. Check them, then save again.`); return;
     }
     saving.current = true;
     try {
