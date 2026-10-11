@@ -47,6 +47,19 @@ test('failed save retains every field and shows nested line error', async () => 
   expect(screen.getByLabelText("Supplier's bill number")).toHaveValue('UBS/12');
   expect(screen.getByLabelText('Rate per gms')).toHaveValue('100.00');
 });
+test('a filed credit month refusal is attached to the credit-month field and keeps the bill', async () => {
+  const detail = "September 2026's GSTR-3B is filed for KIRAN GOLD HOUSE, with this bill's credit in it, so it can't be changed. Have the owner unlock September 2026 in GST returns first.";
+  server({ 'POST purchases/': () => ({ status: 409, data: { code: 'month_closed', detail, locked_period: { id: null, business: 3, year: 2026, month: 9 } } }) });
+  mount();
+  const credit = await screen.findByLabelText('Claim the credit in');
+  await tick(400);
+  fireEvent.change(credit, { target: { value: '2026-09' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save purchase' }));
+  await waitFor(() => expect(credit).toHaveAttribute('aria-invalid', 'true'));
+  expect(credit).toHaveAccessibleDescription(expect.stringContaining(detail));
+  expect(screen.getByLabelText("Supplier's bill number")).toHaveValue('UBS/12');
+  expect(screen.getByLabelText('Rate per gms')).toHaveValue('100.00');
+});
 test('unchecked duplicate answers never say free; late lapsed credit switches off visually only', async () => {
   vi.setSystemTime(new Date('2026-12-08T10:00:00+05:30'));
   const calls = server({ 'GET purchases/check-duplicate/': { duplicate: null, unchecked: true, same_spelling: false },

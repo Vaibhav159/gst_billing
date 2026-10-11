@@ -100,7 +100,7 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
     try {
       const p = original ? await update.mutateAsync({ id: original.id, body }) : await create.mutateAsync(body);
       setSaved(p); await attachSaved(p);
-    } catch (error) { const p = problemOf(error); setProblem(p); setErrors(p.fields ?? {});
+    } catch (error) { const p = problemOf(error); setProblem(p); setErrors(p.code === 'month_closed' ? { itc_month: p.message } : p.fields ?? {});
       if (p.code === 'duplicate') { const body = p.body as { purchase?: Record<string, unknown> }; if (body.purchase) setRefusedDuplicate({ key: duplicateKey, purchase: toPurchaseRef(body.purchase) }); }
     }
     finally { busyRef.current = false; }
