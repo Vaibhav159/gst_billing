@@ -8,7 +8,7 @@ import { ScopeProvider, useScope } from "@/core/scope";
 import { testQueryClient, stubAuth } from "@/test/render";
 import { serve } from "@/test/server";
 import { pass } from "@/test/clock";
-import { AttentionButton } from "./AttentionButton";
+import { AttentionButton, attentionCode } from "./AttentionButton";
 import { AttentionPalette } from "./AttentionPalette";
 import { PhoneShell } from "./PhoneShell";
 import { paletteCode } from "./Palette";
@@ -33,7 +33,7 @@ function setup(showing: "bell" | "palette" | "phone" | "dashboard", cached = tru
   render(<QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><RouterProvider router={router} /></AuthContext.Provider></QueryClientProvider>);
   return { qc, calls };
 }
-beforeAll(async () => { await paletteCode.load(); });
+beforeAll(async () => { await Promise.all([paletteCode.load(), attentionCode.load()]); });
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"], now: new Date("2026-10-08T11:00:00+05:30") }); localStorage.clear(); localStorage.setItem("gst3.scope.1", "3"); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 

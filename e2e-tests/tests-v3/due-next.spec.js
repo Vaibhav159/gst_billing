@@ -1,6 +1,6 @@
 // Proposed tracked destination: e2e-tests/tests-v3/due-next.spec.js
-// X-40: run only after 5B Task 1 and 5D Tasks 1–3 land. Dashboard-opening tests also
-// need 5B's dashboard UI. All non-fixture due-next/dashboard calls require 5A.
+// X-40: run only after 5B Tasks 1–2 and 5D Tasks 1–3 land. Dashboard-opening tests
+// need 5B Task 6's routed dashboard, including 5C's RatesCard. All non-fixture due-next/dashboard calls require 5A.
 // This file imports only helpers that exist at 7597a321; no app exports are assumed.
 // Fixture tests verify browser rendering/cache ownership, NOT backend due counts.
 // Real API tests below do not route due-next/, dashboard/, or sales/ responses.
