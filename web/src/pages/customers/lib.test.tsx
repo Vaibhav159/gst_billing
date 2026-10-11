@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { customerLine } from "./forBills";
 import { homeState, safeReturn, scopeName, SETTLED, tableState, useOnFile } from "./lib";
-import { ANIL, serve } from "./testing";
+import { ANIL, handClock, pass, serve } from "./testing";
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -44,18 +44,27 @@ test("how a statement bill was settled, in one set of words that the statement p
 });
 
 test("customers on file with a phone or GSTIN: asked for once typing pauses, only for a whole number or GSTIN, never the one being edited", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
   const KULKARNI = { ...ANIL, id: 9, name: "Kulkarni Jewellers", gst_number: "27XTZPS7585P1ZB", mobile_number: "9822012345" };
   const calls = serve({ "GET customers/": { count: 1, next: null, results: [KULKARNI] } });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-  const other = renderHook(() => useOnFile("98220 12345", "27XTZPS7585P1ZB"), { wrapper });
-  const self = renderHook(() => useOnFile("98220 12345", "27XTZPS7585P1ZB", 9), { wrapper });
-  const part = renderHook(() => useOnFile("98220 1234", "27XTZPS7585P1Z"), { wrapper });
+  type Typed = { phone: string; gstin: string };
+  // each box a key short of whole: 9 digits, 14 characters
+  const partly: Typed = { phone: "98220 1234", gstin: "27XTZPS7585P1Z" };
+  handClock();
+  const onFile = (except?: number) => renderHook((t: Typed) => useOnFile(t.phone, t.gstin, except), { wrapper, initialProps: partly });
+  const other = onFile();
+  const self = onFile(9);
+  const part = onFile();
+  // the last key: a whole number and a whole GSTIN, and nothing is asked until typing has paused for 250 ms
+  for (const h of [other, self]) h.rerender({ phone: "98220 12345", gstin: "27XTZPS7585P1ZB" });
+  await pass(0);
   expect(calls).toEqual([]);
-  act(() => { vi.advanceTimersByTime(250); });
-  await waitFor(() => expect(other.result.current.samePhone?.name).toBe("Kulkarni Jewellers"));
-  await waitFor(() => expect(other.result.current.sameGstin?.name).toBe("Kulkarni Jewellers"));
+  await pass(249);
+  expect(calls).toEqual([]);
+  await pass(1);
+  expect(other.result.current.samePhone?.name).toBe("Kulkarni Jewellers");
+  expect(other.result.current.sameGstin?.name).toBe("Kulkarni Jewellers");
   // the one being edited has the same answers (one search each), and isn't named
   expect(self.result.current).toEqual({ samePhone: null, sameGstin: null });
   expect(part.result.current).toEqual({ samePhone: null, sameGstin: null });

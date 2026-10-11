@@ -6,7 +6,7 @@ import { __setNetState } from "@/core/api/network";
 import Customers from "./Customers";
 import { customersCsv } from "./exportCsv";
 import { markSaved, useJustSaved } from "./lib";
-import { ANIL, FIRMS, mount, serve, VIEWER, type Call } from "./testing";
+import { ANIL, FIRMS, handClock, mount, pass, serve, typeQuickly, VIEWER, type Call } from "./testing";
 
 const routes = [
   { path: "/customers", element: <Customers /> },
@@ -46,25 +46,6 @@ afterEach(() => {
   (window as unknown as { __phone?: boolean }).__phone = false;
 });
 
-/**
- * For a test that waits on the list's own timer (the 250 ms pause before a search asks): from here the clock moves only
- * when the test says, however long the typing takes on a busy machine. Testing Library's async helpers (userEvent,
- * findBy, waitFor) wait on a 0 ms timer that this clock never runs, so the steps after it are synchronous.
- */
-function handClock() {
-  const now = Date.now();
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
-}
-/** Types `text` a key at a time with no time between the keys: each key a change of its own, as a quick typist's are. */
-function typeQuickly(box: HTMLElement, text: string) {
-  for (let i = 1; i <= text.length; i++) fireEvent.change(box, { target: { value: text.slice(0, i) } });
-}
-/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 /** Catches what Export hands the browser: the files it makes, and the click that would download each. */
 function catchDownloads() {
   const files: Blob[] = [];

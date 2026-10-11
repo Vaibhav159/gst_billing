@@ -5,7 +5,7 @@ import { useCustomer, useCustomerSearch } from "@/core/api/customers";
 import { __setNetState } from "@/core/api/network";
 import CustomerStatement from "./CustomerStatement";
 import { makeStatementPdf } from "./statementPdf";
-import { ANIL, FIRMS, mount, serve, type Call } from "./testing";
+import { ANIL, FIRMS, handClock, mount, pass, serve, type Call } from "./testing";
 
 // the real PDF is statementPdf.test.tsx's: here a small stand-in comes back at once
 vi.mock("./statementPdf", () => ({ makeStatementPdf: vi.fn(async () => new Blob(["%PDF-1.3"], { type: "application/pdf" })) }));
@@ -50,22 +50,6 @@ afterEach(() => {
   delete (navigator as { canShare?: unknown }).canShare;
   (window as unknown as { __phone?: boolean }).__phone = false;
 });
-
-/**
- * For a test that waits on the page's own timer (the 250 ms pause before own dates ask, Ruling 1C-4): from here the
- * clock moves only when the test says. Testing Library's async helpers wait on a 0 ms timer this clock never runs, so
- * the steps after it are synchronous.
- */
-function handClock() {
-  const now = Date.now();
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
-}
-/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 
 test("the year's register from the server: billed, paid at billing, on udhaar, and each bill oldest first with how it was settled", async () => {
   const calls = serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": answer });

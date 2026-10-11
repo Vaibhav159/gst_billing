@@ -1,5 +1,5 @@
 // Pieces the customer screens share, ported from PROTO pages/records/shared.jsx and CustomerDetail.jsx.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { AlertTriangle, Check, Lock, RotateCw, Search, type LucideIcon } from "lucide-react";
 import { saveFailure, type ApiProblem } from "@/core/api/errors";
 import { cn } from "@/core/cn";
@@ -96,4 +96,27 @@ export function FirmToggles({ firms, value, onChange, labelledBy, describedBy, n
       })}
     </div>
   );
+}
+
+/**
+ * Words said while the cursor stays where it is. A refusal after Enter, or after a Save that keeps the cursor, leaves the
+ * cursor in the refused field, and focusing it again fires nothing a screen reader reads; say(words) has `echo`, a polite
+ * live region that is always there (render it once, anywhere), read them. It empties the echo, then gives it the words
+ * 100 ms later, so the same words again are read again. A frame isn't enough: its callback runs before the next paint,
+ * so the empty echo never reaches the screen, and Chrome with NVDA or JAWS may not read an identical message again
+ * (Angular CDK's live announcer waits 100 ms too). say("") (typing) and a newer say cancel words still to come.
+ * ponytail: the kit's Field can't say its error again while its field keeps the cursor, so the screens echo it;
+ * upgrade: a live-error option on the kit's Field, which this echo then gives way to.
+ */
+export function useEcho(): { echo: ReactNode; say: (words: string) => void } {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const later = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(later.current), []);
+  const say = useCallback((words: string) => {
+    clearTimeout(later.current);
+    if (ref.current) ref.current.textContent = "";
+    if (words) later.current = setTimeout(() => { if (ref.current) ref.current.textContent = words; }, 100);
+  }, []);
+  // no React children: the words are written straight in, so a render never rewrites them
+  return { echo: <p ref={ref} aria-live="polite" className="sr-only" />, say };
 }

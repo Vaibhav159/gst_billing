@@ -2,7 +2,7 @@ import { useState } from "react";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/test/render";
-import { Combobox, type ComboItem, type ComboOption } from "./index";
+import { Combobox, Dialog, type ComboItem, type ComboOption } from "./index";
 
 const PEOPLE = ["Anil Gupta", "Meena Jain", "Mahesh Soni"];
 /** A customer box as a page holds one: what's typed, the matches under a heading, and the pick shown in the box. */
@@ -59,6 +59,26 @@ test("Tab picks the highlighted match only once something is typed; Esc closes t
   await userEvent.keyboard("{Escape}");
   expect(outside).toHaveBeenCalledWith("Escape");
   expect(onPick).toHaveBeenCalledTimes(1);
+});
+
+test("in a real dialog, Esc with the list open closes only the list, and the next Esc closes the dialog", async () => {
+  const closed = vi.fn();
+  function InDialog() {
+    const [open, setOpen] = useState(true);
+    return <Dialog open={open} onClose={() => { closed(); setOpen(false); }} title="Pick the customer"><Picker onPick={() => {}} /></Dialog>;
+  }
+  renderApp(<InDialog />);
+  const dialog = screen.getByRole("dialog", { name: "Pick the customer" });
+  const box = within(dialog).getByRole("combobox", { name: "Customer" });
+  await userEvent.type(box, "a");
+  expect(screen.getByRole("listbox", { name: "Customers" })).toBeInTheDocument();
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  expect(closed).not.toHaveBeenCalled();
+  expect(dialog).toBeInTheDocument();
+  expect(box).toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  expect(closed).toHaveBeenCalledTimes(1);
 });
 
 test("a box focused as its page opens waits for the person: its list opens on an arrow key", async () => {

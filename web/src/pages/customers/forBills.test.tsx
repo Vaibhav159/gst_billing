@@ -6,7 +6,7 @@ import { __setNetState } from "@/core/api/network";
 import { toCustomer, type Customer } from "@/core/api/customers";
 import { GSTIN_CHECK_WARNING, PAN_PROBLEM } from "@/core/ids";
 import { CustomerFixSheet, CustomerPicker, CustomerSheet, NewCustomerForm, NewCustomerSheet } from "./forBills";
-import { ANIL, mount, serve, VIEWER, type Call } from "./testing";
+import { ANIL, liveWords, mount, serve, VIEWER, type Call } from "./testing";
 
 const WALKIN = { ...ANIL, id: 1, name: "Walk-in Customer", customer_type: "walkin", type: "walkin", mobile_number: "", city: "" };
 const LAST = { id: 412, invoice_number: "KGH/2026-27/31", invoice_date: "2026-10-08", total_amount: "87083.21", business: 3 };
@@ -347,24 +347,6 @@ test("the fix sheet: the PAN is checked, saved to the customer alone, and the bi
   expect(screen.getByText("It's in Customers now; this bill shows it.")).toBeInTheDocument();
 });
 
-/**
- * What a screen reader reads out while the cursor stays where it is: the words added to a polite live region already on
- * the page, each time they come, so the same words twice are heard twice (a region added with its words already in it
- * isn't reliably read).
- */
-function liveWords(): { said: string[]; stop: () => void } {
-  const said: string[] = [];
-  const watch = new MutationObserver((records) => {
-    for (const r of records) {
-      const at = r.target instanceof Element ? r.target : r.target.parentElement;
-      if (!at?.closest('[aria-live="polite"], [role="status"]')) continue;
-      if (r.type === "characterData" && r.target.textContent) said.push(r.target.textContent);
-      for (const n of r.addedNodes) if (n.textContent) said.push(n.textContent);
-    }
-  });
-  watch.observe(document.body, { subtree: true, childList: true, characterData: true });
-  return { said, stop: () => watch.disconnect() };
-}
 /** The fix sheet for Anil's PAN, open, past its guard against a double tap's second tap, with `typed` in the box. */
 async function panSheet(user: ReturnType<typeof handClock>, typed: string) {
   mount([{ path: "/", element: <CustomerFixSheet customer={toCustomer(ANIL)} field="pan" open onClose={() => {}} /> }], ["/"]);

@@ -1,6 +1,6 @@
 // Test helpers for the customer screens: the shared fake server with the firms and preferences answered, and the screens
 // mounted in a data router (useUnsavedGuard needs one) with the app's providers. Used by the *.test.tsx files beside it only.
-import { render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from "react-router";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
@@ -45,3 +45,42 @@ export function mount(routes: RouteObject[], entries: string[], { me }: { me?: P
 }
 export const VIEWER: Partial<Me> = { role: "viewer", roleLabel: "View only", permissions: ["view", "reports.export"] };
 export const STAFF: Partial<Me> = { role: "staff", roleLabel: "Counter staff", permissions: ["view", "bill.create", "bill.send", "customer.edit"] };
+
+/**
+ * For a test that waits on a screen's own timer (the 250 ms pause before a search asks, Ruling 1C-4): from here the
+ * clock moves only when the test says, however long a step takes on a busy machine. Testing Library's async helpers
+ * (userEvent, findBy, waitFor) wait on a 0 ms timer that this clock never runs, so the steps after it are synchronous.
+ */
+export function handClock() {
+  const now = Date.now();
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
+}
+/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
+export async function pass(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
+/** Types `text` a key at a time with no time between the keys: each key a change of its own, as a quick typist's are. */
+export function typeQuickly(box: HTMLElement, text: string) {
+  for (let i = 1; i <= text.length; i++) fireEvent.change(box, { target: { value: text.slice(0, i) } });
+}
+
+/**
+ * What a screen reader reads out while the cursor stays where it is: the words added to a polite live region already on
+ * the page, each time they come, so the same words twice are heard twice (a region added with its words already in it
+ * isn't reliably read).
+ */
+export function liveWords(): { said: string[]; stop: () => void } {
+  const said: string[] = [];
+  const watch = new MutationObserver((records) => {
+    for (const r of records) {
+      const at = r.target instanceof Element ? r.target : r.target.parentElement;
+      if (!at?.closest('[aria-live="polite"], [role="status"]')) continue;
+      if (r.type === "characterData" && r.target.textContent) said.push(r.target.textContent);
+      for (const n of r.addedNodes) if (n.textContent) said.push(n.textContent);
+    }
+  });
+  watch.observe(document.body, { subtree: true, childList: true, characterData: true });
+  return { said, stop: () => watch.disconnect() };
+}

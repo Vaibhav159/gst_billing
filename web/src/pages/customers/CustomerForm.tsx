@@ -4,7 +4,8 @@
 // check character saves with a warning and stays B2B (part 1 design, decision 3). The GST registry lookup and Merge
 // come in part 4.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { flushSync } from "react-dom";
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router";
 import { AlertTriangle, Check, CheckCircle2, Info, UserPlus, UserRound } from "lucide-react";
 import { customerSaveErrors, useCustomerSearch, useSaveCustomer, useStatement, type Customer, type CustomerBody, type CustomerField } from "@/core/api/customers";
 import type { ApiProblem } from "@/core/api/errors";
@@ -14,13 +15,15 @@ import { date, plural, possessive } from "@/core/format";
 import { checkGstin, cleanGstin, cleanPan, emailProblem, formatMobile, gstinPan, mobileDigits, mobileProblem, panProblem, stateLabel, stateOptions, stateTitle } from "@/core/ids";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope, type Firm } from "@/core/scope";
-import { Banner, Button, ButtonLink, Card, Field, Input, ListSkeleton, LoadError, Page, QueryView, Segmented, Select, scrollIntoViewSafe } from "@/core/ui";
+import { Banner, Button, ButtonLink, Card, ConfirmDialog, Field, Input, ListSkeleton, LoadError, Page, QueryView, Segmented, Select, scrollIntoViewSafe } from "@/core/ui";
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { firstName, homeState, keepFocus, markSaved, safeReturn, tableState, useBack, useCtrlS, useOnFile, useRouteCustomer } from "./lib";
-import { ErrorSummary, FirmToggles, MissingRecord, NoAccess, SaveError } from "./parts";
+import { ErrorSummary, FirmToggles, MissingRecord, NoAccess, SaveError, useEcho } from "./parts";
 
 type Values = { name: string; phone: string; email: string; type: "person" | "business"; gstin: string; pan: string; address: string; city: string; state: string; firms: number[] };
+/** What a GSTIN fills in. */
+type Filled = Pick<Values, "state" | "type" | "pan">;
 const IDS: Record<CustomerField, string> = {
   name: "cu-name", phone: "cu-phone", email: "cu-email", gstin: "cu-gstin", pan: "cu-pan", address: "cu-address", city: "cu-city", state: "cu-state", firms: "cu-firms", type: "cu-type",
 };
@@ -69,6 +72,26 @@ export default function CustomerForm() {
   const existing = editId !== null && one.data && !one.isPlaceholderData ? one.data : null;
   const back = useBack(editId !== null ? `/customers/${editId}` : "/customers");
   const crumbs = [{ label: "Customers", to: "/customers" }];
+  // what the form on screen started from: the customer, or a new one's ?name=, ?phone= and ?gstin=. A link to this same
+  // page with others starts it afresh: at once when nothing would be lost (or the page changed, where its own guard
+  // asked), else once the person says Leave to the guard's question. ponytail: React Router allows one blocker per
+  // router, and useUnsavedGuard's blocks only a change of page, so the form holds the new start here until answered;
+  // upgrade: a "would this lose the changes" option on useUnsavedGuard, which this then gives way to
+  const location = useLocation();
+  const navigate = useNavigate();
+  const navType = useNavigationType();
+  const startKey = editId ?? `new?${query.get("name") ?? ""}&${query.get("phone") ?? ""}&${query.get("gstin") ?? ""}`;
+  const here = { key: startKey, query, path: location.pathname, url: `${location.pathname}${location.search}` };
+  const [shown, setShown] = useState(here);
+  const [dirty, setDirty] = useState(false);
+  const asking = shown.key !== startKey && dirty && shown.path === here.path;
+  if (shown.url !== here.url && !asking) { setShown(here); if (shown.key !== startKey) setDirty(false); }
+  const restart = asking ? (
+    // the words of the form's guard (useUnsavedGuard), with Stay putting the form's own address back
+    <ConfirmDialog open title="Leave without saving?" confirmLabel="Leave" cancelLabel="Stay" tone="danger"
+      onClose={() => { if (navType === "PUSH") navigate(-1); else navigate(shown.url, { replace: true }); }}
+      onConfirm={() => { setShown(here); setDirty(false); }}>Your changes aren't saved. Leave this page and lose them?</ConfirmDialog>
+  ) : null;
   if (missing) return <MissingRecord icon={UserRound} title="This customer isn't on file" to="/customers" label="All customers" />;
   if (existing?.type === "walkin") {
     return (
@@ -99,10 +122,11 @@ export default function CustomerForm() {
   // the firms (for the firm cards) come with the app; a list that couldn't load is said, as the firm picker says it
   if (firmsError) return <Page narrow icon={UserRound} breadcrumbs={crumbs} title={title} back={backTo}><LoadError problem={{ kind: "unreachable", message: "The app couldn't get through" }} what="the firms" /></Page>;
   if (firmsLoading) return <Page narrow icon={UserRound} breadcrumbs={crumbs} title={title} back={backTo}><ListSkeleton rows={5} what="the form" /></Page>;
-  return <Form key={editId ?? `new?${query.get("name") ?? ""}&${query.get("phone") ?? ""}&${query.get("gstin") ?? ""}`} existing={existing} firms={firms} home={homeState(firms, firmId)} query={query} back={back} />;
+  return <><Form key={shown.key} existing={existing} firms={firms} home={homeState(firms, firmId)} query={shown.query} back={back} onDirty={setDirty} />{restart}</>;
 }
 
-function Form({ existing, firms, home, query, back }: { existing: Customer | null; firms: Firm[]; home: string; query: URLSearchParams; back: () => void }) {
+type FormProps = { existing: Customer | null; firms: Firm[]; home: string; query: URLSearchParams; back: () => void; onDirty: (dirty: boolean) => void };
+function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
   const { isPhone } = useView();
   const navigate = useNavigate();
   const save$ = useSaveCustomer();
@@ -113,11 +137,19 @@ function Form({ existing, firms, home, query, back }: { existing: Customer | nul
   const [serverErrs, setServerErrs] = useState<Partial<Record<CustomerField, string>>>({});
   const [saveError, setSaveError] = useState<ApiProblem | null>(null);
   const [stateNote, setStateNote] = useState<{ n: number; text: string } | null>(null);
-  // what a typed GSTIN filled in (state, type, PAN), to put back if it changes again
-  const [auto, setAuto] = useState<{ state: string; type: Values["type"]; pan: string; to: string } | null>(null);
+  // what a GSTIN filled in (put) over what was there before it (was): when it's cleared or changed, each field it filled
+  // goes back, unless the person has changed that field since. A GSTIN from the address (?gstin=) filled a new
+  // customer's start: a person in the firm's state, with no PAN
+  const [auto, setAuto] = useState<{ was: Filled; put: Filled } | null>(() => {
+    const at = checkGstin(initial.gstin).status;
+    return !existing && (at === "valid" || at === "check") ? { was: { state: home, type: "person", pan: "" }, put: { state: initial.state, type: initial.type, pan: initial.pan } } : null;
+  });
   const [done, setDone] = useState<{ to: string; back: boolean } | null>(null);
   const dirty = JSON.stringify(v) !== JSON.stringify(initial);
   const guard = useUnsavedGuard(dirty && !done);
+  // the page around the form holds a link that would start it afresh while this has changes
+  useEffect(() => { onDirty(dirty && !done); }, [dirty, done, onDirty]);
+  useEffect(() => () => onDirty(false), [onDirty]);
   useEffect(() => {
     if (!done) return;
     if (done.back && ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) navigate(-1);
@@ -131,8 +163,11 @@ function Form({ existing, firms, home, query, back }: { existing: Customer | nul
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // what a refusal says while the cursor stays in the refused field (Enter, or a Save that keeps the cursor)
+  const { echo, say } = useEcho();
   const set = <K extends keyof Values>(k: K) => (x: Values[K]) => {
     setV((o) => ({ ...o, [k]: x }));
+    say("");
     setSaveError(null);
     setServerErrs((e) => { if (!(k in e)) return e; const n = { ...e }; delete n[k as CustomerField]; return n; });
   };
@@ -178,33 +213,45 @@ function Form({ existing, firms, home, query, back }: { existing: Customer | nul
     const gstin = cleanGstin(raw);
     const c = checkGstin(gstin);
     const next = { ...v, gstin };
+    say("");
     setSaveError(null);
     setServerErrs((e) => { const n = { ...e }; delete n.gstin; return n; });
+    // each field as it was before the last GSTIN filled it, or as the person has changed it since
+    const keep = <K extends keyof Filled>(k: K): Filled[K] => (auto && v[k] === auto.put[k] ? auto.was[k] : v[k]);
+    const before: Filled = { state: keep("state"), type: keep("type"), pan: keep("pan") };
     if (c.status === "valid" || c.status === "check") {
-      const undo = auto ?? { state: v.state, type: v.type, pan: v.pan, to: c.state };
-      if (v.state !== c.state) { next.state = c.state; setStateNote({ n: (stateNote?.n ?? 0) + 1, text: `Set to ${stateLabel(c.state)} from the GSTIN` }); }
-      next.type = "business";
-      // a GSTIN that fails its check isn't read for a PAN: what was typed before stays
-      next.pan = c.status === "valid" ? c.pan : undo.pan;
-      setAuto({ ...undo, to: c.state });
+      // a GSTIN that fails its check isn't read for a PAN: what was there before stays
+      const put: Filled = { state: c.state, type: "business", pan: c.status === "valid" ? c.pan : before.pan };
+      if (v.state !== c.state) setStateNote({ n: (stateNote?.n ?? 0) + 1, text: `Set to ${stateLabel(c.state)} from the GSTIN` });
+      Object.assign(next, put);
+      setAuto({ was: before, put });
     } else if (auto) {
-      // the GSTIN that filled the state, type and PAN changed: put back what was there before
-      if (v.state === auto.to) next.state = auto.state;
-      next.type = auto.type;
-      next.pan = auto.pan;
+      Object.assign(next, before);
       setAuto(null);
       setStateNote(null);
     }
     setV(next);
   };
 
+  /**
+   * Puts the cursor on a refused field with its words drawn first (draw), so a screen reader reads them with the field as
+   * the cursor lands. Where the cursor is already (Enter in that field, or a Save or Ctrl S that keeps the cursor there),
+   * landing again fires nothing to read: the echo says the words instead, and only then, so a Save isn't read twice.
+   */
+  const refuse = (k: CustomerField, words: string, draw: () => void): HTMLElement | null => {
+    const el = document.getElementById(IDS[k]);
+    flushSync(draw);
+    if (el && el === document.activeElement) say(words);
+    el?.focus({ preventScroll: true });
+    return el;
+  };
   const ret = safeReturn(query.get("return"));
   const save = (e?: FormEvent) => {
     e?.preventDefault();
     if (save$.isPending) return;
-    setTried(true);
     const first = ORDER.find((k) => errs[k]);
-    if (first) { const el = document.getElementById(IDS[first]); el?.focus({ preventScroll: true }); scrollIntoViewSafe(el, { block: "center" }); return; }
+    if (first) { scrollIntoViewSafe(refuse(first, errs[first]!, () => setTried(true)), { block: "center" }); return; }
+    setTried(true);
     setSaveError(null);
     const body: CustomerBody = {
       name: v.name.trim().replace(/\s+/g, " "), mobile_number: digits, email: v.email.trim(), customer_type: v.type, gst_number: v.gstin,
@@ -221,10 +268,9 @@ function Form({ existing, firms, home, query, back }: { existing: Customer | nul
       },
       onError: (err) => {
         const { problem, fields } = customerSaveErrors(err, v.name);
-        setServerErrs(fields);
         const firstField = ORDER.find((k) => fields[k]);
-        if (firstField) document.getElementById(IDS[firstField])?.focus({ preventScroll: true });
-        else setSaveError(problem);
+        if (firstField) refuse(firstField, fields[firstField]!, () => setServerErrs(fields));
+        else { setServerErrs(fields); setSaveError(problem); }
       },
     });
   };
@@ -253,6 +299,7 @@ function Form({ existing, firms, home, query, back }: { existing: Customer | nul
       <form id="customer-form" onSubmit={save} noValidate className="flex flex-col gap-5">
         {tried && errorItems.length ? <ErrorSummary items={errorItems} /> : null}
         <SaveError problem={saveError} onRetry={() => save()} />
+        {echo}
 
         <Card title="Customer">
           <div className={grid}>

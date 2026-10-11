@@ -5,7 +5,7 @@
 //   registry's fill-in comes with part 4's lookup.
 // - A customer's PAN or address, added from a bill (PROTO pages/sales/parts.jsx CustomerFixSheet).
 // The combobox and FailNote are the kit's (@/core/ui), and failText is Selling's (@/core/sales/words): one home each.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { UserPlus } from "lucide-react";
 import { customerSaveErrors, useCustomerSearch, useRecentCustomers, useSaveCustomer, useWalkin, type Customer, type CustomerBody, type CustomerField, type CustomerRow } from "@/core/api/customers";
@@ -21,6 +21,7 @@ import { Avatar, Button, Combobox, Dialog, FailNote, Field, Input, ListRow, Sear
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { customerLine, keepFocus, startFrom, useOnFile } from "./lib";
+import { useEcho } from "./parts";
 
 export { customerLine, homeState } from "./lib";
 
@@ -372,20 +373,8 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
   const [fail, setFail] = useState<FailText | null>(null);
-  const echo = useRef<HTMLParagraphElement>(null);
-  const later = useRef<ReturnType<typeof setTimeout>>();
-  /**
-   * Says `words` in the echo below ("" empties it): emptied first, then the words 100 ms later, so the same words again
-   * are read again. A frame isn't enough: its callback runs before the next paint, so the empty echo never reaches the
-   * screen, and Chrome with NVDA or JAWS may not read an identical message again (Angular CDK's live announcer waits
-   * 100 ms too). What's typed meanwhile, or a newer refusal, cancels words still to come.
-   */
-  const say = (words: string) => {
-    clearTimeout(later.current);
-    if (echo.current) echo.current.textContent = "";
-    if (words) later.current = setTimeout(() => { if (echo.current) echo.current.textContent = words; }, 100);
-  };
-  useEffect(() => () => clearTimeout(later.current), []);
+  // the words a refusal says while the cursor stays in the field (after Enter): the echo below
+  const { echo, say } = useEcho();
   const cid = customer?.id;
   // filled from the record each time it opens (or for another customer or field): the same customer asked for again
   // meanwhile, as after the connection comes back, keeps what's typed
@@ -435,10 +424,7 @@ export function CustomerFixSheet({ customer, field, open, onClose, onSaved }: Cu
             onChange={(e) => { setVal(field === "pan" ? cleanPan(e.target.value) : e.target.value); setErr(""); say(""); }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } }} />
         </Field>
-        {/* the echo: a polite live region that is always there, for words said while the cursor stays in the field.
-            ponytail: the kit's Field can't say its error again while its field keeps the cursor, so the sheet echoes it;
-            upgrade: a live-error option on the kit's Field, which this echo then gives way to */}
-        <p ref={echo} aria-live="polite" className="sr-only" />
+        {echo}
         <FailNote error={fail} />
       </div>
     </Sheet>
