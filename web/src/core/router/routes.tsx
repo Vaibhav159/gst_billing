@@ -14,6 +14,7 @@ import { idlePages, lazyPage } from "./lazyPage";
 
 // Selling's pages load on demand (Ruling 1B-4): code comes as each page opens, or while idle after a real page shows.
 // react-pdf comes later still, with the first PDF made (core/print/make.ts).
+const GstReturns = lazyPage(() => import("@/pages/gst/GstReturns"));
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -28,7 +29,7 @@ const PurchaseList = lazyPage(() => import('@/pages/purchases/PurchaseList'));
 const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 
-const warmPages = idlePages([SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -110,6 +111,7 @@ export const appRoutes: RouteObject[] = [{
         ...captureRoutes,
         // Part 2D pages stay lazy and ahead of their placeholders.
         ...part2dRoutes,
+        { path: "/gst", element: <GstReturns /> },
         { path: '/purchases', element: <PurchaseList /> },
         { path: '/purchases/new', element: <PurchaseFormPage />, handle: { hideNav: true } },
         { path: '/purchases/:id/edit', element: <PurchaseFormPage />, handle: { hideNav: true } },

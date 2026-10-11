@@ -1,3 +1,4 @@
+import { GST_PAGES } from "@/core/gst/palette";
 // Search (Ctrl K, and Today's Search on a phone): pages, actions, the records opened lately, today's bills, and
 // customers, sales bills, deleted bills, products and firms. Ported from PROTO/core/shell.jsx (Palette).
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
@@ -150,6 +151,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
     const pages: Result[] = [
       ...DESKTOP_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: NAV_ICON[n.section], to: n.to })),
       ...MORE_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: n.icon, to: n.to })),
+      ...(t ? GST_PAGES.map((p): Result => ({ group: "Pages", ...p })) : []),
     ];
     const match = (s: string) => !t || s.toLowerCase().includes(t);
     if (!t) {
