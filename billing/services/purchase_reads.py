@@ -1,11 +1,38 @@
 """The contract's purchase rows, figures and filters, reading around cacheops."""
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 
-from django.db.models import DecimalField, Exists, ExpressionWrapper, OuterRef, Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import (
+    Case,
+    CharField,
+    Count,
+    DateField,
+    DecimalField,
+    Exists,
+    ExpressionWrapper,
+    F,
+    Func,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
+from django.db.models.functions import (
+    Cast,
+    Coalesce,
+    Collate,
+    ExtractMonth,
+    ExtractYear,
+    Replace,
+    Round,
+    TruncMonth,
+    Upper,
+)
 from django.http import Http404
 from django.utils import timezone
 
@@ -29,9 +56,80 @@ ROW_FIELDS = ("business_id", "customer_id", "invoice_number", "invoice_date", "c
               "total_amount", "itc_month", "itc_eligible", "needs_review", "source", "source_file", "buyer_gstin",
               "business__name", "business__gst_number", "business__state_name", "customer__name",
               "customer__gst_number", "customer__state_name", "customer__city")
-TOTAL_FIELDS = ("business_id", "invoice_date", "itc_month", "itc_eligible", "total_amount")
 DETAIL_FIELDS = (*ROW_FIELDS, "source_preview", "buyer_ack", "linked_sale", "customer__address",
                  "customer__pan_number", "customer__customer_type", "customer__mobile_number", "customer__email")
+
+
+MONEY_SQL = DecimalField(max_digits=30, decimal_places=6)
+# Every non-ASCII character whose Python upper() contributes ASCII to inward_number_key.
+# Fold before C-collated SQL upper(): PostgreSQL's locale must not change the shared identity.
+ASCII_FOLDS = {"ß": "SS", "ı": "I", "ŉ": "N", "ſ": "S", "ǰ": "J", "ẖ": "H", "ẗ": "T",
+               "ẘ": "W", "ẙ": "Y", "ẚ": "A", "ﬀ": "FF", "ﬁ": "FI", "ﬂ": "FL", "ﬃ": "FFI",
+               "ﬄ": "FFL", "ﬅ": "ST", "ﬆ": "ST"}
+
+# Python 3.12 Unicode 15 Nd ranges: its regex \d includes these under every locale.
+# C-collated PostgreSQL \d is ASCII-only, so spell the same boundaries explicitly.
+DECIMAL_DIGITS = (
+    "\u0030-\u0039\u0660-\u0669\u06f0-\u06f9\u07c0-\u07c9\u0966-\u096f"
+    "\u09e6-\u09ef\u0a66-\u0a6f\u0ae6-\u0aef\u0b66-\u0b6f\u0be6-\u0bef"
+    "\u0c66-\u0c6f\u0ce6-\u0cef\u0d66-\u0d6f\u0de6-\u0def\u0e50-\u0e59"
+    "\u0ed0-\u0ed9\u0f20-\u0f29\u1040-\u1049\u1090-\u1099\u17e0-\u17e9"
+    "\u1810-\u1819\u1946-\u194f\u19d0-\u19d9\u1a80-\u1a89\u1a90-\u1a99"
+    "\u1b50-\u1b59\u1bb0-\u1bb9\u1c40-\u1c49\u1c50-\u1c59\ua620-\ua629"
+    "\ua8d0-\ua8d9\ua900-\ua909\ua9d0-\ua9d9\ua9f0-\ua9f9\uaa50-\uaa59"
+    "\uabf0-\uabf9\uff10-\uff19\U000104a0-\U000104a9\U00010d30-\U00010d39\U00011066-\U0001106f"
+    "\U000110f0-\U000110f9\U00011136-\U0001113f\U000111d0-\U000111d9\U000112f0-\U000112f9\U00011450-\U00011459"
+    "\U000114d0-\U000114d9\U00011650-\U00011659\U000116c0-\U000116c9\U00011730-\U00011739\U000118e0-\U000118e9"
+    "\U00011950-\U00011959\U00011c50-\U00011c59\U00011d50-\U00011d59\U00011da0-\U00011da9\U00011f50-\U00011f59"
+    "\U00016a60-\U00016a69\U00016ac0-\U00016ac9\U00016b50-\U00016b59\U0001d7ce-\U0001d7ff\U0001e140-\U0001e149"
+    "\U0001e2f0-\U0001e2f9\U0001e4f0-\U0001e4f9\U0001e950-\U0001e959\U0001fbf0-\U0001fbf9"
+)
+
+
+class NumberKey(Func):
+    """The shared purchase identity, evaluated by the database instead of transferring numbers."""
+    function = "v3_purchase_number_key"
+    output_field = CharField()
+    arity = 1
+
+    def as_sqlite(self, compiler, connection, **extra_context):
+        # SQLite has no regexp_replace; its deterministic function uses the existing comparator.
+        connection.ensure_connection()
+        connection.connection.create_function(self.function, 1, inward_number_key, deterministic=True)
+        return super().as_sql(compiler, connection, **extra_context)
+
+    def as_postgresql(self, compiler, connection, **extra_context):
+        expression = Replace(self.source_expressions[0], Value("#"), Value("/"))
+        for character, folded in ASCII_FOLDS.items():
+            expression = Replace(expression, Value(character), Value(folded))
+        expression = Upper(Collate(expression, "C"))
+        expression = Func(expression, Value(f"(?<=[{DECIMAL_DIGITS}])[^0-9A-Z]+(?=[{DECIMAL_DIGITS}])"), Value("#"), Value("g"),
+                          function="REGEXP_REPLACE", output_field=CharField())
+        expression = Func(expression, Value("[^0-9A-Z#]"), Value(""), Value("g"),
+                          function="REGEXP_REPLACE", output_field=CharField())
+        return compiler.compile(Replace(expression, Value("#"), Value("-")))
+
+
+def _rounded_tax():
+    return Round(F("cgst"), 2) + Round(F("sgst"), 2) + Round(F("igst"), 2)
+
+
+def _credit_totals(qs):
+    """One rounded tax subtotal per bill, then the contract's eligibility/deadline predicate."""
+    tax = (uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")
+           .annotate(tax=Sum(_rounded_tax(), output_field=MONEY_SQL)).values("tax"))
+    qs = qs.annotate(
+        _tax=Coalesce(Subquery(tax), Value(ZERO), output_field=MONEY_SQL),
+        _credit_month=Coalesce("itc_month", Cast(TruncMonth("invoice_date"), DateField())),
+        _limit_year=ExtractYear("invoice_date") + Case(When(invoice_date__month__lt=4, then=Value(0)),
+                                                    default=Value(1), output_field=IntegerField()),
+        _credit_year=ExtractYear(Coalesce("itc_month", "invoice_date")),
+        _credit_number=ExtractMonth(Coalesce("itc_month", "invoice_date")),
+    )
+    in_time = Q(_credit_year__lt=F("_limit_year")) | Q(_credit_year=F("_limit_year"), _credit_number__lte=10)
+    # credit_lapsed is false for a zero/negative historical tax subtotal, even after the deadline.
+    claimable = Q(itc_eligible=True, invoice_date__gte=LEDGER_START) & (in_time | Q(_tax__lte=ZERO))
+    return qs.annotate(_claimed=Case(When(claimable, then=F("_tax")), default=Value(ZERO), output_field=MONEY_SQL))
 
 
 def purchase_queryset():
@@ -226,11 +324,10 @@ def search(qs, text):
             Q(product_name__istartswith=text) | Q(product_name__icontains=f" {text}"))
         qs = qs.alias(item_match=Exists(line))
         match |= Q(item_match=True)
-    # The Python key is shared with find_duplicate; read only ids and numbers for separator folding.
     key = inward_number_key(text)
     if key:
-        ids = [pk for pk, number in qs.values_list("pk", "invoice_number") if key in inward_number_key(number)]
-        match |= Q(pk__in=ids)
+        qs = qs.alias(number_key=NumberKey("invoice_number"))
+        match |= Q(number_key__contains=key)
     return qs.filter(match)
 
 
@@ -273,7 +370,11 @@ def filter_purchases(qs, params, duplicates=None):
         qs = qs.filter(Exists(uncached(LineItem).filter(invoice_id=OuterRef("pk")).filter(
             Q(hsn_code__isnull=True) | Q(hsn_code__regex=r"^\s*$"))))
     if params.get("dups") == "1":
-        qs = qs.filter(pk__in=duplicate_ids(qs.select_related(None).only("business_id", "invoice_date"), duplicates))
+        pairs = qs.order_by().annotate(year=ExtractYear("invoice_date") - Case(
+            When(invoice_date__month__lt=4, then=Value(1)), default=Value(0), output_field=IntegerField()))
+        identities = [SimpleNamespace(business_id=pk, invoice_date=date(year, 4, 1))
+                      for pk, year in pairs.values_list("business_id", "year").distinct()]
+        qs = qs.filter(pk__in=duplicate_ids(identities, duplicates))
     if search_text(params):
         qs = search(qs, search_text(params))
     return qs
@@ -287,13 +388,17 @@ def ordered(qs, params):
 
 
 def purchase_summary(qs, lines=None):
-    bills = [SimpleNamespace(pk=row.pop("id"), **row)
-             for row in qs.select_related(None).values("id", *TOTAL_FIELDS)]
-    lines = read_lines(bills, ("quantity", "rate", *HEADS), lines)
-    total = sums([li for bill in bills for li in lines[bill.pk]])
-    return {"bills": len(bills), **figures(total),
-            "total_amount": money(sum((b.total_amount for b in bills), ZERO)),
-            "credit": money(sum((Decimal(credit_block(b, sums(lines[b.pk])["tax"], set())["claimed"]) for b in bills), ZERO))}
+    # Keep invoice totals separate from the line join: a two-line bill counts once.
+    bills = _credit_totals(qs.select_related(None).order_by()).aggregate(
+        bills=Count("pk"), total_amount=Sum("total_amount"), credit=Sum("_claimed"))
+    line_rows = uncached(LineItem).filter(invoice_id__in=qs.order_by().values("pk"))
+    total = line_rows.aggregate(
+        taxable=Sum(Round(F("quantity") * F("rate"), 2), output_field=MONEY_SQL),
+        **{head: Sum(Round(F(head), 2), output_field=MONEY_SQL) for head in HEADS})
+    total = {key: value or ZERO for key, value in total.items()}
+    total["tax"] = sum((total[head] for head in HEADS), ZERO)
+    return {"bills": bills["bills"], **figures(total), "total_amount": money(bills["total_amount"] or ZERO),
+            "credit": money(bills["credit"] or ZERO)}
 
 
 def purchase_facets(qs, params, lines=None, duplicates=None):
@@ -301,48 +406,46 @@ def purchase_facets(qs, params, lines=None, duplicates=None):
     year = fy_param(params)
     year = fy_of(None) if year is None else year
     start, end = fy_range(year)
-    base = qs.filter(business_id=firm) if firm is not None else qs
-    # Rows dated in the FY plus late credit arriving from any earlier FY, in one narrow read.
-    relevant = list(base.filter(Q(invoice_date__range=(start, end)) | Q(itc_month__range=(start, end)))
-                    .select_related(None).select_related("business").only(
-                        "business_id", "invoice_date", "itc_month", "itc_eligible", "needs_review",
-                        "source_file", "buyer_gstin", "business__gst_number"))
-    lines = read_lines(relevant, ("quantity", "rate", "hsn_code", *HEADS), lines)
-    twins = duplicate_ids(relevant, duplicates)
+    base = (qs.filter(business_id=firm) if firm is not None else qs).select_related(None).order_by()
     firms = [firm] if firm is not None else list(uncached(Business).values_list("pk", flat=True))
     closed = closed_credit_months(firms)
-    by_date, by_credit, late, late_credit, credit_sum = Counter(), Counter(), Counter(), Counter(), Counter()
-    check_counts = dict.fromkeys(("needs_review", "duplicate", "no_lines", "no_hsn", "photo"), 0)
-    for bill in relevant:
-        month = credit_month_of(bill)
-        claimed = Decimal(credit_block(bill, sums(lines[bill.pk])["tax"], closed)["claimed"])
-        if month is not None and start <= month <= end:
-            by_credit[month] += 1
-            credit_sum[month] += claimed
-            if month != bill.invoice_date.replace(day=1):
-                late[month] += 1
-                late_credit[month] += claimed
-        if start <= bill.invoice_date <= end:
-            by_date[bill.invoice_date.replace(day=1)] += 1
-            check_counts["needs_review"] += bill.needs_review
-            check_counts["photo"] += has_files(bill)
-            for check in checks(bill, lines[bill.pk], bill.pk in twins):
-                if check in check_counts:
-                    check_counts[check] += 1
+    # Duplicate identity still has one narrow firm/FY read; no FY headers or lines cross the wire for sums.
+    twins = duplicate_ids([SimpleNamespace(business_id=pk, invoice_date=start) for pk in firms], duplicates)
+    own = base.filter(invoice_date__range=(start, end)).alias(
+        has_line=Exists(uncached(LineItem).filter(invoice_id=OuterRef("pk"))),
+        missing_hsn=Exists(uncached(LineItem).filter(invoice_id=OuterRef("pk")).filter(
+            Q(hsn_code__isnull=True) | Q(hsn_code__regex=r"^\s*$"))),
+    )
+    photo = Q(has_capture=True) | (Q(source_file__isnull=False) & ~Q(source_file=""))
+    by_date = {row["month"]: row for row in own.annotate(month=TruncMonth("invoice_date")).values("month").annotate(
+        bills=Count("pk"), needs_review=Count("pk", filter=Q(needs_review=True)),
+        duplicate=Count("pk", filter=Q(pk__in=twins)), no_lines=Count("pk", filter=Q(has_line=False)),
+        no_hsn=Count("pk", filter=Q(missing_hsn=True)), photo=Count("pk", filter=photo))}
+    allocated = _credit_totals(base).filter(invoice_date__gte=LEDGER_START, _credit_month__range=(start, end))
+    late = ~Q(_credit_month=TruncMonth("invoice_date"))
+    by_credit = {row["_credit_month"]: row for row in allocated.values("_credit_month").annotate(
+        bills=Count("pk"), credit=Sum("_claimed"), late_in=Count("pk", filter=late),
+        late_in_credit=Sum("_claimed", filter=late))}
+    check_counts = {key: sum(row[key] for row in by_date.values())
+                    for key in ("needs_review", "duplicate", "no_lines", "no_hsn", "photo")}
     months, cursor = [], start
     while cursor <= min(end, timezone.localdate()):
-        months.append({"month": cursor.strftime("%Y-%m"), "bills": by_date[cursor], "late_in": late[cursor],
-                       "late_in_credit": money(late_credit[cursor]),
+        credit_rows = by_credit.get(cursor, {})
+        months.append({"month": cursor.strftime("%Y-%m"), "bills": by_date.get(cursor, {}).get("bills", 0),
+                       "late_in": credit_rows.get("late_in", 0), "late_in_credit": money(credit_rows.get("late_in_credit") or ZERO),
                        "closed": bool(firms) and all((f, cursor.year, cursor.month) in closed for f in firms)})
         cursor = date(cursor.year + cursor.month // 12, cursor.month % 12 + 1, 1)
-    elsewhere = Counter()
+    elsewhere = []
     if search_text(params):
-        elsewhere.update(fy_of(day) for day in search(base, search_text(params)).exclude(
-            invoice_date__range=(start, end)).values_list("invoice_date", flat=True))
+        hits = search(base, search_text(params)).exclude(invoice_date__range=(start, end)).annotate(
+            year=ExtractYear("invoice_date") - Case(When(invoice_date__month__lt=4, then=Value(1)),
+                                                  default=Value(0), output_field=IntegerField()))
+        elsewhere = [{"fy": fy_label(row["year"]), "bills": row["bills"]}
+                     for row in hits.values("year").annotate(bills=Count("pk")).order_by("-year")]
     return {"months": months,
-            "credit_months": [{"month": m.strftime("%Y-%m"), "bills": by_credit[m], "credit": money(credit_sum[m])}
-                              for m in sorted(by_credit) if credit_sum[m]], "checks": check_counts,
-            "elsewhere": [{"fy": fy_label(y), "bills": n} for y, n in sorted(elsewhere.items(), reverse=True)]}
+            "credit_months": [{"month": month.strftime("%Y-%m"), "bills": row["bills"], "credit": money(row["credit"])}
+                              for month, row in sorted(by_credit.items()) if row["credit"]],
+            "checks": check_counts, "elsewhere": elsewhere}
 
 
 def usual_rate(params):

@@ -14,7 +14,6 @@ from billing.credit import credit_month_choices
 from billing.models import BinnedInvoice, Business, Customer
 from billing.params import date_param, firm_param, id_param, text_param
 from billing.services.purchase_reads import (
-    LINE_FIELDS,
     PICK_SUPPLIER,
     ROW_FIELDS,
     filter_purchases,
@@ -25,7 +24,6 @@ from billing.services.purchase_reads import (
     purchase_ref,
     purchase_rows,
     purchase_summary,
-    read_lines,
     usual_rate,
 )
 from billing.services.purchases import check_purchase, move_credit, save_purchase
@@ -164,15 +162,14 @@ class PurchasesViewSet(viewsets.GenericViewSet):
                                    ("summary", ("0", "1"), "Choose 0 or 1 for summary.")]:
             if key in params and params[key] not in values:
                 raise serializers.ValidationError({key: [words]})
-        duplicates, lines = {}, {}
+        duplicates = {}
         bills = filter_purchases(self.get_queryset(), params, duplicates)
         page = self.paginate_queryset(ordered(bills, params).only(*ROW_FIELDS))
-        # A page needs item columns; the rest of the FY needs only checks and sums.
-        read_lines(page, LINE_FIELDS, lines)
-        facets = purchase_facets(self.get_queryset(), params, lines, duplicates) if params.get("facets") == "1" else None
-        response = self.get_paginated_response(purchase_rows(page, params.get("include") == "lines", lines, duplicates))
+        # Only the page loads lines; the full filter's figures and month buckets stay in SQL.
+        facets = purchase_facets(self.get_queryset(), params, duplicates=duplicates) if params.get("facets") == "1" else None
+        response = self.get_paginated_response(purchase_rows(page, params.get("include") == "lines", duplicates=duplicates))
         if params.get("summary") != "0":
-            response.data["summary"] = purchase_summary(bills, lines)
+            response.data["summary"] = purchase_summary(bills)
         if facets is not None:
             response.data["facets"] = facets
         return response
