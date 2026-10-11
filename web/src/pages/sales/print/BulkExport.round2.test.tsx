@@ -105,8 +105,9 @@ test("a failed refresh keeps cached Print details ready and explains them with S
   const made = vi.mocked(makeBillPdf).mock.calls.length;
   failed = true;
   await act(async () => { await qc.refetchQueries({ queryKey: billQuery(1).queryKey }); });
+  // The request settles before React Query notifies its observers.
+  expect(await screen.findByText("Couldn't refresh KGH/2026-27/1")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Print 1" })).toBeEnabled();
-  expect(screen.getByText("Couldn't refresh KGH/2026-27/1")).toBeInTheDocument();
   expect(screen.getByText("The app couldn't reach the shop's records just now, so this is what was last loaded.")).toBeInTheDocument();
   expect(screen.queryByText(/didn't load/)).not.toBeInTheDocument();
   expect(makeBillPdf).toHaveBeenCalledTimes(made);
@@ -161,7 +162,7 @@ test("going offline while reading a zip says nothing was made even after finishe
   vi.mocked(makeBillPdf).mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await waitFor(() => expect(finish).toBeTypeOf("function"));
-  expect(screen.getByText("Reading bills:")).toHaveTextContent("Reading bills: 34 of 40");
+  await waitFor(() => expect(screen.getByText("Reading bills:")).toHaveTextContent("Reading bills: 34 of 40"));
   act(() => __setNetState("offline"));
   await act(async () => finish(wireDetail(rows[34])));
   expect(await screen.findByText("You're offline, so nothing was made")).toBeInTheDocument();

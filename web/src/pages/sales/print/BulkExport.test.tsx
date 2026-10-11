@@ -9,6 +9,7 @@ import { ScopeProvider } from "@/core/scope";
 import { FIRM, OTHER_FIRM, refuse, salesServer, wireDetail, wirePage, wireRow, type Call } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { renderApp } from "@/test/render";
+import { handClock, pass } from "@/test/clock";
 import BulkExport from "./BulkExport";
 import { zipFiles } from "./zip";
 
@@ -216,16 +217,19 @@ test("print caps at 30 and zip at 300, counts the rest and never reads or makes 
   expect(vi.mocked(makeBillPdf).mock.lastCall?.[0]).toHaveLength(30);
   expect(billAsks(calls)).toHaveLength(30);
   vi.mocked(makeBillPdf).mockClear();
+  // Each PDF yields a timer turn; the 300 turns belong to the test's clock, not the runner's load.
+  handClock();
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
-  await waitFor(() => expect(zipped.files).toHaveLength(300), { timeout: 30000 });
-  expect(await screen.findByText("300 PDFs made")).toBeInTheDocument();
+  await pass(1000, 1);
+  expect(screen.getByText("300 PDFs made")).toBeInTheDocument();
   expect(makeBillPdf).toHaveBeenCalledTimes(300);
   expect(zipped.files).toHaveLength(300);
   expect(billAsks(calls)).toHaveLength(300);
   expect(billAsks(calls)).not.toContain("sales/301/");
   fireEvent.click(screen.getByRole("button", { name: "Save the zip" }));
-  await waitFor(() => expect(calls.find((c) => c.url === "audit-logs/log/")?.body).toMatchObject({ details: expect.stringContaining("KGH/2026-27/300") }));
-}, 45000); // 300 yielded files and a 301-row preview on the shared two-CPU machine
+  await pass(0, 1);
+  expect(calls.find((c) => c.url === "audit-logs/log/")?.body).toMatchObject({ details: expect.stringContaining("KGH/2026-27/300") });
+});
 
 
 test("a zip waits for bank settings before it can be made", async () => {
@@ -611,7 +615,7 @@ test("zip read progress counts each finished read before the next one answers", 
   open(); await ready(30);
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await waitFor(() => expect(finish).toBeTypeOf("function"));
-  expect(screen.getByText("Reading bills:")).toHaveTextContent("Reading bills: 31 of 40");
+  await waitFor(() => expect(screen.getByText("Reading bills:")).toHaveTextContent("Reading bills: 31 of 40"));
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
   await act(async () => finish(wireDetail(rows[31])));
 }, 20000);
@@ -636,8 +640,8 @@ test("zip reads collect and name every deleted bill, then stop at the first othe
   failed = false;
   const count = billAsks(calls).length;
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(billAsks(calls)).toContain("sales/40/"));
+  // The last read starting doesn't mean the completed result has rendered yet.
+  expect(await screen.findByText(/were deleted after being picked/)).toHaveTextContent("KGH/2026-27/31");
   expect(billAsks(calls).slice(count)).toEqual(rows.slice(34).map((r) => `sales/${r.id}/`));
-  expect(screen.getByText(/were deleted after being picked/)).toHaveTextContent("KGH/2026-27/31");
   expect(screen.queryByRole("button", { name: "Save the zip" })).not.toBeInTheDocument();
 }, 20000);

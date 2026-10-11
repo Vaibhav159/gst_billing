@@ -135,6 +135,8 @@ test("reading progress announces milestones and keeps Stop outside the live regi
   fireEvent.click(screen.getByRole("button", { name: "Download as zip" }));
   await waitFor(() => expect(release.has(31)).toBe(true));
   const live = screen.getAllByRole("status").find((node) => /Reading bills:/.test(node.textContent ?? ""))!;
+  // Starting the held read doesn't guarantee the previous progress update has committed.
+  await waitFor(() => expect(live).toHaveTextContent("Reading bills: 30 of 33"));
   const text = live.textContent;
   await act(async () => release.get(31)!(wireDetail(rows[30])));
   await waitFor(() => expect(release.has(32)).toBe(true));
