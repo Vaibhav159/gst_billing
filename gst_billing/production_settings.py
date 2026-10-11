@@ -156,6 +156,8 @@ if SENTRY_DSN:
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES", "0") or 0),
         # Books data: never ship request bodies / user PII with events.
         send_default_pii=False,
+        max_request_body_size="never",
+        include_local_variables=False,
     )
 
 # Media files
@@ -422,3 +424,10 @@ GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})
+
+# Password codes ship off; fake is used only by synthetic tests.
+SMS_RESET_ENABLED = os.environ.get("SMS_RESET_ENABLED", "").lower() in {"1", "true", "yes"}
+SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "msg91")
+MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
+MSG91_TEMPLATE_ID = os.environ.get("MSG91_TEMPLATE_ID", "")
+MSG91_SENDER = os.environ.get("MSG91_SENDER", "")
