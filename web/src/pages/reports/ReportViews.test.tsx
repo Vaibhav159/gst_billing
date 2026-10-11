@@ -75,8 +75,10 @@ it("uses one scale for month bars, server totals and hides per-firm cash for all
   renderApp(<MonthsView ctx={{ ...ctx, businessId: "all" }} data={data} />);
   expect(screen.queryByRole("columnheader", { name: "Tax to pay in cash" })).not.toBeInTheDocument();
   expect(within(screen.getByRole("table")).getAllByText("₹206.00")).toHaveLength(2);
-  expect(screen.getByLabelText("Sep 2026 sales")).toHaveStyle({ width: "50%" });
-  expect(screen.getByLabelText("Sep 2026 purchases")).toHaveStyle({ width: "100%" });
+  expect(screen.getByLabelText("Sep 2026 sales: ₹103.00")).toHaveStyle({ width: "50%" });
+  expect(screen.getByLabelText("Sep 2026 purchases: ₹206.00")).toHaveStyle({ width: "100%" });
+  fireEvent.click(screen.getByRole("radio", { name: "Bills" }));
+  expect(screen.getByLabelText("Sep 2026 purchases: 2 bills")).toHaveStyle({ width: "100%" });
 });
 it("lets a viewer export reports, independently of gst.download", () => {
   renderApp(<SalesView ctx={ctx} data={sales} />, { me: { role: "viewer", permissions: ["view", "reports.export"] } });
@@ -113,4 +115,20 @@ it("keeps historical purchases with no credit month readable and exportable", as
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /CSV/ })); });
   const csv = new TextDecoder().decode(await bytesOf(saveFile.mock.calls[0][0]));
   expect(csv).toContain("OLD/7"); expect(csv).not.toContain("null");
+});
+
+it("puts only the main sheet's header and bills in the CSV, without the title, total or payment split", async () => {
+  renderApp(<SalesView ctx={{ ...ctx, split: true }} data={{ ...sales, split: [{ mode: "cash", bills: 1, value: 10300 }] }} />);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /CSV/ })); });
+  const csv = new TextDecoder().decode(await bytesOf((saveFile.mock.calls[0] as [Blob])[0]));
+  const lines = csv.replace(/^\ufeff/, "").trim().split("\r\n");
+  expect(lines[0]).toBe("Bill,Date,Firm,Customer,GSTIN,Payment,Taxable value,IGST,CGST,SGST,Bill value");
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toMatch(/^KGH\/21,2026-09-12,/);
+});
+it("aligns each header with its column's figures rather than by position", () => {
+  renderApp(<SalesView ctx={ctx} data={sales} />);
+  const table = screen.getByRole("table", { name: "Sales bills" });
+  const right = within(table).getAllByRole("columnheader").filter(h => h.classList.contains("text-right")).map(h => h.textContent);
+  expect(right).toEqual(["Taxable value", "IGST", "CGST", "SGST", "Bill value"]);
 });
