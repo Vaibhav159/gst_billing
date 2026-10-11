@@ -293,7 +293,7 @@ export function useBillForm(start: Start) {
 
   /* ── editing: what changes, and whether anything has ── */
   const startSig = useRef(JSON.stringify(start.form, (k, v) => (k === "key" ? undefined : v)));
-  const changes = edit && bill ? changesOf(bill, f, { firmName, number: waitingForNext ? "Getting the next number" : stored, pos, inter: tt.inter, total: figs.total, customerName: cust?.name ?? "" }) : [];
+  const changes = edit && bill ? changesOf(bill, f, { firmName, number: waitingForNext ? "Getting the next number" : stored || "—", pos, inter: tt.inter, total: figs.total, customerName: cust?.name ?? "" }) : [];
   const dirty = edit ? changes.length > 0 : JSON.stringify(f, (k, v) => (k === "key" ? undefined : v)) !== startSig.current;
   // the customer has the bill already, and a change changes its total: the saved page offers to send the corrected one.
   // Never for a bill nothing was changed on, whose stored total v3's maths puts a paisa off (Ruling 1D-16)

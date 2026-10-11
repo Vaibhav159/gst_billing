@@ -18,13 +18,15 @@ export type DialogSize = "sm" | "md" | "lg" | "xl";
 export type DialogProps = {
   open: boolean; onClose: () => void; title: string; description?: ReactNode; footer?: ReactNode; size?: DialogSize;
   initialFocus?: RefObject<HTMLElement>;
+  /** Re-arm the tap guard when an open dialog moves to a fresh step. */
+  ghostGuardKey?: string | number;
   /** What typing would be lost ("Discard this item?"); closing then asks first. */
   confirmClose?: string;
   children: ReactNode;
 };
 
 /** Modal dialog. On phones it rises from the bottom; Esc and the scrim close it; it animates out. */
-export function Dialog({ open, onClose, title, description, children, footer, size = "md", initialFocus, confirmClose }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, footer, size = "md", initialFocus, ghostGuardKey, confirmClose }: DialogProps) {
   const { isPhone, isEasy } = useView();
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -34,7 +36,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   useEffect(() => { if (!open) setAsking(false); }, [open]);
   const tryClose = confirmClose ? () => setAsking(true) : onClose;
   useFocusTrap(ref, open, tryClose, initialFocus);
-  const guard = useGhostGuard(open);
+  const guard = useGhostGuard(open, ghostGuardKey);
   const drag = useDragClose(tryClose, isPhone && open);
   const heldChildren = useHeld(open, children);
   const heldFooter = useHeld(open, footer);

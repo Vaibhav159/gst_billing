@@ -61,6 +61,42 @@ test("a click landing within 350 ms of opening is ignored (the second tap of a d
   vi.useRealTimers();
 });
 
+test("changing a dialog's ghost guard key holds taps for 350 ms without moving focus, and the same key does not restart it", () => {
+  vi.useFakeTimers();
+  try {
+    const onPick = vi.fn();
+    function Probe({ item }: { item: number }) {
+      return <MemoryRouter><ToastProvider><Dialog open onClose={() => {}} title="Add an item" ghostGuardKey={item}>
+        <input aria-label="Search products" /><Button onClick={onPick}>An item that isn't in Products</Button>
+      </Dialog></ToastProvider></MemoryRouter>;
+    }
+    const { rerender } = render(<Probe item={1} />);
+    act(() => { vi.advanceTimersByTime(350); });
+    const field = screen.getByRole("textbox", { name: "Search products" });
+    const pick = screen.getByRole("button", { name: "An item that isn't in Products" });
+    act(() => field.focus());
+    expect(field).toHaveFocus();
+    fireEvent.click(pick);
+    expect(onPick).toHaveBeenCalledTimes(1);
+
+    rerender(<Probe item={2} />);
+    expect(field).toHaveFocus();
+    fireEvent.click(pick);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(349); });
+    expect(field).toHaveFocus();
+    fireEvent.click(pick);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(1); });
+    fireEvent.click(pick);
+    expect(onPick).toHaveBeenCalledTimes(2);
+
+    rerender(<Probe item={2} />);
+    fireEvent.click(pick);
+    expect(onPick).toHaveBeenCalledTimes(3);
+  } finally { vi.useRealTimers(); }
+});
+
 test("menus open from their button and choose with the keyboard", async () => {
   const onSelect = vi.fn();
   wrap(<Menu title="Actions" trigger={(p) => <button {...p}>More</button>} items={[{ label: "Print", onSelect }, { label: "Delete", tone: "danger", onSelect: () => {} }]} />);

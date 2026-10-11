@@ -14,6 +14,7 @@ import { NewItemForm } from "./NewItemForm";
 import { matchProducts, quickProducts, type SaleProduct } from "./products";
 import { isWeight, lineProblems, perWord, unitWord, type LineField } from "./rules";
 import type { BillFormApi } from "./useBillForm";
+import { useRepairBoxes } from "./useRepairBoxes";
 
 const UNIT_OPTIONS = UNITS.map((u) => ({ value: u.value, label: u.value }));
 const ORDER: LineField[] = ["hsn", "gst", "qty", "rate"];
@@ -24,6 +25,8 @@ export type ItemSheetProps = {
   /** The line being changed, or null to add one. */
   lineKey: string | null;
   products: SaleProduct[] | undefined;
+  productsError?: boolean;
+  focusField?: LineField | "product" | "note";
   onClose: () => void;
   /** "Add and next item": the sheet opens again, empty. */
   onAgain: () => void;
@@ -31,7 +34,7 @@ export type ItemSheetProps = {
   again: number;
 };
 
-export function ItemSheet({ F, open, lineKey, products, onClose, onAgain, again }: ItemSheetProps) {
+export function ItemSheet({ F, open, lineKey, products, productsError, focusField, onClose, onAgain, again }: ItemSheetProps) {
   const { can } = useAuth();
   const existing = lineKey ? F.f.lines.find((x) => x.key === lineKey) ?? null : null;
   const [line, setLine] = useState<FormLine>(() => (existing ? { ...existing } : blankLine()));
@@ -40,16 +43,20 @@ export function ItemSheet({ F, open, lineKey, products, onClose, onAgain, again 
   const [tried, setTried] = useState(false);
   const [formTyped, setFormTyped] = useState(false);
   const [productBusy, setProductBusy] = useState(false);
-  const [fixing, setFixing] = useState<string | null>(null);
+  const [opened, setOpened] = useState({ open, lineKey, again });
+  const problemField = useRef<HTMLElement | null>(null);
   const productList = useRef<HTMLDivElement>(null);
   // what the line was before anything was typed: the line being changed, or the product just picked
   const base = useRef<FormLine>(line);
-  useEffect(() => {
-    if (!open) return;
-    const st = existing ? { ...existing } : blankLine();
-    base.current = st;
-    setLine(st); setQ(""); setTried(false); setMode("item"); setFormTyped(false); setFixing(null);
-  }, [open, lineKey, again]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Reset before committing the new sheet: the previous item's fields must never flash or take focus.
+  if (opened.open !== open || opened.lineKey !== lineKey || opened.again !== again) {
+    setOpened({ open, lineKey, again });
+    if (open) {
+      const st = existing ? { ...existing } : blankLine();
+      base.current = st;
+      setLine(st); setQ(""); setTried(false); setMode("item"); setFormTyped(false);
+    }
+  }
   const chosen = hasContent(line) || line.custom;
   // Add and next removes the field with focus: return to the list with the keyboard down.
   useEffect(() => { if (open && !chosen && mode === "item") productList.current?.focus({ preventScroll: true }); }, [open, chosen, mode, again]);
@@ -69,9 +76,11 @@ export function ItemSheet({ F, open, lineKey, products, onClose, onAgain, again 
   // As on a desktop line, keep the repair boxes while typing, even once the HSN and GST rate are valid.
   const item = `${line.productId ?? ""}:${line.name}`;
   const needs = chosen && (line.custom || Boolean(err.hsn || err.gst || show("hsn") || show("gst")));
-  if (needs && fixing !== item) setFixing(item);
-  const repair = needs || (chosen && fixing === item);
-  const pick = (p: SaleProduct) => setLine((l) => { const nl = lineFromProduct(p, l); if (!lineKey) base.current = nl; return nl; });
+  const repair = useRepairBoxes(item, chosen, needs, base.current);
+  const pick = (p: SaleProduct) => {
+    flushSync(() => setLine((l) => { const nl = lineFromProduct(p, l); if (!lineKey) base.current = nl; return nl; }));
+    focusNow("is-qty", true);
+  };
   // a drag, Esc, the scrim or ✕ asks before a typed weight, rate or item is thrown away
   const typed = mode === "product" ? formTyped : SAME.some((k) => (line[k] ?? null) !== (base.current[k] ?? null));
   const commit = (more: boolean) => {
@@ -90,11 +99,11 @@ export function ItemSheet({ F, open, lineKey, products, onClose, onAgain, again 
     </>
   ) : undefined;
   return (
-    <Dialog open={open} onClose={productBusy ? () => {} : onClose} title={mode === "product" ? "An item that isn't in Products" : lineKey ? `Item ${idx}` : `Add item ${idx}`} footer={footer}
+    <Dialog open={open} ghostGuardKey={again} initialFocus={focusField ? problemField : undefined} onClose={productBusy ? () => {} : onClose} title={mode === "product" ? "An item that isn't in Products" : lineKey ? `Item ${idx}` : `Add item ${idx}`} footer={footer}
       confirmClose={!productBusy && typed ? (lineKey && mode !== "product" ? "Discard the changes to this item?" : "Discard this item?") : undefined}>
       {mode === "product" ? (
         <NewItemForm initialName={t} idBase="npp" onCancel={() => setMode("item")} onTyped={setFormTyped} onBusy={setProductBusy}
-          onDone={(r) => { setLine((l) => ({ ...l, productId: r.productId, name: r.line.name, hsn: r.line.hsn, gst: r.line.gst, unit: r.line.unit, rate: r.line.rate || l.rate, note: r.line.description || l.note, custom: r.productId === null })); setMode("item"); }} />
+          onDone={(r) => { flushSync(() => { setLine((l) => ({ ...l, productId: r.productId, name: r.line.name, hsn: r.line.hsn, gst: r.line.gst, unit: r.line.unit, rate: r.line.rate || l.rate, note: r.line.description || l.note, custom: r.productId === null })); setMode("item"); }); focusNow("is-qty", true); }} />
       ) : !chosen ? (
         // opens on the common products, not the search box: the keyboard stays down until asked for
         <div ref={productList} className="flex flex-col gap-3 outline-none" tabIndex={-1} data-autofocus="">
@@ -103,18 +112,19 @@ export function ItemSheet({ F, open, lineKey, products, onClose, onAgain, again 
               {quickProducts(products, 8).map((p) => <Chip key={p.id} onClick={() => pick(p)}>{p.name.replace(/ 22K$/, "")}</Chip>)}
             </div>
           ) : null}
+          {productsError && !products ? <p className="text-fg2">Products couldn't load: add the item by hand</p> : null}
           <SearchInput value={q} onChange={setQ} placeholder="Search products or HSN" label="Search products" enterKeyHint="search" />
           {t ? (
             <div className="-mx-5 flex flex-col">
               {list.map((p) => <ListRow key={p.id} onClick={() => pick(p)} title={p.name} subtitle={`HSN ${p.hsn_code || "missing"} · GST ${p.gst_percent != null ? `${p.gst_percent}%` : "rate not set"} · per ${perWord(p.unit)}`} chevron={false} />)}
-              {!list.length ? <p className="px-5 py-3 text-fg2">{products ? `No product matches “${t}”.` : "Products are still loading."}</p> : null}
+              {!list.length && (products || !productsError) ? <p className="px-5 py-3 text-fg2">{products ? `No product matches “${t}”.` : "Products are still loading."}</p> : null}
             </div>
           ) : null}
           <Button variant="outline" full icon={PackagePlus} onClick={() => setMode("product")}>{t ? `“${t}” isn't in Products` : "An item that isn't in Products"}</Button>
           {!can("product.edit") ? <p className="text-sm text-muted -mt-1">Such an item is used on this bill only. The owner adds products to the list.</p> : null}
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" ref={(node) => { problemField.current = focusField ? node?.querySelector<HTMLElement>(`#is-${focusField}`) ?? null : null; }}>
           <div className="flex items-center gap-3">
             <span className="flex-1 min-w-0">
               <span className="block font-semibold">{line.name}</span>
@@ -138,7 +148,7 @@ export function ItemSheet({ F, open, lineKey, products, onClose, onAgain, again 
             <div className="grid grid-cols-[minmax(0,1fr)_104px] gap-3">
               <Field label={isWeight(line.unit) ? `Weight in ${unitWord(line.unit)}` : `How many ${unitWord(line.unit)}`} htmlFor="is-qty" error={show("qty")}>
                 <QtyInput id="is-qty" unit="" decimals={unitDecimals(line.unit)} value={line.qty} onChange={(v, txt) => setLine((l) => ({ ...l, qty: v, dotQty: /^\./.test(txt) }))}
-                  invalid={Boolean(show("qty"))} inputClassName="h-14 text-2xl tnum" autoFocus={!lineKey} enterKeyHint="next" onKeyDown={enterTo("is-rate")} />
+                  invalid={Boolean(show("qty"))} inputClassName="h-14 text-2xl tnum" enterKeyHint="next" onKeyDown={enterTo("is-rate")} />
               </Field>
               <Field label="Unit" htmlFor="is-unit">
                 <Select id="is-unit" value={line.unit} options={UNIT_OPTIONS} onChange={(e) => setLine((l) => ({ ...l, unit: e.target.value }))} className="[&_select]:h-14" />

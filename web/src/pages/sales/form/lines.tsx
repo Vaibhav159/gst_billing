@@ -13,6 +13,7 @@ import { hasContent, lineFromProduct, SLAB_OPTIONS, slabOf, type FormLine } from
 import { matchProducts, type SaleProduct } from "./products";
 import { isWeight, lineProblems, lineWarning, perWord, unitWord } from "./rules";
 import type { BillFormApi } from "./useBillForm";
+import { useRepairBoxes } from "./useRepairBoxes";
 
 /** The product box's rows: the products matching every word typed, then "+ An item that isn't in Products…". */
 export function productOptions(list: SaleProduct[] | undefined, failed: boolean, typed: string, canAdd: boolean): ComboItem<SaleProduct | null>[] {
@@ -111,9 +112,7 @@ function ProductCell(props: LineProps) {
   const probs = lineProblems(l);
   const needs = content && (l.custom || Boolean(probs.hsn || probs.gst));
   const item = `${l.productId ?? ""}:${l.name}`;
-  const [fixing, setFixing] = useState<string | null>(needs ? item : null);
-  if (needs && fixing !== item) setFixing(item);
-  const inputs = needs || (content && fixing === item);
+  const inputs = useRepairBoxes(item, content, needs);
   return (
     <div className="min-w-0 flex flex-col gap-1.5">
       <ProductField {...props} />

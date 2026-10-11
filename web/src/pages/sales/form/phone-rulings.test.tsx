@@ -167,6 +167,7 @@ test("a line refused by the server opens its own phone sheet and shows the serve
   expect(within(item).getByText(words)).toBeInTheDocument();
   const rate = within(item).getByLabelText("Rate per gram");
   expect(rate).toHaveAttribute("aria-invalid", "true");
+  expect(rate).toHaveFocus();
   await user.clear(rate);
   await user.type(rate, "6500");
   expect(within(item).queryByText(words)).not.toBeInTheDocument();

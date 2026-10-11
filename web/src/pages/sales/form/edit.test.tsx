@@ -2,6 +2,7 @@ import { isValidElement, type ReactElement } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager, QueryClient } from "@tanstack/react-query";
 import { matchRoutes } from "react-router";
+import { __setNetState } from "@/core/api/network";
 import { billQuery, invalidateSales, type BillOutcome } from "@/core/api/sales";
 import { appRoutes } from "@/core/router/routes";
 import { refuse, wireBin, wireDetail, WIRE_LINES, type Route } from "@/core/sales/fixtures";
@@ -12,7 +13,7 @@ import { asksOnClose, formServer, fakeToday, mountForm, settle, STAFF, wireNext 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); (window as unknown as { __phone?: boolean }).__phone = false; });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); act(() => __setNetState("online")); (window as unknown as { __phone?: boolean }).__phone = false; });
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
 const SENT = { at: "2026-10-05T12:09:00+05:30", last_at: "2026-10-05T12:09:00+05:30", count: 1, via: "whatsapp", to: "" };
 
@@ -379,6 +380,26 @@ test("T9 leftovers: a moved edit names the pending number without empty words or
   expect(within(review).getByRole("button", { name: "Save changes" })).toBeDisabled();
   await act(async () => { answer(); });
   await waitFor(() => expect(review).toHaveTextContent("It becomes 9. The change is written to the audit log."));
+  expect(within(review).getByRole("list", { name: "What changes" })).toHaveTextContent("Bill number: KGH/2026-27/31 →becomes 9");
+});
+
+test.each(["fails", "goes offline"] as const)("T9 review fix 1: a moved edit shows — when the next number %s with the review open", async (result) => {
+  const user = fakeToday();
+  let fail = () => {};
+  formServer([
+    ["GET", "sales/412/", () => wireDetail()],
+    ["GET", "sales/next-number/", () => new Promise<void>((done) => { fail = done; }).then(() => refuse(500, {}))],
+  ]);
+  mountForm("/sales/412/edit");
+  await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
+  await user.selectOptions(screen.getByLabelText("Firm"), "2");
+  const { dialog } = await reviewChanges(user);
+  const changes = within(dialog).getByRole("list", { name: "What changes" });
+  expect(changes).toHaveTextContent("Bill number: KGH/2026-27/31 →becomes Getting the next number");
+  await act(async () => { if (result === "fails") fail(); else __setNetState("offline"); });
+  await settle();
+  expect(changes).toHaveTextContent("Bill number: KGH/2026-27/31 →becomes —");
+  expect(changes).not.toHaveTextContent("Getting the next number");
 });
 
 test("T9 leftovers: typing weight and rate back clears the status and both leave prompts", async () => {

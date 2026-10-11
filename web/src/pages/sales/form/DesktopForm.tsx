@@ -6,7 +6,7 @@ import { useNavigate } from "react-router";
 import { AlertTriangle, BookOpenText, FilePlus2, Plus, SquarePen } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { date, monthOf, plural } from "@/core/format";
+import { date, plural } from "@/core/format";
 import { Button, ButtonLink, Card, Field, Kbd, Page, Select, Sheet, Textarea } from "@/core/ui";
 import { useBoxWidth } from "@/core/useBoxWidth";
 import { CustomerFixSheet, CustomerPicker, homeState, NewCustomerSheet, type FixField } from "@/pages/customers/forBills";
@@ -15,7 +15,7 @@ import { CheckList, focusNow, LabelSpacer, PayPicker, type CheckRow } from "./fi
 import { LineRow, ONE_ROW, LINE_COLS } from "./lines";
 import { hasContent } from "./model";
 import { NewItemForm, type NewItem } from "./NewItemForm";
-import { DateBlock, NumberField, Origins, PaperSwitch, paperBookTo, PaymentNote, PlaceOfSupply, SummaryFigures } from "./parts";
+import { billCloseTo, DateBlock, NumberField, Origins, PaperSwitch, PaymentNote, PlaceOfSupply, saveFromReview, SummaryFigures } from "./parts";
 import { useSaleProducts } from "./products";
 import { focusReview, Review } from "./Review";
 import { paymentNote } from "./rules";
@@ -61,9 +61,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
   /** Check and save: the review, or the first problem, scrolled to and focused. */
   const onTryReview = () => { const r = F.openReview(); if (!r.ok) focusProblem(F, r.first); };
   /** Saves from the review; a field the server refused is focused once the review has closed. */
-  const saveNow = (numberOverride?: string) => {
-    void F.save({ numberOverride }).then((r) => { if (r.refused) { const k = r.refused; setTimeout(() => focusProblem(F, k), 0); } });
-  };
+  const saveNow = (numberOverride?: string) => saveFromReview(F, (key) => focusProblem(F, key), numberOverride);
   // Ctrl S: check and save (the review presses its own Save: Review). Ctrl Enter: add a line, focus moving at once.
   // Neither acts on the bill from behind an open dialog (the review, a new customer, an item, a PAN, search) or a menu
   // (the top bar's, as the app's shortcuts read it): Ctrl S there would mark the form and pull the cursor out from under
@@ -78,8 +76,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-  const ym = F.f.date ? monthOf(F.f.date) : "";
-  const close = () => navigate(F.paper && ym && F.f.firmId !== null ? paperBookTo(F.f.firmId, ym) : "/sales");
+  const close = () => navigate(billCloseTo(F));
   const onNewItem = (key: string) => (r: NewItem) => {
     F.setLine(key, (prev) => ({ productId: r.productId, name: r.line.name, hsn: r.line.hsn, gst: r.line.gst, unit: r.line.unit, rate: r.line.rate || prev.rate, note: r.line.description || prev.note, custom: r.productId === null }));
     // the cursor goes to the line's quantity (drawn already) before the sheet lets go of it, so it never passes back

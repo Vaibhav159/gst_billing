@@ -17,6 +17,14 @@ type P = { F: BillFormApi; id: string };
 /** A firm's month in the paper book (/sales/paper keeps its firm and month in the address). */
 export const paperBookTo = (firmId: number, ym: string) => `/sales/paper?firm=${firmId}&month=${ym}`;
 
+/** Closing a new bill returns to its paper book when it has a firm and date, otherwise to Sales. */
+export const billCloseTo = (F: BillFormApi) => F.paper && F.f.date && F.f.firmId !== null ? paperBookTo(F.f.firmId, monthOf(F.f.date)) : "/sales";
+
+/** A server-refused field takes focus once the review has closed, on either view. */
+export function saveFromReview(F: BillFormApi, focus: (key: string) => void, numberOverride?: string): void {
+  void F.save({ numberOverride }).then((r) => { if (r.refused) { const key = r.refused; setTimeout(() => focus(key), 0); } });
+}
+
 /** The bill number: always the paper bill's, typed, or the next one confirmed; a saved bill's kept unless renumbered (PROTO BillForm.jsx:262-299). */
 export function NumberField({ F, id, inputRef }: P & { inputRef?: Ref<HTMLInputElement> }) {
   const offline = useNetwork() === "offline";
@@ -65,12 +73,12 @@ export function PaperSwitch({ F, id }: P) {
 }
 
 /** The date: Today and Yesterday; a paper bill's own date, with Same as last bill, Day before and Day after (PROTO BillForm.jsx:326-356). */
-export function DateBlock({ F, id }: P) {
+export function DateBlock({ F, id, inputRef }: P & { inputRef?: Ref<HTMLInputElement> }) {
   const err = F.showErr("date");
   const pick = (iso: string) => { F.set({ date: iso }); F.setTouched((t) => ({ ...t, date: true })); };
   const hint = F.dateWarn || (F.f.date && !F.errors.date ? `${weekday(F.f.date)} · goes into ${monthLabel(monthOf(F.f.date), { long: true })}'s GSTR-1` : "Day first: 8/10, 08-10-2026 or 8 Oct. Alt + Down opens the calendar.");
   const field = (
-    <DateField id={id} value={F.f.date} today={F.today} offReason={F.offReason} label={F.paper ? "Date on the paper bill" : "Date"}
+    <DateField id={id} inputRef={inputRef} value={F.f.date} today={F.today} offReason={F.offReason} label={F.paper ? "Date on the paper bill" : "Date"}
       onChange={(iso) => F.set({ date: iso ?? "" })} onCommit={() => F.setTouched((t) => ({ ...t, date: true }))}
       invalid={Boolean(err)} describedBy={err ? `${id}-error` : `${id}-hint`} />
   );

@@ -1,7 +1,7 @@
 // The bill form's own fields (PROTO pages/sales/parts.jsx): a date typed day-first with a calendar, how it was paid with
 // nothing picked for you, the checks beside the total, and a rate typed as written (up to 3 decimals, grouped the
 // Indian way once you leave it). Plus the focus helpers that let a fast typist's next key land in the right box.
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type Ref } from "react";
 import { AlertTriangle, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle } from "lucide-react";
 import { cn } from "@/core/cn";
 import { addMonths, date, lastDayOfMonth, monthLabel } from "@/core/format";
@@ -121,10 +121,10 @@ export function Calendar({ value, today, onPick, onClose, offReason, label = "Pi
 
 export type DateFieldProps = {
   id: string; value: string; today: string; onChange: (iso: string | null, text: string) => void; onCommit?: (iso: string | null) => void;
-  invalid?: boolean; describedBy?: string; offReason: (iso: string) => string; label?: string;
+  invalid?: boolean; describedBy?: string; offReason: (iso: string) => string; label?: string; inputRef?: Ref<HTMLInputElement>;
 };
 /** A date typed as people say it ("8/10", "8 oct", "today"); Alt + Down opens the calendar (PROTO parts.jsx:844-881). */
-export function DateField({ id, value, today, onChange, onCommit, invalid, describedBy, offReason, label = "Date" }: DateFieldProps) {
+export function DateField({ id, value, today, onChange, onCommit, invalid, describedBy, offReason, label = "Date", inputRef }: DateFieldProps) {
   const { isPhone } = useView();
   const [text, setText] = useState(value ? date(value) : "");
   const [cal, setCal] = useState(false);
@@ -146,7 +146,7 @@ export function DateField({ id, value, today, onChange, onCommit, invalid, descr
   const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && cal) { e.preventDefault(); e.stopPropagation(); setCal(false); } };
   return (
     <div ref={wrap} className="relative min-w-0" onBlur={leave} onKeyDown={esc}>
-      <Input id={id} value={text} invalid={invalid} aria-describedby={describedBy} autoComplete="off" spellCheck={false} inputClassName={isPhone ? "pl-14" : "pl-11"}
+      <Input ref={inputRef} id={id} value={text} invalid={invalid} aria-describedby={describedBy} autoComplete="off" spellCheck={false} inputClassName={isPhone ? "pl-14" : "pl-11"}
         onChange={(e) => { const t = e.target.value; setText(t); const iso = parseDateText(t, today); last.current = iso ?? ""; onChange(iso, t); }}
         onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "ArrowDown" && e.altKey) { e.preventDefault(); setCal(true); } }} />
       <button type="button" onClick={() => setCal((o) => !o)} aria-label={`${label}: open the calendar`} aria-expanded={cal} title="Calendar (Alt + Down)"

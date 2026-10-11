@@ -117,9 +117,9 @@ export function usePresence(open: boolean, ms = 170): { mounted: boolean; closin
 }
 
 /** Taps landing within ~350 ms of an overlay opening are the tail of the tap that opened it: swallow them. */
-export function useGhostGuard(open: boolean): (e: SyntheticEvent) => void {
+export function useGhostGuard(open: boolean, key?: string | number): (e: SyntheticEvent) => void {
   const at = useRef(0);
-  useEffect(() => { if (open) at.current = Date.now(); }, [open]);
+  useEffect(() => { if (open) at.current = Date.now(); }, [open, key]);
   return (e) => { if (Date.now() - at.current < 350) { e.stopPropagation(); e.preventDefault(); } };
 }
 

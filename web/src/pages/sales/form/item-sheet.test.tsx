@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { refuse, wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { renderApp } from "@/test/render";
-import { ItemSheet } from "./ItemSheet";
+import { ItemSheet, type ItemSheetProps } from "./ItemSheet";
 import { startEdit, startNew, type FormLine, type Start } from "./model";
 import { toSaleProduct } from "./products";
-import { DIAMOND, fakeToday, formServer, NECKLACE, RING, TODAY } from "./testing";
+import { DIAMOND, fakeToday, formServer, mountForm, NECKLACE, RING, TODAY } from "./testing";
 import { useBillForm } from "./useBillForm";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -17,7 +17,7 @@ const products = [RING, NECKLACE, DIAMOND].map(toSaleProduct);
 const newBill = () => startNew({ firmId: 3, firmSource: "scope", today: TODAY });
 const editBill = () => startEdit(toBillDetail(wireDetail()));
 
-function Harness({ start, edit = false }: { start: Start; edit?: boolean }) {
+function Harness({ start, edit = false, productsError, focusField }: { start: Start; edit?: boolean } & Pick<ItemSheetProps, "productsError" | "focusField">) {
   const F = useBillForm(start);
   const [open, setOpen] = useState(false);
   const [again, setAgain] = useState(0);
@@ -26,7 +26,7 @@ function Harness({ start, edit = false }: { start: Start; edit?: boolean }) {
     <button onClick={F.openReview}>Check bill</button>
     <button onClick={() => { void F.save().then((r) => { if (r.refused) setOpen(true); }); }}>Try save</button>
     <output data-testid="lines">{JSON.stringify(F.filled)}</output>
-    <ItemSheet F={F} open={open} lineKey={edit ? start.form.lines[0].key : null} products={products}
+    <ItemSheet F={F} open={open} lineKey={edit ? start.form.lines[0].key : null} products={productsError ? undefined : products} productsError={productsError} focusField={focusField}
       onClose={() => setOpen(false)} onAgain={() => setAgain((n) => n + 1)} again={again} />
   </>;
 }
@@ -51,6 +51,7 @@ test("Add and next item keeps the first item and opens the common list with empt
   const next = await screen.findByRole("dialog", { name: "Add item 2" });
   expect(within(next).getByRole("group", { name: "Common products" }).parentElement).toHaveFocus();
   expect(savedLines()).toMatchObject([{ name: "Gold Ring 22K", qty: 2, rate: "6500" }]);
+  await pass();
   await user.click(within(next).getByRole("button", { name: "Gold Necklace" }));
   expect(within(next).getByLabelText("Weight in grams")).toHaveValue("");
   expect(within(next).getByLabelText("Rate per gram")).toHaveValue("");
@@ -212,4 +213,82 @@ test("a save refusal shows each line field in its sheet, clearing each server er
   await user.click(within(sheet).getByRole("button", { name: "Change" }));
   await user.click(within(sheet).getByRole("button", { name: "Gold Necklace" }));
   expect(within(sheet).queryByText("Use the printed item name.")).not.toBeInTheDocument();
+});
+
+
+test("reopening after Add to bill never focuses the previous weight and Close returns to Add another item", async () => {
+  const user = fakeToday();
+  formServer();
+  mountForm("/sales/new");
+  await screen.findByRole("heading", { level: 1, name: "New bill" });
+  await pass();
+  await user.click(screen.getByRole("button", { name: "Add item" }));
+  let sheet = await screen.findByRole("dialog", { name: "Add item 1" });
+  await pass();
+  await user.click(within(sheet).getByRole("button", { name: "Gold Ring" }));
+  await user.keyboard("2{Enter}6500{Enter}");
+  await pass();
+  const opener = screen.getByRole("button", { name: "Add another item" });
+  const focused: string[] = [];
+  const record = (e: FocusEvent) => focused.push((e.target as Element).id);
+  document.addEventListener("focusin", record);
+  try {
+    await user.click(opener);
+    sheet = await screen.findByRole("dialog", { name: "Add item 2" });
+    await pass();
+  } finally {
+    document.removeEventListener("focusin", record);
+  }
+  expect.soft(focused).not.toContain("is-qty");
+  expect(within(sheet).getByRole("group", { name: "Common products" }).parentElement).toHaveFocus();
+  await user.click(within(sheet).getByRole("button", { name: "Close" }));
+  await pass();
+  expect(opener).toHaveFocus();
+});
+
+test("a failed product list says it could not load and keeps adding by hand available", async () => {
+  const user = fakeToday();
+  formServer();
+  renderApp(<Harness start={newBill()} productsError />);
+  await user.click(screen.getByRole("button", { name: "Open item" }));
+  const sheet = await screen.findByRole("dialog", { name: "Add item 1" });
+  await pass();
+  expect(within(sheet).getByText("Products couldn't load: add the item by hand")).toBeInTheDocument();
+  await user.type(within(sheet).getByLabelText("Search products"), "silver");
+  expect(within(sheet).queryByText("Products are still loading.")).not.toBeInTheDocument();
+  await user.click(within(sheet).getByRole("button", { name: "“silver” isn't in Products" }));
+  expect(within(sheet).getByLabelText(/^Name/)).toHaveValue("silver");
+});
+
+test.each(["product", "hsn", "gst", "qty", "rate", "note"] as const)("an item opened for its %s problem focuses that field immediately and keeps it after the guard", async (focusField) => {
+  const user = fakeToday();
+  formServer();
+  const start = editBill();
+  start.form.lines[0] = { ...start.form.lines[0], hsn: "71", gst: "7" };
+  renderApp(<Harness start={start} edit focusField={focusField} />);
+  await user.click(screen.getByRole("button", { name: "Open item" }));
+  await screen.findByRole("dialog", { name: "Item 1" });
+  expect(document.getElementById(`is-${focusField}`)).toHaveFocus();
+  await pass();
+  expect(document.getElementById(`is-${focusField}`)).toHaveFocus();
+});
+
+test("Add and next item swallows a second tap on the new product list until its 350 ms guard passes", async () => {
+  const user = fakeToday();
+  formServer();
+  const sheet = await openItem(user);
+  await user.click(within(sheet).getByRole("button", { name: "Gold Ring" }));
+  await user.keyboard("2{Enter}6500");
+  fireEvent.click(within(sheet).getByRole("button", { name: "Add and next item" }));
+  const next = screen.getByRole("dialog", { name: "Add item 2" });
+  const byHand = within(next).getByRole("button", { name: "An item that isn't in Products" });
+  fireEvent.click(byHand);
+  expect(screen.getByRole("dialog", { name: "Add item 2" })).toBeInTheDocument();
+  act(() => { vi.advanceTimersByTime(349); });
+  fireEvent.click(byHand);
+  expect(screen.getByRole("dialog", { name: "Add item 2" })).toBeInTheDocument();
+  act(() => { vi.advanceTimersByTime(1); });
+  fireEvent.click(byHand);
+  expect(screen.getByRole("dialog", { name: "An item that isn't in Products" })).toBeInTheDocument();
+  expect(savedLines()).toHaveLength(1);
 });
