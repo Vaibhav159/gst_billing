@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { AxiosError } from "axios";
 import { MemoryRouter } from "react-router";
 import { toCustomer } from "@/core/api/customers";
 import { __resetDrafts, useKeepDraft, useUnfinishedBills } from "@/core/api/drafts";
@@ -222,6 +223,28 @@ test("Ctrl S inside one of the form's own sheets stays there: the bill behind it
   expect(within(summary()).getByRole("alert")).toHaveTextContent("2 things to fix before saving. Each is marked under its field.");
 });
 
+test("a menu open (the top bar's) has Ctrl S and Ctrl Enter, as the app's shortcuts read it: the bill isn't checked behind it, and no line is added", async () => {
+  const user = fakeToday();
+  formServer();
+  mountForm("/sales/new");
+  const customer = await screen.findByRole("combobox", { name: /Customer/ });
+  await waitFor(() => expect(customer).toHaveFocus());
+  const menu = document.body.appendChild(document.createElement("div"));
+  menu.setAttribute("role", "menu");
+  try {
+    await user.keyboard("{Control>}s{/Control}");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(screen.queryByText(/to fix before saving/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Line 2 product" })).not.toBeInTheDocument();
+    // one on its way out doesn't
+    menu.setAttribute("data-closing", "");
+    await user.keyboard("{Control>}s{/Control}");
+    expect(within(summary()).getByRole("alert")).toHaveTextContent("2 things to fix before saving. Each is marked under its field.");
+  } finally {
+    menu.remove();
+  }
+});
+
 test("an item that isn't in Products fills its line, with its HSN and GST rate to change there", async () => {
   const user = fakeToday();
   formServer();
@@ -329,6 +352,21 @@ test("a copy and a cancelled bill made again start filled in, and say where they
   await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
 });
 
+test("a name ending in s takes the apostrophe alone: Kulkarni Jewellers' bill, Kulkarni Jewellers' bills", async () => {
+  fakeToday();
+  const kulkarni = { ...ANIL, id: 12, name: "Kulkarni Jewellers" };
+  formServer([
+    ["GET", "sales/412/", () => wireDetail({ customer: { ...(wireDetail().customer as object), id: 12, name: "Kulkarni Jewellers" } })],
+    ["GET", "customers/12/", () => kulkarni],
+  ]);
+  const view = mountForm("/sales/new?from=412");
+  expect(await screen.findByText("Kulkarni Jewellers' bill of 08 Oct 2026. Check the weights and rates; the date, number and payment are new.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  view.unmount();
+  mountForm("/sales/new?customer=12", { me: ACCOUNTANT });
+  expect(await screen.findByRole("link", { name: "Kulkarni Jewellers' bills" })).toHaveAttribute("href", "/sales?customer=12&all=1");
+});
+
 test("someone who can't make bills is told who can, and led to the customer's bills", async () => {
   fakeToday();
   formServer();
@@ -434,7 +472,7 @@ test("editing keeps the bill's number unless it's renumbered or the bill moves; 
   act(() => { result.current.setNumber("35"); });
   await act(async () => { vi.advanceTimersByTime(400); });
   await waitFor(() => expect(calls.some((c) => c.url === "sales/check-number/" && c.params.exclude_id === 412)).toBe(true));
-  expect(result.current.checks[0].text).toBe("Renumbers KGH/2026-27/31 to KGH/2026-27/35");
+  await waitFor(() => expect(result.current.checks[0]).toEqual({ key: "num", ok: true, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/35" }));
   act(() => { result.current.setFirm(2); });
   await waitFor(() => expect(result.current.moved).toBe(true));
   expect(result.current.firmHint).toBe("Moves the bill to MEERA ORNAMENTS as 35. KGH/2026-27/31 is left unused.");
@@ -471,6 +509,57 @@ test("a number check that checked nothing (contract §2.12's unchecked: no firm,
   await waitFor(() => expect(result.current.numberState).toBe("unknown"));
   expect(result.current.checks[0]).toEqual({ key: "num", ok: null, text: "Bill number KGH/2026-27/35: checked when it saves" });
   expect(result.current.numberError).toBe("");
+});
+
+test.each([
+  ["fails (a 500)", () => refuse(500, { detail: "Server error" })],
+  ["gets no answer (the network)", () => { throw new AxiosError("Network Error", "ERR_NETWORK"); }],
+] as const)("a number check that %s is no answer either: never \"Checking…\" for ever, it's checked when the bill saves (T4 re-review)", async (_, answer) => {
+  fakeToday();
+  const { calls } = formServer([["GET", "sales/check-number/", answer]]);
+  const s = startNew({ firmId: 3, firmSource: "scope", today: TODAY });
+  const { result } = renderHook(() => useBillForm(s), { wrapper: inRouter });
+  await waitFor(() => expect(result.current.suggestion).toBe("34"));
+  act(() => { result.current.setNumber("35"); });
+  // typed, and checked once typing pauses
+  expect(result.current.checks[0]).toEqual({ key: "num", ok: null, text: "Checking that KGH/2026-27/35 is free" });
+  await act(async () => { vi.advanceTimersByTime(400); });
+  await waitFor(() => expect(calls.some((c) => c.url === "sales/check-number/" && c.params.invoice_number === "35")).toBe(true));
+  await waitFor(() => expect(result.current.numberState).toBe("unknown"));
+  expect(result.current.checks[0]).toEqual({ key: "num", ok: null, text: "Bill number KGH/2026-27/35: checked when it saves" });
+  expect(result.current.numberError).toBe("");
+});
+
+test("a number check that can't be sent (no date the server could read) is no answer either: never \"Checking…\" for ever (T4 re-review)", async () => {
+  fakeToday();
+  const { calls } = formServer();
+  const s = startNew({ firmId: 3, firmSource: "scope", today: TODAY });
+  const { result } = renderHook(() => useBillForm(s), { wrapper: inRouter });
+  await waitFor(() => expect(result.current.suggestion).toBe("34"));
+  // the date box holds something that isn't a date
+  act(() => { result.current.set({ date: "" }); result.current.setNumber("35"); });
+  await act(async () => { vi.advanceTimersByTime(400); });
+  expect(result.current.numberState).toBe("unknown");
+  expect(result.current.checks[0]).toEqual({ key: "num", ok: null, text: "Bill number 35: checked when it saves" });
+  expect(calls.some((c) => c.url === "sales/check-number/")).toBe(false);
+});
+
+test("renumbering a saved bill shows as settled only once the server says the new number is free (T4 re-review)", async () => {
+  fakeToday();
+  let answer = () => {};
+  const { calls } = formServer([["GET", "sales/check-number/", () => new Promise((ok) => {
+    answer = () => ok({ invoice_number: "KGH/2026-27/35", counter: 35, code: "", problem: "", bill: null, binned: null, note: "", same_counter: null, next: { counter: 34, invoice_number: "KGH/2026-27/34" } });
+  })]]);
+  const s = startEdit(toBillDetail(wireDetail()));
+  const { result } = renderHook(() => useBillForm(s), { wrapper: inRouter });
+  await waitFor(() => expect(result.current.firms).toHaveLength(2));
+  act(() => { result.current.setNumber("35"); });
+  await act(async () => { vi.advanceTimersByTime(400); });
+  await waitFor(() => expect(calls.some((c) => c.url === "sales/check-number/" && c.params.exclude_id === 412)).toBe(true));
+  await waitFor(() => expect(result.current.stored).toBe("KGH/2026-27/35"));
+  expect(result.current.checks[0]).toEqual({ key: "num", ok: null, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/35: checking that it's free" });
+  await act(async () => { answer(); });
+  await waitFor(() => expect(result.current.checks[0]).toEqual({ key: "num", ok: true, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/35" }));
 });
 
 /** The form hook for `start`, ready to save: its next number in, paid in cash, the review open. */

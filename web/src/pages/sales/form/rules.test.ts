@@ -141,9 +141,19 @@ test("the income-tax checks, an address for a business, and a bill maybe made tw
     .toBe("Anil Gupta already has a bill on 30 Sep for ₹0.01 (KGH/2026-27/31). Copying it twice?");
 });
 
-test("editing: the number is kept, or renumbered", () => {
+test("editing: the number is kept, or renumbered, which is settled only once the server says the new number is free", () => {
   expect(checksOf(input({ mode: "edit", saved: "KGH/2026-27/31" }))[0].text).toBe("Keeps its number KGH/2026-27/31");
-  expect(checksOf(input({ mode: "edit", saved: "KGH/2026-27/31", f: form({ numberTyped: true, customer: ANIL, lines: [ring] }) }))[0].text).toBe("Renumbers KGH/2026-27/31 to KGH/2026-27/34");
+  const renumber = (numberState: CheckInput["numberState"]) => checksOf(input({ mode: "edit", saved: "KGH/2026-27/31", numberState, f: form({ numberTyped: true, customer: ANIL, lines: [ring] }) }))[0];
+  expect(renumber("free")).toEqual({ key: "num", ok: true, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/34" });
+  expect(renumber("checking")).toEqual({ key: "num", ok: null, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/34: checking that it's free" });
+  expect(renumber("unknown")).toEqual({ key: "num", ok: null, text: "Renumbers KGH/2026-27/31 to KGH/2026-27/34: checked when it saves" });
+});
+
+test("a name before 's follows possessive: Kulkarni Jewellers' PAN, never Jewellers's", () => {
+  const kulkarni = toCustomer({ id: 12, name: "Kulkarni Jewellers", state_name: "RAJASTHAN", mobile_number: "9829041133", type: "person" });
+  const pan = { kind: "pan" as const, short: "", text: "" };
+  expect(checksOf(input({ customer: kulkarni, itax: [pan], f: form({ customer: kulkarni, lines: [ring] }) })).find((c) => c.key === "pan")?.text)
+    .toBe("Over ₹2,00,000: Income Tax Rule 114B needs Kulkarni Jewellers' PAN (or Form 60).");
 });
 
 test("the note under Paid by", () => {

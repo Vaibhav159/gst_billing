@@ -1,0 +1,403 @@
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { AxiosError } from "axios";
+import { __resetDrafts } from "@/core/api/drafts";
+import { __setNetState } from "@/core/api/network";
+import { __resetDeviceDrafts } from "@/core/deviceDrafts";
+import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
+import { takeFresh } from "@/core/sales/fresh";
+import { toBillDetail } from "@/core/sales/wire";
+import { BillForm } from "./BillFormPage";
+import { startEdit } from "./model";
+import { ANIL, formServer, fakeToday, mountForm, wireNext } from "./testing";
+
+// whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
+vi.setConfig({ testTimeout: 20_000 });
+
+beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
+afterEach(() => { vi.useRealTimers(); act(() => __setNetState("online")); takeFresh(); });
+
+/** 40 g of a 22K necklace at ₹6,500: ₹2,67,800.00 with GST, over the income-tax limits. */
+const BIG = [{ id: 1, product_name: "Gold Necklace 22K", hsn_code: "711319", quantity: "40.000", unit: "gms", rate: "6500.000", gst_percent: "3", taxable: "260000.00", cgst: "3900.00", sgst: "3900.00", igst: "0.00", tax: "7800.00", amount: "267800.00", note: "" }];
+const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
+const posts = (calls: { method: string; body: unknown }[]) => calls.filter((c) => c.method === "POST").map((c) => (c.body as { invoice_number: string }).invoice_number);
+/** What a row of the review says: its label and value ("Bill no.KGH/2026-27/34"). */
+const cell = (dialog: HTMLElement, label: string) => within(dialog).getByText(label).parentElement;
+/** Lets what's on its way land (answers, the cache telling the page): a little faked time, inside act, twice. */
+async function settle() {
+  for (let i = 0; i < 2; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+}
+
+/** A copy of KGH/2026-27/31 (Anil Gupta: a ring and a pendant), a whole bill ready to check: the review open, past its guard. */
+async function review(user: ReturnType<typeof fakeToday>, routes: Route[] = [], bill = wireDetail()) {
+  const server = formServer([["GET", "sales/412/", () => bill], ...routes]);
+  const view = mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against the key that opened it
+  return { ...server, ...view, dialog };
+}
+
+test("Check and save shows exactly what will be saved; How was it paid? comes first; a pick moves to Save, Enter saves, and the bill opens with its saved panel", async () => {
+  const user = fakeToday();
+  const { calls, router, dialog } = await review(user);
+  expect(dialog).toHaveTextContent("This is exactly what will be saved, to the paisa. Nothing on it is rounded.");
+  expect(within(dialog).getByRole("table", { name: "Items that will be saved" })).toHaveTextContent("Gold Pendant 22K");
+  expect(dialog).toHaveTextContent("It goes into October's GSTR-1 as a B2C sale as KGH/2026-27/34.");
+  expect(dialog).toHaveTextContent("Eighty Seven Thousand Eighty Three Rupees and Twenty One Paise Only");
+  expect(dialog).toHaveTextContent("Paid byNot picked yet");
+  await waitFor(() => expect(within(dialog).getByRole("radio", { name: "Cash" })).toHaveFocus());
+  await user.keyboard(" ");
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save bill" })).toHaveFocus());
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+    business: 3, customer: 7, invoice_number: "34", invoice_date: "2026-10-08", payment_mode: "cash", place_of_supply: "08", notes: "", paper: false, replaces: null, draft_id: null,
+  });
+  // the leave-guard let go first: no "Leave without saving?" on the way
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
+  expect(takeFresh([501])).toEqual(new Set([501]));
+});
+
+test("cash of ₹2,00,000 or more doesn't save in one press: Part cash, or a tick that it's all cash anyway; the PAN check offers Add PAN", async () => {
+  const user = fakeToday();
+  formServer([["GET", "sales/412/", () => wireDetail({ lines: BIG })]]);
+  mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  const checks = within(screen.getByRole("complementary", { name: "Bill summary" })).getByRole("list", { name: "Checks on this bill" });
+  expect(checks).toHaveTextContent("Over ₹2,00,000: Income Tax Rule 114B needs Anil Gupta's PAN (or Form 60).");
+  await user.click(within(checks).getByRole("button", { name: "Add PAN" }));
+  expect(await screen.findByRole("dialog", { name: "Anil Gupta's PAN" })).toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument());
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  expect(dialog).toHaveTextContent("₹2,67,800.00 in cash from one person isn't allowed");
+  const save = within(dialog).getByRole("button", { name: "Save bill" });
+  expect(save).toBeDisabled();
+  await user.click(within(dialog).getByRole("checkbox", { name: "Save it as all cash anyway" }));
+  expect(save).toBeEnabled();
+  await user.click(within(dialog).getByRole("checkbox", { name: "Save it as all cash anyway" }));
+  expect(save).toBeDisabled();
+  await user.click(within(dialog).getByRole("button", { name: "Change to Part cash, part UPI" }));
+  expect(dialog).toHaveTextContent("Paid byPart cash, part UPI");
+  expect(save).toBeEnabled();
+  await waitFor(() => expect(save).toHaveFocus());
+});
+
+test("Ctrl S in the review presses Save, but not in its first moments: the key that opened it, pressed again at once or held down, doesn't save a bill unseen", async () => {
+  const user = fakeToday();
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail()]]);
+  const { router } = mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  // picked on the form, so the review opens with Save on
+  await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
+  // Ctrl S twice at once: the first opens the review, and the second is its tail
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true, repeat: true });
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(posts(calls)).toEqual([]);
+  expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeEnabled();
+  await user.keyboard("{Control>}s{/Control}");
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
+  expect(posts(calls)).toEqual(["34"]);
+});
+
+test("Ctrl S saves from the review only while it's on top and Save is on: not while all cash over the limit holds it, and not from a PAN sheet opened over it", async () => {
+  const user = fakeToday();
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail({ lines: BIG })]]);
+  const { router } = mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  await user.click(screen.getByRole("radio", { name: "Cash" }));
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeDisabled();
+  await user.keyboard("{Control>}s{/Control}");
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(posts(calls)).toEqual([]);
+  await user.click(within(dialog).getByRole("button", { name: "Change to Part cash, part UPI" }));
+  // the PAN, added from the review's own checks: its sheet opens over the review, and Ctrl S there is the sheet's
+  const checked = within(dialog).getByRole("list", { name: "Checked before saving" });
+  expect(checked).toHaveTextContent("Over ₹2,00,000: Income Tax Rule 114B needs Anil Gupta's PAN (or Form 60).");
+  await user.click(within(checked).getByRole("button", { name: "Add PAN" }));
+  const sheet = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await waitFor(() => expect(sheet.contains(document.activeElement)).toBe(true));
+  await user.keyboard("{Control>}s{/Control}");
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(posts(calls)).toEqual([]);
+  expect(screen.getByRole("dialog", { name: "Anil Gupta's PAN" })).toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument());
+  // the review on top again: Ctrl S saves it
+  await user.keyboard("{Control>}s{/Control}");
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ payment_mode: "mixed", invoice_number: "34" });
+});
+
+test("a change to a saved bill with nothing changed yet: Save changes is off, and Ctrl S doesn't send it either", async () => {
+  const user = fakeToday();
+  const { calls } = formServer();
+  // the form as /sales/412/edit puts it together (Task 8 adds the route)
+  mountForm("/edit", { routes: [{ path: "/edit", element: <BillForm start={startEdit(toBillDetail(wireDetail()))} formKey="edit" /> }] });
+  await settle();
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
+  act(() => { vi.advanceTimersByTime(400); });
+  expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await user.keyboard("{Control>}s{/Control}");
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(calls.some((c) => c.method === "PUT")).toBe(false);
+});
+
+test.each([
+  ["no PAN that counts (\"N/A\" stored)", "N/A", "", true],
+  ["a PAN", "ABCPG1234K", "ABCPG1234K", false],
+] as const)("over ₹2,00,000, the review's checks ask for the PAN of a customer with %s, and only then (Ruling 1A-20)", async (_, panNumber, pan, asks) => {
+  const user = fakeToday();
+  formServer([
+    ["GET", "sales/412/", () => wireDetail({ lines: BIG })],
+    ["GET", "customers/7/", () => ({ ...ANIL, pan_number: panNumber, pan })],
+  ]);
+  mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  await settle();
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  const checked = within(dialog).getByRole("list", { name: "Checked before saving" });
+  if (asks) expect(checked).toHaveTextContent("Over ₹2,00,000: Income Tax Rule 114B needs Anil Gupta's PAN (or Form 60). Add PAN");
+  else expect(checked).not.toHaveTextContent(/PAN/);
+});
+
+test("a number taken meanwhile: the server's words first, and a suggested number saves as the next free one in one press", async () => {
+  const user = fakeToday();
+  let tries = 0;
+  const { calls, router, dialog } = await review(user, [["POST", "sales/", () => {
+    tries += 1;
+    return tries === 1
+      ? refuse(409, { detail: "KGH/2026-27/34 is already used in FY 2026-27 by Meena Jain's bill of 08 Oct 2026. The next free number is KGH/2026-27/35.", code: "number_taken",
+        bill: { id: 499, invoice_number: "KGH/2026-27/34", invoice_date: "2026-10-08", customer_name: "Meena Jain", status: "active" }, next: { counter: 35, invoice_number: "KGH/2026-27/35" } })
+      : wireDetail({ id: 502, invoice_number: "KGH/2026-27/35" });
+  }]]);
+  await user.click(within(dialog).getByRole("radio", { name: "UPI / bank" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  const fail = await within(dialog).findByRole("alert");
+  expect(fail).toHaveTextContent("KGH/2026-27/34 was just used");
+  expect(fail).toHaveTextContent("KGH/2026-27/34 is already used in FY 2026-27 by Meena Jain's bill of 08 Oct 2026. The next free number is KGH/2026-27/35. Check the number on the paper bill.");
+  expect(dialog).toHaveTextContent("Save as KGH/2026-27/35 takes the next free number in one step.");
+  expect(dialog).toHaveTextContent("It goes into October's GSTR-1 as a B2C sale as KGH/2026-27/35.");
+  expect(cell(dialog, "Bill no.")).toHaveTextContent("KGH/2026-27/35");
+  await user.click(within(dialog).getByRole("button", { name: "Save as KGH/2026-27/35" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/502?saved=new"));
+  expect(posts(calls)).toEqual(["34", "KGH/2026-27/35"]);
+});
+
+test("after a clash, the review shows the number Save sends as it is now: the server's next, until the next number asked for again moves past it (T4 review)", async () => {
+  const user = fakeToday();
+  let counter = 34;
+  let held: Promise<void> | null = null;
+  let answer = () => {};
+  const { calls, router, dialog } = await review(user, [
+    ["GET", "sales/next-number/", async ({ params }) => { await held; return wireNext(Number(params.business_id), String(params.invoice_date), counter); }],
+    ["POST", "sales/", ({ body }) => ((body as { invoice_number: string }).invoice_number === "34"
+      ? refuse(409, { detail: "KGH/2026-27/34 is already used in FY 2026-27 by Meena Jain's bill of 08 Oct 2026. The next free number is KGH/2026-27/35.", code: "number_taken", next: { counter: 35, invoice_number: "KGH/2026-27/35" } })
+      : wireDetail({ id: 502, invoice_number: (body as { invoice_number: string }).invoice_number }))],
+  ]);
+  // another counter takes 35 too before the next number is asked for again, and that answer is slow
+  counter = 36;
+  held = new Promise<void>((r) => { answer = r; });
+  await user.click(within(dialog).getByRole("radio", { name: "UPI / bank" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await within(dialog).findByRole("alert");
+  expect(cell(dialog, "Bill no.")).toHaveTextContent("KGH/2026-27/35");
+  expect(within(dialog).getByRole("button", { name: "Save as KGH/2026-27/35" })).toBeInTheDocument();
+  await act(async () => { answer(); await vi.advanceTimersByTimeAsync(50); });
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save as KGH/2026-27/36" })).toBeInTheDocument());
+  expect(cell(dialog, "Bill no.")).toHaveTextContent("KGH/2026-27/36");
+  expect(dialog).toHaveTextContent("It goes into October's GSTR-1 as a B2C sale as KGH/2026-27/36.");
+  // and Ctrl S sends what the review shows
+  await user.keyboard("{Control>}s{/Control}");
+  await waitFor(() => expect(where(router)).toBe("/sales/502?saved=new"));
+  expect(posts(calls)).toEqual(["34", "KGH/2026-27/36"]);
+});
+
+test("a second clash, on the number offered: the next free one again, never one taken already, though the next number asked for again lags (T4 review)", async () => {
+  const user = fakeToday();
+  const taken = (n: number) => refuse(409, {
+    detail: `KGH/2026-27/${n} is already used in FY 2026-27 by Meena Jain's bill of 08 Oct 2026. The next free number is KGH/2026-27/${n + 1}.`, code: "number_taken",
+    next: { counter: n + 1, invoice_number: `KGH/2026-27/${n + 1}` },
+  });
+  // the next number asked for again still says 34: the review goes by the server's latest next instead
+  const { calls, router, dialog } = await review(user, [["POST", "sales/", ({ body }) => {
+    const n = (body as { invoice_number: string }).invoice_number;
+    return n === "34" ? taken(34) : n === "KGH/2026-27/35" ? taken(35) : wireDetail({ id: 502, invoice_number: n });
+  }]]);
+  await user.click(within(dialog).getByRole("radio", { name: "UPI / bank" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await user.click(await within(dialog).findByRole("button", { name: "Save as KGH/2026-27/35" }));
+  await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("KGH/2026-27/35 was just used"));
+  expect(cell(dialog, "Bill no.")).toHaveTextContent("KGH/2026-27/36");
+  await user.click(within(dialog).getByRole("button", { name: "Save as KGH/2026-27/36" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/502?saved=new"));
+  expect(posts(calls)).toEqual(["34", "KGH/2026-27/35", "KGH/2026-27/36"]);
+});
+
+test("a number that belonged to a deleted bill: the server's words first, and the next free one in one press", async () => {
+  const user = fakeToday();
+  const { calls, router, dialog } = await review(user, [["POST", "sales/", ({ body }) => ((body as { invoice_number: string }).invoice_number === "34"
+    ? refuse(409, { detail: "KGH/2026-27/34 belonged to a bill that was deleted (it can be restored from the Audit log), so it can't be used again. The next free number is KGH/2026-27/35.", code: "number_deleted",
+      binned: { id: 4, original_id: 205, invoice_number: "KGH/2026-27/34", invoice_date: "2026-10-01", reason: "Entered twice by mistake", deleted_at: "2026-10-03T18:40:00+05:30" }, next: { counter: 35, invoice_number: "KGH/2026-27/35" } })
+    : wireDetail({ id: 502, invoice_number: "KGH/2026-27/35" }))]]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  const fail = await within(dialog).findByRole("alert");
+  expect(fail).toHaveTextContent("KGH/2026-27/34 belonged to a deleted bill");
+  expect(fail).toHaveTextContent("KGH/2026-27/34 belonged to a bill that was deleted (it can be restored from the Audit log), so it can't be used again. The next free number is KGH/2026-27/35. Check the number on the paper bill.");
+  await user.click(within(dialog).getByRole("button", { name: "Save as KGH/2026-27/35" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/502?saved=new"));
+  expect(posts(calls)).toEqual(["34", "KGH/2026-27/35"]);
+});
+
+test("a paper bill's own number taken: nothing is offered in its place, and Change the number takes you back to it", async () => {
+  const user = fakeToday();
+  formServer([["POST", "sales/", () => refuse(409, { detail: "KGH/2026-27/36 is already used in FY 2026-27 by Hemant Dave's bill of 29 Sep 2026. The next free number is KGH/2026-27/37.", code: "number_taken", next: { counter: 37, invoice_number: "KGH/2026-27/37" } })]]);
+  mountForm("/sales/new?paper=1&firm=3&date=2026-09-30&number=36");
+  const customer = await screen.findByRole("combobox", { name: /Customer/ });
+  await waitFor(() => expect(customer).toHaveFocus());
+  await user.keyboard("Anil");
+  await act(async () => { vi.advanceTimersByTime(400); });
+  await screen.findByRole("option", { name: /^Anil Gupta/ });
+  await user.keyboard("{Enter}ring{Enter}1{Enter}6000");
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the paper bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await user.keyboard(" ");
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save bill" })).toHaveFocus());
+  await user.keyboard("{Enter}");
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("KGH/2026-27/36 was just used");
+  expect(within(dialog).queryByRole("button", { name: /^Save as/ })).not.toBeInTheDocument();
+  expect(cell(dialog, "Bill no.")).toHaveTextContent("KGH/2026-27/36");
+  await user.click(within(dialog).getByRole("button", { name: "Change the number" }));
+  await waitFor(() => expect(screen.getByLabelText("Number on the paper bill")).toHaveFocus());
+});
+
+test("a closed month, then a lost connection: each said first in the review, with everything kept; Try again saves", async () => {
+  const user = fakeToday();
+  let tries = 0;
+  const { router, dialog } = await review(user, [["POST", "sales/", () => {
+    tries += 1;
+    if (tries === 1) return refuse(409, { detail: "October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.", code: "month_closed", locked_period: { id: 7, business: 3, year: 2026, month: 10 } });
+    if (tries === 2) throw new AxiosError("Network Error", "ERR_NETWORK");
+    return wireDetail({ id: 503, invoice_number: "KGH/2026-27/34" });
+  }]]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  let fail = await within(dialog).findByRole("alert");
+  expect(fail).toHaveTextContent("October 2026 was just filed");
+  expect(fail).toHaveTextContent("October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.");
+  await user.click(within(dialog).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("Not saved: the app couldn't get through"));
+  fail = within(dialog).getByRole("alert");
+  expect(fail).toHaveTextContent("Nothing was changed. What you typed is still here. Try again in a minute.");
+  await user.click(within(dialog).getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/503?saved=new"));
+});
+
+test("a bill cancelled while it was being changed: the review says so in the server's words (contract §2.3's 409 cancelled)", async () => {
+  const user = fakeToday();
+  const words = "Cancelled bills can't be changed. Make it again from the bill instead.";
+  const { calls } = formServer([["PUT", "sales/412/", () => refuse(409, { detail: words, code: "cancelled" })]]);
+  // the form as /sales/412/edit puts it together (Task 8 adds the route)
+  mountForm("/edit", { routes: [{ path: "/edit", element: <BillForm start={startEdit(toBillDetail(wireDetail()))} formKey="edit" /> }] });
+  await settle();
+  const note = screen.getByLabelText("Note on the bill");
+  await user.type(note, "Weighed again");
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+  const fail = await within(dialog).findByRole("alert");
+  expect(fail).toHaveTextContent(`Not saved${words}`);
+  expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+  // what was typed is still there behind it
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the changes to KGH/2026-27/31" })).not.toBeInTheDocument());
+  expect(screen.getByLabelText("Note on the bill")).toHaveValue("Weighed again");
+});
+
+test("a cancelled bill made again whose remake the server refuses (made again already) keeps the review open with the server's words (Ruling 1D-4)", async () => {
+  const user = fakeToday();
+  const words = "KGH/2026-27/31 was made again already, as KGH/2026-27/33.";
+  const { calls } = formServer([
+    ["GET", "sales/412/", () => wireDetail({ status: "cancelled", cancel_reason: "Wrong weight", payment_mode: "bank" })],
+    ["POST", "sales/", () => refuse(400, { replaces: [words] })],
+  ]);
+  mountForm("/sales/new?remake=412");
+  await screen.findByText("Making KGH/2026-27/31 again");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(`Not saved${words}`);
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ replaces: 412 });
+  expect(screen.getByRole("dialog", { name: "Check the bill before saving" })).toBeInTheDocument();
+});
+
+test("offline, the review says the bill can't be saved yet, and Save waits for the internet", async () => {
+  const user = fakeToday();
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail()]]);
+  mountForm("/sales/new?from=412");
+  await screen.findByText("Copied from KGH/2026-27/31");
+  await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
+  act(() => __setNetState("offline"));
+  await user.keyboard("{Control>}s{/Control}");
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  act(() => { vi.advanceTimersByTime(400); });
+  expect(within(dialog).getAllByRole("alert")[0]).toHaveTextContent("You're offline: this bill can't be saved yet");
+  expect(within(dialog).getAllByRole("alert")[0]).toHaveTextContent("It's kept on this device as an unfinished bill. Save it when the internet is back.");
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeDisabled();
+  // nor does Ctrl S get past it
+  await user.keyboard("{Control>}s{/Control}");
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+});
+
+test("what the server refuses on a line comes back under that line: the review closes and the line's box takes the cursor", async () => {
+  const user = fakeToday();
+  const { dialog } = await review(user, [["POST", "sales/", () => refuse(400, { lines: { "1": { rate: ["Type the rate per piece."] } } })]]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the bill before saving" })).not.toBeInTheDocument());
+  expect(screen.getByText("Type the rate per piece.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Line 2 rate per piece" })).toHaveFocus());
+});
+
+test("a save that answers after the form was left keeps the bill and says so, without moving the page (part 0 carry)", async () => {
+  const user = fakeToday();
+  let release!: (v: unknown) => void;
+  const { router, dialog } = await review(user, [["POST", "sales/", () => new Promise((r) => { release = r; })]]);
+  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
+  expect(within(dialog).getByRole("button", { name: "Saving…" })).toBeInTheDocument();
+  // leaving a new bill never asks, while it saves too (Ruling 1D-10)
+  await act(async () => { await router.navigate("/sales"); });
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
+  await waitFor(() => expect(where(router)).toBe("/sales"));
+  await act(async () => { release(wireDetail({ id: 504, invoice_number: "KGH/2026-27/34" })); });
+  expect(await screen.findByText("Saved KGH/2026-27/34")).toBeInTheDocument();
+  expect(where(router)).toBe("/sales");
+  expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Open" }));
+  await waitFor(() => expect(where(router)).toBe("/sales/504"));
+});

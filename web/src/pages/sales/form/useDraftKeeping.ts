@@ -36,9 +36,11 @@ export type DraftKeeping = {
 
 /** Said where a browser refuses storage, instead of "on this device": the unfinished bill lasts only as long as the page. */
 export const VISIT_ONLY = "This browser doesn't store unfinished bills, so this one lasts only while this page is open.";
+/** Said while the bill's save waits for the draft's last change to land (the status line, and the review). */
+export const SAVE_WAITS = "Saving once the draft's last change reaches the shop's list…";
 
 export function draftText(d: DraftKeeping): string {
-  if (d.waiting) return "Saving once the draft's last change reaches the shop's list…";
+  if (d.waiting) return SAVE_WAITS;
   if (d.pending || d.sending) return "Keeping the draft…";
   if (d.refusal) return d.refusal;
   const when = d.at ? ` at ${timeOf(d.at)}` : "";
@@ -155,10 +157,14 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   const saveEnd = F.saveEnd;
   useEffect(() => {
     alive.current = true;
-    const left = () => {
+    /** failed: the form was left while the bill saved, and the save didn't go through: the toast says so first. */
+    const left = (failed = false) => {
       const draftId = unkept() ? keepNow(false) : id.current;
       if (!draftId) return;
-      show({ tone: "brand", title: "Bill kept as a draft", body: "New bill lists it until it's finished. Open it now?", action: { label: "Open", onClick: () => navigate(`/sales/new?draft=${draftId}`) } });
+      const open = { label: "Open", onClick: () => navigate(`/sales/new?draft=${draftId}`) };
+      show(failed
+        ? { tone: "neg", title: "The bill didn't save", body: "What you typed is kept as an unfinished bill. Open it now?", action: open }
+        : { tone: "brand", title: "Bill kept as a draft", body: "New bill lists it until it's finished. Open it now?", action: open });
     };
     return () => {
       alive.current = false;
@@ -166,7 +172,7 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
       queueMicrotask(() => {
         if (alive.current || !isNew || done.current || save.current.savedTo) return;
         // asked again once the save ends: a keep may have heard meanwhile that a bill was made from the draft
-        if (save.current.saving) { void saveEnd.current?.then((how) => { if (how === "failed" && !done.current) left(); }); return; }
+        if (save.current.saving) { void saveEnd.current?.then((how) => { if (how === "failed" && !done.current) left(true); }); return; }
         left();
       });
     };

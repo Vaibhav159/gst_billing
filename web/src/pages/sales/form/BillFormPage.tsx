@@ -12,7 +12,7 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { ROLES } from "@/core/auth/permissions";
 import { cn } from "@/core/cn";
 import { keptDraft } from "@/core/deviceDrafts";
-import { addMonths, monthOf, todayIST } from "@/core/format";
+import { addMonths, monthOf, possessive, todayIST } from "@/core/format";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope } from "@/core/scope";
 import { ButtonLink, Card, EmptyState, Page, Skeleton } from "@/core/ui";
@@ -55,7 +55,7 @@ function CantMakeBills({ params }: { params: URLSearchParams }) {
     <Page icon={FilePlus2} title="New sales bill" breadcrumbs={[{ label: "Sales", to: "/sales" }]} back="/sales">
       <Card><EmptyState icon={Lock} title="You can't make bills"
         actions={<>
-          {c && c.type !== "walkin" ? <ButtonLink to={`/sales?customer=${c.id}&all=1`} variant="primary">{`${c.name}'s bills`}</ButtonLink> : null}
+          {c && c.type !== "walkin" ? <ButtonLink to={`/sales?customer=${c.id}&all=1`} variant="primary">{`${possessive(c.name)} bills`}</ButtonLink> : null}
           {fromId ? <ButtonLink to={`/sales/${fromId}`} variant="primary">Open the bill</ButtonLink> : null}
           <ButtonLink to="/sales">Back to Sales</ButtonLink>
         </>}>

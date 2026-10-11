@@ -17,6 +17,7 @@ import { hasContent } from "./model";
 import { NewItemForm, type NewItem } from "./NewItemForm";
 import { DateBlock, NumberField, Origins, PaperSwitch, paperBookTo, PaymentNote, PlaceOfSupply, SummaryFigures } from "./parts";
 import { useSaleProducts } from "./products";
+import { Review } from "./Review";
 import { paymentNote } from "./rules";
 import type { BillFormApi } from "./useBillForm";
 import type { DraftKeeping } from "./useDraftKeeping";
@@ -59,15 +60,20 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
   const checks = checksWithFixes(F, setFix);
   /** Check and save: the review, or the first problem, scrolled to and focused. */
   const onTryReview = () => { const r = F.openReview(); if (!r.ok) focusProblem(F, r.first); };
-  // Ctrl S: check and save (and save from the review). Ctrl Enter: add a line, focus moving at once. Neither acts on the
-  // bill from behind an open dialog (a new customer, an item, a PAN, search): Ctrl S there would mark the form and pull
-  // the cursor out from under the sheet. Ctrl S is still taken from the browser, so its Save page never opens instead.
+  /** Saves from the review; a field the server refused is focused once the review has closed. */
+  const saveNow = (numberOverride?: string) => {
+    void F.save({ numberOverride }).then((r) => { if (r.refused) { const k = r.refused; setTimeout(() => focusProblem(F, k), 0); } });
+  };
+  // Ctrl S: check and save (the review presses its own Save: Review). Ctrl Enter: add a line, focus moving at once.
+  // Neither acts on the bill from behind an open dialog (the review, a new customer, an item, a PAN, search) or a menu
+  // (the top bar's, as the app's shortcuts read it): Ctrl S there would mark the form and pull the cursor out from under
+  // it. Ctrl S is still taken from the browser, so its Save page never opens instead.
   useEffect(() => {
-    const dialogOpen = () => Boolean(document.querySelector('[role="dialog"]:not([data-closing])'));
+    const held = () => Boolean(document.querySelector('[role="dialog"]:not([data-closing]), [role="menu"]:not([data-closing])'));
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() === "s") { e.preventDefault(); if (!F.reviewOpen && !dialogOpen()) onTryReview(); }
-      else if (e.key === "Enter") { if (dialogOpen()) return; e.preventDefault(); F.addLine(true); }
+      if (e.key.toLowerCase() === "s") { e.preventDefault(); if (!F.reviewOpen && !held()) onTryReview(); }
+      else if (e.key === "Enter") { if (held()) return; e.preventDefault(); F.addLine(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -160,6 +166,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
         {np ? <NewItemForm key={`${np.key}${np.name}`} initialName={np.name} idBase="np" onCancel={() => setNp(null)} onDone={onNewItem(np.key)} onBusy={setNpBusy} /> : null}
       </Sheet>
       <CustomerFixSheet customer={F.cust} field={fix} open={Boolean(fix)} onClose={() => setFix(null)} onSaved={(c) => F.set({ customer: c })} />
+      <Review F={F} checks={checks} numberId="bf-number" onSave={saveNow} waiting={drafts.waiting} />
       {children}
     </Page>
   );

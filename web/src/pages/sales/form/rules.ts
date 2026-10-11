@@ -3,7 +3,7 @@
 // changes. Pure: the form hook gathers what the server has said (the firm's locked months, the next number, whether a
 // typed number is free) and hands it in.
 import type { Customer } from "@/core/api/customers";
-import { addMonths, date, dateShort, fyMonths, fyOf, inr, monthLabel, monthOf, qty as qtyLabel, unitDecimals } from "@/core/format";
+import { addMonths, date, dateShort, fyMonths, fyOf, inr, monthLabel, monthOf, possessive, qty as qtyLabel, unitDecimals } from "@/core/format";
 import { hasGstin } from "@/core/ids";
 import { numberShapeProblem } from "@/core/sales/numbers";
 import { stateNameOf } from "@/core/sales/pos";
@@ -189,7 +189,13 @@ export function checksOf(c: CheckInput): Check[] {
   const out: Check[] = [];
   const shown = c.stored || "This number";
   if (c.mode === "edit" && !c.moved && !c.f.numberTyped) out.push({ key: "num", ok: true, text: `Keeps its number ${c.saved}` });
-  else if (c.mode === "edit" && !c.moved) out.push(c.numberError ? { key: "num", ok: false, text: `${shown} can't be used` } : { key: "num", ok: true, text: `Renumbers ${c.saved} to ${c.stored}` });
+  // a renumber is settled once the server says the new number is free (T4 re-review)
+  else if (c.mode === "edit" && !c.moved) {
+    const renumber = `Renumbers ${c.saved} to ${c.stored}`;
+    out.push(c.numberError ? { key: "num", ok: false, text: `${shown} can't be used` }
+      : c.numberState === "free" ? { key: "num", ok: true, text: renumber }
+        : { key: "num", ok: null, text: `${renumber}: ${c.numberState === "checking" ? "checking that it's free" : "checked when it saves"}` });
+  }
   else if (c.numberError) out.push({ key: "num", ok: false, text: `${shown} can't be used` });
   else if (c.numberState === "free") out.push({ key: "num", ok: true, text: c.paper ? `${c.stored} from the paper bill is free in FY ${fyOf(c.f.date || c.today)}` : `Bill number ${c.stored} is free` });
   else out.push({ key: "num", ok: null, text: c.numberState === "checking" ? `Checking that ${c.stored} is free` : `Bill number ${c.stored}: checked when it saves` });
@@ -216,7 +222,7 @@ export function checksOf(c: CheckInput): Check[] {
   const p = c.f.payment;
   out.push(p == null ? { key: "pay", ok: null, text: "How it was paid: asked when you check and save" } : p === "" ? { key: "pay", ok: "warn", text: "Paid by: not recorded (kept as it was)" } : { key: "pay", ok: true, text: `Paid by ${PAY[p]}` });
   if (c.itax.some((x) => x.kind === "cash_limit")) out.push({ key: "cash", ok: "warn", text: "Cash of ₹2,00,000 or more from one person isn't allowed (Income Tax Sec 269ST). Take part of it by UPI or bank." });
-  if (cust && c.itax.some((x) => x.kind === "pan")) out.push({ key: "pan", ok: "warn", text: `Over ₹2,00,000: Income Tax Rule 114B needs ${cust.name}'s PAN (or Form 60).`, fix: "pan" });
+  if (cust && c.itax.some((x) => x.kind === "pan")) out.push({ key: "pan", ok: "warn", text: `Over ₹2,00,000: Income Tax Rule 114B needs ${possessive(cust.name)} PAN (or Form 60).`, fix: "pan" });
   if (c.itax.some((x) => x.kind === "walkin_limit")) out.push({ key: "walkin", ok: "warn", text: "Over ₹2,00,000: Rule 114B needs the buyer's PAN. Put the bill in their name, not Walk-in." });
   const slip = filled.find((l) => lineWarning(l));
   if (slip) out.push({ key: "slip", ok: "warn", text: `Line ${lineNo(slip)}: ${lineWarning(slip)}` });

@@ -2,7 +2,7 @@
 // switch, the place of supply, the note under Paid by, the figures, and the banner that says where the bill came from.
 import { AlertTriangle, BookOpenText, Info, RefreshCcw } from "lucide-react";
 import { useNetwork } from "@/core/api/network";
-import { amountInWords, date, fyOf, monthLabel, monthOf, weekday } from "@/core/format";
+import { amountInWords, date, fyOf, monthLabel, monthOf, possessive, weekday } from "@/core/format";
 import { posOptions, stateNameOf } from "@/core/sales/pos";
 import { taxLines } from "@/core/sales/words";
 import { Badge, Banner, Button, ButtonLink, DL, Field, Input, Money, Select, Switch } from "@/core/ui";
@@ -37,7 +37,7 @@ export function NumberField({ F, id }: P) {
     || (F.waitingForNext ? "Looking up the next number…"
       : !F.f.numberTyped && F.suggestion ? (F.paper ? "The paper book's next number. Type the paper bill's own if it's different." : `Next free number for ${short} in FY ${fy}. Type the paper bill's number if it's different.`)
         : !F.suggestion && !F.f.numberTyped ? `Type the number written on the paper bill.${offline ? " The app can't look up the next free number offline." : ""}`
-          : F.paper ? (saved ? "" : "As written on the paper bill.") : `Any format: 108 or SGJ/2024-25/108. Checked against ${short}'s bills in FY ${fy} as you type.`);
+          : F.paper ? (saved ? "" : "As written on the paper bill.") : `Any format: 108 or SGJ/2024-25/108. Checked against ${possessive(short)} bills in FY ${fy} as you type.`);
   const aside = F.edit && F.bill && !F.moved
     ? <Button size="sm" variant="link" onClick={F.takeSuggestion}>{`Keep ${F.bill.invoice_number}`}</Button>
     : F.f.numberTyped && F.suggestion && text !== F.suggestion ? <Button size="sm" variant="link" onClick={() => { F.takeSuggestion(); focusSoon(id, true); }}>Use the next free one</Button> : <LabelSpacer />;
@@ -173,7 +173,7 @@ export function Origins({ F }: { F: BillFormApi }) {
   }
   if (o?.kind === "copy") {
     out.push(<Banner key="c" tone="brand" icon={Info} title={`Copied from ${o.number}`}>
-      {o.customer}&apos;s bill of {date(o.date)}. Check the weights and rates; the date, number and payment are new.
+      {possessive(o.customer)} bill of {date(o.date)}. Check the weights and rates; the date, number and payment are new.
     </Banner>);
   }
   if (o?.kind === "amountOnly") out.push(<Banner key="a" tone="brand" icon={Info} title="Some lines came in as an amount only">They open as 1 × their value, so the total stays the same. Add the weight and rate if you have them.</Banner>);

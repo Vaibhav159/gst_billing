@@ -7,11 +7,8 @@ import { __resetDeviceDrafts, keepOnDevice, keptDraft, keptDrafts } from "@/core
 import { refuse, wireDetail, type Route } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { BillForm } from "./BillFormPage";
-import { DesktopForm } from "./DesktopForm";
 import { startDraft, startEdit, type Start } from "./model";
 import { ANIL, formServer, fakeToday, mountForm } from "./testing";
-import { useBillForm } from "./useBillForm";
-import { useDraftKeeping } from "./useDraftKeeping";
 
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
@@ -187,33 +184,26 @@ test("a new bill lists three of the shop's other unfinished bills, newest first,
   expect(within(list).queryByRole("button", { name: /^Show all/ })).not.toBeInTheDocument();
 });
 
-/**
- * The bill form as BillForm puts it together, with a Save button standing in for the review's: the review comes with
- * Task 5 (Ruling 1D-9), and saves through the same F.save().
- */
-function SavingForm({ start }: { start: Start }) {
-  const F = useBillForm(start);
-  const drafts = useDraftKeeping(F, "saving-form");
-  return (
-    <DesktopForm F={F} drafts={drafts}>
-      <button type="button" onClick={() => { void F.save(); }}>Save the bill</button>
-      <p data-testid="saving">{F.savedTo ? `Saved: ${F.savedTo}` : `${F.saving ? "Saving" : "Not saving"}; ${drafts.pending ? "a change waits to be kept" : "nothing waits to be kept"}`}</p>
-      {F.saveError ? <p data-testid="save-error">{`${F.saveError.title}. ${F.saveError.body}`}</p> : null}
-    </DesktopForm>
-  );
-}
 const fromRakeshs = () => startDraft({ ...rakeshs, onDevice: false } as UnfinishedBill);
+/** The bill form as /sales/new puts it together (BillForm: its draft keeping, its leave-guard and the review), from `start`. */
 function mountSaving(start: Start) {
-  return mountForm("/form", { routes: [{ path: "/form", element: <SavingForm start={start} /> }] });
+  return mountForm("/form", { routes: [{ path: "/form", element: <BillForm start={start} formKey="saving-form" /> }] });
 }
-/** Paid in cash, Check and save (Ctrl S), then Save: what the review will do. */
+/**
+ * Paid in cash, Check and save (Ctrl S), then Save in the review. The review's guard against the key that opened it is
+ * passed on the clock alone, so no timer (the draft's 1.2 s) runs meanwhile.
+ */
 async function save(user: ReturnType<typeof fakeToday>) {
   await waitFor(() => expect(screen.getByLabelText("Bill number")).toHaveValue("34"));
   await user.click(screen.getByRole("radio", { name: "Cash" }));
   await user.keyboard("{Control>}s{/Control}");
-  await user.click(screen.getByRole("button", { name: "Save the bill" }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  vi.setSystemTime(Date.now() + 400);
+  await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
   await settle();
+  return dialog;
 }
+const savingIn = (dialog: HTMLElement) => within(dialog).getByRole("button", { name: "Saving…" });
 
 test("saving from an unfinished bill sends its draft_id and takes the draft with it: the last change goes in the bill, nothing keeps it again, and the next new bill doesn't list it (Ruling 1D-4/F6, F18)", async () => {
   const user = fakeToday();
@@ -226,17 +216,17 @@ test("saving from an unfinished bill sends its draft_id and takes the draft with
   await waitFor(() => expect(calls.some((c) => c.method === "GET" && c.url === "drafts/")).toBe(true));
   // a change made just before the save: not kept yet when Save is pressed
   await user.type(screen.getByLabelText("Note on the bill"), " today");
-  expect(screen.getByTestId("saving")).toHaveTextContent("Not saving; a change waits to be kept");
+  expect(status().getByText("Keeping the draft…")).toBeInTheDocument();
   server.hold("POST");
-  await save(user);
+  const dialog = await save(user);
   // the save takes the change: nothing waits to be kept
-  expect(screen.getByTestId("saving")).toHaveTextContent("Saving; nothing waits to be kept");
+  expect(savingIn(dialog)).toBeInTheDocument();
+  expect(status().queryByText("Keeping the draft…")).not.toBeInTheDocument();
   // and nothing is kept while the save is on its way, however long it takes
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   expect(puts(calls)).toEqual([]);
   await act(async () => { server.release("POST"); await vi.advanceTimersByTimeAsync(50); });
-  expect(screen.getByTestId("saving")).toHaveTextContent("Saved: /sales/501?saved=new");
-  expect(status().queryByText("Keeping the draft…")).not.toBeInTheDocument();
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ draft_id: rakeshs.id, customer: 11, notes: "Waiting for the bangles to be weighed today" });
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   expect(puts(calls)).toEqual([]);
@@ -253,11 +243,11 @@ test("saving from an unfinished bill sends its draft_id and takes the draft with
   expect(screen.queryByText(/Lalit Jain's unfinished bill/)).not.toBeInTheDocument();
 });
 
-test("a save that waits behind the draft's last keep, still on its way, says so (Task 1's review)", async () => {
+test("a save that waits behind the draft's last keep, still on its way, says so in the review and the status (Task 1's review)", async () => {
   const user = fakeToday();
   const server = draftsOnServer([rakeshs]);
   const { calls } = formServer(server.routes);
-  mountSaving(fromRakeshs());
+  const { router } = mountSaving(fromRakeshs());
   await settle();
   await screen.findByText("Finishing an unfinished bill");
   server.hold("PUT");
@@ -265,30 +255,39 @@ test("a save that waits behind the draft's last keep, still on its way, says so 
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   await waitFor(() => expect(puts(calls)).toHaveLength(1));
   expect(status().getByText("Keeping the draft…")).toBeInTheDocument();
-  await save(user);
+  const dialog = await save(user);
+  expect(within(dialog).getByRole("status")).toHaveTextContent("Saving once the draft's last change reaches the shop's list…");
+  expect(savingIn(dialog)).toBeInTheDocument();
   expect(status().getByText("Saving once the draft's last change reaches the shop's list…")).toBeInTheDocument();
   expect(calls.some((c) => c.method === "POST")).toBe(false);
   await act(async () => { server.release("PUT"); await vi.advanceTimersByTimeAsync(50); });
-  await waitFor(() => expect(screen.getByTestId("saving")).toHaveTextContent("Saved: /sales/501?saved=new"));
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
   expect(calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.url}`)).toEqual([`PUT drafts/${rakeshs.id}/`, "POST sales/"]);
 });
 
-test("a save answered 409 draft_saved: keeping stops, and the status says so in the server's words (Ruling 1D-8)", async () => {
+test.each([
+  ["with a link to that bill", SAVED_AS.bill, true],
+  ["alone when that bill has left Sales (its bill: null)", null, false],
+] as const)("a save answered 409 draft_saved: the review says so in the server's words, %s; keeping stops, and the status says so too (Ruling 1D-8)", async (_, bill, linked) => {
   const user = fakeToday();
   const server = draftsOnServer([rakeshs]);
-  const { calls } = formServer(server.routes);
+  const { calls } = formServer([["POST", "sales/", () => refuse(409, { ...SAVED_AS, bill })], ...server.routes]);
   mountSaving(fromRakeshs());
   await settle();
   await screen.findByText("Finishing an unfinished bill");
   // another counter saves it as a bill meanwhile
   server.savedAsBill(rakeshs.id);
-  await save(user);
+  const dialog = await save(user);
+  expect(within(dialog).getByRole("alert")).toHaveTextContent(`Not saved${SAVED_AS.detail}`);
+  if (linked) expect(within(dialog).getByRole("link", { name: "Open KGH/2026-27/31" })).toHaveAttribute("href", "/sales/412");
+  else expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
   await waitFor(() => expect(status().getByText(SAVED_AS.detail)).toBeInTheDocument());
   expect(screen.getByText(`Started at 09:20 by Rakesh Soni. ${SAVED_AS.detail}`)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Discard draft" })).not.toBeInTheDocument();
+  await user.click(within(dialog).getByRole("button", { name: "Go back and edit" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Check the bill before saving" })).not.toBeInTheDocument());
   await user.type(screen.getByLabelText("Note on the bill"), " today");
   expect(status().queryByText("Keeping the draft…")).not.toBeInTheDocument();
-  expect(screen.getByTestId("saving")).toHaveTextContent("nothing waits to be kept");
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
   expect(puts(calls)).toEqual([]);
   expect(keptDraft(rakeshs.id)).toBeNull();
@@ -450,15 +449,20 @@ test("a browser that refuses storage: the form says the bill is kept for this vi
   expect(screen.queryByText(/on this device/)).not.toBeInTheDocument();
 });
 
-test("saved offline where the browser refuses storage, the save's words say it's kept for this visit only (Task 1's review)", async () => {
+test("offline where the browser refuses storage, the review says the bill is kept for this visit only, never on this device (Task 1's review)", async () => {
   const user = fakeToday();
   vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, "setItem").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
-  formServer(draftsOnServer([rakeshs]).routes);
+  const { calls } = formServer(draftsOnServer([rakeshs]).routes);
   mountSaving(fromRakeshs());
   await settle();
   act(() => __setNetState("offline"));
-  await save(user);
-  expect(screen.getByTestId("save-error")).toHaveTextContent("Not saved: you're offline. This browser doesn't store unfinished bills, so this one lasts only while this page is open. Save it when the internet is back; nothing saves by itself.");
+  const dialog = await save(user);
+  const note = within(dialog).getAllByRole("alert")[0];
+  expect(note).toHaveTextContent("You're offline: this bill can't be saved yet");
+  expect(note).toHaveTextContent("This browser doesn't store unfinished bills, so this one lasts only while this page is open. Save it when the internet is back.");
+  expect(dialog).not.toHaveTextContent(/on this device/);
+  expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeDisabled();
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
 });
 
 test("a bill kept on this device before the session ran out comes back on its own address, from this device (part 0 carry)", async () => {
@@ -581,24 +585,25 @@ test("a save held behind the sync's PUT of this draft (the network back, a chang
   const server = draftsOnServer([rakeshs]);
   server.hold("PUT");
   const { calls } = formServer(server.routes);
-  mountSaving(startDraft({ ...mine, onDevice: true } as UnfinishedBill));
+  const { router } = mountSaving(startDraft({ ...mine, onDevice: true } as UnfinishedBill));
   await settle();
   await screen.findByText("Finishing an unfinished bill");
   // the sync as the form opens sends this device's change, and its PUT hangs
   await waitFor(() => expect(puts(calls)).toHaveLength(1));
   expect(status().getByText("Keeping the draft…")).toBeInTheDocument();
-  await save(user);
+  const dialog = await save(user);
+  expect(within(dialog).getByRole("status")).toHaveTextContent("Saving once the draft's last change reaches the shop's list…");
   expect(status().getByText("Saving once the draft's last change reaches the shop's list…")).toBeInTheDocument();
   expect(calls.some((c) => c.method === "POST")).toBe(false);
   await act(async () => { server.release("PUT"); await vi.advanceTimersByTimeAsync(50); });
-  await waitFor(() => expect(screen.getByTestId("saving")).toHaveTextContent("Saved: /sales/501?saved=new"));
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ draft_id: rakeshs.id, notes: "Changed offline" });
 });
 
 test.each([
   ["doesn't go through", () => refuse(500, { detail: "Server error" }), true],
   ["finds a bill was made from it already (409 draft_saved)", () => refuse(409, SAVED_AS), false],
-] as const)("left while the bill saves, and the save %s: what was typed is kept then, and only then (Ruling 1D-10, F6)", async (_, answer, keeps) => {
+] as const)("left while the bill saves, and the save %s: what was typed is kept then, and only then, and the toast says the bill didn't save (Ruling 1D-10, F6)", async (_, answer, keeps) => {
   const user = fakeToday();
   const server = draftsOnServer([rakeshs]);
   let land = () => {};
@@ -607,8 +612,7 @@ test.each([
   await settle();
   await screen.findByText("Finishing an unfinished bill");
   await user.type(screen.getByLabelText("Note on the bill"), " today");
-  await save(user);
-  expect(screen.getByTestId("saving")).toHaveTextContent("Saving;");
+  expect(savingIn(await save(user))).toBeInTheDocument();
   // the form is left before the save answers: nothing is kept while the save is on its way (F6)
   await act(async () => { await router.navigate("/sales"); });
   await settle();
@@ -617,11 +621,16 @@ test.each([
   await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
   if (keeps) {
     expect(keptDraft(rakeshs.id)).toMatchObject({ data: { notes: "Waiting for the bangles to be weighed today" } });
-    expect(screen.getByText("Bill kept as a draft")).toBeInTheDocument();
+    expect(screen.getByText("The bill didn't save")).toBeInTheDocument();
+    expect(screen.getByText("What you typed is kept as an unfinished bill. Open it now?")).toBeInTheDocument();
     await waitFor(() => expect(server.rows.get(rakeshs.id)?.data.notes).toBe("Waiting for the bangles to be weighed today"));
+    await arrive(server, () => user.click(screen.getByRole("button", { name: "Open" })));
+    expect(where(router)).toBe(`/sales/new?draft=${rakeshs.id}`);
+    expect(screen.getByLabelText("Note on the bill")).toHaveValue("Waiting for the bangles to be weighed today");
   } else {
     expect(keptDrafts()).toEqual([]);
     expect(puts(calls)).toEqual([]);
+    expect(screen.queryByText("The bill didn't save")).not.toBeInTheDocument();
     expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
   }
 });
@@ -638,7 +647,7 @@ test.each([
   const user = fakeToday();
   const server = draftsOnServer([rakeshs]);
   const { calls } = formServer(server.routes);
-  mountSaving(fromRakeshs());
+  const { router } = mountSaving(fromRakeshs());
   await settle();
   await screen.findByText("Finishing an unfinished bill");
   // a change made just before the save: not kept yet as Save is pressed, so only the save's guard stops a keep
@@ -646,15 +655,14 @@ test.each([
   // another counter saved it as a bill meanwhile
   if (madeAlready) server.savedAsBill(rakeshs.id);
   server.hold("POST");
-  await save(user);
-  expect(screen.getByTestId("saving")).toHaveTextContent("Saving;");
+  expect(savingIn(await save(user))).toBeInTheDocument();
   hideThenClose();
   await settle();
   expect(keptDrafts()).toEqual([]);
   expect(puts(calls)).toEqual([]);
   await act(async () => { server.release("POST"); await vi.advanceTimersByTimeAsync(50); });
   if (madeAlready) await waitFor(() => expect(status().getByText(SAVED_AS.detail)).toBeInTheDocument());
-  else expect(screen.getByTestId("saving")).toHaveTextContent("Saved: /sales/501?saved=new");
+  else await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
   hideThenClose();
   await settle();
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
@@ -686,6 +694,7 @@ test("left while the save waits behind the draft's keep, which hears the draft b
   expect(calls.some((c) => c.method === "POST")).toBe(true);
   await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
   await settle();
+  expect(screen.queryByText("The bill didn't save")).not.toBeInTheDocument();
   expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
   expect(keptDrafts()).toEqual([]);
   expect(puts(calls)).toHaveLength(1);

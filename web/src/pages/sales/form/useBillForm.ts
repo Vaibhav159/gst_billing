@@ -186,7 +186,12 @@ export function useBillForm(start: Start) {
   const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline" && (f.paper && !edit ? book.isPending : next.isPending);
   const numberError = keep ? "" : numberProblem(numberText, next.data?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
   const numberNote = !numberError && known?.note ? known.note : "";
-  const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : f.numberTyped && net !== "offline" && !answer ? "checking" : "unknown";
+  // "checking" only while a check is coming: typing hasn't paused yet, or the server hasn't answered. One that failed (a
+  // 500, the network) or can't be sent (no firm, or no date it could read) is no answer, like an unchecked one: the
+  // number is checked when the bill saves, never "Checking…" for ever (T4 re-review)
+  const asking = f.numberTyped && !keep && f.firmId !== null && Boolean(f.date) && Boolean(f.number.trim()) && net !== "offline"
+    && (typedNow !== f.number.trim() || check.isPending);
+  const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : asking && !answer ? "checking" : "unknown";
   const setNumber = useCallback((text: string) => set({ number: text, numberTyped: true }), [set]);
   const takeSuggestion = useCallback(() => set({ number: "", numberTyped: false }), [set]);
 
