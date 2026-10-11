@@ -57,7 +57,7 @@ def test_owner_reset_hashed_single_use_and_revokes_all():
     assert anonymous.post("/api/auth/reset/finish/", body).status_code == 200
     assert logged.get("/api/me/").status_code == 401
     assert anonymous.post("/api/token/refresh/", {"refresh": tokens["refresh"]}).status_code == 401
-    assert anonymous.post("/api/auth/reset/finish/", body).data["code"] == ["That code has run out or been used. Ask for a new one."]
+    assert anonymous.post("/api/auth/reset/finish/", body).data["code"] == ["That code isn't right or has run out. Ask for a new code."]
 
 
 @override_settings(SMS_RESET_ENABLED=True, SMS_PROVIDER="fake")
@@ -93,12 +93,48 @@ def test_five_tries_persist_and_expiry_is_enforced():
     wrong = "000000" if correct != "000000" else "111111"
     for remaining in range(4, -1, -1):
         response = client.post("/api/auth/reset/finish/", {"username": "maya", "code": wrong, "password": "Harbour873!"})
-        expected = f"That code isn't right. {remaining} tries left." if remaining else "That code has run out or been used. Ask for a new one."
-        assert response.status_code == 400 and response.data["code"] == [expected]
+        assert response.status_code == 400 and response.data["code"] == ["That code isn't right or has run out. Ask for a new code."]
     assert PasswordResetCode.objects.get().tries == 5
     PasswordResetCode.objects.update(tries=0, expires_at=timezone.now() - timedelta(seconds=1))
     response = client.post("/api/auth/reset/finish/", {"username": "maya", "code": correct, "password": "Harbour873!"})
-    assert "run out" in response.data["code"][0]
+    assert response.data["code"] == ["That code isn't right or has run out. Ask for a new code."]
+
+
+@override_settings(SMS_RESET_ENABLED=True, SMS_PROVIDER="fake")
+def test_wrong_code_words_never_tell_owners_apart():
+    from billing.services.sms import fake_outbox
+    owner = person("maya", "admin")
+    person("staff")
+    security = security_for(owner)
+    security.phone = "9000000000"
+    security.save()
+    client = APIClient()
+    answers = []
+    for username in ("maya", "staff", "absent"):
+        client.post("/api/auth/reset/start/", {"username": username})
+        wrong = "000000" if fake_outbox["9000000000"] != "000000" else "111111"
+        response = client.post("/api/auth/reset/finish/", {"username": username, "code": wrong, "password": "Harbour873!"})
+        answers.append((response.status_code, response.data))
+    assert answers == [(400, {"code": ["That code isn't right or has run out. Ask for a new code."]})] * 3
+    assert PasswordResetCode.objects.get().tries == 1
+
+
+@override_settings(SMS_RESET_ENABLED=True, SMS_PROVIDER="fake")
+@pytest.mark.parametrize("password", [None, 12345678, ["Harbour873!"], {}])
+def test_finish_refuses_a_non_string_password_and_keeps_the_code(password):
+    from billing.services.sms import fake_outbox
+    owner = person("maya", "admin")
+    security = security_for(owner)
+    security.phone = "9000000000"
+    security.save()
+    client = APIClient()
+    client.post("/api/auth/reset/start/", {"username": "maya"})
+    body = {"username": "maya", "code": fake_outbox["9000000000"], "password": password}
+    response = client.post("/api/auth/reset/finish/", body, format="json")
+    assert response.status_code == 400 and response.data == {"password": ["Use a password of 8 to 128 characters."]}
+    owner.refresh_from_db()
+    assert owner.check_password("x")
+    assert PasswordResetCode.objects.get().used_at is None
 
 
 @override_settings(SMS_RESET_ENABLED=True, SMS_PROVIDER="fake")
@@ -181,6 +217,11 @@ def test_production_settings_refuse_fake_even_when_debug(debug):
     with pytest.raises(ImproperlyConfigured, match="SMS_PROVIDER=fake"):
         load_production_settings(SMS_PROVIDER="fake", DEBUG=debug,
                                  SMS_FAKE_OUTBOX_FILE=None)
+
+
+def test_production_settings_refuse_a_fake_outbox_file_at_startup():
+    with pytest.raises(ImproperlyConfigured, match="SMS_FAKE_OUTBOX_FILE"):
+        load_production_settings(SMS_PROVIDER="msg91", SMS_FAKE_OUTBOX_FILE="/tmp/outbox.json")
 
 
 def test_production_settings_still_accept_real_provider():
@@ -274,14 +315,34 @@ def test_fake_file_write_failure_does_not_report_delivery(tmp_path):
         assert not send_code("9000000000", "123456")
 
 
+@override_settings(DEBUG=True, SMS_PROVIDER="fake")
+def test_fake_outbox_folder_is_private_and_must_be_ours(tmp_path):
+    from billing.services.sms import send_code
+
+    outbox = tmp_path / "made" / "outbox.json"
+    with override_settings(SMS_FAKE_OUTBOX_FILE=str(outbox)):
+        assert send_code("9000000000", "123456")
+        assert stat.S_IMODE(outbox.parent.stat().st_mode) == 0o700
+        outbox.unlink()
+        with patch("billing.services.sms.os.getuid", return_value=os.getuid() + 1):
+            assert not send_code("9000000000", "123456")
+        assert not outbox.exists()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / "linked").symlink_to(elsewhere)
+    with override_settings(SMS_FAKE_OUTBOX_FILE=str(tmp_path / "linked" / "outbox.json")):
+        assert not send_code("9000000000", "123456")
+    assert not (elsewhere / "outbox.json").exists()
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 def test_sandbox_fake_sms_is_explicit_and_sets_a_private_file(enabled, tmp_path):
     environment = {"GST_SANDBOX": "1", "DB_HOST": "db", "DB_NAME": "gst_sandbox_test",
                    "SMS_PROVIDER": "", "DEBUG": "False", "SMS_RESET_ENABLED": "",
-                   "SMS_FAKE_OUTBOX_FILE": str(tmp_path / "outbox.json"),
+                   "SMS_FAKE_OUTBOX_FILE": None, "SANDBOX_SMS_OUTBOX_FILE": str(tmp_path / "outbox.json"),
                    "SANDBOX_FAKE_SMS": "1" if enabled else "0"}
     production = load_production_settings(**environment)
-    with patch.dict(os.environ, environment), \
+    with patch.dict(os.environ, {key: value for key, value in environment.items() if value is not None}), \
             patch.dict(sys.modules, {"gst_billing.production_settings": production}):
         sandbox = runpy.run_module("gst_billing.sandbox_settings")
     assert sandbox["DEBUG"] is enabled

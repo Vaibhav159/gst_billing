@@ -1,6 +1,7 @@
 """MSG91 flow adapter. Never log a request, response, phone or reset code."""
 import json
 import os
+import stat
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -24,6 +25,16 @@ def provider_ready():
     )
 
 
+def private_folder(folder):
+    # The sandbox default sits in /tmp: never write into a folder (or symlink) someone else made.
+    try:
+        folder.mkdir(parents=True, mode=0o700)
+    except FileExistsError:
+        pass
+    info = folder.lstat()
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+
+
 def sms_enabled():
     return bool(settings.SMS_RESET_ENABLED and provider_ready())
 
@@ -35,7 +46,8 @@ def send_code(phone, code):
         if filename := getattr(settings, "SMS_FAKE_OUTBOX_FILE", ""):
             path = Path(filename)
             try:
-                path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if not private_folder(path.parent):
+                    return False
                 with TemporaryDirectory(dir=path.parent) as directory:
                     temporary = Path(directory) / "outbox.json"
                     temporary.write_text(json.dumps({"phone": phone, "code": code}))

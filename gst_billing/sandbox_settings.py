@@ -27,7 +27,7 @@ if os.environ.get("SANDBOX_FAKE_SMS") == "1":
     DEBUG = True
     SMS_PROVIDER = "fake"
     SMS_RESET_ENABLED = True
-    SMS_FAKE_OUTBOX_FILE = os.environ.get("SMS_FAKE_OUTBOX_FILE") or "/tmp/gst-sandbox-sms/outbox.json"
+    SMS_FAKE_OUTBOX_FILE = os.environ.get("SANDBOX_SMS_OUTBOX_FILE") or "/tmp/gst-sandbox-sms/outbox.json"
 
 # Reached on localhost ports through an SSH tunnel, and by service name from
 # the Vite container's proxy (which rewrites Host to "nginx").

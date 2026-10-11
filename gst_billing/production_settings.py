@@ -432,7 +432,9 @@ SMS_RESET_ENABLED = os.environ.get("SMS_RESET_ENABLED", "").lower() in {"1", "tr
 SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "msg91")
 if SMS_PROVIDER == "fake":
     raise ImproperlyConfigured("SMS_PROVIDER=fake is not allowed in production settings.")
-SMS_FAKE_OUTBOX_FILE = os.environ.get("SMS_FAKE_OUTBOX_FILE", "")
+if os.environ.get("SMS_FAKE_OUTBOX_FILE"):
+    raise ImproperlyConfigured("SMS_FAKE_OUTBOX_FILE is not allowed in production settings.")
+SMS_FAKE_OUTBOX_FILE = ""
 MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
 MSG91_TEMPLATE_ID = os.environ.get("MSG91_TEMPLATE_ID", "")
 MSG91_SENDER = os.environ.get("MSG91_SENDER", "")

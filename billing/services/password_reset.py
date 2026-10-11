@@ -17,7 +17,8 @@ from billing.services.accounts import audit_user, revoke_all, security_for, vali
 
 from .sms import send_code
 
-EXPIRED = "That code has run out or been used. Ask for a new one."
+# R4B-1: one answer for every wrong, expired or used code, whoever the username is.
+EXPIRED = "That code isn't right or has run out. Ask for a new code."
 FAILED = {"detail": "The SMS couldn't be sent. Try again in a few minutes, or ask the person who looks after the app.", "code": "sms_failed"}
 
 
@@ -74,7 +75,7 @@ def finish_reset(data):
     if not check_password(code, record.code_hash):
         record.tries += 1
         record.save(update_fields=["tries"])
-        return {"code": [f"That code isn't right. {5 - record.tries} tries left." if record.tries < 5 else EXPIRED]}, 400
+        return {"code": [EXPIRED]}, 400
     password = data.get("password")
     validate_password(password, user, own=True, change=True)
     user.set_password(password)
