@@ -1,7 +1,7 @@
 import { readStored, writeStored } from "@/core/storage";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setPasswordNeededHandler, sameTokenSession, setTokens, tokenUser } from "@/core/api/client";
+import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setPasswordNeededHandler, sameTokenSession, setTokens, tabOnly, tokenUser } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { can as canDo, whyNot as whyNotFor, type Action } from "./permissions";
 import { RoleContext, type Role } from "./role";
@@ -20,8 +20,19 @@ export type AuthValue = {
 export const AuthContext = createContext<AuthValue | null>(null);
 const ME_KEY = "gst3.me";
 
-function readMe(): Me | null { try { const s = readStored(ME_KEY); return s ? (JSON.parse(s) as Me) : null; } catch { return null; } }
-function saveMe(me: Me | null) { try { writeStored(ME_KEY, me ? JSON.stringify(me) : null); } catch { /* storage refused */ } }
+// A tab-only sign-in keeps who it is in this tab too: nothing about the person outlives the tab.
+function readMe(): Me | null { try { const s = tabOnly() ? sessionStorage.getItem(ME_KEY) : readStored(ME_KEY); return s ? (JSON.parse(s) as Me) : null; } catch { return null; } }
+function saveMe(me: Me | null) {
+  const value = me ? JSON.stringify(me) : null;
+  try {
+    if (tabOnly()) { writeStored(ME_KEY, null); if (value) sessionStorage.setItem(ME_KEY, value); else sessionStorage.removeItem(ME_KEY); }
+    else { sessionStorage.removeItem(ME_KEY); writeStored(ME_KEY, value); }
+  } catch { /* storage refused */ }
+}
+
+/** The password changed, but this tab now holds a different sign-in (or none): its new tokens aren't this tab's to keep. */
+export class PasswordChangedElsewhere extends Error {}
+class TabStorageRefused extends Error {}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice, mustChangePassword: Boolean(d.must_change_password), sessionId: d.session_id ?? null }; }
 
@@ -78,8 +89,10 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
   const signOut = useCallback(async () => {
     const sent = getTokens();
     if (!sent.access) { forgetOnPurpose(); return; }
-    await api.post("auth/sign-out/", { refresh: sent.refresh }, { headers: { Authorization: `Bearer ${sent.access}` } });
-    if (sameTokenSession(sent.access, getTokens().access)) forgetOnPurpose();
+    const response = await api.post("auth/sign-out/", { refresh: sent.refresh }, { headers: { Authorization: `Bearer ${sent.access}` } });
+    // Judged by the request that succeeded: a legacy token refreshed for the retry is still this sign-in.
+    const ended = String(response.config.headers.Authorization ?? "").replace(/^Bearer /, "") || sent.access;
+    if (sameTokenSession(ended, getTokens().access)) forgetOnPurpose();
   }, [forgetOnPurpose]);
 
   /** This tab's person is now `m`. Someone other than the person shown clears the cache and, unless this tab signed them in, is announced. */
@@ -175,7 +188,7 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     try {
       const r = await api.post("token/", { username, password, remember });
       mine = r.data.access as string;
-      setTokens(r.data.access, r.data.refresh, remember);
+      if (!setTokens(r.data.access, r.data.refresh, remember)) throw new TabStorageRefused("This browser wouldn't keep a sign-in for this tab. Tick Keep me signed in, or allow this site to store data.");
       const m = await ask();
       if (m) adopt(m, false);
       return { ok: true };
@@ -184,13 +197,13 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
       if (mine && getTokens().access === mine) clearTokens();
       // and this tab has no sign-in left to end: a sign-out heard later from another tab isn't this tab's (Ruling 63)
       if (mine && checked.current === mine) checked.current = null;
-      return { ok: false, problem: problemOf(e) };
+      return { ok: false, problem: e instanceof TabStorageRefused ? { kind: "server", message: e.message } : problemOf(e) };
     }
   }, [ask, adopt]);
 
   const refreshMe = useCallback(async () => { const m = await ask(); if (m) adopt(m, false); }, [ask, adopt]);
   const acceptPasswordChange = useCallback(async (pair: {access:string;refresh:string;requestAccess?:string|null}) => {
-    if (!shown.current || !tokenFits(shown.current, pair.access) || !sameTokenSession(pair.requestAccess === undefined ? pair.access : pair.requestAccess, getTokens().access)) return;
+    if (!shown.current || !tokenFits(shown.current, pair.access) || !sameTokenSession(pair.requestAccess === undefined ? pair.access : pair.requestAccess, getTokens().access)) throw new PasswordChangedElsewhere("signed in differently while the password changed");
     setTokens(pair.access, pair.refresh);
     // The endpoint has changed the password even if the follow-up read is offline.
     adopt({ ...shown.current, mustChangePassword: false }, false);

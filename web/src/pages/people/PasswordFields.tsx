@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CheckCircle2, Circle, Eye, EyeOff, KeyRound } from "lucide-react";
-import { useChangePassword } from "@/core/api/account";
+import { useChangePassword, type PasswordAnswer } from "@/core/api/account";
 import { problemOf, saveFailure, type ApiProblem } from "@/core/api/errors";
-import { useAuth } from "@/core/auth/AuthProvider";
+import { PasswordChangedElsewhere, useAuth } from "@/core/auth/AuthProvider";
 import { timeOf } from "@/core/sales/words";
 import { useView } from "@/core/view";
 import { Button, Field, Input, FailNote, SuccessMark, cn } from "@/core/ui";
@@ -60,6 +60,8 @@ export function PasswordFields({ id, value, onChange, again, onAgain, identity, 
   </>;
 }
 
+const ELSEWHERE = "This tab signed in differently while the password was saving. If you are asked to sign in, use your new password.";
+
 /** Shared by Profile and the mandatory password page; fields live only in this form's memory. */
 export function ChangePasswordForm({ person, onDirty, forced = false, onChanged }: { person: PasswordIdentity; onDirty?: (dirty: boolean) => void; forced?: boolean; onChanged?: () => void }) {
   const change = useChangePassword();
@@ -83,14 +85,20 @@ export function ChangePasswordForm({ person, onDirty, forced = false, onChanged 
     const bad = !current ? "current" : passwordError(password, person, true, current) ? "password" : password !== again ? "again" : null;
     if (bad) { document.getElementById(`pw-${bad}`)?.focus(); return; }
     setBusy(true);
+    let reply: PasswordAnswer | null = null;
     try {
-      const reply = await change.mutateAsync({ current, password });
+      reply = await change.mutateAsync({ current, password });
       await acceptPasswordChange(reply);
       if (!mounted.current) return;
       setSuccess({ detail: reply.detail, at: reply.changed_at }); setCurrent(""); setPassword(""); setAgain(""); setTried(false);
       change.reset(); if (mounted.current) onChanged?.();
     } catch (error) {
       if (!mounted.current) return;
+      // Saved on the server, but this tab is now signed in differently: say so, and never offer to send the old password again.
+      if (reply && error instanceof PasswordChangedElsewhere) {
+        setSuccess({ detail: ELSEWHERE, at: reply.changed_at }); setCurrent(""); setPassword(""); setAgain(""); setTried(false);
+        return;
+      }
       const failure = problemOf(error); setProblem(failure);
       document.getElementById(failure.fields?.current ? "pw-current" : "pw-password")?.focus();
     } finally { setBusy(false); }

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { testQueryClient } from "@/test/render";
 import { serve } from "@/test/server";
 import { api, getTokens, setTokens, clearTokens, setSessionExpiredHandler } from "@/core/api/client";
@@ -145,4 +145,83 @@ test.each([true, false])("the shared password flow stores both tokens before its
   expect(unused.getItem("gst_access_token")).toBeNull();
   expect(unused.getItem("gst_refresh_token")).toBeNull();
   expect(auth.me?.mustChangePassword).toBe(false);
+});
+
+test("a legacy sign-out that needs a refresh still signs out, sending the refresh token it holds then", async () => {
+  setTokens("legacyA", "rA");
+  let tries = 0;
+  const calls = serve({ "GET me/": me, "POST auth/sign-out/": () => (++tries === 1 ? { status: 401 } : { status: 204 }) });
+  const axios = (await import("axios")).default;
+  vi.spyOn(axios, "post").mockResolvedValue({ data: { access: "legacyB", refresh: "rB" } });
+  mount();
+  await screen.findByText("private page");
+  act(() => screen.getByText("out").click());
+  await waitFor(() => expect(getTokens().access).toBeNull());
+  const signOuts = calls.filter((c) => c.url === "auth/sign-out/");
+  expect(signOuts.map((c) => c.data)).toEqual([{ refresh: "rA" }, { refresh: "rB" }]);
+});
+
+test("a tab-only tab's token rotation leaves another tab's remembered sign-in alone", () => {
+  setTokens("tab", "tr", false);
+  localStorage.setItem("gst_access_token", "other");
+  localStorage.setItem("gst_refresh_token", "other-r");
+  setTokens("tab2", "tr2");
+  expect(localStorage.getItem("gst_access_token")).toBe("other");
+  expect(localStorage.getItem("gst_refresh_token")).toBe("other-r");
+  expect(getTokens()).toEqual({ access: "tab2", refresh: "tr2" });
+});
+
+test("a browser that refuses tab storage gets a plain sign-in failure, not a thrown error", async () => {
+  const refusing = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage) {
+    if (this === sessionStorage) throw new DOMException("refused", "QuotaExceededError");
+  });
+  expect(setTokens("a", "r", false)).toBe(false);
+  refusing.mockRestore();
+  const refuse = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage) {
+    if (this === sessionStorage) throw new DOMException("refused", "QuotaExceededError");
+  });
+  serve({ "POST token/": { access: "a", refresh: "r" }, "GET me/": me });
+  let auth!: ReturnType<typeof useAuth>;
+  function Capture() { auth = useAuth(); return null; }
+  render(<QueryClientProvider client={testQueryClient()}><AuthProvider><Capture /></AuthProvider></QueryClientProvider>);
+  let result!: Awaited<ReturnType<typeof auth.signIn>>;
+  await act(async () => { result = await auth.signIn("owner", "synthetic", false); });
+  refuse.mockRestore();
+  expect(result.ok).toBe(false);
+  expect(getTokens()).toEqual({ access: null, refresh: null });
+});
+
+test("a tab-only sign-in keeps who signed in out of shared storage", async () => {
+  serve({ "POST token/": { access: "a", refresh: "r" }, "GET me/": me });
+  let auth!: ReturnType<typeof useAuth>;
+  function Capture() { auth = useAuth(); return null; }
+  render(<QueryClientProvider client={testQueryClient()}><AuthProvider><Capture /></AuthProvider></QueryClientProvider>);
+  await act(async () => { await auth.signIn("owner", "synthetic", false); });
+  expect(auth.status).toBe("signed-in");
+  expect(localStorage.getItem("gst3.me")).toBeNull();
+  expect(sessionStorage.getItem("gst3.me")).toContain("owner");
+});
+
+test("a server sign-out of this device starts the next person on a plain sign-in page with the reason", async () => {
+  setTokens("a", "r");
+  serve({ "GET me/": me, "GET people/": () => ({ status: 401, data: { code: "signed_out" } }) });
+  let where = "";
+  function Where() { const loc = useLocation(); where = loc.pathname + loc.search; return <span>login</span>; }
+  render(<QueryClientProvider client={testQueryClient()}><AuthProvider><MemoryRouter initialEntries={["/sales"]}><Routes><Route path="/login" element={<Where />} /><Route path="*" element={<Probe />} /></Routes></MemoryRouter></AuthProvider></QueryClientProvider>);
+  await screen.findByText("private page");
+  await act(async () => { await api.get("people/").catch(() => {}); });
+  await screen.findByText("login");
+  expect(where).toBe("/login?reason=signed_out");
+});
+
+test("a password change from another session says so instead of claiming success quietly", async () => {
+  const jwt = (sid: string) => `e30.${btoa(JSON.stringify({ user_id: 1, sid }))}.sig`;
+  setTokens(jwt("now"), "r");
+  serve({ "GET me/": me });
+  let auth!: ReturnType<typeof useAuth>;
+  function Capture() { auth = useAuth(); return null; }
+  render(<QueryClientProvider client={testQueryClient()}><AuthProvider><Capture /></AuthProvider></QueryClientProvider>);
+  await waitFor(() => expect(auth.status).toBe("signed-in"));
+  await expect(auth.acceptPasswordChange({ access: jwt("other"), refresh: "r2", requestAccess: jwt("other") })).rejects.toThrow();
+  expect(getTokens().access).toBe(jwt("now"));
 });

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { AuthContext } from "@/core/auth/AuthProvider";
+import { AuthContext, PasswordChangedElsewhere } from "@/core/auth/AuthProvider";
 import type { Role } from "@/core/auth/role";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { serve, type Answer, type Call, type Reply } from "@/test/server";
@@ -160,6 +160,17 @@ describe("own password", () => {
     expect(auth.acceptPasswordChange).toHaveBeenCalledWith(expect.objectContaining({ access: answer.access, refresh: answer.refresh }));
     expect(screen.getByLabelText("Current password")).toHaveValue("");
     expect(calls.find((c) => c.url === "account/password/")?.data).toEqual({ current: "Old8!phrase", password: "Quartz7!moon" });
+  });
+  it("says the password changed but this tab is signed in differently, and never offers to resend the old password", async () => {
+    const answer = { detail: "Password changed. Your other devices are signed out.", changed_at: "2026-10-08T16:52:00+05:30", access: "new-access", refresh: "new-refresh" };
+    const { auth } = mount({ "POST account/password/": answer });
+    auth.acceptPasswordChange.mockRejectedValue(new PasswordChangedElsewhere("signed in differently"));
+    await fillPassword();
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByText(/This tab signed in differently while the password was saving/)).toBeInTheDocument();
+    expect(screen.getByText("Password changed at 16:52")).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
   });
   it("shows the server's current and common-password errors under the correct fields without losing input", async () => {
     mount({ "POST account/password/": () => ({ status: 400, data: { current: ["That isn't your current password. Check Caps Lock and try again."], password: ["The new password needs: not a common password."] } }) });

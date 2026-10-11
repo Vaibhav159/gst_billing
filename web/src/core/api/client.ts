@@ -15,20 +15,27 @@ export const ACCESS_KEY = "gst_access_token";
 export const REFRESH_KEY = "gst_refresh_token";
 
 const TAB_SESSION = "gst3.tabSession";
-function tabOnly(): boolean { try { return sessionStorage.getItem(TAB_SESSION) === "1"; } catch { return false; } }
+export function tabOnly(): boolean { try { return sessionStorage.getItem(TAB_SESSION) === "1"; } catch { return false; } }
 function tabRead(key: string): string | null { try { return sessionStorage.getItem(key); } catch { return null; } }
 export function getTokens() { return { access: tabOnly() ? tabRead(ACCESS_KEY) : read(ACCESS_KEY), refresh: tabOnly() ? tabRead(REFRESH_KEY) : read(REFRESH_KEY) }; }
-export function setTokens(access: string, refresh?: string, remember?: boolean) {
+/** Stores a sign-in. False when this tab's storage refused a tab-only one: nothing is kept, so the caller can say so. */
+export function setTokens(access: string, refresh?: string, remember?: boolean): boolean {
   const temporary = remember === undefined ? tabOnly() : !remember;
   if (temporary) {
-    // Never leave a persistent older sign-in to return after this tab closes.
-    writeStored(ACCESS_KEY, null); writeStored(REFRESH_KEY, null);
-    sessionStorage.setItem(TAB_SESSION, "1"); sessionStorage.setItem(ACCESS_KEY, access);
-    if (refresh) sessionStorage.setItem(REFRESH_KEY, refresh);
-  } else {
-    try { sessionStorage.removeItem(TAB_SESSION); sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); } catch { /* no tab session */ }
-    if (writeStored(ACCESS_KEY, access) && refresh) writeStored(REFRESH_KEY, refresh);
+    // Choosing tab-only never leaves a persistent older sign-in to return after this tab closes. A rotation here
+    // (remember undefined) leaves the shared keys alone: they may hold another tab's newer remembered sign-in.
+    if (remember === false) { writeStored(ACCESS_KEY, null); writeStored(REFRESH_KEY, null); }
+    try {
+      sessionStorage.setItem(TAB_SESSION, "1"); sessionStorage.setItem(ACCESS_KEY, access);
+      if (refresh) sessionStorage.setItem(REFRESH_KEY, refresh);
+      return true;
+    } catch {
+      try { sessionStorage.removeItem(TAB_SESSION); sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); } catch { /* storage refused */ }
+      return false;
+    }
   }
+  try { sessionStorage.removeItem(TAB_SESSION); sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); } catch { /* no tab session */ }
+  return writeStored(ACCESS_KEY, access) && (!refresh || writeStored(REFRESH_KEY, refresh));
 }
 export function clearTokens() {
   if (tabOnly()) { try { sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); } catch { /* storage refused */ } }
@@ -232,6 +239,8 @@ api.interceptors.response.use(
       return rejectRequest(e instanceof SessionEnded || e instanceof SignedOutMeanwhile ? error : e, original);
     }
     original.headers.Authorization = `Bearer ${access}`;
+    // The refresh above rotated the refresh token a sign-out names: send the one held now, so the right one is revoked.
+    if (path === "auth/sign-out/") original.data = { refresh: getTokens().refresh };
     return api(original);
   },
 );

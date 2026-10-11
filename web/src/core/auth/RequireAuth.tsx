@@ -15,6 +15,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (status === "signed-out") {
     // whoever signs in next on this computer starts at home, not on the last person's page (a late expiry doesn't change that)
     if (signedOutOnPurpose) return <Navigate to="/login" replace />;
+    // the server ended this device's session: the reason stays, but whoever is next still starts at home
+    if (expiredFrom && expiredReason === "signed_out") return <Navigate to="/login?reason=signed_out" replace />;
     const next = expiredFrom || loc.pathname + loc.search;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}${expiredFrom ? `&reason=${expiredReason ?? "expired"}` : ""}`} replace />;
   }
