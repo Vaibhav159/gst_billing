@@ -2,6 +2,7 @@
 from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.db import connection
 from django.db.models import Case, CharField, Count, F, Q, Sum, Value, When
 from django.db.models.functions import Lower, Round
 from django.utils import timezone
@@ -58,10 +59,8 @@ def scope(params):
 
 def product_names(products):
     """One audit read for the products; a current holder owns its name over historical aliases."""
-    holders = defaultdict(set)
-    for pk, name in uncached(Product).values_list("id", "name"):
-        holders[name.lower()].add(pk)
     names = {product.pk: [product.name] for product in products}
+    candidates = defaultdict(list)
     for pk, changes in uncached(AuditLog).filter(entity="product", entity_id__in=names, changes__has_key="name") \
             .order_by("timestamp", "id").values_list("entity_id", "changes"):
         change = changes.get("name")
@@ -69,9 +68,18 @@ def product_names(products):
             continue
         for key in ("old", "new"):
             name = change.get(key)
-            if not isinstance(name, str) or not name or holders[name.lower()] - {pk}:
+            if not isinstance(name, str) or not name or name in names[pk] or name in candidates[pk]:
                 continue
-            if name not in names[pk]:
+            candidates[pk].append(name)
+    if not candidates:
+        return names
+    holders = defaultdict(set)
+    keys = {name.lower() for values in candidates.values() for name in values}
+    for pk, name in uncached(Product).alias(name_key=Lower("name")).filter(name_key__in=keys).values_list("id", "name"):
+        holders[name.lower()].add(pk)
+    for pk, values in candidates.items():
+        for name in values:
+            if not holders[name.lower()] - {pk}:
                 names[pk].append(name)
     return names
 
@@ -136,19 +144,57 @@ def catalog_summary(names, period, show_empty):
             "no_items": [bill_ref(bill) for bill in refs], "no_items_count": empty.count() if show_empty else 0}
 
 
-def product_uses(product, names=None):
-    names = names or product_names([product])[product.pk]
-    lines = matching_lines(names)
-    sale = Q(invoice__type_of_invoice=INVOICE_TYPE_OUTWARD)
-    cancelled = Q(invoice__status=BILL_CANCELLED)
-    uses = lines.aggregate(sales=Count("invoice_id", distinct=True, filter=sale & ~cancelled),
-                           cancelled=Count("invoice_id", distinct=True, filter=sale & cancelled),
-                           purchases=Count("invoice_id", distinct=True, filter=Q(invoice__type_of_invoice=INVOICE_TYPE_INWARD)))
-    keys = {name.lower() for name in names}
-    uses["bin"] = sum(any(isinstance(line, dict) and str(line.get("product_name", "")).lower() in keys
-                          for line in (rows or []))
-                      for rows in uncached(BinnedInvoice).live().values_list("data__lines", flat=True))
+def product_uses_many(products, names=None):
+    """Two grouped counts; only product ids/counts cross the wire, never a bin's JSON.
+
+    ``names`` optionally supplies product_names()'s {product id: aliases} mapping.
+    Distinct bill ids prevent two matching aliases on the same bill counting twice.
+    """
+    products = list(products)
+    uses = {product.pk: dict.fromkeys(("sales", "cancelled", "purchases", "bin"), 0) for product in products}
+    if not products:
+        return uses
+    names = product_names(products) if names is None else names
+    pairs = [(product.pk, name) for product in products for name in sorted({n.lower() for n in names[product.pk]})]
+    if not pairs:
+        return uses
+    parameters = [value for pair in pairs for value in pair]
+    named = "WITH names(product_id, name_key) AS (VALUES " + ", ".join(["(%s, %s)"] * len(pairs)) + ") "
+    quote = connection.ops.quote_name
+    with connection.cursor() as cursor:
+        cursor.execute(named + f"""
+            SELECT names.product_id,
+                   COUNT(DISTINCT CASE WHEN bill.type_of_invoice = %s AND bill.status <> %s THEN bill.id END),
+                   COUNT(DISTINCT CASE WHEN bill.type_of_invoice = %s AND bill.status = %s THEN bill.id END),
+                   COUNT(DISTINCT CASE WHEN bill.type_of_invoice = %s THEN bill.id END)
+            FROM {quote(LineItem._meta.db_table)} item
+            JOIN {quote(Invoice._meta.db_table)} bill ON bill.id = item.invoice_id
+            JOIN names ON names.name_key = LOWER(item.product_name)
+            GROUP BY names.product_id
+        """, [*parameters, INVOICE_TYPE_OUTWARD, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, BILL_CANCELLED, INVOICE_TYPE_INWARD])
+        for pk, sales, cancelled, purchases in cursor.fetchall():
+            uses[pk].update(sales=sales, cancelled=cancelled, purchases=purchases)
+        # Reuse live() so v2 undo markers and restored rows follow the bin's shared rule.
+        live_sql, live_parameters = uncached(BinnedInvoice).live().order_by().values("id", "data").query.sql_with_params()
+        if connection.vendor == "postgresql":
+            rows = "jsonb_array_elements(CASE WHEN jsonb_typeof(b.data->'lines') = 'array' THEN b.data->'lines' ELSE '[]'::jsonb END) element(value)"
+            name = "element.value->>'product_name'"
+        else:
+            rows = "json_each(CASE WHEN json_type(b.data, '$.lines') = 'array' THEN json_extract(b.data, '$.lines') ELSE '[]' END) element"
+            name = "CASE WHEN element.type = 'object' THEN json_extract(element.value, '$.product_name') END"
+        cursor.execute(named + f"""
+            SELECT names.product_id, COUNT(DISTINCT b.id)
+            FROM ({live_sql}) b CROSS JOIN {rows}
+            JOIN names ON names.name_key = LOWER({name})
+            GROUP BY names.product_id
+        """, [*parameters, *live_parameters])
+        for pk, count in cursor.fetchall():
+            uses[pk]["bin"] = count
     return uses
+
+
+def product_uses(product, names=None):
+    return product_uses_many([product], {product.pk: names} if names is not None else None)[product.pk]
 
 
 def _line_bills(lines):
