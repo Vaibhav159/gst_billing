@@ -21,9 +21,11 @@ Postgres (or a throwaway SQLite, for tests).
 import os
 import random
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import Group, User
 from django.core.files.base import ContentFile
@@ -166,6 +168,7 @@ class Command(BaseCommand):
         parser.add_argument("--purchases-v3", action="store_true", help="Add v3 purchase, capture and AI usage cases.")
         parser.add_argument("--gst", action="store_true", help="Add v3 filing, correction and credit examples (needs part 2A).")
         parser.add_argument("--reset", action="store_true", help="Delete existing sandbox data first.")
+        parser.add_argument("--easy", action="store_true", help="Add Easy's synthetic acceptance cases.")
         parser.add_argument(
             "--print-credentials", action="store_true",
             help="Print role, username and password for each sandbox login to stdout.",
@@ -189,6 +192,8 @@ class Command(BaseCommand):
             self._products()
             n_out = self._outward(firms, parties, opts["scale"])
             n_out += self._selling(firms, parties)
+            if opts["easy"]:
+                n_out += self._easy(firms, parties)
             n_in = self._inward(firms, parties, opts["scale"])
             n_locked = self._file_periods(firms)
             n_caps = self._captures(firms, parties)
@@ -202,7 +207,7 @@ class Command(BaseCommand):
                 from billing.services.gst_seed import seed_gst
                 seed_gst(firms, User.objects.get(username="sandbox_owner"), self.today)
         self.stderr.write(
-            f"Seeded {len(firms)} firms, {len(parties['all'])} parties, {len(PRODUCTS)} products, "
+            f"Seeded {len(firms)} firms, {len(parties['all'])} parties, {Product.objects.count()} products, "
             f"{n_out} outward + {n_in} inward invoices, {n_locked} filed months, {n_caps} captures."
         )
         if opts["print_credentials"]:
@@ -485,6 +490,81 @@ class Command(BaseCommand):
             sent_at=now, last_sent_at=now, sent_count=2, sent_via="whatsapp", sent_to="9829041122")
         invalidate(Invoice)
         return len(PAPER_BUYERS) + 2
+
+    def _easy(self, firms, parties):
+        """Part 6's opt-in fixtures; base seed tests keep their original books."""
+        aarav, meera, kiran = firms
+        by_name = {party.name: party for party in parties["all"]}
+        staff = User.objects.get(username="sandbox_staff")
+        owner = User.objects.get(username="sandbox_owner")
+        before = Invoice.objects.count()
+        # These rows were created in this seed's transaction. Easy opens on exactly three sales.
+        Invoice.objects.filter(business=kiran, invoice_date=self.today, type_of_invoice=INVOICE_TYPE_OUTWARD).delete()
+
+        def at(hour, minute):
+            return timezone.make_aware(datetime.combine(self.today, time(hour, minute)), ZoneInfo("Asia/Kolkata"))
+
+        def make(firm, customer, items, payment):
+            number = format_number(firm, self.today, str(next_counter(firm.pk, fy_of(self.today))))
+            return self._invoice(firm, customer, self.today, number, INVOICE_TYPE_OUTWARD, items, payment)
+
+        walkin = by_name["Walk-in Customer"]
+        walkin.businesses.add(kiran)
+        make(kiran, walkin, [self._line("gold22", qty="2", rate="9850")], "cash")
+        sent = make(kiran, by_name["Anil Gupta"], [self._line("silver", qty="25", rate="120")], "bank")
+        Invoice.objects.filter(pk=sent.pk).update(sent_at=at(10, 44), last_sent_at=at(10, 44), sent_count=1, sent_via="whatsapp")
+        make(kiran, by_name["Priya Sharma"], [self._line("gold18", qty="3", rate="7950")], "cash")
+
+        lalit = Customer.objects.create(
+            name="Lalit Jain", address="7 Demo Road, Jaipur", city="Jaipur", state_name="RAJASTHAN",
+            mobile_number="9829041150", customer_type="person",
+        )
+        lalit.businesses.add(kiran)
+        parties["all"].append(lalit)
+        product, _ = Product.objects.get_or_create(name="Gold bangles 22K", defaults={
+            "hsn_code": "711319", "gst_tax_rate": D("0.03"), "default_unit": "gms",
+        })
+        draft = SaleDraft.objects.create(
+            id=uuid4(), business=kiran, started_by=staff,
+            data={
+                "v": 1, "firmId": kiran.pk,
+                "customer": {"id": lalit.pk, "name": lalit.name, "address": lalit.address, "city": lalit.city,
+                             "state_name": lalit.state_name, "mobile_number": lalit.mobile_number,
+                             "gst_number": "", "pan_number": "", "email": "", "businesses": [kiran.pk],
+                             "created_at": lalit.created_at.isoformat(), "customer_type": "person", "type": "person", "pan": ""},
+                "date": self.today.isoformat(),
+                "number": format_number(kiran, self.today, str(next_counter(kiran.pk, fy_of(self.today)))),
+                "numberTyped": False, "paper": False, "posOverride": None, "payment": None, "notes": "",
+                "lines": [{"productId": product.pk, "name": "Gold bangles 22K", "hsn": "711319", "gst": "3",
+                           "unit": "gms", "qty": None, "rate": "", "note": "", "custom": False}],
+                "replaces": None,
+            },
+        )
+        SaleDraft.objects.filter(pk=draft.pk).update(created_at=at(15, 20), updated_at=at(15, 20))
+        viewer = User.objects.get(username="sandbox_viewer")
+        pref, _ = UserPreference.objects.get_or_create(user=viewer)
+        pref.data = {**pref.data, "defaultBusinessId": str(aarav.pk)}
+        pref.save(update_fields=["data"])
+
+        no_hsn = {**self._line("gold22", qty="4", rate="9850"), "hsn_code": ""}
+        imported = make(aarav, by_name["Sharma Gold Traders"], [no_hsn], "")
+        AuditLog.objects.create(
+            user=owner, action="imported", entity="invoice", entity_id=imported.pk, entity_name=imported.invoice_number,
+            details=f"Imported from Excel (1 items, total: {imported.total_amount})",
+        )
+        make(aarav, by_name["Bhandari Jewels"], [], "")
+        cancelled = make(meera, by_name["Neha Agarwal"], [self._line("gold22", qty="3", rate="9850")], "cash")
+        cancel_bill(cancelled, owner, "Wrong weight or rate")
+
+        last_month = month_add(self.today.replace(day=1), -1)
+        original = (Invoice.objects.sales().filter(business=kiran, status="active", paper=True,
+                                                   invoice_date__gte=last_month, invoice_date__lt=self.today.replace(day=1))
+                    .only("invoice_number", "invoice_date").order_by("invoice_date", "id").first())
+        # Legacy case variants are duplicates to _number_key, while the DB's exact constraint remains intact.
+        self._invoice(kiran, by_name["Anil Gupta"], original.invoice_date, original.invoice_number.lower(),
+                      INVOICE_TYPE_OUTWARD, [self._line("gold22", qty="2", rate="9850")], "cash", paper=True)
+        invalidate(Invoice, LineItem)
+        return Invoice.objects.count() - before
 
     def _invoice(self, firm, party, when, number, kind, items, payment_mode, paper=False):
         invoice = Invoice.objects.create(

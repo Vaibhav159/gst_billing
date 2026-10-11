@@ -109,7 +109,7 @@ case "$cmd" in
         # Into a temp file first: the seed is atomic, so when it fails the
         # existing users keep their passwords, and the logins file is the only copy.
         tmp="$(mktemp "$ENV_DIR/logins.XXXXXX")"
-        if dc exec -T web python manage.py seed_sandbox "${flag[@]}" --print-credentials > "$tmp"; then
+        if dc exec -T web python manage.py seed_sandbox "${flag[@]}" --easy --print-credentials > "$tmp"; then
             mv "$tmp" "$LOGINS_FILE"
             echo "Sandbox logins written to $LOGINS_FILE (0600)."
         else
