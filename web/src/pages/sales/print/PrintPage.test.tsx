@@ -325,7 +325,7 @@ test("the PDF follows the bill on screen: a refresh that changed what prints mak
   expect(await screen.findByRole("button", { name: "Send again" })).toBeInTheDocument();
   expect(billFile).toHaveBeenCalledTimes(1);
   await userEvent.click(pdf);
-  expect(URL.createObjectURL).toHaveBeenLastCalledWith(first);
+  expect(vi.mocked(URL.createObjectURL).mock.lastCall?.[0]).toBe(first);
   // changed elsewhere: its note
   detail = { ...detail, notes: "Hallmarked by BIS" };
   await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
@@ -334,7 +334,7 @@ test("the PDF follows the bill on screen: a refresh that changed what prints mak
   const replacement = (await vi.mocked(billFile).mock.results[1].value).blob;
   expect(replacement).not.toBe(first);
   await userEvent.click(pdf);
-  expect(URL.createObjectURL).toHaveBeenLastCalledWith(replacement);
+  expect(vi.mocked(URL.createObjectURL).mock.lastCall?.[0]).toBe(replacement);
 });
 
 test("offline: a print page with no bill yet says so, and the bill comes when the internet is back; a PDF that can't be made says why and offers Try again", async () => {
