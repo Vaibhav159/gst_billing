@@ -2,8 +2,9 @@
 // last change, once it has a customer, an item or a note, on this device at once and on the shop's list (contract §4).
 // The address then names it (?draft=), so a reload, a session that ran out or a sign-in on this tab comes back to it.
 // Leaving never asks (Ruling 1D-10): it says where to find the bill, and keeps at once a change the 1.2 s hadn't kept yet,
-// also as the tab closes. Discard draft has Undo. Nothing is kept while the bill itself saves (a save that doesn't go
-// through lets it be), nor ever again once a bill is made from it. Changing a saved bill keeps no draft.
+// also as the tab closes. Only a browser that refuses storage gets its own prompt as the tab closes, while a change isn't
+// on the shop's list yet (Ruling 1D-11). Discard draft has Undo. Nothing is kept while the bill itself saves (a save that
+// doesn't go through lets it be), nor ever again once a bill is made from it. Changing a saved bill keeps no draft.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { newDraftId, useDiscardDraft, useDraftBusy, useDraftSync, useKeepDraft, type KeepResult } from "@/core/api/drafts";
@@ -164,7 +165,8 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
       // StrictMode (in development) runs this cleanup and the effect again at once: only a form that stays gone has left
       queueMicrotask(() => {
         if (alive.current || !isNew || done.current || save.current.savedTo) return;
-        if (save.current.saving) { void saveEnd.current?.then((how) => { if (how === "failed") left(); }); return; }
+        // asked again once the save ends: a keep may have heard meanwhile that a bill was made from the draft
+        if (save.current.saving) { void saveEnd.current?.then((how) => { if (how === "failed" && !done.current) left(); }); return; }
         left();
       });
     };
@@ -186,6 +188,17 @@ export function useDraftKeeping(F: BillFormApi, formKey: string): DraftKeeping {
   const kept = billMade || !F.draftId ? null
     : mine ? (mine.synced ? "server" : visitOnly ? "visit" : "device")
     : F.start.draftId === F.draftId ? "server" : null;
+  // where the browser refuses storage, a keep as the tab closes lives only in this page, and the unload may cancel its
+  // PUT: a change not kept yet, or not on the shop's list yet (its keep on its way, or kept for this visit only), keeps
+  // the browser's own prompt as the tab closes. Only that: leaving in the app keeps it at once, as the page lives on and
+  // the PUT completes (Ruling 1D-11)
+  const atRisk = isNew && visitOnly && (pending || kept === "visit");
+  useEffect(() => {
+    if (!atRisk) return undefined;
+    const ask = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, [atRisk]);
   return {
     pending: isNew && pending && !leaveTo,
     sending: isNew && busy,

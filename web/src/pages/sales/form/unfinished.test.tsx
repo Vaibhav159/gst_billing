@@ -229,7 +229,7 @@ test("saving from an unfinished bill sends its draft_id and takes the draft with
   expect(screen.getByTestId("saving")).toHaveTextContent("Not saving; a change waits to be kept");
   server.hold("POST");
   await save(user);
-  // the save takes the change: nothing waits to be kept, so leaving now wouldn't ask
+  // the save takes the change: nothing waits to be kept
   expect(screen.getByTestId("saving")).toHaveTextContent("Saving; nothing waits to be kept");
   // and nothing is kept while the save is on its way, however long it takes
   await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
@@ -624,6 +624,121 @@ test.each([
     expect(puts(calls)).toEqual([]);
     expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
   }
+});
+
+/** The page hidden (a phone switching to another app), then closed: each keeps a change not kept yet, as AWAY says. */
+function hideThenClose() {
+  act(() => { for (const [, away] of AWAY) away()(); });
+}
+
+test.each([
+  ["lands", false],
+  ["is answered 409 draft_saved", true],
+] as const)("hidden or closed while the bill saves, and again once its answer %s: nothing is kept (F6, Task 6 re-review)", async (_, madeAlready) => {
+  const user = fakeToday();
+  const server = draftsOnServer([rakeshs]);
+  const { calls } = formServer(server.routes);
+  mountSaving(fromRakeshs());
+  await settle();
+  await screen.findByText("Finishing an unfinished bill");
+  // a change made just before the save: not kept yet as Save is pressed, so only the save's guard stops a keep
+  await user.type(screen.getByLabelText("Note on the bill"), " today");
+  // another counter saved it as a bill meanwhile
+  if (madeAlready) server.savedAsBill(rakeshs.id);
+  server.hold("POST");
+  await save(user);
+  expect(screen.getByTestId("saving")).toHaveTextContent("Saving;");
+  hideThenClose();
+  await settle();
+  expect(keptDrafts()).toEqual([]);
+  expect(puts(calls)).toEqual([]);
+  await act(async () => { server.release("POST"); await vi.advanceTimersByTimeAsync(50); });
+  if (madeAlready) await waitFor(() => expect(status().getByText(SAVED_AS.detail)).toBeInTheDocument());
+  else expect(screen.getByTestId("saving")).toHaveTextContent("Saved: /sales/501?saved=new");
+  hideThenClose();
+  await settle();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+  expect(keptDrafts()).toEqual([]);
+  expect(puts(calls)).toEqual([]);
+});
+
+test("left while the save waits behind the draft's keep, which hears the draft became a bill already, and the save then fails another way: no toast claims it was kept (Task 6 re-review)", async () => {
+  const user = fakeToday();
+  const server = draftsOnServer([rakeshs]);
+  let land = () => {};
+  // the server refuses the bill another way first (a 500)
+  const { calls } = formServer([["POST", "sales/", () => new Promise<void>((r) => { land = r; }).then(() => refuse(500, { detail: "Server error" }))], ...server.routes]);
+  const { router } = mountSaving(fromRakeshs());
+  await settle();
+  await screen.findByText("Finishing an unfinished bill");
+  server.hold("PUT");
+  await user.type(screen.getByLabelText("Note on the bill"), " today");
+  await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+  await waitFor(() => expect(puts(calls)).toHaveLength(1));
+  await save(user);
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+  await act(async () => { await router.navigate("/sales"); });
+  await settle();
+  // another counter saves the draft as a bill: the keep on its way hears 409 draft_saved, and the save goes on
+  server.savedAsBill(rakeshs.id);
+  await act(async () => { server.release("PUT"); await vi.advanceTimersByTimeAsync(50); });
+  await settle();
+  expect(calls.some((c) => c.method === "POST")).toBe(true);
+  await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
+  await settle();
+  expect(screen.queryByText("Bill kept as a draft")).not.toBeInTheDocument();
+  expect(keptDrafts()).toEqual([]);
+  expect(puts(calls)).toHaveLength(1);
+});
+
+test("where the browser refuses storage, closing the tab with a change not kept yet, or with its keep still on its way, gets the browser's own prompt; leaving in the app doesn't ask, and keeps it at once (Ruling 1D-11)", async () => {
+  const user = fakeToday();
+  vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, "setItem").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
+  const server = draftsOnServer();
+  const { calls } = formServer(server.routes);
+  const { router } = mountForm("/sales/new");
+  await settle();
+  /** Whether closing the tab now would ask (the browser's prompt). */
+  const asksOnClose = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
+  expect(asksOnClose()).toBe(false);
+  await pickAnil(user);
+  expect(asksOnClose()).toBe(true);
+  // kept: in this page only, and its PUT on its way
+  server.hold("PUT");
+  await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+  await waitFor(() => expect(puts(calls)).toHaveLength(1));
+  expect(asksOnClose()).toBe(true);
+  // the shop's list has it: closing loses nothing
+  await act(async () => { server.release("PUT"); await vi.advanceTimersByTimeAsync(50); });
+  await waitFor(() => expect(screen.getByText("Kept as a draft at 10:00")).toBeInTheDocument());
+  expect(asksOnClose()).toBe(false);
+  // another change, then a link: no ask, and it's kept at once, the page living on to send it
+  await user.click(screen.getByLabelText("Note on the bill"));
+  await user.keyboard("Ring for Meena");
+  expect(asksOnClose()).toBe(true);
+  await act(async () => { await router.navigate("/sales"); });
+  await settle();
+  expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
+  expect(where(router)).toBe("/sales");
+  expect(screen.getByText("Bill kept as a draft")).toBeInTheDocument();
+  await waitFor(() => expect([...server.rows.values()].map((d) => d.data.notes)).toEqual(["Ring for Meena"]));
+  expect(asksOnClose()).toBe(false);
+});
+
+test("where the browser keeps unfinished bills, closing the tab never asks: the change is kept on this device as the tab closes (Ruling 1D-11)", async () => {
+  const user = fakeToday();
+  const server = draftsOnServer();
+  server.hold("PUT");
+  const { calls } = formServer(server.routes);
+  mountForm("/sales/new");
+  await settle();
+  const asksOnClose = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
+  await pickAnil(user);
+  expect(asksOnClose()).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1300); });
+  await waitFor(() => expect(puts(calls)).toHaveLength(1));
+  expect(asksOnClose()).toBe(false);
+  await act(async () => { server.release("PUT"); await vi.advanceTimersByTimeAsync(50); });
 });
 
 test("an unfinished bill picked up opens at its newest version: the form waits for the shop's fresh answer, not the list it had (Task 6 review)", async () => {
