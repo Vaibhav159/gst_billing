@@ -2,9 +2,9 @@
 // happen in the app's words. Plan 1C made this file with PAY, PAY_SHORT, cancelledNote, FailText and failText; plan 1B
 // adds Selling's other words beside them.
 // Plan 1B's (PROTO sales/lib.js, sales/parts.jsx, core/common.jsx): the list's filters, tax labels from the heads stored,
-// when a bill was sent, day rows, how many bills (cancelled ones named apart, never added in), list footers, a send or an
-// Undo that didn't go through, a send that opened but isn't marked as sent, and words for the months filed, the firms,
-// the year and who may do what.
+// when a bill was sent, day rows, how many bills (cancelled ones named apart, never added in), a cancelled bill's row
+// (" · cancelled"), list footers, a send or an Undo that didn't go through, a send that opened but isn't marked as
+// sent, and words for the months filed, the firms, the year and who may do what.
 import type { ApiProblem } from "@/core/api/errors";
 import { can, ROLES, type Action } from "@/core/auth/permissions";
 import perms from "@/core/auth/perms.json";
@@ -139,6 +139,10 @@ export function andList(items: string[]): string {
   return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 }
 
+/** " · cancelled" after a cancelled bill's details in a row (search, today's bills, a number's bills), else "". */
+export function cancelledMark(status: string | null | undefined): string {
+  return status === "cancelled" ? " · cancelled" : "";
+}
 /** "1 cancelled bill also listed" (how: "not counted"…), or "" when there are none (PROTO sales/lib.js:608-611). */
 export function cancelledNote(n: number, how = "also listed"): string {
   return n ? `${plural(n, "cancelled bill")} ${how}` : "";

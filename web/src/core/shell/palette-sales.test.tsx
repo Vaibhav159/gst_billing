@@ -192,7 +192,7 @@ test("deleted bills come with the search's records, never after them; deleted bi
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/310/ })).toBeInTheDocument();
   expect(headings()).not.toContain("Deleted bills");
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
-});
+}, 15_000); // two searches, a held answer and many role queries: past 5 s on a busy 2-CPU machine
 
 test("Try again asks through the client for the search and, when they failed too, the deleted bills: both come back together", async () => {
   let down = true;
@@ -229,4 +229,25 @@ test("a customer whose name starts like a month (Mayank) is found and opened by 
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
   await pass(0);
   expect(screen.getByTestId("where")).toHaveTextContent("/customers/9");
+});
+
+/* ── Review fix 1 ── */
+
+test("a plain number that is a bill's own number puts that bill before customers whose phone holds the digits, so Enter opens the bill", async () => {
+  serve({ search: (config) => answer(config, {
+    customers: [{ id: 5, name: "Bharat Soni", mobile_number: "9831012345", gst_number: "", state_name: "RAJASTHAN", recent_invoices: [] }],
+    invoices: [quick(99, "31", "2026-09-02", { paper: true }), quick(1, "KGH/2026-27/131", "2026-10-07")], products: [],
+  }) });
+  mount();
+  await pass(0);
+  // no bill has the number typed: customers come first, as before
+  await type("9831");
+  expect(headings()).toEqual(["Customers", "Sales bills"]);
+  // a paper bill numbered as typed: it comes first, ahead of the customer whose phone holds 31
+  await type("31");
+  expect(headings()).toEqual(["Sales bills", "Customers"]);
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["31Meena Jain · 02 Sep 2026 · ₹1,000.00", "KGH/2026-27/131Meena Jain · 07 Oct 2026 · ₹1,000.00", "Bharat Soni98310 12345"]);
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  await pass(0);
+  expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
 });

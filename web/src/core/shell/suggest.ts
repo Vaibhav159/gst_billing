@@ -1,8 +1,9 @@
 // Search's words that open a list already filtered (PROTO core/shell.jsx:399-438): "udhaar sep" is September's bills on
-// udhaar, "kiran gstr1" Kiran's returns, "new anil" a new bill for Anil Gupta. Months are this year's FY, as the list
-// then moves the year picker to the month's FY itself. And how bills found by a search are ranked.
+// udhaar, "kiran gstr1" Kiran's returns, "new anil" a new bill for Anil Gupta. A month is the latest of that name that
+// isn't after today (Ruling 1B-23): "mar" in October 2026 is March 2026, and the list then moves the year picker to that
+// month's FY itself. And how bills found by a search are ranked.
 import { Landmark, Plus, ReceiptText, ShoppingBag, type LucideIcon } from "lucide-react";
-import { addMonths, fyOf, monthLabel } from "@/core/format";
+import { addMonths, monthLabel } from "@/core/format";
 import { counterOf, sameNumber } from "@/core/sales/numbers";
 import type { Firm } from "@/core/scope";
 
@@ -26,13 +27,14 @@ export function suggestions(text: string, { firms, today, canCreate, customers =
   const t = text.trim().toLowerCase();
   const out: Suggestion[] = [];
   const words = t.split(/\s+/).filter(Boolean);
-  const fyStart = Number(fyOf(today).slice(0, 4));
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
   let ym: string | null = null;
   let pay: (typeof PAY_WORDS)[number][1] | null = null;
   let firm: Firm | null = null;
   for (const w of words) {
     const mi = MONTH_NAMES.findIndex((m) => w.length >= 3 && m.startsWith(w));
-    if (mi >= 0) ym = `${mi + 1 >= 4 ? fyStart : fyStart + 1}-${String(mi + 1).padStart(2, "0")}`;
+    if (mi >= 0) ym = `${mi + 1 <= month ? year : year - 1}-${String(mi + 1).padStart(2, "0")}`;
     for (const [rx, v] of PAY_WORDS) if (rx.test(w)) pay = v;
     const f = firms.find((x) => x.short.toLowerCase() === w || x.name.toLowerCase().split(" ")[0] === w);
     if (f) firm = f;

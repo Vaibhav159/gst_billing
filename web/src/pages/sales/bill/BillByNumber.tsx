@@ -13,6 +13,7 @@ import { useNetwork } from "@/core/api/network";
 import { salesKeys, useSalesPage, type SalesQuery } from "@/core/api/sales";
 import { date, fyOf, inr, toPaise } from "@/core/format";
 import { sameNumber } from "@/core/sales/numbers";
+import { cancelledMark } from "@/core/sales/words";
 import { useFirms } from "@/core/scope";
 import { Badge, Banner, Button, ButtonLink, Card, EmptyState, ListRow, ListSkeleton, LoadError, Page, StaleNote } from "@/core/ui";
 import { MissingBill } from "./MissingBill";
@@ -90,14 +91,16 @@ export function BillByNumber({ number, firmSlug = "", fy = "" }: { number: strin
   if (!page.data) return <Asking title={title} q={page} retry={again(pageKey)} />;
   const firm = firms.find((f) => f.id === linkFirm)?.name;
   const sales = bills.map((b): Choice => ({ kind: "Sale", to: `/sales/${b.id}`, number: b.invoice_number, total: b.total_amount,
-    line: `${b.business_name} · ${date(b.invoice_date)} · ${b.customer.name}${b.status === "cancelled" ? " · cancelled" : ""}` }));
+    line: `${b.business_name} · ${date(b.invoice_date)} · ${b.customer.name}${cancelledMark(b.status)}` }));
   // a refresh that failed keeps what was shown, and says so (part 0's rule, as BillPage's)
   const stale = (q: { isError: boolean; error: unknown; isFetching: boolean }, key: QueryKey) => (q.isError
     ? <StaleNote problem={problemOf(q.error)} what="the bills with this number" retry={again(key)} busy={q.isFetching} /> : null);
   // the purchases can't be known (their lookup failed, or over 1000 have numbers like it): the one sale with the number
   // opens, several are offered with a line saying the purchases aren't among them, and with none the page says it
-  // couldn't tell (Rulings 1B-20, 1B-22)
-  if (inward.data?.tooMany || (!inward.data && inward.isError)) {
+  // couldn't tell (Rulings 1B-20, 1B-22). A lookup that failed is still unknown while Try again asks again: TanStack puts
+  // a failed query with nothing loaded back to pending, error gone, so its failures are counted instead
+  const failed = !inward.data && (inward.isError || inward.errorUpdateCount > 0);
+  if (inward.data?.tooMany || failed) {
     if (sales.length === 1) return <Navigate to={sales[0].to} replace />;
     if (sales.length > 1) {
       return <PickBill number={number} choices={sales} note={<>{stale(page, pageKey)}<Unchecked failed={!inward.data} retry={again(inKey)} busy={inward.isFetching} number={number} firm={firm} fy={fy} /></>} />;

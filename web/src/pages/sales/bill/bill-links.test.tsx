@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryClientProvider, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { createMemoryRouter, Route, RouterProvider, Routes, useLocation } from "react-router";
 import { __setNetState } from "@/core/api/network";
+import { salesKeys } from "@/core/api/sales";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
 import { refuse, salesServer, wireDetail, wirePage, wireRow } from "@/core/sales/fixtures";
@@ -327,7 +328,9 @@ const TWO_SALES = () => wirePage([wireRow({ id: 512, invoice_number: "KGH-31", .
 
 test("several sales have the number and the purchases couldn't be checked: the sales are offered, with a line saying so; Try again asks v2 again", async () => {
   let down = true;
-  const { calls } = salesServer([["GET", "sales/", TWO_SALES], ["GET", "invoices/", () => (down ? refuse(500, {}) : page([INWARD(77, { invoice_number: "KGH-31" })]))]]);
+  let answerNow = () => {};
+  const { calls } = salesServer([["GET", "sales/", TWO_SALES], ["GET", "invoices/", () => (down ? refuse(500, {})
+    : new Promise((resolve) => { answerNow = () => resolve(page([INWARD(77, { invoice_number: "KGH-31" })])); }))]]);
   mount("/sales/KGH-31");
   const list = await screen.findByRole("list", { name: "Bills with this number" });
   expect(within(list).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/sales/512", "/sales/613"]);
@@ -335,6 +338,11 @@ test("several sales have the number and the purchases couldn't be checked: the s
   expect(screen.queryByText("Couldn't load this bill")).not.toBeInTheDocument();
   down = false;
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  // while the purchases are asked again the sales stay on offer, the line with them, its Try again busy (Review fix 1)
+  await waitFor(() => expect(calls.filter((c) => c.url === "invoices/")).toHaveLength(2));
+  expect(within(screen.getByRole("list", { name: "Bills with this number" })).getAllByRole("link")).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "Try again" })).toHaveAttribute("aria-busy", "true");
+  await act(async () => { answerNow(); });
   // the purchase joins the sales, each row saying which it is, and the line goes
   expect(await screen.findByRole("link", { name: /^KGH-31 Purchase KIRAN GOLD HOUSE \(SANDBOX\) · 02 May 2026 · Shree Bullion/ })).toHaveAttribute("href", "/purchases/77");
   expect(within(screen.getByRole("list", { name: "Bills with this number" })).getAllByRole("link")).toHaveLength(3);
@@ -350,4 +358,21 @@ test("several sales have the number and over 1,000 purchases have numbers like i
   expect(screen.getByText("Over 1,000 purchases have numbers like “KGH-31”, too many to check here, so this list has only the sales with this number.")).toBeInTheDocument();
   expect(screen.queryByText("Too many bills to check")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+});
+
+test("several sales and the purchases unknown: a failed refresh of the sales says so above the line, and the sales stay; a cancelled one says so", async () => {
+  let salesDown = false;
+  salesServer([
+    ["GET", "sales/", () => (salesDown ? refuse(500, {}) : wirePage([wireRow({ id: 512, invoice_number: "KGH-31", ...KIRAN }), wireRow({ id: 613, invoice_number: "KGH-31", invoice_date: "2025-11-02", fy: "2025-26", status: "cancelled", ...MEERA })]))],
+    ["GET", "invoices/", () => refuse(500, {})],
+  ]);
+  renderApp(<><Grab /><Routes><Route path="/sales/:id" element={<BillPage />} /></Routes></>, { path: "/sales/KGH-31" });
+  const list = await screen.findByRole("list", { name: "Bills with this number" });
+  expect(within(list).getByRole("link", { name: /^KGH-31 MEERA ORNAMENTS \(SANDBOX\) · 02 Nov 2025 · Anil Gupta · cancelled/ })).toHaveAttribute("href", "/sales/613");
+  salesDown = true;
+  await act(async () => { await cache.invalidateQueries({ queryKey: salesKeys.page("all", { number: "KGH-31" }, 20) }); });
+  const stale = await screen.findByText("Couldn't refresh the bills with this number");
+  const line = screen.getByText("The app couldn't check purchases just now, so this list has only the sales with this number.");
+  expect(stale.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(screen.getByRole("list", { name: "Bills with this number" })).getAllByRole("link")).toHaveLength(2);
 });

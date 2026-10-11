@@ -6,7 +6,7 @@ const go = (t: string) => suggestions(t, ctx).map((s) => [s.label, s.to]);
 
 test("a month and a way of paying go straight to that list, the firm too when named", () => {
   expect(go("udhaar sep")).toEqual([["Sales bills · September 2026 · paid by udhaar", "/sales?month=2026-09&paid=credit"]]);
-  expect(go("kiran cash mar")).toEqual([["Sales bills · March 2027 · paid by cash · KIRAN GOLD HOUSE", "/sales?month=2027-03&paid=cash&firm=3"]]);
+  expect(go("kiran cash mar")).toEqual([["Sales bills · March 2026 · paid by cash · KIRAN GOLD HOUSE", "/sales?month=2026-03&paid=cash&firm=3"]]);
   expect(go("aug")).toEqual([
     ["Sales bills · August 2026", "/sales?month=2026-08"],
     ["Purchase bills · August 2026", "/purchases?month=2026-08"],
@@ -44,6 +44,14 @@ test("a bare number puts that bill first by its counter, an exact full number fi
 
 test("a month is its name or the start of it, three letters on: never a name that only starts like one, so Enter still opens that customer", () => {
   expect(go("sept")).toEqual([["Sales bills · September 2026", "/sales?month=2026-09"], ["Purchase bills · September 2026", "/purchases?month=2026-09"]]);
-  expect(go("march udhaar")).toEqual([["Sales bills · March 2027 · paid by udhaar", "/sales?month=2027-03&paid=credit"]]);
+  expect(go("march udhaar")).toEqual([["Sales bills · March 2026 · paid by udhaar", "/sales?month=2026-03&paid=credit"]]);
   for (const name of ["mayank", "janki", "junaid", "mary", "augustine", "new mayank"]) expect(go(name), name).toEqual([]);
+});
+
+test("a month word names the latest such month that isn't after today (Ruling 1B-23): this month, or last year's for one still to come", () => {
+  expect(go("oct")).toEqual([["Sales bills · October 2026", "/sales?month=2026-10"], ["Purchase bills · October 2026", "/purchases?month=2026-10"]]);
+  expect(go("nov")[0]).toEqual(["Sales bills · November 2025", "/sales?month=2025-11"]);
+  expect(go("mar")[0]).toEqual(["Sales bills · March 2026", "/sales?month=2026-03"]);
+  expect(go("gst mar")[0]).toEqual(["GST returns · KIRAN GOLD HOUSE · Mar 2026", "/gst?firm=3&month=2026-03"]);
+  expect(suggestions("jan", { ...ctx, today: "2027-01-31" })[0].to).toBe("/sales?month=2027-01");
 });

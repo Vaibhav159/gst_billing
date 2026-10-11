@@ -10,8 +10,9 @@ import { useBin, useTodaysBills } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, dateShort, inr, mobileText, pct, toPaise, todayIST } from "@/core/format";
+import { sameNumber } from "@/core/sales/numbers";
 import type { BinRow } from "@/core/sales/types";
-import { dayOf, timeOf } from "@/core/sales/words";
+import { cancelledMark, dayOf, timeOf } from "@/core/sales/words";
 import { useFirms, type Firm } from "@/core/scope";
 import { Button, Dialog, Kbd, optionClass } from "@/core/ui";
 import { useView } from "@/core/view";
@@ -36,17 +37,19 @@ type Quick = {
 
 /**
  * The server's records as rows: customers; sales bills by number or by a customer found, each once, the exact number
- * first then the newest (rankBills); deleted bills (the owner's), each opening its page to restore; products.
+ * first then the newest (rankBills); deleted bills (the owner's), each opening its page to restore; products. A bill
+ * whose number is exactly what's typed puts the bills ahead of the customers: a plain number ("34", a paper bill's) is
+ * also in customers' phone numbers, and Enter opens the first row.
  */
 function recordRows(d: Quick, term: string, deleted: BinRow[]): Result[] {
-  const rows: Result[] = d.customers.map((c) => ({ group: "Customers", label: c.name, icon: UserRound, hint: mobileText(c.mobile_number) || c.gst_number || "Customer", to: `/customers/${c.id}` }));
+  const customers: Result[] = d.customers.map((c) => ({ group: "Customers", label: c.name, icon: UserRound, hint: mobileText(c.mobile_number) || c.gst_number || "Customer", to: `/customers/${c.id}` }));
   // the prototype's "bills by number or customer": sales only, each once
   const bills = new Map<number, QuickBill & { customer_name: string }>();
   for (const b of d.invoices) if (b.type_of_invoice === "outward") bills.set(b.id, b);
   for (const c of d.customers) for (const b of c.recent_invoices) if (b.type_of_invoice === "outward" && !bills.has(b.id)) bills.set(b.id, { ...b, customer_name: c.name });
-  for (const b of rankBills([...bills.values()], term).slice(0, 5)) {
-    rows.push({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}${b.status === "cancelled" ? " · cancelled" : ""}`, to: `/sales/${b.id}` });
-  }
+  const ranked = rankBills([...bills.values()], term).slice(0, 5);
+  const sales: Result[] = ranked.map((b) => ({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}${cancelledMark(b.status)}`, to: `/sales/${b.id}` }));
+  const rows = ranked.some((b) => sameNumber(b.invoice_number, term)) ? [...sales, ...customers] : [...customers, ...sales];
   // deleted bills can still be found: their page offers Restore (PROTO core/shell.jsx:493-496)
   for (const s of deleted) rows.push({ group: "Deleted bills", label: s.invoice_number, icon: FileX, hint: `deleted ${dateShort(dayOf(s.deleted_at))} · ${s.customer.name} · open it to restore`, to: `/sales/${s.original_id}` });
   for (const p of d.products.slice(0, 3)) rows.push({ group: "Products", label: p.name, icon: Package, hint: `HSN ${p.hsn_code}${p.gst_tax_rate == null ? "" : ` · GST ${pct(Number(p.gst_tax_rate))}`}`, to: `/products/${p.id}` });
@@ -138,7 +141,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose(): void }) {
       for (const v of recent.slice(0, 5)) out.push({ group: "Opened recently", label: v.label || v.to, icon: RECENT_ICON[v.to.split("/")[1] ?? ""], to: v.to });
       out.push(...actions);
       for (const b of (todays ?? []).slice(0, 3)) {
-        out.push({ group: "Today's bills", label: b.invoice_number, icon: FileText, hint: `${b.customer.name} · ${b.paper ? "paper bill" : timeOf(b.created_at)} · ${inr(b.total_amount)}${b.status === "cancelled" ? " · cancelled" : ""}`, to: `/sales/${b.id}` });
+        out.push({ group: "Today's bills", label: b.invoice_number, icon: FileText, hint: `${b.customer.name} · ${b.paper ? "paper bill" : timeOf(b.created_at)} · ${inr(b.total_amount)}${cancelledMark(b.status)}`, to: `/sales/${b.id}` });
       }
       out.push(...pages);
       return out.slice(0, 24);

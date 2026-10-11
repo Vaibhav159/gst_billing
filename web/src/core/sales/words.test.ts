@@ -1,6 +1,6 @@
 import type { BillRow } from "./types";
 import {
-  billsAnd, cancelledNote, dayCount, dayGroups, dayLabel, dayOf, ewayNumberText, failText, filedRangeText, firmsWord, fyLabel, gstLabel, listFooter, PAY_FILTER,
+  billsAnd, cancelledMark, cancelledNote, dayCount, dayGroups, dayLabel, dayOf, ewayNumberText, failText, filedRangeText, firmsWord, fyLabel, gstLabel, listFooter, PAY_FILTER,
   notMarkedSent, rateText, realReason, restoreFailure, sendFailure, sentLine, sentWhen, taxLines, timeOf, whoCan,
 } from "./words";
 
@@ -8,6 +8,12 @@ test("cancelled bills are named apart, in the caller's words, and not at all whe
   expect(cancelledNote(0)).toBe("");
   expect(cancelledNote(1)).toBe("1 cancelled bill also listed");
   expect(cancelledNote(2, "not counted")).toBe("2 cancelled bills not counted");
+});
+
+test("a cancelled bill's row says so after its details, the one way search, today's bills and a number's bills say it", () => {
+  expect(cancelledMark("cancelled")).toBe(" · cancelled");
+  expect(cancelledMark("active")).toBe("");
+  expect(cancelledMark(undefined)).toBe("");
 });
 
 test("a failure says what didn't happen and what to do; only a save says that what was typed is still there", () => {

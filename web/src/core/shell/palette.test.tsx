@@ -48,14 +48,16 @@ test("a view-only person isn't offered actions they can't do", () => {
 });
 
 test("typing searches customers and bills once, after a pause, and Enter opens the first", async () => {
+  const user = typingClock();
   mount();
-  await userEvent.type(screen.getByRole("combobox"), "meena");
+  await user.type(screen.getByRole("combobox"), "meena");
+  await move(250);
   // anchored: the bill's row names its customer too ("Meena Jain · 08 Oct 2026 · ₹38,412.50")
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /KGH\/2026-27\/32 .*₹38,412\.50/ })).toBeInTheDocument();
   // one request, for the word as it rested: search/quick/ (Ruling 49), not a list per kind
   expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=meena"]);
-  await userEvent.keyboard("{Enter}");
+  await user.keyboard("{Enter}");
   await waitFor(() => expect(screen.getByText("customer 7")).toBeInTheDocument());
 }, 15_000); // a typed search and many role queries: past 5 s on a busy 2-CPU machine
 
@@ -136,14 +138,17 @@ test("no search is made on opening or for one character; a search waits for a pa
 }, 15_000); // typing on the clock and many role queries: past 5 s on a busy 2-CPU machine
 
 test("a phone number typed in groups is asked for as its digits, and its rows show; a bill's year keeps its hyphen", async () => {
+  const user = typingClock();
   mount();
   const box = screen.getByRole("combobox");
-  await userEvent.type(box, "98290 41122");
+  await user.type(box, "98290 41122");
+  await move(250);
   // the rows are for what's in the box, so they show: the stale-rows check reads the same digits
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=9829041122"]);
-  await userEvent.clear(box);
-  await userEvent.type(box, "2026-27");
+  await user.clear(box);
+  await user.type(box, "2026-27");
+  await move(250);
   await waitFor(() => expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=9829041122", "search/quick/?q=2026-27"]));
 }, 15_000); // two typed searches and many role queries: past 5 s on a busy 2-CPU machine
 
@@ -165,15 +170,18 @@ test("a term searched in the last 30 s comes back without asking again", async (
 
 test("an older search's rows never stand in for what's typed now", async () => {
   const held = holdingServer();
+  const user = typingClock();
   mount();
   const box = screen.getByRole("combobox");
-  await userEvent.type(box, "meena");
+  await user.type(box, "meena");
+  await move(250);
   await waitFor(() => expect(held).toHaveLength(1));
   await act(async () => { held[0].reply(MEENA); });
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
-  await userEvent.type(box, "x");
+  await user.type(box, "x");
   expect(screen.queryByRole("option", { name: /^Meena Jain/ })).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("Searching…");
+  await move(250);
   await waitFor(() => expect(held).toHaveLength(2));
   await act(async () => { held[1].reply(NOTHING); });
   expect(await screen.findByText(/^Nothing matches “meenax”/)).toBeInTheDocument();
@@ -198,9 +206,11 @@ test("each record says what it is: a mobile in two groups, else as typed, else t
     { id: 5, name: "ANIL GOLD", gst_number: "", state_name: "RAJASTHAN" }, { id: 6, name: "ANIL SILVER", gst_number: "", state_name: "RAJASTHAN" },
     { id: 7, name: "ANIL GEMS", gst_number: "", state_name: "RAJASTHAN" },
   ] } : { results: [] })) as AxiosAdapter;
+  const user = typingClock();
   renderApp(<Routes><Route path="*" element={<Palette open onClose={() => {}} />} /><Route path="/firms/3" element={<p>firm 3</p>} /></Routes>);
   const box = screen.getByRole("combobox");
-  await userEvent.type(box, "anil");
+  await user.type(box, "anil");
+  await move(250);
   expect(await screen.findByRole("option", { name: "Anil Gupta 98290 41122" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "Anil & Sons 0141 2345678" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "Anil Traders 08CCCCC0000C1Z5" })).toBeInTheDocument();
@@ -213,12 +223,14 @@ test("each record says what it is: a mobile in two groups, else as typed, else t
   expect(screen.queryByRole("option", { name: /KIRAN/ })).not.toBeInTheDocument();
   expect(screen.getAllByRole("option", { name: /^ANIL / })).toHaveLength(3);
   expect([...document.querySelectorAll("#palette-list .caps")].map((h) => h.textContent)).toEqual(["Customers", "Products", "Firms"]);
-  await userEvent.clear(box);
-  await userEvent.type(box, "08ddd");
+  await user.clear(box);
+  await user.type(box, "08ddd");
+  await move(250);
   expect(await screen.findByRole("option", { name: "KIRAN GOLD HOUSE 08DDDDD0000D1Z5" })).toBeInTheDocument();
-  await userEvent.clear(box);
-  await userEvent.type(box, "anil");
-  await userEvent.click(await screen.findByRole("option", { name: "ANIL JEWELLERS 08BBBBB0000B1Z5" }));
+  await user.clear(box);
+  await user.type(box, "anil");
+  await move(250);
+  await user.click(await screen.findByRole("option", { name: "ANIL JEWELLERS 08BBBBB0000B1Z5" }));
   expect(await screen.findByText("firm 3")).toBeInTheDocument();
 }, 15_000); // three typed searches and many role queries: past 5 s on a busy 2-CPU machine
 
@@ -236,8 +248,10 @@ test("sales bills: by number and from each customer found, sales only, each once
     ],
     products: [],
   } : { results: [] })) as AxiosAdapter;
+  const user = typingClock();
   mount();
-  await userEvent.type(screen.getByRole("combobox"), "kgh");
+  await user.type(screen.getByRole("combobox"), "kgh");
+  await move(250);
   await screen.findByRole("option", { name: /^KGH\/2026-27\/40/ });
   const bills = screen.getAllByRole("option").filter((o) => /^KGH/.test(o.textContent ?? ""));
   expect(bills.map((o) => o.textContent?.split("Mohan")[0].split("Meena")[0])).toEqual(["KGH/2026-27/40", "KGH/2026-27/33", "KGH/2026-27/32", "KGH/2026-27/30", "KGH/2025-26/132"]);
@@ -248,15 +262,19 @@ test("sales bills: by number and from each customer found, sales only, each once
 
 test("a product from a server that doesn't send its rate shows its HSN alone, never “GST NaN%”", async () => {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? { ...NOTHING, products: [{ id: 5, name: "Anklet", hsn_code: "7113" }] } : { results: [] })) as AxiosAdapter;
+  const user = typingClock();
   mount();
-  await userEvent.type(screen.getByRole("combobox"), "ank");
+  await user.type(screen.getByRole("combobox"), "ank");
+  await move(250);
   expect(await screen.findByRole("option", { name: "Anklet HSN 7113" })).toBeInTheDocument();
 });
 
 test("a finished search that finds nothing says so, with what to try", async () => {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? NOTHING : { results: [] })) as AxiosAdapter;
+  const user = typingClock();
   mount();
-  await userEvent.type(screen.getByRole("combobox"), "zzz");
+  await user.type(screen.getByRole("combobox"), "zzz");
+  await move(250);
   expect(await screen.findByText("Nothing matches “zzz”. Try a phone number, or a bill number like 31 or KGH/2026-27/31.")).toHaveAttribute("role", "status");
   expect(screen.queryByRole("option")).not.toBeInTheDocument();
 });
@@ -429,7 +447,7 @@ test("the page the app opens on counts as a visit", async () => {
 });
 
 test("on a desktop, the header's Search and Ctrl K open search; choosing a page closes it, opens the page and focuses its title", async () => {
-  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const user = typingClock();
   serve();
   const router = shell([
     { path: "/sales", element: <Page title="Bills">the list</Page> },
@@ -438,22 +456,23 @@ test("on a desktop, the header's Search and Ctrl K open search; choosing a page 
   await screen.findByRole("heading", { level: 1, name: "Bills" });
   const button = screen.getByRole("button", { name: "Search (Ctrl K)" });
   afterADoubleTap();
-  await userEvent.click(button);
+  await user.click(button);
   const dialog = await screen.findByRole("dialog", { name: "Search" });
   expect(within(dialog).getByRole("combobox")).toHaveFocus();
-  await userEvent.keyboard("meena");
+  await user.keyboard("meena");
+  await move(250);
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   // Esc goes back to where you were
-  await userEvent.keyboard("{Escape}");
+  await user.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(button).toHaveFocus();
   // and the next search starts afresh, ready to type in at once
-  await userEvent.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}k{/Control}");
   const box = within(screen.getByRole("dialog", { name: "Search" })).getByRole("combobox");
   expect(box).toHaveFocus();
   expect(box).toHaveValue("");
   expect(screen.queryByRole("option", { name: /^Meena Jain/ })).not.toBeInTheDocument();
-  await userEvent.keyboard("customers{Enter}");
+  await user.keyboard("customers{Enter}");
   const h1 = await screen.findByRole("heading", { level: 1, name: "Customers" });
   expect(router.state.location.pathname).toBe("/customers");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -461,7 +480,7 @@ test("on a desktop, the header's Search and Ctrl K open search; choosing a page 
 }, 15_000); // the whole shell and a typed search: past 5 s on a busy 2-CPU machine
 
 test("on a phone, Today carries Search last in its header, after its own buttons; it opens the same search, and a record found opens with focus on its title", async () => {
-  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const user = typingClock();
   (window as unknown as { __phone?: boolean }).__phone = true;
   serve();
   const router = shell([
@@ -472,17 +491,18 @@ test("on a phone, Today carries Search last in its header, after its own buttons
   expect(within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Bright screen for sunlight", "Search customers and bills"]);
   const search = within(header).getByRole("button", { name: "Search customers and bills" });
   afterADoubleTap();
-  await userEvent.click(search);
+  await user.click(search);
   const dialog = await screen.findByRole("dialog", { name: "Search" });
   expect(within(dialog).getByRole("combobox")).toHaveFocus();
-  await userEvent.keyboard("{Escape}");
+  await user.keyboard("{Escape}");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(search).toHaveFocus();
   afterADoubleTap();
-  await userEvent.click(search);
-  await userEvent.keyboard("meena");
+  await user.click(search);
+  await user.keyboard("meena");
+  await move(250);
   afterADoubleTap();
-  await userEvent.click(await screen.findByRole("option", { name: /^Meena Jain/ }));
+  await user.click(await screen.findByRole("option", { name: /^Meena Jain/ }));
   const h1 = await screen.findByRole("heading", { level: 1, name: "Meena Jain" });
   expect(router.state.location.pathname).toBe("/customers/7");
   await waitFor(() => expect(h1).toHaveFocus());
