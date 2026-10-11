@@ -28,8 +28,9 @@ const BulkExport = lazyPage(() => import("@/pages/sales/print/BulkExport"));
 const PurchaseList = lazyPage(() => import('@/pages/purchases/PurchaseList'));
 const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
+const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -130,6 +131,8 @@ export const appRoutes: RouteObject[] = [{
         { path: "/scan", element: <ScanPage /> },
         { path: "/sales/batch", element: <BatchPrint /> },
         { path: "/sales/export", element: <BulkExport /> },
+        { path: "/reports", element: <Reports /> },
+        { path: "/reports/:kind", element: <Reports /> },
         // the home is the phone's Today: its header carries search, as the prototype's does (part 5's page keeps it)
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,

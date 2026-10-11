@@ -22,7 +22,7 @@ vi.mock("@react-pdf/renderer", () => { rendererLoaded(); return {}; });
 
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((route) => [route, ...all(route.children ?? [])]);
 
-test("the real routes warm every other lazy screen (GST returns included) and Search records once, leaving the four import/supplier pages on demand, with no PDF renderer or API fetch", async () => {
+test("the real routes warm every other lazy screen (GST returns and reports included) and Search records once, leaving the four import/supplier pages on demand, with no PDF renderer or API fetch", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   let idle!: IdleRequestCallback;
@@ -39,9 +39,11 @@ test("the real routes warm every other lazy screen (GST returns included) and Se
     expect(owned).toHaveLength(4);
     for (const route of part2dRoutes) expect(all(appRoutes).find(r => r.path === route.path)?.element).toBe(route.element);
     expect(pages).toEqual(expect.arrayContaining(capturePages));
-    // part 3C's GST returns page is warmed with the rest
-    const gst = all(appRoutes).find(r => r.path === "/gst")?.element;
-    expect(isValidElement(gst) && pages).toContain(isValidElement(gst) ? gst.type : null);
+    // parts 3C and 3D's GST returns and report pages are warmed with the rest
+    for (const path of ["/gst", "/reports", "/reports/:kind"]) {
+      const element = all(appRoutes).find(r => r.path === path)?.element;
+      expect(isValidElement(element) && pages.includes(element.type as unknown as Code)).toBe(true);
+    }
     for (const page of owned) expect(pages).toContain(page);
     const expected: Code[] = [...pages.filter(page => !owned.includes(page)), paletteCode];
     for (const page of owned) expect(queues[0]).not.toContain(page);
