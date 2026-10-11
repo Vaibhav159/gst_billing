@@ -30,8 +30,8 @@ async function discover(api) {
     for (const fy of [current, `${Number(current.slice(0, 4)) - 1}-${current.slice(2, 4)}`]) {
       const year = await api.get("gst/year/", { business_id: firm.id, fy });
       for (const row of year.months) {
-      if (!ready && ["ready", "blocked"].includes(row.stage)) ready = { business: firm.id, fy: year.fy, month: row.month };
-      if (!filed && ["filed", "gstr1"].includes(row.stage)) filed = { business: firm.id, fy: year.fy, month: row.month };
+        if (!ready && ["ready", "blocked"].includes(row.stage)) ready = { business: firm.id, fy: year.fy, month: row.month };
+        if (!filed && ["filed", "gstr1"].includes(row.stage)) filed = { business: firm.id, fy: year.fy, month: row.month };
         if (!unlocked && row.stage === "unlocked") unlocked = { business: firm.id, fy: year.fy, month: row.month };
       }
     }
