@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { date, fyOf, monthLabel, todayIST } from "@/core/format";
+import { date, fyOf, lastDayOfMonth as lastDay, monthLabel, todayIST } from "@/core/format";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { readStored, writeStored } from "@/core/storage";
 
@@ -11,11 +11,6 @@ export type ReportPeriod = PeriodRange & { p: PeriodPreset };
 export const reportPeriodKey = (id: number) => `gst3.reports.period.${id}`;
 const pad = (v: number) => String(v).padStart(2, "0");
 const monthAt = (y: number, offset: number) => `${y + Math.floor(offset / 12)}-${pad(offset % 12 + 1)}`;
-export function lastDay(month: string): string {
-  const [y, m] = month.split("-").map(Number);
-  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
-  return `${month}-${[31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]}`;
-}
 const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number(s.slice(5, 7)) >= 1 && Number(s.slice(5, 7)) <= 12 && Number(s.slice(8)) >= 1 && s <= lastDay(s.slice(0, 7));
 export function rangeProblems(from: string, to: string, today = todayIST()): Partial<Record<keyof PeriodRange, string>> {
   const errors: Partial<Record<keyof PeriodRange, string>> = {};

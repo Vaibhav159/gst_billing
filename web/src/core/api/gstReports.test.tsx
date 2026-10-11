@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -68,4 +70,8 @@ it("adapts customer udhaar/walkin and grouped products without inventing a produ
   expect(customer.rows[0]).toMatchObject({ udhaar_bills: 1, udhaar_total: 10300 }); expect(customer.walk_in).toEqual({ bills: 0, total: 0 });
   const product = normalizeReport("products", { rows: [{ name: "Diamond", hsn: "710239", quantity: { ct: "6.400", gms: "1.234" }, taxable: "100.00", bills: 1 }], totals: amounts }, query);
   expect(product.rows[0]).toEqual({ name: "Diamond", hsn: "710239", quantity: [{ unit: "ct", quantity: "6.400" }, { unit: "gms", quantity: "1.234" }], taxable: 10000, bills: 1 });
+});
+
+it("report adapters import only core code, so the reports chunk doesn't pull in the sales form", () => {
+  expect(readFileSync(resolve(__dirname, "gstReports.ts"), "utf8")).not.toMatch(/from "@\/pages\//);
 });

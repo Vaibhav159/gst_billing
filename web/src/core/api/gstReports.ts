@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
-import { toPaise } from "@/core/format";
+import { lastDayOfMonth as lastDay, toPaise } from "@/core/format";
 import type { FirmId } from "@/core/scope";
-import { lastDay } from "@/pages/reports/period";
-import { slabOf } from "@/pages/sales/form/model";
+import { slabOf } from "@/core/gst/slabs";
 import type { Reconciliation, ReportFirm, ReportHeads, ReportKind, ReportMap, ReportParty, ReportPurchase, ReportSale, ReportSplit, ReportStage, ReportTotals, TaxMonth } from "@/core/gst/reportTypes";
 
 export type ReportQuery = { businessId: FirmId | null; from: string; to: string; split: boolean };

@@ -8,7 +8,6 @@ import { paiseToDecimal, unitDecimals } from "@/core/format";
 import { GST_STATES, hasGstin, stateCodeOf } from "@/core/ids";
 import { autoPos } from "@/core/sales/pos";
 import { SLABS } from "@/core/sales/slabs";
-export { SLABS } from "@/core/sales/slabs";
 import type { BillDetail, BillInput, CustomerOnBill, Line, PaymentMode, Person } from "@/core/sales/types";
 import type { SaleProduct } from "./products";
 
@@ -223,17 +222,12 @@ export function toBillInput(f: FormState, { mode, pos, number, draftId, replaces
  * (Ruling 1B-15), named here too so the form's files import it from the model.
  */
 export { storedFor } from "@/core/sales/numbers";
+/** The slabs live in core so the GST reports can use them without the form; the form's files still import them here. */
+export { SLABS, slabOf } from "@/core/gst/slabs";
 
 /** The GST rates, the jeweller's two first (PROTO sales/parts.jsx:1039-1040), with what each is for. */
 const SLAB_HINT: Record<string, string> = { "3": "gold, silver, jewellery", "0.25": "cut and polished diamonds", "0.1": "goods to exporters", "1.5": "rough diamonds", "5": "job work", "18": "services, packing", "0": "exempt" };
 export const SLAB_OPTIONS = SLABS.map((p) => ({ value: p, label: `${p}%${SLAB_HINT[p] ? ` · ${SLAB_HINT[p]}` : ""}` }));
-/**
- * A GST rate as its slab, compared as numbers ("3.00" is "3", "0.250" is "0.25"), or "" when it isn't one: none picked,
- * a blank (which isn't 0%), or a v2 product's rate outside the slabs (0.07 reads "7").
- */
-export function slabOf(gst: string | null): string {
-  return gst != null && gst.trim() !== "" ? SLABS.find((s) => Number(s) === Number(gst)) ?? "" : "";
-}
 
 /** A record's id from a link (?from=412, ?customer=7): a whole number above 0, else null. The form's pages read their links with it. */
 export const idParam = (v: string | null): number | null => (v && /^\d+$/.test(v) && Number(v) > 0 ? Number(v) : null);
