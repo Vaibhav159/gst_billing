@@ -5,6 +5,7 @@ from rest_framework_simplejwt.views import TokenVerifyView
 from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
+from .catalog import CatalogDetail, CatalogList
 from .drafts import DraftViewSet
 from .firms import FirmDetailView, FirmSignatureView, FirmsView
 from .gst import (
@@ -114,6 +115,8 @@ urlpatterns = [
     path("firms/", FirmsView.as_view(), name="firms"),
     path("firms/<int:pk>/", FirmDetailView.as_view(), name="firm-detail"),
     path("firms/<int:pk>/signature/", FirmSignatureView.as_view(), name="firm-signature"),
+    path("catalog/", CatalogList.as_view(), name="catalog"),
+    path("catalog/<int:pk>/", CatalogDetail.as_view(), name="catalog-detail"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",
