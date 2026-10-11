@@ -193,16 +193,16 @@ def _credit_lapse(lines, *, filing_month=None, filing_date=None, today=None):
     lines = lines.annotate(claimed_on=claimed_on).annotate(
         claim_year=ExtractYear("claimed_on"), claim_month_number=ExtractMonth("claimed_on"))
     after_month = Q(credit_year__gt=F("bill_fy") + 1) | Q(credit_year=F("bill_fy") + 1, credit_month_number__gt=10)
-    # R3A-5: October's GSTR-3B still unfiled after 30 November can no longer
-    # claim it. Legacy months (locked or frozen before the app) count as filed.
+    # R3A-5 / R3A-9: once 30 November after the bill's year passes, any month of
+    # it whose GSTR-3B is still unfiled can no longer claim the credit (Sec 16(4)).
+    # Legacy months (locked or frozen before the app) count as filed.
     today = today or timezone.localdate()
     closed_fy = today.year - (1 if today > date(today.year, 11, 30) else 2)
     legacy = (uncached(FiledPeriod).filter(business_id=OuterRef("invoice__business_id"), year=OuterRef("credit_year"),
                                            month=OuterRef("credit_month_number")))
     frozen = (uncached(FilingMonth).filter(business_id=OuterRef("invoice__business_id"), year=OuterRef("credit_year"),
                                            month=OuterRef("credit_month_number"), legacy_frozen_at__isnull=False))
-    after_month |= (Q(credit_year=F("bill_fy") + 1, credit_month_number=10, bill_fy__lte=closed_fy)
-                    & ~Exists(legacy) & ~Exists(frozen))
+    after_month |= Q(bill_fy__lte=closed_fy) & ~Exists(legacy) & ~Exists(frozen)
     after_date = Q(claim_year__gt=F("bill_fy") + 1) | Q(claim_year=F("bill_fy") + 1, claim_month_number__gt=11)
     return lines.annotate(lapsed=Case(When(Q(credit_eligible=True) & (
         Q(claimed_on__isnull=True) & after_month | Q(claimed_on__isnull=False) & after_date), then=True),
@@ -562,15 +562,15 @@ def credit_at_risk_summary(business_ids, today=None):
     if source_fy < fy_of(START):
         return zero
     if today > deadline:
-        # R3A-5: October's credit with its GSTR-3B still unfiled has lapsed.
-        rows = _risk_rows(business_ids, source_fy, october=True)
+        # R3A-9: every month's credit with its GSTR-3B still unfiled has lapsed.
+        rows = _risk_rows(business_ids, source_fy)
         return {**zero, "lapsed": {"count": rows["count"], "tax": to_paise(rows["tax"] or 0)}}
     rows = _risk_rows(business_ids, source_fy)
     return {**rows, "tax": to_paise(rows["tax"] or 0), "earliest_deadline": deadline if rows["count"] else None,
             "lapsed": zero["lapsed"]}
 
 
-def _risk_rows(business_ids, source_fy, *, october=False):
+def _risk_rows(business_ids, source_fy):
     if not {"itc_month", "itc_eligible"} <= {field.name for field in Invoice._meta.fields}:
         raise ImproperlyConfigured("3A credit summary requires part 2A's purchase credit fields.")
     start, end = fy_range(source_fy)
@@ -584,7 +584,7 @@ def _risk_rows(business_ids, source_fy, *, october=False):
     return (uncached(Invoice).filter(business_id__in=business_ids, type_of_invoice="inward", itc_eligible=True,
                                      invoice_date__range=(start, end))
             .annotate(credit_date=Coalesce("itc_month", TruncMonth("invoice_date"), output_field=DateField()))
-            .filter(credit_date__lte=date(source_fy + 1, 10, 1), **({"credit_date": date(source_fy + 1, 10, 1)} if october else {}))
+            .filter(credit_date__lte=date(source_fy + 1, 10, 1))
             .annotate(credit_year=ExtractYear("credit_date"), credit_number=ExtractMonth("credit_date"))
             .annotate(recorded=Exists(records), legacy=Exists(legacy), frozen=Exists(frozen))
             .filter(recorded=False, legacy=False, frozen=False)

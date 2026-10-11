@@ -339,7 +339,44 @@ def test_october_credit_lapses_once_30_november_passes_unfiled():
     assert lapsed(date(2026, 12, 1)) is False
 
 
-def test_credit_risk_after_30_november_reports_october_credit_as_lapsed(monkeypatch):
+@pytest.mark.django_db
+def test_every_unfiled_month_of_the_year_lapses_after_30_november():
+    # R3A-9, worked by hand for 2025-26 bills at 3%, deadline 30 Nov 2026:
+    #   A Jun 2025 bill, Jun 2025 credit month, unfiled        tax  30  -> lapses
+    #   B Mar 2026 bill, Apr 2026 credit month, unfiled        tax  60  -> lapses
+    #   C Sep 2025 bill, its GSTR-3B recorded on 20 Oct 2025   tax  90  -> claimed
+    #   D Oct 2025 bill, Oct 2026 credit month, unfiled        tax 120  -> lapses (R3A-5)
+    #   E Jul 2025 bill, July locked by v2 (legacy, filed)     tax 150  -> claimed
+    # On 30 Nov: 3 bills, 30 + 60 + 120 = 210 at risk. On 1 Dec: those 3 lapse, 210.
+    from billing.models import FiledPeriod, FilingRecord
+    from billing.services.ledger import _purchase_lines, credit_at_risk_summary
+
+    business, supplier = firm(), buyer(gst_number="08ABCDE1234A1Z5")
+    bills = {
+        "A": sale(business, supplier, "A", date(2025, 6, 10), line(rate="1000"), kind="inward"),
+        "B": sale(business, supplier, "B", date(2026, 3, 5), line(rate="2000"), kind="inward", itc_month=date(2026, 4, 1)),
+        "C": sale(business, supplier, "C", date(2025, 9, 1), line(rate="3000"), kind="inward"),
+        "D": sale(business, supplier, "D", date(2025, 10, 1), line(rate="4000"), kind="inward", itc_month=date(2026, 10, 1)),
+        "E": sale(business, supplier, "E", date(2025, 7, 1), line(rate="5000"), kind="inward"),
+    }
+    FilingRecord.objects.create(business=business, year=2025, month=9, kind="gstr3b", filed_on=date(2025, 10, 20))
+    FiledPeriod.objects.create(business=business, year=2025, month=7)
+    names = {bill.pk: name for name, bill in bills.items()}
+
+    def lapsed(today):
+        return sorted(names[pk] for pk in _purchase_lines(business, today=today).filter(lapsed=True)
+                      .values_list("invoice_id", flat=True))
+
+    assert lapsed(date(2026, 11, 30)) == []
+    before = credit_at_risk_summary([business.pk], today=date(2026, 11, 30))
+    assert (before["count"], before["tax"], before["lapsed"]) == (3, Decimal("210.00"), {"count": 0, "tax": Decimal("0.00")})
+    assert lapsed(date(2026, 12, 1)) == ["A", "B", "D"]
+    after = credit_at_risk_summary([business.pk], today=date(2026, 12, 1))
+    assert (after["count"], after["earliest_deadline"]) == (0, None)
+    assert after["lapsed"] == {"count": 3, "tax": Decimal("210.00")}
+
+
+def test_credit_risk_after_30_november_reports_unfiled_credit_as_lapsed(monkeypatch):
     from billing.services import ledger
 
     monkeypatch.setattr(ledger, "_risk_rows", lambda business_ids, source_fy, **more: {
