@@ -18,6 +18,7 @@ from django.db.models import Case, Count, Exists, F, IntegerField, OuterRef, Q, 
 from django.db.models.functions import ExtractYear, Length, Round, TruncMonth
 from django.utils import timezone
 
+from billing.api.search import number_part
 from billing.cache import uncached
 from billing.constants import B2CL_THRESHOLD, BILL_ACTIVE, BILL_CANCELLED, GST_CODE
 from billing.fy import fy_label, fy_of, fy_range
@@ -373,6 +374,8 @@ def search(bills, q):
     for word in q.split():
         name &= Q(customer__name__istartswith=word) | Q(customer__name__icontains=f" {word}")
     match = Q(invoice_number__icontains=q) | name
+    if q.isascii() and q.isdigit():
+        match |= number_part(q)
     digits = re.sub(r"[^0-9]", "", q)
     if len(digits) >= 3 and re.fullmatch(r"[0-9\s+]+", q):
         match |= Q(customer__mobile_number__contains=digits)
@@ -500,14 +503,16 @@ ORDERINGS = {
 
 
 def ordered(bills, params):
-    """The list's order; a bill whose number is exactly `q` comes first."""
+    """Exact numbers first, then equal numeric parts, each in the chosen order."""
     keys = ORDERINGS.get(params.get("ordering") or "-date", ORDERINGS["-date"])
     if "number" in (params.get("ordering") or ""):
         bills = bills.annotate(fy=_FY_EXPR, number_length=Length("invoice_number"))
     q = search_text(params)
     if q:
-        bills = bills.annotate(exact=Case(When(invoice_number__iexact=q, then=Value(0)), default=Value(1),
-                                          output_field=IntegerField()))
+        first = [When(invoice_number__iexact=q, then=Value(0))]
+        if q.isascii() and q.isdigit():
+            first.append(When(number_part(q), then=Value(1)))
+        bills = bills.alias(exact=Case(*first, default=Value(2), output_field=IntegerField()))
         keys = ("exact", *keys)
     return bills.order_by(*keys)
 
