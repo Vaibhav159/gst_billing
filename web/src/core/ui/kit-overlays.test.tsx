@@ -1,3 +1,4 @@
+import { settle } from "@/test/clock";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -145,7 +146,6 @@ import { overlayLayer } from "./Overlay";
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 afterEach(() => phone(false));
 /** Past the ghost-tap guard: a dialog ignores clicks for 350 ms after it opens. */
-const settle = () => act(async () => { vi.advanceTimersByTime(400); });
 
 test("overlays portal into one layer on <body> that carries the view, and a closing dialog says so", async () => {
   function Probe() { const [open, setOpen] = useState(true); return <Dialog open={open} onClose={() => setOpen(false)} title="Add a customer"><p>Name and phone</p></Dialog>; }

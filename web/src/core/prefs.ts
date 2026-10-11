@@ -1,3 +1,4 @@
+import { readStored, writeStored } from "@/core/storage";
 import { useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
@@ -11,12 +12,12 @@ export type Prefs = { defaultBusinessId?: string; phoneMode?: "easy" | "expert";
 const keptKey = (id: number) => `gst3.prefs.${id}`;
 function readKept(id: number): Prefs | undefined {
   try {
-    const v: unknown = JSON.parse(localStorage.getItem(keptKey(id)) ?? "null");
+    const v: unknown = JSON.parse(readStored(keptKey(id)) ?? "null");
     return v && typeof v === "object" && !Array.isArray(v) ? (v as Prefs) : undefined;
   } catch { return undefined; }
 }
 function keep(id: number, prefs: Prefs) {
-  try { localStorage.setItem(keptKey(id), JSON.stringify(prefs)); } catch { /* storage refused: the next load waits for the server */ }
+  try { writeStored(keptKey(id), JSON.stringify(prefs)); } catch { /* storage refused: the next load waits for the server */ }
 }
 
 /**
@@ -46,6 +47,7 @@ export function usePrefs() {
 /** Easy or Expert on a phone: the person's setting, else what v2 remembered on this phone, else Easy (today's default). */
 export function phoneModeOf(prefs: Prefs): "easy" | "expert" {
   if (prefs.phoneMode === "easy" || prefs.phoneMode === "expert") return prefs.phoneMode;
-  try { const v2 = localStorage.getItem("mobile-mode"); if (v2 === "expert" || v2 === "easy") return v2; } catch { /* storage refused */ }
+  const v2 = readStored("mobile-mode");
+  if (v2 === "expert" || v2 === "easy") return v2;
   return "easy";
 }

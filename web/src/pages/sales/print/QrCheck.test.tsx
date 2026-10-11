@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
@@ -128,20 +129,6 @@ function mountApp(path: string) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(<QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
-}
-/**
- * From here the clock moves only when the test says, however busy the machine (as 1B's list tests do it): Testing
- * Library's async helpers wait on timers this clock never runs, so the steps after it are fireEvent and pass().
- */
-function handClock() {
-  const now = Date.now();
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
-}
-/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  for (let i = 0; i < 4; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }
 /**
  * The hand clock moves `step` ms at a time (none by default) until `seen()` holds: a check (and its requests) answers

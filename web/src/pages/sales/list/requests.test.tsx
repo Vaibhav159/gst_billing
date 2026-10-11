@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { Route, Routes } from "react-router";
@@ -14,16 +15,12 @@ vi.mock("@/core/print/make", async (real) => ({
 }));
 beforeEach(() => {
   localStorage.clear();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: new Date("2026-10-08T12:30:00+05:30") });
+  handClock(new Date("2026-10-08T12:30:00+05:30"));
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:pdf"), revokeObjectURL: vi.fn() });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   vi.spyOn(window, "open").mockImplementation(() => ({}) as Window);
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
-async function pass(ms = 0) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  for (let n = 0; n < 6; n++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 const asks = (calls: Call[]) => calls.filter((c) => c.url.startsWith("sales/"));
 function setup(path = "/sales") {
   const { calls } = salesServer([
@@ -41,23 +38,23 @@ function setup(path = "/sales") {
 
 test("request budget: opening, matched and empty searches, and returning after one minute", async () => {
   const calls = setup();
-  await pass();
+  await pass(0, 6);
   const opening = asks(calls).length;
   let before = asks(calls).length;
   fireEvent.change(screen.getByRole("searchbox", { name: /Search sales bills/ }), { target: { value: "anil" } });
-  await pass(300);
+  await pass(300, 6);
   const matched = asks(calls).slice(before);
   before = asks(calls).length;
   fireEvent.change(screen.getByRole("searchbox", { name: /Search sales bills/ }), { target: { value: "missing" } });
-  await pass(300);
+  await pass(300, 6);
   const empty = asks(calls).slice(before);
   fireEvent.change(screen.getByRole("searchbox", { name: /Search sales bills/ }), { target: { value: "" } });
-  await pass(300);
+  await pass(300, 6);
   fireEvent.click(screen.getByRole("button", { name: "Toggle list" }));
-  await pass(60_000);
+  await pass(60_000, 6);
   before = asks(calls).length;
   fireEvent.click(screen.getByRole("button", { name: "Toggle list" }));
-  await pass();
+  await pass(0, 6);
   const returning = asks(calls).slice(before);
   expect({ opening, matched: matched.length, matchedFacets: matched[0]?.params.facets, empty: empty.length, emptyFacets: empty.map((c) => c.params.facets), returning: returning.length })
     .toEqual({ opening: 2, matched: 1, matchedFacets: undefined, empty: 2, emptyFacets: [undefined, "elsewhere"], returning: 1 });
@@ -65,13 +62,13 @@ test("request budget: opening, matched and empty searches, and returning after o
 
 test("request budget: one Send from a row with its preview open and an older cached bill", async () => {
   const calls = setup("/sales?bill=412");
-  await pass(200);
-  await pass(31_000);
+  await pass(200, 6);
+  await pass(31_000, 6);
   const before = asks(calls).length;
   const row = document.querySelector<HTMLElement>('tr[data-row="412"]')!;
   act(() => row.focus());
   fireEvent.keyDown(row, { key: "s" });
-  await pass();
+  await pass(0, 6);
   expect(asks(calls).slice(before).map((c) => [c.method, c.url, c.params.facets])).toEqual([
     ["GET", "sales/412/", undefined], ["POST", "sales/412/sent/", undefined],
     ["GET", "sales/412/", undefined], ["GET", "sales/", undefined], ["GET", "sales/", 1],
@@ -80,6 +77,6 @@ test("request budget: one Send from a row with its preview open and an older cac
 
 test("an all-years empty search never asks elsewhere", async () => {
   const calls = setup("/sales?month=years&q=missing");
-  await pass();
+  await pass(0, 6);
   expect(asks(calls).filter((c) => c.params.q).map((c) => c.params.facets)).toEqual([undefined]);
 });

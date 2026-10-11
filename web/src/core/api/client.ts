@@ -1,16 +1,16 @@
+import { readStored as read, writeStored } from "@/core/storage";
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { markReachable, markUnreachable } from "./network";
 
 export const ACCESS_KEY = "gst_access_token";
 export const REFRESH_KEY = "gst_refresh_token";
 
-function read(k: string) { try { return localStorage.getItem(k); } catch { return null; } }
 export function getTokens() { return { access: read(ACCESS_KEY), refresh: read(REFRESH_KEY) }; }
 export function setTokens(access: string, refresh?: string) {
-  try { localStorage.setItem(ACCESS_KEY, access); if (refresh) localStorage.setItem(REFRESH_KEY, refresh); } catch { /* storage refused */ }
+  if (writeStored(ACCESS_KEY, access) && refresh) writeStored(REFRESH_KEY, refresh);
 }
 export function clearTokens() {
-  try { localStorage.removeItem(ACCESS_KEY); localStorage.removeItem(REFRESH_KEY); } catch { /* storage refused */ }
+  if (writeStored(ACCESS_KEY, null)) writeStored(REFRESH_KEY, null);
 }
 
 /** The user id an access token names (SimpleJWT's user_id claim), read without asking the server. Null when it can't be read. */

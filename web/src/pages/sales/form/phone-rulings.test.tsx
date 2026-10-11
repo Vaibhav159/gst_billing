@@ -1,3 +1,4 @@
+import { tick } from "@/test/clock";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { __resetDrafts } from "@/core/api/drafts";
 import { __resetDeviceDrafts, keptDrafts } from "@/core/deviceDrafts";
@@ -9,22 +10,21 @@ vi.setConfig({ testTimeout: 20_000 });
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 beforeEach(() => { phone(true); localStorage.clear(); __resetDrafts(); __resetDeviceDrafts(); });
 afterEach(() => { cleanup(); phone(false); vi.useRealTimers(); vi.restoreAllMocks(); });
-const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(400); });
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
 const copyRoute: Route = ["GET", "sales/412/", () => wireDetail()];
 async function reviewCopy(user: ReturnType<typeof fakeToday>) {
   await screen.findByRole("heading", { level: 1, name: "New bill" });
-  await settle();
+  await tick(400);
   await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
   await user.click(screen.getByRole("button", { name: "Check and save" }));
   const review = await screen.findByRole("dialog", { name: "Check the bill" });
-  await settle();
+  await tick(400);
   return review;
 }
 async function menu(user: ReturnType<typeof fakeToday>, label: string) {
   await user.click(screen.getByRole("button", { name: "More for this bill" }));
   const sheet = await screen.findByRole("dialog", { name: "Bill" });
-  await settle();
+  await tick(400);
   await user.click(within(sheet).getByRole("menuitem", { name: new RegExp(`^${label}`) }));
 }
 
@@ -35,11 +35,11 @@ test("a typed-number collision opens its phone sheet before moving focus to the 
   await screen.findByRole("heading", { level: 1, name: "New bill" });
   await user.click(screen.getByRole("button", { name: /KIRAN GOLD HOUSE/ }));
   let info = await screen.findByRole("dialog", { name: "Firm, number and date" });
-  await settle();
+  await tick(400);
   await user.clear(within(info).getByLabelText("Bill number"));
   await user.type(within(info).getByLabelText("Bill number"), "35");
   await user.click(within(info).getByRole("button", { name: "Done" }));
-  await settle();
+  await tick(400);
   const review = await reviewCopy(user);
   await act(async () => {
     fireEvent.click(within(review).getByRole("button", { name: "Save bill" }));
@@ -48,7 +48,7 @@ test("a typed-number collision opens its phone sheet before moving focus to the 
   await user.click(await within(review).findByRole("button", { name: "Change the number" }));
   info = await screen.findByRole("dialog", { name: "Firm, number and date" });
   expect(within(info).getByLabelText("Bill number")).toHaveFocus();
-  await settle();
+  await tick(400);
   expect(within(info).getByLabelText("Bill number")).toHaveFocus();
   expect(screen.queryByRole("dialog", { name: "Check the bill" })).not.toBeInTheDocument();
 });
@@ -83,7 +83,7 @@ test.each([false, true])("closing a new phone bill keeps the pending note at onc
   await user.type(screen.getByLabelText("Note on the bill"), "Meena");
   expect(asksOnClose()).toBe(storageRefused);
   await menu(user, "Close");
-  await settle();
+  await tick(400);
   expect(where(router)).toBe("/sales");
   expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).not.toBeInTheDocument();
   expect(keptDrafts().map((d) => d.data.notes)).toEqual(["Meena"]);
@@ -98,19 +98,19 @@ test("an unchanged phone edit cannot save, a changed edit asks to leave, and rev
   expect(screen.getByText("No changes yet")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Check and save changes" }));
   const review = await screen.findByRole("dialog", { name: "Check the changes to KGH/2026-27/31" });
-  await settle();
+  await tick(400);
   expect(within(review).getByRole("button", { name: "Save changes" })).toBeDisabled();
   await user.keyboard("{Control>}s{/Control}");
   expect(calls.some((c) => c.method === "PUT")).toBe(false);
   await user.click(within(review).getByRole("button", { name: "Go back and edit" }));
-  await settle();
+  await tick(400);
   await user.click(screen.getByRole("radio", { name: "UPI / bank" }));
   expect(asksOnClose()).toBe(true);
   await menu(user, "Stop editing");
   const ask = await screen.findByRole("dialog", { name: "Leave without saving?" });
-  await settle();
+  await tick(400);
   await user.click(within(ask).getByRole("button", { name: "Stay" }));
-  await settle();
+  await tick(400);
   await user.click(screen.getByRole("radio", { name: "Cash" }));
   expect(screen.getByText("No changes yet")).toBeInTheDocument();
   expect(asksOnClose()).toBe(false);
@@ -142,9 +142,9 @@ test("a PAN fixed from the phone review keeps focus in it and holds Save for the
   held = new Promise<void>((r) => { land = r; });
   await user.click(within(review).getByRole("button", { name: "Add PAN" }));
   const pan = await screen.findByRole("dialog", { name: "Anil Gupta's PAN" });
-  await settle();
+  await tick(400);
   await user.type(within(pan).getByRole("textbox"), "ABCPG1234K{Enter}");
-  await settle();
+  await tick(400);
   expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument();
   expect(review).toContainElement(document.activeElement as HTMLElement);
   expect(within(review).getByRole("button", { name: "Save bill" })).toBeDisabled();
@@ -166,7 +166,7 @@ test("a line refused by the server opens its own phone sheet and shows the serve
     await vi.advanceTimersByTimeAsync(400);
   });
   const item = await screen.findByRole("dialog", { name: "Item 1" });
-  await settle();
+  await tick(400);
   expect(within(item).getByText(words)).toBeInTheDocument();
   const rate = within(item).getByLabelText("Rate per gram");
   expect(rate).toHaveAttribute("aria-invalid", "true");
@@ -175,6 +175,6 @@ test("a line refused by the server opens its own phone sheet and shows the serve
   await user.type(rate, "6500");
   expect(within(item).queryByText(words)).not.toBeInTheDocument();
   await user.click(within(item).getByRole("button", { name: "Save item" }));
-  await settle();
+  await tick(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

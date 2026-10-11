@@ -1,7 +1,8 @@
+import { tick } from "@/test/clock";
 // Tests only (not *.test.tsx, so vitest doesn't run it, and nothing in the app imports it): the bill form in a data
 // router with the app's providers and the firm scope, and a fake server answering everything the form asks, the
 // contract's way. Today is 08 Oct 2026, as in the prototype's sample data.
-import { act, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, type RouteObject } from "react-router";
@@ -31,7 +32,7 @@ export function fakeToday({ intervals = false }: { intervals?: boolean } = {}) {
  * twice, since what one answer draws can ask for more.
  */
 export async function settle() {
-  for (let i = 0; i < 2; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  for (let i = 0; i < 2; i += 1) await tick(50);
 }
 /** Whether closing the tab now would ask (the browser's own prompt). */
 export function asksOnClose(): boolean {

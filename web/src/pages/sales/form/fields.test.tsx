@@ -1,3 +1,4 @@
+import { tick } from "@/test/clock";
 import { useState } from "react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -491,22 +492,21 @@ test("in a sheet the cursor starts in Name, and Back or Esc gives it back to wha
   // a clock the test moves: the sheet's own focus step, its guard against a double tap's second tap, and its way out
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  const pass = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
   renderApp(<ItemSheet />);
   const opener = screen.getByRole("button", { name: "Add an item" });
   await user.click(opener);
   const sheet = await screen.findByRole("dialog", { name: "An item that isn't in Products" });
-  await pass(400);
+  await tick(400);
   expect(within(sheet).getByLabelText(/^Name/)).toHaveFocus();
   await user.click(within(sheet).getByRole("button", { name: "Back" }));
-  await pass(400);
+  await tick(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(opener).toHaveFocus();
   await user.click(opener);
   await screen.findByRole("dialog", { name: "An item that isn't in Products" });
-  await pass(400);
+  await tick(400);
   await user.keyboard("{Escape}");
-  await pass(400);
+  await tick(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(opener).toHaveFocus();
 });

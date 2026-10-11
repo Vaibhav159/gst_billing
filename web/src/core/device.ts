@@ -1,3 +1,4 @@
+import { readStored as read, writeStored as write } from "@/core/storage";
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 export type Theme = "obsidian" | "pearl" | "sapphire" | "ember" | "forest";
@@ -8,12 +9,6 @@ export const THEMES: { value: Theme; label: string }[] = [
 const THEME_KEY = "gst3.theme";
 const V2_THEME_KEY = "gst-theme";
 
-function read(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-function write(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* private window: the choice lasts this visit */ }
-}
 function isTheme(v: string | null): v is Theme {
   return THEMES.some((t) => t.value === v);
 }

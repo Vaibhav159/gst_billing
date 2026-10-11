@@ -1,3 +1,4 @@
+import { readStored, writeStored } from "@/core/storage";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setTokens, tokenUser } from "@/core/api/client";
@@ -19,8 +20,8 @@ export type AuthValue = {
 export const AuthContext = createContext<AuthValue | null>(null);
 const ME_KEY = "gst3.me";
 
-function readMe(): Me | null { try { const s = localStorage.getItem(ME_KEY); return s ? (JSON.parse(s) as Me) : null; } catch { return null; } }
-function saveMe(me: Me | null) { try { if (me) localStorage.setItem(ME_KEY, JSON.stringify(me)); else localStorage.removeItem(ME_KEY); } catch { /* storage refused */ } }
+function readMe(): Me | null { try { const s = readStored(ME_KEY); return s ? (JSON.parse(s) as Me) : null; } catch { return null; } }
+function saveMe(me: Me | null) { try { writeStored(ME_KEY, me ? JSON.stringify(me) : null); } catch { /* storage refused */ } }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice }; }
 

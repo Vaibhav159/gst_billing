@@ -1,3 +1,4 @@
+import { pass } from "@/test/clock";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
@@ -9,10 +10,6 @@ import { ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { BillPreview } from "./BillPreview";
 
-async function pass(ms = 0) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 const props = { index: 0, total: 10, onClose: vi.fn(), onMove: vi.fn(), openDialog: vi.fn(), send: vi.fn() };
 /** over: what a bill's row and answer say besides the contract's example (its status, its customer), by its id. */
 function setup(over: (id: number) => Record<string, unknown> = () => ({})) {
@@ -32,16 +29,16 @@ test("a preview draws its row at once and reads the bill only after 200 ms witho
   const { calls, Preview } = setup();
   const { rerender } = render(<Preview id={412} />);
   expect(screen.getByRole("complementary", { name: "Preview of bill 412" })).toBeInTheDocument();
-  await pass(199);
+  await pass(199, 3);
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url))).toHaveLength(0);
   for (let id = 413; id <= 421; id++) {
     rerender(<Preview id={id} />);
     expect(screen.getByRole("complementary", { name: `Preview of bill ${id}` })).toBeInTheDocument();
-    await pass(20);
+    await pass(20, 3);
   }
-  await pass(179);
+  await pass(179, 3);
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url))).toHaveLength(0);
-  await pass(1);
+  await pass(1, 3);
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url)).toEqual(["sales/421/"]);
   expect(screen.getByText("12.345 gms × ₹6,512.50/gms")).toBeInTheDocument();
 });
@@ -49,7 +46,7 @@ test("a preview draws its row at once and reads the bill only after 200 ms witho
 test("switching previews never draws the previous bill while the next read is waiting", async () => {
   const { Preview } = setup();
   const { rerender } = render(<Preview id={412} />);
-  await pass(200);
+  await pass(200, 3);
   expect(screen.getByText("12.345 gms × ₹6,512.50/gms")).toBeInTheDocument();
   rerender(<Preview id={413} />);
   expect(screen.getByRole("complementary", { name: "Preview of bill 413" })).toBeInTheDocument();
@@ -64,7 +61,7 @@ test("cached details and a delete answer update the current preview even while i
   expect(screen.getByText("12.345 gms × ₹6,512.50/gms")).toBeInTheDocument();
   const deleted: BillOutcome = { kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) };
   act(() => { qc.setQueryData(billQuery(412).queryKey, deleted); });
-  await pass(0);
+  await pass(0, 3);
   expect(screen.getByText(/^This bill was deleted\./)).toBeInTheDocument();
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url))).toHaveLength(0);
 });
@@ -72,14 +69,14 @@ test("cached details and a delete answer update the current preview even while i
 test("returning quickly to a stale bill waits for a fresh 200 ms pause", async () => {
   const { qc, calls, Preview } = setup();
   const { rerender } = render(<Preview id={412} />);
-  await pass(200);
+  await pass(200, 3);
   await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey, refetchType: "none" }); });
   rerender(<Preview id={413} />);
-  await pass(20);
+  await pass(20, 3);
   rerender(<Preview id={412} />);
-  await pass(199);
+  await pass(199, 3);
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url)).toEqual(["sales/412/"]);
-  await pass(1);
+  await pass(1, 3);
   expect(calls.filter((c) => /^sales\/\d+\/$/.test(c.url)).map((c) => c.url)).toEqual(["sales/412/", "sales/412/"]);
 });
 

@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
@@ -48,31 +49,25 @@ const mount = (me?: Partial<Me>) => renderApp(<><Routes><Route path="*" element=
 /**
  * India's 12:30 on 8 Oct 2026, on a clock that moves only when the test says (Ruling 1B-10), however busy the machine:
  * the search's 250 ms pause and the dialog's 350 ms guard pass when the test says, and no step waits on real time.
- * Testing Library's async helpers wait on timers this clock never runs, so the steps are fireEvent and pass().
+ * Testing Library's async helpers wait on timers this clock never runs, so the steps are fireEvent and pass(0, 2).
  */
 beforeEach(() => {
   localStorage.clear();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: new Date("2026-10-08T12:30:00+05:30") });
+  handClock(new Date("2026-10-08T12:30:00+05:30"));
   serve();
 });
 afterEach(() => { vi.useRealTimers(); act(() => { __setNetState("online"); onlineManager.setOnline(true); }); });
-/** The clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 /** What's typed in the box; then typing pauses (250 ms), so the search asks and its answer shows. */
 async function type(text: string) {
   fireEvent.change(screen.getByRole("combobox"), { target: { value: text } });
-  await pass(250);
+  await pass(250, 2);
 }
 const headings = () => [...document.querySelectorAll("#palette-list .caps")].map((h) => h.textContent);
 const bins = () => asked.filter((a) => a.startsWith("bin/"));
 
 test("opened empty, search lists today's newest bills after the actions, asked once", async () => {
   mount();
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByRole("option", { name: "KGH/2026-27/32 Meena Jain · 12:09 · ₹31,556.04" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "KGH/2026-27/31 Anil Gupta · 10:42 · ₹87,083.21" })).toBeInTheDocument();
   expect(headings()).toEqual(["Actions", "Today's bills", "Pages"]);
@@ -81,7 +76,7 @@ test("opened empty, search lists today's newest bills after the actions, asked o
 
 test("a bare number puts that bill first, a cancelled one says so; deleted bills are found for the owner and open to restore", async () => {
   mount();
-  await pass(0);
+  await pass(0, 2);
   await type("31");
   const bills = screen.getAllByRole("option").filter((o) => /^KGH/.test(o.textContent ?? ""));
   expect(bills.map((o) => o.textContent?.split("Meena")[0])).toEqual(["KGH/2026-27/31", "KGH/2026-27/310", "KGH/2026-27/131"]);
@@ -90,26 +85,26 @@ test("a bare number puts that bill first, a cancelled one says so; deleted bills
   const gone = screen.getByRole("option", { name: "KGH/2026-27/27 deleted 03 Oct · Walk-in Customer · open it to restore" });
   expect(gone.querySelector("svg")).toHaveClass("text-neg");
   expect(asked).toContain("bin/?q=27&page_size=3");
-  await pass(400); // past the dialog's guard against the tap that opened it
+  await pass(400, 2); // past the dialog's guard against the tap that opened it
   fireEvent.click(gone);
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/205");
 }, 15_000); // two searches and many role queries: past 5 s on a busy 2-CPU machine
 
 test("someone who can't delete bills isn't searched for deleted ones", async () => {
   mount({ role: "staff", permissions: ["view", "bill.create", "bill.send", "customer.edit"] });
-  await pass(0);
+  await pass(0, 2);
   await type("27");
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/310 / })).toBeInTheDocument();
   // the search has answered, and the clock moves on: a request for deleted bills would have gone by now
-  await pass(1_000);
+  await pass(1_000, 2);
   expect(bins()).toEqual([]);
   expect(headings()).not.toContain("Deleted bills");
 });
 
 test("words go straight to a list: “udhaar sep”, and “new anil” asks for Anil and offers his new bill", async () => {
   mount();
-  await pass(0);
+  await pass(0, 2);
   const box = screen.getByRole("combobox");
   fireEvent.change(box, { target: { value: "udhaar sep" } });
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("Sales bills · September 2026 · paid by udhaar");
@@ -118,7 +113,7 @@ test("words go straight to a list: “udhaar sep”, and “new anil” asks for
   expect(screen.getByRole("option", { name: "New bill for Anil Gupta" })).toBeInTheDocument();
   expect(asked.filter((a) => a.startsWith("search/"))).toContain("search/quick/?q=anil");
   fireEvent.keyDown(box, { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/new?customer=7");
 }, 15_000); // as above
 
@@ -130,10 +125,10 @@ test("today's bills are asked once as search opens and kept 30 s: never on a tim
     return <><button type="button" onClick={() => setOpen(true)}>Open search</button><Palette open={open} onClose={() => setOpen(false)} /></>;
   }
   renderApp(<Openable />, { path: "/" });
-  await pass(0);
+  await pass(0, 2);
   const todays = () => asked.filter((a) => a.startsWith("sales/"));
-  const close = async () => { fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" }); await pass(400); expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); };
-  const open = async () => { fireEvent.click(screen.getByRole("button", { name: "Open search" })); await pass(0); };
+  const close = async () => { fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" }); await pass(400, 2); expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); };
+  const open = async () => { fireEvent.click(screen.getByRole("button", { name: "Open search" })); await pass(0, 2); };
   expect(todays()).toHaveLength(1);
   // closed and opened again within 30 s: what was asked stands
   await close();
@@ -141,7 +136,7 @@ test("today's bills are asked once as search opens and kept 30 s: never on a tim
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/32 Meena Jain/ })).toBeInTheDocument();
   expect(todays()).toHaveLength(1);
   // open for a minute, then typing and clearing the box: nothing more is asked (the database is Neon's free plan)
-  await pass(60_000);
+  await pass(60_000, 2);
   await type("me");
   await type("");
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/32 Meena Jain/ })).toBeInTheDocument();
@@ -154,11 +149,11 @@ test("today's bills are asked once as search opens and kept 30 s: never on a tim
 
 test("the owner's deleted bills are asked for once typing pauses, once per term", async () => {
   mount();
-  await pass(0);
+  await pass(0, 2);
   const box = screen.getByRole("combobox");
-  for (const t of ["2", "20", "202", "2026"]) { fireEvent.change(box, { target: { value: t } }); await pass(100); }
+  for (const t of ["2", "20", "202", "2026"]) { fireEvent.change(box, { target: { value: t } }); await pass(100, 2); }
   expect(bins()).toEqual([]);
-  await pass(150);
+  await pass(150, 2);
   expect(bins()).toEqual(["bin/?q=2026&page_size=3"]);
   await type("27");
   await type("2026");
@@ -168,7 +163,7 @@ test("the owner's deleted bills are asked for once typing pauses, once per term"
 test("a paper bill among today's says so in place of its time, and a cancelled one says so", async () => {
   serve({ today: [wireRow({ id: 420, invoice_number: "KGH/2026-27/34", paper: true, created_at: "2026-10-08T12:20:00+05:30" }), wireRow({ status: "cancelled" })] });
   mount();
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByRole("option", { name: "KGH/2026-27/34 Anil Gupta · paper bill · ₹87,083.21" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "KGH/2026-27/31 Anil Gupta · 10:42 · ₹87,083.21 · cancelled" })).toBeInTheDocument();
 });
@@ -177,14 +172,14 @@ test("deleted bills come with the search's records, never after them; deleted bi
   let binIn: (data: unknown) => void = () => {};
   serve({ bin: (config) => new Promise((resolve) => { binIn = (data) => { void resolve({ status: 200, statusText: "", headers: {}, config, data }); }; }) });
   mount();
-  await pass(0);
+  await pass(0, 2);
   await type("27");
   // the records are in, the deleted bills not yet: nothing shows until both are
   expect(asked.filter((a) => a.startsWith("search/"))).toEqual(["search/quick/?q=27"]);
   expect(screen.getByRole("status")).toHaveTextContent("Searching…");
   expect(screen.queryByRole("option", { name: /^KGH\/2026-27\/310/ })).not.toBeInTheDocument();
   await act(async () => { binIn({ count: 1, next: null, previous: null, results: [wireBin()] }); });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/310/ })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/27 deleted/ })).toBeInTheDocument();
   // the bin can't be read: the records show without it
@@ -203,18 +198,18 @@ test("Try again asks through the client for the search and, when they failed too
     bin: (config) => (down ? noReply(config) : new Promise((resolve) => { binIn = () => { void resolve(theBin(config)); }; })),
   });
   mount();
-  await pass(0);
+  await pass(0, 2);
   await type("27");
   expect(screen.getByRole("status")).toHaveTextContent("The app couldn't reach the shop's records just now, so customers, bills and products weren't searched.");
   down = false;
-  await pass(400); // past the dialog's guard against the tap that opened it
+  await pass(400, 2); // past the dialog's guard against the tap that opened it
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await pass(0);
+  await pass(0, 2);
   // the search has answered, the deleted bills not yet: the records wait for them
   expect(screen.getByRole("status")).toHaveTextContent("Searching…");
   expect(screen.queryByRole("option", { name: /^KGH\/2026-27\/310/ })).not.toBeInTheDocument();
   await act(async () => { binIn(); });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/310/ })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /^KGH\/2026-27\/27 deleted/ })).toBeInTheDocument();
   expect(asked.filter((a) => a.startsWith("search/"))).toEqual(["search/quick/?q=27", "search/quick/?q=27"]);
@@ -224,11 +219,11 @@ test("Try again asks through the client for the search and, when they failed too
 test("a customer whose name starts like a month (Mayank) is found and opened by Enter, not May's bills", async () => {
   serve({ search: (config) => answer(config, { customers: [{ id: 9, name: "Mayank Soni", mobile_number: "9414000001", gst_number: "", state_name: "RAJASTHAN", recent_invoices: [] }], invoices: [], products: [] }) });
   mount();
-  await pass(0);
+  await pass(0, 2);
   await type("mayank");
   expect(headings()[0]).toBe("Customers");
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/customers/9");
 });
 
@@ -240,7 +235,7 @@ test("a plain number that is a bill's own number puts that bill before customers
     invoices: [quick(99, "31", "2026-09-02", { paper: true }), quick(1, "KGH/2026-27/131", "2026-10-07")], products: [],
   }) });
   mount();
-  await pass(0);
+  await pass(0, 2);
   // no bill has the number typed: customers come first, as before
   await type("9831");
   expect(headings()).toEqual(["Customers", "Sales bills"]);
@@ -249,7 +244,7 @@ test("a plain number that is a bill's own number puts that bill before customers
   expect(headings()).toEqual(["Sales bills", "Customers"]);
   expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["31Meena Jain · 02 Sep 2026 · ₹1,000.00", "KGH/2026-27/131Meena Jain · 07 Oct 2026 · ₹1,000.00", "Bharat Soni98310 12345"]);
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
 });
 
@@ -264,12 +259,12 @@ test("a full-number bill whose counter is typed comes before a deleted match and
     bin: (config) => answer(config, { count: 1, next: null, previous: null, results: [wireBin({ invoice_number: "MO/2026-27/31" })] }),
   });
   mount();
-  await pass(0);
+  await pass(0, 2);
   await type("31");
   expect(headings()).toEqual(["Sales bills", "Deleted bills", "Customers"]);
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("KGH/2026-27/31Meena Jain");
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
 });
 
@@ -285,12 +280,12 @@ test("a deleted full-number bill whose counter is typed comes before other delet
     ] }),
   });
   mount();
-  await pass(0);
+  await pass(0, 2);
   await type("31");
   expect(headings()).toEqual(["Deleted bills", "Customers", "Sales bills"]);
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("KGH/2026-27/31deleted");
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/207");
 });
 
@@ -307,7 +302,7 @@ test("for the owner, a deleted bill whose number is exactly what's typed comes a
     bin: (config) => { const results = GONE[(config.params as { q: string }).q] ?? []; return answer(config, { count: results.length, next: null, previous: null, results }); },
   });
   mount();
-  await pass(0);
+  await pass(0, 2);
   const rows = () => screen.getAllByRole("option").map((o) => o.textContent);
   // no live bill is numbered 36, a deleted one is: the deleted bills go ahead of the customers, that one first
   await type("36");
@@ -317,13 +312,13 @@ test("for the owner, a deleted bill whose number is exactly what's typed comes a
     "Bharat Soni98310 12345", "KGH/2026-27/136Meena Jain · 07 Oct 2026 · ₹1,000.00",
   ]);
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/206");
   // a live bill and a deleted one are both numbered 31: the live one first, the deleted one after it, then the customers
   await type("31");
   expect(headings()).toEqual(["Sales bills", "Deleted bills", "Customers"]);
   expect(rows()[2]).toBe("31deleted 04 Oct · Walk-in Customer · open it to restore");
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-  await pass(0);
+  await pass(0, 2);
   expect(screen.getByTestId("where")).toHaveTextContent("/sales/99");
 }, 15_000); // two searches and many role queries: past 5 s on a busy 2-CPU machine

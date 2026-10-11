@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
@@ -48,22 +49,6 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 
-/**
- * From here the clock moves only when the test says (Ruling 1B-10), however busy the machine: the customer search's 250 ms
- * pause, the sheet's 350 ms guard and its 220 ms way out pass when the test says. Testing Library's async helpers wait on
- * timers this clock never runs, so the steps after it are fireEvent and pass() (as the desktop list's tests do).
- */
-function handClock() {
-  const now = Date.now();
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now });
-}
-/** The hand clock moves `ms` on; then what that set off reaches the screen (TanStack sends its news on a 0 ms timer). */
-async function pass(ms: number) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-}
 
 test("a phone opens on this month: the summary, then cards by day; a card opens its bill", async () => {
   const { calls } = salesServer([["GET", "sales/", (c) => (isFacets(c) ? { ...wirePage([]), facets: wireFacets() } : wirePage(ROWS))]]);
@@ -107,26 +92,26 @@ test("the filter sheet picks a customer, how it was paid and the order, and says
   await userEvent.click(await screen.findByRole("button", { name: "Filter" }));
   const sheet = await screen.findByRole("dialog", { name: "Filter bills" });
   handClock();
-  await pass(400); // past the sheet's guard against the tap that opened it
+  await pass(400, 2); // past the sheet's guard against the tap that opened it
   const box = within(sheet).getByRole("searchbox", { name: "Show one customer's bills" });
   fireEvent.change(box, { target: { value: "meenaz" } });
-  await pass(250); // typing has paused: the search asks
+  await pass(250, 2); // typing has paused: the search asks
   expect(within(sheet).getByText("No customer matches “meenaz”.")).toBeInTheDocument();
   // a letter less: that answer was for "meenaz", so nothing is said of "meena" until it has been searched for
   fireEvent.change(box, { target: { value: "meena" } });
   expect(within(sheet).queryByText(/No customer matches/)).not.toBeInTheDocument();
-  await pass(250);
+  await pass(250, 2);
   fireEvent.click(within(sheet).getByRole("button", { name: /^Meena Jain/ }));
-  await pass(0);
+  await pass(0, 2);
   // the period stays as picked (this month, a phone's first view): the customer narrows it
   expect(lists(calls).at(-1)?.params).toMatchObject({ customer_id: 8, month: "2026-10" });
   expect(within(sheet).getByRole("button", { name: "Remove Meena Jain" })).toBeInTheDocument();
   fireEvent.change(within(sheet).getByRole("combobox", { name: "Paid by" }), { target: { value: "credit" } });
   fireEvent.click(within(sheet).getByRole("button", { name: "Biggest" }));
-  await pass(0);
+  await pass(0, 2);
   expect(lists(calls).at(-1)?.params).toMatchObject({ customer_id: 8, payment_mode: "credit", ordering: "-total" });
   fireEvent.click(within(sheet).getByRole("button", { name: "Show 1 bill" }));
-  await pass(220); // the sheet's way out
+  await pass(220, 2); // the sheet's way out
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Filter, 2 on" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Meena Jain. Remove" })).toBeInTheDocument();
@@ -205,26 +190,26 @@ test("the filter sheet's customer search says it's searching until the answer fo
   await userEvent.click(await screen.findByRole("button", { name: "Filter" }));
   const sheet = await screen.findByRole("dialog", { name: "Filter bills" });
   handClock();
-  await pass(400); // past the sheet's guard against the tap that opened it
+  await pass(400, 2); // past the sheet's guard against the tap that opened it
   const box = within(sheet).getByRole("searchbox", { name: "Show one customer's bills" });
   fireEvent.change(box, { target: { value: "m" } });
   expect(within(sheet).getByRole("status")).toHaveTextContent("Keep typing to search");
   fireEvent.change(box, { target: { value: "meenaz" } });
   expect(within(sheet).getByRole("status")).toHaveTextContent("Searching…");
-  await pass(250); // typing has paused: the search asks
+  await pass(250, 2); // typing has paused: the search asks
   expect(calls.filter((c) => c.url === "customers/").map((c) => c.params.search)).toEqual(["meenaz"]);
   // asked, not answered yet
   expect(within(sheet).getByRole("status")).toHaveTextContent("Searching…");
   await act(async () => { answer([]); });
-  await pass(0);
+  await pass(0, 2);
   expect(within(sheet).getByRole("status")).toHaveTextContent("No customer matches “meenaz”.");
   down = true;
   fireEvent.change(box, { target: { value: "kamal" } });
-  await pass(250);
+  await pass(250, 2);
   expect(within(sheet).getByRole("status")).toHaveTextContent("Couldn't search: the app couldn't get through");
   act(() => { onlineManager.setOnline(false); __setNetState("offline"); });
   fireEvent.change(box, { target: { value: "rekha" } });
-  await pass(250);
+  await pass(250, 2);
   expect(within(sheet).getByRole("status")).toHaveTextContent("You're offline: the search runs when you're back online");
   expect(within(sheet).queryByText(/No customer matches/)).not.toBeInTheDocument();
 });

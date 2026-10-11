@@ -1,4 +1,5 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { settle } from "@/test/clock";
+import { screen, waitFor, within } from "@testing-library/react";
 import { wireDetail } from "@/core/sales/fixtures";
 import { formServer, fakeToday, mountForm, RING } from "./testing";
 
@@ -10,7 +11,6 @@ beforeEach(() => { phone(true); localStorage.clear(); });
 afterEach(() => { phone(false); vi.useRealTimers(); });
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
 /** Past a sheet's guard against the tap that opened it, and a search's debounce. */
-const settle = () => act(async () => { vi.advanceTimersByTime(400); });
 
 test("common product chips keep their full names when purity distinguishes products", async () => {
   const user = fakeToday();

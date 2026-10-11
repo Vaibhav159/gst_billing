@@ -1,3 +1,4 @@
+import { settle } from "@/test/clock";
 import type { ReactNode } from "react";
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
@@ -25,7 +26,6 @@ vi.setConfig({ testTimeout: 20_000 });
 beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
 afterEach(() => { vi.useRealTimers(); act(() => __setNetState("online")); });
 /** Past a debounce (the number's check, the customer search) at once. */
-const settle = () => act(async () => { vi.advanceTimersByTime(400); });
 const summary = () => screen.getByRole("complementary", { name: "Bill summary" });
 
 test("a counter bill by keyboard: the customer box has the first keys, Enter picks, then product, weight and rate; the bill adds up to the paisa", async () => {

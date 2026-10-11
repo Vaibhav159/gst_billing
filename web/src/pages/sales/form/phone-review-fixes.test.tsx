@@ -1,4 +1,5 @@
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { tick } from "@/test/clock";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { __resetDrafts } from "@/core/api/drafts";
 import { __resetDeviceDrafts } from "@/core/deviceDrafts";
 import { refuse, wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
@@ -10,13 +11,12 @@ beforeEach(() => {
   localStorage.clear(); __resetDrafts(); __resetDeviceDrafts();
 });
 afterEach(() => { cleanup(); (window as unknown as { __phone: boolean }).__phone = false; vi.useRealTimers(); });
-const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(400); });
 async function copiedBill(over: Record<string, unknown> = {}) {
   const user = fakeToday();
   const server = formServer([["GET", "sales/412/", () => wireDetail(over)]]);
   const view = mountForm("/sales/new?from=412");
   await screen.findByRole("heading", { level: 1, name: "New bill" });
-  await settle();
+  await tick(400);
   return { user, ...server, ...view };
 }
 
@@ -25,10 +25,10 @@ test("a failed phone product list says to add the item by hand, including before
   formServer([["GET", "products/", () => refuse(503, { detail: "Products are unavailable." })]]);
   mountForm("/sales/new");
   await screen.findByRole("heading", { level: 1, name: "New bill" });
-  await settle();
+  await tick(400);
   await user.click(screen.getByRole("button", { name: "Add item" }));
   const sheet = await screen.findByRole("dialog", { name: "Add item 1" });
-  await settle();
+  await tick(400);
   expect(within(sheet).getByText("Products couldn't load: add the item by hand")).toBeInTheDocument();
   await user.type(within(sheet).getByLabelText("Search products"), "ring");
   expect(within(sheet).getByText("Products couldn't load: add the item by hand")).toBeInTheDocument();
@@ -53,21 +53,21 @@ test("Remove item in an item's sheet focuses the next card, or Add another item 
   const removeInSheet = async (card: string, sheet: string) => {
     await user.click(screen.getByRole("button", { name: card }));
     const open = screen.getByRole("dialog", { name: sheet });
-    await settle();
+    await tick(400);
     await user.click(within(open).getByRole("button", { name: "Remove item" }));
   };
   await removeInSheet("Item 1: Gold Ring 22K. Edit", "Item 1");
   expect(screen.getByRole("button", { name: "Item 1: Gold Pendant 22K. Edit" })).toHaveFocus();
   // and still there once the sheet has gone
-  await settle();
+  await tick(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Item 1: Gold Pendant 22K. Edit" })).toHaveFocus();
   await user.click(screen.getByRole("button", { name: /^Undo/ }));
   await removeInSheet("Item 2: Gold Pendant 22K. Edit", "Item 2");
-  await settle();
+  await tick(400);
   expect(screen.getByRole("button", { name: "Add another item" })).toHaveFocus();
   await removeInSheet("Item 1: Gold Ring 22K. Edit", "Item 1");
-  await settle();
+  await tick(400);
   expect(screen.getByRole("button", { name: "Add item" })).toHaveFocus();
 });
 
@@ -77,7 +77,7 @@ test("an unsupported stored GST rate reads as not set on the phone card and in i
   expect(card).toHaveTextContent("GST not set");
   expect(card).not.toHaveTextContent("GST 7%");
   await user.click(card);
-  await settle();
+  await tick(400);
   expect(screen.getByRole("dialog", { name: "Item 1" })).toHaveTextContent("GST not set");
 });
 
@@ -87,7 +87,7 @@ test.each([
   const { user } = await copiedBill();
   await user.click(screen.getByRole("button", { name: /KIRAN GOLD HOUSE/ }));
   const info = screen.getByRole("dialog", { name: "Firm, number and date" });
-  await settle();
+  await tick(400);
   if (label === "Date") {
     // A missing date cannot look up an automatic number. Keep a typed number so Date is the first problem.
     await user.clear(within(info).getByLabelText("Bill number"));
@@ -97,11 +97,11 @@ test.each([
   await user.clear(box);
   await user.type(box, value);
   await user.click(within(info).getByRole("button", { name: "Done" }));
-  await settle();
+  await tick(400);
   await user.click(screen.getByRole("button", { name: "Check and save" }));
   const reopened = screen.getByRole("dialog", { name: "Firm, number and date" });
   expect(within(reopened).getByLabelText(label)).toHaveFocus();
-  await settle();
+  await tick(400);
   expect(within(reopened).getByLabelText(label)).toHaveFocus();
 });
 
@@ -113,7 +113,7 @@ test.each([
   await user.click(screen.getByRole("button", { name: "Check and save" }));
   const sheet = screen.getByRole("dialog", { name: "Item 1" });
   expect(within(sheet).getByLabelText(label)).toHaveFocus();
-  await settle();
+  await tick(400);
   expect(within(sheet).getByLabelText(label)).toHaveFocus();
 });
 
@@ -124,7 +124,7 @@ test.each(["Control", "Meta"])("%s S opens the phone review without saving on it
   const review = screen.getByRole("dialog", { name: "Check the bill" });
   fireEvent.keyDown(window, { key: "s", ctrlKey: modifier === "Control", metaKey: modifier === "Meta" });
   expect(calls.some((c) => c.method === "POST")).toBe(false);
-  await settle();
+  await tick(400);
   expect(review).toBeInTheDocument();
   await user.keyboard(`{${modifier}>}s{/${modifier}}`);
   expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
@@ -133,14 +133,14 @@ test.each(["Control", "Meta"])("%s S opens the phone review without saving on it
 test("Ctrl S behind a phone sheet or menu stays there and still takes the browser shortcut", async () => {
   const { user, calls } = await copiedBill();
   await user.click(screen.getByRole("button", { name: "Add another item" }));
-  await settle();
+  await tick(400);
   expect(fireEvent.keyDown(window, { key: "s", ctrlKey: true })).toBe(false);
   expect(screen.getByRole("dialog", { name: "Add item 3" })).toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "Check the bill" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Close" }));
-  await settle();
+  await tick(400);
   await user.click(screen.getByRole("button", { name: "More for this bill" }));
-  await settle();
+  await tick(400);
   expect(fireEvent.keyDown(window, { key: "s", metaKey: true })).toBe(false);
   expect(screen.getByRole("dialog", { name: "Bill" })).toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "Check the bill" })).not.toBeInTheDocument();

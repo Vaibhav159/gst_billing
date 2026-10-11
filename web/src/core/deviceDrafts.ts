@@ -1,3 +1,4 @@
+import { readStored, writeStored } from "@/core/storage";
 // Unfinished bills kept on this device (localStorage), beside the shop-wide copies on the server (core/api/drafts.ts).
 // A bill typed offline, or while a session ran out, is never lost: it stays here until the server has it. Signing out
 // keeps them ("Unfinished bills stay on this phone"): drafts are the shop's, not one person's, so whoever signs in next
@@ -38,15 +39,15 @@ function parse(raw: string | null): KeptDraft[] {
 }
 function read(): KeptDraft[] {
   if (memoryOnly) return cache.list;
-  let raw: string | null;
-  try { raw = localStorage.getItem(KEY); } catch { return cache.list; }
+  const raw = readStored(KEY, cache.raw);
   if (raw !== cache.raw) cache = { raw, list: parse(raw) };
   return cache.list;
 }
 function write(list: KeptDraft[]) {
   const sorted = [...list].sort(newestFirst);
   const raw = JSON.stringify(sorted);
-  try { localStorage.setItem(KEY, raw); checked = true; } catch { memoryOnly = true; }
+  if (writeStored(KEY, raw)) checked = true;
+  else memoryOnly = true;
   cache = { raw, list: sorted };
   listeners.forEach((l) => l());
 }
@@ -86,7 +87,7 @@ export function forgetOnDevice(id: string): void {
 export function keepsOnDevice(): boolean {
   if (!memoryOnly && !checked) {
     checked = true;
-    try { localStorage.setItem(`${KEY}.check`, "1"); localStorage.removeItem(`${KEY}.check`); } catch { read(); memoryOnly = true; }
+    if (!writeStored(`${KEY}.check`, "1") || !writeStored(`${KEY}.check`, null)) { read(); memoryOnly = true; }
   }
   return !memoryOnly;
 }

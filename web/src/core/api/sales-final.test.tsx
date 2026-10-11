@@ -1,3 +1,4 @@
+import { handClock, pass } from "@/test/clock";
 import type { ReactNode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -5,16 +6,12 @@ import { salesServer, wireBin, wireDetail, wireFacets, wirePage, wireRow } from 
 import { testQueryClient } from "@/test/render";
 import { invalidateSales, salesKeys, useBill, useDeleteBill, useSalesFacets, useSalesList, type SalesQuery } from "./sales";
 
-beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: new Date("2026-10-08T23:58:00+05:30") }));
+beforeEach(() => handClock(new Date("2026-10-08T23:58:00+05:30")));
 afterEach(() => vi.useRealTimers());
 function setup() {
   const qc = testQueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   return { qc, wrapper };
-}
-async function pass(ms = 0) {
-  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  for (let n = 0; n < 4; n++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }
 
 test("facets stay fresh for five minutes, refresh after writes, and use India's new day", async () => {

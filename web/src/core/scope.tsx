@@ -1,3 +1,4 @@
+import { readStored as read, writeStored as write } from "@/core/storage";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
@@ -56,12 +57,6 @@ const ScopeCtx = createContext<Scope | null>(null);
 const FY_KEY = "gst3.fy";
 const V2_FY_KEY = "gst_selected_fy";
 const scopeKey = (meId: number) => `gst3.scope.${meId}`;
-function read(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-function write(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* private window: the pick lasts this visit */ }
-}
 /** A firm id from storage or preferences ("3"), or null when there isn't a usable one. */
 function toId(v: unknown): number | null {
   const n = Number(v);
