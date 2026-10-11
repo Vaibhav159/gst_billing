@@ -2,6 +2,7 @@ from django.urls import include, path, re_path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenVerifyView
 
+from .account_sessions import PasswordView, SessionEndView, SessionsView, SignOutView
 from .audit import AuditActionView, AuditExportView, AuditView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
@@ -136,6 +137,11 @@ urlpatterns = [
     path("audit/", AuditView.as_view(), name="audit"),
     path("audit/export/", AuditExportView.as_view(), name="audit-export"),
     path("audit/<int:pk>/<str:action>/", AuditActionView.as_view(), name="audit-action"),
+    path("account/password/", PasswordView.as_view()),
+    path("account/sessions/", SessionsView.as_view()),
+    path("account/sessions/sign-out-others/", SessionEndView.as_view()),
+    path("account/sessions/<str:pk>/sign-out/", SessionEndView.as_view()),
+    path("auth/sign-out/", SignOutView.as_view()),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",

@@ -421,3 +421,4 @@ APPYFLOW_API_URL = os.getenv("APPYFLOW_API_URL", "https://appyflow.in/api/verify
 GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})

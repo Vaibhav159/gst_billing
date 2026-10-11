@@ -437,3 +437,4 @@ LOGGING = {
 }
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})
