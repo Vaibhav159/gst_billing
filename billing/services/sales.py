@@ -18,7 +18,7 @@ from billing.cache import invalidate
 from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, UNIT_TO_GRAM, V2_LINE_SNAPSHOT_FIELDS
 from billing.fy import fy_of
 from billing.models import AuditLog, Invoice, LineItem
-from billing.numbering import checked_number, format_number, refuse_taken
+from billing.numbering import checked_number, format_number, lock_firms, refuse_taken
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
 from billing.services.drafts import became, claim
@@ -41,6 +41,7 @@ FIRM_FIELDS = ("name", "address", "gst_number", "state_name", "pan_number", "mob
 def firm_snapshot(business):
     """The firm as a bill prints it, frozen on the bill at create and on a move to another firm."""
     data = {field: getattr(business, field) or "" for field in FIRM_FIELDS}
+    data["business_id"] = business.pk
     data["signature_image"] = business.signature_image.name if business.signature_image else ""
     return data
 
@@ -100,7 +101,7 @@ def cancel_bill(invoice, user, reason):
         invoice.status = BILL_CANCELLED
         invoice.cancel_reason = reason
         invoice.cancelled_at = timezone.now()
-        invoice.cancelled_by = user if user.is_authenticated else None
+        invoice.cancelled_by = user if user and user.is_authenticated else None
         invoice.save(update_fields=["status", "cancel_reason", "cancelled_at", "cancelled_by", "updated_at"])
         log(invoice, user, "cancelled", reason, changes={"status": {"old": BILL_ACTIVE, "new": BILL_CANCELLED}})
     return invoice
@@ -188,6 +189,7 @@ def move_bill(invoice, user, business, typed):
         refuse_cancelled(invoice)
         if business.pk == invoice.business_id:
             raise ValidationError({"business": [f"The bill is in {business.name} already. Pick the firm to move it to."]})
+        lock_firms(invoice.business_id, business.pk)
         assert_sales_open(invoice.business_id, invoice.invoice_date, "move")
         assert_sales_open(business, invoice.invoice_date, "move")
         number = checked_number(business, invoice.invoice_date, typed)
@@ -303,6 +305,8 @@ def save_bill(data, user, invoice=None):
             raise ValidationError({"invoice_date": [problem]})
         assert_sales_open(business, day, "edit" if old else "create")
         moved = old is not None and business.pk != old.business_id
+        if moved:
+            lock_firms(old.business_id, business.pk)
         number = format_number(business, day, typed)
         # Unchanged when the stored number is what's typed or its formatted form: the form sends it back as it is, so
         # a v2 "31" stays "31" (contract 2.3). Kept as stored, and never checked again.

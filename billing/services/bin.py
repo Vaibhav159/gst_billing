@@ -7,7 +7,7 @@ id; and v2's "deleted" audit row with v2's keys only, so v2's undo still works a
 rollback. Whichever brings the bill back marks the other used, so the two can't both fire.
 """
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from billing.api.mixins import mark_undone, snapshot_of
@@ -116,7 +116,7 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
                           "already_restored", bill=bill_ref(back) if back else None)
         if check_month:
             assert_sales_open(binned.business_id, binned.invoice_date, "restore")
-        firm = uncached(Business).filter(pk=binned.business_id).first()  # v2 may have deleted it (Ruling 1A-6)
+        firm = uncached(Business).select_for_update().filter(pk=binned.business_id).first()
         if firm is None:
             raise Refusal("The firm on this bill was deleted, so it can't come back as it was. "
                           "Make the bill again in the right firm.", "firm_gone")
@@ -132,7 +132,13 @@ def restore_from_bin(binned, user, check_month=True, via="bin"):
         invoice = Invoice(**fields)
         if not uncached(Invoice).filter(pk=binned.original_id).exists():
             invoice.pk = binned.original_id
-        invoice.save(force_insert=True)
+        try:
+            with transaction.atomic():
+                invoice.save(force_insert=True)
+        except IntegrityError:
+            # A v2 writer may bypass the firm lock: name its bill after rolling back the insert (Ruling 1A-46).
+            refuse_taken(firm, binned.invoice_date, binned.invoice_number, bins=False)
+            raise
         LineItem.objects.bulk_create([
             LineItem(invoice=invoice, customer_id=invoice.customer_id, **_fields(LineItem, row))
             for row in binned.data["lines"]

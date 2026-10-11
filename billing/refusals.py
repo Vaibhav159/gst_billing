@@ -11,8 +11,6 @@ from rest_framework.exceptions import APIException
 class Refusal(APIException):
     status_code = status.HTTP_409_CONFLICT
 
-    def __init__(self, detail, code, status_code=None, **more):
+    def __init__(self, detail, code, **more):
         super().__init__(detail, code)
-        if status_code:
-            self.status_code = status_code
         self.detail = {"detail": detail, "code": code, **more}

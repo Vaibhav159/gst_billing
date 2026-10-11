@@ -17,22 +17,23 @@ from itertools import count, islice
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from billing.cache import uncached
 from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD
 from billing.fy import fy_label, fy_of, fy_range
-from billing.models import BinnedInvoice, Invoice
+from billing.models import BinnedInvoice, Business, Invoice
 from billing.period_lock import locked_period_or_none
 from billing.refusals import Refusal
 from billing.text import day_text, money, stamp
 
-_TRAILING = re.compile(r"(\d+)\s*$")
+_TRAILING = re.compile(r"([0-9]+)\s*$")
 _DIGITS = re.compile(r"^[0-9]+$")
 _RULE_46 = re.compile(r"^[A-Za-z0-9/-]+$")
 _PREFIX = re.compile(r"[A-Za-z]+")
 # The shapes the next number reads, as v2's next_invoice_number does: "108" and
 # "KGH/2026-27/108". Anything else ("P1778291284") would leak a giant counter.
-_SERIES_SHAPE = re.compile(r"^(?:\d+|[A-Za-z]+/\d{4}-\d{2}/\d+)\s*$")
+_SERIES_SHAPE = re.compile(r"^(?:[0-9]+|[A-Za-z]+/[0-9]{4}-[0-9]{2}/[0-9]+)\s*$")
 # The most "not entered yet" numbers the paper book lists; missing_count says how many in all (Ruling 1A-1).
-LISTED = 500
+MISSING_NUMBER_LIMIT = 500
 # What a bill or deleted bill named in another answer is read in (bill_ref, binned_ref, the refusals' words), and what
 # the paper book shows of the month's bills: since every v3 read crosses the wire to Neon, the rest of the row stays
 # unread (Ruling 1A-39).
@@ -171,11 +172,19 @@ def shape_problem(typed, final, following):
     return ""
 
 
+def lock_firms(*business_ids):
+    """Hold number writes until the transaction ends; moves take both firms in id order (Ruling 1A-46)."""
+    list(uncached(Business).select_for_update().filter(pk__in=sorted(set(business_ids)))
+         .order_by("pk").values_list("pk", flat=True))
+
+
 def checked_number(business, day, typed, exclude_invoice=None):
     """The number to store for `typed` on `day`, or 400 (its shape) / 409 (in use).
 
+    Called inside the write's transaction: the firm lock covers the check and save, including case variants.
     The next free number is read (the FY's numbers) only for the words about an empty number (Ruling 1A-39).
     """
+    lock_firms(business.pk)
     final = format_number(business, day, typed)
     problem = shape_problem(typed, final, next_number(business, day)["invoice_number"] if not final else "")
     if problem:
@@ -253,7 +262,7 @@ def paper_book(business, year, month):
     and deleted bill's number part fills its place, whatever the number's shape: a "KGH-18" is 18,
     so it is never "not entered yet", and a second 18 shows as twice (Ruling 1A-29). Only the
     series shapes next-number reads set the span the book looks across, and the missing numbers
-    are counted, not listed past the first LISTED: one stray "P20000" or "1778291284" would
+    are counted, not listed past MISSING_NUMBER_LIMIT: one stray "P20000" or "1778291284" would
     otherwise make thousands of rows, or a billion. A stray fills a hole; it never widens the
     span (Rulings 1A-1, 1D-3).
     """
@@ -276,7 +285,7 @@ def paper_book(business, year, month):
     prev_max = max(before, default=0)
     lo, hi = min([prev_max + 1, *ends]), max(ends, default=0)
     missing_count = max(hi - lo + 1, 0) - sum(lo <= n <= hi for n in used)
-    missing = list(islice((n for n in count(lo) if n not in used), min(missing_count, LISTED)))
+    missing = list(islice((n for n in count(lo) if n not in used), min(missing_count, MISSING_NUMBER_LIMIT)))
     runs = []
     for n in sorted({c for c in (counter_of(x.invoice_number) for x in (*month_bills, *month_bin)) if lo <= c <= hi}):
         if runs and n == runs[-1][1] + 1:
