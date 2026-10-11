@@ -6,6 +6,7 @@ from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .drafts import DraftViewSet
+from .firms import FirmDetailView, FirmSignatureView, FirmsView
 from .gst import (
     GstBundle,
     GstFile,
@@ -110,6 +111,9 @@ urlpatterns = [
     path("reconciliation/", ReconciliationView.as_view(), name="reconciliation"),
     path("shop-settings/", ShopSettingsView.as_view(), name="shop-settings"),
     path("inward-bills/<int:pk>/", InwardBillDetailView.as_view(), name="inward-bill-detail"),
+    path("firms/", FirmsView.as_view(), name="firms"),
+    path("firms/<int:pk>/", FirmDetailView.as_view(), name="firm-detail"),
+    path("firms/<int:pk>/signature/", FirmSignatureView.as_view(), name="firm-signature"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",
