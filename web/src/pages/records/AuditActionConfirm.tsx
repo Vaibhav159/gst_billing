@@ -31,7 +31,7 @@ export function AuditActionConfirm({ entry, record, busy, error, onClose, onConf
     words = purchase ? "It moves to the bin, out of Purchases and its month's input tax credit. It can be restored here." : "The bill moves to the bin, out of Sales and its month's GST figures. Its number isn't reused. It can be restored here.";
   } else {
     title = `Undo adding ${name}?`; label = `Remove ${name}`;
-    rows = [[entry.entity === "customer" ? "Customer" : entry.entity === "product" ? "Product" : "Firm", name], ["Added", `${dateLong(dayOf(entry.at))}, ${timeOf(entry.at)}`], ["On bills", "None"]];
+    rows = [[entry.entity === "customer" ? "Customer" : entry.entity === "product" ? "Product" : "Firm", name], ["Added", `${dateLong(dayOf(entry.at))}, ${timeOf(entry.at)}`]];
     words = "It goes off the lists and the bill form. It can be restored here.";
   }
   if (bill && b) {

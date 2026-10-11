@@ -38,6 +38,7 @@ test("undo an unused record confirms, refreshes and shows Undone without a toast
   fireEvent.click(await screen.findByRole("button", { name: "Undo Priya Sharma" }));
   const dialog = screen.getByRole("dialog", { name: "Undo adding Priya Sharma?" });
   expect(within(dialog).getByText("It goes off the lists and the bill form. It can be restored here.")).toBeInTheDocument();
+  expect(within(dialog).queryByText("On bills")).not.toBeInTheDocument();
   opened(); fireEvent.click(within(dialog).getByRole("button", { name: "Remove Priya Sharma" }));
   expect(await screen.findByText("Undone")).toBeInTheDocument();
   expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
@@ -117,6 +118,13 @@ test("a purchase bin row whose original id matches a deleted sales bill never op
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.queryByText("UBS/26-27/0850")).not.toBeInTheDocument();
   expect(calls.some((c) => c.method === "POST")).toBe(false);
+});
+
+test("an undo button's accessible name contains its visible text whatever the server's label", async () => {
+  serve({ "GET audit/": page({ ...entry, action: "created", changes: [], can: { kind: "undo", label: "Remove addition…", disabled: "", hint: "", effect: "" } }) });
+  renderApp(<Audit />);
+  const button = await screen.findByRole("button", { name: /Priya Sharma$/ });
+  expect(button.getAttribute("aria-label")).toContain(button.textContent!.replace("…", ""));
 });
 
 test("restoring a record is immediate, and a server refusal stays on its row", async () => {
