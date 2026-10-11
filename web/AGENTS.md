@@ -52,7 +52,7 @@ stop only processes you started, by PID.
   beside them the bill form (`form/`), the paper book (`paper/`) and printing (`print/`).
 - `src/core/print/` — printing, which Easy reuses: what a Tally A4 bill says and where its pages
   break (`model.ts`), the PDF (`BillDocument.tsx`, react-pdf, which `make.ts` loads on demand), the
-  paper on screen (`Paper.tsx`), the QR code (`qr.ts`), handing a file out (`files.ts`, the app's
+  paper on screen (`Paper.tsx`), the QR drawing (`qrPath.ts`; `qr.ts` holds the payload and `parseQr`), handing a file out (`files.ts`, the app's
   one copy) and the share sheet's second press (`ShareHost.tsx`). Any ₹ in a react-pdf document is
   drawn in the RupeeSign font (`rupeeSignFont.ts`), registered once in `pdfRupee.tsx`, whose
   `RupeeText` draws any text that can hold a ₹: the PDF's built-in Times and Helvetica have no ₹.

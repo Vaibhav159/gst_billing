@@ -24,12 +24,16 @@ test("a bill from a firm without a GSTIN reads back too: its GSTIN is empty, not
   expect(parseQr(qrPayload(b))).toEqual({ number: "KGH/2026-27/31", gstin: "", firm: "", date: "2026-10-08", total: 8708321 });
 });
 
-test("reading a code back doesn't load the QR encoder: the QR check comes with the first download, and the encoder only with the paper and the PDF (Ruling 1B-4)", async () => {
+test("reading a code and the startup make → model → qr chain don't load the QR encoder (Ruling 1B-4)", async () => {
   vi.resetModules();
   vi.doMock("qrcode", () => { throw new Error("the QR encoder was loaded"); });
   try {
     const qr = await import("./qr");
+    const model = await import("./model");
+    const make = await import("./make");
     expect(qr.parseQr("KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21")).toMatchObject({ number: "KGH/2026-27/31", total: 8708321 });
+    expect(model.printBill).toBeTypeOf("function");
+    expect(make.makeBillPdf).toBeTypeOf("function");
   } finally {
     vi.doUnmock("qrcode");
     vi.resetModules();
