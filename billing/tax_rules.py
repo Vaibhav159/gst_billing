@@ -485,3 +485,23 @@ def utilise_by_month(months, opening=None):
             cash[h] += month["cash"][h]
             carry[h] = month["carry_forward"][h]
     return {"cash": _with_total(cash), "carry_forward": _with_total(carry)}
+
+def uqc_for(unit, hsn):
+    """GST unit code; metric carats are CTM (cross-part ruling X-4)."""
+    if (hsn or "").strip().startswith("99"):
+        return "NA"
+    return {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
+            "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM",
+            "pair": "PRS", "set": "SET", "box": "BOX", "dozen": "DOZ", "mtr": "MTR",
+            "ltr": "LTR", "ml": "MLT", "unit": "UNT", "tola": "GMS", "oz": "GMS"}.get(
+                (unit or "").strip().lower(), "OTH")
+
+
+def filed_quantity(unit, qty, hsn=""):
+    """Quantity in the portal's unit; only tola and troy oz convert to grams."""
+    from billing.constants import UNIT_TO_GRAM
+
+    if uqc_for(unit, hsn) == "NA":
+        return Decimal("0")
+    unit = (unit or "").strip().lower()
+    return Decimal(qty or 0) * (UNIT_TO_GRAM[unit] if unit in ("tola", "oz") else 1)
