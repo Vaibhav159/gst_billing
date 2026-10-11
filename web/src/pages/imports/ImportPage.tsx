@@ -11,7 +11,7 @@ import { Page, Card, Button, ButtonLink, Field, Input, Select, Table, Th, Td, Tr
 import { IMPORT_KINDS } from './kinds';
 import { readWorkbook, type Sheet } from './parse';
 import { BILL_FIELDS, readSheet, sheetFirm, sheetKindHint, type ColumnOverrides, type Field as ImportField, type BillKind } from './columns';
-import { addPatch, checkBill, groupBills, withEdits, type BillEdit } from './model';
+import { addPatch, checkBill, groupBills, withEdits, type BillEdit, type ParsedBill } from './model';
 import { makeBatches, matchParty, rowsText, useImportParties, useImportRates, type ReadyBill } from './workbook';
 import { useImportSession } from './session';
 import type { ImportKind, ImportResult } from './batch';
@@ -71,8 +71,12 @@ function ImportDesktop() {
     const state = c.state === 'role' ? 'role' : failed ? 'fix' : c.state;
     const selectable = !loading && !failed && ['ready', 'check'].includes(state);
     const selected = selectable && !(off[b.key] ?? state === 'check');
-    return { b, sheet, c, person, suggestion: match.suggestion, loading, failed, state, selectable, selected, partyState };
+    return { b, sheet, c, person, suggestion: match.suggestion, loading, failed, tooMany: Boolean(q?.data?.next), state, selectable, selected, partyState };
   });
+  // Same-numbered bills (sales and purchases, or two sheets) get names that tell them apart.
+  const numbers = analysed.reduce((n, a) => n.set(a.b.number, (n.get(a.b.number) ?? 0) + 1), new Map<string, number>());
+  const nameOf = (b: ParsedBill) => (numbers.get(b.number) ?? 0) > 1 ? `${b.number} (${b.kind}, sheet “${b.sheet}” ${rowsText(b.rows)})` : b.number;
+  const unchecked = analysed.filter(a => a.failed).length;
   const chosen = analysed.filter(a => a.selected);
   const complete = session.checks.length > 0 && session.checks.every(check => check.result.bills.every(b => savedRefs.has(`${check.kind}|${b.ref}`))) && !session.busy && !session.error;
   const leave = useUnsavedGuard(Boolean(file) && !complete, 'The file and your changes are still here. Leave without importing?');
@@ -117,7 +121,8 @@ function ImportDesktop() {
             <div className="grid gap-4 md:grid-cols-2"><Field label="Whose bills" htmlFor={`firm-${index}`} hint={s.firmId ? 'Every bill on this sheet follows this firm.' : 'Pick the firm once for the whole sheet.'}><Select id={`firm-${index}`} value={s.firmId ?? ''} placeholder="Choose the firm" options={firms.map(f => ({ value: String(f.id), label: `${f.name} · ${f.gstin}` }))} onChange={e => { invalidate(); setFirmFix(x => ({ ...x, [s.src.name]: Number(e.target.value) })); }} /></Field>
             {s.read.markers ? <p>Sales and purchases, by their Outward and Inward Supply headings</p> : <Field label="What's on it" htmlFor={`kind-${index}`}><Select id={`kind-${index}`} value={s.kind} options={[{ value: 'sale', label: 'Sales' }, { value: 'purchase', label: 'Purchases' }]} onChange={e => { invalidate(); setKindFix(x => ({ ...x, [s.src.name]: e.target.value as BillKind })); }} /></Field>}</div>
             {s.read.tables.map(t => <Disclosure key={t.n} title={`Columns on row ${t.n}`} defaultOpen><Table label={`Columns on sheet ${s.src.name}, row ${t.n}`}><thead><tr><Th>Column in the file</Th><Th>Read as</Th><Th>How sure</Th></tr></thead><tbody>{t.columns.map(c => <Tr key={c.i}><Td>{c.heading}</Td><Td><Select aria-label={`Read the column ${c.heading} as`} value={c.field ?? ''} options={[{ value: '', label: 'Not used' }, ...Object.entries(BILL_FIELDS).map(([value, label]) => ({ value, label }))]} onChange={e => { invalidate(); setCols(x => ({ ...x, [s.src.name]: { ...x[s.src.name], [t.n]: { ...x[s.src.name]?.[t.n], [c.i]: e.target.value as ImportField | '' } } })); }} /></Td><Td>{c.sure === 'you' ? 'Chosen by you' : c.sure === 'sure' ? 'Sure' : c.sure === 'check' ? 'Check this' : 'Not used'}</Td></Tr>)}</tbody></Table></Disclosure>)}
-            {s.read.skipped.length ? <Disclosure title={`${plural(s.read.skipped.length, 'row')} that aren't bills`}><ul>{s.read.skipped.map(r => <li key={r.n}>Row {r.n} · {r.why} · {r.text}</li>)}</ul></Disclosure> : null}
+            {s.read.skipped.some(r => r.bill) ? <div><p className="font-medium">{plural(s.read.skipped.filter(r => r.bill).length, 'row')} left out of the bills</p><ul className="text-sm">{s.read.skipped.filter(r => r.bill).map(r => <li key={r.n}>Row {r.n} · {r.why} · {r.text}</li>)}</ul></div> : null}
+            {s.read.skipped.some(r => !r.bill) ? <Disclosure title={`${plural(s.read.skipped.filter(r => !r.bill).length, 'row')} that aren't bills`}><ul>{s.read.skipped.filter(r => !r.bill).map(r => <li key={r.n}>Row {r.n} · {r.why} · {r.text}</li>)}</ul></Disclosure> : null}
           </div>}
         </Card>)}
         {missing.length ? <Banner tone="neg" title="Some columns aren't read yet">Pick Bill number, Bill date, Party and an amount under Read as.</Banner> : null}
@@ -125,6 +130,7 @@ function ImportDesktop() {
       </> : null}
       {step === 3 ? <fieldset disabled={session.busy} className="min-w-0 border-0 p-0 m-0 contents">
         <Card><div className="flex flex-wrap gap-2">{[['all', 'All'], ['ready', 'Ready'], ['check', 'To check'], ['fix', 'To fix'], ['role', 'Not for your role'], ['off', 'Left out by you']].map(([value, label]) => <Button key={value} aria-pressed={tab === value} onClick={() => setTab(value)}>{label}</Button>)}</div><p className="mt-3 text-sm text-muted">Problems are said in plain words, with the fix beside them; Edit changes any bill in place. Nothing is added until you import.</p>
+          {unchecked ? <p role="status" className="mt-2 text-sm">{plural(unchecked, 'bill')} couldn't be checked; each says why.</p> : null}
           {analysed.some(a => a.suggestion) ? <Button onClick={() => { invalidate(); setPartyFix(x => ({ ...x, ...Object.fromEntries(analysed.filter(a => a.suggestion).map(a => [a.b.key, a.suggestion!.id])) })); }}>Match all similar names</Button> : null}
         </Card>
         {sheets.flatMap(sheet => (['sale', 'purchase'] as const).map(kind => {
@@ -139,19 +145,19 @@ function ImportDesktop() {
               const b = a.b, ref = `Sheet “${b.sheet}” ${rowsText(b.rows)}`;
               const server = session.checks.flatMap(r => r.result.bills).find(r => r.ref === ref);
               return <Fragment key={b.key}><Tr>
-                <Td><Checkbox hideLabel label={`Import ${b.number}`} checked={a.selected} disabled={!a.selectable || session.busy} onChange={v => { invalidate(); setOff(x => ({ ...x, [b.key]: !v })); }} /></Td>
+                <Td><Checkbox hideLabel label={`Import ${nameOf(b)}`} checked={a.selected} disabled={!a.selectable || session.busy} onChange={v => { invalidate(); setOff(x => ({ ...x, [b.key]: !v })); }} /></Td>
                 <Td className="min-w-[140px]"><strong className="tnum">{b.number}</strong><span className="block text-xs text-muted">{b.date}</span><span className="block text-xs text-muted">{rowsText(b.rows)}</span></Td>
                 <Td className="max-w-[230px]"><span className="block font-medium">{b.party}</span><span className="block text-xs text-muted tnum">{b.gstin || 'No GSTIN'}</span><span className="block text-xs text-muted">{a.person ? `On file as ${a.person.name}` : 'New party: added only with these bills.'}</span></Td>
                 <Td className="max-w-[230px]"><span className="block truncate">{b.lines.map(l => l.item).join(', ')}</span><span className="text-xs text-muted">{plural(b.lines.length, 'item')}</span></Td>
                 <Td align="right" className="hidden min-[1240px]:table-cell">{inr(a.c.totals.taxable)}</Td><Td align="right" className="hidden min-[1240px]:table-cell">{inr(a.c.totals.tax)}</Td><Td align="right"><strong className="tnum">{inr(a.c.totals.total)}</strong><span className="block min-[1240px]:hidden text-xs text-muted">Taxable {inr(a.c.totals.taxable)} · GST {inr(a.c.totals.tax)}</span></Td>
                 <Td className="min-w-[210px] max-w-[330px]"><Badge>{a.loading ? 'Checking…' : a.state === 'role' ? 'Not for your role' : a.state === 'ready' ? 'Ready' : a.state === 'check' ? 'To check' : 'To fix'}</Badge>
-                  {a.failed ? <p role="alert">The party or usual rate couldn't be checked. Go back, then check the bills again.</p> : null}
+                  {a.failed ? <p className="text-neg">{a.tooMany ? `“${b.party}” matches more than 100 parties, so one can't be picked here. Use Edit to type the GSTIN printed on the bill, or a fuller name.` : "The party or usual rate couldn't be checked. Go back, then check the bills again."}</p> : null}
                   {a.suggestion && !a.person ? <Button size="sm" onClick={() => { invalidate(); setPartyFix(x => ({ ...x, [b.key]: a.suggestion!.id })); }}>Use {a.suggestion.name}</Button> : null}
                   {[...a.c.problems, ...a.c.warnings].map((p, n) => <div key={`${p.field}-${n}`} className="mt-2 text-sm"><span>{p.detail}</span>{p.fix ? <Button size="sm" variant="link" onClick={() => patch(b.key, addPatch(edits[b.key], p.fix!.patch))}>{p.fix.label}</Button> : null}</div>)}
                   {a.c.notes.map((note, n) => <p key={`note-${n}`} className="mt-2 text-sm text-muted">{note}</p>)}
-                  {server?.problems.map(p => <p key={p.field} role="alert" className="text-neg">{p.detail}</p>)}
+                  {server?.problems.map(p => <p key={p.field} className="text-neg">{p.detail}</p>)}
                   {server?.duplicate ? <ButtonLink to={`/${b.kind === 'purchase' ? 'purchases' : 'sales'}/${server.duplicate.id}`}>Already in the app · {server.duplicate.invoice_number}</ButtonLink> : null}
-                </Td><Td><Button size="sm" icon={Pencil} disabled={a.state === 'role' || session.busy} onClick={() => setEditing(editing === b.key ? null : b.key)}>Edit {b.number}</Button></Td>
+                </Td><Td><Button size="sm" icon={Pencil} aria-expanded={editing === b.key} disabled={a.state === 'role' || session.busy} onClick={() => setEditing(editing === b.key ? null : b.key)}>Edit {nameOf(b)}</Button></Td>
               </Tr>{editing === b.key ? <Tr><Td colSpan={9}><BillEditor bill={b} onApply={edit => { patch(b.key, { ...edits[b.key], ...edit, lines: { ...edits[b.key]?.lines, ...edit.lines } }); setEditing(null); }} onUndo={() => { patch(b.key, {}); setEditing(null); }} onClose={() => setEditing(null)} /></Td></Tr> : null}</Fragment>;
             })}</tbody></Table>
           </Card>;
@@ -163,7 +169,7 @@ function ImportDesktop() {
         {session.checked?.map(b => <p key={b.kind}>{plural(b.body.bills.length, b.kind === 'purchases' ? 'purchase bill' : 'sales bill')} · {file?.name}</p>)}
         {session.checks.map(r => <p key={r.kind}>{r.kind === 'purchases' ? 'Purchases' : 'Sales'} · {inr(toPaise(r.result.totals.total_amount) ?? 0)} · ITC {inr(toPaise(r.result.totals.credit) ?? 0)}</p>)}
         {savedLinks}
-        {savedIds.length ? <><ButtonLink to="/purchases">View purchases</ButtonLink><Button disabled={session.busy} onClick={() => { if (session.busy) return; ++request.current; setFile(null); setStep(1); setEdits({}); setOff({}); invalidate(); setReceipts([]); }}>Import another file</Button></> : null}
+        {savedIds.length ? <>{savedIds.some(b => b.kind === 'purchases') ? <ButtonLink to="/purchases">View purchases</ButtonLink> : null}{savedIds.some(b => b.kind === 'sales') ? <ButtonLink to="/sales">View sales</ButtonLink> : null}<Button disabled={session.busy} onClick={() => { if (session.busy) return; ++request.current; setFile(null); setStep(1); setEdits({}); setOff({}); invalidate(); setReceipts([]); }}>Import another file</Button></> : null}
         {!complete ? <Button onClick={() => { invalidate(); setStep(3); }} disabled={session.busy}>Back</Button> : null}
         {session.checked ? <Button variant="primary" loading={session.busy} onClick={() => void session.importChecked()}>Import {plural(session.checked.reduce((n, b) => n + b.body.bills.length, 0), 'bill')}</Button> : null}
       </Card> : null}

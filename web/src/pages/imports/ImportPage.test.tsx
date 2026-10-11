@@ -183,3 +183,39 @@ it('a partial import keeps receipts while only the edited remaining bill is chec
   await advanceToBills(csv);
   await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Import 001' })).toBeEnabled());
 });
+
+it('lists a skipped bill row openly with the bill it would have changed (X-63)', async () => {
+  setup();
+  choose(`${csv}\n001,,,,Ring,7113,0,1,50\n002,,,,Coin,7113,0,1,5`);
+  await screen.findByText('October.csv'); fireEvent.click(screen.getByRole('button', { name: 'Next: check the layout' }));
+  const row = screen.getByText(/No party name, and no earlier bill 002 to join/);
+  expect(row.closest('[inert]')).toBeNull();
+  expect(screen.getByText('2 rows of bills', { exact: false })).toBeInTheDocument();
+});
+it('says a party name matches too many parties instead of asking to go back', async () => {
+  setup({ 'GET customers/': { count: 150, results: [], next: 'http://test/api/customers/?page=2' } });
+  await advanceToBills();
+  expect(await screen.findByText(/matches more than 100 parties/)).toBeInTheDocument();
+  expect(screen.queryByText(/Go back, then check the bills again/)).not.toBeInTheDocument();
+});
+it('announces a refused check once, gives Edit its state and names same-number bills apart', async () => {
+  setup({ 'POST purchases/import/': (c: { data: unknown }) => ({ status: 200, data: importReply(c.data, 91, false) }), 'POST sales/import/': (c: { data: unknown }) => ({ status: 200, data: importReply(c.data, 92, false) }) });
+  await advanceToBills(`Inward Supply\n${csv}\nOutward Supply\n${csv}`);
+  const boxes = await screen.findAllByRole('checkbox', { name: /^Import 001/ });
+  expect(boxes).toHaveLength(2); expect(new Set(boxes.map(b => b.getAttribute('aria-label') ?? b.closest('label')?.textContent)).size).toBe(2);
+  const edit = screen.getAllByRole('button', { name: /^Edit 001/ })[0];
+  expect(edit).toHaveAttribute('aria-expanded', 'false'); fireEvent.click(edit); expect(edit).toHaveAttribute('aria-expanded', 'true'); fireEvent.click(edit);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Next: import 2 bills' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Next: import 2 bills' }));
+  expect(await screen.findAllByText('This number was just used by another bill.')).toHaveLength(2);
+  expect(screen.queryAllByRole('alert')).toHaveLength(0);
+});
+it('after importing only sales, links to sales and not to purchases', async () => {
+  setup({ 'POST sales/import/': (c: { data: unknown }) => ({ status: 200, data: importReply(c.data, 92) }) });
+  await advanceToBills(`Outward Supply\n${csv}`);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Next: import 1 bill' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Next: import 1 bill' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Import 1 bill' }));
+  expect(await screen.findByRole('link', { name: 'View sales' })).toHaveAttribute('href', '/sales');
+  expect(screen.queryByRole('link', { name: 'View purchases' })).not.toBeInTheDocument();
+});
