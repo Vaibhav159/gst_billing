@@ -6,6 +6,18 @@ from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .drafts import DraftViewSet
+from .gst import (
+    GstBundle,
+    GstFile,
+    GstFiling,
+    GstFilings,
+    GstMonth,
+    GstMonthAction,
+    GstMonthEnd,
+    GstOpeningCredit,
+    GstSections,
+    GstYear,
+)
 from .gstin_lookup import GstinLookupView
 from .inward_bills import (
     InwardBillDetailView,
@@ -69,6 +81,22 @@ urlpatterns = [
     path("ai-reads/", AiReadsView.as_view(), name="ai-reads"),
     path("purchases/import/", PurchaseImportView.as_view(), name="purchase-import"),
     path("sales/import/", SalesImportView.as_view(), name="sale-import"),
+    path("gst/year/", GstYear.as_view()),
+    path("gst/month/", GstMonth.as_view()),
+    path("gst/month-end/", GstMonthEnd.as_view()),
+    path("gst/month/gstr1/", GstSections.as_view(), {"kind": "gstr1"}),
+    path("gst/month/gstr3b/", GstSections.as_view(), {"kind": "gstr3b"}),
+    path("gst/files/gstr1/", GstFile.as_view(), {"kind": "gstr1"}),
+    path("gst/files/gstr1a/", GstFile.as_view(), {"kind": "gstr1a"}),
+    path("gst/files/amendments/", GstFile.as_view(), {"kind": "amendments"}),
+    path("gst/files/gstr3b/", GstFile.as_view(), {"kind": "gstr3b"}),
+    path("gst/files/bundle/", GstBundle.as_view()),
+    path("gst/filings/", GstFilings.as_view()),
+    path("gst/filings/<int:pk>/", GstFiling.as_view()),
+    path("gst/months/unlock/", GstMonthAction.as_view(), {"operation": "unlock"}),
+    path("gst/months/relock/", GstMonthAction.as_view(), {"operation": "relock"}),
+    path("gst/months/filed-before/", GstMonthAction.as_view(), {"operation": "filed-before"}),
+    path("gst/opening-credit/", GstOpeningCredit.as_view()),
     # Explicit paths BEFORE router to avoid router's <pk> catching them
     path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
