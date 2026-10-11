@@ -160,7 +160,7 @@ def _amount(text):
         value = Decimal(text) if text.isascii() else None
     except (InvalidOperation, ValueError):
         return None
-    if value is None or not value.is_finite() or -value.as_tuple().exponent > 3 or abs(value) > MOST:
+    if value is None or not value.is_finite() or -value.as_tuple().exponent > 3 or value.copy_abs() > MOST:
         return None
     return value
 

@@ -66,7 +66,7 @@ def locked_bill(invoice):
 
     A bill another request deleted since this one found it is the plain 404, not a 500 (Ruling 1A-17).
     """
-    bill = (Invoice.objects.select_for_update(of=("self",)).select_related("customer", "business")
+    bill = (Invoice.objects.nocache().select_for_update(of=("self",)).select_related("customer", "business")
             .filter(pk=invoice.pk).first())
     if bill is None:
         raise Http404("No Invoice matches the given query.")
