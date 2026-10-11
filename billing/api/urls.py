@@ -38,6 +38,9 @@ from .purchase_reader import AiReadsView, PurchaseReadView
 from .purchases import PurchaseBinViewSet, PurchasesViewSet
 from .reconciliation import ReconciliationView
 from .registry import RegistryView
+from .reports_v3 import CAWorkbookView, CreditView
+from .reports_v3 import ReconciliationView as GSTReconciliationView
+from .reports_v3 import ReportView as ReportV3View
 from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
 from .setup import SetupView
@@ -106,6 +109,10 @@ urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them
     path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),
+    path("reports/ca-workbook/", CAWorkbookView.as_view(), name="ca-workbook"),
+    path("reports/<str:kind>/", ReportV3View.as_view(), name="report-v3"),
+    path("gst/credit/", CreditView.as_view(), name="gst-credit"),
+    path("gst/reconciliation/", GSTReconciliationView.as_view(), name="gst-reconciliation"),
     path("csv/import/", CSVImportView.as_view(), name="csv-import"),
     # Inward Bills module (explicit paths BEFORE router)
     path("inward-bills/", InwardBillListCreateView.as_view(), name="inward-bill-list"),
