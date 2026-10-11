@@ -1,16 +1,13 @@
-// react-pdf writes a real PDF here, through the same makeStatementPdf the page uses. Under jsdom its compressed streams
-// don't read back byte for byte, so the checks look at the PDF's plain-text parts: the header, the fonts and the pages.
+// The statement PDF is checked two ways. Real files, written by react-pdf through the same makeStatementPdf the page uses:
+// under jsdom their compressed streams don't read back byte for byte, so those checks look at the PDF's plain-text parts
+// (the header, the fonts and the pages). And the document's element tree, expanded as react-pdf expands it, for where each
+// ₹ prints and in which font.
 import type { Statement } from "@/core/api/customers";
-import { expand, flat, rupeeTexts, type PdfNode } from "@/core/print/testing";
+import { expand, flat, pdfText, rupeeTexts, type PdfNode } from "@/core/print/testing";
 import { StatementDocument, type StatementPdfData } from "./statementDoc";
 import { statementFileName } from "./statementFiles";
 import { makeStatementPdf } from "./statementPdf";
 
-/** The PDF as text (jsdom's Blob reads through a FileReader). */
-async function text(blob: Blob): Promise<string> {
-  const buf = await new Promise<ArrayBuffer>((done) => { const r = new FileReader(); r.onload = () => done(r.result as ArrayBuffer); r.readAsArrayBuffer(blob); });
-  return new TextDecoder("latin1").decode(buf);
-}
 const bill = (id: number, paid: Statement["bills"][number]["paid"]) => ({
   id, business: 3, business_name: "KIRAN GOLD HOUSE", invoice_number: `KGH/2026-27/${id}`, invoice_date: "2026-09-10", payment_mode: paid === "udhaar" ? "credit" as const : "cash" as const,
   taxable: 100000, tax: 3000, total_amount: 103000, status: paid === "cancelled" ? "cancelled" as const : "active" as const, cancel_reason: "", paid, itax: [],
@@ -31,14 +28,14 @@ function data(bills: Statement["bills"]): StatementPdfData {
 test("the statement is an A4 PDF whose ₹ prints in the one-glyph Tinos font (Helvetica has no ₹)", async () => {
   const blob = await makeStatementPdf(data([bill(17, "billing"), bill(18, "udhaar"), bill(19, "cancelled")]));
   expect(blob.type).toBe("application/pdf");
-  const pdf = await text(blob);
+  const pdf = await pdfText(blob);
   expect(pdf.startsWith("%PDF-")).toBe(true);
   expect(pdf).toMatch(/\/BaseFont \/[A-Z]{6}\+Tinos-Bold/);
   expect(pdf).toMatch(/\/MediaBox \[0 0 595\.28\d* 841\.89\d*\]/); // A4
 }, 30_000);
 
 test("a long statement runs on to more pages", async () => {
-  const pdf = await text(await makeStatementPdf(data(Array.from({ length: 80 }, (_, i) => bill(100 + i, "billing")))));
+  const pdf = await pdfText(await makeStatementPdf(data(Array.from({ length: 80 }, (_, i) => bill(100 + i, "billing")))));
   expect(pdf.match(/\/Type \/Page\b/g)!.length).toBeGreaterThan(1);
 }, 30_000);
 

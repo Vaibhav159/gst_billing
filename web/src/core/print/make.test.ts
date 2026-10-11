@@ -4,7 +4,7 @@ import type { ReactElement } from "react";
 import { renderHook } from "@testing-library/react";
 import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
-import { serve, serveWith } from "@/test/server";
+import { serveWith } from "@/test/server";
 import { billFile, makeBillPdf, sendBankChoice, signatureData, useSendBankChoice } from "./make";
 import { copyPages, printBill, type PrintBill } from "./model";
 
@@ -20,8 +20,11 @@ function maker(fail?: Error) {
 const made = () => pdf.mock.calls.map(([el]) => (el as ReactElement<Made>).props);
 const bill = (over: Record<string, unknown> = {}) => toBillDetail(wireDetail(over));
 const PNG = new Blob([Uint8Array.from([137, 80, 78, 71])], { type: "image/png" });
+/** Another kind of image, which the maker redraws as PNG: here one the browser can't decode. */
+const WEBP = new Blob([Uint8Array.from([82, 73, 70, 70])], { type: "image/webp" });
 
 beforeEach(() => { pdf.mockReset(); maker(); });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 test("a bill's PDF is made once for each answer from the server and each choice: the print page, Send and Share share it", async () => {
   const d = bill();
@@ -50,27 +53,40 @@ test("a PDF that couldn't be made isn't kept: the next ask makes it again", asyn
 
 test("a firm's signature reaches the PDF as a data URL fetched through the app's api, once per file however its link is signed; none prints without it", async () => {
   const calls = serveWith((c) => (c.url.startsWith("media/signatures/kgh.png?") ? { status: 200, data: PNG } : { status: 404 }));
-  const url = await signatureData("/api/media/signatures/kgh.png?sig=a1");
-  expect(url).toMatch(/^data:image\/png;base64,/);
-  expect(await signatureData("/api/media/signatures/kgh.png?sig=b2")).toBe(url);
+  const { src } = await signatureData("/api/media/signatures/kgh.png?sig=a1");
+  expect(src).toMatch(/^data:image\/png;base64,/);
+  expect(await signatureData("/api/media/signatures/kgh.png?sig=b2")).toEqual({ src, again: false });
   expect(calls.map((c) => c.url)).toEqual(["media/signatures/kgh.png?sig=a1"]);
-  expect(await signatureData(null)).toBeNull();
+  expect(await signatureData(null)).toEqual({ src: null, again: false });
 
   const d = bill({ firm: { ...(wireDetail().firm as object), signature_url: "/api/media/signatures/kgh.png?sig=c3" } });
   await makeBillPdf([printBill(d, { showBank: true })], "original", { title: "t" });
-  expect(made()[0].bills[0].firm.signature).toBe(url);
+  expect(made()[0].bills[0].firm.signature).toBe(src);
 });
 
-test("a signature that can't be fetched prints none, and is asked for again next time", async () => {
-  const calls = serve({});
-  expect(await signatureData("/api/media/signatures/gone.png?sig=a1")).toBeNull();
-  expect(await signatureData("/api/media/signatures/gone.png?sig=b2")).toBeNull();
-  expect(calls).toHaveLength(2);
+test("a signature that can't be read prints none, and the next file asks for it again; only one that got no answer (offline, unreachable) may come by then", async () => {
+  const calls = serveWith((c) => (c.url.startsWith("media/signatures/later.png?") ? { status: 0 } : { status: 404 }));
+  expect(await signatureData("/api/media/signatures/gone.png?sig=a1")).toEqual({ src: null, again: false });
+  expect(await signatureData("/api/media/signatures/gone.png?sig=b2")).toEqual({ src: null, again: false });
+  expect(await signatureData("/api/media/signatures/later.png?sig=a1")).toEqual({ src: null, again: true });
+  expect(calls).toHaveLength(3);
 });
 
-test("a PDF made while the firm's signature couldn't be read is handed out but not kept: the next ask makes it again, with the signature", async () => {
+test("a PDF made without a signature that can never be read, a file that's gone (404) or an image that won't decode, is kept: the next Download, Print or Share hands out the same file, with nothing fetched again", async () => {
+  const calls = serveWith((c) => (c.url.startsWith("media/signatures/odd.webp?") ? { status: 200, data: WEBP } : { status: 404 }));
+  vi.stubGlobal("createImageBitmap", vi.fn(async () => { throw new DOMException("The source image could not be decoded.", "InvalidStateError"); }));
+  for (const signature_url of ["/api/media/signatures/gone.png?sig=a1", "/api/media/signatures/odd.webp?sig=a1"]) {
+    const d = bill({ firm: { ...(wireDetail().firm as object), signature_url } });
+    const first = await billFile(d, { copies: "original", showBank: true });
+    expect(await billFile(d, { copies: "original", showBank: true })).toBe(first);
+  }
+  expect(made().map((m) => m.bills[0].firm.signature)).toEqual([null, null]);
+  expect(calls.map((c) => c.url)).toEqual(["media/signatures/gone.png?sig=a1", "media/signatures/odd.webp?sig=a1"]);
+});
+
+test("a PDF made while the firm's signature got no answer (offline, unreachable) is handed out but not kept: the next ask makes it again, with the signature", async () => {
   let up = false;
-  serveWith((c) => (up && c.url.startsWith("media/signatures/later.png?") ? { status: 200, data: PNG } : { status: 404 }));
+  serveWith((c) => (c.url.startsWith("media/signatures/later.png?") ? (up ? { status: 200, data: PNG } : { status: 0 }) : { status: 404 }));
   const d = bill({ firm: { ...(wireDetail().firm as object), signature_url: "/api/media/signatures/later.png?sig=a1" } });
   const without = await billFile(d, { copies: "original", showBank: true });
   expect(made()[0].bills[0].firm.signature).toBeNull();
