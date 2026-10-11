@@ -26,7 +26,7 @@ test("counter staff send and duplicate; the owner's actions are greyed with who 
   for (const name of [/^Edit/, /^E-way bill…/, /^Renumber…/, /^Move to another firm…/, /^Cancel bill…/, /^Delete…/]) expect(screen.getByRole("menuitem", { name })).toBeDisabled();
   expect(screen.getByRole("menuitem", { name: /^Edit/ })).toHaveTextContent("Only the owner can change bills. Ask the owner if you need it.");
   expect(screen.getByRole("menuitem", { name: /^Cancel bill…/ })).toHaveTextContent("Only the owner can cancel bills. Ask the owner if you need it.");
-});
+}, 15_000); // two menus and their role-named items: past 5 s on a busy 2-CPU machine (it passes alone)
 
 test("a cancelled bill offers Make it again, can still be deleted, and can't be cancelled or edited; a paper bill offers a copy", async () => {
   salesServer();
