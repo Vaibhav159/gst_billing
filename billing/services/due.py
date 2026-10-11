@@ -100,6 +100,13 @@ def operational_items(user, firms, business_id, today, stages=None):
 
 
 def due_next(user, firms, business_id, today, returns=False):
-    allowed = any(can(user, key) for key in KEYS.values())
-    items = operational_items(user, firms, business_id, today) if allowed else []
-    return {"today": today.isoformat(), "items": sorted(items, key=lambda i: (i["due"] or "9999", ORDER.index(i["kind"]))), "returns": None}
+
+    from billing.services.due_gst import collect_gst, gst_items, returns_card
+    keys = {key for key in KEYS.values() if can(user, key)}
+    ready = find_spec("billing.services.filing") is not None
+    facts = collect_gst(firms, today, keys, returns) if ready and (returns or keys & {"gst.file", "bill.edit"}) else None
+    items = operational_items(user, firms, business_id, today, facts["stages"] if facts else None) if keys else []
+    if facts:
+        items.extend(gst_items(keys, firms, today, facts))
+    return {"today": today.isoformat(), "items": sorted(items, key=lambda i: (i["due"] or "9999", ORDER.index(i["kind"]))),
+            "returns": returns_card(firms, today, facts) if returns and facts else None}
