@@ -96,7 +96,7 @@ test("filters live in the address and ask again: a saved view and the status", a
   await userEvent.click(screen.getByRole("button", { name: /^September 2026/ }));
   await waitFor(() => expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", status: "cancelled" }));
   expect(screen.getByTestId("where")).toHaveTextContent("/sales?month=2026-09&status=cancelled");
-});
+}, 15_000); // two filter rounds, each asking again: past 5 s on a busy 2-CPU machine (it passes alone)
 
 // (the brief's one test, in two: each loads the page once fewer, so a busy machine keeps it inside the 5 s a test has)
 test("a search looks through the whole year, not just the month picked, with its filters; Only narrows it back", async () => {
