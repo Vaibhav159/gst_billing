@@ -324,7 +324,8 @@ def _purchase_input(row, day, business, supplier, services):
                "lines": [{**{name: value for name, value in item.items() if name != "gst_tax_rate"},
                           "gst_percent": rate_as_percent(item["gst_tax_rate"])} for item in row["lines"]]}
     source = serializers.CharField(max_length=10, allow_blank=True).run_validation(payload.get("source", "typed"))
-    if source not in {value for value, _ in Invoice._meta.get_field("source").choices or [(source, "")]}:
+    choices = next((field.choices for field in Invoice._meta.concrete_fields if field.name == "source"), None)
+    if choices and source not in {value for value, _ in choices}:
         raise ValidationError({"source": ["That bill's source isn't one this app records."]})
     # The public serializer accepts typed/capture; a backup also retains 2A import sources.
     payload["source"] = "typed"
