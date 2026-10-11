@@ -8,13 +8,19 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { AppRoutes } from "@/App";
 import { queryClient } from "@/core/api/query";
 import { AuthContext } from "@/core/auth/AuthProvider";
-import { salesServer } from "@/core/sales/fixtures";
+import { salesServer, wireDetail } from "@/core/sales/fixtures";
 import { Page, ToastProvider } from "@/core/ui";
 import Placeholder from "@/pages/core/Placeholder";
 import CustomerPage from "@/pages/customers/CustomerPage";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { lazyPage, loadedPage, type LazyPage } from "./lazyPage";
 import { appRoutes } from "./routes";
+
+// the print page's PDF is core/print's (and its own tests'): here a stand-in made at once (Ruling 1E-4)
+vi.mock("@/core/print/make", async (real) => ({
+  ...(await real<typeof import("@/core/print/make")>()),
+  billFile: vi.fn(async () => ({ blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "KGH_2026-27_31.pdf", sheets: 1 })),
+}));
 
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((r) => [r, ...all(r.children ?? [])]);
 const isLazy = (el: unknown) => isValidElement(el) && (el.type as { $$typeof?: symbol }).$$typeof === Symbol.for("react.lazy");
@@ -132,4 +138,12 @@ test.each([["a first open", "/broken"], ["a move", "/first"]])("a page whose cod
   } finally {
     reported.mockRestore();
   }
+});
+
+test("the print page loads on demand too, and hides the phone's tabs as a form does", async () => {
+  salesServer([["GET", "sales/412/", () => wireDetail()], ["GET", "shop-settings/", () => ({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null })]]);
+  mount("/sales/412/print");
+  expect(await screen.findByRole("document", { name: "Bill KGH/2026-27/31 on paper, original copy" }, { timeout: 5000 })).toBeInTheDocument();
+  expect(route("/sales/:id/print")?.handle).toEqual({ hideNav: true });
+  expect(isLazy(route("/sales/:id/print")?.element)).toBe(true);
 });

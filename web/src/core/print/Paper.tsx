@@ -79,6 +79,9 @@ function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode
   );
 }
 
+/** Which sheet a paper is ("duplicate copy, page 2 of 3"): it names the paper, and its view at full size. */
+const sheetOf = (copy: CopyMark, page: PrintPage) => `${copy.label.toLowerCase()} copy${page.count > 1 ? `, page ${page.index + 1} of ${page.count}` : ""}`;
+
 /** One sheet: a page of one copy of one bill. Lines are keyed by their place: an address can repeat a line. */
 export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
   const multi = page.count > 1;
@@ -90,7 +93,7 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
   // a firm without a GSTIN leaves it out of the code's name, as the code leaves its field empty
   const qrName = `QR code: ${[b.number, b.firm.gstin, b.dated, `₹${b.total.amount}`].filter(Boolean).join(", ")}`;
   return (
-    <div role="document" data-paper="" aria-label={`Bill ${b.number} on paper, ${copy.label.toLowerCase()} copy${multi ? `, page ${page.index + 1} of ${page.count}` : ""}`}
+    <div role="document" data-paper="" aria-label={`Bill ${b.number} on paper, ${sheetOf(copy, page)}`}
       className="relative flex flex-col bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: `${pt(14)}px ${pt(20)}px`, fontFamily: SERIF, fontSize: pt(9), lineHeight: LINE }}>
       <div className="flex justify-between items-end" style={{ fontSize: pt(7.5), marginBottom: pt(3) }}>
         <span style={{ color: GREY }}>{multi ? `Page ${page.index + 1} of ${page.count}` : NBSP}</span>
@@ -230,7 +233,10 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
   );
 }
 
-/** The paper, scaled to the space it has (a phone, a narrow window); a button shows it full size. */
+/**
+ * The paper, scaled to the space it has (a phone, a narrow window); a button shows it full size, in a region named after
+ * it, as the print page stacks one per copy and page.
+ */
 export function ScaledPaper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
   const box = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(358);
@@ -248,7 +254,7 @@ export function ScaledPaper({ b, copy, page }: { b: PrintBill; copy: CopyMark; p
   const scale = Math.min(1, w / A4_W);
   return (
     <div ref={box} className="w-full flex flex-col gap-2">
-      <div {...(full ? { className: "scroll-x -mx-4 px-4", tabIndex: 0, role: "region", "aria-label": "The bill at full size" } : {})}>
+      <div {...(full ? { className: "scroll-x -mx-4 px-4", tabIndex: 0, role: "region", "aria-label": `Bill ${b.number}, ${sheetOf(copy, page)}, at full size` } : {})}>
         <div style={full ? undefined : { zoom: scale }}><Paper b={b} copy={copy} page={page} /></div>
       </div>
       {scale < 1 ? <Button size="sm" variant="ghost" icon={full ? Minimize2 : Maximize2} onClick={() => setFull(!full)} className="self-center">{full ? "Fit to the screen" : "See it full size"}</Button> : null}

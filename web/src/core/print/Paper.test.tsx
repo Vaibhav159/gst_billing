@@ -228,11 +228,17 @@ test("on a narrow screen the paper shrinks to fit, and a button shows it full si
   expect(screen.queryByRole("region")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "See it full size" }));
   expect(zoom()).toBe("");
-  expect(screen.getByRole("region", { name: "The bill at full size" })).toHaveAttribute("tabindex", "0"); // the keyboard can scroll it
+  // named after its paper, as the print page stacks one per copy and page
+  expect(screen.getByRole("region", { name: "Bill KGH/2026-27/31, original copy, at full size" })).toHaveAttribute("tabindex", "0"); // the keyboard can scroll it
   await userEvent.click(screen.getByRole("button", { name: "Fit to the screen" }));
   expect(Number(zoom())).toBeCloseTo(358 / A4_W);
   expect(screen.queryByRole("region")).not.toBeInTheDocument();
   unmount();
+  const long = bill({ lines: Array.from({ length: 60 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })) });
+  const second = renderApp(<ScaledPaper b={long} copy={COPY_MARKS[2]} page={long.pages[1]} />);
+  await userEvent.click(screen.getByRole("button", { name: "See it full size" }));
+  expect(screen.getByRole("region", { name: `Bill KGH/2026-27/31, triplicate copy, page 2 of ${long.pages.length}, at full size` })).toBeInTheDocument();
+  second.unmount();
   vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1000);
   renderApp(<ScaledPaper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
   expect(zoom()).toBe("1");
