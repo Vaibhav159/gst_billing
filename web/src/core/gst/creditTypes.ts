@@ -2,6 +2,7 @@
 export type OpeningCreditValue<M> = {
   business: number; as_of: string; igst: M; cgst: M; sgst: M; total: M; typed: boolean;
   updated_by: { id: number; name: string; role: string } | null; updated_at: string | null;
+  first_filed_3b: string | null;
   carried_out_of_first_month: { month: string; heads: { igst: M; cgst: M; sgst: M } };
 };
 export type OpeningEffectValue<M> = {

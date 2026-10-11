@@ -13,8 +13,9 @@ function setup() {
   return { client, wrapper };
 }
 describe("GST credit wire boundary", () => {
-  it("requests the picked firm and FY and converts every money field once", async () => {
-    const calls = serve({ "GET gst/credit/": creditWire, "GET gst/opening-credit/": openingWire });
+  it.each(["2025-06", null])("preserves first_filed_3b=%s, requests the picked firm and FY, and converts money once", async first_filed_3b => {
+    const opening = { ...openingWire, first_filed_3b };
+    const calls = serve({ "GET gst/credit/": { ...creditWire, opening }, "GET gst/opening-credit/": opening });
     const { wrapper } = setup();
     const { result } = renderHook(() => ({ credit: useGstCredit(3, "2026-27"), opening: useOpeningCredit(3) }), { wrapper });
     await waitFor(() => expect(result.current.credit.isSuccess && result.current.opening.isSuccess).toBe(true));
@@ -27,6 +28,8 @@ describe("GST credit wire boundary", () => {
     expect(d.opening.total).toBe(1900000);
     expect(d.opening.carried_out_of_first_month.heads).toEqual({ igst: 0, cgst: 800000, sgst: 800000 });
     expect(result.current.opening.data?.cgst).toBe(950000);
+    expect(d.opening.first_filed_3b).toBe(first_filed_3b);
+    expect(result.current.opening.data?.first_filed_3b).toBe(first_filed_3b);
     expect(calls.map(c => c.params)).toEqual([{ business_id: 3, fy: "2026-27" }, { business_id: 3 }]);
   });
   it("does not fetch without a firm, even on forced invalidation", async () => {

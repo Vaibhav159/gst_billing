@@ -115,7 +115,7 @@ function OpeningCard({ opening: o, businessId, firmName, firmGstin }: { opening:
       <div className="flex flex-col gap-3">
         <DL rows={[["IGST credit", <Money key="i" value={o.igst} tone={o.igst ? undefined : "muted"} />], ["CGST credit", <Money key="c" value={o.cgst} tone={o.cgst ? undefined : "muted"} />], ["SGST credit", <Money key="s" value={o.sgst} tone={o.sgst ? undefined : "muted"} />], ["Total", <Money key="t" value={o.total} strong />, { strong: true }]]} />
         {!o.typed ? <p className="text-sm text-muted">The opening credit isn't typed yet, so the credit carried in may be too low.</p> : null}
-        <p className="text-sm text-muted">April 2025's return starts from this; every month after carries on from the one before. A change here moves only the months before the first filed GSTR-3B. April 2025 ended with {inr(h.igst + h.cgst + h.sgst)} carried on.</p>
+        <p className="text-sm text-muted">April 2025's return starts from this; every month after carries on from the one before. {o.first_filed_3b ? `Changing this moves the credit in every month before ${monthLabel(o.first_filed_3b, { long: true })}; that month's GSTR-3B is filed, so its figures stay as filed.` : "Changing this moves the credit in every month."} April 2025 ended with {inr(h.igst + h.cgst + h.sgst)} carried on.</p>
         {o.updated_by && o.updated_at ? <p className="text-sm text-muted">Last changed by {o.updated_by.name} on {date(todayIST(new Date(o.updated_at)))}.</p> : null}
       </div>
       <OpeningCreditDialog opening={o} businessId={businessId} firmName={firmName} firmGstin={firmGstin} open={open} onClose={() => setOpen(false)} />

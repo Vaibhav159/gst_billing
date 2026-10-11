@@ -20,12 +20,25 @@ describe("Credit and deadlines", () => {
     expect(screen.getByRole("option", { name: /November 2026.*after the last day/ })).toBeDisabled();
     expect(screen.getByText(/No credit on 1 bill/)).toHaveTextContent("Local Supplier (XYZ/18, credit not allowed)");
     expect(screen.getByRole("region", { name: "Credit carried into FY 2025-26" })).toHaveAttribute("id", "opening");
-    expect(screen.getByText(/A change here moves only the months before the first filed GSTR-3B\./)).toBeVisible();
+    expect(screen.getByRole("region", { name: "Credit carried into FY 2025-26" })).toHaveTextContent("Changing this moves the credit in every month before June 2025; that month's GSTR-3B is filed, so its figures stay as filed.");
     expect(screen.getByRole("region", { name: "Credit on FY 2026-27 purchase bills" })).toHaveTextContent("30 Nov 2027");
     expect(screen.getByRole("region", { name: "Credit on FY 2026-27 purchase bills" })).toHaveTextContent("418 days left");
     expect(screen.getByRole("region", { name: "Last year's credit to claim · by 30 Nov 2026" })).toBeVisible();
     expect(screen.getByText(/April 2025 ended with ₹16,000.00 carried on/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Edit opening credit" })).toBeEnabled();
+  });
+  it.each([
+    ["2025-04", "Changing this moves the credit in every month before April 2025; that month's GSTR-3B is filed, so its figures stay as filed."],
+    [null, "Changing this moves the credit in every month."],
+  ] as const)("shows the server's first filed month %s to a viewer without a privileged preview", async (first_filed_3b, words) => {
+    const calls = serve({ "GET businesses/": firms, "GET gst/credit/": { ...creditWire, opening: { ...creditWire.opening, first_filed_3b } } });
+    renderApp(<CreditView businessId={3} fy="2026-27" />, { me: { role: "viewer", permissions: ["view"] } });
+    const card = await screen.findByRole("region", { name: "Credit carried into FY 2025-26" });
+    expect(card).toHaveTextContent(words);
+    expect(card).not.toHaveTextContent("A change here moves only the months before the first filed GSTR-3B.");
+    expect(calls.every(c => c.method === "GET")).toBe(true);
+    expect(calls.some(c => c.url === "gst/opening-credit/")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Edit opening credit" })).not.toBeInTheDocument();
   });
   it.each([
     ["accountant", ["view", "gst.file", "purchase.edit"], true],

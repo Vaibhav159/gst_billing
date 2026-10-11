@@ -2,6 +2,7 @@
 export const openingWire = {
   business: 3, as_of: "2025-04-01", igst: "0.00", cgst: "9500.00", sgst: "9500.00", total: "19000.00",
   typed: true, updated_by: { id: 1, name: "Kailash Mehta", role: "owner" }, updated_at: "2026-10-08T09:00:00+05:30",
+  first_filed_3b: "2025-06",
   carried_out_of_first_month: { month: "2025-04", heads: { igst: "0.00", cgst: "8000.00", sgst: "8000.00" } },
 };
 export const effectWire = {

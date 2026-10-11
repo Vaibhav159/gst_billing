@@ -23,7 +23,7 @@ describe("opening credit", () => {
     expect(screen.getByText(/Credit carried out of May 2025/)).toHaveTextContent("₹16,000.00 → ₹16,001.23");
     expect(screen.getByText(/Tax to pay in cash for May 2025/)).toHaveTextContent("₹12.50 → ₹11.27");
     expect(screen.getByText(/Filed months keep their figures as filed/)).toHaveTextContent("2 filed months (Jun 2025 to Jul 2025)");
-    expect(screen.getByText("A change here moves only the months before the first filed GSTR-3B.", { exact: true })).toBeVisible();
+    expect(screen.getByText("Changing this moves the credit in every month before June 2025; that month's GSTR-3B is filed, so its figures stay as filed.", { exact: true })).toBeVisible();
     expect(calls).toHaveLength(1);
     edit("2.34");
     expect(screen.queryByText("What this changes")).not.toBeInTheDocument();
@@ -37,11 +37,22 @@ describe("opening credit", () => {
   });
   it("names the current month returned by preview when no GSTR-3B is filed", async () => {
     serve({ "PUT gst/opening-credit/": { ...effectWire, reaches: "2026-10", cash: { ...effectWire.cash, month: "2026-10" }, filed_differ: { count: 0, from: null, to: null } } });
-    mount(); edit("1.23"); fireEvent.click(screen.getByRole("button", { name: "Preview the change" }));
+    renderApp(<OpeningCreditDialog {...props} opening={{ ...props.opening, first_filed_3b: null }} />);
+    vi.setSystemTime(new Date("2026-10-08T12:00:01+05:30"));
+    edit("1.23"); fireEvent.click(screen.getByRole("button", { name: "Preview the change" }));
     await screen.findByText("What this changes");
-    expect(screen.getByText("A change here moves only the months before the first filed GSTR-3B.", { exact: true })).toBeVisible();
+    expect(screen.getByText("Changing this moves the credit in every month.", { exact: true })).toBeVisible();
     expect(screen.getByText(/Credit carried out of October 2026/)).toBeVisible();
     expect(screen.getByText("No filed month comes out differently.")).toBeVisible();
+  });
+  it("names the first filed GSTR-3B even when it is the first ledger month", async () => {
+    serve({ "PUT gst/opening-credit/": { ...effectWire, reaches: "2025-03", cash: { ...effectWire.cash, month: "2025-03" } } });
+    renderApp(<OpeningCreditDialog {...props} opening={{ ...props.opening, first_filed_3b: "2025-04" }} />);
+    vi.setSystemTime(new Date("2026-10-08T12:00:01+05:30"));
+    edit("1.23"); fireEvent.click(screen.getByRole("button", { name: "Preview the change" }));
+    await screen.findByText("What this changes");
+    expect(screen.getByText("Changing this moves the credit in every month before April 2025; that month's GSTR-3B is filed, so its figures stay as filed.", { exact: true })).toBeVisible();
+    expect(screen.getByText(/Credit carried out of March 2025/)).toBeVisible();
   });
   it("lets the owner explicitly save an untyped zero opening", async () => {
     const calls = serve({ "PUT gst/opening-credit/": (c: Call) => ({ status: 200, data: c.params.preview ? effectWire : { opening: openingWire, effect: effectWire } }) });
