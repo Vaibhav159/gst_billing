@@ -23,7 +23,7 @@ export function shortName(name: string): string {
 }
 
 export function toScopeFirm(b: FirmRow): Firm {
-  return { id: b.id, name: b.name, short: b.short || shortName(b.name), gstin: b.gst_number ?? "", state: b.state_name ?? "", prefix: b.invoice_prefix ?? "" };
+  return { id: b.id, name: b.name.trim(), short: b.short || shortName(b.name), gstin: b.gst_number ?? "", state: b.state_name ?? "", prefix: b.invoice_prefix ?? "" };
 }
 
 const NO_FIRMS: Firm[] = [];

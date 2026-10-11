@@ -1,13 +1,13 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "@/test/render";
 import { serve } from "@/test/server";
-import { useFirms } from "@/core/scope";
+import { toScopeFirm, useFirms } from "@/core/scope";
 import { mount, VIEWER } from "@/pages/customers/testing";
 import Firms from "./Firms";
 import { ReturnBadge } from "./parts";
 import type { ReturnState } from "@/core/api/firms";
 import FirmDetail from "./FirmDetail";
-import { toFirmDetail, useFirmNumbers } from "@/core/api/firms";
+import { toFirmDetail, toFirmRow, useFirmNumbers } from "@/core/api/firms";
 import { FIRM_DETAIL } from "@/test/firmRecords";
 
 const reply = (over: Record<string, unknown> = {}) => ({ ...FIRM_DETAIL, ...over });
@@ -76,4 +76,7 @@ test.each([false, true])("the highest deleted bill is labelled and links only fo
   expect(await screen.findByText("Deleted")).toBeInTheDocument();
   if (viewer) expect(screen.queryByRole("link", { name: "KGH/2026-27/33 · Deleted" })).not.toBeInTheDocument();
   else expect(screen.getByRole("link", { name: "KGH/2026-27/33 · Deleted" })).toHaveAttribute("href", "/sales/205");
+});
+test("the slim picker trims stored firm names as the old list did", () => {
+  expect(toScopeFirm(toFirmRow({ ...FIRM_DETAIL, name: "  KIRAN GOLD HOUSE " })).name).toBe("KIRAN GOLD HOUSE");
 });
