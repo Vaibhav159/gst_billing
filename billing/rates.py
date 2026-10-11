@@ -72,3 +72,24 @@ def read_quotes(body):
     if errors:
         raise ValidationError({"quoted": errors})
     return quoted
+
+
+def firm_short(business):
+    """Mirror scope.tsx shortName, with part 4's explicit short name taking priority."""
+    explicit = getattr(business, "short_name", "")
+    first = business.name.strip().split()
+    return explicit or (first[0][:1].upper() + first[0][1:].lower() if first else business.name)
+
+
+def rate_key(product):
+    # Part 4A owns inference; imported only when a product consumer calls this.
+    from billing.services.catalog import effective_kind
+    key = f"{effective_kind(product)}-{product.purity}"
+    return key if key in {r["key"] for r in RATE_ROWS} else None
+
+
+def rate_for(product, day):
+    key = rate_key(product)
+    board = in_force(day) if key else None
+    row = next((r for r in RATE_ROWS if r["key"] == key), None)
+    return per_gram(board.quoted, row) if board else None

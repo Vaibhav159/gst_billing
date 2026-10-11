@@ -256,6 +256,26 @@ def _in_series(row):
     return _numbered(row) and bool(_SERIES_SHAPE.match(row.invoice_number or ""))
 
 
+
+def _missing_span(numbers, first, last):
+    used = {counter_of(x.invoice_number) for x in numbers if _numbered(x)}
+    ends = [counter_of(x.invoice_number) for x in numbers if first <= x.invoice_date <= last and _in_series(x)]
+    before = [counter_of(x.invoice_number) for x in numbers if _in_series(x) and x.invoice_date < first]
+    prev_max = max(before, default=0)
+    lo, hi = min([prev_max + 1, *ends]), max(ends, default=0)
+    missing_count = max(hi - lo + 1, 0) - sum(lo <= n <= hi for n in used)
+    return used, prev_max, lo, hi, missing_count
+
+
+def missing_numbers(business_id, year, month, numbers=None):
+    """Count paper-book holes and the first four, from optional Numbered rows of the whole FY."""
+    first, last = date(year, month, 1), date(year, month, monthrange(year, month)[1])
+    if numbers is None:
+        numbers = [Numbered(*r) for query in (series_bills(business_id, fy_of(first)), series_bin(business_id, fy_of(first)))
+                   for r in query.values_list("invoice_number", "invoice_date")]
+    used, _prev, lo, _hi, total = _missing_span(numbers, first, last)
+    return total, list(islice((n for n in count(lo) if n not in used), min(total, 4)))
+
 def paper_book(business, year, month):
     """GET sales/paper-book/'s answer: a firm's month as the paper book sees it (PROTO paperBook).
 
@@ -281,13 +301,8 @@ def paper_book(business, year, month):
     every_bin = list(series_bin(business.pk, fy).only(*BINNED_REF_FIELDS))
     month_bills = [b for b in listed if _numbered(b)]
     month_bin = [b for b in every_bin if first <= b.invoice_date <= last and _numbered(b)]
-    used = {counter_of(x.invoice_number) for x in (*every, *every_bin) if _numbered(x)}
-    # The span's ends: series shapes only (Ruling 1A-1).
-    ends = [counter_of(x.invoice_number) for x in (*month_bills, *month_bin) if _in_series(x)]
-    before = [counter_of(x.invoice_number) for x in (*every, *every_bin) if _in_series(x) and x.invoice_date < first]
-    prev_max = max(before, default=0)
-    lo, hi = min([prev_max + 1, *ends]), max(ends, default=0)
-    missing_count = max(hi - lo + 1, 0) - sum(lo <= n <= hi for n in used)
+    used, prev_max, lo, hi, missing_count = _missing_span([*every, *every_bin], first, last)
+    missing_count, _first_four = missing_numbers(business.pk, year, month, [*every, *every_bin])
     missing = list(islice((n for n in count(lo) if n not in used), min(missing_count, MISSING_NUMBER_LIMIT)))
     runs = []
     for n in sorted({c for c in (counter_of(x.invoice_number) for x in (*month_bills, *month_bin)) if lo <= c <= hi}):

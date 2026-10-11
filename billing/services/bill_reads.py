@@ -470,22 +470,7 @@ def filter_bills(bills, params, dates=True):
     if p.get("dups") == "1":
         bills = bills.filter(pk__in=duplicated_ids(bills.select_related(None).only("business_id", "invoice_date")))
     if p.get("itax") == "1":
-        # Rule 46(f) uses lines, never the stored total. Each line can round up by half a paisa:
-        # this upper bound narrows candidates in SQL without losing a bill at the rounded limit.
-        # Python still decides exactly, with only the candidates' lines read in one uncached batch.
-        # Keep the product's six decimal places (quantity/rate have three each), removing SQLite's
-        # binary sum drift at the boundary; this does not round the bill's taxable value.
-        taxable_upper = (uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")
-                         .annotate(upper=Round(Sum(F("quantity") * F("rate")) + Count("pk") * (PAISA / 2), 6))
-                         .values("upper"))
-        missing_address = (Q(customer__customer_type="walkin") | Q(customer__address__isnull=True)
-                           | Q(customer__address__regex=r"^\s*$"))
-        maybe = list(bills.counted().select_related(None).select_related("customer")
-                     .alias(gstin_length=Length("customer__gst_number"), taxable_upper=Subquery(taxable_upper))
-                     .filter(Q(total_amount__gte=ITAX_LIMIT) | Q(gstin_length__gte=15)
-                             | (missing_address & Q(taxable_upper__gte=B2C_ADDRESS_LIMIT))).only(*ITAX_FIELDS))
-        lines = lines_of(maybe, ("quantity", "rate"))
-        bills = bills.filter(pk__in=[inv.pk for inv in maybe if itax_flags(inv, lines[inv.pk])])
+        bills = bills.filter(pk__in=itax_matches(bills))
     if p.get("check") == "1":
         bills = bills.filter(pk__in=checked_ids(bills.counted().only(*CHECK_FIELDS)))
     return bills
@@ -598,3 +583,29 @@ def facets(sales, params, reads=None):
         "cash": sum(b.payment_mode == "cash" and (b.total_amount or ZERO) >= ITAX_LIMIT for b in active),
     }
     return out
+
+
+def itax_matches(bills):
+    """One candidate pass shared by the sales filter and the dashboard's counts."""
+    # Rule 46(f) uses lines, never the stored total. Each line can round up by half a paisa:
+    # this upper bound narrows candidates in SQL without losing a bill at the rounded limit.
+    # Python still decides exactly, with only the candidates' lines read in one uncached batch.
+    # Keep the product's six decimal places (quantity/rate have three each), removing SQLite's
+    # binary sum drift at the boundary; this does not round the bill's taxable value.
+    taxable_upper = (uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")
+                     .annotate(upper=Round(Sum(F("quantity") * F("rate")) + Count("pk") * (PAISA / 2), 6))
+                     .values("upper"))
+    missing_address = (Q(customer__customer_type="walkin") | Q(customer__address__isnull=True)
+                       | Q(customer__address__regex=r"^\s*$"))
+    maybe = list(bills.counted().select_related(None).select_related("customer")
+                 .alias(gstin_length=Length("customer__gst_number"), taxable_upper=Subquery(taxable_upper))
+                 .filter(Q(total_amount__gte=ITAX_LIMIT) | (Q(gstin_length__gte=15) &
+                          (Q(customer__address__isnull=True) | Q(customer__address__regex=r"^\s*$")))
+                         | (missing_address & Q(taxable_upper__gte=B2C_ADDRESS_LIMIT))).only(*ITAX_FIELDS))
+    lines = lines_of(maybe, ("quantity", "rate"))
+    return {inv.pk: itax_flags(inv, lines[inv.pk]) for inv in maybe if itax_flags(inv, lines[inv.pk])}
+
+
+def itax_summary(bills):
+    matches = itax_matches(bills)
+    return len(matches), dict(Counter(flag["kind"] for flags in matches.values() for flag in flags))
