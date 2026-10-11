@@ -454,6 +454,20 @@ test("the greeting after signing in is spent once a page stays: a later redraw o
 
 // More: the mode, the pages by role, text size, sign out
 
+test("More explains the GSTR-1A correction before GSTR-3B using the contract's lock words", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  server({ prefs: { phoneMode: "expert" } });
+  open("/more");
+  const help = await screen.findByRole("button", { name: /^How do I…/ });
+  afterADoubleTap();
+  await userEvent.click(help);
+  const dialog = await screen.findByRole("dialog", { name: "How do I…" });
+  afterADoubleTap();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Fix a mistake on a bill" }));
+  expect(within(dialog).getByText("Open the bill → Edit, while its month's GSTR-1 isn't filed. This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only). A bill made by mistake can be cancelled (it keeps its number) or deleted (it can be restored from the Audit log).")).toBeVisible();
+  expect(within(dialog).queryByText(/next month's GSTR-1/)).not.toBeInTheDocument();
+});
+
 test("Switch to Expert keeps the choice for this person and opens the Expert home, and the phone stays there", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   const s = server();

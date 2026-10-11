@@ -1,8 +1,12 @@
 import type { BillRow } from "./types";
 import {
   billsAnd, cancelledMark, cancelledNote, dayCount, dayGroups, dayLabel, dayOf, ewayNumberText, failText, filedRangeText, firmsWord, fyLabel, gstLabel, listFooter, PAY_FILTER,
-  notMarkedSent, rateText, realReason, restoreFailure, sendFailure, sentLine, sentWhen, taxLines, timeOf, whoCan,
+  LOCKED_REASON, notMarkedSent, rateText, realReason, restoreFailure, sendFailure, sentLine, sentWhen, taxLines, timeOf, whoCan,
 } from "./words";
+
+test("the shared sales lock reason names GSTR-1A before GSTR-3B and owner-only unlocking", () => {
+  expect(LOCKED_REASON).toBe("This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only).");
+});
 
 test("cancelled bills are named apart, in the caller's words, and not at all when there are none", () => {
   expect(cancelledNote(0)).toBe("");

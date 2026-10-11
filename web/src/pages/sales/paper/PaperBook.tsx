@@ -12,10 +12,10 @@ import { problemOf } from "@/core/api/errors";
 import { salesKeys, usePaperBook } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
-import { addMonths, date, dateShort, monthLabel, monthOf, plural, possessive, todayIST } from "@/core/format";
+import { addMonths, date, dateShort, monthLabel, monthOf, plural, todayIST } from "@/core/format";
 import { takeFresh } from "@/core/sales/fresh";
 import type { PaperBook, PaperBookBill } from "@/core/sales/types";
-import { cancelledMark } from "@/core/sales/words";
+import { LOCKED_REASON, cancelledMark } from "@/core/sales/words";
 import { useFirms, useScope, type Firm } from "@/core/scope";
 import { Banner, Button, ButtonLink, Card, EmptyState, Field, Money, Page, QueryView, Select, Skeleton, Table, Td, Th, Tr } from "@/core/ui";
 import { useView } from "@/core/view";
@@ -128,7 +128,7 @@ function PaperBookScreen({ firms, firmId, month: ym, months, today, onPick }: Sc
           <div className="flex flex-col gap-5">
             {pickers}
             <QueryView query={view} what="the month's bills" skeleton={loading}>
-              {(data) => <BookFacts pb={data} firm={firm} ym={ym} today={today} />}
+              {(data) => <BookFacts pb={data} ym={ym} today={today} />}
             </QueryView>
             {pb && !isPhone ? (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -146,7 +146,7 @@ function PaperBookScreen({ firms, firmId, month: ym, months, today, onPick }: Sc
 }
 
 /** What the month holds: how many bills and which numbers, why some are missing, what's not entered yet, and GSTR-1. */
-function BookFacts({ pb, firm, ym, today }: { pb: PaperBook; firm: Firm; ym: string; today: string }) {
+function BookFacts({ pb, ym, today }: { pb: PaperBook; ym: string; today: string }) {
   const month = monthLabel(ym, { long: true, year: false });
   const cur = ym === monthOf(today);
   // bills whose numbers are all outside the span (odd shapes, Ruling 1A-29) have no runs: the count says it alone
@@ -211,7 +211,7 @@ function BookFacts({ pb, firm, ym, today }: { pb: PaperBook; firm: Firm; ym: str
       </div>
       {pb.locked ? (
         <Banner tone="file" icon={Lock} title={`${month}'s GSTR-1 is filed`}>
-          {possessive(firm.name)} {month} is filed and locked: bills can&apos;t be added until the owner unlocks the month in GST returns. A bill found later goes into next month&apos;s return as an amendment; ask your CA.
+          {LOCKED_REASON}
         </Banner>
       ) : (
         <p className={cn("text-sm flex items-start gap-2", tone === "neg" ? "text-neg" : "text-fg2")}>

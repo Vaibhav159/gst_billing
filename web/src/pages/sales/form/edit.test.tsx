@@ -107,7 +107,7 @@ test("a cancelled bill, a filed month, or someone who can't change bills: what's
 
   formServer([["GET", "sales/412/", () => wireDetail({ locked: true })]]);
   const second = mountForm("/sales/412/edit");
-  expect(await screen.findByText("This bill's month is filed and locked. Unlock the month in GST returns first (owner only). The change then goes into a revised return.")).toBeInTheDocument();
+  expect(await screen.findByText("This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only). The change then goes into a revised return.")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Make it again" })).not.toBeInTheDocument();
   second.unmount();
 

@@ -106,12 +106,14 @@ test("picking another firm or month follows the address, and each firm has its o
   await waitFor(() => expect(where(router)).toBe("/sales/paper?firm=3&month=2026-09"));
 });
 
-test("a filed month says so, and no bill can be added to it", async () => {
+test.each([false, true])("a GSTR-1-locked month explains GSTR-1A before GSTR-3B and prevents adding bills (phone %s)", async (phone) => {
   fakeToday();
+  (window as unknown as { __phone?: boolean }).__phone = phone;
   formServer([["GET", "sales/paper-book/", () => wireBook({ locked: true })]]);
   mountBook("/sales/paper?firm=3&month=2026-09");
   expect(await screen.findByText("September's GSTR-1 is filed")).toBeInTheDocument();
-  expect(screen.getByText(/KIRAN GOLD HOUSE's September is filed and locked: bills can't be added until the owner unlocks the month in GST returns/)).toBeInTheDocument();
+  expect(screen.getByText("This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only).")).toBeInTheDocument();
+  expect(screen.queryByText(/A bill found later goes into next month's return/)).not.toBeInTheDocument();
   const enter = screen.getByRole("button", { name: "Enter bill 34" });
   expect(enter).toBeDisabled();
   expect(enter).toHaveAttribute("title", "September 2026 is filed for KIRAN GOLD HOUSE, so no bill can be added until the owner unlocks it in GST returns.");

@@ -505,7 +505,7 @@ const FORM_STATES = [
     // a bill in a filed month on its edit page: what's on it, and why it can't change (ReadOnlyBill); the sandbox's
     name: "a filed month's bill on its edit page", on: ["desktop", "phone"], prepare: aFiledMonth,
     note: (c) => `${c.firm.name}, ${c.monthName} (filed): bill ${c.bill.invoice_number}`, path: (c) => `/sales/${c.bill.id}/edit`,
-    async show(page) { await expect(page.getByText(/^This bill's month is filed and locked\./)).toBeVisible(); },
+    async show(page) { await expect(page.getByText(/^This bill's month has its GSTR-1 filed, so its bills can't change\./)).toBeVisible(); },
   },
   {
     // a save refused (1D-20): the number a copy shows is taken meanwhile, by a bill another counter saves (made through

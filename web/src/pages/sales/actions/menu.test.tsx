@@ -49,7 +49,7 @@ test("a filed month's bill can't be edited, cancelled or deleted, and says why; 
   salesServer();
   const view = renderApp(<BillMenu bill={toBillRow(wireRow({ locked: true }))} />);
   await open();
-  expect(await screen.findByRole("menuitem", { name: /^Delete…/ })).toHaveTextContent("This bill's month is filed and locked. Unlock the month in GST returns first (owner only).");
+  expect(await screen.findByRole("menuitem", { name: /^Delete…/ })).toHaveTextContent("This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only).");
   expect(screen.getByRole("menuitem", { name: /^Delete…/ })).toBeDisabled();
   view.unmount();
   renderApp(<BillMenu bill={toBillRow(wireRow())} />);
@@ -79,6 +79,6 @@ test("a filed month's bill can't take a new number, move firm or change its e-wa
   for (const name of [/^E-way bill…/, /^Renumber…/, /^Move to another firm…/]) {
     const item = await screen.findByRole("menuitem", { name });
     expect(item).toBeDisabled();
-    expect(item).toHaveTextContent("This bill's month is filed and locked. Unlock the month in GST returns first (owner only).");
+    expect(item).toHaveTextContent("This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only).");
   }
 });

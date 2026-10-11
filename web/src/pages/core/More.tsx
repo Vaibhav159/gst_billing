@@ -10,6 +10,7 @@ import { TEXT_SIZES, useTextSize } from "@/core/device";
 import { addMonths, date, monthLabel, monthOf, todayIST } from "@/core/format";
 import { usePrefs } from "@/core/prefs";
 import { MORE_NAV } from "@/core/shell/nav";
+import { LOCKED_REASON } from "@/core/sales/locked";
 import { Button, Card, ConfirmDialog, Dialog, Disclosure, ListRow, Menu, Page, Spinner, useToast } from "@/core/ui";
 import { useView } from "@/core/view";
 
@@ -17,7 +18,7 @@ const HELP = [
   ["Make a bill", "Home → New bill. Pick the customer (or Walk-in), add each piece with its weight; the rate comes from today's rates board. Check the bill, pick how they paid, and save. Then send it on WhatsApp or print it."],
   ["Capture a supplier's bill", "Capture tab → Take a photo (or pick a PDF). The app reads it while you carry on; fill it in later from Captured bills. A photo it can't read is kept, with Take it again."],
   ["Send a bill again", "Bills → open the bill → Send again. In a list, tap Sent to see when it went and send it again."],
-  ["Fix a mistake on a bill", "Open the bill → Edit, while its month's GSTR-1 isn't filed. In a filed month the owner unlocks it first, and the change goes in next month's GSTR-1 as an amendment. A bill made by mistake can be cancelled (it keeps its number) or deleted (it can be restored from the Audit log)."],
+  ["Fix a mistake on a bill", `Open the bill → Edit, while its month's GSTR-1 isn't filed. ${LOCKED_REASON} A bill made by mistake can be cancelled (it keeps its number) or deleted (it can be restored from the Audit log).`],
   ["GST each month", "Due next on Home shows what stops a return and what's due. GSTR-1 is due on the 11th and GSTR-3B on the 20th: they're filed on the GST portal at the computer, then marked filed here."],
   ["Today's rates", "Home → Today's rates → Change. Type gold per 10 g and silver per kg, the way the board reads; every new bill line takes its rate from there."],
   ["Bigger text, or a bright screen", "More → Text size makes everything bigger on this phone. The sun button on Home switches to the light theme for a sunny counter."],

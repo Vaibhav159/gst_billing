@@ -227,8 +227,7 @@ export function restoreFailure(p: ApiProblem, what = "The bill", many = false): 
     body: `${what} ${many ? "stay" : "stays"} deleted. Restore ${many ? "them" : "it"} from the Audit log ${off ? "when you're back online" : "in a minute"}.` };
 }
 
-/** Why a bill in a closed month can't change (PROTO core/common.jsx:158-163; part 3 adds "GSTR-1 filed"). */
-export const LOCKED_REASON = "This bill's month is filed and locked. Unlock the month in GST returns first (owner only).";
+export { LOCKED_REASON } from "./locked";
 
 /** "April to August" for the months filed for the firm or firms in view; "every month"; "" (PROTO sales/lib.js:103-110). */
 export function filedRangeText(months: MonthFacet[]): string {
