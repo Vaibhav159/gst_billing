@@ -1,7 +1,10 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { SIGNED_OUT, opened } = require("./session");
-const { afterDialog, client, newBill, removeBill, today } = require("./sales-data");
+const { afterDialog, client, esc, makesBills, newBill, today } = require("./sales-data");
+
+// every bill a check makes goes to the bin after it (sales-data.js)
+makesBills(test);
 
 /** What axe finds against WCAG 2.2 AA: each rule broken, with the elements that break it. */
 async function problems(page) {
@@ -74,35 +77,53 @@ const STATES = [
     },
   },
 ];
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// What needs a bill: one is made through the API for each check, and goes to the bin after it (sales-data.js).
+// What needs a bill: one is made through the API for each test and measured in each state it's put in on the way (sent,
+// cancelled or deleted through the API between pages), so few bills go to the bin; each goes there after its test.
 const BILL_STATES = [
   {
-    name: "the bills list with a bill previewed", on: ["desktop"], path: (b) => `/sales?firm=${b.business}&month=today&bill=${b.id}`, landing: "/sales",
-    async show(page, b) { await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toBeVisible(); },
+    // a new bill's Not sent yet, the green Sent once sent, then a cancelled bill's red banner and badge and its muted
+    // total, and on a phone its card among the month's bills (1B Task 8)
+    name: "a bill from new to cancelled", on: ["desktop", "phone"],
+    steps: [
+      {
+        name: "the bills list with a bill previewed", on: ["desktop"], path: (b) => `/sales?firm=${b.business}&month=today&bill=${b.id}`, landing: "/sales",
+        async show(page, b) { await expect(page.getByRole("complementary", { name: `Preview of bill ${b.number}`, exact: true })).toBeVisible(); },
+      },
+      {
+        name: "a bill's page", path: (b) => `/sales/${b.id}`,
+        async show(page) { await expect(page.getByText("Not sent yet", { exact: true })).toBeVisible(); },
+      },
+      {
+        name: "the cancel dialog", on: ["desktop"], path: (b) => `/sales/${b.id}`,
+        async show(page, b) {
+          await opened(page);
+          await page.getByRole("button", { name: `More actions for ${b.number}`, exact: true }).click();
+          await page.getByRole("menuitem", { name: /^Cancel bill…/ }).click();
+          await expect(page.getByRole("dialog", { name: `Cancel bill ${b.number}?`, exact: true })).toBeVisible();
+          await afterDialog(page);
+        },
+      },
+      {
+        name: "a sent bill's page", sent: true, path: (b) => `/sales/${b.id}`,
+        async show(page) { await expect(page.getByText(/^Sent at \d{2}:\d{2}$/)).toBeVisible(); },
+      },
+      {
+        name: "a cancelled bill's page", cancelled: true, path: (b) => `/sales/${b.id}`,
+        async show(page) { await expect(page.getByText("This bill is cancelled")).toBeVisible(); },
+      },
+      {
+        name: "the phone's bills with a cancelled one", on: ["phone"], path: (b) => `/sales?firm=${b.business}&month=${today().slice(0, 7)}`, landing: "/sales",
+        async show(page, b) { await expect(page.getByRole("link", { name: new RegExp(`^${esc(b.customerName)}, ${esc(b.number)}, .*, cancelled$`) })).toBeVisible(); },
+      },
+    ],
   },
   {
-    name: "a bill's page", on: ["desktop", "phone"], path: (b) => `/sales/${b.id}`,
-    async show(page) { await expect(page.getByText("Parties", { exact: true })).toBeVisible(); },
-  },
-  {
-    name: "the cancel dialog", on: ["desktop"], path: (b) => `/sales/${b.id}`,
-    async show(page, b) {
-      await opened(page);
-      await page.getByRole("button", { name: `More actions for ${b.number}`, exact: true }).click();
-      await page.getByRole("menuitem", { name: /^Cancel bill…/ }).click();
-      await expect(page.getByRole("dialog", { name: `Cancel bill ${b.number}?`, exact: true })).toBeVisible();
-      await afterDialog(page);
-    },
-  },
-  {
-    name: "a deleted bill's page", on: ["desktop", "phone"], path: (b) => `/sales/${b.id}`, deleted: true,
-    async show(page) { await expect(page.getByText("This bill was deleted")).toBeVisible(); },
-  },
-  {
-    // a cancelled bill's card among the month's bills, its muted words included (1B Task 8)
-    name: "the phone's bills with a cancelled one", on: ["phone"], path: (b) => `/sales?firm=${b.business}&month=${today().slice(0, 7)}`, landing: "/sales", cancelled: true,
-    async show(page, b) { await expect(page.getByRole("link", { name: new RegExp(`^${esc(b.customerName)}, ${esc(b.number)}, .*, cancelled$`) })).toBeVisible(); },
+    // a paper bill's muted On paper, then the page a deleted bill has
+    name: "a paper bill, then deleted", on: ["desktop", "phone"], paper: true,
+    steps: [
+      { name: "a paper bill's page", path: (b) => `/sales/${b.id}`, async show(page) { await expect(page.getByText("On paper", { exact: true })).toBeVisible(); } },
+      { name: "a deleted bill's page", deleted: true, path: (b) => `/sales/${b.id}`, async show(page) { await expect(page.getByText("This bill was deleted")).toBeVisible(); } },
+    ],
   },
 ];
 
@@ -125,21 +146,23 @@ for (const theme of ["obsidian", "pearl"]) {
       expect(await problems(page)).toEqual([]);
     });
   }
-  for (const { name, on, path, landing, deleted, cancelled, show } of BILL_STATES) {
+  for (const { name, on, paper, steps } of BILL_STATES) {
     test(`no WCAG 2.2 AA problems: ${name} in ${theme}`, async ({ page, request }, info) => {
       test.skip(!on.includes(info.project.name), `${name} isn't measured on the ${info.project.name}`);
+      test.slow(); // several pages, each measured
       const api = client(request);
-      const b = await newBill(api);
-      try {
-        if (cancelled) await api.post(`sales/${b.id}/cancel/`, { reason: "Test bill" });
-        if (deleted) await removeBill(api, b.id);
-        const at = path(b);
-        await openIn(page, theme, at, landing ?? at);
-        await show(page, b);
-        await settle(page);
-        expect(await problems(page)).toEqual([]);
-      } finally {
-        await removeBill(api, b.id);
+      const b = await newBill(api, { paper });
+      for (const step of steps.filter((x) => !x.on || x.on.includes(info.project.name))) {
+        await test.step(step.name, async () => {
+          if (step.sent) await api.post(`sales/${b.id}/sent/`, { via: "whatsapp" });
+          if (step.cancelled) await api.post(`sales/${b.id}/cancel/`, { reason: "Test bill" });
+          if (step.deleted) await api.del(`sales/${b.id}/`, { reason: "Test bill" });
+          const at = step.path(b);
+          await openIn(page, theme, at, step.landing ?? at);
+          await step.show(page, b);
+          await settle(page);
+          expect(await problems(page), step.name).toEqual([]);
+        });
       }
     });
   }

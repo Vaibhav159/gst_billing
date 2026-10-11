@@ -8,6 +8,9 @@ function today() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
+/** A text as a regular expression that matches it literally. */
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /** /api/ as the signed-in user: each call's JSON, after checking it went through (del with check: false never fails). */
 function client(request) {
   const headers = { Authorization: `Bearer ${savedToken()}` };
@@ -48,17 +51,26 @@ async function walkIn(api) {
     ?? api.post("customers/", { name: "Walk-in Customer (e2e)", customer_type: "walkin", state_name: "RAJASTHAN" });
 }
 
-/** A bill for today in the firm's series at its next free number, one 3% line unless `lines` (the contract's line inputs) says otherwise: { id, number, counter, business, firmName, customerName }. */
-async function newBill(api, { firm, customer, rate = "6500.000", lines } = {}) {
+/** The bills made in the test running now, for makesBills to send to the bin after it. */
+const made = [];
+
+/**
+ * A bill for today in the firm's series at its next free number, one 3% line unless `lines` (the contract's line inputs)
+ * says otherwise, from the paper book when `paper`: { id, number, counter, business, firmName, customerName }. Each is
+ * noted, so makesBills can send it to the bin after the test.
+ */
+async function newBill(api, { firm, customer, rate = "6500.000", lines, paper = false } = {}) {
   const f = firm ?? (await firstFirm(api));
   const c = customer ?? (await someCustomer(api));
   const day = today();
   const next = await api.get("sales/next-number/", { business_id: f.id, invoice_date: day });
   const bill = await api.post("sales/", {
-    business: f.id, customer: c.id, invoice_number: next.invoice_number, invoice_date: day, payment_mode: "cash", place_of_supply: null, notes: "",
+    business: f.id, customer: c.id, invoice_number: next.invoice_number, invoice_date: day, payment_mode: "cash", place_of_supply: null, notes: "", paper,
     lines: lines ?? [{ product_name: "Gold Ring 22K (e2e)", hsn_code: "711319", gst_percent: "3", quantity: "1.000", unit: "gms", rate, note: "" }],
   });
-  return { id: bill.id, number: bill.invoice_number, counter: bill.counter, business: f.id, firmName: f.name, customerName: c.name };
+  const b = { id: bill.id, number: bill.invoice_number, counter: bill.counter, business: f.id, firmName: f.name, customerName: c.name };
+  made.push(b);
+  return b;
 }
 
 /** To the bin, as every spec leaves the bills it made (the number stays used, so no gap opens); a bill gone already is fine. */
@@ -66,9 +78,39 @@ async function removeBill(api, id) {
   await api.del(`sales/${id}/`, { reason: "Test bill" }, { check: false });
 }
 
+/**
+ * For a file whose tests make bills, called at its top level: after each test, every bill it made goes to the bin, one
+ * renumbered first getting its number back, so the series keeps no gap. A test.afterEach, not each test's finally: a test
+ * that times out has its request disposed before a finally could use it, which would leave a live bill or a gap. A bill
+ * the server won't check or take (a 429 once the user's requests for the day are used up, a 5xx) fails the hook, saying
+ * so, and stays noted for the next test's: never a live test bill left unsaid.
+ */
+function makesBills(test) {
+  test.afterEach(async ({ request }) => {
+    const headers = { Authorization: `Bearer ${savedToken()}` };
+    const call = (method, path, data) => request.fetch(`/api/${path}`, { method, headers, data });
+    while (made.length) {
+      const b = made[0];
+      const now = await call("GET", `sales/${b.id}/`);
+      // a 404 is a bill in the bin already: its test deleted it
+      if (now.status() !== 404) {
+        const text = await now.text();
+        expect(now.ok(), `test bill ${b.number} (${b.id}) couldn't be checked before it goes to the bin: ${now.status()} ${text}`).toBe(true);
+        if (JSON.parse(text).invoice_number !== b.number) {
+          const back = await call("POST", `sales/${b.id}/renumber/`, { invoice_number: b.number });
+          expect(back.ok(), `test bill ${b.id} didn't get its number ${b.number} back: ${back.status()} ${await back.text()}`).toBe(true);
+        }
+        const gone = await call("DELETE", `sales/${b.id}/`, { reason: "Test bill" });
+        expect(gone.ok() || gone.status() === 404, `test bill ${b.number} (${b.id}) didn't go to the bin: ${gone.status()} ${await gone.text()}`).toBe(true);
+      }
+      made.shift();
+    }
+  });
+}
+
 /** A dialog drops a click within 350 ms of opening (the kit's guard against the click that opened it). */
 async function afterDialog(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { today, client, firstFirm, someCustomer, walkIn, newBill, removeBill, afterDialog };
+module.exports = { today, esc, client, firstFirm, someCustomer, walkIn, newBill, removeBill, makesBills, afterDialog };

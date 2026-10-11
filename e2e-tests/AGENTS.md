@@ -47,8 +47,8 @@ preferences; `desktop` (1440×900) and `phone` (390×844, touch) start signed in
 `tests-v3/session.js` has the session's path, the sign-in, `opened(page)` and the
 API calls the specs make beside the app's. `tests-v3/sales-data.js` makes and
 removes the bills a spec needs through the API, as the signed-in user:
-`client(request)`, `newBill(api, { firm?, customer?, rate?, lines? })`,
-`removeBill(api, id)`. Also `workers: 1`,
+`client(request)`, `newBill(api, { firm?, customer?, rate?, lines?, paper? })`,
+`removeBill(api, id)`, `makesBills(test)`. Also `workers: 1`,
 `retries: 0`: one user for every spec, and the phone spec saves Easy or Expert on
 the server. CI runs it as the `web-e2e` job.
 
@@ -93,13 +93,25 @@ Pitfalls:
   shell around the page (the top bar, the phone's tabs) aren't held back.
 - A spec that needs a bill makes it: `tests-v3/sales-data.js` reads the firms,
   customers and next number at runtime and makes the bill through the API with
-  the saved session (`client(request)`, `newBill`, `walkIn`), then sends it to
-  the bin in a `finally` (`removeBill`). CI's database has no bills, so a spec
-  never assumes a seed id. A dialog also drops a click within 350 ms of opening:
-  `afterDialog(page)` waits it out. WhatsApp never opens: replace `window.open`
-  with `page.addInitScript` before the page loads, with a stand-in that returns
-  an object, since the app takes `null` for a tab the browser stopped and
-  records nothing.
+  the saved session (`client(request)`, `newBill`, `walkIn`). CI's database has
+  no bills, so a spec never assumes a seed id. A file whose tests make bills
+  calls `makesBills(test)` at its top level: after each test, every bill
+  `newBill` made goes to the bin, a renumbered one getting its number back
+  first. It's a `test.afterEach`, not each test's `finally`: a test that times
+  out has its request disposed before a `finally` could use it, which would
+  leave a live bill or a gap in the numbers. A dialog also drops a click within
+  350 ms of opening: `afterDialog(page)` waits it out. WhatsApp never opens:
+  replace `window.open` with `page.addInitScript` before the page loads, with a
+  stand-in that returns an object, since the app takes `null` for a tab the
+  browser stopped and records nothing.
+- What the specs leave behind, on the sandbox as on CI: the bills they make stay
+  in the bin, which nothing empties. A full run uses about 16 of the first
+  firm's numbers (a fresh database up to 9 more, so that search has a number of
+  two digits to find), and they show in that firm's bin and in its paper book as
+  deleted test bills. `walkIn` makes "Walk-in Customer (e2e)" where there's no
+  walk-in record (the sandbox had none) and keeps it for every later run: don't
+  delete it. Its bills in the bin protect it anyway, and each run would make a
+  new one.
 - Your own Vite in a worktree: start it with `--force` when its dependency
   cache (`web/node_modules/.vite`) may be older than an import such as the PDF's
   `qrcode`. Otherwise Vite optimizes that dependency the first time a page
