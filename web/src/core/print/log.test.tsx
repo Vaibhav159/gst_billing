@@ -5,7 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { refuse, salesServer, wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { testQueryClient } from "@/test/render";
-import { billLog, useLogPrint } from "./log";
+import { batchLog, billLog, useLogPrint } from "./log";
 
 const BILL = toBillDetail(wireDetail());
 
@@ -13,6 +13,16 @@ test("a bill's lines, as v2's bulk PDFs wrote them: printed from its print page,
   expect(billLog("printed", BILL, "original")).toEqual({ action: "printed", entity_id: 412, entity_name: "#KGH/2026-27/31 - Anil Gupta", details: "Printed: original copy" });
   expect(billLog("exported", BILL, "all")).toEqual({ action: "exported", entity_id: 412, entity_name: "#KGH/2026-27/31 - Anil Gupta", details: "PDF downloaded: all three copies" });
   expect(billLog("exported", BILL, "duplicate").details).toBe("PDF downloaded: duplicate copy");
+});
+
+test("many bills' line, as v2's bulk PDFs wrote it (entity_id 0): the bills firm by firm with their numbers, the pages, and three copies each", () => {
+  const span = "3 bills from 2 firms: KIRAN GOLD HOUSE (KGH/2026-27/31, KGH/2026-27/32) and MEERA ORNAMENTS (MO/2026-27/7)";
+  expect(batchLog("printed", { what: "3 bills", span, pages: 9, copies: "all" })).toEqual({
+    action: "printed", entity_id: 0, entity_name: "Batch print (3 bills)", details: `${span} · 9 pages · three copies each`,
+  });
+  expect(batchLog("exported", { what: "1 bill", span: "KGH/2026-27/31", pages: 1, copies: "original" })).toEqual({
+    action: "exported", entity_id: 0, entity_name: "Combined PDF (1 bill)", details: "KGH/2026-27/31 · 1 page",
+  });
 });
 
 test("a line goes into the audit log against the bill, and a log that fails stops nothing", async () => {

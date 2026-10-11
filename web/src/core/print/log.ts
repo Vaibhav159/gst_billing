@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
+import { plural } from "@/core/format";
 import type { Copies } from "@/core/sales/types";
 import { copiesWords } from "./model";
 
@@ -19,5 +20,16 @@ export function billLog(action: PrintLog["action"], b: { id: number; invoice_num
   return {
     action, entity_id: b.id, entity_name: `#${b.invoice_number} - ${b.customer.name}`,
     details: `${action === "printed" ? "Printed" : "PDF downloaded"}: ${copiesWords(copies).toLowerCase()}`,
+  };
+}
+
+/**
+ * Many bills' line, entity_id 0 as v2's bulk PDFs wrote it for many: "Batch print (3 bills)" or "Combined PDF (3 bills)",
+ * then span (billsSpan with their numbers: the bills firm by firm), the pages, and "three copies each" for all three.
+ */
+export function batchLog(action: PrintLog["action"], { what, span, pages, copies }: { what: string; span: string; pages: number; copies: Copies }): PrintLog {
+  return {
+    action, entity_id: 0, entity_name: `${action === "printed" ? "Batch print" : "Combined PDF"} (${what})`,
+    details: `${span} · ${plural(pages, "page")}${copies === "all" ? " · three copies each" : ""}`,
   };
 }

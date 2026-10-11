@@ -2,7 +2,7 @@
 // PDF (both come from printBill), drawn in HTML so it shows on phones (which don't show a PDF inside a page), reads
 // out to a screen reader, and scales to the space it has. Always black on white paper, in every theme. It reads only
 // the print model (Ruling 1E-6): every word and figure here was worked out there, once for both drawings.
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/core/cn";
@@ -82,8 +82,12 @@ function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode
 /** Which sheet a paper is ("duplicate copy, page 2 of 3"): it names the paper, and its view at full size. */
 const sheetOf = (copy: CopyMark, page: PrintPage) => `${copy.label.toLowerCase()} copy${page.count > 1 ? `, page ${page.index + 1} of ${page.count}` : ""}`;
 
-/** One sheet: a page of one copy of one bill. Lines are keyed by their place: an address can repeat a line. */
-export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
+/**
+ * One sheet: a page of one copy of one bill. Lines are keyed by their place: an address can repeat a line. It draws again
+ * only when its bill, copy or page does (memo): batch print stacks a paper for every page of every copy, twice, and the
+ * page around them draws again on every choice and answer.
+ */
+export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
   const multi = page.count > 1;
   // a label stands on its own line, as tall as its own 7 pt text (inline, it would take the paper's 9 pt line)
   const label = (t: string) => <span className="block" style={{ fontSize: pt(7), color: GREY }}>{t}</span>;
@@ -231,13 +235,14 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
       ) : null}
     </div>
   );
-}
+});
 
 /**
  * The paper, scaled to the space it has (a phone, a narrow window); a button shows it full size, in a region named after
- * it, as the print page stacks one per copy and page.
+ * it, as the print page stacks one per copy and page, and batch print one per bill, copy and page. Drawn again only when
+ * its bill, copy or page does, as Paper is.
  */
-export function ScaledPaper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
+export const ScaledPaper = memo(function ScaledPaper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
   const box = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(358);
   const [full, setFull] = useState(false);
@@ -260,7 +265,7 @@ export function ScaledPaper({ b, copy, page }: { b: PrintBill; copy: CopyMark; p
       {scale < 1 ? <Button size="sm" variant="ghost" icon={full ? Minimize2 : Maximize2} onClick={() => setFull(!full)} className="self-center">{full ? "Fit to the screen" : "See it full size"}</Button> : null}
     </div>
   );
-}
+});
 
 /**
  * The papers again, full size and outside the app, for printing from the browser (Ctrl P): on screen they're hidden,

@@ -3,20 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "@/core/auth/AuthProvider";
-import { hasBank } from "@/core/print/model";
+import { hasBank, type PrintBill } from "@/core/print/model";
 import type { FirmOnBill } from "@/core/sales/types";
 import { andList, billsAnd } from "@/core/sales/words";
 import { Switch } from "@/core/ui";
 
 /**
  * What `make` makes for `key` (null: nothing to make yet), made again when the key changes, on retry or on remake. Only
- * the file of the key now showing is handed out, so a choice just changed never prints the one before it. retry: the
- * person's Try again, which clears the failure at once (retrying until that attempt ends); remake: made again quietly,
- * the one made still handed out meanwhile (a PDF that went without its signature), and kept if that attempt fails.
+ * the file of the key now showing is handed out, so a choice just changed never prints the one before it. error: why the
+ * last attempt failed, kept while a Try again tries, so its words hold. retry: the person's Try again, which clears the
+ * failure at once (retrying until that attempt ends); remake: made again quietly, the one made still handed out
+ * meanwhile (a PDF that went without its signature), and kept if that attempt fails.
  */
-export function useMade<T>(key: string | null, make: () => Promise<T>): { value: T | null; failed: boolean; retrying: boolean; retry: () => void; remake: () => void } {
+export function useMade<T>(key: string | null, make: () => Promise<T>): { value: T | null; failed: boolean; error: unknown; retrying: boolean; retry: () => void; remake: () => void } {
   const [tries, setTries] = useState(0);
-  const [made, setMade] = useState<{ key: string; value: T | null; failed: boolean } | null>(null);
+  const [made, setMade] = useState<{ key: string; value: T | null; failed: boolean; error?: unknown } | null>(null);
   // the key a Try again is making again
   const [retrying, setRetrying] = useState<string | null>(null);
   // the key a quiet remake is making again: one that fails leaves the file made as it is
@@ -26,14 +27,23 @@ export function useMade<T>(key: string | null, make: () => Promise<T>): { value:
     let live = true;
     const remaking = quiet.current === key;
     quiet.current = null;
-    const end = (m: { key: string; value: T | null; failed: boolean }) => { if (!live) return; setMade(m); setRetrying(null); };
-    make().then((value) => end({ key, value, failed: false }), () => { if (!remaking) end({ key, value: null, failed: true }); });
+    const end = (m: { key: string; value: T | null; failed: boolean; error?: unknown }) => { if (!live) return; setMade(m); setRetrying(null); };
+    make().then((value) => end({ key, value, failed: false }), (error: unknown) => { if (!remaking) end({ key, value: null, failed: true, error }); });
     return () => { live = false; };
   }, [key, tries]); // eslint-disable-line react-hooks/exhaustive-deps -- `make` changes with `key`
-  const retry = useCallback(() => { quiet.current = null; setMade(null); setRetrying(key); setTries((n) => n + 1); }, [key]);
+  const retry = useCallback(() => { quiet.current = null; setMade((m) => (m ? { ...m, value: null, failed: false } : m)); setRetrying(key); setTries((n) => n + 1); }, [key]);
   const remake = useCallback(() => { quiet.current = key; setTries((n) => n + 1); }, [key]);
   const now = made && made.key === key ? made : null;
-  return { value: now?.value ?? null, failed: now?.failed ?? false, retrying: retrying !== null && retrying === key, retry, remake };
+  return { value: now?.value ?? null, failed: now?.failed ?? false, error: now?.error ?? null, retrying: retrying !== null && retrying === key, retry, remake };
+}
+
+/**
+ * What a paper prints, to key its PDF on: everything the PDF draws, with the firm's signature by its path, as its link is
+ * signed afresh with each answer. So a refresh that changed what prints makes the PDF again, and one that changed nothing
+ * on paper (a send's record, a link signed afresh) keeps the one made (Ruling 1E-8).
+ */
+export function whatPrints(p: PrintBill): string {
+  return JSON.stringify({ ...p, firm: { ...p.firm, signature: p.firm.signature?.split("?")[0] ?? null } });
 }
 
 /**

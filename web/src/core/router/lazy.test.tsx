@@ -147,3 +147,7 @@ test("the print page loads on demand too, and hides the phone's tabs as a form d
   expect(route("/sales/:id/print")?.handle).toEqual({ hideNav: true });
   expect(isLazy(route("/sales/:id/print")?.element)).toBe(true);
 });
+
+test("batch print is a page of its own, loaded on demand", () => {
+  expect(isLazy(route("/sales/batch")?.element)).toBe(true);
+});

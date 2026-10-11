@@ -25,7 +25,7 @@ import { DeletedBill } from "../bill/DeletedBill";
 import { MissingBill } from "../bill/MissingBill";
 import { useSendBill, useSendReady } from "../actions/useSendBill";
 import { WhatsAppDialog } from "../actions/WhatsAppDialog";
-import { BankSwitch, useMade } from "./parts";
+import { BankSwitch, useMade, whatPrints } from "./parts";
 
 /** Until the bill comes: the paper's outline, or why it can't come, with Try again when asking again can help. */
 function Preparing({ phone, problem, retry }: { phone: boolean; problem: ApiProblem | null; retry?: () => void }) {
@@ -90,9 +90,8 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   useEffect(() => { document.title = `Print ${b.invoice_number} · GST Billing`; }, [b.invoice_number]);
 
   const paper = useMemo(() => printBill(b, { showBank }), [b, showBank]);
-  // what the PDF prints, the signature by its path (its link is signed afresh with each answer): a refresh that changed
-  // the bill on paper makes the PDF again, and one that changed nothing on it (a send's record) keeps the one made (Ruling 1E-8)
-  const prints = useMemo(() => JSON.stringify({ ...paper, firm: { ...paper.firm, signature: paper.firm.signature?.split("?")[0] ?? null } }), [paper]);
+  // what the PDF prints: a refresh that changed the bill on paper makes it again, one that changed nothing on it keeps it
+  const prints = useMemo(() => whatPrints(paper), [paper]);
   const copyList = copyPages(copies);
   const sheets = paper.pages.length * copyList.length;
   // made once the shop's defaults are in, so the first file is the one wanted; offline, with the choices on screen.
