@@ -44,6 +44,20 @@ def test_ended_or_revoked_tokens_stop_access_and_refresh():
         assert response.data == {"detail": "You were signed out on this device. Sign in again.", "code": "signed_out"}
 
 
+def test_token_verify_refuses_signed_out_or_revoked_tokens():
+    user = person("maya", "admin")
+    client, tokens = login(user)
+    verify = APIClient()
+    assert verify.post("/api/token/verify/", {"token": tokens["access"]}).status_code == 200
+    assert verify.post("/api/token/verify/", {"token": "not-a-token"}).status_code == 401
+    assert client.post("/api/auth/sign-out/", {"refresh": tokens["refresh"]}).status_code == 204
+    response = verify.post("/api/token/verify/", {"token": tokens["access"]})
+    assert response.status_code == 401 and response.data["code"] == "signed_out"
+    _, fresh = login(user)
+    revoke_all(user)
+    assert verify.post("/api/token/verify/", {"token": fresh["access"]}).status_code == 401
+
+
 def test_sidless_token_works_until_revoked():
     user = person("maya", "admin")
     token = RefreshToken.for_user(user)

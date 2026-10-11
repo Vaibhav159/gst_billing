@@ -105,6 +105,7 @@ class V3Permission(BasePermission):
         if not (user and user.is_authenticated):
             return False
         if not isinstance(self, V3PermissionIfPlaced):
+            # The gate reads what SessionJWTAuthentication attached; any other auth class skips it.
             from .account_access import password_gate
             password_gate(user)
         return self._allows(user, needed(request, view))

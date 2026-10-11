@@ -1,5 +1,6 @@
 import math
 import re
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -1398,7 +1399,6 @@ class UserSecurity(models.Model):
 
 
 class SignInSession(models.Model):
-    import uuid
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="sign_in_sessions", db_constraint=False)
     device = models.CharField(max_length=100, default="", db_default="")

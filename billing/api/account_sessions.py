@@ -103,7 +103,7 @@ class SessionEndView(APIView):
             try:
                 session_id = UUID(pk)
             except (ValueError, TypeError, AttributeError):
-                raise NotFound("That device is signed out already.") from None
+                raise ValidationError({"detail": "That isn't a device from the list. Refresh the list and try again."}) from None
             if str(session_id) == current:
                 raise ValidationError({"detail": "That's this device. Use Sign out at the top instead."})
             session = sessions.only("id", "device").filter(pk=session_id).first()

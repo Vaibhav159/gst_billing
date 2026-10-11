@@ -19,6 +19,9 @@ def test_devices_are_private_current_first_and_revoked_immediately():
     assert len(rows) == 2 and rows[0]["current"]
     assert first.post(f"/api/account/sessions/{rows[0]['id']}/sign-out/").status_code == 400
     assert first.post(f"/api/account/sessions/{foreign.pk}/sign-out/").status_code == 404
+    malformed = first.post("/api/account/sessions/not-a-device/sign-out/")
+    assert malformed.status_code == 400
+    assert malformed.data == {"detail": "That isn't a device from the list. Refresh the list and try again."}
     response = first.post(f"/api/account/sessions/{rows[1]['id']}/sign-out/")
     assert response.status_code == 204
     assert second.get("/api/me/").status_code == 401

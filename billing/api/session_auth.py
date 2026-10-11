@@ -49,8 +49,6 @@ class SessionJWTAuthentication(JWTAuthentication):
         return user
 
 
-
-
 def track_refresh(token, blacklist=False):
     """SimpleJWT's blacklist storage without its redundant full User fetch."""
     from rest_framework_simplejwt.settings import api_settings as jwt_settings

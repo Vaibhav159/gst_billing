@@ -1,6 +1,5 @@
 from django.urls import include, path, re_path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenVerifyView
 
 from .account_sessions import PasswordView, SessionEndView, SessionsView, SignOutView
 from .audit import AuditActionView, AuditExportView, AuditView
@@ -50,7 +49,7 @@ from .search import QuickSearchView
 from .setup import SetupView
 from .shop import ShopSettingsView
 from .suppliers import SupplierViewSet
-from .token_views import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
+from .token_views import SessionTokenVerifyView, ThrottledTokenObtainPairView, ThrottledTokenRefreshView
 from .views import (
     AIInvoiceCreateView,
     AIInvoiceProcessingView,
@@ -187,5 +186,5 @@ urlpatterns = [
     # JWT Authentication endpoints
     path("token/", ThrottledTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", ThrottledTokenRefreshView.as_view(), name="token_refresh"),
-    path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
+    path("token/verify/", SessionTokenVerifyView.as_view(), name="token_verify"),
 ]
