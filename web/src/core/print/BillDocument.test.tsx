@@ -4,6 +4,7 @@
 // page count (more pages than planned would mean a planned page overflowed), its fonts, and its Subject.
 import type { ReactElement } from "react";
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
+import type { Copies } from "@/core/sales/types";
 import { toBillDetail } from "@/core/sales/wire";
 import { BillDocument } from "./BillDocument";
 import { makeBillPdf } from "./make";
@@ -134,6 +135,16 @@ test("a real PDF: A4, as many pages as planned (none overflowed), Times with the
   expect(pdf).toContain("(KGH/2026-27/31|08ABCPK1234F1Z5|2026-10-08|87083.21)");
 }, 30_000);
 
+test("an ordinary bill prints on the sheets it needs: the 8-line bill's three copies on three sheets, 9 lines on one, and a 10th line on two", async () => {
+  const made = async (n: number, copies: Copies) => {
+    const p = printBill(bill({ lines: rows(n) }), { showBank: true });
+    return [p.pages.length, sheetsIn(await pdfText(await makeBillPdf([p], copies, { title: "t" })))];
+  };
+  expect(await made(8, "all")).toEqual([1, 3]);
+  expect(await made(9, "original")).toEqual([1, 1]);
+  expect(await made(10, "original")).toEqual([2, 2]);
+}, 60_000);
+
 test("an inter-state bill sets out IGST: the HSN summary's five columns and one tax row by slab", () => {
   const p = printBill(bill(IGST), { showBank: true });
   const [page] = pagesOf(<BillDocument bills={[p]} copies={copyPages("original")} title="t" />);
@@ -146,6 +157,16 @@ test("an inter-state bill sets out IGST: the HSN summary's five columns and one 
   ]);
   expect(words(page)).toContain("IGST 3% 2,536.40"); // the tax row: its head, rate and amount in their columns
   expect(words(page)).not.toMatch(/CGST|SGST/);
+});
+
+test("a bank's name or branch too long for its column wraps inside it, as on the paper on screen: each value takes the room beside its label, which keeps its width", () => {
+  const p = printBill(bill({ firm: firmWith({ bank_name: "The Udaipur Mahila Urban Co-operative Bank Limited", bank_branch_name: "Hiran Magri Sector 4, Udaipur" }) }), { showBank: true });
+  const [page] = pagesOf(<BillDocument bills={[p]} copies={copyPages("original")} title="t" />);
+  const bank = nodes(page, "VIEW").filter((v) => v.children.length === 2 && ["Bank Name", "A/c No.", "Branch & IFS Code"].includes(raw(v.children[0])));
+  expect(bank.map((v) => [words(v.children[0]), flat((v.children[0] as PdfNode).props.style).width, words(v.children[1])])).toEqual([
+    ["Bank Name", 82, ": The Udaipur Mahila Urban Co-operative Bank Limited"], ["A/c No.", 82, ": 000000000003"], ["Branch & IFS Code", 82, ": Hiran Magri Sector 4, Udaipur & SBOX0000003"],
+  ]);
+  for (const v of bank) expect(flat((v.children[1] as PdfNode).props.style)).toMatchObject({ flexGrow: 1, flexBasis: 0 });
 });
 
 test("the firm's signature, handed in as data (make.ts fetches it), sits between the firm's name and Authorised Signatory", () => {
@@ -180,6 +201,7 @@ const SHAPES: [string, Record<string, unknown>][] = [
   ["a business buyer's name in capitals that wraps in both party blocks", { customer: LONG_BUYER, lines: rows(26) }],
   ["26 lines, 3 of them 12,345.678 gms: a quantity of 10 kg wraps in its column", { lines: rows(26, (i) => (i < 3 ? HEAVY : {})) }],
   ["64 lines, 3 of 10 kg and more on a later page, and the total's quantity wrapping too", { lines: rows(64, (i) => (i >= 30 && i < 33 ? HEAVY : {})) }],
+  ["a bank's long name and branch in capitals, each wrapping to three lines in the bank block", { firm: firmWith({ bank_name: "THE UDAIPUR MAHILA URBAN CO-OPERATIVE BANK LIMITED, HEAD OFFICE", bank_branch_name: "HIRAN MAGRI SECTOR 4, NEAR CHETAK CIRCLE, UDAIPUR" }), lines: rows(47) }],
 ];
 
 test.each(SHAPES)("a real PDF has exactly the pages planned: %s", async (_, over) => {

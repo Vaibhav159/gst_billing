@@ -64,6 +64,7 @@ const s = StyleSheet.create({
   footRight: { width: 240 },
   bank: { padding: 5, borderBottom: B, fontSize: 8 },
   bankRow: { flexDirection: "row" },
+  bankValue: { flexGrow: 1, flexBasis: 0 }, // a value too long for its column wraps in it, as on the paper on screen
   sign: { padding: 5, minHeight: 58, justifyContent: "space-between", alignItems: "flex-end", fontSize: 8 },
   center: { textAlign: "center", paddingVertical: 3, fontSize: 7.5 },
   stamp: { position: "absolute", top: 380, left: 0, right: 0, alignItems: "center" },
@@ -185,7 +186,7 @@ function Footer({ b }: { b: PrintBill }) {
           {b.firm.bank ? (
             <View style={s.bank}>
               <Text>Company&apos;s Bank Details</Text>
-              {b.firm.bank.map(([k, v]) => <View key={k} style={s.bankRow}><Text style={{ width: 82 }}>{k}</Text><Text style={s.bold}>: <RupeeText>{v}</RupeeText></Text></View>)}
+              {b.firm.bank.map(([k, v]) => <View key={k} style={s.bankRow}><Text style={{ width: 82 }}>{k}</Text><Text style={[s.bold, s.bankValue]}>: <RupeeText>{v}</RupeeText></Text></View>)}
             </View>
           ) : null}
           <View style={s.sign}>

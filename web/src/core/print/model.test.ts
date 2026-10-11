@@ -1,7 +1,7 @@
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { amountText, COPY_OPTIONS, copiesWords, copyPages, planPages, printBill } from "./model";
-import { firmWith, IGST, LONG_BUYER, rows, TRANSPORTED, TWO_LINE_ADDRESSES, WALKIN } from "./testing";
+import { buyerWith, firmWith, IGST, LONG_BUYER, rows, TRANSPORTED, TWO_LINE_ADDRESSES, WALKIN } from "./testing";
 
 const bill = (over: Record<string, unknown> = {}) => toBillDetail(wireDetail(over));
 
@@ -106,13 +106,18 @@ test("rows that wrap take more room: 30 lines with two-line names and notes brea
   expect(printBill(bill({ lines }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([10, 15, 5]);
 });
 
-test("a two-line address takes room from the first page, and a long note and the bank from the last: 42 lines break as 24, 17 and 1", () => {
+test("a two-line address takes room from the first page, and a long note and the bank from the last: 42 lines break as 24 and 18", () => {
   const p = printBill(bill({
     lines: Array.from({ length: 42 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })),
     customer: { ...(wireDetail().customer as object), address: "Shop 12, Ground Floor, Bapu Bazaar, near Jagdish Chowk" },
     notes: "Delivered at the counter to the buyer's son, Rohit Gupta, who showed the order slip. Hallmarked by BIS. Ring size 14; the pendant chain was resized free of charge on request.",
   }), { showBank: true });
-  expect(p.pages.map((x) => x.lines.length)).toEqual([24, 17, 1]);
+  expect(p.pages.map((x) => x.lines.length)).toEqual([24, 18]);
+});
+
+test("an ordinary bill prints on the sheets it needs, the bank block counted once: 8 lines fit one page, and so do 9; a 10th line takes a second, 9 and 1", () => {
+  const split = (n: number) => printBill(bill({ lines: rows(n) }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split(8), split(9), split(10)]).toEqual([[8], [9], [9, 1]]);
 });
 
 test("text someone typed reaches the drawing as typed, a ₹ too, for the one ₹-aware text piece to draw (Ruling 1E-5); the figures carry none", () => {
@@ -149,10 +154,56 @@ test("an address typed on two lines prints as two lines, in the firm's block and
   expect(p.pages.map((x) => x.lines.length)).toEqual([23, 7]);
 });
 
-test("a note typed on three lines keeps its breaks for the paper, and the plan counts three lines: 6 lines break as 5 and 1", () => {
-  const p = printBill(bill({ notes: "Hallmarked\nBIS 916\nSize 14", lines: Array.from({ length: 6 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })) }), { showBank: true });
+test("the first page's header is counted as the PDF draws it, the point under the firm's name too: with every address typed on three lines, 26 lines break as 21 and 5", () => {
+  const p = printBill(bill({
+    firm: firmWith({ address: "12 Sandbox Bazaar\nJohari Bazaar\nJaipur, Rajasthan" }), customer: buyerWith({ address: "Shop 12, Ground Floor\nBapu Bazaar\nnear Jagdish Chowk" }), lines: rows(26),
+  }), { showBank: true });
+  expect(p.parties.map((x) => x.lines.slice(0, 3))).toEqual(Array.from({ length: 2 }, () => ["Shop 12, Ground Floor", "Bapu Bazaar", "near Jagdish Chowk, Udaipur"]));
+  expect(p.pages.map((x) => x.lines.length)).toEqual([21, 5]);
+});
+
+test("a note typed on three lines keeps its breaks for the paper, and the plan counts three lines: 8 lines break as 7 and 1, where the same note on one line leaves them on one page", () => {
+  const lines = Array.from({ length: 8 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 }));
+  const p = printBill(bill({ notes: "Hallmarked\nBIS 916\nSize 14", lines }), { showBank: true });
   expect(p.note).toBe("Hallmarked\nBIS 916\nSize 14");
-  expect(p.pages.map((x) => x.lines.length)).toEqual([5, 1]);
+  expect(p.pages.map((x) => x.lines.length)).toEqual([7, 1]);
+  expect(printBill(bill({ notes: "Hallmarked BIS 916 Size 14", lines }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([8]);
+});
+
+/** k rows of the HSN summary, each its own code: each row takes 14.46 pt of the last page, a fine step for finding its edge. */
+const groups = (k: number) => Array.from({ length: k }, (_, i) => ({ ...(wireDetail().hsn_summary as object[])[0], hsn_code: String(711301 + i) }));
+
+test("a one-line note takes a full row, as the PDF draws it (18 pt, more than its one line): 8 lines over 3 HSN groups beside a one-line note break as 7 and 1, where without it they fit one page", () => {
+  const split = (over: Record<string, unknown>) => printBill(bill({ lines: rows(8), hsn_summary: groups(3), ...over }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split({ notes: "Hallmarked by BIS, size 14" }), split({})]).toEqual([[7, 1], [8]]);
+});
+
+test("the tax in words, too long for its line, takes a second, and the plan counts it: 8 lines over 4 HSN groups beside the longest tax in words break as 7 and 1, where a short one leaves them on one page", () => {
+  const taxWords = "Seventy Seven Crore Seventy Seven Lakh Seventy Seven Thousand Seven Hundred Seventy Seven Rupees and Seventy Seven Paise Only";
+  const split = (over: Record<string, unknown>) => printBill(bill({ lines: rows(8), hsn_summary: groups(4), ...over }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split({ tax_in_words: taxWords }), split({})]).toEqual([[7, 1], [8]]);
+});
+
+test("a firm's signature beside a name that wraps under it (\"for SHREE MAHALAXMI …\" on two lines) makes the signatory's box taller: 9 lines break as 8 and 1, where without the signature they fit one page", () => {
+  const name = "SHREE MAHALAXMI GOLD AND SILVER JEWELLERS PVT LTD";
+  const split = (firm: Record<string, unknown>) => printBill(bill({ firm: firmWith({ name, ...firm }), lines: rows(9) }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split({ signature_url: "/api/media/signatures/3.png?s=abc" }), split({})]).toEqual([[8, 1], [9]]);
+});
+
+test("a bank's name or branch too long for its column wraps there, and the plan counts each line: a co-operative bank's long name and branch break 9 lines as 8 and 1, where a short name and branch leave them on one page", () => {
+  const split = (firm: Record<string, unknown>) => printBill(bill({ firm: firmWith(firm), lines: rows(9) }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split({ bank_name: "The Udaipur Mahila Urban Co-operative Bank Limited", bank_branch_name: "Hiran Magri Sector 4, Udaipur" }), split({})]).toEqual([[8, 1], [9]]);
+});
+
+test("an IGST bill's HSN summary heads its columns on one line, where a local bill's take two (CGST Rate, SGST/UTGST): 11 lines of an IGST bill fit one page, and a local bill's break as 10 and 1", () => {
+  const igst = printBill(bill({ ...IGST, lines: rows(11, () => ({ cgst: "0.00", sgst: "0.00", igst: "1205.95" })) }), { showBank: true });
+  expect(igst.pages.map((x) => x.lines.length)).toEqual([11]);
+  expect(printBill(bill({ lines: rows(11) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([10, 1]);
+});
+
+test("a line that holds a ₹ stands as tall as the ₹'s own font makes it (Tinos, 1.15 em against Times's 1.12): 6 two-line names with a ₹ over 3 HSN groups break as 5 and 1, where without it they fit one page", () => {
+  const split = (name: string) => printBill(bill({ lines: rows(6, (i) => ({ product_name: `${name} ${i + 1}` })), hsn_summary: groups(3) }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split("Gold Necklace ₹ motif 22K, Kundan and Meenakari work"), split("Gold Necklace 22K motif, Kundan and Meenakari work")]).toEqual([[5, 1], [6]]);
 });
 
 test("the 14 boxes and a continued page's header hold one line each: a line break typed there reads as a space", () => {
@@ -186,13 +237,11 @@ test("a line break inside a name, a line's note or the bank's details reads as a
   expect(p.pages.map((x) => x.lines.length)).toEqual([18, 12]);
 });
 
-test("the last page's fixed part fits a sheet only up to a limit (the ponytail at lastExtra): with 28 HSN groups beside the bank block, the totals stand alone on a fourth page", () => {
-  const groups = Array.from({ length: 28 }, (_, i) => String(711301 + i));
-  const p = printBill(bill({
-    lines: groups.map((hsn_code, i) => ({ ...WIRE_LINES[0], id: i + 1, hsn_code })),
-    hsn_summary: groups.map((hsn_code) => ({ ...(wireDetail().hsn_summary as object[])[0], hsn_code })),
-  }), { showBank: true });
-  expect(p.pages.map((x) => x.lines.length)).toEqual([25, 2, 1, 0]);
+test("the last page's fixed part fits a sheet only up to a limit (the ponytail at lastExtra): with 29 HSN groups beside the bank block the totals stand alone on a fourth page, where 28 keep a line beside them", () => {
+  const split = (k: number) => printBill(bill({
+    lines: groups(k).map(({ hsn_code }, i) => ({ ...WIRE_LINES[0], id: i + 1, hsn_code })), hsn_summary: groups(k),
+  }), { showBank: true }).pages.map((x) => x.lines.length);
+  expect([split(28), split(29)]).toEqual([[25, 2, 1], [25, 3, 1, 0]]);
 });
 
 test("names in capitals too long for a line wrap where they print, and the first page makes room: the firm's (in its header) and a business buyer's (in both party blocks): 26 lines break as 23 and 3", () => {
@@ -226,13 +275,18 @@ test("a quantity of 10 kg and more wraps in its column, and its row takes two li
   expect(printBill(bill({ lines: rows(26, () => ({ quantity: "1234.567" })) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 1]);
 });
 
-test("a total of 10 kg and more wraps in the Total row, and the last page makes room for it: 45 lines of 1 kg break as 25, 19 and 1, where 45 of 200 g (9 kg) break as 25 and 20", () => {
-  const kg = printBill(bill({ lines: rows(45, () => ({ quantity: "1000.000" })) }), { showBank: true });
-  expect(kg.total.qty).toBe("45,000.000 gms");
-  expect(kg.pages.map((x) => x.lines.length)).toEqual([25, 19, 1]);
-  const light = printBill(bill({ lines: rows(45, () => ({ quantity: "200.000" })) }), { showBank: true });
-  expect(light.total.qty).toBe("9,000.000 gms");
-  expect(light.pages.map((x) => x.lines.length)).toEqual([25, 20]);
+test("a total of 10 kg and more wraps in the Total row, and the last page makes room for its second line: without the bank block, 12 lines of 1 kg break as 11 and 1, where 12 of 200 g fit one page; 10 of 1.5 kg over one HSN group still fit; 45 of 1 kg break as 25 and 20", () => {
+  const kg = printBill(bill({ lines: rows(12, () => ({ quantity: "1000.000" })) }), { showBank: false });
+  expect(kg.total.qty).toBe("12,000.000 gms");
+  expect(kg.pages.map((x) => x.lines.length)).toEqual([11, 1]);
+  const light = printBill(bill({ lines: rows(12, () => ({ quantity: "200.000" })) }), { showBank: false });
+  expect(light.total.qty).toBe("2,400.000 gms");
+  expect(light.pages.map((x) => x.lines.length)).toEqual([12]);
+  // the Total row grows by its second line only (27.16 pt in all), not by a line's whole row
+  const bars = printBill(bill({ lines: rows(10, () => ({ quantity: "1500.000" })), hsn_summary: groups(1) }), { showBank: true });
+  expect(bars.total.qty).toBe("15,000.000 gms");
+  expect(bars.pages.map((x) => x.lines.length)).toEqual([10]);
+  expect(printBill(bill({ lines: rows(45, () => ({ quantity: "1000.000" })) }), { showBank: true }).pages.map((x) => x.lines.length)).toEqual([25, 20]);
 });
 
 test("a firm without a GSTIN prints no bare GSTIN, in its block or a continued page's header, and its QR code leaves the field empty", () => {
